@@ -5,8 +5,16 @@ export class SketchWorkbenchHarness {
   constructor(readonly page: Page) {}
 
   async open() {
-    await this.page.addInitScript(() => window.localStorage.clear())
+    await this.openPreservingStorage()
+  }
+
+  async openPreservingStorage() {
     await this.page.goto('/')
+    await expect(this.page.getByText('Machine:')).toBeVisible()
+  }
+
+  async reloadPreservingStorage() {
+    await this.page.reload()
     await expect(this.page.getByText('Machine:')).toBeVisible()
   }
 
@@ -192,7 +200,41 @@ export class SketchWorkbenchHarness {
         const targetId = (await this.currentHoverTarget()).match(pattern)?.[0]
 
         if (targetId) {
-          return targetId
+          return { point, targetId }
+        }
+      }
+    }
+
+    throw new Error(`Viewport target matching ${pattern} was not found in the current camera framing.`)
+  }
+
+  async hoverFirstViewportTargetMatchingDense(pattern: RegExp) {
+    const viewport = this.viewport()
+    const box = await viewport.boundingBox()
+
+    if (!box) {
+      throw new Error('Viewport surface is not visible.')
+    }
+
+    const xSteps = 11
+    const ySteps = 7
+
+    for (let row = 1; row <= ySteps; row += 1) {
+      for (let column = 1; column <= xSteps; column += 1) {
+        const point = {
+          x: Math.round((box.width * column) / (xSteps + 1)),
+          y: Math.round((box.height * row) / (ySteps + 1)),
+        }
+
+        for (const probePoint of expandProbePoints(point)) {
+          await this.page.mouse.move(box.x + probePoint.x, box.y + probePoint.y)
+          await this.page.waitForTimeout(8)
+
+          const targetId = (await this.currentHoverTarget()).match(pattern)?.[0]
+
+          if (targetId) {
+            return { point: probePoint, targetId }
+          }
         }
       }
     }
@@ -205,13 +247,15 @@ export class SketchWorkbenchHarness {
     candidates: Array<{ x: number; y: number }>,
   ) {
     for (const point of candidates) {
-      await this.hoverViewportAtReal(point)
-      await this.page.waitForTimeout(50)
+      for (const probePoint of expandProbePoints(point)) {
+        await this.hoverViewportAtReal(probePoint)
+        await this.page.waitForTimeout(50)
 
-      const targetId = (await this.currentHoverTarget()).match(pattern)?.[0]
+        const targetId = (await this.currentHoverTarget()).match(pattern)?.[0]
 
-      if (targetId) {
-        return { point, targetId }
+        if (targetId) {
+          return { point: probePoint, targetId }
+        }
       }
     }
 
@@ -230,4 +274,22 @@ export class SketchWorkbenchHarness {
   async expectMachine(kind: string) {
     await expect(this.page.getByText('Machine:')).toContainText(kind)
   }
+}
+
+function expandProbePoints(point: { x: number; y: number }) {
+  return [
+    { x: point.x, y: point.y },
+    { x: point.x - 18, y: point.y },
+    { x: point.x + 18, y: point.y },
+    { x: point.x, y: point.y - 18 },
+    { x: point.x, y: point.y + 18 },
+    { x: point.x - 18, y: point.y - 18 },
+    { x: point.x + 18, y: point.y - 18 },
+    { x: point.x - 18, y: point.y + 18 },
+    { x: point.x + 18, y: point.y + 18 },
+    { x: point.x - 36, y: point.y },
+    { x: point.x + 36, y: point.y },
+    { x: point.x, y: point.y - 36 },
+    { x: point.x, y: point.y + 36 },
+  ]
 }

@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
-### Requirement: Viewport picking SHALL support BVH-backed geometric acceleration
-The workbench viewport SHALL support BVH-backed geometric acceleration for supported renderable geometry so hover and selection remain responsive as scene complexity grows.
+### Requirement: Viewport picking SHALL support drei `<Bvh>`-backed geometric acceleration
+The workbench viewport SHALL support drei `<Bvh>`-backed geometric acceleration for supported renderable geometry so hover and selection remain responsive as scene complexity grows.
 
 #### Scenario: Hover a target in a dense scene
 - **WHEN** the viewport evaluates hover against supported geometry in a dense scene
-- **THEN** it uses the BVH-accelerated intersection path for that geometry instead of only relying on unaccelerated full-scene ray intersection
+- **THEN** it uses the drei `<Bvh>`-accelerated intersection path for that geometry instead of only relying on unaccelerated full-scene ray intersection
 
 #### Scenario: Select a target in a dense scene
 - **WHEN** the user clicks supported geometry in a dense scene
-- **THEN** the viewport uses the BVH-accelerated intersection path before resolving the corresponding target binding
+- **THEN** the viewport uses the drei `<Bvh>`-accelerated intersection path before resolving the corresponding target binding
 
 ### Requirement: BVH acceleration SHALL preserve existing picking semantics
 The workbench viewport SHALL preserve its current durable target binding, selection filtering, and hover-resolution semantics when BVH acceleration is enabled.

@@ -35,22 +35,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libxrandr-dev \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 24
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-  && apt-get install -y nodejs \
-  && rm -rf /var/lib/apt/lists/*
-
-# Set up npm global directory with proper permissions
-RUN mkdir -p /usr/local/share/npm-global \
-  && chmod 755 /usr/local/share/npm-global
+RUN curl -fsSL https://bun.com/install | bash
+ENV PATH=$PATH:/root/.bun/bin
 
 # Install codex from npm globally
-RUN npm install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest && npm cache clean --force
+RUN bun install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest && npm cache clean --force
 RUN playwright-cli install
 
 # Set npm global config for any user
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin:/root/.local/bin
 
 # Inside the container we consider the environment already sufficiently locked
 # down, therefore instruct Codex CLI to allow running without sandboxing.

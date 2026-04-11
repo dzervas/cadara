@@ -25,7 +25,7 @@ export interface SketchDisplayScene {
   targetToObjects: Map<string, THREE.Object3D[]>
 }
 
-const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
+export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
 const PICK_PROXY_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 16, 16)
 const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
   'construction_plane-xy',
@@ -35,7 +35,7 @@ const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
 const VISIBLE_MARKER_SCALE_FACTOR = 0.44
 const MARKER_PICK_SCALE_FACTOR = 1.45
 
-const SURFACE_COLORS = {
+export const SURFACE_COLORS = {
   bodyFace: 0xf1eee4,
   planarFace: 0xf1eee4,
   region: 0x93dff2,
@@ -66,6 +66,7 @@ export function buildWorkspaceRenderScene(renderables: ViewportRenderableRecord[
       renderable.binding.target,
       renderable.binding.semanticClass,
       entry.origin,
+      renderable,
     )
     group.add(object.root)
     pickables.push(object.root)
@@ -534,7 +535,7 @@ function getHighlightColor(
   return getRenderableBaseColor(semanticClass)
 }
 
-function isSeededDatumPlaneRenderable(renderable: RenderableEntityRecord) {
+export function isSeededDatumPlaneRenderable(renderable: RenderableEntityRecord) {
   return renderable.binding.target.kind === 'construction'
     && SEEDED_DATUM_CONSTRUCTION_IDS.has(renderable.binding.target.constructionId)
 }
@@ -579,7 +580,7 @@ function getBaseMeshOpacity(semanticClass: RenderableEntityRecord['binding']['se
   return semanticClass === 'region' ? 0.22 : 1
 }
 
-function getRenderableRenderOrder(
+export function getRenderableRenderOrder(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
 ) {
@@ -594,7 +595,7 @@ function getRenderableRenderOrder(
   return origin === 'preview' ? 7 : 4
 }
 
-function createRenderableMeshMaterial(
+export function createRenderableMeshMaterial(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
 ) {
@@ -616,7 +617,7 @@ function createRenderableMeshMaterial(
   })
 }
 
-function createRenderableLineMaterial(
+export function createRenderableLineMaterial(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
 ) {
@@ -627,7 +628,7 @@ function createRenderableLineMaterial(
   })
 }
 
-function createRenderableMarkerMaterial(
+export function createRenderableMarkerMaterial(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
 ) {
@@ -723,16 +724,20 @@ function getObjectMaterial(object: THREE.Object3D) {
   return null
 }
 
-function bindRenderableObject(
+export function bindRenderableObject(
   object: THREE.Object3D,
   pickId: string | null,
   target: PrimitiveRef,
   semanticClass: RenderableEntityRecord['binding']['semanticClass'],
   origin: ViewportRenderableOrigin,
+  renderable?: RenderableEntityRecord,
 ) {
   object.userData.target = target
   object.userData.semanticClass = semanticClass
   object.userData.renderableOrigin = origin
+  if (renderable) {
+    object.userData.renderableRecord = renderable
+  }
 
   if (pickId !== null) {
     object.userData.pickId = pickId
@@ -745,6 +750,10 @@ function getBoundPickId(object: THREE.Object3D) {
 
 export function getBoundTarget(object: THREE.Object3D) {
   return findBoundValue<PrimitiveRef>(object, 'target')
+}
+
+export function getBoundRenderableRecord(object: THREE.Object3D) {
+  return findBoundValue<RenderableEntityRecord>(object, 'renderableRecord')
 }
 
 function getBoundSemanticClass(object: THREE.Object3D) {
@@ -771,7 +780,7 @@ function findBoundValue<T>(object: THREE.Object3D, key: string) {
   return undefined
 }
 
-function createMarkerPickProxy(position: readonly [number, number, number], displayRadius: number) {
+export function createMarkerPickProxy(position: readonly [number, number, number], displayRadius: number) {
   const material = createInvisiblePickMaterial()
   const mesh = new THREE.Mesh(PICK_PROXY_SPHERE_GEOMETRY, material)
   mesh.position.set(position[0], position[1], position[2])
@@ -779,7 +788,7 @@ function createMarkerPickProxy(position: readonly [number, number, number], disp
   return mesh
 }
 
-function createInvisiblePickMaterial() {
+export function createInvisiblePickMaterial() {
   const material = new THREE.MeshBasicMaterial({
     transparent: true,
     opacity: 0,
@@ -790,6 +799,6 @@ function createInvisiblePickMaterial() {
   return material
 }
 
-function getVisibleMarkerRadius(displayRadius: number) {
+export function getVisibleMarkerRadius(displayRadius: number) {
   return Math.max(displayRadius * VISIBLE_MARKER_SCALE_FACTOR, Number.EPSILON)
 }

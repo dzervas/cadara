@@ -30,6 +30,8 @@
     "test:contract-examples": "bun x vite-node src/contracts/shared/contract-examples.spec.ts"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tooltip": "^1.2.8",
@@ -43,8 +45,8 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1",
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.56.1",
     "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
@@ -59,7 +61,7 @@
     "tsx": "^4.21.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",
-    "vite-node": "^3.2.4",
-    "vite": "^8.0.4"
+    "vite": "^8.0.4",
+    "vite-node": "^3.2.4"
   }
 }

@@ -1,9 +1,9 @@
 import * as THREE from 'three'
-import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 
 interface SnapCameraToVectorOptions {
   camera: THREE.PerspectiveCamera
-  controls: OrbitControls
+  controls: ViewportCameraControls
   direction: THREE.Vector3
 }
 

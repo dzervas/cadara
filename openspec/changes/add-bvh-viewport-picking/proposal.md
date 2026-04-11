@@ -4,9 +4,9 @@ Viewport picking currently raycasts against the full scene object set without an
 
 ## What Changes
 
-- Add BVH-backed raycast acceleration for viewport picking so hover and selection scale better with larger scene complexity.
+- Add BVH-backed raycast acceleration for viewport picking through drei's `<Bvh>` so hover and selection scale better with larger scene complexity.
 - Keep durable target binding, selection filtering, and hover-resolution behavior unchanged while accelerating the geometric intersection phase.
-- Introduce a viewport-owned BVH integration that works with the current renderable contract and does not require a full rendering-runtime migration.
+- Introduce a viewport-owned drei `<Bvh>` integration that works with the current renderable contract and current React Three Fiber runtime.
 - Define rebuild and invalidation behavior so BVH data stays in sync when viewport geometry changes.
 - Add focused verification for hover and selection parity plus performance-oriented picking stability on denser scenes.
 
@@ -20,5 +20,5 @@ Viewport picking currently raycasts against the full scene object set without an
 ## Impact
 
 - Affected code includes `src/components/cad/three-cad-viewport.tsx`, `src/domain/workspace/render-picking.ts`, and related viewport tests.
-- Adds a new dependency on a BVH acceleration library for Three.js raycasting.
+- Uses drei's `<Bvh>` acceleration path within the current React Three Fiber viewport.
 - Improves the picking path without changing modeling contracts, editor command semantics, or renderable target bindings.

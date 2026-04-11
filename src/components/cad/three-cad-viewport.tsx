@@ -1,24 +1,34 @@
-import { useEffect, useRef } from 'react'
+import { Canvas } from '@react-three/fiber'
+import { OrbitControls } from '@react-three/drei'
+import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import {
+  getPrimitiveRefKey,
   type PrimitiveRef,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import { createWorkspaceScene } from '@/domain/workspace/scene-factory'
 import {
-  buildWorkspaceRenderScene,
-  buildSketchDisplayGroup,
+  MARKER_SPHERE_GEOMETRY,
+  bindRenderableObject,
+  createInvisiblePickMaterial,
+  createMarkerPickProxy,
+  createRenderableLineMaterial,
+  createRenderableMarkerMaterial,
+  createRenderableMeshMaterial,
+  getBoundRenderableRecord,
   getBoundTarget,
+  getRenderableRenderOrder,
+  getVisibleMarkerRadius,
+  isSeededDatumPlaneRenderable,
   resolvePickTarget,
-  type SketchDisplayScene,
+  SURFACE_COLORS,
   updateWorkspaceHighlight,
-  type WorkspaceRenderScene,
 } from '@/domain/workspace/render-picking'
 import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
+import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import { snapCameraToVector } from '@/domain/workspace/view-navigation'
 import { mapWorldPointToSketch } from '@/domain/modeling/occ/planes'
@@ -42,6 +52,8 @@ const FACE_INDEX_TO_DIRECTION = {
   5: GIZMO_DIRECTIONS.back,
 } as const
 
+const VIEW_CUBE_SIZE = 120
+
 interface ThreeCadViewportProps {
   hoverTarget: PrimitiveRef | null
   renderables: ViewportRenderableRecord[]
@@ -54,21 +66,10 @@ interface ThreeCadViewportProps {
   selection: PrimitiveRef[]
 }
 
-interface ViewportRuntime {
-  scene: THREE.Scene
-  camera: THREE.PerspectiveCamera
-  renderer: THREE.WebGLRenderer
-  controls: OrbitControls
-  gizmoScene: THREE.Scene
-  gizmoCamera: THREE.PerspectiveCamera
-  gizmoRenderer: THREE.WebGLRenderer
-  gizmoCube: THREE.Mesh
-  raycaster: THREE.Raycaster
-  pointer: THREE.Vector2
-  sketchPlane: THREE.Plane
-  sketchHitPoint: THREE.Vector3
-  primaryPointerDown: { x: number; y: number } | null
-  animationFrameId: number
+interface CollectedBindings {
+  pickables: THREE.Object3D[]
+  pickIdToRenderable: Map<string, ViewportRenderableRecord['renderable']>
+  targetToObjects: Map<string, THREE.Object3D[]>
 }
 
 export function ThreeCadViewport({
@@ -83,10 +84,20 @@ export function ThreeCadViewport({
   selection,
 }: ThreeCadViewportProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
-  const gizmoRef = useRef<HTMLDivElement | null>(null)
-  const runtimeRef = useRef<ViewportRuntime | null>(null)
-  const renderSceneRef = useRef<WorkspaceRenderScene | null>(null)
-  const sketchDisplayGroupRef = useRef<SketchDisplayScene | null>(null)
+  const viewCubeRef = useRef<HTMLDivElement | null>(null)
+  const canvasElementRef = useRef<HTMLCanvasElement | null>(null)
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const controlsRef = useRef<ViewportCameraControls | null>(null)
+  const controlsInitializedRef = useRef(false)
+  const raycasterRef = useRef(new THREE.Raycaster())
+  const pointerRef = useRef(new THREE.Vector2())
+  const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
+  const sketchHitPointRef = useRef(new THREE.Vector3())
+  const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
+  const documentGroupRef = useRef<THREE.Group | null>(null)
+  const sketchGroupRef = useRef<THREE.Group | null>(null)
+  const documentBindingsRef = useRef<CollectedBindings | null>(null)
+  const sketchBindingsRef = useRef<CollectedBindings | null>(null)
   const hoverRef = useRef(onHover)
   const hoverTargetRef = useRef(hoverTarget)
   const sketchCameraSessionTokenRef = useRef<string | null>(null)
@@ -125,99 +136,50 @@ export function ThreeCadViewport({
   ])
 
   useEffect(() => {
-    const viewportElement = viewportRef.current
-    const gizmoElement = gizmoRef.current
+    const cubeElement = viewCubeRef.current
 
-    if (!viewportElement || !gizmoElement) {
+    if (!cubeElement) {
       return
     }
 
-    const scene = createWorkspaceScene()
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
-    camera.position.set(14, -16, 28)
-    camera.up.set(0, 0, 1)
-
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setClearColor(0x000000, 0)
-    viewportElement.appendChild(renderer.domElement)
+    renderer.setSize(VIEW_CUBE_SIZE, VIEW_CUBE_SIZE, false)
+    cubeElement.appendChild(renderer.domElement)
 
-    const controls = new OrbitControls(camera, renderer.domElement)
-    controls.target.set(0, 0, 4)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.08
-    controls.screenSpacePanning = true
-    controls.mouseButtons = {
-      LEFT: -1 as THREE.MOUSE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: THREE.MOUSE.ROTATE,
-    }
-
-    const gizmoScene = new THREE.Scene()
-    const gizmoCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 100)
-    const gizmoRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    gizmoRenderer.setPixelRatio(window.devicePixelRatio)
-    gizmoRenderer.setClearColor(0x000000, 0)
-    gizmoElement.appendChild(gizmoRenderer.domElement)
-
-    const gizmoCube = new THREE.Mesh(
+    const cubeMaterials = [
+      new THREE.MeshStandardMaterial({ color: 0x4b94ff, metalness: 0.15, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x2e6fd1, metalness: 0.15, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x7cc8ff, metalness: 0.15, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x17365f, metalness: 0.15, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x3f7fd8, metalness: 0.15, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x234a8f, metalness: 0.15, roughness: 0.7 }),
+    ]
+    const cube = new THREE.Mesh(
       new THREE.BoxGeometry(1.2, 1.2, 1.2),
-      [
-        new THREE.MeshStandardMaterial({ color: 0x4b94ff, metalness: 0.15, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0x2e6fd1, metalness: 0.15, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0x7cc8ff, metalness: 0.15, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0x17365f, metalness: 0.15, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0x3f7fd8, metalness: 0.15, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0x234a8f, metalness: 0.15, roughness: 0.7 }),
-      ],
+      cubeMaterials,
     )
+    scene.add(cube)
+    scene.add(new THREE.AmbientLight(0xffffff, 1.4))
 
-    gizmoScene.add(gizmoCube)
-    gizmoScene.add(new THREE.AmbientLight(0xffffff, 1.4))
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.3)
+    directionalLight.position.set(3, 4, 6)
+    scene.add(directionalLight)
 
-    const gizmoDirectionalLight = new THREE.DirectionalLight(0xffffff, 1.3)
-    gizmoDirectionalLight.position.set(3, 4, 6)
-    gizmoScene.add(gizmoDirectionalLight)
+    const pointer = new THREE.Vector2()
+    const raycaster = new THREE.Raycaster()
+    let animationFrameId = 0
 
-    const runtime: ViewportRuntime = {
-      scene,
-      camera,
-      renderer,
-      controls,
-      gizmoScene,
-      gizmoCamera,
-      gizmoRenderer,
-      gizmoCube,
-      raycaster: new THREE.Raycaster(),
-      pointer: new THREE.Vector2(),
-      sketchPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      sketchHitPoint: new THREE.Vector3(),
-      primaryPointerDown: null,
-      animationFrameId: 0,
-    }
-    runtime.raycaster.params.Line.threshold = 0.75
+    const handlePointerDown = (event: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect()
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
 
-    runtimeRef.current = runtime
-
-    const resize = () => {
-      const { clientWidth, clientHeight } = viewportElement
-      renderer.setSize(clientWidth, clientHeight, false)
-      camera.aspect = clientWidth / clientHeight
-      camera.updateProjectionMatrix()
-
-      const gizmoSize = Math.min(140, Math.max(110, clientWidth * 0.12))
-      gizmoRenderer.setSize(gizmoSize, gizmoSize, false)
-      gizmoCamera.aspect = 1
-      gizmoCamera.updateProjectionMatrix()
-    }
-
-    const handleGizmoPointerDown = (event: PointerEvent) => {
-      const rect = gizmoRenderer.domElement.getBoundingClientRect()
-      runtime.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      runtime.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-
-      runtime.raycaster.setFromCamera(runtime.pointer, gizmoCamera)
-      const [intersection] = runtime.raycaster.intersectObject(gizmoCube)
+      raycaster.setFromCamera(pointer, camera)
+      const [intersection] = raycaster.intersectObject(cube)
 
       if (!intersection?.face) {
         return
@@ -232,107 +194,71 @@ export function ThreeCadViewport({
         return
       }
 
-      snapCameraToVector({
-        camera,
-        controls,
-        direction,
-      })
+      snapView(direction, cameraRef.current, controlsRef.current)
     }
 
     const animate = () => {
-      const nextRuntime = runtimeRef.current
+      const viewportCamera = cameraRef.current
+      const viewportControls = controlsRef.current
 
-      if (!nextRuntime) {
-        return
+      if (viewportCamera && viewportControls) {
+        const orbitOffset = viewportCamera.position
+          .clone()
+          .sub(viewportControls.target)
+          .normalize()
+        camera.position.copy(orbitOffset.multiplyScalar(4))
+        camera.up.copy(viewportCamera.up)
+        camera.lookAt(0, 0, 0)
       }
 
-      nextRuntime.controls.update()
-
-      const orbitOffset = nextRuntime.camera.position
-        .clone()
-        .sub(nextRuntime.controls.target)
-        .normalize()
-      nextRuntime.gizmoCamera.position.copy(orbitOffset.multiplyScalar(4))
-      nextRuntime.gizmoCamera.up.copy(nextRuntime.camera.up)
-      nextRuntime.gizmoCamera.lookAt(0, 0, 0)
-
-      nextRuntime.renderer.render(nextRuntime.scene, nextRuntime.camera)
-      nextRuntime.gizmoRenderer.render(nextRuntime.gizmoScene, nextRuntime.gizmoCamera)
-      nextRuntime.animationFrameId = window.requestAnimationFrame(animate)
+      renderer.render(scene, camera)
+      animationFrameId = window.requestAnimationFrame(animate)
     }
 
-    const onContextMenu = (event: Event) => event.preventDefault()
-
-    resize()
-    runtime.animationFrameId = window.requestAnimationFrame(animate)
-
-    window.addEventListener('resize', resize)
-    renderer.domElement.addEventListener('contextmenu', onContextMenu)
-    gizmoRenderer.domElement.addEventListener('pointerdown', handleGizmoPointerDown)
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown)
+    animationFrameId = window.requestAnimationFrame(animate)
 
     return () => {
-      window.cancelAnimationFrame(runtime.animationFrameId)
-      window.removeEventListener('resize', resize)
-      renderer.domElement.removeEventListener('contextmenu', onContextMenu)
-      gizmoRenderer.domElement.removeEventListener('pointerdown', handleGizmoPointerDown)
-
-      disposeRenderScene(renderSceneRef.current)
-      renderSceneRef.current = null
-      disposeSketchDisplayGroup(sketchDisplayGroupRef.current)
-      sketchDisplayGroupRef.current = null
-      runtimeRef.current = null
-
-      controls.dispose()
+      window.cancelAnimationFrame(animationFrameId)
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
+      cube.geometry.dispose()
+      cubeMaterials.forEach((material) => material.dispose())
       renderer.dispose()
-      gizmoRenderer.dispose()
-
-      viewportElement.removeChild(renderer.domElement)
-      gizmoElement.removeChild(gizmoRenderer.domElement)
-      scene.traverse((object: THREE.Object3D) => {
-        if (object instanceof THREE.Mesh) {
-          object.geometry.dispose()
-          if (Array.isArray(object.material)) {
-            object.material.forEach((material: THREE.Material) => material.dispose())
-          } else {
-            object.material.dispose()
-          }
-        }
-      })
+      cubeElement.removeChild(renderer.domElement)
     }
   }, [])
 
   useEffect(() => {
-    const runtime = runtimeRef.current
+    const frameId = window.requestAnimationFrame(() => {
+      documentBindingsRef.current = collectBindings(documentGroupRef.current)
+      const bindings = documentBindingsRef.current
 
-    if (!runtime) {
-      return
-    }
+      if (bindings) {
+        updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
+      }
+    })
 
-    disposeRenderScene(renderSceneRef.current)
-    const nextScene = buildWorkspaceRenderScene(renderables)
-    runtime.scene.add(nextScene.group)
-    renderSceneRef.current = nextScene
-    updateWorkspaceHighlight(nextScene.targetToObjects, selectionRef.current, hoverTargetRef.current)
+    return () => window.cancelAnimationFrame(frameId)
   }, [renderables])
 
   useEffect(() => {
-    const runtime = runtimeRef.current
+    const frameId = window.requestAnimationFrame(() => {
+      sketchBindingsRef.current = collectBindings(sketchGroupRef.current)
+      const bindings = sketchBindingsRef.current
 
-    if (!runtime) {
-      return
-    }
+      if (bindings) {
+        updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
+      }
+    })
 
-    disposeSketchDisplayGroup(sketchDisplayGroupRef.current)
-    const displayScene = buildSketchDisplayGroup(sketchDisplayRenderables)
-    runtime.scene.add(displayScene.group)
-    sketchDisplayGroupRef.current = displayScene
-    updateWorkspaceHighlight(displayScene.targetToObjects, selectionRef.current, hoverTargetRef.current)
+    return () => window.cancelAnimationFrame(frameId)
   }, [sketchDisplayRenderables])
 
   useEffect(() => {
-    const runtime = runtimeRef.current
+    const camera = cameraRef.current
+    const controls = controlsRef.current
 
-    if (!runtime || !sketchSession) {
+    if (!camera || !controls || !sketchSession) {
       sketchCameraSessionTokenRef.current = null
       return
     }
@@ -344,8 +270,8 @@ export function ThreeCadViewport({
     }
 
     applySketchCameraFrame({
-      camera: runtime.camera,
-      controls: runtime.controls,
+      camera,
+      controls,
       plane: sketchSession.plane,
       renderables: sketchDisplayRenderables,
     })
@@ -354,38 +280,70 @@ export function ThreeCadViewport({
   }, [sketchDisplayRenderables, sketchSession])
 
   useEffect(() => {
-    if (renderSceneRef.current) {
-      updateWorkspaceHighlight(renderSceneRef.current.targetToObjects, selection, hoverTarget)
+    if (documentBindingsRef.current) {
+      updateWorkspaceHighlight(documentBindingsRef.current.targetToObjects, selection, hoverTarget)
     }
 
-    if (sketchDisplayGroupRef.current) {
-      updateWorkspaceHighlight(sketchDisplayGroupRef.current.targetToObjects, selection, hoverTarget)
+    if (sketchBindingsRef.current) {
+      updateWorkspaceHighlight(sketchBindingsRef.current.targetToObjects, selection, hoverTarget)
     }
   }, [hoverTarget, selection])
 
   useEffect(() => {
-    const runtime = runtimeRef.current
-    const renderScene = renderSceneRef.current
     const viewportElement = viewportRef.current
+    const canvasElement = canvasElementRef.current
 
-    if (!runtime || !renderScene || !viewportElement) {
+    if (!viewportElement || !canvasElement) {
       return
     }
 
-    const canvas = runtime.renderer.domElement
+    const pointerWithinViewCube = (clientX: number, clientY: number) => {
+      const cubeElement = viewCubeRef.current
+
+      if (!cubeElement) {
+        return false
+      }
+
+      const rect = cubeElement.getBoundingClientRect()
+      return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+    }
 
     const getPickTargetFromClientPoint = (clientX: number, clientY: number) => {
-      const rect = canvas.getBoundingClientRect()
-      runtime.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
-      runtime.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
-      runtime.raycaster.setFromCamera(runtime.pointer, runtime.camera)
-      const intersections = runtime.raycaster.intersectObjects(
-        [...renderScene.pickables, ...(sketchDisplayGroupRef.current?.pickables ?? [])],
+      const camera = cameraRef.current
+      const documentBindings = collectBindings(documentGroupRef.current)
+      const sketchBindings = collectBindings(sketchGroupRef.current)
+
+      if (!camera || !documentBindings) {
+        return null
+      }
+
+      documentBindingsRef.current = documentBindings
+      sketchBindingsRef.current = sketchBindings
+
+      updatePointerFromClientPoint(pointerRef.current, canvasElement, clientX, clientY)
+      raycasterRef.current.setFromCamera(pointerRef.current, camera)
+      raycasterRef.current.params.Line.threshold = 0.75
+
+      const intersections = raycasterRef.current.intersectObjects(
+        [...documentBindings.pickables, ...(sketchBindings?.pickables ?? [])],
         true,
       )
+      const projectedMarkerTarget = resolveProjectedMarkerTarget({
+        clientX,
+        clientY,
+        camera,
+        viewportElement: canvasElement,
+        renderables,
+        acceptsTarget: (target) => selectionFilterAllowsTarget(
+          selectionFilterRef.current,
+          selectionRef.current,
+          target,
+          selectionCatalogRef.current,
+        ),
+      })
       const workspaceTarget = resolvePickTarget(
         intersections,
-        renderScene.pickIdToRenderable,
+        documentBindings.pickIdToRenderable,
         (target) => selectionFilterAllowsTarget(
           selectionFilterRef.current,
           selectionRef.current,
@@ -393,6 +351,10 @@ export function ThreeCadViewport({
           selectionCatalogRef.current,
         ),
       )
+
+      if (projectedMarkerTarget) {
+        return projectedMarkerTarget
+      }
 
       if (workspaceTarget) {
         return workspaceTarget
@@ -422,18 +384,18 @@ export function ThreeCadViewport({
       }
     }
 
-    const projectSketchPoint = (event: PointerEvent): readonly [number, number] | null => {
-      if (!sketchSession) {
+    const projectSketchPoint = (clientX: number, clientY: number): readonly [number, number] | null => {
+      const camera = cameraRef.current
+
+      if (!camera || !sketchSession) {
         return null
       }
 
-      const rect = canvas.getBoundingClientRect()
-      runtime.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      runtime.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-      runtime.raycaster.setFromCamera(runtime.pointer, runtime.camera)
+      updatePointerFromClientPoint(pointerRef.current, canvasElement, clientX, clientY)
+      raycasterRef.current.setFromCamera(pointerRef.current, camera)
 
       const { frame } = sketchSession.plane
-      runtime.sketchPlane.set(
+      sketchPlaneRef.current.set(
         new THREE.Vector3(frame.normal[0], frame.normal[1], frame.normal[2]),
         -(
           frame.normal[0] * frame.origin[0]
@@ -442,23 +404,36 @@ export function ThreeCadViewport({
         ),
       )
 
-      if (!runtime.raycaster.ray.intersectPlane(runtime.sketchPlane, runtime.sketchHitPoint)) {
+      if (!raycasterRef.current.ray.intersectPlane(sketchPlaneRef.current, sketchHitPointRef.current)) {
         return null
       }
 
       return mapWorldPointToSketch(sketchSession.plane, [
-        runtime.sketchHitPoint.x,
-        runtime.sketchHitPoint.y,
-        runtime.sketchHitPoint.z,
+        sketchHitPointRef.current.x,
+        sketchHitPointRef.current.y,
+        sketchHitPointRef.current.z,
       ])
     }
 
+    const clearHover = () => {
+      lastPickedTargetRef.current = null
+      if (hoverTargetRef.current !== null) {
+        hoverTargetRef.current = null
+        clearHoverRef.current()
+      }
+    }
+
     const handlePointerMove = (event: PointerEvent) => {
+      if (pointerWithinViewCube(event.clientX, event.clientY)) {
+        clearHover()
+        return
+      }
+
       const target = getPickTargetFromClientPoint(event.clientX, event.clientY)
 
       if (
-        target &&
-        selectionFilterAllowsTarget(
+        target
+        && selectionFilterAllowsTarget(
           selectionFilterRef.current,
           selectionRef.current,
           target.target,
@@ -471,18 +446,14 @@ export function ThreeCadViewport({
           hoverRef.current(target.target)
         }
       } else {
-        lastPickedTargetRef.current = null
-        if (hoverTargetRef.current !== null) {
-          hoverTargetRef.current = null
-          clearHoverRef.current()
-        }
+        clearHover()
       }
 
       if (!sketchSession) {
         return
       }
 
-      const point = projectSketchPoint(event)
+      const point = projectSketchPoint(event.clientX, event.clientY)
 
       if (point) {
         sketchMoveRef.current(point)
@@ -490,30 +461,24 @@ export function ThreeCadViewport({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) {
+      if (event.button !== 0 || pointerWithinViewCube(event.clientX, event.clientY)) {
         return
       }
 
-      runtime.primaryPointerDown = {
+      primaryPointerDownRef.current = {
         x: event.clientX,
         y: event.clientY,
-      }
-
-      const isSketchDrawingClick = sketchSession?.activeTool != null
-
-      if (isSketchDrawingClick) {
-        return
       }
     }
 
     const handlePointerUp = (event: PointerEvent) => {
       if (event.button !== 0) {
-        runtime.primaryPointerDown = null
+        primaryPointerDownRef.current = null
         return
       }
 
-      const pointerDown = runtime.primaryPointerDown
-      runtime.primaryPointerDown = null
+      const pointerDown = primaryPointerDownRef.current
+      primaryPointerDownRef.current = null
 
       if (!pointerDown) {
         return
@@ -524,15 +489,11 @@ export function ThreeCadViewport({
         event.clientY - pointerDown.y,
       )
 
-      if (dragDistance > 6) {
+      if (dragDistance > 6 || !sketchSession) {
         return
       }
 
-      if (!sketchSession) {
-        return
-      }
-
-      const point = projectSketchPoint(event)
+      const point = projectSketchPoint(event.clientX, event.clientY)
 
       if (point) {
         sketchReleaseRef.current(point)
@@ -540,16 +501,12 @@ export function ThreeCadViewport({
     }
 
     const handlePointerLeave = () => {
-      runtime.primaryPointerDown = null
-      lastPickedTargetRef.current = null
-      if (hoverTargetRef.current !== null) {
-        hoverTargetRef.current = null
-        clearHoverRef.current()
-      }
+      primaryPointerDownRef.current = null
+      clearHover()
     }
 
     const handleClick = (event: MouseEvent) => {
-      if (event.button !== 0) {
+      if (event.button !== 0 || pointerWithinViewCube(event.clientX, event.clientY)) {
         return
       }
 
@@ -564,13 +521,7 @@ export function ThreeCadViewport({
           && event.clientY <= rect.bottom
         )
 
-      if (!withinViewport) {
-        return
-      }
-
-      const isSketchDrawingClick = sketchSession?.activeTool != null
-
-      if (isSketchDrawingClick) {
+      if (!withinViewport || sketchSession?.activeTool != null) {
         return
       }
 
@@ -589,87 +540,632 @@ export function ThreeCadViewport({
       selectRef.current(resolvedTarget.target)
     }
 
-    viewportElement.addEventListener('pointerdown', handlePointerDown, true)
-    viewportElement.addEventListener('pointermove', handlePointerMove)
+    const handleContextMenu = (event: Event) => event.preventDefault()
+
+    canvasElement.addEventListener('pointerdown', handlePointerDown, true)
+    canvasElement.addEventListener('pointermove', handlePointerMove)
+    canvasElement.addEventListener('pointerleave', handlePointerLeave)
+    canvasElement.addEventListener('contextmenu', handleContextMenu)
     window.addEventListener('pointerup', handlePointerUp, true)
     window.addEventListener('click', handleClick, true)
-    viewportElement.addEventListener('pointerleave', handlePointerLeave)
 
     return () => {
-      viewportElement.removeEventListener('pointerdown', handlePointerDown, true)
-      viewportElement.removeEventListener('pointermove', handlePointerMove)
+      canvasElement.removeEventListener('pointerdown', handlePointerDown, true)
+      canvasElement.removeEventListener('pointermove', handlePointerMove)
+      canvasElement.removeEventListener('pointerleave', handlePointerLeave)
+      canvasElement.removeEventListener('contextmenu', handleContextMenu)
       window.removeEventListener('pointerup', handlePointerUp, true)
       window.removeEventListener('click', handleClick, true)
-      viewportElement.removeEventListener('pointerleave', handlePointerLeave)
     }
   }, [renderables, selection, sketchSession])
 
   return (
-    <>
-      <div ref={viewportRef} data-testid="cad-viewport" className="h-full w-full" />
+    <div ref={viewportRef} data-testid="cad-viewport" className="relative h-full w-full">
+      <Canvas
+        className="h-full w-full"
+        frameloop="always"
+        gl={{ antialias: true, alpha: true }}
+        camera={{ fov: 45, near: 0.1, far: 1000, position: [14, -16, 28] }}
+        onCreated={({ camera, gl, raycaster }) => {
+          const perspectiveCamera = camera instanceof THREE.PerspectiveCamera
+            ? camera
+            : new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
+          perspectiveCamera.up.set(0, 0, 1)
+          perspectiveCamera.lookAt(0, 0, 4)
+          cameraRef.current = perspectiveCamera
+          canvasElementRef.current = gl.domElement
+          gl.setClearColor(0x000000, 0)
+          raycaster.params.Line.threshold = 0.75
+        }}
+      >
+        <ambientLight color={0xd7dfe9} intensity={0.56} />
+        <hemisphereLight args={[0xe8edf5, 0x253447, 0.62]} position={[0, 0, 1]} />
+        <directionalLight args={[0xf5eee2, 1.45]} position={[14, -16, 28]} />
+        <directionalLight args={[0x91b4d8, 0.52]} position={[-12, 14, 18]} />
+        <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
+        <WorkspaceSceneScaffold />
+        <group ref={documentGroupRef}>
+          {renderables.map((entry) => (
+            <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
+          ))}
+        </group>
+        <group ref={sketchGroupRef}>
+          {sketchDisplayRenderables.map((renderable) => (
+            <SketchDisplayRenderableNode key={renderable.id} renderable={renderable} />
+          ))}
+        </group>
+        <OrbitControls
+          ref={(controls) => {
+            controlsRef.current = controls as unknown as ViewportCameraControls | null
+            if (!controls || !cameraRef.current) {
+              return
+            }
+
+            if (controlsInitializedRef.current) {
+              return
+            }
+
+            cameraRef.current.position.set(14, -16, 28)
+            cameraRef.current.up.set(0, 0, 1)
+            controls.target.set(0, 0, 4)
+            cameraRef.current.lookAt(controls.target)
+            controls.update()
+            controlsInitializedRef.current = true
+          }}
+          makeDefault
+          target={[0, 0, 4]}
+          enableDamping
+          dampingFactor={0.08}
+          screenSpacePanning
+          mouseButtons={{
+            LEFT: -1 as THREE.MOUSE,
+            MIDDLE: THREE.MOUSE.PAN,
+            RIGHT: THREE.MOUSE.ROTATE,
+          }}
+        />
+      </Canvas>
       <div
-        ref={gizmoRef}
+        ref={viewCubeRef}
         data-testid="view-cube"
-        className="pointer-events-auto absolute right-4 top-4 h-[120px] w-[120px] overflow-hidden rounded-xl border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.78)] shadow-[var(--cad-panel-shadow)]"
+        className="pointer-events-auto absolute right-4 top-4 overflow-hidden rounded-xl border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.78)] shadow-[var(--cad-panel-shadow)]"
+        style={{ width: VIEW_CUBE_SIZE, height: VIEW_CUBE_SIZE }}
       />
+    </div>
+  )
+}
+
+function WorkspaceSceneScaffold() {
+  const grid = useMemo(() => {
+    const helper = new THREE.GridHelper(100, 100, 0x5a7594, 0x34465a)
+    helper.rotation.x = Math.PI / 2
+    return helper
+  }, [])
+  const axes = useMemo(() => new THREE.AxesHelper(7), [])
+
+  useEffect(() => () => {
+    grid.geometry.dispose()
+    if (Array.isArray(grid.material)) {
+      grid.material.forEach((material) => material.dispose())
+    } else {
+      grid.material.dispose()
+    }
+  }, [grid])
+
+  useEffect(() => () => {
+    axes.geometry.dispose()
+    if (Array.isArray(axes.material)) {
+      axes.material.forEach((material) => material.dispose())
+    } else {
+      axes.material.dispose()
+    }
+  }, [axes])
+
+  return (
+    <>
+      <primitive object={grid} />
+      <primitive object={axes} />
+      <mesh>
+        <sphereGeometry args={[0.24, 18, 18]} />
+        <meshStandardMaterial
+          color={0xffffff}
+          emissive={0x2f6fd2}
+          emissiveIntensity={0.72}
+          roughness={0.28}
+          metalness={0.14}
+        />
+      </mesh>
     </>
   )
 }
 
-function disposeRenderScene(renderScene: WorkspaceRenderScene | null) {
-  if (!renderScene) {
-    return
-  }
-
-  renderScene.group.parent?.remove(renderScene.group)
-
-  for (const object of [...renderScene.group.children]) {
-    renderScene.group.remove(object)
-
-    if (object instanceof THREE.Mesh) {
-      object.geometry.dispose()
-
-      if (Array.isArray(object.material)) {
-        object.material.forEach((material) => material.dispose())
-      } else {
-        object.material.dispose()
-      }
-    }
-
-    if (object instanceof THREE.Line || object instanceof THREE.Points) {
-      object.geometry.dispose()
-
-      if (Array.isArray(object.material)) {
-        object.material.forEach((material) => material.dispose())
-      } else {
-        object.material.dispose()
-      }
-    }
+function DocumentRenderableNode({ entry }: { entry: ViewportRenderableRecord }) {
+  switch (entry.renderable.geometry.kind) {
+    case 'mesh':
+      return <DocumentMeshNode entry={entry} />
+    case 'polyline':
+      return <DocumentPolylineNode entry={entry} />
+    case 'marker':
+      return <DocumentMarkerNode entry={entry} />
   }
 }
 
-function disposeSketchDisplayGroup(displayScene: SketchDisplayScene | null) {
-  if (!displayScene) {
+function DocumentMeshNode({ entry }: { entry: ViewportRenderableRecord }) {
+  const { renderable, origin } = entry
+  const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
+  const geometry = useMemo(() => {
+    if (!geometryData) {
+      throw new Error(`Renderable ${renderable.id} is missing mesh geometry.`)
+    }
+
+    const nextGeometry = new THREE.BufferGeometry()
+    nextGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(geometryData.vertexPositions.flat(), 3),
+    )
+    nextGeometry.setIndex(geometryData.triangleIndices.flat())
+    if (geometryData.vertexNormals) {
+      nextGeometry.setAttribute(
+        'normal',
+        new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3),
+      )
+    } else {
+      nextGeometry.computeVertexNormals()
+    }
+    return nextGeometry
+  }, [geometryData, renderable.id])
+  const material = useMemo(() => {
+    return isSeededDatumPlaneRenderable(renderable)
+      ? new THREE.MeshStandardMaterial({
+          color: 0x9ea8b5,
+          transparent: true,
+          opacity: 0.12,
+          side: THREE.DoubleSide,
+          metalness: 0.02,
+          roughness: 0.96,
+          emissive: 0x000000,
+          emissiveIntensity: 0,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
+        })
+      : createRenderableMeshMaterial(renderable, origin)
+  }, [origin, renderable])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => material.dispose(), [material])
+  return (
+    <mesh
+      ref={(value) => {
+        if (value) {
+          bindRenderableObject(
+            value,
+            renderable.binding.pickId,
+            renderable.binding.target,
+            renderable.binding.semanticClass,
+            origin,
+            renderable,
+          )
+        }
+      }}
+      geometry={geometry}
+      material={material}
+      renderOrder={
+        isSeededDatumPlaneRenderable(renderable)
+          ? 1
+          : getRenderableRenderOrder(renderable, origin)
+      }
+    />
+  )
+}
+
+function DocumentPolylineNode({ entry }: { entry: ViewportRenderableRecord }) {
+  const { renderable, origin } = entry
+  const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
+  const line = useMemo(() => {
+    if (!geometryData) {
+      throw new Error(`Renderable ${renderable.id} is missing polyline geometry.`)
+    }
+
+    const points = geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2]))
+    const displayPoints = geometryData.isClosed && points.length > 0 ? [...points, points[0].clone()] : points
+    const nextGeometry = new THREE.BufferGeometry().setFromPoints(displayPoints)
+    const nextMaterial = isSeededDatumPlaneRenderable(renderable)
+      ? new THREE.LineBasicMaterial({
+          color: 0x7f8a98,
+          transparent: true,
+          opacity: 0.4,
+          depthTest: true,
+          depthWrite: false,
+        })
+      : createRenderableLineMaterial(renderable, origin)
+    nextMaterial.depthTest = true
+    nextMaterial.depthWrite = false
+    const nextLine = new THREE.Line(nextGeometry, nextMaterial)
+    nextLine.renderOrder = isSeededDatumPlaneRenderable(renderable)
+      ? 2
+      : getRenderableRenderOrder(renderable, origin)
+    bindRenderableObject(
+      nextLine,
+      renderable.binding.pickId,
+      renderable.binding.target,
+      renderable.binding.semanticClass,
+      origin,
+      renderable,
+    )
+    return nextLine
+  }, [geometryData, origin, renderable])
+
+  useEffect(() => {
+    return () => {
+      line.geometry.dispose()
+      if (Array.isArray(line.material)) {
+        line.material.forEach((material) => material.dispose())
+      } else {
+        line.material.dispose()
+      }
+    }
+  }, [line])
+
+  return <primitive object={line} />
+}
+
+function DocumentMarkerNode({ entry }: { entry: ViewportRenderableRecord }) {
+  const { renderable, origin } = entry
+  const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+  const pickProxy = useMemo(() => {
+    if (!geometryData) {
+      throw new Error(`Renderable ${renderable.id} is missing marker geometry.`)
+    }
+
+    return createMarkerPickProxy(geometryData.position, geometryData.displayRadius)
+  }, [geometryData, renderable.id])
+  const material = useMemo(() => createRenderableMarkerMaterial(renderable, origin), [origin, renderable])
+
+  useEffect(() => {
+    pickProxy.userData.highlightExcluded = true
+  }, [pickProxy])
+  useEffect(() => () => material.dispose(), [material])
+  useEffect(() => {
+    const proxyMaterial = pickProxy.material
+
+    return () => {
+      if (proxyMaterial instanceof THREE.Material) {
+        proxyMaterial.dispose()
+      }
+    }
+  }, [pickProxy])
+  return (
+    <group
+      ref={(value) => {
+        if (value) {
+          bindRenderableObject(
+            value,
+            renderable.binding.pickId,
+            renderable.binding.target,
+            renderable.binding.semanticClass,
+            origin,
+            renderable,
+          )
+        }
+      }}
+      renderOrder={getRenderableRenderOrder(renderable, origin)}
+    >
+      <mesh
+        geometry={MARKER_SPHERE_GEOMETRY}
+        material={material}
+        position={geometryData?.position}
+        scale={geometryData ? getVisibleMarkerRadius(geometryData.displayRadius) : 1}
+        renderOrder={getRenderableRenderOrder(renderable, origin)}
+      />
+      <primitive object={pickProxy} />
+    </group>
+  )
+}
+
+function SketchDisplayRenderableNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+  switch (renderable.geometry.kind) {
+    case 'mesh':
+      return <SketchDisplayMeshNode renderable={renderable} />
+    case 'polyline':
+      return <SketchDisplayPolylineNode renderable={renderable} />
+    case 'marker':
+      return <SketchDisplayMarkerNode renderable={renderable} />
+  }
+}
+
+function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+  const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
+  const geometry = useMemo(() => {
+    if (!geometryData) {
+      throw new Error(`Display renderable ${renderable.id} is missing mesh geometry.`)
+    }
+
+    const nextGeometry = new THREE.BufferGeometry()
+    nextGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(geometryData.vertexPositions.flat(), 3),
+    )
+    nextGeometry.setIndex(geometryData.triangleIndices.flat())
+    if (geometryData.vertexNormals) {
+      nextGeometry.setAttribute(
+        'normal',
+        new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3),
+      )
+    } else {
+      nextGeometry.computeVertexNormals()
+    }
+    return nextGeometry
+  }, [geometryData, renderable.id])
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    color: SURFACE_COLORS.sketchCurve,
+    transparent: true,
+    opacity: 0.24,
+    side: THREE.DoubleSide,
+    metalness: 0.08,
+    roughness: 0.58,
+    emissive: 0x214566,
+    emissiveIntensity: 0.18,
+  }), [renderable.id])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => material.dispose(), [material])
+  return (
+    <mesh
+      ref={(value) => {
+        if (value && renderable.target) {
+          bindRenderableObject(value, null, renderable.target, 'sketchCurve', 'document')
+        }
+      }}
+      geometry={geometry}
+      material={material}
+    />
+  )
+}
+
+function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+  const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
+  const line = useMemo(() => {
+    if (!geometryData) {
+      throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
+    }
+
+    const points = geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2]))
+    const displayPoints = geometryData.isClosed && points.length > 0 ? [...points, points[0].clone()] : points
+    const nextLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(displayPoints),
+      new THREE.LineBasicMaterial({
+        color: SURFACE_COLORS.sketchCurve,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: true,
+        depthWrite: false,
+      }),
+    )
+    nextLine.renderOrder = 3
+
+    if (renderable.target) {
+      bindRenderableObject(nextLine, null, renderable.target, 'sketchCurve', 'document')
+    }
+
+    return nextLine
+  }, [geometryData, renderable])
+
+  useEffect(() => {
+    return () => {
+      line.geometry.dispose()
+      if (Array.isArray(line.material)) {
+        line.material.forEach((material) => material.dispose())
+      } else {
+        line.material.dispose()
+      }
+    }
+  }, [line])
+
+  return <primitive object={line} />
+}
+
+function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+  const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    color: SURFACE_COLORS.sketchPoint,
+    metalness: 0.08,
+    roughness: 0.34,
+    emissive: 0x1c3245,
+    emissiveIntensity: 0.16,
+    depthTest: true,
+    depthWrite: false,
+  }), [renderable.id])
+  const pickProxy = useMemo(() => {
+    if (!geometryData) {
+      throw new Error(`Display renderable ${renderable.id} is missing marker geometry.`)
+    }
+
+    const proxy = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 16, 16),
+      createInvisiblePickMaterial(),
+    )
+    proxy.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
+    proxy.scale.setScalar(Math.max(geometryData.displayRadius * 1.45, geometryData.displayRadius, Number.EPSILON))
+    proxy.userData.highlightExcluded = true
+    return proxy
+  }, [geometryData, renderable.id])
+
+  useEffect(() => () => material.dispose(), [material])
+  useEffect(() => {
+    const mesh = pickProxy
+    return () => {
+      if (mesh.geometry instanceof THREE.BufferGeometry) {
+        mesh.geometry.dispose()
+      }
+      if (mesh.material instanceof THREE.Material) {
+        mesh.material.dispose()
+      }
+    }
+  }, [pickProxy])
+  return (
+    <group
+      ref={(value) => {
+        if (value && renderable.target) {
+          bindRenderableObject(value, null, renderable.target, 'sketchPoint', 'document')
+        }
+      }}
+    >
+      <mesh
+        geometry={MARKER_SPHERE_GEOMETRY}
+        material={material}
+        position={geometryData?.position}
+        scale={geometryData ? getVisibleMarkerRadius(geometryData.displayRadius) : 1}
+        renderOrder={4}
+      />
+      <primitive object={pickProxy} />
+    </group>
+  )
+}
+
+function snapView(
+  direction: THREE.Vector3,
+  camera: THREE.PerspectiveCamera | null,
+  controls: ViewportCameraControls | null,
+) {
+  if (!camera || !controls) {
     return
   }
 
-  const { group } = displayScene
+  snapCameraToVector({
+    camera,
+    controls,
+    direction,
+  })
+}
 
-  group.parent?.remove(group)
-
-  for (const object of [...group.children]) {
-    group.remove(object)
-
-    if (object instanceof THREE.Mesh) {
-      object.geometry.dispose()
-
-      if (Array.isArray(object.material)) {
-        object.material.forEach((material) => material.dispose())
-      } else {
-        object.material.dispose()
-      }
-    }
+function collectBindings(root: THREE.Object3D | null): CollectedBindings | null {
+  if (!root) {
+    return null
   }
+
+  const pickables: THREE.Object3D[] = []
+  const pickIdToRenderable = new Map<string, ViewportRenderableRecord['renderable']>()
+  const targetToObjects = new Map<string, THREE.Object3D[]>()
+
+  root.traverse((object) => {
+    if (object.userData.pickId !== undefined || object.userData.target !== undefined) {
+      pickables.push(object)
+    }
+
+    const pickId = object.userData.pickId as string | undefined
+    const renderableRecord = getBoundRenderableRecord(object)
+
+    if (pickId && renderableRecord) {
+      pickIdToRenderable.set(pickId, renderableRecord)
+    }
+
+    if (object.userData.highlightExcluded === true) {
+      return
+    }
+
+    const target = getBoundTarget(object)
+
+    if (!target || !(object instanceof THREE.Mesh || object instanceof THREE.Line)) {
+      return
+    }
+
+    const key = getPrimitiveRefKey(target)
+    const entries = targetToObjects.get(key) ?? []
+    entries.push(object)
+    targetToObjects.set(key, entries)
+  })
+
+  return {
+    pickables,
+    pickIdToRenderable,
+    targetToObjects,
+  }
+}
+
+function resolveProjectedMarkerTarget({
+  clientX,
+  clientY,
+  camera,
+  viewportElement,
+  renderables,
+  acceptsTarget,
+}: {
+  clientX: number
+  clientY: number
+  camera: THREE.PerspectiveCamera
+  viewportElement: HTMLElement
+  renderables: ViewportRenderableRecord[]
+  acceptsTarget: (target: PrimitiveRef) => boolean
+}) {
+  const rect = viewportElement.getBoundingClientRect()
+  const pointerX = clientX - rect.left
+  const pointerY = clientY - rect.top
+  const maxDistance = 32
+  const projectedPoint = new THREE.Vector3()
+
+  const candidates = renderables
+    .flatMap(({ renderable }) => {
+      const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+
+      if (
+        !geometryData
+        || renderable.binding.semanticClass !== 'featureVertex'
+        || !acceptsTarget(renderable.binding.target)
+      ) {
+        return []
+      }
+
+      projectedPoint.set(
+        geometryData.position[0],
+        geometryData.position[1],
+        geometryData.position[2],
+      )
+      projectedPoint.project(camera)
+
+      const screenX = ((projectedPoint.x + 1) / 2) * rect.width
+      const screenY = ((-projectedPoint.y + 1) / 2) * rect.height
+      const distance = Math.hypot(screenX - pointerX, screenY - pointerY)
+
+      return [{
+        distance,
+        depth: projectedPoint.z,
+        renderable,
+      }]
+    })
+    .filter((entry) => entry.distance <= maxDistance)
+    .sort((left, right) => {
+      const distanceDelta = left.distance - right.distance
+
+      if (distanceDelta !== 0) {
+        return distanceDelta
+      }
+
+      return left.depth - right.depth
+    })
+
+  const candidate = candidates[0]
+
+  if (!candidate) {
+    return null
+  }
+
+  return {
+    pickId: candidate.renderable.binding.pickId,
+    target: candidate.renderable.binding.target,
+    renderable: candidate.renderable,
+  }
+}
+
+function updatePointerFromClientPoint(
+  pointer: THREE.Vector2,
+  viewportElement: HTMLElement,
+  clientX: number,
+  clientY: number,
+) {
+  const rect = viewportElement.getBoundingClientRect()
+  pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+  pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
 }
 
 function getSketchSessionCameraToken(

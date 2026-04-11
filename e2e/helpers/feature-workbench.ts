@@ -33,6 +33,11 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
   }
 
+  async reloadPreservingStorage() {
+    await super.reloadPreservingStorage()
+    await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
+  }
+
   async createRectangleProfileFixture(options: {
     start?: { x: number; y: number }
     end?: { x: number; y: number }

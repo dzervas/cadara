@@ -1,8 +1,8 @@
 import * as THREE from 'three'
-import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
+import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 
 const DEFAULT_HALF_EXTENT = 10
 const MIN_HALF_EXTENT = 1
@@ -22,7 +22,7 @@ interface ComputeSketchCameraFrameInput {
 }
 
 interface ApplySketchCameraFrameInput extends ComputeSketchCameraFrameInput {
-  controls: OrbitControls
+  controls: ViewportCameraControls
 }
 
 export function applySketchCameraFrame({

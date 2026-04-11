@@ -31,3 +31,4 @@ node_modules
 playwright-report/
 test-results/
 !.codex/skills/
+.tmp-after-extrude.png .tmp-empty-hover-scan.mjs .tmp-live-check.mjs .tmp-live-check.png
