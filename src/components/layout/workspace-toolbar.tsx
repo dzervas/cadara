@@ -1,36 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  ArrowBigDownDash,
-  ArrowBigUpDash,
-  Binary,
-  Box,
-  Circle,
-  Combine,
-  Component,
-  Crop,
-  Cuboid,
-  Diamond,
-  DraftingCompass,
-  Equal,
-  Eye,
-  Grid3X3,
-  History,
-  LineChart,
-  Minus,
-  Move3d,
-  Orbit,
-  PencilRuler,
-  Redo2,
-  RotateCcw,
   Search,
-  Shapes,
-  Sigma,
-  Slash,
-  Spline,
-  SplitSquareVertical,
-  Square,
-  Trash2,
-  Undo2,
 } from 'lucide-react'
 
 import { ToolButton } from '@/components/layout/tool-button'
@@ -43,47 +13,7 @@ import {
   type RegisteredToolDefinition,
   searchToolDefinitions,
 } from '@/domain/tools/tool-registry'
-import type { ToolIconId } from '@/domain/tools/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
-
-const iconMap: Record<ToolIconId, typeof Undo2> = {
-  undo: Undo2,
-  redo: Redo2,
-  sketch: PencilRuler,
-  line: Slash,
-  rectangle: Square,
-  circle: Circle,
-  spline: Spline,
-  dimension: Sigma,
-  constraintCoincident: Grid3X3,
-  constraintParallel: Binary,
-  constraintEqual: Equal,
-  extrude: ArrowBigUpDash,
-  revolve: Orbit,
-  sweep: Spline,
-  loft: Shapes,
-  split: SplitSquareVertical,
-  fillet: Crop,
-  chamfer: Diamond,
-  thicken: Cuboid,
-  deleteSolid: Trash2,
-  shell: Cuboid,
-  linearPattern: Shapes,
-  circularPattern: RotateCcw,
-  curvePattern: LineChart,
-  moveFace: Move3d,
-  mirror: Component,
-  transform: Move3d,
-  measure: Eye,
-  sectionView: Box,
-  trim: Minus,
-  offset: DraftingCompass,
-  finishSketch: ArrowBigDownDash,
-  search: Search,
-  plane: Component,
-  combine: Combine,
-  history: History,
-}
 
 export function WorkspaceToolbar() {
   const [searchQuery, setSearchQuery] = useState('')
@@ -103,7 +33,6 @@ export function WorkspaceToolbar() {
       return null
     }
 
-    const Icon = iconMap[tool.icon]
     const isActive =
       activeCommand?.toolId === tool.id ||
       (isDropdownTool(tool) &&
@@ -115,15 +44,13 @@ export function WorkspaceToolbar() {
         <ToolDropdownButton
           key={tool.id}
           tool={tool}
-          icon={Icon}
           variantTools={variantTools}
-          iconMap={iconMap}
           active={isActive}
         />
       )
     }
 
-    return <ToolButton key={tool.id} tool={tool} icon={Icon} active={isActive} />
+    return <ToolButton key={tool.id} tool={tool} active={isActive} />
   }
 
   return (
@@ -158,12 +85,10 @@ export function WorkspaceToolbar() {
               {searchResults.length > 0 ? (
                 <div className="max-h-80 overflow-y-auto p-1">
                   {searchResults.map((tool) => {
-                    const Icon = iconMap[tool.icon]
                     return (
                       <ToolButton
                         key={`search-${tool.id}`}
                         tool={tool}
-                        icon={Icon}
                         inline
                         active={activeCommand?.toolId === tool.id}
                         onTrigger={() => setSearchQuery('')}

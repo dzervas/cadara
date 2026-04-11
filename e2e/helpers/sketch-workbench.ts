@@ -11,7 +11,9 @@ export class SketchWorkbenchHarness {
   }
 
   toolbarButton(name: string): Locator {
-    return this.page.getByRole('button', { name })
+    return this.page.locator(
+      `button[aria-label="${name}"], button[data-tool-tooltip="${name}"]`,
+    )
   }
 
   viewport(): Locator {

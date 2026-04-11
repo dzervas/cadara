@@ -1,17 +1,16 @@
-import type { LucideIcon } from 'lucide-react'
-
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
+import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
 import { useToolActions } from '@/hooks/use-tool-actions'
 
 interface ToolButtonProps {
   tool: RegisteredToolDefinition
-  icon: LucideIcon
   inline?: boolean
   onTrigger?: () => void
   active?: boolean
@@ -19,7 +18,6 @@ interface ToolButtonProps {
 
 export function ToolButton({
   tool,
-  icon: Icon,
   inline = false,
   onTrigger,
   active = false,
@@ -40,9 +38,13 @@ export function ToolButton({
       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-[var(--cad-surface-elevated)] ${
         active ? 'bg-[var(--cad-surface-elevated)]' : ''
       }`}
+      aria-label={tool.name}
+      data-tool-id={tool.id}
+      data-tool-source="search"
+      data-tool-tooltip={tool.tooltip}
     >
       <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--cad-border)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]">
-        <Icon className="h-4 w-4" />
+        <ToolbarToolIcon icon={tool.icon} />
       </span>
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium text-[var(--cad-foreground)]">
@@ -62,10 +64,13 @@ export function ToolButton({
           ? 'border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)]'
           : 'border-transparent'
       }`}
-      aria-label={tool.tooltip}
+      aria-label={tool.name}
       aria-pressed={active}
+      data-tool-id={tool.id}
+      data-tool-source="toolbar"
+      data-tool-tooltip={tool.tooltip}
     >
-      <Icon className="h-4 w-4" />
+      <ToolbarToolIcon icon={tool.icon} />
     </button>
   )
 
@@ -77,7 +82,9 @@ export function ToolButton({
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>{content}</TooltipTrigger>
-        <TooltipContent>{tool.tooltip}</TooltipContent>
+        <TooltipContent>
+          <ToolbarTooltipContent title={tool.name} description={tool.tooltip} />
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )

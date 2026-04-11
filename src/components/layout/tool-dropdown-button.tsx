@@ -1,5 +1,4 @@
 import { ChevronDown } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 
 import {
   DropdownMenu,
@@ -13,23 +12,20 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
+import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
-import type { ToolIconId } from '@/domain/tools/schema'
 import { useToolActions } from '@/hooks/use-tool-actions'
 
 interface ToolDropdownButtonProps {
   tool: RegisteredToolDefinition
-  icon: LucideIcon
   variantTools: RegisteredToolDefinition[]
-  iconMap: Record<ToolIconId, LucideIcon>
   active?: boolean
 }
 
 export function ToolDropdownButton({
   tool,
-  icon: Icon,
   variantTools,
-  iconMap,
   active = false,
 }: ToolDropdownButtonProps) {
   const { triggerTool } = useToolActions()
@@ -47,18 +43,18 @@ export function ToolDropdownButton({
                     ? 'border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)]'
                     : 'border-transparent'
                 }`}
-                aria-label={tool.tooltip}
+                aria-label={tool.name}
                 aria-pressed={active}
+                data-tool-id={tool.id}
+                data-tool-tooltip={tool.tooltip}
               >
-                <Icon className="h-4 w-4" />
+                <ToolbarToolIcon icon={tool.icon} />
                 <ChevronDown className="h-3.5 w-3.5 text-[var(--cad-muted)]" />
               </button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
           <DropdownMenuContent align="start" className="min-w-56">
             {variantTools.map((variant) => {
-              const VariantIcon = iconMap[variant.icon]
-
               return (
                 <DropdownMenuItem
                   key={variant.id}
@@ -67,8 +63,10 @@ export function ToolDropdownButton({
                       source: 'dropdown',
                     })
                   }
+                  data-tool-id={variant.id}
+                  data-tool-tooltip={variant.tooltip}
                 >
-                  <VariantIcon className="mr-2 h-4 w-4" />
+                  <ToolbarToolIcon icon={variant.icon} className="mr-2" />
                   <div className="flex flex-col">
                     <span>{variant.name}</span>
                     <span className="text-xs text-[var(--cad-muted-foreground)]">
@@ -80,7 +78,9 @@ export function ToolDropdownButton({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
-        <TooltipContent>{tool.tooltip}</TooltipContent>
+        <TooltipContent>
+          <ToolbarTooltipContent title={tool.name} description={tool.tooltip} />
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )

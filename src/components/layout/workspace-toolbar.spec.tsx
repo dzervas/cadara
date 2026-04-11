@@ -30,6 +30,18 @@ const toolbarMarkup = renderToStaticMarkup(
 )
 
 assert(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')
+assert(
+  toolbarMarkup.includes('/icons/extrude.svg'),
+  'Toolbar should render standard tool buttons with local SVG assets.',
+)
+assert(
+  toolbarMarkup.includes('/icons/linear-pattern.svg'),
+  'Toolbar should render dropdown-backed tool triggers with local SVG assets.',
+)
+assert(
+  toolbarMarkup.includes('aria-label="Extrude"'),
+  'Toolbar buttons should expose concise accessibility labels based on the tool name.',
+)
 assert(!toolbarMarkup.includes('Filter:'), 'Toolbar should not duplicate the selection filter debugger readout.')
 assert(!toolbarMarkup.includes('Requirement:'), 'Toolbar should not duplicate the requirement debugger readout.')
 assert(!toolbarMarkup.includes('Slots:'), 'Toolbar should not duplicate the slot-count debugger readout.')
