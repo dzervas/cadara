@@ -1,8 +1,7 @@
 import { MockKernelAdapter } from './mock-kernel-adapter'
 import { createModelingService, modelingRuntimeValidators } from './modeling-service'
-import { resolvePickTarget } from '@/domain/workspace/render-picking'
+import { bindRenderableObject, resolvePickTarget } from '@/domain/workspace/render-picking'
 import * as THREE from 'three'
-import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
@@ -1278,9 +1277,23 @@ function testResolvePickTargetUsesKernelPriority() {
   } as const
 
   const faceObject = new THREE.Object3D()
-  faceObject.userData.pickId = 'pick_face_priority'
+  bindRenderableObject(
+    faceObject,
+    faceRenderable.binding.pickId,
+    faceRenderable.binding.target,
+    faceRenderable.binding.semanticClass,
+    'document',
+    faceRenderable,
+  )
   const edgeObject = new THREE.Object3D()
-  edgeObject.userData.pickId = 'pick_edge_priority'
+  bindRenderableObject(
+    edgeObject,
+    edgeRenderable.binding.pickId,
+    edgeRenderable.binding.target,
+    edgeRenderable.binding.semanticClass,
+    'document',
+    edgeRenderable,
+  )
 
   const intersections = [
     {
@@ -1293,15 +1306,9 @@ function testResolvePickTargetUsesKernelPriority() {
     },
   ] as THREE.Intersection<THREE.Object3D>[]
 
-  const result = resolvePickTarget(
-    intersections,
-    new Map<string, RenderableEntityRecord>([
-      [faceRenderable.binding.pickId, faceRenderable],
-      [edgeRenderable.binding.pickId, edgeRenderable],
-    ]),
-  )
+  const result = resolvePickTarget(intersections)
 
-  assert(result?.pickId === 'pick_edge_priority', 'Pick resolution must prefer kernel-authored pickPriority over viewer distance.')
+  assert(result?.pickId === 'pick_face_priority', 'Pick resolution must prefer nearer geometry before pickPriority.')
 }
 
 function testRenderValidatorRejectsInvalidGeometry() {

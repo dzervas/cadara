@@ -79,7 +79,7 @@ export class SketchWorkbenchHarness {
   }
 
   async hoverViewportAtReal(point: { x: number; y: number }) {
-    const box = await this.viewport().boundingBox()
+    const box = await this.viewportSurface().boundingBox()
 
     if (!box) {
       throw new Error('Viewport surface is not visible.')
@@ -89,7 +89,7 @@ export class SketchWorkbenchHarness {
   }
 
   async clickViewportAtReal(point: { x: number; y: number }) {
-    const box = await this.viewport().boundingBox()
+    const box = await this.viewportSurface().boundingBox()
 
     if (!box) {
       throw new Error('Viewport surface is not visible.')
@@ -113,6 +113,16 @@ export class SketchWorkbenchHarness {
     const bodyText = await this.page.locator('body').textContent()
     const match = bodyText?.match(/Machine:\s*[^\n]*Command:\s*[^\n]*Phase:\s*[^\n]*Selection:\s*(\d+)/s)
     return match ? Number(match[1]) : NaN
+  }
+
+  async clearHoverByLeavingViewport() {
+    const box = await this.viewportSurface().boundingBox()
+
+    if (!box) {
+      throw new Error('Viewport surface is not visible.')
+    }
+
+    await this.page.mouse.move(box.x - 24, box.y - 24)
   }
 
   async clickViewportTarget(targetId: string) {

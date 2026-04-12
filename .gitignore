@@ -27,7 +27,6 @@ build
 node_modules
 .codex/*
 .playwright-cli/
-.playwright/
 playwright-report/
 test-results/
 !.codex/skills/

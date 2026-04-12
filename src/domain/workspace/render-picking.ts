@@ -6,37 +6,18 @@ import {
   type PrimitiveRef,
 } from '@/domain/editor/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
 import type {
   ViewportRenderableOrigin,
-  ViewportRenderableRecord,
 } from '@/domain/workspace/viewport-renderables'
 
 export interface CollectedBindings {
   pickables: THREE.Object3D[]
-  pickIdToRenderable: Map<string, RenderableEntityRecord>
   targetToObjects: Map<string, THREE.Object3D[]>
 }
 
-export interface WorkspaceRenderScene {
-  group: THREE.Group
-  pickables: THREE.Object3D[]
-  targetToObjects: Map<string, THREE.Object3D[]>
-  pickIdToRenderable: Map<string, RenderableEntityRecord>
+interface PickResolutionOptions {
+  wireOcclusionTolerance?: number
 }
-
-export interface SketchDisplayScene {
-  group: THREE.Group
-  pickables: THREE.Object3D[]
-  targetToObjects: Map<string, THREE.Object3D[]>
-}
-
-/**
- * First-pass BVH acceleration targets mesh-backed document geometry only.
- * Lightweight helper planes, wire renderables, and marker proxy meshes stay on the
- * fallback path until they show a concrete payoff from BVH management.
- */
-export const BVH_ACCELERATED_DOCUMENT_GEOMETRY_KINDS = ['mesh'] as const
 
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
 const PICK_PROXY_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 16, 16)
@@ -47,6 +28,8 @@ const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
 ])
 const VISIBLE_MARKER_SCALE_FACTOR = 0.44
 const MARKER_PICK_SCALE_FACTOR = 1.45
+export const DEFAULT_LINE_PICK_THRESHOLD = 0.75
+const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01
 
 export const SURFACE_COLORS = {
   bodyFace: 0xf1eee4,
@@ -59,409 +42,63 @@ export const SURFACE_COLORS = {
   construction: 0xb6d6ff,
 } as const
 
-interface RenderObjectBundle {
-  root: THREE.Object3D
-  highlightObjects: THREE.Object3D[]
-}
-
-export function buildWorkspaceRenderScene(renderables: ViewportRenderableRecord[]): WorkspaceRenderScene {
-  const group = new THREE.Group()
-  const pickables: THREE.Object3D[] = []
-  const targetToObjects = new Map<string, THREE.Object3D[]>()
-  const pickIdToRenderable = new Map<string, RenderableEntityRecord>()
-
-  for (const entry of renderables) {
-    const object = createObjectForRenderable(entry)
-    const renderable = entry.renderable
-    bindRenderableObject(
-      object.root,
-      renderable.binding.pickId,
-      renderable.binding.target,
-      renderable.binding.semanticClass,
-      entry.origin,
-      renderable,
-    )
-    group.add(object.root)
-    pickables.push(object.root)
-    pickIdToRenderable.set(renderable.binding.pickId, renderable)
-
-    const targetKey = getPrimitiveRefKey(renderable.binding.target)
-    const targetObjects = targetToObjects.get(targetKey) ?? []
-    targetObjects.push(...object.highlightObjects)
-    targetToObjects.set(targetKey, targetObjects)
-  }
-
-  return {
-    group,
-    pickables,
-    targetToObjects,
-    pickIdToRenderable,
-  }
-}
-
-export function isBvhAcceleratedDocumentRenderable(entry: ViewportRenderableRecord) {
-  return entry.renderable.geometry.kind === 'mesh'
-    && !isSeededDatumPlaneRenderable(entry.renderable)
-}
-
-export function partitionViewportRenderablesForBvh(renderables: ViewportRenderableRecord[]) {
-  const accelerated: ViewportRenderableRecord[] = []
-  const fallback: ViewportRenderableRecord[] = []
-
-  for (const entry of renderables) {
-    if (isBvhAcceleratedDocumentRenderable(entry)) {
-      accelerated.push(entry)
-      continue
-    }
-
-    fallback.push(entry)
-  }
-
-  return {
-    accelerated,
-    fallback,
-  }
-}
-
-export function getViewportRenderableGeometryToken(entry: ViewportRenderableRecord) {
-  const { geometry } = entry.renderable
-
-  switch (geometry.kind) {
-    case 'mesh':
-      return [
-        'mesh',
-        geometry.vertexPositions.flat().join(','),
-        geometry.triangleIndices.flat().join(','),
-        geometry.vertexNormals ? geometry.vertexNormals.flat().join(',') : 'auto-normals',
-      ].join(':')
-    case 'polyline':
-      return [
-        'polyline',
-        geometry.points.flat().join(','),
-        geometry.isClosed ? 'closed' : 'open',
-      ].join(':')
-    case 'marker':
-      return [
-        'marker',
-        geometry.position.join(','),
-        geometry.displayRadius,
-      ].join(':')
-  }
-}
-
-export function buildSketchDisplayGroup(renderables: SketchSessionDisplayRenderable[]): SketchDisplayScene {
-  const group = new THREE.Group()
-  const pickables: THREE.Object3D[] = []
-  const targetToObjects = new Map<string, THREE.Object3D[]>()
-
-  for (const renderable of renderables) {
-    const object = createDisplayObject(renderable)
-    if (renderable.target) {
-      bindRenderableObject(
-        object.root,
-        null,
-        renderable.target,
-        renderable.geometry.kind === 'marker' ? 'sketchPoint' : 'sketchCurve',
-        'document',
-      )
-      const targetKey = getPrimitiveRefKey(renderable.target)
-      const targetObjects = targetToObjects.get(targetKey) ?? []
-      targetObjects.push(...object.highlightObjects)
-      targetToObjects.set(targetKey, targetObjects)
-      pickables.push(object.root)
-    }
-    group.add(object.root)
-  }
-
-  return {
-    group,
-    pickables,
-    targetToObjects,
-  }
-}
-
-function createDisplayObject(renderable: SketchSessionDisplayRenderable) {
-  switch (renderable.geometry.kind) {
-    case 'mesh':
-      return createDisplayFaceObject(renderable)
-    case 'polyline':
-      return createDisplayEdgeObject(renderable)
-    case 'marker':
-      return createDisplayMarkerObject(renderable)
-  }
-}
-
-function createObjectForRenderable(renderable: ViewportRenderableRecord) {
-  switch (renderable.renderable.geometry.kind) {
-    case 'mesh':
-      return createMeshObject(renderable)
-    case 'polyline':
-      return createPolylineObject(renderable)
-    case 'marker':
-      return createMarkerObject(renderable)
-  }
-}
-
-function createMeshObject(entry: ViewportRenderableRecord) {
-  const renderable = entry.renderable
-  const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
-
-  if (!geometryData) {
-    throw new Error(`Renderable ${renderable.id} is missing mesh geometry.`)
-  }
-
-  const geometry = new THREE.BufferGeometry()
-  const flattenedPositions = geometryData.vertexPositions.flat()
-  geometry.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute(flattenedPositions, 3),
-  )
-  geometry.setIndex(geometryData.triangleIndices.flat())
-  if (geometryData.vertexNormals) {
-    geometry.setAttribute(
-      'normal',
-      new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3),
-    )
-  } else {
-    geometry.computeVertexNormals()
-  }
-  const material = isSeededDatumPlaneRenderable(renderable)
-    ? new THREE.MeshStandardMaterial({
-        color: 0x9ea8b5,
-        transparent: true,
-        opacity: 0.12,
-        side: THREE.DoubleSide,
-        metalness: 0.02,
-        roughness: 0.96,
-        emissive: 0x000000,
-        emissiveIntensity: 0,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
-      })
-    : createRenderableMeshMaterial(renderable, entry.origin)
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.renderOrder = isSeededDatumPlaneRenderable(renderable)
-    ? 1
-    : getRenderableRenderOrder(renderable, entry.origin)
-  return {
-    root: mesh,
-    highlightObjects: [mesh],
-  } satisfies RenderObjectBundle
-}
-
-function createPolylineObject(entry: ViewportRenderableRecord) {
-  const renderable = entry.renderable
-  const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
-
-  if (!geometryData) {
-    throw new Error(`Renderable ${renderable.id} is missing polyline geometry.`)
-  }
-
-  const points = geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2]))
-  const displayPoints = geometryData.isClosed && points.length > 0 ? [...points, points[0].clone()] : points
-  const geometry = new THREE.BufferGeometry().setFromPoints(displayPoints)
-  const material = isSeededDatumPlaneRenderable(renderable)
-    ? new THREE.LineBasicMaterial({
-        color: 0x7f8a98,
-        transparent: true,
-        opacity: 0.4,
-      })
-    : createRenderableLineMaterial(renderable, entry.origin)
-  const line = new THREE.Line(geometry, material)
-  line.renderOrder = isSeededDatumPlaneRenderable(renderable)
-    ? 2
-    : getRenderableRenderOrder(renderable, entry.origin)
-  line.material.depthTest = true
-  line.material.depthWrite = false
-
-  if (isSeededDatumPlaneRenderable(renderable)) {
-    return {
-      root: line,
-      highlightObjects: [line],
-    } satisfies RenderObjectBundle
-  }
-
-  return {
-    root: line,
-    highlightObjects: [line],
-  } satisfies RenderObjectBundle
-}
-
-function createMarkerObject(entry: ViewportRenderableRecord) {
-  const renderable = entry.renderable
-  const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
-
-  if (!geometryData) {
-    throw new Error(`Renderable ${renderable.id} is missing marker geometry.`)
-  }
-
-  const material = createRenderableMarkerMaterial(renderable, entry.origin)
-  const mesh = new THREE.Mesh(MARKER_SPHERE_GEOMETRY, material)
-  mesh.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
-  mesh.scale.setScalar(getVisibleMarkerRadius(geometryData.displayRadius))
-  mesh.renderOrder = getRenderableRenderOrder(renderable, entry.origin)
-  mesh.material.depthTest = true
-  mesh.material.depthWrite = false
-
-  const group = new THREE.Group()
-  group.add(mesh)
-  group.add(createMarkerPickProxy(geometryData.position, geometryData.displayRadius))
-
-  return {
-    root: group,
-    highlightObjects: [mesh],
-  } satisfies RenderObjectBundle
-}
-
-function createDisplayFaceObject(renderable: SketchSessionDisplayRenderable) {
-  const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
-
-  if (!geometryData) {
-    throw new Error(`Display renderable ${renderable.id} is missing mesh geometry.`)
-  }
-
-  const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(geometryData.vertexPositions.flat(), 3))
-  geometry.setIndex(geometryData.triangleIndices.flat())
-  if (geometryData.vertexNormals) {
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3))
-  } else {
-    geometry.computeVertexNormals()
-  }
-  const material = new THREE.MeshStandardMaterial({
-    color: SURFACE_COLORS.sketchCurve,
-    transparent: true,
-    opacity: 0.24,
-    side: THREE.DoubleSide,
-    metalness: 0.08,
-    roughness: 0.58,
-    emissive: 0x214566,
-    emissiveIntensity: 0.18,
-  })
-
-  const mesh = new THREE.Mesh(geometry, material)
-  return {
-    root: mesh,
-    highlightObjects: [mesh],
-  } satisfies RenderObjectBundle
-}
-
-function createDisplayEdgeObject(renderable: SketchSessionDisplayRenderable) {
-  const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
-
-  if (!geometryData) {
-    throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
-  }
-
-  const points = geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2]))
-  const displayPoints = geometryData.isClosed && points.length > 0 ? [...points, points[0].clone()] : points
-  const geometry = new THREE.BufferGeometry().setFromPoints(displayPoints)
-  const material = new THREE.LineBasicMaterial({
-    color: SURFACE_COLORS.sketchCurve,
-    transparent: true,
-    opacity: 0.95,
-  })
-
-  const line = new THREE.Line(geometry, material)
-  line.renderOrder = 3
-  line.material.depthTest = true
-  line.material.depthWrite = false
-
-  return {
-    root: line,
-    highlightObjects: [line],
-  } satisfies RenderObjectBundle
-}
-
-function createDisplayMarkerObject(renderable: SketchSessionDisplayRenderable) {
-  const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
-
-  if (!geometryData) {
-    throw new Error(`Display renderable ${renderable.id} is missing marker geometry.`)
-  }
-
-  const material = new THREE.MeshStandardMaterial({
-    color: SURFACE_COLORS.sketchPoint,
-    metalness: 0.08,
-    roughness: 0.34,
-    emissive: 0x1c3245,
-    emissiveIntensity: 0.16,
-  })
-  const mesh = new THREE.Mesh(MARKER_SPHERE_GEOMETRY, material)
-  mesh.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
-  mesh.scale.setScalar(getVisibleMarkerRadius(geometryData.displayRadius))
-  mesh.renderOrder = 4
-  mesh.material.depthTest = true
-  mesh.material.depthWrite = false
-
-  const group = new THREE.Group()
-  group.add(mesh)
-  group.add(createMarkerPickProxy(geometryData.position, geometryData.displayRadius))
-
-  return {
-    root: group,
-    highlightObjects: [mesh],
-  } satisfies RenderObjectBundle
-}
-
 export function resolvePickTarget(
   intersections: THREE.Intersection<THREE.Object3D>[],
-  pickIdToRenderable: Map<string, RenderableEntityRecord>,
   acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
+  options: PickResolutionOptions = {},
 ) {
+  const wireOcclusionTolerance = options.wireOcclusionTolerance ?? DEFAULT_WIRE_OCCLUSION_TOLERANCE
   const resolvedHits = intersections
     .map((intersection) => {
-      const pickId = getBoundPickId(intersection.object)
+      const target = getBoundTarget(intersection.object)
+      const semanticClass = getBoundSemanticClass(intersection.object)
+      const origin = getBoundRenderableOrigin(intersection.object)
 
-      if (!pickId) {
-        return null
-      }
-
-      const renderable = pickIdToRenderable.get(pickId)
-
-      if (!renderable) {
+      if (!target || !semanticClass || !origin) {
         return null
       }
 
       return {
         intersection,
-        pickId,
-        target: renderable.binding.target,
-        renderable,
+        pickId: getBoundPickId(intersection.object) ?? null,
+        target,
+        priority: getBoundPickPriority(intersection.object) ?? Number.POSITIVE_INFINITY,
+        semanticClass,
+        renderable: getBoundRenderableRecord(intersection.object) ?? null,
       }
     })
     .filter((hit): hit is NonNullable<typeof hit> => hit !== null)
     .sort((left, right) => {
-      const semanticRankDelta = getInteractionSortRank(left.renderable) - getInteractionSortRank(right.renderable)
+      const distanceDelta = left.intersection.distance - right.intersection.distance
 
-      if (semanticRankDelta !== 0) {
-        return semanticRankDelta
+      if (distanceDelta !== 0) {
+        return distanceDelta
       }
 
-      const priorityDelta = left.renderable.binding.pickPriority - right.renderable.binding.pickPriority
+      const priorityDelta = left.priority - right.priority
 
       if (priorityDelta !== 0) {
         return priorityDelta
       }
 
-      return left.intersection.distance - right.intersection.distance
+      return getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
     })
 
   const nearestOccludingFaceDistance = resolvedHits.reduce<number | null>((nearest, hit) => {
-    if (!isOccludingFaceRenderable(hit.renderable)) {
+    if (!isOccludingFaceSemanticClass(hit.semanticClass)) {
       return nearest
     }
 
-    return nearest === null ? hit.intersection.distance : Math.min(nearest, hit.intersection.distance)
+    return nearest === null
+      ? hit.intersection.distance
+      : Math.min(nearest, hit.intersection.distance)
   }, null)
 
   for (const hit of resolvedHits) {
     if (
       nearestOccludingFaceDistance !== null
-      && isWireRenderable(hit.renderable)
-      && hit.intersection.distance - nearestOccludingFaceDistance > 0.01
+      && isWireSemanticClass(hit.semanticClass)
+      && hit.intersection.distance - nearestOccludingFaceDistance > wireOcclusionTolerance
     ) {
       continue
     }
@@ -603,19 +240,19 @@ export function isSeededDatumPlaneRenderable(renderable: RenderableEntityRecord)
     && SEEDED_DATUM_CONSTRUCTION_IDS.has(renderable.binding.target.constructionId)
 }
 
-function isWireRenderable(renderable: RenderableEntityRecord) {
-  return renderable.binding.semanticClass === 'featureEdge'
-    || renderable.binding.semanticClass === 'featureVertex'
-    || renderable.binding.semanticClass === 'sketchCurve'
-    || renderable.binding.semanticClass === 'sketchPoint'
+function isWireSemanticClass(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+  return semanticClass === 'featureEdge'
+    || semanticClass === 'featureVertex'
+    || semanticClass === 'sketchCurve'
+    || semanticClass === 'sketchPoint'
 }
 
-function isOccludingFaceRenderable(renderable: RenderableEntityRecord) {
-  return renderable.binding.semanticClass === 'bodyFace' || renderable.binding.semanticClass === 'planarFace'
+function isOccludingFaceSemanticClass(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+  return semanticClass === 'bodyFace' || semanticClass === 'planarFace'
 }
 
-function getInteractionSortRank(renderable: RenderableEntityRecord) {
-  switch (renderable.binding.semanticClass) {
+function getInteractionSortRank(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+  switch (semanticClass) {
     case 'featureVertex':
     case 'sketchPoint':
       return 0
@@ -630,13 +267,6 @@ function getInteractionSortRank(renderable: RenderableEntityRecord) {
     case 'construction':
       return 4
   }
-}
-
-function isWireSemanticClass(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
-  return semanticClass === 'featureEdge'
-    || semanticClass === 'featureVertex'
-    || semanticClass === 'sketchCurve'
-    || semanticClass === 'sketchPoint'
 }
 
 function getBaseMeshOpacity(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
@@ -798,6 +428,7 @@ export function bindRenderableObject(
   object.userData.target = target
   object.userData.semanticClass = semanticClass
   object.userData.renderableOrigin = origin
+  object.userData.pickPriority = renderable?.binding.pickPriority
   if (renderable) {
     object.userData.renderableRecord = renderable
   }
@@ -809,6 +440,10 @@ export function bindRenderableObject(
 
 function getBoundPickId(object: THREE.Object3D) {
   return findBoundValue<string>(object, 'pickId')
+}
+
+function getBoundPickPriority(object: THREE.Object3D) {
+  return findBoundValue<number>(object, 'pickPriority')
 }
 
 export function getBoundTarget(object: THREE.Object3D) {
@@ -847,7 +482,7 @@ export function createMarkerPickProxy(position: readonly [number, number, number
   const material = createInvisiblePickMaterial()
   const mesh = new THREE.Mesh(PICK_PROXY_SPHERE_GEOMETRY, material)
   mesh.position.set(position[0], position[1], position[2])
-  mesh.scale.setScalar(Math.max(displayRadius * MARKER_PICK_SCALE_FACTOR, displayRadius, Number.EPSILON))
+  mesh.scale.setScalar(getBaseMarkerPickRadius(displayRadius))
   return mesh
 }
 
@@ -872,19 +507,11 @@ export function collectBindings(root: THREE.Object3D | null): CollectedBindings 
   }
 
   const pickables: THREE.Object3D[] = []
-  const pickIdToRenderable = new Map<string, RenderableEntityRecord>()
   const targetToObjects = new Map<string, THREE.Object3D[]>()
 
   root.traverse((object) => {
     if (object.userData.pickId !== undefined || object.userData.target !== undefined) {
       pickables.push(object)
-    }
-
-    const pickId = object.userData.pickId as string | undefined
-    const renderableRecord = getBoundRenderableRecord(object)
-
-    if (pickId && renderableRecord) {
-      pickIdToRenderable.set(pickId, renderableRecord)
     }
 
     if (object.userData.highlightExcluded === true) {
@@ -905,7 +532,10 @@ export function collectBindings(root: THREE.Object3D | null): CollectedBindings 
 
   return {
     pickables,
-    pickIdToRenderable,
     targetToObjects,
   }
+}
+
+function getBaseMarkerPickRadius(displayRadius: number) {
+  return Math.max(displayRadius * MARKER_PICK_SCALE_FACTOR, displayRadius, Number.EPSILON)
 }

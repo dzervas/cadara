@@ -14,16 +14,12 @@ import {
   bindRenderableObject,
   collectBindings,
   type CollectedBindings,
-  createInvisiblePickMaterial,
   createMarkerPickProxy,
   createRenderableLineMaterial,
   createRenderableMarkerMaterial,
   createRenderableMeshMaterial,
-  getViewportRenderableGeometryToken,
-  getBoundTarget,
-  isBvhAcceleratedDocumentRenderable,
+  DEFAULT_LINE_PICK_THRESHOLD,
   getRenderableRenderOrder,
-  partitionViewportRenderablesForBvh,
   getVisibleMarkerRadius,
   isSeededDatumPlaneRenderable,
   resolvePickTarget,
@@ -56,6 +52,7 @@ const FACE_INDEX_TO_DIRECTION = {
 } as const
 
 const VIEW_CUBE_SIZE = 120
+const PROJECTED_VERTEX_PICK_RADIUS_PX = 48
 
 interface ThreeCadViewportProps {
   hoverTarget: PrimitiveRef | null
@@ -67,6 +64,12 @@ interface ThreeCadViewportProps {
   onSketchMove: (point: readonly [number, number]) => void
   onSketchRelease: (point: readonly [number, number]) => void
   selection: PrimitiveRef[]
+}
+
+interface ViewportCameraFrame {
+  position: THREE.Vector3
+  target: THREE.Vector3
+  up: THREE.Vector3
 }
 
 export function ThreeCadViewport({
@@ -91,13 +94,12 @@ export function ThreeCadViewport({
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
   const sketchHitPointRef = useRef(new THREE.Vector3())
   const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
-  const documentGroupRef = useRef<THREE.Group | null>(null)
-  const sketchGroupRef = useRef<THREE.Group | null>(null)
-  const documentBindingsRef = useRef<CollectedBindings | null>(null)
-  const sketchBindingsRef = useRef<CollectedBindings | null>(null)
+  const pickRootRef = useRef<THREE.Group | null>(null)
+  const bindingsRef = useRef<CollectedBindings | null>(null)
   const hoverRef = useRef(onHover)
   const hoverTargetRef = useRef(hoverTarget)
   const sketchCameraSessionTokenRef = useRef<string | null>(null)
+  const partCameraFrameRef = useRef<ViewportCameraFrame | null>(null)
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
   const selectRef = useRef(onSelect)
   const clearHoverRef = useRef(onClearHover)
@@ -109,20 +111,17 @@ export function ThreeCadViewport({
   const selectionRef = useRef(selection)
   const selectionFilterRef = useRef(selectionFilter)
   const selectionCatalogRef = useRef(selectionCatalog)
-  const bvhManagedRenderables = useMemo(
-    () => partitionViewportRenderablesForBvh(renderables),
-    [renderables],
-  )
   const bvhSceneKey = useMemo(
-    () => bvhManagedRenderables.accelerated
-      .map(({ origin, renderable }) => {
-        return `${origin}:${renderable.id}:${renderable.binding.pickId}:${getViewportRenderableGeometryToken({
-          origin,
-          renderable,
-        })}`
-      })
+    () => [
+      ...renderables.map(({ origin, renderable }) => {
+        return `${origin}:${renderable.id}:${renderable.binding.pickId}:${getGeometryToken(renderable.geometry)}`
+      }),
+      ...sketchDisplayRenderables.map((renderable) => {
+        return `sketch:${renderable.id}:${renderable.target ? JSON.stringify(renderable.target) : 'none'}:${getGeometryToken(renderable.geometry)}`
+      }),
+    ]
       .join('|'),
-    [bvhManagedRenderables.accelerated],
+    [renderables, sketchDisplayRenderables],
   )
 
   useEffect(() => {
@@ -242,8 +241,8 @@ export function ThreeCadViewport({
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
-      documentBindingsRef.current = collectBindings(documentGroupRef.current)
-      const bindings = documentBindingsRef.current
+      bindingsRef.current = collectBindings(pickRootRef.current)
+      const bindings = bindingsRef.current
 
       if (bindings) {
         updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
@@ -251,26 +250,22 @@ export function ThreeCadViewport({
     })
 
     return () => window.cancelAnimationFrame(frameId)
-  }, [renderables])
-
-  useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      sketchBindingsRef.current = collectBindings(sketchGroupRef.current)
-      const bindings = sketchBindingsRef.current
-
-      if (bindings) {
-        updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
-      }
-    })
-
-    return () => window.cancelAnimationFrame(frameId)
-  }, [sketchDisplayRenderables])
+  }, [renderables, sketchDisplayRenderables])
 
   useEffect(() => {
     const camera = cameraRef.current
     const controls = controlsRef.current
 
-    if (!camera || !controls || !sketchSession) {
+    if (!camera || !controls) {
+      return
+    }
+
+    if (!sketchSession) {
+      if (partCameraFrameRef.current) {
+        applyViewportCameraFrame(camera, controls, partCameraFrameRef.current)
+        partCameraFrameRef.current = null
+      }
+
       sketchCameraSessionTokenRef.current = null
       return
     }
@@ -279,6 +274,10 @@ export function ThreeCadViewport({
 
     if (sketchCameraSessionTokenRef.current === nextToken) {
       return
+    }
+
+    if (partCameraFrameRef.current === null) {
+      partCameraFrameRef.current = captureViewportCameraFrame(camera, controls)
     }
 
     applySketchCameraFrame({
@@ -292,12 +291,8 @@ export function ThreeCadViewport({
   }, [sketchDisplayRenderables, sketchSession])
 
   useEffect(() => {
-    if (documentBindingsRef.current) {
-      updateWorkspaceHighlight(documentBindingsRef.current.targetToObjects, selection, hoverTarget)
-    }
-
-    if (sketchBindingsRef.current) {
-      updateWorkspaceHighlight(sketchBindingsRef.current.targetToObjects, selection, hoverTarget)
+    if (bindingsRef.current) {
+      updateWorkspaceHighlight(bindingsRef.current.targetToObjects, selection, hoverTarget)
     }
   }, [hoverTarget, selection])
 
@@ -322,79 +317,43 @@ export function ThreeCadViewport({
 
     const getPickTargetFromClientPoint = (clientX: number, clientY: number) => {
       const camera = cameraRef.current
-      const documentBindings = collectBindings(documentGroupRef.current)
-      const sketchBindings = collectBindings(sketchGroupRef.current)
+      const bindings = collectBindings(pickRootRef.current)
 
-      if (!camera || !documentBindings) {
+      if (!camera || !bindings) {
         return null
       }
 
-      documentBindingsRef.current = documentBindings
-      sketchBindingsRef.current = sketchBindings
+      bindingsRef.current = bindings
 
       updatePointerFromClientPoint(pointerRef.current, canvasElement, clientX, clientY)
       raycasterRef.current.setFromCamera(pointerRef.current, camera)
-      raycasterRef.current.params.Line.threshold = 0.75
+      raycasterRef.current.params.Line.threshold = DEFAULT_LINE_PICK_THRESHOLD
       ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true
 
-      const intersections = raycasterRef.current.intersectObjects(
-        [...documentBindings.pickables, ...(sketchBindings?.pickables ?? [])],
-        true,
+      const intersections = raycasterRef.current.intersectObjects(bindings.pickables, true)
+      const acceptsTarget = (target: PrimitiveRef) => selectionFilterAllowsTarget(
+        selectionFilterRef.current,
+        selectionRef.current,
+        target,
+        selectionCatalogRef.current,
       )
-      const projectedMarkerTarget = resolveProjectedMarkerTarget({
-        clientX,
-        clientY,
-        camera,
-        viewportElement: canvasElement,
-        renderables,
-        acceptsTarget: (target) => selectionFilterAllowsTarget(
-          selectionFilterRef.current,
-          selectionRef.current,
-          target,
-          selectionCatalogRef.current,
-        ),
-      })
       const workspaceTarget = resolvePickTarget(
         intersections,
-        documentBindings.pickIdToRenderable,
-        (target) => selectionFilterAllowsTarget(
-          selectionFilterRef.current,
-          selectionRef.current,
-          target,
-          selectionCatalogRef.current,
-        ),
+        acceptsTarget,
       )
-
-      if (projectedMarkerTarget) {
-        return projectedMarkerTarget
-      }
 
       if (workspaceTarget) {
         return workspaceTarget
       }
 
-      const sketchDisplayHit = intersections.find((intersection) => {
-        const target = getBoundTarget(intersection.object)
-
-        return target
-          ? selectionFilterAllowsTarget(
-              selectionFilterRef.current,
-              selectionRef.current,
-              target,
-              selectionCatalogRef.current,
-            )
-          : false
+      return resolveProjectedVertexTarget({
+        clientX,
+        clientY,
+        camera,
+        viewportElement: canvasElement,
+        renderables,
+        acceptsTarget,
       })
-
-      if (!sketchDisplayHit) {
-        return null
-      }
-
-      return {
-        pickId: null,
-        target: getBoundTarget(sketchDisplayHit.object) as PrimitiveRef,
-        renderable: null,
-      }
     }
 
     const projectSketchPoint = (clientX: number, clientY: number): readonly [number, number] | null => {
@@ -597,21 +556,16 @@ export function ThreeCadViewport({
         <directionalLight args={[0x91b4d8, 0.52]} position={[-12, 14, 18]} />
         <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
         <WorkspaceSceneScaffold />
-        <group ref={documentGroupRef}>
-          <Bvh key={bvhSceneKey} enabled={bvhManagedRenderables.accelerated.length > 0} firstHitOnly>
-            {bvhManagedRenderables.accelerated.map((entry) => (
+        <Bvh key={bvhSceneKey} enabled firstHitOnly>
+          <group ref={pickRootRef}>
+            {renderables.map((entry) => (
               <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
             ))}
-          </Bvh>
-          {bvhManagedRenderables.fallback.map((entry) => (
-            <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
-          ))}
-        </group>
-        <group ref={sketchGroupRef}>
-          {sketchDisplayRenderables.map((renderable) => (
-            <SketchDisplayRenderableNode key={renderable.id} renderable={renderable} />
-          ))}
-        </group>
+            {sketchDisplayRenderables.map((renderable) => (
+              <SketchDisplayRenderableNode key={renderable.id} renderable={renderable} />
+            ))}
+          </group>
+        </Bvh>
         <OrbitControls
           ref={(controls) => {
             controlsRef.current = controls as unknown as ViewportCameraControls | null
@@ -650,6 +604,29 @@ export function ThreeCadViewport({
       />
     </div>
   )
+}
+
+function captureViewportCameraFrame(
+  camera: THREE.PerspectiveCamera,
+  controls: ViewportCameraControls,
+): ViewportCameraFrame {
+  return {
+    position: camera.position.clone(),
+    target: controls.target.clone(),
+    up: camera.up.clone(),
+  }
+}
+
+function applyViewportCameraFrame(
+  camera: THREE.PerspectiveCamera,
+  controls: ViewportCameraControls,
+  frame: ViewportCameraFrame,
+) {
+  camera.up.copy(frame.up)
+  camera.position.copy(frame.position)
+  controls.target.copy(frame.target)
+  camera.lookAt(frame.target)
+  controls.update()
 }
 
 function WorkspaceSceneScaffold() {
@@ -754,9 +731,6 @@ function DocumentMeshNode({ entry }: { entry: ViewportRenderableRecord }) {
   useEffect(() => () => material.dispose(), [material])
   return (
     <mesh
-      userData={{
-        bvhAccelerated: isBvhAcceleratedDocumentRenderable(entry),
-      }}
       ref={(value) => {
         if (value) {
           bindRenderableObject(
@@ -1002,12 +976,7 @@ function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisp
       throw new Error(`Display renderable ${renderable.id} is missing marker geometry.`)
     }
 
-    const proxy = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 16, 16),
-      createInvisiblePickMaterial(),
-    )
-    proxy.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
-    proxy.scale.setScalar(Math.max(geometryData.displayRadius * 1.45, geometryData.displayRadius, Number.EPSILON))
+    const proxy = createMarkerPickProxy(geometryData.position, geometryData.displayRadius)
     proxy.userData.highlightExcluded = true
     return proxy
   }, [geometryData, renderable.id])
@@ -1016,9 +985,6 @@ function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisp
   useEffect(() => {
     const mesh = pickProxy
     return () => {
-      if (mesh.geometry instanceof THREE.BufferGeometry) {
-        mesh.geometry.dispose()
-      }
       if (mesh.material instanceof THREE.Material) {
         mesh.material.dispose()
       }
@@ -1060,7 +1026,7 @@ function snapView(
   })
 }
 
-function resolveProjectedMarkerTarget({
+function resolveProjectedVertexTarget({
   clientX,
   clientY,
   camera,
@@ -1078,10 +1044,10 @@ function resolveProjectedMarkerTarget({
   const rect = viewportElement.getBoundingClientRect()
   const pointerX = clientX - rect.left
   const pointerY = clientY - rect.top
-  const maxDistance = 32
+  const maxDistance = PROJECTED_VERTEX_PICK_RADIUS_PX
   const projectedPoint = new THREE.Vector3()
 
-  const candidates = renderables
+  const candidate = renderables
     .flatMap(({ renderable }) => {
       const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
 
@@ -1119,9 +1085,7 @@ function resolveProjectedMarkerTarget({
       }
 
       return left.depth - right.depth
-    })
-
-  const candidate = candidates[0]
+    })[0]
 
   if (!candidate) {
     return null
@@ -1143,6 +1107,32 @@ function updatePointerFromClientPoint(
   const rect = viewportElement.getBoundingClientRect()
   pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
   pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+}
+
+function getGeometryToken(
+  geometry: ViewportRenderableRecord['renderable']['geometry'] | SketchSessionDisplayRenderable['geometry'],
+) {
+  switch (geometry.kind) {
+    case 'mesh':
+      return [
+        'mesh',
+        geometry.vertexPositions.flat().join(','),
+        geometry.triangleIndices.flat().join(','),
+        geometry.vertexNormals ? geometry.vertexNormals.flat().join(',') : 'auto-normals',
+      ].join(':')
+    case 'polyline':
+      return [
+        'polyline',
+        geometry.points.flat().join(','),
+        geometry.isClosed ? 'closed' : 'open',
+      ].join(':')
+    case 'marker':
+      return [
+        'marker',
+        geometry.position.join(','),
+        geometry.displayRadius,
+      ].join(':')
+  }
 }
 
 function getSketchSessionCameraToken(
