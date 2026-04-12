@@ -466,7 +466,7 @@ async function testWorkspaceSnapshotBuildsContractValidRenderExport() {
   )
 }
 
-async function testWorkspaceSnapshotCarriesInvalidatedReferencesIntoSnapshotDiagnostics() {
+async function testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics() {
   const oc = await getDefaultOpenCascadeInstance()
   const baseBody = await createBoxBody()
   const initialState = createOccAuthoringState(oc, {
@@ -506,15 +506,15 @@ async function testWorkspaceSnapshotCarriesInvalidatedReferencesIntoSnapshotDiag
 
   assert(invalidatedEdge, 'Phase 6 snapshot references must preserve invalidated durable topology targets.')
   assert(
-    snapshot.document.diagnostics.some((diagnostic) =>
+    !snapshot.document.diagnostics.some((diagnostic) =>
       diagnostic.code === 'occ-invalid-reference'
       && diagnostic.detail?.kind === 'invalidReference',
     ),
-    'Phase 6 snapshot diagnostics must surface invalidated references explicitly.',
+    'Phase 6 snapshot diagnostics must not surface historical invalidated references after a successful rebuild.',
   )
 }
 
 await testWorkspaceSnapshotBuildsContractValidRenderExport()
-await testWorkspaceSnapshotCarriesInvalidatedReferencesIntoSnapshotDiagnostics()
+await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
 
 console.log('OCC phase 6 snapshot/export tests passed.')

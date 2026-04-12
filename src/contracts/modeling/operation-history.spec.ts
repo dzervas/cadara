@@ -97,11 +97,150 @@ const reorderFeatureRequest: ReorderFeatureRequest = {
   beforeFeatureId: 'feature_extrude-1',
 }
 
+function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
+  return {
+    schemaVersion: SKETCH_SCHEMA_VERSION,
+    referenceIds: [],
+    references: [],
+    pointIds: [
+      'sketch_point_1_rect-bottom-left',
+      'sketch_point_1_rect-bottom-right',
+      'sketch_point_1_rect-top-right',
+      'sketch_point_1_rect-top-left',
+    ] as const,
+    points: [
+      {
+        pointId: 'sketch_point_1_rect-bottom-left',
+        label: 'Rectangle 1 bottom left',
+        target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-bottom-left' },
+        position: [-15.5, -5] as const,
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_1_rect-bottom-right',
+        label: 'Rectangle 1 bottom right',
+        target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-bottom-right' },
+        position: [-5, -5] as const,
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_1_rect-top-right',
+        label: 'Rectangle 1 top right',
+        target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-top-right' },
+        position: [-5, 4.5] as const,
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_1_rect-top-left',
+        label: 'Rectangle 1 top left',
+        target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-top-left' },
+        position: [-15.5, 4.5] as const,
+        isConstruction: false,
+      },
+    ],
+    entityIds: [
+      'sketch_entity_1_rect-bottom',
+      'sketch_entity_1_rect-right',
+      'sketch_entity_1_rect-top',
+      'sketch_entity_1_rect-left',
+    ] as const,
+    entities: [
+      {
+        kind: 'lineSegment' as const,
+        entityId: 'sketch_entity_1_rect-bottom',
+        label: 'Rectangle 1 bottom',
+        target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-bottom' },
+        isConstruction: false,
+        startPointId: 'sketch_point_1_rect-bottom-left',
+        endPointId: 'sketch_point_1_rect-bottom-right',
+      },
+      {
+        kind: 'lineSegment' as const,
+        entityId: 'sketch_entity_1_rect-right',
+        label: 'Rectangle 1 right',
+        target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-right' },
+        isConstruction: false,
+        startPointId: 'sketch_point_1_rect-bottom-right',
+        endPointId: 'sketch_point_1_rect-top-right',
+      },
+      {
+        kind: 'lineSegment' as const,
+        entityId: 'sketch_entity_1_rect-top',
+        label: 'Rectangle 1 top',
+        target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-top' },
+        isConstruction: false,
+        startPointId: 'sketch_point_1_rect-top-right',
+        endPointId: 'sketch_point_1_rect-top-left',
+      },
+      {
+        kind: 'lineSegment' as const,
+        entityId: 'sketch_entity_1_rect-left',
+        label: 'Rectangle 1 left',
+        target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-left' },
+        isConstruction: false,
+        startPointId: 'sketch_point_1_rect-top-left',
+        endPointId: 'sketch_point_1_rect-bottom-left',
+      },
+    ],
+    constraintIds: [
+      'constraint_1_bottom-horizontal',
+      'constraint_1_top-horizontal',
+      'constraint_1_right-vertical',
+      'constraint_1_left-vertical',
+    ] as const,
+    constraints: [
+      {
+        constraintId: 'constraint_1_bottom-horizontal',
+        kind: 'horizontal' as const,
+        label: 'Rectangle 1 bottom horizontal',
+        entityId: 'sketch_entity_1_rect-bottom',
+      },
+      {
+        constraintId: 'constraint_1_top-horizontal',
+        kind: 'horizontal' as const,
+        label: 'Rectangle 1 top horizontal',
+        entityId: 'sketch_entity_1_rect-top',
+      },
+      {
+        constraintId: 'constraint_1_right-vertical',
+        kind: 'vertical' as const,
+        label: 'Rectangle 1 right vertical',
+        entityId: 'sketch_entity_1_rect-right',
+      },
+      {
+        constraintId: 'constraint_1_left-vertical',
+        kind: 'vertical' as const,
+        label: 'Rectangle 1 left vertical',
+        entityId: 'sketch_entity_1_rect-left',
+      },
+    ],
+    dimensionIds: ['dimension_1_width', 'dimension_1_height'] as const,
+    dimensions: [
+      {
+        dimensionId: 'dimension_1_width',
+        kind: 'distance' as const,
+        label: 'Rectangle 1 width',
+        axis: 'horizontal' as const,
+        pointIds: ['sketch_point_1_rect-bottom-left', 'sketch_point_1_rect-bottom-right'] as const,
+        value: 10.5,
+      },
+      {
+        dimensionId: 'dimension_1_height',
+        kind: 'distance' as const,
+        label: 'Rectangle 1 height',
+        axis: 'vertical' as const,
+        pointIds: ['sketch_point_1_rect-bottom-right', 'sketch_point_1_rect-top-right'] as const,
+        value: 9.5,
+      },
+    ],
+  } satisfies CommitSketchRequest['definition']
+}
+
 function testValidatesRepresentativeHistory() {
   const payload: ModelingOperationHistoryPayload = {
     ...createEmptyOperationHistory('doc_workspace'),
     entries: [
-      createCommitSketchHistoryEntry(commitSketchRequest),
+      createCommitSketchHistoryEntry(commitSketchRequest, commitSketchRequest.sketchId!),
       createCreateFeatureHistoryEntry(createFeatureRequest),
       createReorderFeatureHistoryEntry(reorderFeatureRequest),
     ],
@@ -119,6 +258,47 @@ function testValidatesRepresentativeHistory() {
     !('baseRevisionId' in result.payload.entries[1]!.payload),
     'Persisted feature entries must omit replay-derived base revision metadata.',
   )
+}
+
+function testNormalizesCommittedCommitSketchTargets() {
+  const committedSketchId = 'sketch_committed'
+  const entry = createCommitSketchHistoryEntry({
+    ...commitSketchRequest,
+    sketchId: null,
+    definition: createDraftSketchDefinition('sketch_draft'),
+  }, committedSketchId)
+
+  assert(entry.kind === 'commitSketch', 'Commit sketch history entry should preserve its kind.')
+  assert(entry.payload.sketchId === committedSketchId, 'Persisted commitSketch entries must store the committed sketch id.')
+  assert(
+    entry.payload.definition.points.every((point) => point.target.sketchId === committedSketchId),
+    'Persisted commitSketch point targets must be normalized to the committed sketch id.',
+  )
+  assert(
+    entry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
+    'Persisted commitSketch entity targets must be normalized to the committed sketch id.',
+  )
+}
+
+function testAcceptsLegacyDraftCommitSketchTargets() {
+  const result = validateOperationHistoryPayload({
+    ...createEmptyOperationHistory('doc_workspace'),
+    entries: [
+      {
+        kind: 'commitSketch',
+        payload: {
+          sketchId: null,
+          sketchLabel: 'Legacy Draft Sketch',
+          plane: commitSketchRequest.plane,
+          planeTarget: commitSketchRequest.planeTarget,
+          planeKey: commitSketchRequest.planeKey,
+          definition: createDraftSketchDefinition('sketch_draft'),
+        },
+      },
+    ],
+  })
+
+  assert(result.ok, 'Legacy commitSketch histories with draft sketch ids should remain loadable.')
 }
 
 function testRejectsUnsupportedVersion() {
@@ -152,6 +332,44 @@ function testRejectsTransportMetadataLeak() {
   assert(
     !result.ok && result.reasonCode === 'transport-field-leak',
     'Transport metadata leaks must report a stable reason code.',
+  )
+}
+
+function testRejectsInconsistentCommitSketchTargets() {
+  const result = validateOperationHistoryPayload({
+    ...createEmptyOperationHistory('doc_workspace'),
+    entries: [
+      {
+        kind: 'commitSketch',
+        payload: {
+          sketchId: null,
+          sketchLabel: 'Broken Sketch',
+          plane: commitSketchRequest.plane,
+          planeTarget: commitSketchRequest.planeTarget,
+          planeKey: commitSketchRequest.planeKey,
+          definition: {
+            ...createDraftSketchDefinition('sketch_draft'),
+            entities: [
+              ...createDraftSketchDefinition('sketch_draft').entities.slice(0, 3),
+              {
+                ...createDraftSketchDefinition('sketch_draft').entities[3]!,
+                target: {
+                  kind: 'sketchEntity' as const,
+                  sketchId: 'sketch_other',
+                  entityId: 'sketch_entity_1_rect-left',
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  })
+
+  assert(!result.ok, 'Inconsistent commitSketch target sketch ids must fail validation.')
+  assert(
+    !result.ok && result.reasonCode === 'inconsistent-commit-sketch-targets',
+    'Inconsistent commitSketch target sketch ids must report a stable reason code.',
   )
 }
 
@@ -592,8 +810,11 @@ function testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdat
 }
 
 testValidatesRepresentativeHistory()
+testNormalizesCommittedCommitSketchTargets()
+testAcceptsLegacyDraftCommitSketchTargets()
 testRejectsUnsupportedVersion()
 testRejectsTransportMetadataLeak()
+testRejectsInconsistentCommitSketchTargets()
 testValidatesProfileCollectionFeaturePayloads()
 testRejectsLegacyAndInvalidProfileCollections()
 testPreservesAdvancedParticipantsAndOperationIntent()

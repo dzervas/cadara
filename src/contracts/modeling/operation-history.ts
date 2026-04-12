@@ -6,7 +6,7 @@ import type {
   SetFeatureCursorRequest,
   UpdateFeatureRequest,
 } from '@/contracts/modeling/schema'
-import type { DocumentId } from '@/contracts/shared/ids'
+import type { DocumentId, SketchId } from '@/contracts/shared/ids'
 import {
   CONTRACT_VERSION,
   OPERATION_HISTORY_SCHEMA_VERSION,
@@ -74,16 +74,17 @@ export function createEmptyOperationHistory(documentId: DocumentId): ModelingOpe
 
 export function createCommitSketchHistoryEntry(
   payload: CommitSketchRequest,
+  committedSketchId: SketchId,
 ): ModelingOperationHistoryEntry {
   return {
     kind: 'commitSketch',
     payload: {
-      sketchId: payload.sketchId,
+      sketchId: committedSketchId,
       sketchLabel: payload.sketchLabel,
       plane: payload.plane,
       planeTarget: payload.planeTarget,
       planeKey: payload.planeKey,
-      definition: payload.definition,
+      definition: normalizeCommitSketchDefinitionForSketchId(payload.definition, committedSketchId),
     },
   }
 }
@@ -153,6 +154,29 @@ function isString(value: unknown): value is string {
   return typeof value === 'string'
 }
 
+function normalizeCommitSketchDefinitionForSketchId(
+  definition: CommitSketchRequest['definition'],
+  sketchId: SketchId,
+): CommitSketchRequest['definition'] {
+  return {
+    ...definition,
+    points: definition.points.map((point) => ({
+      ...point,
+      target: {
+        ...point.target,
+        sketchId,
+      },
+    })),
+    entities: definition.entities.map((entity) => ({
+      ...entity,
+      target: {
+        ...entity.target,
+        sketchId,
+      },
+    })),
+  }
+}
+
 function hasForbiddenTransportFields(value: Record<string, unknown>) {
   return (
     'contractVersion' in value
@@ -214,6 +238,66 @@ function validateProfileBasedFeatureDefinition(
       }
     }
     profileKeys.add(key)
+  }
+
+  return { ok: true }
+}
+
+function validateCommitSketchDefinitionTargets(
+  definition: Record<string, unknown>,
+  sketchId: string | null,
+  index: number,
+): OperationHistoryEntryValidationResult {
+  if (!Array.isArray(definition.points) || !Array.isArray(definition.entities)) {
+    return {
+      ok: false,
+      reasonCode: 'invalid-commit-sketch-definition',
+      message: `Operation history entry ${index} has an invalid commitSketch definition.`,
+    }
+  }
+
+  let inferredSketchId: string | null = null
+
+  const validateTargetSketchId = (target: unknown, targetLabel: 'point' | 'entity') => {
+    if (
+      !isRecord(target)
+      || (targetLabel === 'point' && target.kind !== 'sketchPoint')
+      || (targetLabel === 'entity' && target.kind !== 'sketchEntity')
+      || !isString(target.sketchId)
+    ) {
+      return false
+    }
+
+    if (sketchId !== null && target.sketchId !== sketchId) {
+      return false
+    }
+
+    if (inferredSketchId === null) {
+      inferredSketchId = target.sketchId
+      return true
+    }
+
+    return target.sketchId === inferredSketchId
+  }
+
+  for (const point of definition.points) {
+    if (!isRecord(point) || !validateTargetSketchId(point.target, 'point')) {
+      return {
+        ok: false,
+        reasonCode: 'inconsistent-commit-sketch-targets',
+        message: `Operation history entry ${index} has a commitSketch definition with inconsistent point sketch IDs.`,
+      }
+    }
+  }
+
+  for (const entity of definition.entities) {
+    if (!isRecord(entity) || !validateTargetSketchId(entity.target, 'entity')) {
+      return {
+        ok: false,
+        reasonCode: 'inconsistent-commit-sketch-targets',
+        message: `Operation history entry ${index} has a commitSketch definition with inconsistent entity sketch IDs.`,
+      }
+    }
   }
 
   return { ok: true }
@@ -291,7 +375,7 @@ function validateEntry(value: unknown, index: number): OperationHistoryEntryVali
   switch (value.kind) {
     case 'commitSketch':
       if (
-        !('sketchId' in value.payload)
+        !(isString(value.payload.sketchId) || value.payload.sketchId === null)
         || !isString(value.payload.sketchLabel)
         || !isRecord(value.payload.plane)
         || !isRecord(value.payload.planeTarget)
@@ -303,7 +387,7 @@ function validateEntry(value: unknown, index: number): OperationHistoryEntryVali
           message: `Operation history entry ${index} has an invalid commitSketch payload.`,
         }
       }
-      return { ok: true }
+      return validateCommitSketchDefinitionTargets(value.payload.definition, value.payload.sketchId, index)
     case 'createFeature':
       if (!isRecord(value.payload.definition)) {
         return {

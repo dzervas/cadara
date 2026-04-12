@@ -3010,7 +3010,7 @@ export function createModelingService(
       const request = normalizeCommitSketchInput(input, currentDocumentId)
       const response = await adapter.commitSketch(request)
       if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createCommitSketchHistoryEntry(request))
+        appendOperationHistoryEntry(createCommitSketchHistoryEntry(request, response.sketchId))
       }
 
       return mapCommitSketchResponse(response, currentDocumentId)

@@ -8,7 +8,6 @@ import type {
   ModelingDiagnostic,
   ObjectTreeNodeRecord,
   ReferenceRecord,
-  ResolvedReferenceRecord,
   SketchSnapshotRecord,
   SnapshotEntityRecord,
   WorkspaceSnapshot,
@@ -81,7 +80,6 @@ const DEFAULT_ARC_SAMPLE_COUNT = 33
 const DEFAULT_POINT_DISPLAY_RADIUS = 0.25
 const DEFAULT_LINEAR_DEFLECTION = 0.1
 const DEFAULT_ANGULAR_DEFLECTION = 0.5
-const OCC_INVALID_REFERENCE_DIAGNOSTIC_CODE = 'occ-invalid-reference'
 
 function sanitizeIdSegment(value: string) {
   return value
@@ -132,23 +130,6 @@ function toRenderPoint(point: { X(): number; Y(): number; Z(): number }): Render
 
 function buildFeatureLabel(featureId: FeatureId, explicitLabel?: string) {
   return explicitLabel ?? featureId
-}
-
-function createInvalidatedReferenceDiagnostic(
-  resolution: ResolvedReferenceRecord,
-): ModelingDiagnostic {
-  return {
-    code: OCC_INVALID_REFERENCE_DIAGNOSTIC_CODE,
-    severity: 'error',
-    message: 'Requested durable reference no longer resolves in the current OCC authoring state.',
-    target: resolution.target,
-    detail: resolution.invalidation === null
-      ? null
-      : {
-          kind: 'invalidReference',
-          reference: resolution.invalidation,
-        },
-  }
 }
 
 function createConstructionPlaneGapDiagnostic(
@@ -640,10 +621,6 @@ function buildSnapshotDiagnostics(
   extraDiagnostics: readonly ModelingDiagnostic[],
 ): ModelingDiagnostic[] {
   const diagnostics = [...extraDiagnostics]
-
-  for (const reference of state.referenceState.invalidatedReferencesByKey.values()) {
-    diagnostics.push(createInvalidatedReferenceDiagnostic(reference))
-  }
 
   for (const construction of state.constructions) {
     if (construction.ownerFeatureId !== null) {

@@ -1442,6 +1442,73 @@ async function testChamferPreviewCreateAndUnsupportedCases() {
   )
 }
 
+async function testChamferCreateKeepsHistoricalInvalidationsOutOfDocumentDiagnostics() {
+  const adapter = createAdapter()
+  const committed = await commitSeedSketch(adapter)
+
+  if (committed.revisionState.kind !== 'accepted') {
+    throw new Error('Seed sketch commit must succeed before chamfer invalidation coverage.')
+  }
+
+  const committedSnapshot = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: 'doc_workspace',
+  })
+  const sketch = requirePrimarySketch(committedSnapshot.snapshot)
+  const extrude = await createExtrudeBody(adapter, committedSnapshot.snapshot.revisionId, sketch, 12)
+  const edgeId = await findPreviewableChamferEdge(adapter, extrude.response.revisionId, extrude.bodyId)
+  const created = await adapter.createFeature({
+    contractVersion: CONTRACT_VERSION,
+    documentId: 'doc_workspace',
+    baseRevisionId: extrude.response.revisionId,
+    definition: createChamferDefinition(extrude.bodyId, edgeId, 0.05),
+  })
+
+  assert(created.revisionState.kind === 'accepted', 'Chamfer create must be accepted for invalidation coverage.')
+  assert(created.rebuildResult.kind === 'rebuilt', 'Chamfer create must rebuild for invalidation coverage.')
+  assert(
+    !created.diagnostics.some((diagnostic) => diagnostic.code === 'occ-invalid-reference'),
+    'Successful chamfer commits must not surface steady-state invalidated topology as operation diagnostics.',
+  )
+
+  const snapshot = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: 'doc_workspace',
+  })
+  const invalidatedInputEdge = snapshot.snapshot.document.references.find((reference) =>
+    reference.target.kind === 'edge'
+    && reference.target.bodyId === extrude.bodyId
+    && reference.target.edgeId === edgeId
+    && reference.invalidation !== null,
+  )
+
+  assert(
+    invalidatedInputEdge,
+    'Chamfer snapshots must preserve invalidated input topology in reference records for downstream tooling.',
+  )
+  assert(
+    !snapshot.snapshot.document.diagnostics.some((diagnostic) => diagnostic.code === 'occ-invalid-reference'),
+    'Committed chamfers must not expose their own invalidated input topology as document diagnostics.',
+  )
+
+  const resolved = await adapter.resolveReference({
+    contractVersion: CONTRACT_VERSION,
+    documentId: 'doc_workspace',
+    target: { kind: 'edge', bodyId: extrude.bodyId, edgeId },
+  })
+
+  assert(
+    resolved.resolution.invalidation?.target.kind === 'edge'
+    && resolved.resolution.invalidation.target.bodyId === extrude.bodyId
+    && resolved.resolution.invalidation.target.edgeId === edgeId,
+    'Explicit lookup of a chamfer-consumed input edge must still return an invalidated edge resolution.',
+  )
+  assert(
+    resolved.diagnostics.some((diagnostic) => diagnostic.code === 'occ-invalid-reference'),
+    'Explicit lookup of a chamfer-consumed input edge must still emit invalid-reference diagnostics.',
+  )
+}
+
 async function testShellPreviewCreateUpdateAndSnapshotRoundTrip() {
   const adapter = createAdapter()
   const committed = await commitSeedSketch(adapter)
@@ -2594,6 +2661,7 @@ await testSweepPreviewCreateAndUnsupportedCases()
 await testLoftPreviewCreateAndUnsupportedCases()
 await testFilletCreateAndUpdateMutateBodyTopology()
 await testChamferPreviewCreateAndUnsupportedCases()
+await testChamferCreateKeepsHistoricalInvalidationsOutOfDocumentDiagnostics()
 await testShellPreviewCreateUpdateAndSnapshotRoundTrip()
 await testThickenPreviewCreateAndUnsupportedCases()
 await testSplitPreviewCreateAndUnsupportedCases()
