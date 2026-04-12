@@ -35,11 +35,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libxrandr-dev \
   && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN curl -fsSL https://bun.com/install | bash
 ENV PATH=$PATH:/root/.bun/bin
 
 # Install codex from npm globally
-RUN bun install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest && npm cache clean --force
+RUN bun install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest
 RUN playwright-cli install
 
 # Set npm global config for any user

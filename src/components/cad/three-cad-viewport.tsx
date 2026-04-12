@@ -1,10 +1,9 @@
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { Bvh, OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 
 import {
-  getPrimitiveRefKey,
   type PrimitiveRef,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
@@ -13,14 +12,18 @@ import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-sess
 import {
   MARKER_SPHERE_GEOMETRY,
   bindRenderableObject,
+  collectBindings,
+  type CollectedBindings,
   createInvisiblePickMaterial,
   createMarkerPickProxy,
   createRenderableLineMaterial,
   createRenderableMarkerMaterial,
   createRenderableMeshMaterial,
-  getBoundRenderableRecord,
+  getViewportRenderableGeometryToken,
   getBoundTarget,
+  isBvhAcceleratedDocumentRenderable,
   getRenderableRenderOrder,
+  partitionViewportRenderablesForBvh,
   getVisibleMarkerRadius,
   isSeededDatumPlaneRenderable,
   resolvePickTarget,
@@ -66,12 +69,6 @@ interface ThreeCadViewportProps {
   selection: PrimitiveRef[]
 }
 
-interface CollectedBindings {
-  pickables: THREE.Object3D[]
-  pickIdToRenderable: Map<string, ViewportRenderableRecord['renderable']>
-  targetToObjects: Map<string, THREE.Object3D[]>
-}
-
 export function ThreeCadViewport({
   hoverTarget,
   renderables,
@@ -112,6 +109,21 @@ export function ThreeCadViewport({
   const selectionRef = useRef(selection)
   const selectionFilterRef = useRef(selectionFilter)
   const selectionCatalogRef = useRef(selectionCatalog)
+  const bvhManagedRenderables = useMemo(
+    () => partitionViewportRenderablesForBvh(renderables),
+    [renderables],
+  )
+  const bvhSceneKey = useMemo(
+    () => bvhManagedRenderables.accelerated
+      .map(({ origin, renderable }) => {
+        return `${origin}:${renderable.id}:${renderable.binding.pickId}:${getViewportRenderableGeometryToken({
+          origin,
+          renderable,
+        })}`
+      })
+      .join('|'),
+    [bvhManagedRenderables.accelerated],
+  )
 
   useEffect(() => {
     hoverRef.current = onHover
@@ -323,6 +335,7 @@ export function ThreeCadViewport({
       updatePointerFromClientPoint(pointerRef.current, canvasElement, clientX, clientY)
       raycasterRef.current.setFromCamera(pointerRef.current, camera)
       raycasterRef.current.params.Line.threshold = 0.75
+      ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true
 
       const intersections = raycasterRef.current.intersectObjects(
         [...documentBindings.pickables, ...(sketchBindings?.pickables ?? [])],
@@ -585,7 +598,12 @@ export function ThreeCadViewport({
         <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
         <WorkspaceSceneScaffold />
         <group ref={documentGroupRef}>
-          {renderables.map((entry) => (
+          <Bvh key={bvhSceneKey} enabled={bvhManagedRenderables.accelerated.length > 0} firstHitOnly>
+            {bvhManagedRenderables.accelerated.map((entry) => (
+              <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
+            ))}
+          </Bvh>
+          {bvhManagedRenderables.fallback.map((entry) => (
             <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
           ))}
         </group>
@@ -736,6 +754,9 @@ function DocumentMeshNode({ entry }: { entry: ViewportRenderableRecord }) {
   useEffect(() => () => material.dispose(), [material])
   return (
     <mesh
+      userData={{
+        bvhAccelerated: isBvhAcceleratedDocumentRenderable(entry),
+      }}
       ref={(value) => {
         if (value) {
           bindRenderableObject(
@@ -1037,50 +1058,6 @@ function snapView(
     controls,
     direction,
   })
-}
-
-function collectBindings(root: THREE.Object3D | null): CollectedBindings | null {
-  if (!root) {
-    return null
-  }
-
-  const pickables: THREE.Object3D[] = []
-  const pickIdToRenderable = new Map<string, ViewportRenderableRecord['renderable']>()
-  const targetToObjects = new Map<string, THREE.Object3D[]>()
-
-  root.traverse((object) => {
-    if (object.userData.pickId !== undefined || object.userData.target !== undefined) {
-      pickables.push(object)
-    }
-
-    const pickId = object.userData.pickId as string | undefined
-    const renderableRecord = getBoundRenderableRecord(object)
-
-    if (pickId && renderableRecord) {
-      pickIdToRenderable.set(pickId, renderableRecord)
-    }
-
-    if (object.userData.highlightExcluded === true) {
-      return
-    }
-
-    const target = getBoundTarget(object)
-
-    if (!target || !(object instanceof THREE.Mesh || object instanceof THREE.Line)) {
-      return
-    }
-
-    const key = getPrimitiveRefKey(target)
-    const entries = targetToObjects.get(key) ?? []
-    entries.push(object)
-    targetToObjects.set(key, entries)
-  })
-
-  return {
-    pickables,
-    pickIdToRenderable,
-    targetToObjects,
-  }
 }
 
 function resolveProjectedMarkerTarget({

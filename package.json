@@ -27,7 +27,8 @@
     "test:occ-phase7": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx src/domain/modeling/opencascade-kernel-adapter.spec.ts",
     "test:occ-phase8": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx src/domain/modeling/opencascade-kernel-adapter.spec.ts",
     "test:occ-phase9": "bun run test:occ-phase1-browser-compile && bun run test:occ-phase8 && bun run build",
-    "test:contract-examples": "bun x vite-node src/contracts/shared/contract-examples.spec.ts"
+    "test:contract-examples": "bun x vite-node src/contracts/shared/contract-examples.spec.ts",
+    "test:render-picking": "bun x vite-node src/domain/workspace/render-picking.spec.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

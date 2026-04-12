@@ -12,6 +12,12 @@ import type {
   ViewportRenderableRecord,
 } from '@/domain/workspace/viewport-renderables'
 
+export interface CollectedBindings {
+  pickables: THREE.Object3D[]
+  pickIdToRenderable: Map<string, RenderableEntityRecord>
+  targetToObjects: Map<string, THREE.Object3D[]>
+}
+
 export interface WorkspaceRenderScene {
   group: THREE.Group
   pickables: THREE.Object3D[]
@@ -24,6 +30,13 @@ export interface SketchDisplayScene {
   pickables: THREE.Object3D[]
   targetToObjects: Map<string, THREE.Object3D[]>
 }
+
+/**
+ * First-pass BVH acceleration targets mesh-backed document geometry only.
+ * Lightweight helper planes, wire renderables, and marker proxy meshes stay on the
+ * fallback path until they show a concrete payoff from BVH management.
+ */
+export const BVH_ACCELERATED_DOCUMENT_GEOMETRY_KINDS = ['mesh'] as const
 
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
 const PICK_PROXY_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 16, 16)
@@ -83,6 +96,56 @@ export function buildWorkspaceRenderScene(renderables: ViewportRenderableRecord[
     pickables,
     targetToObjects,
     pickIdToRenderable,
+  }
+}
+
+export function isBvhAcceleratedDocumentRenderable(entry: ViewportRenderableRecord) {
+  return entry.renderable.geometry.kind === 'mesh'
+    && !isSeededDatumPlaneRenderable(entry.renderable)
+}
+
+export function partitionViewportRenderablesForBvh(renderables: ViewportRenderableRecord[]) {
+  const accelerated: ViewportRenderableRecord[] = []
+  const fallback: ViewportRenderableRecord[] = []
+
+  for (const entry of renderables) {
+    if (isBvhAcceleratedDocumentRenderable(entry)) {
+      accelerated.push(entry)
+      continue
+    }
+
+    fallback.push(entry)
+  }
+
+  return {
+    accelerated,
+    fallback,
+  }
+}
+
+export function getViewportRenderableGeometryToken(entry: ViewportRenderableRecord) {
+  const { geometry } = entry.renderable
+
+  switch (geometry.kind) {
+    case 'mesh':
+      return [
+        'mesh',
+        geometry.vertexPositions.flat().join(','),
+        geometry.triangleIndices.flat().join(','),
+        geometry.vertexNormals ? geometry.vertexNormals.flat().join(',') : 'auto-normals',
+      ].join(':')
+    case 'polyline':
+      return [
+        'polyline',
+        geometry.points.flat().join(','),
+        geometry.isClosed ? 'closed' : 'open',
+      ].join(':')
+    case 'marker':
+      return [
+        'marker',
+        geometry.position.join(','),
+        geometry.displayRadius,
+      ].join(':')
   }
 }
 
@@ -801,4 +864,48 @@ export function createInvisiblePickMaterial() {
 
 export function getVisibleMarkerRadius(displayRadius: number) {
   return Math.max(displayRadius * VISIBLE_MARKER_SCALE_FACTOR, Number.EPSILON)
+}
+
+export function collectBindings(root: THREE.Object3D | null): CollectedBindings | null {
+  if (!root) {
+    return null
+  }
+
+  const pickables: THREE.Object3D[] = []
+  const pickIdToRenderable = new Map<string, RenderableEntityRecord>()
+  const targetToObjects = new Map<string, THREE.Object3D[]>()
+
+  root.traverse((object) => {
+    if (object.userData.pickId !== undefined || object.userData.target !== undefined) {
+      pickables.push(object)
+    }
+
+    const pickId = object.userData.pickId as string | undefined
+    const renderableRecord = getBoundRenderableRecord(object)
+
+    if (pickId && renderableRecord) {
+      pickIdToRenderable.set(pickId, renderableRecord)
+    }
+
+    if (object.userData.highlightExcluded === true) {
+      return
+    }
+
+    const target = getBoundTarget(object)
+
+    if (!target || !(object instanceof THREE.Mesh || object instanceof THREE.Line)) {
+      return
+    }
+
+    const key = getPrimitiveRefKey(target)
+    const entries = targetToObjects.get(key) ?? []
+    entries.push(object)
+    targetToObjects.set(key, entries)
+  })
+
+  return {
+    pickables,
+    pickIdToRenderable,
+    targetToObjects,
+  }
 }
