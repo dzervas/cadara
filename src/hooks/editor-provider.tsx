@@ -1,16 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { PropsWithChildren } from 'react'
 
 import {
   createModelingServiceEditorEffectRuntime,
   getEditorViewState,
-  initialEditorState,
-  runEditorEffect,
-  transitionEditorState,
-  type EditorEffect,
   type EditorEvent,
-  type EditorState,
 } from '@/contracts/editor/state-machine'
+import { createEditorRuntimeActor } from '@/contracts/editor/runtime-machine'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { EditorContext } from '@/hooks/editor-context'
 
@@ -18,73 +14,40 @@ interface EditorProviderProps extends PropsWithChildren {
   modelingService: ModelingService
 }
 
-interface RuntimeState {
-  machineState: EditorState
-  pendingEffects: EditorEffect[]
-}
-
-type RuntimeAction =
-  | { type: 'event'; event: EditorEvent }
-  | { type: 'effects.flushed' }
-
-function editorRuntimeReducer(state: RuntimeState, action: RuntimeAction): RuntimeState {
-  switch (action.type) {
-    case 'event': {
-      const result = transitionEditorState(state.machineState, action.event)
-
-      return {
-        machineState: result.state,
-        pendingEffects: [...state.pendingEffects, ...result.effects],
-      }
-    }
-    case 'effects.flushed':
-      if (state.pendingEffects.length === 0) {
-        return state
-      }
-
-      return {
-        ...state,
-        pendingEffects: [],
-      }
-    default:
-      return state
-  }
-}
-
 export function EditorProvider({ modelingService, children }: EditorProviderProps) {
-  const [runtimeState, runtimeDispatch] = useReducer(editorRuntimeReducer, {
-    machineState: initialEditorState,
-    pendingEffects: [],
-  })
-  const dispatch = useCallback((event: EditorEvent) => {
-    runtimeDispatch({ type: 'event', event })
-  }, [])
+  const runtime = useMemo(
+    () => createModelingServiceEditorEffectRuntime(modelingService),
+    [modelingService],
+  )
+  const actor = useMemo(() => createEditorRuntimeActor(runtime), [runtime])
+  const [machineState, setMachineState] = useState(() => actor.getSnapshot().context.machineState)
 
   useEffect(() => {
-    dispatch({ type: 'session.started' })
-  }, [dispatch])
+    actor.start()
 
-  useEffect(() => {
-    if (runtimeState.pendingEffects.length === 0) {
-      return
-    }
-
-    const effects = runtimeState.pendingEffects
-    const runtime = createModelingServiceEditorEffectRuntime(modelingService)
-    runtimeDispatch({ type: 'effects.flushed' })
-
-    effects.forEach((effect) => {
-      void runEditorEffect(effect, runtime).then(dispatch)
+    const subscription = actor.subscribe((snapshot) => {
+      setMachineState(snapshot.context.machineState)
     })
-  }, [dispatch, modelingService, runtimeState.pendingEffects])
+
+    setMachineState(actor.getSnapshot().context.machineState)
+
+    return () => {
+      subscription.unsubscribe()
+      actor.stop()
+    }
+  }, [actor])
+
+  const dispatch = useCallback((event: EditorEvent) => {
+    actor.send(event)
+  }, [actor])
 
   const value = useMemo(
     () => ({
-      machineState: runtimeState.machineState,
-      state: getEditorViewState(runtimeState.machineState),
+      machineState,
+      state: getEditorViewState(machineState),
       dispatch,
     }),
-    [dispatch, runtimeState.machineState],
+    [dispatch, machineState],
   )
 
   return <EditorContext.Provider value={value}>{children}</EditorContext.Provider>

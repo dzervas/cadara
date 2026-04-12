@@ -7,6 +7,7 @@ import {
   transitionEditorState,
   type EditorEvent,
 } from './state-machine'
+import { createEditorRuntimeActor } from './runtime-machine'
 import type { SelectionTargetCatalog } from '@/domain/editor/schema'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
@@ -235,6 +236,11 @@ async function createMockWorkspaceSnapshot() {
 
 function runEventTrace(events: readonly EditorEvent[]) {
   return replayEditorEvents(events)
+}
+
+async function flushAsyncWork() {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await Promise.resolve()
 }
 
 function testSketchActivationEmitsCorrelatedOpenEffect() {
@@ -1250,6 +1256,107 @@ async function testRuntimeLoopReopensSketchFromExplicitIntent() {
   assert(result.state.session.plane.key === 'yz', 'Committed sketch reopen should preserve the stored sketch plane.')
 }
 
+async function testXStateRuntimeBootstrapsAndLoadsSnapshot() {
+  const snapshot = createSnapshot()
+  let snapshotCallCount = 0
+  const runtime: EditorEffectRuntime = {
+    getCurrentDocumentSnapshot: async () => {
+      snapshotCallCount += 1
+      return snapshot
+    },
+    commitSketch: async () => null,
+    evaluatePreview: async () => ({
+      revisionId: snapshot.revisionId,
+      stale: false,
+      diagnostics: [],
+      renderables: [],
+    }),
+    commitFeature: async () => ({
+      revisionId: snapshot.revisionId,
+      featureId: 'feature_alpha' as const,
+      accepted: true,
+      diagnostics: [],
+    }),
+  }
+
+  const actor = createEditorRuntimeActor(runtime)
+
+  actor.start()
+  await flushAsyncWork()
+
+  const machineState = actor.getSnapshot().context.machineState
+
+  assert(snapshotCallCount === 1, 'The XState runtime should bootstrap the initial snapshot load itself.')
+  assert(machineState.document.documentId === snapshot.documentId, 'Bootstrap should hydrate the document id.')
+  assert(machineState.document.revisionId === snapshot.revisionId, 'Bootstrap should hydrate the revision id.')
+  assert(machineState.snapshot?.revisionId === snapshot.revisionId, 'Bootstrap should store the loaded snapshot.')
+  actor.stop()
+}
+
+async function testXStateRuntimeCancelsObsoleteSketchOpenEffects() {
+  const snapshot = createSnapshot()
+  let snapshotCallCount = 0
+  let resolveOpenSnapshot: ((value: DocumentSnapshot) => void) | null = null
+
+  const runtime: EditorEffectRuntime = {
+    getCurrentDocumentSnapshot: () => {
+      snapshotCallCount += 1
+
+      if (snapshotCallCount === 1) {
+        return Promise.resolve(snapshot)
+      }
+
+      return new Promise<DocumentSnapshot>((resolve) => {
+        resolveOpenSnapshot = resolve
+      })
+    },
+    commitSketch: async () => null,
+    evaluatePreview: async () => ({
+      revisionId: snapshot.revisionId,
+      stale: false,
+      diagnostics: [],
+      renderables: [],
+    }),
+    commitFeature: async () => ({
+      revisionId: snapshot.revisionId,
+      featureId: 'feature_alpha' as const,
+      accepted: true,
+      diagnostics: [],
+    }),
+  }
+
+  const actor = createEditorRuntimeActor(runtime)
+
+  actor.start()
+  await flushAsyncWork()
+  actor.send({ type: 'tool.activated', toolId: 'sketch' })
+  actor.send({
+    type: 'viewport.selectionRequested',
+    target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+  })
+  await flushAsyncWork()
+
+  const selectionState = actor.getSnapshot().context.machineState
+  assert(selectionState.kind === 'selectionCommand', 'Sketch activation should reach the selection workflow before opening.')
+
+  actor.send({
+    type: 'command.cancelled',
+    commandSessionId: selectionState.command.commandSessionId,
+  })
+
+  const pendingOpenSnapshotResolver = resolveOpenSnapshot as ((value: DocumentSnapshot) => void) | null
+
+  if (pendingOpenSnapshotResolver) {
+    pendingOpenSnapshotResolver(snapshot)
+  }
+  await flushAsyncWork()
+
+  const cancelledState = actor.getSnapshot().context.machineState
+
+  assert(cancelledState.kind === 'idle', 'Cancelling sketch selection should return the runtime to idle.')
+  actor.stop()
+}
+
 function testSketchToolClearStaysInSketchEditing() {
   const activated = transitionEditorState(
     {
@@ -1324,3 +1431,5 @@ await testRuntimeLoopOpensSketchFromNonXYConstruction()
 await testRuntimeLoopReopensStoredSketchPlane()
 await testRuntimeLoopReopensCommittedFeatureFromExplicitIntent()
 await testRuntimeLoopReopensSketchFromExplicitIntent()
+await testXStateRuntimeBootstrapsAndLoadsSnapshot()
+await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
