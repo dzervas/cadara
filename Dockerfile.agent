@@ -46,6 +46,8 @@ ENV PATH=$PATH:/root/.bun/bin
 RUN bun install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest
 RUN playwright-cli install
 
+RUN bun install -g @mariozechner/pi-coding-agent task-factory
+
 # Set npm global config for any user
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 

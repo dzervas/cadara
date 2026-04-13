@@ -2,8 +2,9 @@ services:
   agent:
     build:
       dockerfile: Dockerfile.agent
+    command: task-factory start -h 0.0.0.0
     ports:
-      - "8000:8000"
+      - "8000:3000"
     volumes:
       - .:/app
       - .codex/container:/root/.codex
