@@ -1,0 +1,277 @@
+import { z } from 'zod'
+
+import type {
+  ConstraintDefinition,
+  DimensionDefinition,
+  ProjectedSketchGeometryRef,
+  RegionRecord,
+  SketchDefinition,
+  SketchEntityDefinition,
+  SketchPointDefinition,
+  SketchRecord,
+  SketchReferenceDefinition,
+  SolvedSketchSnapshot,
+} from '@/contracts/sketch/schema'
+import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
+import { durableRefSchema, sketchEntityRefSchema, sketchPointRefSchema } from '@/contracts/shared/references.runtime-schema'
+import {
+  constraintIdSchema,
+  dimensionIdSchema,
+  point2dSchema,
+  positiveNumberSchema,
+  projectedGeometryIdSchema,
+  referenceIdSchema,
+  regionIdSchema,
+  requestIdSchema,
+  sketchEntityIdSchema,
+  sketchIdSchema,
+  sketchPointIdSchema,
+} from '@/contracts/shared/runtime-schema'
+
+export const sketchSchemaVersionSchema = z.literal('sketch-definition/v1alpha1')
+export const solvedSketchSchemaVersionSchema = z.literal('solved-sketch/v1alpha1')
+
+const projectedSketchGeometryRefSchema = z.object({
+  kind: z.union([
+    z.literal('projectedPoint'),
+    z.literal('projectedLineSegment'),
+    z.literal('projectedCircle'),
+    z.literal('projectedArc'),
+  ]),
+  referenceId: referenceIdSchema,
+  geometryId: projectedGeometryIdSchema,
+}).transform((value) => value as ProjectedSketchGeometryRef)
+
+const sketchReferenceDefinitionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    referenceId: referenceIdSchema,
+    kind: z.literal('constructionPlane'),
+    label: z.string(),
+    source: z.object({
+      kind: z.literal('construction'),
+      constructionId: z.string(),
+    }),
+    projectionMode: z.literal('coplanar'),
+  }),
+  z.object({
+    referenceId: referenceIdSchema,
+    kind: z.literal('modelReference'),
+    label: z.string(),
+    source: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('face'), bodyId: z.string(), faceId: z.string() }),
+      z.object({ kind: z.literal('edge'), bodyId: z.string(), edgeId: z.string() }),
+      z.object({ kind: z.literal('vertex'), bodyId: z.string(), vertexId: z.string() }),
+    ]),
+    projectionMode: z.union([
+      z.literal('projectAlongPlaneNormal'),
+      z.literal('useExistingCoplanarGeometry'),
+    ]),
+  }),
+]).transform((value) => value as SketchReferenceDefinition)
+
+const sketchPointDefinitionSchema = z.object({
+  pointId: sketchPointIdSchema,
+  label: z.string(),
+  target: sketchPointRefSchema,
+  position: point2dSchema,
+  isConstruction: z.boolean(),
+}).transform((value) => value as SketchPointDefinition)
+
+const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('lineSegment'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    startPointId: sketchPointIdSchema,
+    endPointId: sketchPointIdSchema,
+  }),
+  z.object({
+    kind: z.literal('point'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    pointId: sketchPointIdSchema,
+  }),
+  z.object({
+    kind: z.literal('circle'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    centerPointId: sketchPointIdSchema,
+    radius: positiveNumberSchema('Circle radius must be positive.'),
+  }),
+  z.object({
+    kind: z.literal('arc'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    centerPointId: sketchPointIdSchema,
+    startPointId: sketchPointIdSchema,
+    endPointId: sketchPointIdSchema,
+    sweepDirection: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
+  }),
+]).transform((value) => value as SketchEntityDefinition)
+
+const constraintDefinitionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('coincident'),
+    label: z.string(),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('horizontal'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('fixPoint'),
+    label: z.string(),
+    pointId: sketchPointIdSchema,
+    position: point2dSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('angle'),
+    label: z.string(),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema, sketchPointIdSchema]),
+    valueRadians: z.number(),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('parallel'),
+    label: z.string(),
+    entityIds: z.tuple([sketchEntityIdSchema, sketchEntityIdSchema]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('perpendicular'),
+    label: z.string(),
+    entityIds: z.tuple([sketchEntityIdSchema, sketchEntityIdSchema]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('equalLength'),
+    label: z.string(),
+    entityIds: z.tuple([sketchEntityIdSchema, sketchEntityIdSchema]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('vertical'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+  }),
+]).transform((value) => value as ConstraintDefinition)
+
+const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('distance'),
+    label: z.string(),
+    axis: z.union([z.literal('aligned'), z.literal('horizontal'), z.literal('vertical')]),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
+    value: z.number(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('circleRadius'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+    value: positiveNumberSchema('Circle radius dimension must be positive.'),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('horizontalDistance'),
+    label: z.string(),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
+    value: z.number(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('verticalDistance'),
+    label: z.string(),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
+    value: z.number(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('arcStartPointCoincident'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+    pointId: sketchPointIdSchema,
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('arcEndPointCoincident'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+    pointId: sketchPointIdSchema,
+  }),
+]).transform((value) => value as DimensionDefinition)
+
+export const sketchDefinitionSchema = z.object({
+  schemaVersion: sketchSchemaVersionSchema,
+  referenceIds: z.array(referenceIdSchema),
+  references: z.array(sketchReferenceDefinitionSchema),
+  pointIds: z.array(sketchPointIdSchema),
+  points: z.array(sketchPointDefinitionSchema),
+  entityIds: z.array(sketchEntityIdSchema),
+  entities: z.array(sketchEntityDefinitionSchema),
+  constraintIds: z.array(constraintIdSchema),
+  constraints: z.array(constraintDefinitionSchema),
+  dimensionIds: z.array(dimensionIdSchema),
+  dimensions: z.array(dimensionDefinitionSchema),
+}).transform((value) => value as SketchDefinition)
+
+const regionRecordSchema = z.object({
+  regionId: regionIdSchema,
+  label: z.string(),
+  target: durableRefSchema,
+  sourceSketch: z.object({ kind: z.literal('sketch'), sketchId: sketchIdSchema }),
+}).passthrough().transform((value) => value as unknown as RegionRecord)
+
+export const sketchRecordSchema = z.object({
+  sketchId: sketchIdSchema,
+  sketchLabel: z.string(),
+  plane: sketchPlaneDefinitionSchema,
+  planeTarget: z.union([
+    z.object({ kind: z.literal('construction'), constructionId: z.string() }),
+    z.object({ kind: z.literal('face'), bodyId: z.string(), faceId: z.string() }),
+  ]),
+  planeKey: z.union([z.literal('xy'), z.literal('yz'), z.literal('xz')]).nullable(),
+  definition: sketchDefinitionSchema,
+}).passthrough().transform((value) => value as unknown as SketchRecord)
+
+export const solvedSketchSnapshotSchema = z.object({
+  schemaVersion: solvedSketchSchemaVersionSchema,
+  points: z.array(z.object({
+    pointId: sketchPointIdSchema,
+    target: sketchPointRefSchema,
+    solvedPosition: point2dSchema,
+  }).passthrough()),
+  entities: z.array(z.object({
+    entityId: sketchEntityIdSchema,
+    target: sketchEntityRefSchema,
+  }).passthrough()),
+  constraints: z.array(z.object({
+    constraintId: constraintIdSchema,
+  }).passthrough()),
+  dimensions: z.array(z.object({
+    dimensionId: dimensionIdSchema,
+  }).passthrough()),
+}).passthrough().transform((value) => value as unknown as SolvedSketchSnapshot)
+
+export const projectedReferenceRequestTargetSchema = z.union([
+  durableRefSchema,
+  projectedSketchGeometryRefSchema,
+])
+
+export const solverRegionRecordSchema = regionRecordSchema
+export const solverRequestIdSchema = requestIdSchema

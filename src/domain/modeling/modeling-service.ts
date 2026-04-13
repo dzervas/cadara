@@ -71,7 +71,21 @@ import type {
   AdvancedSolidFeatureParameters,
 } from '@/contracts/modeling/schema'
 import type { RenderExport, RenderableEntityRecord } from '@/contracts/render/schema'
+import { renderExportSchema } from '@/contracts/render/runtime-schema'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, isAdvancedParticipantRole, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
+import {
+  commitSketchResponseSchema,
+  createFeatureResponseSchema,
+  deleteFeatureResponseSchema,
+  evaluatePreviewResponseSchema,
+  getDocumentSnapshotResponseSchema,
+  kernelDocumentSnapshotSchema,
+  reorderFeatureResponseSchema,
+  resolveReferenceResponseSchema,
+  setFeatureCursorResponseSchema,
+  updateFeatureResponseSchema,
+  workspaceSnapshotSchema,
+} from '@/contracts/modeling/runtime-schema'
 import {
   createCommitSketchHistoryEntry,
   createCreateFeatureHistoryEntry,
@@ -2418,53 +2432,23 @@ function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
 }
 
 function normalizeKernelDocumentSnapshot(value: unknown): KernelDocumentSnapshot {
-  if (
-    !isRecord(value)
-    || !isString(value.documentId)
-    || !isString(value.revisionId)
-  ) {
-    throw new Error('Invalid kernel document snapshot payload.')
-  }
-
-  const features = normalizeFeatures(value.features)
-  const cursor = normalizeDocumentFeatureCursor(value.cursor, features)
+  const parsed = kernelDocumentSnapshotSchema.parse(value)
 
   return {
-    contractVersion:
-      value.contractVersion === CONTRACT_VERSION
-        ? value.contractVersion
-        : (() => { throw new Error('Invalid kernel snapshot contract version payload.') })(),
-    schemaVersion:
-      value.schemaVersion === SNAPSHOT_SCHEMA_VERSION
-        ? value.schemaVersion
-        : (() => { throw new Error('Invalid kernel snapshot schema version payload.') })(),
-    documentId: assertDocumentId(value.documentId),
-    revisionId: assertRevisionId(value.revisionId),
-    settings: normalizeModelingDocumentSettings(value.settings),
-    capabilities: normalizeModelingKernelCapabilities(value.capabilities),
-    featureTree: normalizeFeatureTree(value.featureTree),
-    objects: normalizeObjects(value.objects),
-    features,
-    cursor,
-    sketches: normalizeSketches(value.sketches),
-    bodies: normalizeBodies(value.bodies),
-    constructions: normalizeConstructions(value.constructions),
-    entities: normalizeEntities(value.entities),
-    references: normalizeReferences(value.references),
-    diagnostics: normalizeDiagnostics(value.diagnostics),
-    render: normalizeRenderExport(value.render),
+    ...parsed,
+    settings: normalizeModelingDocumentSettings(parsed.settings),
+    capabilities: normalizeModelingKernelCapabilities(parsed.capabilities),
+    render: normalizeRenderExport(parsed.render),
   }
 }
 
 function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
-  if (!isRecord(value)) {
-    throw new Error('Invalid workspace snapshot payload.')
-  }
-
-  const document = normalizeKernelDocumentSnapshot(value.document)
-  const presentation = normalizeDocumentPresentation(value.presentation)
+  const parsed = workspaceSnapshotSchema.parse(value)
+  const document = normalizeKernelDocumentSnapshot(parsed.document)
+  const presentation = normalizeDocumentPresentation(parsed.presentation)
 
   return {
+    ...parsed,
     document,
     presentation,
     contractVersion: document.contractVersion,
@@ -2496,20 +2480,11 @@ function normalizeChangedTargets(value: unknown): PrimitiveRef[] {
 }
 
 function normalizeResolution(value: unknown): ResolvedReferenceRecord {
-  if (!isRecord(value) || !isString(value.label)) {
-    throw new Error('Invalid reference resolution payload.')
-  }
-
-  return {
-    label: value.label,
-    target: assertPrimitiveRef(value.target),
-    ownerDocumentId: assertDocumentId(value.ownerDocumentId),
-    ownerRevisionId: assertRevisionId(value.ownerRevisionId),
-    ownerFeatureId: value.ownerFeatureId === null ? null : assertFeatureId(value.ownerFeatureId),
-    ownerSketchId: value.ownerSketchId === null ? null : assertSketchId(value.ownerSketchId),
-    ownerBodyId: value.ownerBodyId === null ? null : assertBodyId(value.ownerBodyId),
-    invalidation: value.invalidation === null ? null : normalizeInvalidReferenceDetail(value.invalidation),
-  }
+  return resolveReferenceResponseSchema.parse({
+    contractVersion: CONTRACT_VERSION,
+    resolution: value,
+    diagnostics: [],
+  }).resolution
 }
 
 function buildDocumentRequest(documentId: DocumentSnapshot['documentId']): GetDocumentSnapshotRequest {
@@ -2545,25 +2520,28 @@ function validateSnapshotResponse(
   response: GetDocumentSnapshotResponse,
   expectedDocumentId: DocumentId,
 ): DocumentSnapshot {
-  assertKernelContractVersion(response.snapshot.document.contractVersion)
-  assertSnapshotSchemaVersion(response.snapshot.document.schemaVersion)
-  assertKernelDocumentIdMatches(response.snapshot.document.documentId, expectedDocumentId, 'Snapshot')
-  return normalizeWorkspaceSnapshot(response.snapshot)
+  const parsed = getDocumentSnapshotResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.snapshot.document.contractVersion)
+  assertSnapshotSchemaVersion(parsed.snapshot.document.schemaVersion)
+  assertKernelDocumentIdMatches(parsed.snapshot.document.documentId, expectedDocumentId, 'Snapshot')
+  return normalizeWorkspaceSnapshot(parsed.snapshot)
 }
 
 function mapFeatureMutationResponse(
   response: CreateFeatureResponse | UpdateFeatureResponse,
   expectedDocumentId: DocumentId,
 ): ModelingFeatureMutationResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.documentId, expectedDocumentId, 'Feature mutation')
+  const parsed = createFeatureResponseSchema.safeParse(response)
+  const normalized = parsed.success ? parsed.data : updateFeatureResponseSchema.parse(response)
+  assertKernelContractVersion(normalized.contractVersion)
+  assertKernelDocumentIdMatches(normalized.documentId, expectedDocumentId, 'Feature mutation')
   return {
-    revisionId: response.revisionId,
-    featureId: response.featureId,
-    revisionState: response.revisionState,
-    rebuildResult: response.rebuildResult,
-    changedTargets: response.changedTargets,
-    diagnostics: response.diagnostics,
+    revisionId: normalized.revisionId,
+    featureId: normalized.featureId,
+    revisionState: normalized.revisionState,
+    rebuildResult: normalized.rebuildResult,
+    changedTargets: normalized.changedTargets,
+    diagnostics: normalized.diagnostics,
   }
 }
 
@@ -2571,15 +2549,16 @@ function mapDeleteFeatureResponse(
   response: DeleteFeatureResponse,
   expectedDocumentId: DocumentId,
 ): ModelingDeleteFeatureResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.documentId, expectedDocumentId, 'Delete feature')
+  const parsed = deleteFeatureResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Delete feature')
   return {
-    revisionId: response.revisionId,
-    deletedFeatureId: response.deletedFeatureId,
-    revisionState: response.revisionState,
-    rebuildResult: response.rebuildResult,
-    changedTargets: response.changedTargets,
-    diagnostics: response.diagnostics,
+    revisionId: parsed.revisionId,
+    deletedFeatureId: parsed.deletedFeatureId,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
   }
 }
 
@@ -2587,15 +2566,16 @@ function mapCommitSketchResponse(
   response: CommitSketchResponse,
   expectedDocumentId: DocumentId,
 ): ModelingCommitSketchResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.documentId, expectedDocumentId, 'Commit sketch')
+  const parsed = commitSketchResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Commit sketch')
   return {
-    revisionId: response.revisionId,
-    sketchId: response.sketchId,
-    revisionState: response.revisionState,
-    rebuildResult: response.rebuildResult,
-    changedTargets: response.changedTargets,
-    diagnostics: response.diagnostics,
+    revisionId: parsed.revisionId,
+    sketchId: parsed.sketchId,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
   }
 }
 
@@ -2603,15 +2583,16 @@ function mapPreviewResponse(
   response: EvaluatePreviewResponse,
   expectedDocumentId: DocumentId,
 ): ModelingPreviewResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.documentId, expectedDocumentId, 'Preview')
+  const parsed = evaluatePreviewResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Preview')
   return {
-    revisionId: response.revisionId,
-    previewId: response.previewId,
-    renderables: response.render.records,
-    freshness: response.freshness,
-    stale: response.freshness.kind === 'stale',
-    diagnostics: response.diagnostics,
+    revisionId: parsed.revisionId,
+    previewId: parsed.previewId,
+    renderables: parsed.render.records,
+    freshness: parsed.freshness,
+    stale: parsed.freshness.kind === 'stale',
+    diagnostics: parsed.diagnostics,
   }
 }
 
@@ -2619,16 +2600,17 @@ function mapReorderFeatureResponse(
   response: ReorderFeatureResponse,
   expectedDocumentId: DocumentId,
 ): ModelingReorderFeatureResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.documentId, expectedDocumentId, 'Reorder feature')
+  const parsed = reorderFeatureResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Reorder feature')
   return {
-    revisionId: response.revisionId,
-    featureId: response.featureId,
-    beforeFeatureId: response.beforeFeatureId,
-    revisionState: response.revisionState,
-    rebuildResult: response.rebuildResult,
-    changedTargets: response.changedTargets,
-    diagnostics: response.diagnostics,
+    revisionId: parsed.revisionId,
+    featureId: parsed.featureId,
+    beforeFeatureId: parsed.beforeFeatureId,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
   }
 }
 
@@ -2636,15 +2618,16 @@ function mapSetFeatureCursorResponse(
   response: SetFeatureCursorResponse,
   expectedDocumentId: DocumentId,
 ): ModelingSetFeatureCursorResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.documentId, expectedDocumentId, 'Set feature cursor')
+  const parsed = setFeatureCursorResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Set feature cursor')
   return {
-    revisionId: response.revisionId,
-    cursor: response.cursor,
-    revisionState: response.revisionState,
-    rebuildResult: response.rebuildResult,
-    changedTargets: response.changedTargets,
-    diagnostics: response.diagnostics,
+    revisionId: parsed.revisionId,
+    cursor: parsed.cursor,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
   }
 }
 
@@ -2652,11 +2635,12 @@ function mapResolvedReferenceResponse(
   response: ResolveReferenceResponse,
   expectedDocumentId: DocumentId,
 ): ModelingResolvedReferenceResult {
-  assertKernelContractVersion(response.contractVersion)
-  assertKernelDocumentIdMatches(response.resolution.ownerDocumentId, expectedDocumentId, 'Resolve reference')
+  const parsed = resolveReferenceResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.resolution.ownerDocumentId, expectedDocumentId, 'Resolve reference')
   return {
-    resolution: response.resolution,
-    diagnostics: response.diagnostics,
+    resolution: parsed.resolution,
+    diagnostics: parsed.diagnostics,
   }
 }
 
@@ -2832,15 +2816,9 @@ async function replayHistoryEntry(input: {
 
   switch (input.entry.kind) {
     case 'commitSketch': {
-      const persistedSketchId = input.entry.payload.sketchId
-      const sketchId =
-        persistedSketchId && !currentSnapshot.sketches.some((entry) => entry.sketchId === persistedSketchId)
-          ? null
-          : persistedSketchId
-
       return input.adapter.commitSketch({
         ...input.entry.payload,
-        sketchId,
+        sketchId: input.entry.payload.sketchId,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -3114,7 +3092,7 @@ export const modelingRuntimeValidators = {
   objects: normalizeObjects,
   references: normalizeReferences,
   renderables: normalizeRenderables,
-  renderExport: normalizeRenderExport,
+  renderExport: (value: unknown) => renderExportSchema.parse(value),
   sketches: normalizeSketches,
   features: normalizeFeatures,
   documentFeatureCursor: normalizeDocumentFeatureCursor,

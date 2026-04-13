@@ -17,6 +17,7 @@ import {
   type ValidateSketchRequest,
   type ValidateSketchResponse,
 } from '@/contracts/solver/schema'
+import { sketchSolverEnvelopeSchema } from '@/contracts/solver/runtime-schema'
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   type ProjectedSketchGeometryRef,
@@ -148,16 +149,9 @@ function assertSupportedRequest(
     | ResolveSketchReferenceRequest,
   options: MockSketchSolverAdapterOptions,
 ): void {
-  if (request.contractVersion !== CONTRACT_VERSION) {
-    throw new Error(
-      `Unsupported contract version ${request.contractVersion}; expected ${CONTRACT_VERSION}.`,
-    )
-  }
-
-  if (request.solverSchemaVersion !== SOLVER_SCHEMA_VERSION) {
-    throw new Error(
-      `Unsupported solver schema version ${request.solverSchemaVersion}; expected ${SOLVER_SCHEMA_VERSION}.`,
-    )
+  const parsed = sketchSolverEnvelopeSchema.safeParse(request)
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? 'Invalid sketch solver request envelope.')
   }
 
   const revisionDiagnostics = getRevisionMismatchDiagnostics(request, options)

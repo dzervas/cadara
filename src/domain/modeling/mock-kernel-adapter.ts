@@ -20,6 +20,7 @@ import type {
 } from '@/contracts/shared/ids'
 import { getPrimitiveRefKey } from '@/domain/editor/schema'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
@@ -210,10 +211,9 @@ function createConstructionPlaneRenderRecords(): RenderableEntityRecord[] {
 }
 
 function assertSupportedModelingRequest(request: { contractVersion: string; documentId: string }) {
-  if (request.contractVersion !== CONTRACT_VERSION) {
-    throw new Error(
-      `Unsupported contract version ${request.contractVersion}; expected ${CONTRACT_VERSION}.`,
-    )
+  const parsed = modelingDocumentRequestEnvelopeSchema.safeParse(request)
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? 'Invalid modeling request envelope.')
   }
 
   if (request.documentId !== DOCUMENT_ID) {

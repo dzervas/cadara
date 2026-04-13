@@ -1,4 +1,5 @@
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import type { SolverTolerancePolicy } from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
@@ -104,8 +105,9 @@ function assertSupportedModelingRequest(
   },
   documentId: DocumentId,
 ) {
-  if (request.contractVersion !== CONTRACT_VERSION) {
-    throw new Error(`Unsupported contract version ${request.contractVersion}; expected ${CONTRACT_VERSION}.`)
+  const parsed = modelingDocumentRequestEnvelopeSchema.safeParse(request)
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? 'Invalid modeling request envelope.')
   }
 
   if (request.documentId !== documentId) {
