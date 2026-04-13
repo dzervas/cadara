@@ -2402,6 +2402,9 @@ function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
           semantic !== 'constructionPlane' &&
           semantic !== 'existingSketch' &&
           semantic !== 'sketchEntity' &&
+          semantic !== 'sketchPoint' &&
+          semantic !== 'constraintAnnotation' &&
+          semantic !== 'dimensionAnnotation' &&
           semantic !== 'planarFace' &&
           semantic !== 'planarReference'
         ) {
@@ -2799,12 +2802,12 @@ function isAcceptedMutation(response: ModelingOperationResult) {
   return response.revisionState.kind === 'accepted'
 }
 
-async function getAdapterCurrentRevisionId(
+async function getAdapterCurrentSnapshot(
   adapter: ModelingKernelAdapter,
   documentId: DocumentId,
-): Promise<RevisionId> {
+): Promise<DocumentSnapshot> {
   const response = await adapter.getDocumentSnapshot(buildDocumentRequest(documentId))
-  return validateSnapshotResponse(response, documentId).document.revisionId
+  return validateSnapshotResponse(response, documentId)
 }
 
 function createHistoryReplayCorrelation(index: number): ModelingCommitSketchCorrelation {
@@ -2824,17 +2827,26 @@ async function replayHistoryEntry(input: {
   entry: ModelingOperationHistoryEntry
   entryIndex: number
 }): Promise<ModelingOperationResult> {
-  const baseRevisionId = await getAdapterCurrentRevisionId(input.adapter, input.documentId)
+  const currentSnapshot = await getAdapterCurrentSnapshot(input.adapter, input.documentId)
+  const baseRevisionId = currentSnapshot.document.revisionId
 
   switch (input.entry.kind) {
-    case 'commitSketch':
+    case 'commitSketch': {
+      const persistedSketchId = input.entry.payload.sketchId
+      const sketchId =
+        persistedSketchId && !currentSnapshot.sketches.some((entry) => entry.sketchId === persistedSketchId)
+          ? null
+          : persistedSketchId
+
       return input.adapter.commitSketch({
         ...input.entry.payload,
+        sketchId,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
         solverCorrelation: createHistoryReplayCorrelation(input.entryIndex),
       })
+    }
     case 'createFeature':
       return input.adapter.createFeature({
         ...input.entry.payload,

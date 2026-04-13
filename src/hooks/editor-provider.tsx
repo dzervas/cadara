@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsWithChildren } from 'react'
 
 import {
   createModelingServiceEditorEffectRuntime,
   getEditorViewState,
+  initialEditorState,
   type EditorEvent,
 } from '@/contracts/editor/state-machine'
-import { createEditorRuntimeActor } from '@/contracts/editor/runtime-machine'
+import {
+  createEditorRuntimeActor,
+  type EditorRuntimeActor,
+} from '@/contracts/editor/runtime-machine'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { EditorContext } from '@/hooks/editor-context'
 
@@ -19,27 +23,32 @@ export function EditorProvider({ modelingService, children }: EditorProviderProp
     () => createModelingServiceEditorEffectRuntime(modelingService),
     [modelingService],
   )
-  const actor = useMemo(() => createEditorRuntimeActor(runtime), [runtime])
-  const [machineState, setMachineState] = useState(() => actor.getSnapshot().context.machineState)
+  const actorRef = useRef<EditorRuntimeActor | null>(null)
+  const [machineState, setMachineState] = useState(() => initialEditorState)
 
   useEffect(() => {
-    actor.start()
+    const actor = createEditorRuntimeActor(runtime)
+    actorRef.current = actor
 
     const subscription = actor.subscribe((snapshot) => {
       setMachineState(snapshot.context.machineState)
     })
 
+    actor.start()
     setMachineState(actor.getSnapshot().context.machineState)
 
     return () => {
       subscription.unsubscribe()
+      if (actorRef.current === actor) {
+        actorRef.current = null
+      }
       actor.stop()
     }
-  }, [actor])
+  }, [runtime])
 
   const dispatch = useCallback((event: EditorEvent) => {
-    actor.send(event)
-  }, [actor])
+    actorRef.current?.send(event)
+  }, [])
 
   const value = useMemo(
     () => ({

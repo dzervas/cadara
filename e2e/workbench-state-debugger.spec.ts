@@ -12,10 +12,10 @@ test('state debugger owns workbench debug readouts and collapses locally', async
   await expect(page.getByText('Active mode')).toBeVisible()
   await expect(page.getByText('Selection filter')).toBeVisible()
 
-  const featureTreeHeader = page.locator('header').filter({ hasText: 'Feature Tree' })
-  await expect(featureTreeHeader).toBeVisible()
-  await expect(featureTreeHeader).not.toContainText('Active mode')
-  await expect(featureTreeHeader).not.toContainText('Filter:')
+  const partsHeader = page.locator('aside header').filter({ hasText: 'Parts & Objects' }).first()
+  await expect(partsHeader).toBeVisible()
+  await expect(partsHeader).not.toContainText('Active mode')
+  await expect(partsHeader).not.toContainText('Filter:')
   await expect(page.getByText('Editor Session')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Collapse state debugger' }).click()

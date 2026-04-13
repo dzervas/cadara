@@ -517,6 +517,15 @@ function deriveRebuildFailureCode(error: unknown) {
     return OCC_REBUILD_FAILURE_CODE
   }
 
+  const structuredCode =
+    'code' in error && typeof (error as Error & { code?: unknown }).code === 'string'
+      ? (error as Error & { code: string }).code
+      : null
+
+  if (structuredCode && OCC_REBUILD_DIAGNOSTIC_CODES.has(structuredCode)) {
+    return structuredCode
+  }
+
   const match = /^([a-z0-9-]+):\s+/i.exec(error.message)
 
   if (!match) {
