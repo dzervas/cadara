@@ -1,5 +1,5 @@
 import { Layers3 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import {
   Tooltip,
@@ -43,26 +43,26 @@ export function FeatureTimelineBar({
   const {
     state: { selection, selectionFilter, selectionCatalog },
   } = useEditorState()
-  const features = snapshot?.document.features ?? []
+  const features = useMemo(() => snapshot?.document.features ?? [], [snapshot])
   const cursor = snapshot?.document.cursor ?? { kind: 'empty' as const }
   const cursorIndex = getTimelineCursorIndex(features, cursor)
   const trackRef = useRef<HTMLDivElement | null>(null)
+  const handleRef = useRef<HTMLButtonElement | null>(null)
   const anchorRefs = useRef<Array<HTMLDivElement | null>>([])
   const [dragCursorIndex, setDragCursorIndex] = useState<number | null>(null)
-  const [handleLeft, setHandleLeft] = useState<number | null>(null)
   const activeCursorIndex = dragCursorIndex ?? cursorIndex
   const anchorElements = useMemo(
     () => Array.from({ length: features.length + 1 }, (_, index) => index),
     [features.length],
   )
-  const getPositionCursor = (index: number): DocumentFeatureCursor => {
+  const getPositionCursor = useCallback((index: number): DocumentFeatureCursor => {
     if (index < 0) {
       return { kind: 'empty' }
     }
 
     const feature = features[index]
     return feature ? { kind: 'feature', featureId: feature.featureId } : { kind: 'empty' }
-  }
+  }, [features])
 
   useEffect(() => {
     if (dragCursorIndex === null) {
@@ -104,19 +104,27 @@ export function FeatureTimelineBar({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [cursorIndex, dragCursorIndex, onCursorRequested, features])
+  }, [cursorIndex, dragCursorIndex, getPositionCursor, onCursorRequested])
 
   useEffect(() => {
+    const handle = handleRef.current
     const anchor = anchorRefs.current[activeCursorIndex + 1]
     const track = trackRef.current
 
+    if (!handle) {
+      return
+    }
+
     if (!anchor || !track) {
-      setHandleLeft(null)
+      handle.style.opacity = '0'
+      handle.style.transform = 'translate(-50%, -50%)'
       return
     }
 
     const updateHandleLeft = () => {
-      setHandleLeft(anchor.offsetLeft + anchor.offsetWidth / 2)
+      handle.style.left = `${anchor.offsetLeft + anchor.offsetWidth / 2}px`
+      handle.style.opacity = '1'
+      handle.style.transform = 'translate(-50%, -50%)'
     }
 
     updateHandleLeft()
@@ -126,10 +134,6 @@ export function FeatureTimelineBar({
       window.removeEventListener('resize', updateHandleLeft)
     }
   }, [activeCursorIndex, features.length])
-
-  const currentHandleStyle = handleLeft === null
-    ? { opacity: 0, transform: 'translate(-50%, -50%)' as const }
-    : { left: handleLeft, opacity: 1, transform: 'translate(-50%, -50%)' as const }
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault()
@@ -160,13 +164,14 @@ export function FeatureTimelineBar({
           <div className="overflow-x-auto overflow-y-hidden">
             <div ref={trackRef} className="relative flex min-h-12 min-w-max items-center gap-1 pr-6">
               <button
+                ref={handleRef}
                 type="button"
                 className={`absolute top-1/2 z-10 flex h-10 w-7 items-center justify-center rounded-full border text-sm text-[var(--cad-foreground)] shadow-[0_10px_24px_rgba(0,0,0,0.26)] transition ${
                   dragCursorIndex === null
                     ? 'border-[var(--cad-border-strong)] bg-[rgba(14,18,25,0.92)]'
                     : 'border-[var(--cad-accent)] bg-[rgba(22,32,46,0.96)]'
                 }`}
-                style={currentHandleStyle}
+                style={{ opacity: 0, transform: 'translate(-50%, -50%)' }}
                 aria-label={getTimelineCursorAriaLabel(features, activeCursorIndex)}
                 aria-current={dragCursorIndex === null ? 'step' : undefined}
                 aria-grabbed={dragCursorIndex !== null}

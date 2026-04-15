@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 import type { SketchToolFloatingInputDescriptor } from '@/domain/sketch-tools/editor-schema'
 
 interface SketchFloatingInputProps {
@@ -8,12 +6,6 @@ interface SketchFloatingInputProps {
 }
 
 export function SketchFloatingInput({ descriptor, onPatch }: SketchFloatingInputProps) {
-  const [draftValue, setDraftValue] = useState<string>(descriptor?.value?.toString() ?? '')
-
-  useEffect(() => {
-    setDraftValue(descriptor?.value?.toString() ?? '')
-  }, [descriptor?.id, descriptor?.value])
-
   if (!descriptor) {
     return null
   }
@@ -24,12 +16,12 @@ export function SketchFloatingInput({ descriptor, onPatch }: SketchFloatingInput
       <input
         autoFocus
         className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
+        defaultValue={descriptor.value?.toString() ?? ''}
+        key={descriptor.id}
         min={descriptor.min}
         step="any"
         type="number"
-        value={draftValue}
         onChange={(event) => {
-          setDraftValue(event.currentTarget.value)
           const nextValue = Number(event.currentTarget.value)
           onPatch({
             value: Number.isNaN(nextValue) ? null : nextValue,

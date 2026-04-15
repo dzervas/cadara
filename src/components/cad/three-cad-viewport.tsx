@@ -810,16 +810,15 @@ function DocumentMarkerNode({ entry }: { entry: ViewportRenderableRecord }) {
   const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
   const pickProxy = useMemo(() => {
     if (!geometryData) {
-      throw new Error(`Renderable ${renderable.id} is missing marker geometry.`)
+      throw new Error('Renderable is missing marker geometry.')
     }
 
-    return createMarkerPickProxy(geometryData.position, geometryData.displayRadius)
-  }, [geometryData, renderable.id])
+    const proxy = createMarkerPickProxy(geometryData.position, geometryData.displayRadius)
+    proxy.userData.highlightExcluded = true
+    return proxy
+  }, [geometryData])
   const material = useMemo(() => createRenderableMarkerMaterial(renderable, origin), [origin, renderable])
 
-  useEffect(() => {
-    pickProxy.userData.highlightExcluded = true
-  }, [pickProxy])
   useEffect(() => () => material.dispose(), [material])
   useEffect(() => {
     const proxyMaterial = pickProxy.material
@@ -873,7 +872,7 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
   const geometry = useMemo(() => {
     if (!geometryData) {
-      throw new Error(`Display renderable ${renderable.id} is missing mesh geometry.`)
+      throw new Error('Display renderable is missing mesh geometry.')
     }
 
     const nextGeometry = new THREE.BufferGeometry()
@@ -891,7 +890,7 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
       nextGeometry.computeVertexNormals()
     }
     return nextGeometry
-  }, [geometryData, renderable.id])
+  }, [geometryData])
   const material = useMemo(() => new THREE.MeshStandardMaterial({
     color: SURFACE_COLORS.sketchCurve,
     transparent: true,
@@ -901,7 +900,7 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
     roughness: 0.58,
     emissive: 0x214566,
     emissiveIntensity: 0.18,
-  }), [renderable.id])
+  }), [])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
@@ -970,16 +969,16 @@ function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisp
     emissiveIntensity: 0.16,
     depthTest: true,
     depthWrite: false,
-  }), [renderable.id])
+  }), [])
   const pickProxy = useMemo(() => {
     if (!geometryData) {
-      throw new Error(`Display renderable ${renderable.id} is missing marker geometry.`)
+      throw new Error('Display renderable is missing marker geometry.')
     }
 
     const proxy = createMarkerPickProxy(geometryData.position, geometryData.displayRadius)
     proxy.userData.highlightExcluded = true
     return proxy
-  }, [geometryData, renderable.id])
+  }, [geometryData])
 
   useEffect(() => () => material.dispose(), [material])
   useEffect(() => {

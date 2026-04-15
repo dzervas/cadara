@@ -345,7 +345,6 @@ export function CadWorkbench() {
             snapshot={snapshot}
             hiddenTargetKeys={visibleHiddenTargetKeys}
             onSelectTarget={handleViewportSelect}
-            onReopenTarget={handleNavigationReopen}
             onToggleTargetVisibility={handleTargetVisibilityToggle}
             visibleSelection={visibleSelection}
           />

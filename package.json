@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "load-time": "bun ./scripts/load-time.ts",
     "test": "bun test src",
     "test:e2e": "playwright test"
   },

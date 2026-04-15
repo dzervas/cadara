@@ -15,7 +15,6 @@ interface FeatureSidebarProps {
   onToggleTargetVisibility: (target: PrimitiveRef) => void
   snapshot: DocumentSnapshot | null
   onSelectTarget: (target: PrimitiveRef) => void
-  onReopenTarget: (target: PrimitiveRef) => void
   visibleSelection: PrimitiveRef[]
 }
 
@@ -66,7 +65,6 @@ export function FeatureSidebar({
   snapshot,
   hiddenTargetKeys,
   onSelectTarget,
-  onReopenTarget: _onReopenTarget,
   onToggleTargetVisibility,
   visibleSelection,
 }: FeatureSidebarProps) {

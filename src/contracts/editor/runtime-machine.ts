@@ -119,7 +119,47 @@ function workflowTarget(kind: WorkflowKind, substate: 'ready' | 'executing') {
   return `#editorRuntime.${kind}.${substate}` as const
 }
 
-function createWorkflowRedirects(currentKind: WorkflowKind) {
+type WorkflowRedirect = {
+  guard: ReturnType<typeof workflowGuardName>
+  target: ReturnType<typeof workflowTarget>
+}
+
+type WorkflowStateConfig = {
+  initial: 'ready'
+  states: {
+    ready: {
+      always: Array<
+        | WorkflowRedirect
+        | {
+            guard: 'hasQueuedEffects'
+            actions: 'promoteQueuedEffect'
+            target: 'executing'
+          }
+      >
+    }
+    executing: {
+      invoke: {
+        src: 'runEffect'
+        input: ({ context }: { context: EditorRuntimeContext }) => {
+          effect: EditorEffect
+          runtime: EditorEffectRuntime
+        }
+        onDone: {
+          actions: 'applyCompletedEffect'
+        }
+      }
+      always: Array<
+        | WorkflowRedirect
+        | {
+            guard: 'hasNoActiveEffect'
+            target: 'ready'
+          }
+      >
+    }
+  }
+}
+
+function createWorkflowRedirects(currentKind: WorkflowKind): WorkflowRedirect[] {
   const workflowKinds: readonly WorkflowKind[] = [
     'idle',
     'selectionCommand',
@@ -129,15 +169,13 @@ function createWorkflowRedirects(currentKind: WorkflowKind) {
 
   return workflowKinds
     .filter((kind) => kind !== currentKind)
-    .flatMap((kind) => [
-      {
-        guard: workflowGuardName(kind) as never,
-        target: workflowTarget(kind, 'ready'),
-      },
-    ]) as any
+    .map((kind) => ({
+      guard: workflowGuardName(kind),
+      target: workflowTarget(kind, 'ready'),
+    }))
 }
 
-function createWorkflowState(kind: WorkflowKind) {
+function createWorkflowState(kind: WorkflowKind): WorkflowStateConfig {
   return {
     initial: 'ready',
     states: {
@@ -177,7 +215,7 @@ function createWorkflowState(kind: WorkflowKind) {
         ],
       },
     },
-  } as any
+  }
 }
 
 const editorRuntimeMachine = setup({
