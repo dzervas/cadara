@@ -1,9 +1,5 @@
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+import { ActionIcon, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
+
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
@@ -32,46 +28,70 @@ export function ToolButton({
   }
 
   const content = inline ? (
-    <button
+    <UnstyledButton
       type="button"
       onClick={handleClick}
-      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-[var(--cad-surface-elevated)] ${
-        active ? 'bg-[var(--cad-surface-elevated)]' : ''
-      }`}
       aria-label={tool.name}
       data-tool-id={tool.id}
       data-tool-source="search"
       data-tool-tooltip={tool.tooltip}
     >
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--cad-border)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]">
-        <ToolbarToolIcon icon={tool.icon} />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-[var(--cad-foreground)]">
-          {tool.name}
-        </span>
-        <span className="block truncate text-xs text-[var(--cad-muted-foreground)]">
-          {tool.tooltip}
-        </span>
-      </span>
-    </button>
+      <Paper
+        radius="md"
+        px="sm"
+        py={10}
+        withBorder={active}
+        style={{
+          backgroundColor: active ? 'rgba(94, 130, 171, 0.2)' : 'transparent',
+          borderColor: 'var(--mantine-color-dark-5)',
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <Paper
+            radius="md"
+            withBorder
+            p={8}
+            style={{
+              backgroundColor: 'var(--mantine-color-dark-8)',
+              borderColor: 'var(--mantine-color-dark-5)',
+            }}
+          >
+            <ToolbarToolIcon icon={tool.icon} />
+          </Paper>
+          <div className="min-w-0 flex-1">
+            <Text size="sm" fw={500} c="dark.0" truncate="end">
+              {tool.name}
+            </Text>
+            <Text size="xs" c="dimmed" truncate="end">
+              {tool.tooltip}
+            </Text>
+          </div>
+        </div>
+      </Paper>
+    </UnstyledButton>
   ) : (
-    <button
+    <ActionIcon
       type="button"
       onClick={handleClick}
-      className={`flex h-10 w-10 items-center justify-center rounded-lg border bg-transparent text-[var(--cad-foreground)] transition hover:border-[var(--cad-border-strong)] hover:bg-[var(--cad-surface-elevated)] ${
-        active
-          ? 'border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)]'
-          : 'border-transparent'
-      }`}
+      variant={active ? 'light' : 'subtle'}
+      color="workbench"
       aria-label={tool.name}
       aria-pressed={active}
       data-tool-id={tool.id}
       data-tool-source="toolbar"
       data-tool-tooltip={tool.tooltip}
+      styles={{
+        root: {
+          border: active
+            ? '1px solid var(--mantine-color-workbench-4)'
+            : '1px solid transparent',
+          backgroundColor: active ? 'rgba(94, 130, 171, 0.22)' : 'transparent',
+          color: 'var(--mantine-color-dark-0)',
+        },
+      }}
     >
       <ToolbarToolIcon icon={tool.icon} />
-    </button>
+    </ActionIcon>
   )
 
   if (inline) {
@@ -79,13 +99,8 @@ export function ToolButton({
   }
 
   return (
-    <TooltipProvider delayDuration={100}>
-      <Tooltip>
-        <TooltipTrigger asChild>{content}</TooltipTrigger>
-        <TooltipContent>
-          <ToolbarTooltipContent title={tool.name} description={tool.tooltip} />
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} />}>
+      {content}
+    </Tooltip>
   )
 }

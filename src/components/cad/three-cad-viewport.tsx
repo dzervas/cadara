@@ -1099,6 +1099,22 @@ function resolveProjectedVertexTarget({
       )
       projectedPoint.project(camera)
 
+      // Ignore vertices that project outside the view frustum; their clipped screen
+      // coordinates can otherwise create false "nearest vertex" hits in blank space.
+      if (
+        !Number.isFinite(projectedPoint.x)
+        || !Number.isFinite(projectedPoint.y)
+        || !Number.isFinite(projectedPoint.z)
+        || projectedPoint.z < -1
+        || projectedPoint.z > 1
+        || projectedPoint.x < -1
+        || projectedPoint.x > 1
+        || projectedPoint.y < -1
+        || projectedPoint.y > 1
+      ) {
+        return []
+      }
+
       const screenX = ((projectedPoint.x + 1) / 2) * rect.width
       const screenY = ((-projectedPoint.y + 1) / 2) * rect.height
       const distance = Math.hypot(screenX - pointerX, screenY - pointerY)

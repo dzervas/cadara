@@ -49,7 +49,7 @@ function DebuggerRow(props: { label: string; value: string | number }) {
   )
 }
 
-export function WorkbenchStateDebugger({ state, defaultExpanded = true }: WorkbenchStateDebuggerProps) {
+export function WorkbenchStateDebugger({ state, defaultExpanded = false }: WorkbenchStateDebuggerProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
   return (

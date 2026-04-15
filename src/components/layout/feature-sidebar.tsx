@@ -1,3 +1,4 @@
+import { ActionIcon, Paper, Text } from '@mantine/core'
 import { Box, Component, Eye, EyeOff } from 'lucide-react'
 
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -73,13 +74,29 @@ export function FeatureSidebar({
   } = useEditorState()
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-r border-[var(--cad-border)] bg-[linear-gradient(180deg,_rgba(17,21,28,0.96),_rgba(11,15,21,0.98))]">
-      <section className="grid min-h-0 flex-[1.35] grid-rows-[minmax(0,1.1fr)_minmax(0,0.9fr)] border-b border-[var(--cad-border)]">
-        <div className="flex min-h-0 flex-col border-b border-[var(--cad-border)]">
-          <header className="border-b border-[var(--cad-border)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+    <Paper
+      component="aside"
+      radius={0}
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+      style={{
+        background: 'linear-gradient(180deg, rgba(17, 21, 28, 0.96), rgba(11, 15, 21, 0.98))',
+        borderRight: '1px solid var(--mantine-color-dark-5)',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <section
+        className="grid min-h-0 flex-[1.35] grid-rows-[minmax(0,1.1fr)_minmax(0,0.9fr)] overflow-hidden"
+        style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}
+      >
+        <div
+          className="flex min-h-0 flex-col overflow-hidden"
+          style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}
+        >
+          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+            <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
               Parts & Objects
-            </p>
+            </Text>
           </header>
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-1 px-3 py-3">
@@ -94,8 +111,8 @@ export function FeatureSidebar({
                 return (
                   <div
                     key={item.id}
-                    className={`flex items-start gap-2 rounded-md px-2 py-1.5 transition ${
-                      isSelected ? 'bg-[var(--cad-surface-elevated)]' : ''
+                    className={`-mx-3 flex items-start gap-2 px-5 py-1.5 transition hover:bg-[rgba(94,130,171,0.18)] ${
+                      isSelected ? 'bg-[rgba(94,130,171,0.18)]' : ''
                     } ${isHidden ? 'opacity-55' : ''}`}
                   >
                     <button
@@ -106,14 +123,17 @@ export function FeatureSidebar({
                         }
                         onSelectTarget(target)
                       }}
-                      className={`min-w-0 flex-1 text-left transition hover:bg-[var(--cad-surface-elevated)] ${
+                      className={`min-w-0 flex-1 text-left ${
                         !isAllowed || isHidden ? 'cursor-not-allowed opacity-45' : ''
                       }`}
                       aria-disabled={!isAllowed || isHidden}
                       title={!isAllowed ? 'Filtered out by the current command' : isHidden ? 'Hidden in the viewport' : undefined}
                     >
                       <div className="flex items-start gap-2">
-                        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-[var(--cad-accent)]">
+                        <span
+                          className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center"
+                          style={{ color: 'var(--mantine-color-workbench-4)' }}
+                        >
                           {item.kind === 'body' ? (
                             <Box className="h-3.5 w-3.5" />
                           ) : (
@@ -121,26 +141,24 @@ export function FeatureSidebar({
                           )}
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate text-[13px] font-medium leading-5 text-[var(--cad-foreground)]">
+                          <p className="truncate text-[13px] font-medium leading-5 text-[var(--mantine-color-dark-0)]">
                             {item.label}
                           </p>
-                          {isHidden ? (
-                            <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[var(--cad-muted-foreground)]">
-                              Hidden
-                            </p>
-                          ) : null}
                         </div>
                       </div>
                     </button>
-                    <button
-                      type="button"
+                    <ActionIcon
+                      component="button"
                       onClick={() => onToggleTargetVisibility(target)}
-                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-[var(--cad-muted-foreground)] transition hover:bg-[var(--cad-surface-elevated)] hover:text-[var(--cad-foreground)]"
+                      className="mt-0.5"
+                      variant="subtle"
+                      color="gray"
+                      size={24}
                       aria-label={isHidden ? `Show ${item.label}` : `Hide ${item.label}`}
                       title={isHidden ? 'Show in viewport' : 'Hide from viewport'}
                     >
                       {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </button>
+                    </ActionIcon>
                   </div>
                 )
               })}
@@ -148,11 +166,11 @@ export function FeatureSidebar({
           </ScrollArea>
         </div>
 
-        <div className="flex min-h-0 flex-col">
-          <header className="border-b border-[var(--cad-border)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+        <div className="flex min-h-0 flex-col overflow-hidden">
+          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+            <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
               Snapshot References
-            </p>
+            </Text>
           </header>
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-2 px-3 py-3">
@@ -170,20 +188,20 @@ export function FeatureSidebar({
                       }
                       onSelectTarget(reference.target)
                     }}
-                    className={`block w-full rounded-md border px-2 py-2 text-left transition hover:bg-[var(--cad-surface-elevated)] ${
+                    className={`block w-full rounded-md border px-2 py-2 text-left transition hover:bg-[rgba(94,130,171,0.18)] ${
                       reference.invalidation
                         ? 'border-[rgba(214,106,106,0.4)] bg-[rgba(49,22,24,0.72)]'
-                        : 'border-[var(--cad-border)] bg-[rgba(10,14,20,0.72)]'
+                        : 'border-[var(--mantine-color-dark-5)] bg-[rgba(10,14,20,0.72)]'
                     } ${!isAllowed ? 'cursor-not-allowed opacity-45' : ''}`}
                     aria-disabled={!isAllowed}
                     aria-label={`Select ${reference.label} ${targetLabel}`}
                     title={!isAllowed ? 'Filtered out by the current command' : undefined}
                   >
-                    <span className="block truncate text-sm font-medium text-[var(--cad-foreground)]">{reference.label}</span>
-                    <span className="block truncate text-xs text-[var(--cad-muted-foreground)]">
+                    <span className="block truncate text-sm font-medium text-[var(--mantine-color-dark-0)]">{reference.label}</span>
+                    <span className="block truncate text-xs text-[var(--mantine-color-dark-2)]">
                       {targetLabel}
                     </span>
-                    <span className="mt-1 block truncate text-[11px] uppercase tracking-[0.18em] text-[var(--cad-muted)]">
+                    <span className="mt-1 block truncate text-[11px] uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
                       Owner {snapshot ? formatReferenceOwner(snapshot, reference.ownerFeatureId, reference.ownerSketchId) : 'n/a'}
                     </span>
                     {getReferenceStatus(reference) ? (
@@ -197,11 +215,14 @@ export function FeatureSidebar({
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-[0.85] flex-col border-b border-[var(--cad-border)]">
-        <header className="border-b border-[var(--cad-border)] px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+      <section
+        className="flex min-h-0 flex-[0.85] flex-col overflow-hidden"
+        style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}
+      >
+        <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+          <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
             Document Diagnostics
-          </p>
+          </Text>
         </header>
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-2 px-3 py-3">
@@ -214,33 +235,32 @@ export function FeatureSidebar({
                       ? 'border-[rgba(214,106,106,0.45)] bg-[rgba(49,22,24,0.72)]'
                       : diagnostic.severity === 'warning'
                         ? 'border-[rgba(196,152,84,0.45)] bg-[rgba(46,33,17,0.72)]'
-                        : 'border-[var(--cad-border)] bg-[rgba(10,14,20,0.72)]'
+                        : 'border-[var(--mantine-color-dark-5)] bg-[rgba(10,14,20,0.72)]'
                   }`}
                 >
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--cad-muted)]">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
                     {diagnostic.severity}
                   </p>
-                  <p className="mt-1 text-sm text-[var(--cad-foreground)]">{diagnostic.message}</p>
+                  <p className="mt-1 text-sm text-[var(--mantine-color-dark-0)]">{diagnostic.message}</p>
                   {diagnostic.target ? (
-                    <p className="mt-1 text-xs text-[var(--cad-muted-foreground)]">
+                    <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">
                       Target {getPrimitiveRefLabel(diagnostic.target)}
                     </p>
                   ) : null}
                   {formatDocumentDiagnosticDetail(diagnostic) ? (
-                    <p className="mt-1 text-xs text-[var(--cad-muted-foreground)]">
+                    <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">
                       {formatDocumentDiagnosticDetail(diagnostic)}
                     </p>
                   ) : null}
-                  <p className="mt-1 text-xs text-[var(--cad-muted)]">{diagnostic.code}</p>
+                  <p className="mt-1 text-xs text-[var(--mantine-color-dark-3)]">{diagnostic.code}</p>
                 </div>
               ))
             ) : (
-              <p className="text-xs text-[var(--cad-muted-foreground)]">No document diagnostics.</p>
+              <p className="text-xs text-[var(--mantine-color-dark-2)]">No document diagnostics.</p>
             )}
           </div>
         </ScrollArea>
       </section>
-
-    </aside>
+    </Paper>
   )
 }

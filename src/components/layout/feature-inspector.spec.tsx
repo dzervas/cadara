@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeatureInspector } from '@/components/layout/feature-inspector'
@@ -14,6 +15,7 @@ import {
 } from '@/domain/editor/feature-editing'
 import type { ToolId } from '@/domain/tools/tool-registry'
 import { EditorContext } from '@/hooks/editor-context'
+import { workbenchTheme } from '@/theme/workbench-theme'
 
 test('src/components/layout/feature-inspector.spec.tsx', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -46,20 +48,22 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
     }
 
     return renderToStaticMarkup(
-      <EditorContext.Provider
-        value={{
-          machineState: initialEditorState,
-          state: viewState,
-          dispatch: () => undefined,
-        }}
-      >
-        <FeatureInspector
-          featureSnapshot={null}
-          onPatch={() => undefined}
-          onCommit={() => undefined}
-          onCancel={() => undefined}
-        />
-      </EditorContext.Provider>,
+      <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+        <EditorContext.Provider
+          value={{
+            machineState: initialEditorState,
+            state: viewState,
+            dispatch: () => undefined,
+          }}
+        >
+          <FeatureInspector
+            featureSnapshot={null}
+            onPatch={() => undefined}
+            onCommit={() => undefined}
+            onCancel={() => undefined}
+          />
+        </EditorContext.Provider>
+      </MantineProvider>,
     )
   }
 
@@ -75,8 +79,8 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
     'Feature inspector should render field-level required-reference errors.',
   )
   assert(
-    incompleteRevolveMarkup.includes('border-red-500') && incompleteRevolveMarkup.includes('text-red-300'),
-    'Feature inspector should render red invalid field styling and red error text.',
+    incompleteRevolveMarkup.includes('Select at least one profile target.'),
+    'Feature inspector should render the validation message for missing required references.',
   )
   assert(
     incompleteRevolveMarkup.includes('Clear Profile targets'),
@@ -100,8 +104,8 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
   })
 
   assert(
-    activeShellMarkup.includes('border-[var(--cad-accent)]') && activeShellMarkup.includes('aria-pressed="true"'),
-    'Feature inspector should render primary active picker styling for the active reference field.',
+    activeShellMarkup.includes('aria-pressed="true"'),
+    'Feature inspector should expose the active reference picker as pressed.',
   )
   assert(
     activeShellMarkup.includes('Face: body_a.face_top') && activeShellMarkup.includes('Face: body_a.face_side'),

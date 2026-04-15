@@ -5,8 +5,8 @@
 - Runtime/package manager: Bun
 - App framework: React 19 + TypeScript
 - Bundler/dev server: Vite on port `3000`
-- UI primitives: shadcn-style component structure with Radix UI
-- Styling: Tailwind CSS v4 + project CSS variables
+- UI primitives: Mantine as the primary shell component library
+- Styling: Mantine theme tokens first, Tailwind CSS v4 for layout glue, minimal custom CSS
 - 3D viewport: Three.js
 
 ## Interface Overview
@@ -21,6 +21,8 @@
 - Tool/group hooks are strongly typed through `ToolActionBus`; clicking a tool dispatches the group event first and the tool event second.
 - UI components live under `src/components/`; tool logic, schemas, and scene helpers stay in `src/domain/` and `src/hooks/`.
 - `ToolActionProvider` supplies the current mode and the shared action bus to the UI.
+- Mantine theme configuration should live in a central theme module with an easily editable dark-first colors tuple as the source of truth for shell chrome.
+- Prefer Mantine components and theme overrides over bespoke UI wrappers, long Tailwind class stacks, or custom shell CSS.
 
 ## Current Behavior Rules
 
@@ -28,10 +30,11 @@
 - Entering sketch mode is triggered by the `Sketch` tool.
 - Returning to part mode is triggered by `Finish Sketch`.
 - Keep UI, domain definitions, and future CAD behavior split cleanly; do not mix scene logic or event contracts into presentational components.
+- Preserve the dense dark CAD-style feel, but prefer fewer lines of code over decorative eye candy when the behavioral contract stays the same.
 
 ## Active Technologies
 
-- TypeScript strict mode on React 19 + React 19, Vite 8, Bun, Three.js, Radix UI, Tailwind CSS v4, OpenCascade.js
+- TypeScript strict mode on React 19 + React 19, Vite 8, Bun, Three.js, Mantine, Tailwind CSS v4, OpenCascade.js
 - Always prefer @react-three packages to interact with three.js (@react-three/drai, @react-three/fiber, etc.)
 - Runtime contract validation uses `zod`; prefer shared schemas for transport and persistence boundaries, and keep domain invariants in plain TypeScript when schemas do not make the code smaller or clearer.
 - Stateful editor/runtime orchestration uses `xstate`; keep machine logic in domain/contracts modules and avoid leaking state-machine concerns into presentational components.

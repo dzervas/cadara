@@ -1,11 +1,9 @@
 import { useMemo, useState } from 'react'
-import {
-  Search,
-} from 'lucide-react'
+import { Divider, Paper, ScrollArea, Text, TextInput } from '@mantine/core'
+import { Search } from 'lucide-react'
 
 import { ToolButton } from '@/components/layout/tool-button'
 import { ToolDropdownButton } from '@/components/layout/tool-dropdown-button'
-import { Input } from '@/components/ui/input'
 import {
   getToolById,
   getToolbarSectionsForMode,
@@ -54,7 +52,16 @@ export function WorkspaceToolbar() {
   }
 
   return (
-    <header className="border-b border-[var(--cad-border)] bg-[var(--cad-surface-muted)] px-4 py-1.5">
+    <Paper
+      component="header"
+      radius={0}
+      px="md"
+      py={6}
+      style={{
+        backgroundColor: 'rgba(13, 18, 25, 0.95)',
+        borderBottom: '1px solid var(--mantine-color-dark-5)',
+      }}
+    >
       <div className="flex items-center gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {visibleSections.map((section, index) => (
@@ -66,45 +73,67 @@ export function WorkspaceToolbar() {
                 {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
               </div>
               {index < visibleSections.length - 1 ? (
-                <div className="h-8 w-px bg-[var(--cad-border-strong)]" aria-hidden="true" />
+                <Divider
+                  orientation="vertical"
+                  style={{ borderColor: 'var(--mantine-color-dark-4)', height: 32 }}
+                />
               ) : null}
             </div>
           ))}
         </div>
 
         <div className="relative w-full max-w-[240px]">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--cad-muted)]" />
-          <Input
+          <TextInput
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="Search tools"
-            className="h-10 rounded-xl border-[var(--cad-border)] bg-[rgba(12,16,22,0.92)] pl-9"
+            leftSection={<Search className="h-4 w-4" />}
+            styles={{
+              input: {
+                backgroundColor: 'rgba(12, 16, 22, 0.92)',
+                borderColor: 'var(--mantine-color-dark-5)',
+                height: 40,
+              },
+              section: {
+                color: 'var(--mantine-color-dark-2)',
+              },
+            }}
           />
           {searchQuery && (
-            <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden rounded-xl border border-[var(--cad-border-strong)] bg-[rgba(9,13,18,0.98)] shadow-[var(--cad-panel-shadow)]">
+            <Paper
+              className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden"
+              withBorder
+              style={{
+                backgroundColor: 'rgba(9, 13, 18, 0.98)',
+                borderColor: 'var(--mantine-color-dark-4)',
+                boxShadow: 'var(--workbench-panel-shadow)',
+              }}
+            >
               {searchResults.length > 0 ? (
-                <div className="max-h-80 overflow-y-auto p-1">
-                  {searchResults.map((tool) => {
-                    return (
-                      <ToolButton
-                        key={`search-${tool.id}`}
-                        tool={tool}
-                        inline
-                        active={activeCommand?.toolId === tool.id}
-                        onTrigger={() => setSearchQuery('')}
-                      />
-                    )
-                  })}
-                </div>
+                <ScrollArea.Autosize mah={320} mx={4} my={4}>
+                  <div className="grid gap-1">
+                    {searchResults.map((tool) => {
+                      return (
+                        <ToolButton
+                          key={`search-${tool.id}`}
+                          tool={tool}
+                          inline
+                          active={activeCommand?.toolId === tool.id}
+                          onTrigger={() => setSearchQuery('')}
+                        />
+                      )
+                    })}
+                  </div>
+                </ScrollArea.Autosize>
               ) : (
-                <div className="px-3 py-4 text-sm text-[var(--cad-muted-foreground)]">
+                <Text c="dimmed" px="sm" py="md" size="sm">
                   No tools match “{searchQuery}”.
-                </div>
+                </Text>
               )}
-            </div>
+            </Paper>
           )}
         </div>
       </div>
-    </header>
+    </Paper>
   )
 }

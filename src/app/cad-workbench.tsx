@@ -228,6 +228,11 @@ export function CadWorkbench() {
     dispatch({ type: 'viewport.selectionRequested', target })
   }
 
+  const handleShellSelect = (target: PrimitiveRef) => {
+    dispatch({ type: 'viewport.selectionRequested', target })
+    dispatch({ type: 'viewport.hoverCleared' })
+  }
+
   const handleNavigationReopen = (target: PrimitiveRef) => {
     const reopenEvent = getNavigationReopenRequest(snapshot, target)
 
@@ -337,14 +342,14 @@ export function CadWorkbench() {
   }, [])
 
   return (
-    <div className="flex h-screen min-h-screen flex-col bg-[var(--cad-background)] text-[var(--cad-foreground)]">
+    <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
       <WorkspaceToolbar />
-      <div ref={shellFrameRef} className="flex min-h-0 flex-1">
-        <div className="relative min-h-0 shrink-0" style={{ width: leftSidebarWidth }}>
+      <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar
             snapshot={snapshot}
             hiddenTargetKeys={visibleHiddenTargetKeys}
-            onSelectTarget={handleViewportSelect}
+            onSelectTarget={handleShellSelect}
             onToggleTargetVisibility={handleTargetVisibilityToggle}
             visibleSelection={visibleSelection}
           />
@@ -418,7 +423,7 @@ export function CadWorkbench() {
           <FeatureTimelineBar
             snapshot={snapshot}
             visibleSelection={visibleSelection}
-            onSelectTarget={handleViewportSelect}
+            onSelectTarget={handleShellSelect}
             onReopenTarget={handleNavigationReopen}
             onCursorRequested={handleTimelineCursorRequested}
           />

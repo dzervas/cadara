@@ -35,6 +35,7 @@ export class SketchWorkbenchHarness {
 
   async openPreservingStorage() {
     await this.page.goto('/')
+    await this.ensureStateDebuggerExpanded()
     await expect(this.page.getByText('Machine:')).toBeVisible()
   }
 
@@ -191,5 +192,15 @@ export class SketchWorkbenchHarness {
 
   async expectMachine(kind: string) {
     await expect(this.page.getByText('Machine:')).toContainText(kind)
+  }
+
+  private async ensureStateDebuggerExpanded() {
+    const expandButton = this.page.getByRole('button', {
+      name: 'Expand state debugger',
+    })
+
+    if (await expandButton.isVisible().catch(() => false)) {
+      await expandButton.click()
+    }
   }
 }

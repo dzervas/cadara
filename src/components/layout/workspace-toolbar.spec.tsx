@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
@@ -9,6 +10,7 @@ import {
 import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 import { EditorContext } from '@/hooks/editor-context'
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
+import { workbenchTheme } from '@/theme/workbench-theme'
 
 test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -18,17 +20,19 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   }
 
   const toolbarMarkup = renderToStaticMarkup(
-    <EditorContext.Provider
-      value={{
-        machineState: initialEditorState,
-        state: getEditorViewState(initialEditorState),
-        dispatch: () => undefined,
-      }}
-    >
-      <ToolActionProvider actionBus={createToolActionBus()}>
-        <WorkspaceToolbar />
-      </ToolActionProvider>
-    </EditorContext.Provider>,
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: getEditorViewState(initialEditorState),
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
   )
 
   assert(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')

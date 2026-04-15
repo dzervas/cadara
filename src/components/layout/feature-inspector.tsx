@@ -1,3 +1,4 @@
+import { ActionIcon, Button, Paper, Text, ThemeIcon } from '@mantine/core'
 import { useEffect, useRef } from 'react'
 import { Check, CircleSlash, Layers3, X } from 'lucide-react'
 import { Controller, type Control, useForm } from 'react-hook-form'
@@ -30,7 +31,7 @@ interface FeatureInspectorProps {
 function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagnostic[] }) {
   if (diagnostics.length === 0) {
     return (
-      <p className="text-xs text-[var(--cad-muted-foreground)]">
+      <p className="text-xs text-[var(--mantine-color-dark-2)]">
         No diagnostics reported for the current preview.
       </p>
     )
@@ -41,18 +42,18 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
       {diagnostics.map((diagnostic, index) => (
         <div
           key={`${diagnostic.code}-${diagnostic.message}-${index}`}
-          className="rounded-lg border border-[var(--cad-border)] bg-[rgba(12,16,22,0.8)] px-3 py-2"
+          className="rounded-lg border border-[var(--mantine-color-dark-5)] bg-[rgba(12,16,22,0.8)] px-3 py-2"
         >
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--cad-muted)]">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
             {diagnostic.severity}
           </p>
-          <p className="mt-1 text-sm text-[var(--cad-foreground)]">{diagnostic.message}</p>
+          <p className="mt-1 text-sm text-[var(--mantine-color-dark-0)]">{diagnostic.message}</p>
           {diagnostic.detail ? (
-            <p className="mt-1 text-xs text-[var(--cad-muted-foreground)]">
+            <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">
               {formatDiagnosticDetail(diagnostic)}
             </p>
           ) : null}
-          <p className="mt-1 text-xs text-[var(--cad-muted-foreground)]">{diagnostic.code}</p>
+          <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">{diagnostic.code}</p>
         </div>
       ))}
     </div>
@@ -98,10 +99,10 @@ function fieldBorderClass(field: Pick<FeatureEditorFormField, 'error'>, isActive
   }
 
   if (isActive) {
-    return 'border-[var(--cad-accent)] text-[var(--cad-accent)]'
+    return 'border-[var(--mantine-color-workbench-4)] text-[var(--mantine-color-workbench-4)]'
   }
 
-  return 'border-[var(--cad-border)] text-[var(--cad-foreground)]'
+  return 'border-[var(--mantine-color-dark-5)] text-[var(--mantine-color-dark-0)]'
 }
 
 function FieldMessage(props: { helper?: string; error?: { message: string } | null }) {
@@ -110,7 +111,7 @@ function FieldMessage(props: { helper?: string; error?: { message: string } | nu
   }
 
   return props.helper ? (
-    <p className="text-xs text-[var(--cad-muted-foreground)]">{props.helper}</p>
+    <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.helper}</p>
   ) : null
 }
 
@@ -137,7 +138,7 @@ function NumericField(props: {
       name={props.field.id}
       render={({ field }) => (
         <section className="space-y-2">
-          <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]" htmlFor={props.field.id}>
+          <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]" htmlFor={props.field.id}>
             {props.field.label}
           </label>
           <Input
@@ -177,15 +178,17 @@ function EnumField(props: {
       name={props.field.id}
       render={({ field }) => (
         <section className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]">
             {props.field.label}
           </p>
           <div className="grid grid-cols-4 gap-2">
             {props.field.options.map((option) => (
-              <button
+              <Button
                 key={option.value}
                 type="button"
                 disabled={props.field.disabled}
+                variant={field.value === option.value ? 'light' : 'default'}
+                color="workbench"
                 onClick={() => {
                   field.onChange(option.value)
 
@@ -194,14 +197,23 @@ function EnumField(props: {
                     props.onPatch(patch)
                   }
                 }}
-                className={`rounded-md border px-2 py-2 text-xs font-medium transition ${
-                  field.value === option.value
-                    ? 'border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)] text-[var(--cad-foreground)]'
-                    : 'border-[var(--cad-border)] bg-[rgba(12,16,22,0.8)] text-[var(--cad-muted-foreground)] hover:border-[var(--cad-border-strong)]'
-                }`}
+                styles={{
+                  root: {
+                    backgroundColor:
+                      field.value === option.value ? 'rgba(94, 130, 171, 0.18)' : 'rgba(12, 16, 22, 0.8)',
+                    borderColor:
+                      field.value === option.value
+                        ? 'var(--mantine-color-dark-4)'
+                        : 'var(--mantine-color-dark-5)',
+                    color:
+                      field.value === option.value
+                        ? 'var(--mantine-color-dark-0)'
+                        : 'var(--mantine-color-dark-2)',
+                  },
+                }}
               >
                 {option.label}
-              </button>
+              </Button>
             ))}
           </div>
           <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
@@ -224,8 +236,8 @@ function ReferenceCard(props: {
   const className = `w-full rounded-md border bg-[rgba(12,16,22,0.8)] px-3 py-3 text-left transition ${fieldBorderClass({ error: props.error }, props.isActive)}`
   const labelContent = (
     <>
-      <p className="text-xs text-[var(--cad-muted-foreground)]">{props.title}</p>
-      <p className={`mt-1 text-sm ${props.error ? 'text-red-100' : props.isActive ? 'text-[var(--cad-accent)]' : 'text-[var(--cad-foreground)]'}`}>
+      <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.title}</p>
+      <p className={`mt-1 text-sm ${props.error ? 'text-red-100' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
         {props.value}
       </p>
     </>
@@ -233,50 +245,68 @@ function ReferenceCard(props: {
 
   if (props.onActivate) {
     return (
-      <div className={className}>
+      <Paper className={className}>
         <div className="flex items-start justify-between gap-2">
           <button type="button" onClick={props.onActivate} className="min-w-0 flex-1 text-left" aria-pressed={props.isActive}>
             {labelContent}
           </button>
           {props.onClear ? (
-            <button
-              type="button"
+            <ActionIcon
+              component="button"
               onClick={props.onClear}
               disabled={props.clearDisabled}
               aria-label={`Clear ${props.title}`}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-red-400 hover:text-red-200 disabled:pointer-events-none disabled:opacity-40"
+              variant="default"
+              color="red"
+              size={28}
+              styles={{
+                root: {
+                  backgroundColor: 'rgba(12, 16, 22, 0.8)',
+                  borderColor: 'var(--mantine-color-dark-5)',
+                  color: 'var(--mantine-color-dark-2)',
+                },
+              }}
             >
               <X className="h-3.5 w-3.5" />
-            </button>
+            </ActionIcon>
           ) : null}
         </div>
         <div className="mt-2">
           <FieldMessage helper={props.helper} error={props.error} />
         </div>
-      </div>
+      </Paper>
     )
   }
 
   return (
-    <div className={className}>
+    <Paper className={className}>
       <div className="flex items-start justify-between gap-2">
         <div>{labelContent}</div>
         {props.onClear ? (
-          <button
-            type="button"
+          <ActionIcon
+            component="button"
             onClick={props.onClear}
             disabled={props.clearDisabled}
             aria-label={`Clear ${props.title}`}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-red-400 hover:text-red-200 disabled:pointer-events-none disabled:opacity-40"
+            variant="default"
+            color="red"
+            size={28}
+            styles={{
+              root: {
+                backgroundColor: 'rgba(12, 16, 22, 0.8)',
+                borderColor: 'var(--mantine-color-dark-5)',
+                color: 'var(--mantine-color-dark-2)',
+              },
+            }}
           >
             <X className="h-3.5 w-3.5" />
-          </button>
+          </ActionIcon>
         ) : null}
       </div>
       <div className="mt-2">
         <FieldMessage helper={props.helper} error={props.error} />
       </div>
-    </div>
+    </Paper>
   )
 }
 
@@ -313,7 +343,7 @@ function ReferenceCollectionCard(props: {
         }
 
         return (
-          <div
+          <Paper
             className={`rounded-md border bg-[rgba(12,16,22,0.8)] px-3 py-3 ${fieldBorderClass(props.field, props.isActive)}`}
           >
             <div className="flex items-start justify-between gap-2">
@@ -323,73 +353,107 @@ function ReferenceCollectionCard(props: {
                 className="min-w-0 flex-1 text-left"
                 aria-pressed={props.isActive}
               >
-                <p className="text-xs text-[var(--cad-muted-foreground)]">{props.field.label}</p>
-                <p className={`mt-1 text-sm ${props.isActive ? 'text-[var(--cad-accent)]' : 'text-[var(--cad-foreground)]'}`}>
+                <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.field.label}</p>
+                <p className={`mt-1 text-sm ${props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
                   {hasSelection ? `${selected.length} selected` : props.field.emptyLabel}
                 </p>
               </button>
-              <button
-                type="button"
+              <ActionIcon
+                component="button"
                 onClick={() => {
                   field.onChange([])
                   props.onPatch(createFeatureEditorClearReferencePatch(props.field))
                 }}
                 disabled={!hasSelection}
                 aria-label={`Clear ${props.field.label}`}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-red-400 hover:text-red-200 disabled:pointer-events-none disabled:opacity-40"
+                variant="default"
+                color="red"
+                size={28}
+                styles={{
+                  root: {
+                    backgroundColor: 'rgba(12, 16, 22, 0.8)',
+                    borderColor: 'var(--mantine-color-dark-5)',
+                    color: 'var(--mantine-color-dark-2)',
+                  },
+                }}
               >
                 <X className="h-3.5 w-3.5" />
-              </button>
+              </ActionIcon>
             </div>
             {hasSelection ? (
               <div className="mt-3 space-y-2">
                 {selected.map((target) => (
                   <div
                     key={getPrimitiveRefLabel(target)}
-                    className="flex items-center justify-between gap-2 rounded-md border border-[var(--cad-border)] bg-[rgba(7,10,14,0.72)] px-2 py-2"
+                    className="flex items-center justify-between gap-2 rounded-md border border-[var(--mantine-color-dark-5)] bg-[rgba(7,10,14,0.72)] px-2 py-2"
                   >
-                    <span className="min-w-0 truncate text-xs text-[var(--cad-foreground)]">
+                    <span className="min-w-0 truncate text-xs text-[var(--mantine-color-dark-0)]">
                       {props.field.picker.itemLabel ?? props.field.label}: {getPrimitiveRefLabel(target)}
                     </span>
                     {props.field.picker.allowsMultiple ? (
                       <div className="flex items-center gap-1">
                         {props.field.ordering ? (
                           <>
-                            <button
-                              type="button"
+                            <ActionIcon
+                              component="button"
                               onClick={() => {
                                 moveItem(target, 'up')
                                 props.onPatch({ [props.field.ordering!.moveUpPatchKey]: target })
                               }}
                               aria-label={`Move ${getPrimitiveRefLabel(target)} earlier`}
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-[var(--cad-border-strong)] hover:text-[var(--cad-foreground)]"
+                              variant="default"
+                              size={24}
+                              styles={{
+                                root: {
+                                  backgroundColor: 'rgba(12, 16, 22, 0.8)',
+                                  borderColor: 'var(--mantine-color-dark-5)',
+                                  color: 'var(--mantine-color-dark-2)',
+                                },
+                              }}
                             >
                               <Check className="h-3 w-3 rotate-180" />
-                            </button>
-                            <button
-                              type="button"
+                            </ActionIcon>
+                            <ActionIcon
+                              component="button"
                               onClick={() => {
                                 moveItem(target, 'down')
                                 props.onPatch({ [props.field.ordering!.moveDownPatchKey]: target })
                               }}
                               aria-label={`Move ${getPrimitiveRefLabel(target)} later`}
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-[var(--cad-border-strong)] hover:text-[var(--cad-foreground)]"
+                              variant="default"
+                              size={24}
+                              styles={{
+                                root: {
+                                  backgroundColor: 'rgba(12, 16, 22, 0.8)',
+                                  borderColor: 'var(--mantine-color-dark-5)',
+                                  color: 'var(--mantine-color-dark-2)',
+                                },
+                              }}
                             >
                               <Check className="h-3 w-3" />
-                            </button>
+                            </ActionIcon>
                           </>
                         ) : null}
-                        <button
-                          type="button"
+                        <ActionIcon
+                          component="button"
                           onClick={() => {
                             field.onChange(selected.filter((entry) => !primitiveRefEquals(entry, target)))
                             props.onPatch(createFeatureEditorRemoveReferenceItemPatch(props.field, target))
                           }}
                           aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-red-400 hover:text-red-200"
+                          variant="default"
+                          color="red"
+                          size={24}
+                          styles={{
+                            root: {
+                              backgroundColor: 'rgba(12, 16, 22, 0.8)',
+                              borderColor: 'var(--mantine-color-dark-5)',
+                              color: 'var(--mantine-color-dark-2)',
+                            },
+                          }}
                         >
                           <X className="h-3 w-3" />
-                        </button>
+                        </ActionIcon>
                       </div>
                     ) : null}
                   </div>
@@ -399,7 +463,7 @@ function ReferenceCollectionCard(props: {
             <div className="mt-2">
               <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
             </div>
-          </div>
+          </Paper>
         )
       }}
     />
@@ -524,21 +588,32 @@ export function FeatureInspector({
       : `Create ${activeEditSession.featureType[0]!.toUpperCase()}${activeEditSession.featureType.slice(1)}`
 
   return (
-    <aside className="flex h-full max-h-full w-[320px] min-w-[320px] flex-col overflow-hidden border border-[var(--cad-border)] bg-[linear-gradient(180deg,_rgba(16,21,29,0.98),_rgba(10,14,20,0.98))]">
-      <header className="border-b border-[var(--cad-border)] px-4 py-4">
-        <div className="flex items-center gap-2 text-[var(--cad-accent)]">
-          <Layers3 className="h-4 w-4" />
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+    <Paper
+      component="aside"
+      className="flex h-full max-h-full w-[320px] min-w-[320px] flex-col overflow-hidden"
+      style={{
+        background: 'linear-gradient(180deg, rgba(16, 21, 29, 0.98), rgba(10, 14, 20, 0.98))',
+        border: '1px solid var(--mantine-color-dark-5)',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <header className="px-4 py-4" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+        <div className="flex items-center gap-2">
+          <ThemeIcon variant="light" color="workbench" size={20}>
+            <Layers3 className="h-4 w-4" />
+          </ThemeIcon>
+          <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
             Feature Session
-          </p>
+          </Text>
         </div>
-        <p className="mt-2 text-sm font-medium text-[var(--cad-foreground)]">{title}</p>
+        <Text mt={8} size="sm" fw={500} c="dark.0">{title}</Text>
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {formSchema.sections.map((section) => (
           <section key={section.id} className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]">
               {section.title}
             </p>
             {section.fields.map((field) => (
@@ -555,24 +630,39 @@ export function FeatureInspector({
         ))}
       </div>
 
-      <footer className="grid grid-cols-2 gap-2 border-t border-[var(--cad-border)] px-4 py-4">
-        <button
+      <footer className="grid grid-cols-2 gap-2 px-4 py-4" style={{ borderTop: '1px solid var(--mantine-color-dark-5)' }}>
+        <Button
           type="button"
           onClick={onCancel}
-          className="flex items-center justify-center gap-2 rounded-md border border-[var(--cad-border)] bg-[rgba(12,16,22,0.8)] px-3 py-2 text-sm text-[var(--cad-muted-foreground)] transition hover:border-[var(--cad-border-strong)]"
+          variant="default"
+          leftSection={<CircleSlash className="h-4 w-4" />}
+          styles={{
+            root: {
+              backgroundColor: 'rgba(12, 16, 22, 0.8)',
+              borderColor: 'var(--mantine-color-dark-5)',
+              color: 'var(--mantine-color-dark-2)',
+            },
+          }}
         >
-          <CircleSlash className="h-4 w-4" />
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={onCommit}
-          className="flex items-center justify-center gap-2 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)] px-3 py-2 text-sm text-[var(--cad-foreground)] transition hover:brightness-110"
+          variant="light"
+          color="workbench"
+          leftSection={<Check className="h-4 w-4" />}
+          styles={{
+            root: {
+              backgroundColor: 'rgba(94, 130, 171, 0.22)',
+              borderColor: 'var(--mantine-color-workbench-4)',
+              color: 'var(--mantine-color-dark-0)',
+            },
+          }}
         >
-          <Check className="h-4 w-4" />
           Commit
-        </button>
+        </Button>
       </footer>
-    </aside>
+    </Paper>
   )
 }

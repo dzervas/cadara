@@ -54,7 +54,9 @@ test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
     }
   }
 
-  const expandedMarkup = renderToStaticMarkup(<WorkbenchStateDebugger state={createDebuggerModel()} />)
+  const expandedMarkup = renderToStaticMarkup(
+    <WorkbenchStateDebugger state={createDebuggerModel()} defaultExpanded />,
+  )
   assert(expandedMarkup.includes('State Debugger'), 'Debugger should render its title.')
   assert(expandedMarkup.includes('Active mode'), 'Expanded debugger should render active mode.')
   assert(expandedMarkup.includes('editingFeature'), 'Expanded debugger should render machine state.')
@@ -71,9 +73,7 @@ test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
   assert(expandedMarkup.includes('(2 slots)'), 'Expanded debugger should render selection requirement slot counts.')
   assert(expandedMarkup.includes('Profile region'), 'Expanded debugger should render selection detail.')
 
-  const collapsedMarkup = renderToStaticMarkup(
-    <WorkbenchStateDebugger state={createDebuggerModel()} defaultExpanded={false} />,
-  )
+  const collapsedMarkup = renderToStaticMarkup(<WorkbenchStateDebugger state={createDebuggerModel()} />)
   assert(collapsedMarkup.includes('aria-expanded="false"'), 'Collapsed debugger should expose collapsed state.')
   assert(collapsedMarkup.includes('State Debugger'), 'Collapsed debugger should retain an expand affordance.')
   assert(!collapsedMarkup.includes('Active mode'), 'Collapsed debugger should hide detailed rows.')
