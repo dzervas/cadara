@@ -20,19 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   unzip \
   ripgrep \
   zsh \
-  libglib2.0-dev \
-  libnspr4-dev \
-  libnss3-dev \
-  libatk1.0-dev \
-  libatk-bridge2.0-dev \
-  libcups2-dev \
-  libxkbcommon-dev \
-  libasound2-dev \
-  libgbm-dev \
-  libpango1.0-dev \
-  libxcomposite-dev \
-  libxdamage-dev \
-  libxrandr-dev \
   && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -44,9 +31,9 @@ ENV PATH=$PATH:/root/.bun/bin
 
 # Install codex from npm globally
 RUN bun install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest
-RUN playwright-cli install
-
 RUN bun install -g @mariozechner/pi-coding-agent task-factory
+
+RUN playwright-cli install && bunx playwright install --with-deps chrome
 
 # Set npm global config for any user
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
