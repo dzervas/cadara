@@ -38,7 +38,10 @@ import type {
   SketchId,
   SketchPointId,
 } from '@/contracts/shared/ids'
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import {
+  CONTRACT_VERSION,
+  RENDER_EXPORT_SCHEMA_VERSION,
+} from '@/contracts/shared/versioning'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type {
   RegionRecord,
@@ -55,7 +58,10 @@ import {
 import { extractPlanarFaceData } from '@/domain/modeling/occ/planes'
 import { OCC_CONTRACT_GAP_CODES } from '@/domain/modeling/occ/implementation-policy'
 import { getOpenCascadeInstance, type OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
-import { buildOccWorkspaceSnapshot } from '@/domain/modeling/occ/snapshot'
+import {
+  buildOccSnapshotDiagnostics,
+  buildOccWorkspaceSnapshot,
+} from '@/domain/modeling/occ/snapshot'
 import {
   getOccDurableRefKey,
   resolveOccReference,
@@ -454,14 +460,10 @@ function getNewInvalidatedTargets(
 }
 
 function buildPreviewRenderRecords(
-  state: OccAuthoringState,
+  records: ReturnType<typeof buildOccWorkspaceSnapshot>['render']['records'],
   previewFeatureId: FeatureId,
-  diagnostics: readonly ModelingDiagnostic[],
 ) {
-  return buildOccWorkspaceSnapshot(state, diagnostics)
-    .render
-    .records
-    .filter((record) => record.ownerFeatureId === previewFeatureId)
+  return records.filter((record) => record.ownerFeatureId === previewFeatureId)
 }
 
 function filterPreviewInvalidationDiagnostics(
@@ -891,7 +893,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     extraDiagnostics: readonly ModelingDiagnostic[],
   ) {
     const invalidatedTargets = getNewInvalidatedTargets(previousState, nextState)
-    const diagnostics = buildOccWorkspaceSnapshot(nextState, extraDiagnostics).diagnostics
+    const diagnostics = buildOccSnapshotDiagnostics(nextState, extraDiagnostics)
 
     return {
       revisionId: nextState.revisionId,
@@ -1013,7 +1015,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     return {
       contractVersion: CONTRACT_VERSION,
-      snapshot: structuredClone(buildOccWorkspaceSnapshot(runtimeState.authoringState)),
+      snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState),
     }
   }
 
@@ -1206,9 +1208,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
     const nextSequence = runtimeState.revisionSequence + 1
     const nextRevisionId = createRevisionId(nextSequence)
-
+    const insertionIndex = getCursorInsertionIndex(
+      runtimeState.authoringState.cursor,
+      runtimeState.authoringState.features,
+    )
     const nextFeatures = [...runtimeState.authoringState.features]
-    nextFeatures.splice(getCursorInsertionIndex(runtimeState.authoringState.cursor, nextFeatures), 0, feature)
+    nextFeatures.splice(insertionIndex, 0, feature)
 
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
@@ -1234,7 +1239,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionSequence: nextSequence,
     })
 
-    const featureSnapshot = nextAuthoringState.state.features.find((entry) => entry.featureId === featureId)
+    const featureSnapshot = nextAuthoringState.state.features[insertionIndex]
     const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
 
     return {
@@ -1265,9 +1270,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
-    const existing = runtimeState.authoringState.features.find((entry) => entry.featureId === request.featureId)
+    const featureIndex = runtimeState.authoringState.features.findIndex(
+      (entry) => entry.featureId === request.featureId,
+    )
 
-    if (!existing) {
+    if (featureIndex < 0) {
       const rejected = this.buildRejectedResult(
         request.baseRevisionId,
         [createMissingFeatureDiagnostic(request.featureId)],
@@ -1282,6 +1289,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ...rejected,
       }
     }
+
+    const existing = runtimeState.authoringState.features[featureIndex]!
 
     const nextSequence = runtimeState.revisionSequence + 1
     const nextRevisionId = createRevisionId(nextSequence)
@@ -1317,7 +1326,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionSequence: nextSequence,
     })
 
-    const updated = nextAuthoringState.state.features.find((entry) => entry.featureId === request.featureId)
+    const updated = nextAuthoringState.state.features[featureIndex]
     const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
 
     return {
@@ -1349,9 +1358,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
-    const existing = runtimeState.authoringState.features.find((entry) => entry.featureId === request.featureId)
+    const featureIndex = runtimeState.authoringState.features.findIndex(
+      (entry) => entry.featureId === request.featureId,
+    )
 
-    if (!existing) {
+    if (featureIndex < 0) {
       const rejected = this.buildRejectedResult(
         request.baseRevisionId,
         [createMissingFeatureDiagnostic(request.featureId)],
@@ -1366,6 +1377,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ...rejected,
       }
     }
+
+    const existing = runtimeState.authoringState.features[featureIndex]!
 
     const nextSequence = runtimeState.revisionSequence + 1
     const nextRevisionId = createRevisionId(nextSequence)
@@ -1657,7 +1670,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         },
         render: {
           schemaVersion: snapshot.render.schemaVersion,
-          records: buildPreviewRenderRecords(previewState, previewFeatureId, []),
+          records: buildPreviewRenderRecords(snapshot.render.records, previewFeatureId),
         },
         diagnostics,
       }
@@ -1700,7 +1713,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
               currentRevisionId,
             },
         render: {
-          schemaVersion: buildOccWorkspaceSnapshot(runtimeState.authoringState).render.schemaVersion,
+          schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
           records: [],
         },
         diagnostics,

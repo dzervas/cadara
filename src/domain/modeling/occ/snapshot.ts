@@ -162,6 +162,8 @@ function getFaceSemanticClasses(
   }
 }
 
+type FaceSemanticClasses = ReturnType<typeof getFaceSemanticClasses>
+
 function collectFeatureConsumedTargets(definition: OccAuthoringState['features'][number]['definition']) {
   const targets: DurableRef[] = []
   let booleanScope:
@@ -215,27 +217,40 @@ function createFeatureConsumerMap(state: OccAuthoringState) {
     }
 
     for (const key of uniqueKeys) {
-      const current = consumers.get(key) ?? []
-      consumers.set(key, [...current, featureId])
+      const current = consumers.get(key)
+
+      if (current) {
+        current.push(featureId)
+        continue
+      }
+
+      consumers.set(key, [featureId])
     }
   }
 
   return consumers
 }
 
-function getProducedTargetsForFeature(
-  state: OccAuthoringState,
-  featureId: FeatureId,
+function createProducedTargetsByFeatureId(
+  features: readonly OccAuthoringState['features'][number][],
 ) {
-  const feature = state.features.find((entry) => entry.featureId === featureId)
+  const producedTargetsByFeatureId = new Map<FeatureId, DurableRef[]>()
 
-  if (feature?.producedTargets && feature.producedTargets.length > 0) {
-    return [...feature.producedTargets].sort((left, right) =>
-      getOccDurableRefKey(left).localeCompare(getOccDurableRefKey(right)),
+  for (const feature of features) {
+    if (!feature.producedTargets || feature.producedTargets.length === 0) {
+      producedTargetsByFeatureId.set(feature.featureId, [])
+      continue
+    }
+
+    producedTargetsByFeatureId.set(
+      feature.featureId,
+      [...feature.producedTargets].sort((left, right) =>
+        getOccDurableRefKey(left).localeCompare(getOccDurableRefKey(right)),
+      ),
     )
   }
 
-  return []
+  return producedTargetsByFeatureId
 }
 
 function createSnapshotFeatureDefinition(
@@ -313,28 +328,16 @@ function createSnapshotFeatureDefinition(
   }
 }
 
-function buildFeatureSnapshots(state: OccAuthoringState): FeatureSnapshotRecord[] {
-  return state.features.map((feature) => ({
-    ownerDocumentId: state.documentId,
-    ownerRevisionId: state.revisionId,
-    ownerFeatureId: feature.featureId,
-    ownerSketchId: null,
-    ownerBodyId: null,
-    featureId: feature.featureId,
-    label: buildFeatureLabel(feature.featureId, feature.label),
-    definition: createSnapshotFeatureDefinition(feature.definition),
-    producedTargets: getProducedTargetsForFeature(state, feature.featureId),
-  }))
-}
-
-function buildFeatureTree(
+function buildSnapshotPresentationRecords(
   state: OccAuthoringState,
-  features: readonly FeatureSnapshotRecord[],
-): FeatureTreeNodeRecord[] {
-  const rows: FeatureTreeNodeRecord[] = []
+  producedTargetsByFeatureId: ReadonlyMap<FeatureId, readonly DurableRef[]>,
+) {
+  const features: FeatureSnapshotRecord[] = []
+  const featureTree: FeatureTreeNodeRecord[] = []
+  const objects: ObjectTreeNodeRecord[] = []
 
   for (const construction of state.constructions) {
-    rows.push({
+    featureTree.push({
       id: createFeatureTreeNodeId('construction', construction.target),
       label: construction.label,
       description: 'Construction plane',
@@ -344,10 +347,19 @@ function buildFeatureTree(
       ownerSketchId: null,
       sourceFeatureId: construction.ownerFeatureId,
     })
+    objects.push({
+      id: createObjectTreeNodeId('construction', construction.target),
+      label: construction.label,
+      description: 'Construction plane',
+      kind: 'construction',
+      target: construction.target,
+      ownerBodyId: null,
+      ownerFeatureId: construction.ownerFeatureId,
+    })
   }
 
   for (const sketch of state.sketches) {
-    rows.push({
+    featureTree.push({
       id: createFeatureTreeNodeId('sketch', { kind: 'sketch', sketchId: sketch.sketchId }),
       label: sketch.label,
       description: 'Authored sketch',
@@ -359,28 +371,35 @@ function buildFeatureTree(
     })
   }
 
-  for (const feature of features) {
-    rows.push({
-      id: createFeatureTreeNodeId('feature', { kind: 'feature', featureId: feature.featureId }),
-      label: feature.label,
-      description: `${feature.definition.kind} feature`,
-      kind: 'feature',
-      target: { kind: 'feature', featureId: feature.featureId },
+  for (const feature of state.features) {
+    const snapshot: FeatureSnapshotRecord = {
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
       ownerFeatureId: feature.featureId,
+      ownerSketchId: null,
+      ownerBodyId: null,
+      featureId: feature.featureId,
+      label: buildFeatureLabel(feature.featureId, feature.label),
+      definition: createSnapshotFeatureDefinition(feature.definition),
+      producedTargets: [...(producedTargetsByFeatureId.get(feature.featureId) ?? [])],
+    }
+
+    features.push(snapshot)
+    featureTree.push({
+      id: createFeatureTreeNodeId('feature', { kind: 'feature', featureId: snapshot.featureId }),
+      label: snapshot.label,
+      description: `${snapshot.definition.kind} feature`,
+      kind: 'feature',
+      target: { kind: 'feature', featureId: snapshot.featureId },
+      ownerFeatureId: snapshot.featureId,
       ownerSketchId: null,
       sourceFeatureId: null,
     })
   }
 
-  return rows
-}
-
-function buildObjectTree(state: OccAuthoringState): ObjectTreeNodeRecord[] {
-  const rows: ObjectTreeNodeRecord[] = []
-
   for (const body of state.bodies) {
     const target = { kind: 'body', bodyId: body.bodyId } as const
-    rows.push({
+    objects.push({
       id: createObjectTreeNodeId('body', target),
       label: body.label,
       description: 'Solid body',
@@ -391,25 +410,37 @@ function buildObjectTree(state: OccAuthoringState): ObjectTreeNodeRecord[] {
     })
   }
 
-  for (const construction of state.constructions) {
-    rows.push({
-      id: createObjectTreeNodeId('construction', construction.target),
-      label: construction.label,
-      description: 'Construction plane',
-      kind: 'construction',
-      target: construction.target,
-      ownerBodyId: null,
-      ownerFeatureId: construction.ownerFeatureId,
-    })
+  return {
+    features,
+    featureTree,
+    objects,
+  }
+}
+
+function createFaceSemanticClassMap(state: OccAuthoringState) {
+  const faceSemanticClasses = new Map<string, FaceSemanticClasses>()
+
+  for (const body of state.bodies) {
+    for (const faceId of body.topology.faceIds) {
+      const face = body.facesById.get(faceId)
+
+      if (!face) {
+        continue
+      }
+
+      const target = createFaceTarget(body.bodyId, faceId)
+      faceSemanticClasses.set(getOccDurableRefKey(target), getFaceSemanticClasses(state, face))
+    }
   }
 
-  return rows
+  return faceSemanticClasses
 }
 
 function buildBodyEntities(
   state: OccAuthoringState,
   body: OccTrackedBody,
   consumerMap: ReadonlyMap<string, FeatureId[]>,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
 ): SnapshotEntityRecord[] {
   const bodyTarget = { kind: 'body', bodyId: body.bodyId } as const
   const records: SnapshotEntityRecord[] = [
@@ -436,7 +467,7 @@ function buildBodyEntities(
       continue
     }
 
-    const semantics = getFaceSemanticClasses(state, face)
+    const semantics = faceSemanticClasses.get(getOccDurableRefKey(target)) ?? getFaceSemanticClasses(state, face)
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -586,11 +617,12 @@ function buildSketchEntities(
 function buildSnapshotEntities(
   state: OccAuthoringState,
   consumerMap: ReadonlyMap<string, FeatureId[]>,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
 ) {
   return [
     ...buildConstructionEntities(state, consumerMap),
     ...state.sketches.flatMap((sketch) => buildSketchEntities(state, sketch, consumerMap)),
-    ...state.bodies.flatMap((body) => buildBodyEntities(state, body, consumerMap)),
+    ...state.bodies.flatMap((body) => buildBodyEntities(state, body, consumerMap, faceSemanticClasses)),
   ]
 }
 
@@ -616,7 +648,7 @@ function buildReferenceRecords(state: OccAuthoringState): ReferenceRecord[] {
     }))
 }
 
-function buildSnapshotDiagnostics(
+export function buildOccSnapshotDiagnostics(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[],
 ): ModelingDiagnostic[] {
@@ -724,16 +756,18 @@ function buildMeshGeometryFromFace(
   }
 
   const triangulation = triangulationHandle.get()
+  const nodeCount = triangulation.NbNodes()
+  const triangleCount = triangulation.NbTriangles()
   const hasNormals = triangulation.HasNormals()
   const isReversed = getFaceOrientationIsReversed(state, face)
-  const vertexPositions: RenderPoint3D[] = []
-  const vertexNormals: RenderPoint3D[] = []
-  const triangleIndices: Array<readonly [number, number, number]> = []
+  const vertexPositions = new Array<RenderPoint3D>(nodeCount)
+  const vertexNormals = hasNormals ? new Array<RenderPoint3D>(nodeCount) : null
+  const triangleIndices = new Array<readonly [number, number, number]>(triangleCount)
 
-  for (let index = 1; index <= triangulation.NbNodes(); index += 1) {
-    vertexPositions.push(applyLocationToPoint(triangulation.Node(index), location))
+  for (let index = 1; index <= nodeCount; index += 1) {
+    vertexPositions[index - 1] = applyLocationToPoint(triangulation.Node(index), location)
 
-    if (hasNormals) {
+    if (vertexNormals) {
       const transformedNormal = triangulation.Normal_1(index).Transformed(location.Transformation())
       const baseNormal: RenderPoint3D = [
         transformedNormal.X(),
@@ -741,28 +775,27 @@ function buildMeshGeometryFromFace(
         transformedNormal.Z(),
       ]
 
-      vertexNormals.push(isReversed
+      vertexNormals[index - 1] = isReversed
         ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
-        : baseNormal)
+        : baseNormal
     }
   }
 
-  for (let index = 1; index <= triangulation.NbTriangles(); index += 1) {
+  for (let index = 1; index <= triangleCount; index += 1) {
     const triangle = triangulation.Triangle(index)
     const first = triangle.Value(1) - 1
     const second = triangle.Value(2) - 1
     const third = triangle.Value(3) - 1
 
-    triangleIndices.push(
+    triangleIndices[index - 1] =
       isReversed
         ? [first, third, second]
-        : [first, second, third],
-    )
+        : [first, second, third]
   }
 
   return {
     vertexPositions,
-    vertexNormals: hasNormals ? vertexNormals : null,
+    vertexNormals,
     triangleIndices,
   }
 }
@@ -787,6 +820,7 @@ function buildFaceRenderRecord(
   body: OccTrackedBody,
   faceId: FaceId,
   face: InstanceType<OccAuthoringState['oc']['TopoDS_Face']>,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
 ): RenderableEntityRecord | null {
   const geometry = buildMeshGeometryFromFace(state, face)
 
@@ -795,7 +829,7 @@ function buildFaceRenderRecord(
   }
 
   const target: FaceRef = createFaceTarget(body.bodyId, faceId)
-  const semantics = getFaceSemanticClasses(state, face)
+  const semantics = faceSemanticClasses.get(getOccDurableRefKey(target)) ?? getFaceSemanticClasses(state, face)
 
   return {
     id: createRenderableId(target),
@@ -1041,7 +1075,11 @@ function buildVertexRenderRecord(
   }
 }
 
-function buildBodyRenderRecords(state: OccAuthoringState, body: OccTrackedBody) {
+function buildBodyRenderRecords(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+) {
   const records: RenderableEntityRecord[] = []
 
   new state.oc.BRepMesh_IncrementalMesh_2(
@@ -1059,7 +1097,7 @@ function buildBodyRenderRecords(state: OccAuthoringState, body: OccTrackedBody) 
       continue
     }
 
-    const record = buildFaceRenderRecord(state, body, faceId, face)
+    const record = buildFaceRenderRecord(state, body, faceId, face, faceSemanticClasses)
     if (record) {
       records.push(record)
     }
@@ -1274,11 +1312,14 @@ function buildSketchRenderRecords(state: OccAuthoringState) {
   ]
 }
 
-export function buildOccRenderExport(state: OccAuthoringState) {
+export function buildOccRenderExport(
+  state: OccAuthoringState,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses> = createFaceSemanticClassMap(state),
+) {
   const records: RenderableEntityRecord[] = [
     ...buildConstructionRenderRecords(state),
     ...buildSketchRenderRecords(state),
-    ...state.bodies.flatMap((body) => buildBodyRenderRecords(state, body)),
+    ...state.bodies.flatMap((body) => buildBodyRenderRecords(state, body, faceSemanticClasses)),
   ]
 
   return {
@@ -1291,13 +1332,13 @@ export function buildOccKernelDocumentSnapshot(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[] = [],
 ): KernelDocumentSnapshot {
-  const features = buildFeatureSnapshots(state)
+  const producedTargetsByFeatureId = createProducedTargetsByFeatureId(state.features)
   const consumerMap = createFeatureConsumerMap(state)
-  const featureTree = buildFeatureTree(state, features)
-  const objects = buildObjectTree(state)
-  const entities = buildSnapshotEntities(state, consumerMap)
+  const faceSemanticClasses = createFaceSemanticClassMap(state)
+  const { features, featureTree, objects } = buildSnapshotPresentationRecords(state, producedTargetsByFeatureId)
+  const entities = buildSnapshotEntities(state, consumerMap, faceSemanticClasses)
   const references = buildReferenceRecords(state)
-  const diagnostics = buildSnapshotDiagnostics(state, extraDiagnostics)
+  const diagnostics = buildOccSnapshotDiagnostics(state, extraDiagnostics)
 
   return {
     contractVersion: CONTRACT_VERSION,
@@ -1320,7 +1361,7 @@ export function buildOccKernelDocumentSnapshot(
     entities,
     references,
     diagnostics,
-    render: buildOccRenderExport(state),
+    render: buildOccRenderExport(state, faceSemanticClasses),
   }
 }
 
