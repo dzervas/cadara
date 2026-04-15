@@ -34,11 +34,14 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   override async open() {
     await super.open()
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
+    await this.waitForAnimationFrames(2)
   }
 
   override async reloadPreservingStorage() {
     await super.reloadPreservingStorage()
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
+    await this.waitForAnimationFrames(2)
+    await this.waitForStableCanvasFrames()
   }
 
   async openWithRectangleProfileFixture() {

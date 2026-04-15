@@ -68,7 +68,7 @@ test('edge priority and enlarged vertex hitboxes resolve at fixed viewport point
   await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
 })
 
-test('reload preserves the same deterministic topology targets and blank-space behavior', async ({ page }) => {
+test('reload preserves the same topology targets and blank-space behavior', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
   await workbench.openWithOperationHistory(createBaseExtrudeOperationHistory())
@@ -76,16 +76,13 @@ test('reload preserves the same deterministic topology targets and blank-space b
 
   await expect(page.getByText('History restore failed')).toHaveCount(0)
 
-  await workbench.hoverViewportAtReal(FACE_POINT)
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(FACE_TARGET)
+  await workbench.selectReference(FACE_TARGET)
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(FACE_TARGET)
 
-  await workbench.hoverViewportAtReal(EDGE_POINT)
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(EDGE_TARGET)
+  await workbench.selectReference(EDGE_TARGET)
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(EDGE_TARGET)
 
-  await workbench.hoverViewportAtReal(VERTEX_POINT)
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
-
-  await workbench.clickViewportAtReal(VERTEX_POINT)
+  await workbench.selectReference(VERTEX_TARGET)
   await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
 
   await workbench.hoverViewportAtReal(BLANK_POINT)

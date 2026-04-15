@@ -39,8 +39,7 @@ export class SketchWorkbenchHarness {
   }
 
   async reloadPreservingStorage() {
-    await this.page.reload()
-    await expect(this.page.getByText('Machine:')).toBeVisible()
+    await this.openPreservingStorage()
   }
 
   toolbarButton(name: string): Locator {
@@ -78,7 +77,17 @@ export class SketchWorkbenchHarness {
       throw new Error('Viewport surface is not visible.')
     }
 
-    await this.page.mouse.move(box.x + point.x, box.y + point.y)
+    const targetX = box.x + point.x
+    const targetY = box.y + point.y
+
+    await this.page.mouse.move(targetX - 4, targetY - 4)
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await this.page.mouse.move(targetX, targetY)
+      if (attempt < 2) {
+        await this.page.waitForTimeout(50)
+      }
+    }
   }
 
   async clickViewportAt(point: { x: number; y: number }) {

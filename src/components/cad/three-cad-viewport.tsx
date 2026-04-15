@@ -1,6 +1,6 @@
 import { Canvas } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 
 import {
@@ -183,6 +183,7 @@ export function ThreeCadViewport({
     const pointer = new THREE.Vector2()
     const raycaster = new THREE.Raycaster()
     let animationFrameId = 0
+    let attachedControls: ViewportCameraControls | null = null
 
     const handlePointerDown = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect()
@@ -208,7 +209,7 @@ export function ThreeCadViewport({
       snapView(direction, cameraRef.current, controlsRef.current)
     }
 
-    const animate = () => {
+    const renderCube = () => {
       const viewportCamera = cameraRef.current
       const viewportControls = controlsRef.current
 
@@ -223,15 +224,40 @@ export function ThreeCadViewport({
       }
 
       renderer.render(scene, camera)
-      animationFrameId = window.requestAnimationFrame(animate)
+    }
+
+    const requestRender = () => {
+      if (animationFrameId !== 0) {
+        return
+      }
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = 0
+        renderCube()
+      })
+    }
+
+    const attachControls = () => {
+      animationFrameId = 0
+      const controls = controlsRef.current
+
+      if (!controls) {
+        animationFrameId = window.requestAnimationFrame(attachControls)
+        return
+      }
+
+      attachedControls = controls
+      controls.addEventListener('change', requestRender)
+      requestRender()
     }
 
     renderer.domElement.addEventListener('pointerdown', handlePointerDown)
-    animationFrameId = window.requestAnimationFrame(animate)
+    animationFrameId = window.requestAnimationFrame(attachControls)
 
     return () => {
       window.cancelAnimationFrame(animationFrameId)
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
+      attachedControls?.removeEventListener('change', requestRender)
       cube.geometry.dispose()
       cubeMaterials.forEach((material) => material.dispose())
       renderer.dispose()
@@ -239,17 +265,14 @@ export function ThreeCadViewport({
     }
   }, [])
 
-  useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      bindingsRef.current = collectBindings(pickRootRef.current)
-      const bindings = bindingsRef.current
+  useLayoutEffect(() => {
+    bindingsRef.current = null
+    bindingsRef.current = collectBindings(pickRootRef.current)
+    const bindings = bindingsRef.current
 
-      if (bindings) {
-        updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
-      }
-    })
-
-    return () => window.cancelAnimationFrame(frameId)
+    if (bindings) {
+      updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
+    }
   }, [renderables, sketchDisplayRenderables])
 
   useEffect(() => {
@@ -924,10 +947,19 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
       throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
     }
 
-    const points = geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2]))
-    const displayPoints = geometryData.isClosed && points.length > 0 ? [...points, points[0].clone()] : points
     const nextLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(displayPoints),
+      new THREE.BufferGeometry().setFromPoints(
+        geometryData.isClosed && geometryData.points.length > 0
+          ? [
+              ...geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2])),
+              new THREE.Vector3(
+                geometryData.points[0]![0],
+                geometryData.points[0]![1],
+                geometryData.points[0]![2],
+              ),
+            ]
+          : geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2])),
+      ),
       new THREE.LineBasicMaterial({
         color: SURFACE_COLORS.sketchCurve,
         transparent: true,
@@ -1133,6 +1165,7 @@ function getGeometryToken(
       ].join(':')
   }
 }
+
 
 function getSketchSessionCameraToken(
   session: NonNullable<ReturnType<typeof useEditorState>['state']['sketchSession']>,
