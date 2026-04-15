@@ -29,29 +29,25 @@ import {
 import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
-import { snapCameraToVector } from '@/domain/workspace/view-navigation'
+import {
+  type ViewNavigationPresetId,
+  snapCameraToPreset,
+} from '@/domain/workspace/view-navigation'
+import {
+  VIEW_CUBE_CORNER_TARGETS,
+  VIEW_CUBE_FACE_TARGETS,
+} from '@/domain/workspace/view-cube-navigation'
 import { mapWorldPointToSketch } from '@/domain/modeling/occ/planes'
 import { useEditorState } from '@/hooks/use-editor-state'
 
-const GIZMO_DIRECTIONS = {
-  front: new THREE.Vector3(0, -1, 0),
-  back: new THREE.Vector3(0, 1, 0),
-  right: new THREE.Vector3(1, 0, 0),
-  left: new THREE.Vector3(-1, 0, 0),
-  top: new THREE.Vector3(0, 0, 1),
-  bottom: new THREE.Vector3(0, 0, -1),
-} as const
-
-const FACE_INDEX_TO_DIRECTION = {
-  0: GIZMO_DIRECTIONS.right,
-  1: GIZMO_DIRECTIONS.left,
-  2: GIZMO_DIRECTIONS.top,
-  3: GIZMO_DIRECTIONS.bottom,
-  4: GIZMO_DIRECTIONS.front,
-  5: GIZMO_DIRECTIONS.back,
-} as const
-
 const VIEW_CUBE_SIZE = 120
+const VIEW_CUBE_EDGE_SIZE = 1.24
+const VIEW_CUBE_FACE_FILL_SIZE = 1.1
+const VIEW_CUBE_FACE_FILL_OFFSET = 0.58
+const VIEW_CUBE_FACE_OUTLINE_SIZE = 0.78
+const VIEW_CUBE_FACE_HIT_SIZE = 0.72
+const VIEW_CUBE_CORNER_FACE_SIZE = 0.26
+const VIEW_CUBE_CORNER_HIT_SIZE = 0.34
 const PROJECTED_VERTEX_PICK_RADIUS_PX = 48
 
 interface ThreeCadViewportProps {
@@ -70,6 +66,21 @@ interface ViewportCameraFrame {
   position: THREE.Vector3
   target: THREE.Vector3
   up: THREE.Vector3
+}
+
+interface ViewCubeFaceVisual {
+  normal: THREE.Vector3
+  outlineMaterial: THREE.LineBasicMaterial
+  labelMaterial: THREE.MeshBasicMaterial
+  labelTexture: THREE.Texture
+}
+
+interface ViewCubeSceneState {
+  scene: THREE.Scene
+  camera: THREE.PerspectiveCamera
+  interactiveObjects: THREE.Object3D[]
+  faceVisuals: ViewCubeFaceVisual[]
+  dispose: () => void
 }
 
 export function ThreeCadViewport({
@@ -154,32 +165,12 @@ export function ThreeCadViewport({
       return
     }
 
-    const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100)
+    const viewCubeScene = createViewCubeScene()
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setClearColor(0x000000, 0)
     renderer.setSize(VIEW_CUBE_SIZE, VIEW_CUBE_SIZE, false)
     cubeElement.appendChild(renderer.domElement)
-
-    const cubeMaterials = [
-      new THREE.MeshStandardMaterial({ color: 0x4b94ff, metalness: 0.15, roughness: 0.7 }),
-      new THREE.MeshStandardMaterial({ color: 0x2e6fd1, metalness: 0.15, roughness: 0.7 }),
-      new THREE.MeshStandardMaterial({ color: 0x7cc8ff, metalness: 0.15, roughness: 0.7 }),
-      new THREE.MeshStandardMaterial({ color: 0x17365f, metalness: 0.15, roughness: 0.7 }),
-      new THREE.MeshStandardMaterial({ color: 0x3f7fd8, metalness: 0.15, roughness: 0.7 }),
-      new THREE.MeshStandardMaterial({ color: 0x234a8f, metalness: 0.15, roughness: 0.7 }),
-    ]
-    const cube = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 1.2, 1.2),
-      cubeMaterials,
-    )
-    scene.add(cube)
-    scene.add(new THREE.AmbientLight(0xffffff, 1.4))
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.3)
-    directionalLight.position.set(3, 4, 6)
-    scene.add(directionalLight)
 
     const pointer = new THREE.Vector2()
     const raycaster = new THREE.Raycaster()
@@ -187,27 +178,23 @@ export function ThreeCadViewport({
     let attachedControls: ViewportCameraControls | null = null
 
     const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) {
+        return
+      }
+
       const rect = renderer.domElement.getBoundingClientRect()
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
 
-      raycaster.setFromCamera(pointer, camera)
-      const [intersection] = raycaster.intersectObject(cube)
+      raycaster.setFromCamera(pointer, viewCubeScene.camera)
+      const [intersection] = raycaster.intersectObjects(viewCubeScene.interactiveObjects, false)
+      const presetId = resolveViewCubePresetId(intersection?.object)
 
-      if (!intersection?.face) {
+      if (!presetId) {
         return
       }
 
-      const direction =
-        FACE_INDEX_TO_DIRECTION[
-          intersection.face.materialIndex as keyof typeof FACE_INDEX_TO_DIRECTION
-        ]
-
-      if (!direction) {
-        return
-      }
-
-      snapView(direction, cameraRef.current, controlsRef.current)
+      snapView(presetId, cameraRef.current, controlsRef.current)
     }
 
     const renderCube = () => {
@@ -219,12 +206,13 @@ export function ThreeCadViewport({
           .clone()
           .sub(viewportControls.target)
           .normalize()
-        camera.position.copy(orbitOffset.multiplyScalar(4))
-        camera.up.copy(viewportCamera.up)
-        camera.lookAt(0, 0, 0)
+        viewCubeScene.camera.position.copy(orbitOffset.multiplyScalar(4))
+        viewCubeScene.camera.up.copy(viewportCamera.up)
+        viewCubeScene.camera.lookAt(0, 0, 0)
       }
 
-      renderer.render(scene, camera)
+      updateViewCubeFaceVisibility(viewCubeScene.faceVisuals, viewCubeScene.camera)
+      renderer.render(viewCubeScene.scene, viewCubeScene.camera)
     }
 
     const requestRender = () => {
@@ -259,8 +247,7 @@ export function ThreeCadViewport({
       window.cancelAnimationFrame(animationFrameId)
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
       attachedControls?.removeEventListener('change', requestRender)
-      cube.geometry.dispose()
-      cubeMaterials.forEach((material) => material.dispose())
+      viewCubeScene.dispose()
       renderer.dispose()
       cubeElement.removeChild(renderer.domElement)
     }
@@ -624,11 +611,300 @@ export function ThreeCadViewport({
       <div
         ref={viewCubeRef}
         data-testid="view-cube"
-        className="pointer-events-auto absolute right-4 top-4 overflow-hidden rounded-xl border border-[var(--cad-border-strong)] bg-[var(--workbench-viewport-overlay-muted)] shadow-[var(--cad-panel-shadow)]"
+        className="pointer-events-auto absolute right-4 top-4"
         style={{ width: VIEW_CUBE_SIZE, height: VIEW_CUBE_SIZE }}
       />
     </div>
   )
+}
+
+function createViewCubeScene(): ViewCubeSceneState {
+  const scene = new THREE.Scene()
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100)
+  const interactiveObjects: THREE.Object3D[] = []
+  const faceVisuals: ViewCubeFaceVisual[] = []
+
+  scene.add(new THREE.AmbientLight(0xffffff, 1.1))
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9)
+  directionalLight.position.set(3, 4, 6)
+  scene.add(directionalLight)
+
+  const cubeGroup = new THREE.Group()
+  scene.add(cubeGroup)
+
+  const edgeGeometry = new THREE.EdgesGeometry(
+    new THREE.BoxGeometry(VIEW_CUBE_EDGE_SIZE, VIEW_CUBE_EDGE_SIZE, VIEW_CUBE_EDGE_SIZE),
+  )
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: 0xd9e8ff,
+  })
+  cubeGroup.add(new THREE.LineSegments(edgeGeometry, edgeMaterial))
+
+  const faceFillGeometry = new THREE.PlaneGeometry(VIEW_CUBE_FACE_FILL_SIZE, VIEW_CUBE_FACE_FILL_SIZE)
+  const faceFillMaterial = new THREE.MeshBasicMaterial({
+    color: 0x314255,
+  })
+  const faceOutlineGeometry = createViewCubeFaceOutlineGeometry(VIEW_CUBE_FACE_OUTLINE_SIZE)
+  const faceHitGeometry = new THREE.PlaneGeometry(VIEW_CUBE_FACE_HIT_SIZE, VIEW_CUBE_FACE_HIT_SIZE)
+  const faceLabelGeometry = new THREE.PlaneGeometry(1.08, 0.54)
+  const faceHitMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  })
+
+  for (const faceTarget of VIEW_CUBE_FACE_TARGETS) {
+    const faceNormal = new THREE.Vector3(...faceTarget.position).normalize()
+    const fill = new THREE.Mesh(faceFillGeometry, faceFillMaterial)
+    fill.position.copy(faceNormal.clone().multiplyScalar(VIEW_CUBE_FACE_FILL_OFFSET))
+    fill.rotation.set(...faceTarget.rotation)
+    cubeGroup.add(fill)
+
+    const outlineMaterial = new THREE.LineBasicMaterial({
+      color: 0x8db7ff,
+      transparent: true,
+      opacity: 0.5,
+    })
+    const outline = new THREE.LineLoop(faceOutlineGeometry, outlineMaterial)
+    outline.position.fromArray(faceTarget.position)
+    outline.rotation.set(...faceTarget.rotation)
+    cubeGroup.add(outline)
+
+    const label = createViewCubeLabelMesh(faceTarget.label, faceLabelGeometry)
+    label.mesh.position.fromArray(faceTarget.position)
+    label.mesh.position.add(faceNormal.clone().multiplyScalar(0.02))
+    label.mesh.quaternion.copy(
+      createViewCubePlaneQuaternion(
+        faceNormal,
+        new THREE.Vector3(...faceTarget.labelUp),
+      ),
+    )
+    cubeGroup.add(label.mesh)
+
+    const hitTarget = new THREE.Mesh(faceHitGeometry, faceHitMaterial)
+    hitTarget.position.fromArray(faceTarget.position)
+    hitTarget.rotation.set(...faceTarget.rotation)
+    hitTarget.userData.presetId = faceTarget.presetId
+    cubeGroup.add(hitTarget)
+    interactiveObjects.push(hitTarget)
+
+    faceVisuals.push({
+      normal: faceNormal,
+      outlineMaterial,
+      labelMaterial: label.material,
+      labelTexture: label.texture,
+    })
+  }
+
+  const cornerFaceGeometry = createViewCubeCornerFaceGeometry(VIEW_CUBE_CORNER_FACE_SIZE)
+  const cornerFaceOutlineGeometry = createViewCubeCornerFaceOutlineGeometry(VIEW_CUBE_CORNER_FACE_SIZE)
+  const cornerHitGeometry = createViewCubeCornerFaceGeometry(VIEW_CUBE_CORNER_HIT_SIZE)
+  const cornerFaceMaterial = new THREE.MeshBasicMaterial({
+    color: 0x8db7ff,
+    transparent: true,
+    opacity: 0.1,
+    depthWrite: false,
+  })
+  const cornerFaceOutlineMaterial = new THREE.LineBasicMaterial({
+    color: 0xbfd7ff,
+    transparent: true,
+    opacity: 0.74,
+  })
+  const cornerHitMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  })
+
+  for (const cornerTarget of VIEW_CUBE_CORNER_TARGETS) {
+    const cornerNormal = new THREE.Vector3(...cornerTarget.position).normalize()
+    const cornerQuaternion = createViewCubePlaneQuaternion(
+      cornerNormal,
+      resolveViewCubePlaneUp(cornerNormal),
+    )
+
+    const cornerFace = new THREE.Mesh(cornerFaceGeometry, cornerFaceMaterial)
+    cornerFace.position.fromArray(cornerTarget.position)
+    cornerFace.quaternion.copy(cornerQuaternion)
+    cubeGroup.add(cornerFace)
+
+    const cornerOutline = new THREE.LineLoop(cornerFaceOutlineGeometry, cornerFaceOutlineMaterial)
+    cornerOutline.position.fromArray(cornerTarget.position)
+    cornerOutline.quaternion.copy(cornerQuaternion)
+    cubeGroup.add(cornerOutline)
+
+    const hitTarget = new THREE.Mesh(cornerHitGeometry, cornerHitMaterial)
+    hitTarget.position.fromArray(cornerTarget.position)
+    hitTarget.quaternion.copy(cornerQuaternion)
+    hitTarget.userData.presetId = cornerTarget.presetId
+    cubeGroup.add(hitTarget)
+    interactiveObjects.push(hitTarget)
+  }
+
+  return {
+    scene,
+    camera,
+    interactiveObjects,
+    faceVisuals,
+    dispose: () => {
+      edgeGeometry.dispose()
+      edgeMaterial.dispose()
+      faceFillGeometry.dispose()
+      faceFillMaterial.dispose()
+      faceOutlineGeometry.dispose()
+      faceHitGeometry.dispose()
+      faceLabelGeometry.dispose()
+      faceHitMaterial.dispose()
+      cornerFaceGeometry.dispose()
+      cornerFaceOutlineGeometry.dispose()
+      cornerFaceMaterial.dispose()
+      cornerFaceOutlineMaterial.dispose()
+      cornerHitGeometry.dispose()
+      cornerHitMaterial.dispose()
+      faceVisuals.forEach((faceVisual) => {
+        faceVisual.outlineMaterial.dispose()
+        faceVisual.labelMaterial.dispose()
+        faceVisual.labelTexture.dispose()
+      })
+    },
+  }
+}
+
+function createViewCubeFaceOutlineGeometry(size: number) {
+  const halfSize = size / 2
+
+  return new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-halfSize, -halfSize, 0),
+    new THREE.Vector3(halfSize, -halfSize, 0),
+    new THREE.Vector3(halfSize, halfSize, 0),
+    new THREE.Vector3(-halfSize, halfSize, 0),
+  ])
+}
+
+function createViewCubeCornerFaceGeometry(size: number) {
+  const height = size * Math.sqrt(3) * 0.5
+  const halfBase = size / 2
+  const geometry = new THREE.BufferGeometry()
+
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([
+      0, height * (2 / 3), 0,
+      -halfBase, -height / 3, 0,
+      halfBase, -height / 3, 0,
+    ], 3),
+  )
+  geometry.setIndex([0, 1, 2])
+
+  return geometry
+}
+
+function createViewCubeCornerFaceOutlineGeometry(size: number) {
+  const height = size * Math.sqrt(3) * 0.5
+  const halfBase = size / 2
+
+  return new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, height * (2 / 3), 0),
+    new THREE.Vector3(-halfBase, -height / 3, 0),
+    new THREE.Vector3(halfBase, -height / 3, 0),
+  ])
+}
+
+function createViewCubeLabelMesh(label: string, geometry: THREE.PlaneGeometry) {
+  const width = 256
+  const height = 128
+  const devicePixelRatio = window.devicePixelRatio || 1
+  const canvas = document.createElement('canvas')
+  canvas.width = width * devicePixelRatio
+  canvas.height = height * devicePixelRatio
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('Unable to create view cube label context.')
+  }
+
+  const { outlineColor, textColor } = resolveViewCubeLabelColors()
+
+  context.scale(devicePixelRatio, devicePixelRatio)
+  context.clearRect(0, 0, width, height)
+  context.font = '600 42px "IBM Plex Sans", "Segoe UI", sans-serif'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.lineJoin = 'round'
+  context.globalAlpha = 0.92
+  context.strokeStyle = outlineColor
+  context.lineWidth = 10
+  context.strokeText(label, width / 2, height / 2)
+  context.globalAlpha = 1
+  context.fillStyle = textColor
+  context.fillText(label, width / 2, height / 2)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+  })
+  const mesh = new THREE.Mesh(geometry, material)
+
+  return { mesh, material, texture }
+}
+
+function resolveViewCubeLabelColors() {
+  const rootStyles = getComputedStyle(document.documentElement)
+
+  return {
+    outlineColor: rootStyles.getPropertyValue('--workbench-viewport-background').trim() || 'black',
+    textColor: rootStyles.getPropertyValue('--workbench-shell-text').trim() || 'white',
+  }
+}
+
+function createViewCubePlaneQuaternion(normal: THREE.Vector3, up: THREE.Vector3) {
+  const normalizedNormal = normal.clone().normalize()
+  const normalizedUp = up.clone().normalize()
+  const right = normalizedUp.clone().cross(normalizedNormal).normalize()
+  const labelUp = normalizedNormal.clone().cross(right).normalize()
+
+  return new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(right, labelUp, normalizedNormal),
+  )
+}
+
+function resolveViewCubePlaneUp(normal: THREE.Vector3) {
+  const normalizedNormal = normal.clone().normalize()
+  const preferredUp = Math.abs(normalizedNormal.z) < 0.92
+    ? new THREE.Vector3(0, 0, 1)
+    : new THREE.Vector3(0, 1, 0)
+
+  return preferredUp
+    .sub(normalizedNormal.clone().multiplyScalar(preferredUp.dot(normalizedNormal)))
+    .normalize()
+}
+
+function updateViewCubeFaceVisibility(
+  faceVisuals: ViewCubeFaceVisual[],
+  camera: THREE.PerspectiveCamera,
+) {
+  const cameraDirection = camera.position.clone().normalize()
+
+  faceVisuals.forEach((faceVisual) => {
+    const facingAlignment = faceVisual.normal.dot(cameraDirection)
+    const facingForward = facingAlignment > 0.12
+
+    faceVisual.outlineMaterial.opacity = facingForward ? 0.58 : 0.16
+    faceVisual.labelMaterial.opacity = facingForward ? 1 : 0
+  })
+}
+
+function resolveViewCubePresetId(object: THREE.Object3D | undefined) {
+  const presetId = object?.userData.presetId
+
+  return typeof presetId === 'string' ? presetId as ViewNavigationPresetId : null
 }
 
 function captureViewportCameraFrame(
@@ -1044,7 +1320,7 @@ function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisp
 }
 
 function snapView(
-  direction: THREE.Vector3,
+  presetId: ViewNavigationPresetId,
   camera: THREE.PerspectiveCamera | null,
   controls: ViewportCameraControls | null,
 ) {
@@ -1052,10 +1328,10 @@ function snapView(
     return
   }
 
-  snapCameraToVector({
+  snapCameraToPreset({
     camera,
     controls,
-    direction,
+    presetId,
   })
 }
 
