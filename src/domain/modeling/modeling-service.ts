@@ -94,6 +94,7 @@ import {
   createReorderFeatureHistoryEntry,
   createSetFeatureCursorHistoryEntry,
   createUpdateFeatureHistoryEntry,
+  type PersistedCommitSketchPayload,
   type ModelingOperationHistoryEntry,
   type ModelingOperationHistoryPayload,
 } from '@/contracts/modeling/operation-history'
@@ -2805,6 +2806,29 @@ function createHistoryReplayCorrelation(index: number): ModelingCommitSketchCorr
   }
 }
 
+function getExpectedAllocatedReplaySketchId(
+  currentSnapshot: DocumentSnapshot,
+): SketchId {
+  return currentSnapshot.document.sketches.length === 0
+    ? 'sketch_primary'
+    : (`sketch_${currentSnapshot.document.sketches.length + 1}` as SketchId)
+}
+
+function resolveReplayCommitSketchId(
+  currentSnapshot: DocumentSnapshot,
+  sketchId: PersistedCommitSketchPayload['sketchId'],
+): PersistedCommitSketchPayload['sketchId'] {
+  if (sketchId === null) {
+    return null
+  }
+
+  if (currentSnapshot.document.sketches.some((entry) => entry.sketchId === sketchId)) {
+    return sketchId
+  }
+
+  return sketchId === getExpectedAllocatedReplaySketchId(currentSnapshot) ? null : sketchId
+}
+
 async function replayHistoryEntry(input: {
   adapter: ModelingKernelAdapter
   documentId: DocumentId
@@ -2818,7 +2842,7 @@ async function replayHistoryEntry(input: {
     case 'commitSketch': {
       return input.adapter.commitSketch({
         ...input.entry.payload,
-        sketchId: input.entry.payload.sketchId,
+        sketchId: resolveReplayCommitSketchId(currentSnapshot, input.entry.payload.sketchId),
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,

@@ -30,10 +30,10 @@ RUN curl -fsSL https://bun.com/install | bash
 ENV PATH=$PATH:/root/.bun/bin
 
 # Install codex from npm globally
-RUN bun install -g @openai/codex@latest @playwright/cli@latest @fission-ai/openspec@latest
+RUN bun install -g @openai/codex@latest @fission-ai/openspec@latest
 RUN bun install -g @mariozechner/pi-coding-agent task-factory
 
-RUN playwright-cli install && bunx playwright install --with-deps chrome
+RUN bunx playwright install --with-deps chrome chromium-headless-shell
 
 # Set npm global config for any user
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global

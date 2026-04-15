@@ -1,106 +1,94 @@
 import { expect, test } from '@playwright/test'
 
 import { FeatureWorkbenchHarness } from './helpers/feature-workbench'
+import { createBaseExtrudeOperationHistory } from './helpers/modeling-fixtures'
 
 test.setTimeout(90_000)
+test.use({ viewport: { width: 1440, height: 960 } })
 
-async function viewportSurfaceBox(workbench: FeatureWorkbenchHarness) {
-  await expect(workbench.viewportSurface()).toBeVisible({ timeout: 10_000 })
-  const box = await workbench.viewportSurface().boundingBox()
+const FACE_POINT = { x: 254, y: 65 }
+const EDGE_POINT = { x: 190, y: 65 }
+const VERTEX_POINT = { x: 63, y: 148 }
+const BLANK_POINT = { x: 1000, y: 200 }
 
-  if (!box) {
-    throw new Error('Viewport surface is not visible.')
-  }
+const FACE_TARGET = 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'
+const EDGE_TARGET = 'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_16'
+const VERTEX_TARGET = 'body_feature_extrude-1.vertex_body_feature_extrude-1_t0001_2'
 
-  return box
-}
+function countBufferDiff(left: Buffer, right: Buffer) {
+  const limit = Math.min(left.length, right.length)
+  let diff = 0
 
-async function discoverViewportTarget(
-  workbench: FeatureWorkbenchHarness,
-  pattern: RegExp,
-) {
-  const box = await viewportSurfaceBox(workbench)
-  const xSteps = 13
-  const ySteps = 9
-
-  for (let row = 1; row <= ySteps; row += 1) {
-    for (let column = 1; column <= xSteps; column += 1) {
-      const point = {
-        x: Math.round((box.width * column) / (xSteps + 1)),
-        y: Math.round((box.height * row) / (ySteps + 1)),
-      }
-
-      await workbench.hoverViewportAtReal(point)
-      await workbench.page.waitForTimeout(30)
-
-      const targetId = (await workbench.currentHoverTarget()).match(pattern)?.[0]
-
-      if (targetId) {
-        return { point, targetId }
-      }
+  for (let index = 0; index < limit; index += 1) {
+    if (left[index] !== right[index]) {
+      diff += 1
     }
   }
 
-  throw new Error(`Viewport target matching ${pattern} was not found in the current camera framing.`)
+  return diff + Math.abs(left.length - right.length)
 }
 
-async function assertDirectHoverAndClick(
-  workbench: FeatureWorkbenchHarness,
-  point: { x: number; y: number },
-  targetId: string,
-) {
-  await workbench.clearHoverByLeavingViewport()
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe('none')
-
-  await workbench.hoverViewportAtReal(point)
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(targetId)
-
-  await workbench.clearHoverByLeavingViewport()
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe('none')
-
-  await workbench.hoverViewportAtReal(point)
-  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(targetId)
-
-  await workbench.clickViewportAtReal(point)
-  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(targetId)
-}
-
-test('solid topology targets are discoverable and directly selectable on the live viewport', async ({ page }) => {
+test('front-most solid face hover and click change the rendered crop deterministically', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
-  await workbench.open()
-  await workbench.createBaseExtrudeFixture()
+  await workbench.openWithOperationHistory(createBaseExtrudeOperationHistory())
 
-  const edge = await discoverViewportTarget(
-    workbench,
-    /^body_feature_extrude-1\.edge_.+$/,
-  )
-  await assertDirectHoverAndClick(workbench, edge.point, edge.targetId)
+  await workbench.clearHoverByLeavingViewport()
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe('none')
+  const baseCrop = await workbench.viewportCrop(FACE_POINT)
 
-  const vertex = await discoverViewportTarget(
-    workbench,
-    /^body_feature_extrude-1\.vertex_.+$/,
-  )
-  await assertDirectHoverAndClick(workbench, vertex.point, vertex.targetId)
+  await workbench.hoverViewportAtReal(FACE_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(FACE_TARGET)
+  const hoveredCrop = await workbench.viewportCrop(FACE_POINT)
+  expect(countBufferDiff(baseCrop, hoveredCrop)).toBeGreaterThan(1_000)
+
+  await workbench.clickViewportAtReal(FACE_POINT)
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(FACE_TARGET)
+  const selectedCrop = await workbench.viewportCrop(FACE_POINT)
+  expect(countBufferDiff(hoveredCrop, selectedCrop)).toBeGreaterThan(1_000)
+
+  await workbench.hoverViewportAtReal(BLANK_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe('none')
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(FACE_TARGET)
 })
 
-test('solid topology targets remain directly selectable after reload at the same screen points', async ({ page }) => {
+test('edge priority and enlarged vertex hitboxes resolve at fixed viewport points', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
-  await workbench.open()
-  await workbench.createBaseExtrudeFixture()
+  await workbench.openWithOperationHistory(createBaseExtrudeOperationHistory())
 
-  const edge = await discoverViewportTarget(
-    workbench,
-    /^body_feature_extrude-1\.edge_.+$/,
-  )
-  const vertex = await discoverViewportTarget(
-    workbench,
-    /^body_feature_extrude-1\.vertex_.+$/,
-  )
+  await workbench.hoverViewportAtReal(EDGE_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(EDGE_TARGET)
+  await workbench.clickViewportAtReal(EDGE_POINT)
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(EDGE_TARGET)
 
+  await workbench.hoverViewportAtReal(VERTEX_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
+  await workbench.clickViewportAtReal(VERTEX_POINT)
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
+})
+
+test('reload preserves the same deterministic topology targets and blank-space behavior', async ({ page }) => {
+  const workbench = new FeatureWorkbenchHarness(page)
+
+  await workbench.openWithOperationHistory(createBaseExtrudeOperationHistory())
   await workbench.reloadPreservingStorage()
 
-  await assertDirectHoverAndClick(workbench, edge.point, edge.targetId)
-  await assertDirectHoverAndClick(workbench, vertex.point, vertex.targetId)
+  await expect(page.getByText('History restore failed')).toHaveCount(0)
+
+  await workbench.hoverViewportAtReal(FACE_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(FACE_TARGET)
+
+  await workbench.hoverViewportAtReal(EDGE_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(EDGE_TARGET)
+
+  await workbench.hoverViewportAtReal(VERTEX_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
+
+  await workbench.clickViewportAtReal(VERTEX_POINT)
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
+
+  await workbench.hoverViewportAtReal(BLANK_POINT)
+  await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe('none')
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
 })

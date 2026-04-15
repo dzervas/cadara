@@ -1,10 +1,17 @@
 import { test } from 'bun:test'
-import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
+import { createCreateFeatureHistoryEntry, createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
-import type { CommitSketchRequest, DocumentSnapshot, SketchSnapshotRecord } from '@/contracts/modeling/schema'
+import type {
+  CommitSketchRequest,
+  CreateFeatureRequest,
+  DocumentSnapshot,
+  FeatureSnapshotRecord,
+  SketchSnapshotRecord,
+} from '@/contracts/modeling/schema'
 import { SOLVED_SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
   CONTRACT_VERSION,
+  EXTRUDE_FEATURE_SCHEMA_VERSION,
   RENDER_EXPORT_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
@@ -214,6 +221,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
   function createWorkspaceSnapshot(
     revisionId: `rev_${string}`,
     sketches: DocumentSnapshot['sketches'] = [],
+    features: DocumentSnapshot['features'] = [],
   ): DocumentSnapshot {
     const document = {
       contractVersion: CONTRACT_VERSION,
@@ -234,7 +242,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       },
       featureTree: [],
       objects: [],
-      features: [],
+      features,
       cursor: { kind: 'empty' as const },
       sketches,
       bodies: [],
@@ -257,7 +265,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       capabilities: document.capabilities,
       featureTree: [],
       objects: [],
-      features: [],
+      features,
       cursor: { kind: 'empty' },
       sketches,
       bodies: [],
@@ -375,6 +383,172 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     }
   }
 
+  function createStrictReplayAdapter(): ModelingKernelAdapter {
+    let currentSnapshot = createWorkspaceSnapshot('rev_0001')
+    let revisionCounter = 1
+
+    function nextRevisionId() {
+      revisionCounter += 1
+      return `rev_${String(revisionCounter).padStart(4, '0')}` as const
+    }
+
+    function allocateSketchId() {
+      return currentSnapshot.document.sketches.length === 0
+        ? ('sketch_primary' as const)
+        : (`sketch_${currentSnapshot.document.sketches.length + 1}` as const)
+    }
+
+    return {
+      async getDocumentSnapshot() {
+        return {
+          contractVersion: CONTRACT_VERSION,
+          snapshot: currentSnapshot,
+        }
+      },
+      async commitSketch(request) {
+        if (
+          request.sketchId !== null
+          && !currentSnapshot.document.sketches.some((entry) => entry.sketchId === request.sketchId)
+        ) {
+          return {
+            contractVersion: CONTRACT_VERSION,
+            documentId: 'doc_workspace',
+            revisionId: currentSnapshot.revisionId,
+            sketchId: request.sketchId,
+            revisionState: {
+              kind: 'rejected' as const,
+              reasonCode: 'occ-missing-sketch',
+            },
+            rebuildResult: {
+              kind: 'skipped' as const,
+              reasonCode: 'validationRejected' as const,
+              invalidatedTargets: [],
+              diagnostics: [],
+            },
+            changedTargets: [],
+            diagnostics: [],
+          }
+        }
+
+        const revisionId = nextRevisionId()
+        const sketchId = request.sketchId ?? allocateSketchId()
+        const normalizedDefinition = normalizeDefinitionForSketchId(request.definition, sketchId)
+        const sketch: SketchSnapshotRecord = {
+          ownerDocumentId: 'doc_workspace',
+          ownerRevisionId: revisionId,
+          ownerFeatureId: null,
+          ownerSketchId: sketchId,
+          ownerBodyId: null,
+          sketchId,
+          label: request.sketchLabel,
+          plane: request.plane,
+          planeTarget: request.planeTarget,
+          planeKey: request.planeKey,
+          sketch: {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: revisionId,
+            ownerFeatureId: null,
+            ownerSketchId: sketchId,
+            ownerBodyId: null,
+            sketchId,
+            label: request.sketchLabel,
+            planeSupport: request.plane.support,
+            definition: normalizedDefinition,
+            solvedSnapshot: {
+              schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+              status: {
+                solveState: 'solved',
+                constraintState: 'wellConstrained',
+              },
+              solvedEntities: [],
+              solvedPoints: [],
+              constraintStatuses: [],
+              dimensionStatuses: [],
+              diagnostics: [],
+            },
+            regions: [],
+          },
+        }
+        currentSnapshot = createWorkspaceSnapshot(revisionId, [...currentSnapshot.document.sketches, sketch])
+
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: 'doc_workspace',
+          revisionId,
+          sketchId,
+          revisionState: {
+            kind: 'accepted' as const,
+            baseRevisionId: request.baseRevisionId,
+          },
+          rebuildResult: {
+            kind: 'rebuilt' as const,
+            revisionId,
+            invalidatedTargets: [],
+            diagnostics: [],
+          },
+          changedTargets: [],
+          diagnostics: [],
+        }
+      },
+      async createFeature(request) {
+        const revisionId = nextRevisionId()
+        const feature: FeatureSnapshotRecord = {
+          ownerDocumentId: 'doc_workspace',
+          ownerRevisionId: revisionId,
+          ownerFeatureId: 'feature_extrude-1',
+          ownerSketchId: null,
+          ownerBodyId: null,
+          featureId: 'feature_extrude-1',
+          label: 'Extrude 1',
+          producedTargets: [],
+          definition: request.definition,
+        }
+        currentSnapshot = createWorkspaceSnapshot(
+          revisionId,
+          currentSnapshot.document.sketches,
+          [...currentSnapshot.document.features, feature],
+        )
+
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: 'doc_workspace',
+          revisionId,
+          featureId: 'feature_extrude-1',
+          revisionState: {
+            kind: 'accepted' as const,
+            baseRevisionId: request.baseRevisionId,
+          },
+          rebuildResult: {
+            kind: 'rebuilt' as const,
+            revisionId,
+            invalidatedTargets: [],
+            diagnostics: [],
+          },
+          changedTargets: [],
+          diagnostics: [],
+        }
+      },
+      async updateFeature() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async deleteFeature() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async reorderFeature() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async setFeatureCursor() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async evaluatePreview() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async resolveReference() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+    }
+  }
+
   async function testCommitSketchPersistenceNormalizesSketchIds() {
     const store = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
     const service = createModelingService(new MockKernelAdapter(), {
@@ -461,6 +635,95 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     )
   }
 
+  async function testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore() {
+    const sketchRequest = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_0001',
+      solverCorrelation: {
+        requestId: 'request_commit_restore',
+        projectionRequestId: 'request_commit_restore:project',
+        validationRequestId: 'request_commit_restore:validate',
+        solveRequestId: 'request_commit_restore:solve',
+        regionRequestId: 'request_commit_restore:regions',
+      },
+      sketchId: 'sketch_primary',
+      sketchLabel: 'Replay Sketch',
+      plane: {
+        key: 'xy',
+        support: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+      },
+      planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
+      planeKey: 'xy',
+      definition: createDraftSketchDefinition('sketch_primary'),
+    } satisfies CommitSketchRequest
+    const extrudeRequest = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_0002',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [{ kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary-outer' }],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 10 },
+          operation: 'newBody',
+          booleanScope: { kind: 'standalone' },
+        },
+      },
+    } satisfies CreateFeatureRequest
+    const persistedHistory = {
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        {
+          kind: 'commitSketch' as const,
+          payload: {
+            sketchId: sketchRequest.sketchId,
+            sketchLabel: sketchRequest.sketchLabel,
+            plane: sketchRequest.plane,
+            planeTarget: sketchRequest.planeTarget,
+            planeKey: sketchRequest.planeKey,
+            definition: sketchRequest.definition,
+          },
+        },
+        createCreateFeatureHistoryEntry(extrudeRequest),
+      ],
+    }
+    const service = createModelingService(createStrictReplayAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(persistedHistory),
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+
+    assert(
+      restoreState.kind === 'restored',
+      'Allocator-compatible explicit sketch ids should restore successfully on an empty strict adapter.',
+    )
+    assert(restoreState.entriesReplayed === 2, 'Replay should apply both the sketch and feature entries.')
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+
+    assert(
+      snapshot.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
+      'Replay should recreate the expected primary sketch id.',
+    )
+    assert(
+      snapshot.features.some((entry) => entry.featureId === 'feature_extrude-1' && entry.definition.kind === 'extrude'),
+      'Replay should continue into downstream feature history after recreating the sketch.',
+    )
+  }
+
   await testCommitSketchPersistenceNormalizesSketchIds()
   await testLegacyCommitSketchHistoryRestores()
+  await testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore()
 })

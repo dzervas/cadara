@@ -28,8 +28,7 @@ test('state debugger owns workbench debug readouts and collapses locally', async
 test('feature inspector omits debugger-only contract and revision readouts', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
-  await workbench.open()
-  await workbench.createRectangleProfileFixture()
+  await workbench.openWithRectangleProfileFixture()
   await workbench.selectReference(FEATURE_FIXTURE.profile)
   await workbench.activateFeature('extrude')
 

@@ -32,6 +32,7 @@
 ## Active Technologies
 
 - TypeScript strict mode on React 19 + React 19, Vite 8, Bun, Three.js, Radix UI, Tailwind CSS v4, OpenCascade.js
+- Always prefer @react-three packages to interact with three.js (@react-three/drai, @react-three/fiber, etc.)
 - Runtime contract validation uses `zod`; prefer shared schemas for transport and persistence boundaries, and keep domain invariants in plain TypeScript when schemas do not make the code smaller or clearer.
 - Stateful editor/runtime orchestration uses `xstate`; keep machine logic in domain/contracts modules and avoid leaking state-machine concerns into presentational components.
 - Non-E2E tests use `bun:test`; add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
