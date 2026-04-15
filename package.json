@@ -24,6 +24,7 @@
     "opencascade.js": "^2.0.0-beta.b5ff984",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-hook-form": "^7.72.1",
     "tailwind-merge": "^3.5.0",
     "three": "^0.183.2",
     "xstate": "^5.30.0",

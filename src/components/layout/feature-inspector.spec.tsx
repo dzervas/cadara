@@ -3,7 +3,15 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeatureInspector } from '@/components/layout/feature-inspector'
 import { initialEditorState, type EditorViewState } from '@/contracts/editor/state-machine'
-import { createFeatureEditSession, patchFeatureEditSession } from '@/domain/editor/feature-editing'
+import {
+  createFeatureEditorFormValues,
+  shouldResetFeatureEditorFormValues,
+} from '@/domain/feature-authoring/form-adapter'
+import {
+  createFeatureEditSession,
+  getFeatureEditorFormSchema,
+  patchFeatureEditSession,
+} from '@/domain/editor/feature-editing'
 import type { ToolId } from '@/domain/tools/tool-registry'
 import { EditorContext } from '@/hooks/editor-context'
 
@@ -75,16 +83,16 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
     'Feature inspector should render a clear control for single-reference fields.',
   )
 
-  const shellSession = patchFeatureEditSession(
-    createFeatureEditSession({
-      featureType: 'shell',
-      selectedTarget: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
-    }),
-    { faceTargets: [
+  const baseShellSession = createFeatureEditSession({
+    featureType: 'shell',
+    selectedTarget: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+  })
+  const shellSession = patchFeatureEditSession(baseShellSession, {
+    faceTargets: [
       { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
       { kind: 'face', bodyId: 'body_a', faceId: 'face_side' },
-    ] },
-  )
+    ],
+  })
 
   const activeShellMarkup = renderInspector({
     activeEditSession: shellSession,
@@ -106,5 +114,40 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
   assert(
     activeShellMarkup.includes('Clear Removable faces') && activeShellMarkup.includes('Remove body_a.face_side'),
     'Feature inspector should render clear-all and per-instance remove controls for multi-instance fields.',
+  )
+
+  const shellSchema = getFeatureEditorFormSchema(baseShellSession)
+  const activeShellSchema = getFeatureEditorFormSchema(
+    patchFeatureEditSession(baseShellSession, {
+      faceTargets: [
+        { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+        { kind: 'face', bodyId: 'body_a', faceId: 'face_side' },
+      ],
+    }),
+  )
+  const shellValues = createFeatureEditorFormValues(shellSchema)
+  const activeShellValues = createFeatureEditorFormValues(activeShellSchema)
+
+  assert(
+    shouldResetFeatureEditorFormValues({
+      schema: shellSchema,
+      sessionKey: 'command_shell-1',
+      lastSessionKey: 'command_shell-1',
+      currentValues: { ...shellValues, 'shell-thickness': '1.0' },
+      lastSyncedValues: { ...shellValues, 'shell-thickness': '0.5' },
+      nextValues: shellValues,
+    }) === false,
+    'Feature inspector should preserve locally typed numeric values when the synced draft already matches semantically.',
+  )
+  assert(
+    shouldResetFeatureEditorFormValues({
+      schema: activeShellSchema,
+      sessionKey: 'command_shell-1',
+      lastSessionKey: 'command_shell-1',
+      currentValues: shellValues,
+      lastSyncedValues: shellValues,
+      nextValues: activeShellValues,
+    }),
+    'Feature inspector should reset RHF values when the editor session changes externally, such as after reference picking.',
   )
 })

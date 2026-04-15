@@ -1,6 +1,6 @@
 import { Canvas } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 
 import {
@@ -89,6 +89,7 @@ export function ThreeCadViewport({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<ViewportCameraControls | null>(null)
   const controlsInitializedRef = useRef(false)
+  const [canvasReadyVersion, setCanvasReadyVersion] = useState(0)
   const raycasterRef = useRef(new THREE.Raycaster())
   const pointerRef = useRef(new THREE.Vector2())
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
@@ -552,7 +553,7 @@ export function ThreeCadViewport({
       window.removeEventListener('pointerup', handlePointerUp, true)
       window.removeEventListener('click', handleClick, true)
     }
-  }, [renderables, selection, sketchSession])
+  }, [canvasReadyVersion, renderables, selection, sketchSession])
 
   return (
     <div ref={viewportRef} data-testid="cad-viewport" className="relative h-full w-full">
@@ -569,6 +570,7 @@ export function ThreeCadViewport({
           perspectiveCamera.lookAt(0, 0, 4)
           cameraRef.current = perspectiveCamera
           canvasElementRef.current = gl.domElement
+          setCanvasReadyVersion((current) => current + 1)
           gl.setClearColor(0x000000, 0)
           raycaster.params.Line.threshold = 0.75
         }}
