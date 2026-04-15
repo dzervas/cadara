@@ -37,11 +37,11 @@ export function ToolDropdownButton({
               withBorder={active}
               style={{
                 alignItems: 'center',
-                backgroundColor: active ? 'rgba(94, 130, 171, 0.22)' : 'transparent',
+                backgroundColor: active ? 'var(--workbench-shell-accent-surface)' : 'transparent',
                 borderColor: active
-                  ? 'var(--mantine-color-workbench-4)'
+                  ? 'var(--workbench-shell-accent)'
                   : 'transparent',
-                color: 'var(--mantine-color-dark-0)',
+                color: 'var(--workbench-shell-text)',
                 display: 'flex',
                 gap: 4,
               }}
@@ -49,7 +49,7 @@ export function ToolDropdownButton({
               <ToolbarToolIcon icon={tool.icon} />
               <ChevronDown
                 className="h-3.5 w-3.5"
-                style={{ color: 'var(--mantine-color-dark-2)' }}
+                style={{ color: 'var(--workbench-shell-text-muted)' }}
               />
             </Paper>
           </UnstyledButton>
@@ -58,8 +58,8 @@ export function ToolDropdownButton({
 
       <Menu.Dropdown
         style={{
-          backgroundColor: 'rgba(9, 13, 18, 0.98)',
-          borderColor: 'var(--mantine-color-dark-5)',
+          backgroundColor: 'var(--workbench-shell-overlay-strong)',
+          borderColor: 'var(--workbench-shell-border)',
           boxShadow: 'var(--workbench-panel-shadow)',
         }}
       >
@@ -77,10 +77,10 @@ export function ToolDropdownButton({
               leftSection={<ToolbarToolIcon icon={variant.icon} />}
             >
               <div className="flex flex-col">
-                <Text size="sm" c="dark.0">
+                <Text size="sm" style={{ color: 'var(--workbench-shell-text)' }}>
                   {variant.name}
                 </Text>
-                <Text size="xs" c="dimmed">
+                <Text size="xs" style={{ color: 'var(--workbench-shell-text-muted)' }}>
                   {variant.tooltip}
                 </Text>
               </div>

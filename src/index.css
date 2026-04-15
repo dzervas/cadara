@@ -10,19 +10,6 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --workbench-panel-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.38),
-    0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  --cad-background: var(--mantine-color-dark-9);
-  --cad-foreground: var(--mantine-color-dark-0);
-  --cad-muted: var(--mantine-color-dark-3);
-  --cad-muted-foreground: var(--mantine-color-dark-2);
-  --cad-border: var(--mantine-color-dark-5);
-  --cad-border-strong: var(--mantine-color-dark-4);
-  --cad-surface: rgba(20, 28, 37, 0.98);
-  --cad-surface-elevated: rgba(30, 40, 52, 0.96);
-  --cad-accent: var(--mantine-color-workbench-4);
-  --cad-panel-shadow: var(--workbench-panel-shadow);
 }
 
 html,
@@ -32,14 +19,12 @@ body,
   height: 100%;
   min-height: 100%;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top, rgba(51, 84, 121, 0.2), transparent 28%),
-    linear-gradient(180deg, #0f141a, #070a0f 62%);
+  background: var(--workbench-app-background);
 }
 
 body {
   min-height: 100vh;
-  color: var(--mantine-color-dark-0);
+  color: var(--workbench-shell-text);
 }
 
 * {

@@ -20,7 +20,7 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
   const hints = schema.completionHints ?? []
 
   return (
-    <div className="pointer-events-auto absolute left-4 top-4 w-[260px] rounded-lg border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.9)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
+    <div className="pointer-events-auto absolute left-4 top-4 w-[260px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
       <div className="grid gap-2">
         {schema.prompts.map((prompt) => (
           <div key={prompt.id} className="text-sm font-medium text-[var(--cad-foreground)]">
@@ -49,7 +49,10 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
           </div>
         ) : null}
         {validation.map((message) => (
-          <div key={message.id} className="rounded-md border border-[rgba(255,143,107,0.45)] px-2 py-1 text-[rgb(255,190,164)]">
+          <div
+            key={message.id}
+            className="rounded-md border border-[var(--workbench-shell-danger-border)] bg-[var(--workbench-shell-danger-surface)] px-2 py-1 text-[var(--workbench-shell-danger-text)]"
+          >
             {message.message}
           </div>
         ))}
@@ -110,7 +113,7 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
         {hints.map((hint) => (
           <div
             key={hint.id}
-            className={hint.ready ? 'text-[rgb(136,212,152)]' : 'text-[var(--cad-muted-foreground)]'}
+            className={hint.ready ? 'text-[var(--workbench-shell-success-text)]' : 'text-[var(--cad-muted-foreground)]'}
           >
             {hint.text}
           </div>

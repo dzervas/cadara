@@ -6,9 +6,9 @@ export function Input({ className, ...props }: TextInputProps) {
       classNames={{ input: className }}
       styles={{
         input: {
-          backgroundColor: 'var(--mantine-color-dark-8)',
-          borderColor: 'var(--mantine-color-dark-5)',
-          color: 'var(--mantine-color-dark-0)',
+          backgroundColor: 'var(--workbench-shell-control-surface)',
+          borderColor: 'var(--workbench-shell-border)',
+          color: 'var(--workbench-shell-text)',
         },
       }}
       {...props}

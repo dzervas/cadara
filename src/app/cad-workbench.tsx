@@ -364,7 +364,7 @@ export function CadWorkbench() {
           </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col">
-          <main className="relative min-h-0 flex-1 overflow-hidden border-l border-[var(--cad-border)] bg-[radial-gradient(circle_at_top,_rgba(79,104,140,0.12),_transparent_36%),linear-gradient(180deg,_rgba(14,18,24,0.96),_rgba(8,11,16,1))]">
+          <main className="relative min-h-0 flex-1 overflow-hidden border-l border-[var(--cad-border)] bg-[var(--workbench-viewport-background)]">
             <ThreeCadViewport
               renderables={viewportRenderables.documentRenderables}
               sketchDisplayRenderables={viewportRenderables.sketchDisplayRenderables}
@@ -391,11 +391,11 @@ export function CadWorkbench() {
               onSelect={(target) => dispatch({ type: 'viewport.selectionRequested', target })}
             />
             {restoreMessage ? (
-              <div className="absolute right-4 top-4 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.95)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]">
+              <div className="absolute right-4 top-4 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]">
                 <div className="font-medium">History restore failed</div>
                 <div className="mt-1 text-[var(--cad-muted-foreground)]">{restoreMessage}</div>
                 <button
-                  className="mt-3 rounded-md border border-[var(--cad-border-strong)] px-2 py-1 text-[var(--cad-foreground)]"
+                  className="mt-3 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface)] px-2 py-1 text-[var(--cad-foreground)]"
                   type="button"
                   onClick={() => {
                     modelingService.resetOperationHistory()

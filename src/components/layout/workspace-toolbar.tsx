@@ -58,8 +58,8 @@ export function WorkspaceToolbar() {
       px="md"
       py={6}
       style={{
-        backgroundColor: 'rgba(13, 18, 25, 0.95)',
-        borderBottom: '1px solid var(--mantine-color-dark-5)',
+        backgroundColor: 'var(--workbench-shell-surface-strong)',
+        borderBottom: '1px solid var(--workbench-shell-border)',
       }}
     >
       <div className="flex items-center gap-3">
@@ -75,7 +75,7 @@ export function WorkspaceToolbar() {
               {index < visibleSections.length - 1 ? (
                 <Divider
                   orientation="vertical"
-                  style={{ borderColor: 'var(--mantine-color-dark-4)', height: 32 }}
+                  style={{ borderColor: 'var(--workbench-shell-border-strong)', height: 32 }}
                 />
               ) : null}
             </div>
@@ -90,12 +90,7 @@ export function WorkspaceToolbar() {
             leftSection={<Search className="h-4 w-4" />}
             styles={{
               input: {
-                backgroundColor: 'rgba(12, 16, 22, 0.92)',
-                borderColor: 'var(--mantine-color-dark-5)',
                 height: 40,
-              },
-              section: {
-                color: 'var(--mantine-color-dark-2)',
               },
             }}
           />
@@ -104,8 +99,8 @@ export function WorkspaceToolbar() {
               className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden"
               withBorder
               style={{
-                backgroundColor: 'rgba(9, 13, 18, 0.98)',
-                borderColor: 'var(--mantine-color-dark-4)',
+                backgroundColor: 'var(--workbench-shell-overlay-strong)',
+                borderColor: 'var(--workbench-shell-border-strong)',
                 boxShadow: 'var(--workbench-panel-shadow)',
               }}
             >

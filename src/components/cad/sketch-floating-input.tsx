@@ -11,7 +11,7 @@ export function SketchFloatingInput({ descriptor, onPatch }: SketchFloatingInput
   }
 
   return (
-    <div className="pointer-events-auto absolute bottom-6 left-1/2 z-10 w-[220px] -translate-x-1/2 rounded-xl border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.96)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
+    <div className="pointer-events-auto absolute bottom-6 left-1/2 z-10 w-[220px] -translate-x-1/2 rounded-xl border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
       <div className="text-sm font-medium text-[var(--cad-foreground)]">{descriptor.label}</div>
       <input
         autoFocus

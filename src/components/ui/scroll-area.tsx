@@ -5,17 +5,6 @@ export function ScrollArea({
   ...props
 }: ScrollAreaProps) {
   return (
-    <MantineScrollArea
-      className={className}
-      styles={{
-        scrollbar: {
-          backgroundColor: 'transparent',
-        },
-        thumb: {
-          backgroundColor: 'rgba(148, 174, 211, 0.32)',
-        },
-      }}
-      {...props}
-    />
+    <MantineScrollArea className={className} {...props} />
   )
 }

@@ -153,8 +153,8 @@ export function FeatureTimelineBar({
     <section
       className="flex min-h-[56px] shrink-0 items-center gap-3 border-t px-3 py-2"
       style={{
-        backgroundColor: 'rgba(10, 14, 20, 0.96)',
-        borderColor: 'var(--mantine-color-dark-5)',
+        backgroundColor: 'var(--workbench-shell-overlay-strong)',
+        borderColor: 'var(--workbench-shell-border)',
       }}
       aria-label="Feature timeline"
     >
@@ -164,15 +164,18 @@ export function FeatureTimelineBar({
             <button
               ref={handleRef}
               type="button"
-              className="absolute top-1/2 z-10 flex h-10 w-7 items-center justify-center rounded-full border text-sm shadow-[0_10px_24px_rgba(0,0,0,0.26)] transition"
+              className="absolute top-1/2 z-10 flex h-10 w-7 items-center justify-center rounded-full border text-sm transition"
               style={{
                 backgroundColor:
-                  dragCursorIndex === null ? 'rgba(14, 18, 25, 0.92)' : 'rgba(22, 32, 46, 0.96)',
+                  dragCursorIndex === null
+                    ? 'var(--workbench-shell-control-surface)'
+                    : 'var(--workbench-shell-overlay)',
                 borderColor:
                   dragCursorIndex === null
-                    ? 'var(--mantine-color-dark-4)'
-                    : 'var(--mantine-color-workbench-4)',
-                color: 'var(--mantine-color-dark-0)',
+                    ? 'var(--workbench-shell-border-strong)'
+                    : 'var(--workbench-shell-accent)',
+                boxShadow: 'var(--workbench-panel-shadow)',
+                color: 'var(--workbench-shell-text)',
                 opacity: 0,
                 transform: 'translate(-50%, -50%)',
               }}
@@ -248,11 +251,11 @@ export function FeatureTimelineBar({
                           label={(
                             <div className="max-w-56">
                               <div className="font-medium">{feature.label}</div>
-                              <div style={{ color: 'var(--mantine-color-dark-2)' }}>
+                              <div style={{ color: 'var(--workbench-shell-text-muted)' }}>
                                 {getFeatureDescription(feature)}
                               </div>
                               {isAfterCursor ? (
-                                <div style={{ color: 'var(--mantine-color-dark-2)' }}>
+                                <div style={{ color: 'var(--workbench-shell-text-muted)' }}>
                                   After current cursor
                                 </div>
                               ) : null}
@@ -273,11 +276,13 @@ export function FeatureTimelineBar({
                               isAfterCursor ? 'opacity-45' : ''
                             } ${!isAllowed ? 'cursor-not-allowed' : ''}`}
                             style={{
-                              backgroundColor: isSelected ? 'rgba(94, 130, 171, 0.18)' : 'transparent',
-                              borderColor: isSelected
-                                ? 'var(--mantine-color-dark-4)'
+                              backgroundColor: isSelected
+                                ? 'var(--workbench-shell-accent-surface)'
                                 : 'transparent',
-                              color: 'var(--mantine-color-dark-0)',
+                              borderColor: isSelected
+                                ? 'var(--workbench-shell-border-strong)'
+                                : 'transparent',
+                              color: 'var(--workbench-shell-text)',
                             }}
                             aria-label={`Select ${feature.label}. Double-click to reopen.`}
                             aria-disabled={!isAllowed}

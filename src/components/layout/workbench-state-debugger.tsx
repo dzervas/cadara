@@ -53,7 +53,7 @@ export function WorkbenchStateDebugger({ state, defaultExpanded = false }: Workb
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
   return (
-    <div className="pointer-events-auto absolute bottom-4 left-4 max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.9)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
+    <div className="pointer-events-auto absolute bottom-4 left-4 max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">

@@ -64,8 +64,8 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(sidebarMarkup.includes('Snapshot References'), 'Sidebar should keep snapshot references.')
   assert(sidebarMarkup.includes('Document Diagnostics'), 'Sidebar should keep document diagnostics.')
   assert(
-    sidebarMarkup.includes('hover:bg-[rgba(94,130,171,0.18)]'),
-    'Sidebar object rows should highlight across the full row container on hover.',
+    sidebarMarkup.includes('hover:bg-[var(--workbench-shell-accent-surface)]'),
+    'Sidebar object rows should highlight across the full row container with the shared workbench accent surface.',
   )
 
   const hiddenObjectMarkup = renderToStaticMarkup(

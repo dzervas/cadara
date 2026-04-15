@@ -17,7 +17,7 @@ export function SketchConstraintAnnotations({
   }
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-28 z-10 grid max-w-[280px] gap-2 rounded-xl border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.9)] p-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
+    <div className="pointer-events-auto absolute right-4 top-28 z-10 grid max-w-[280px] gap-2 rounded-xl border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
       {annotations.map((annotation) => {
         const isSelected = (() => {
           if (annotation.target.kind === 'constraint') {

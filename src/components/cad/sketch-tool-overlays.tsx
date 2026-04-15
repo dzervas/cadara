@@ -12,7 +12,7 @@ export function SketchToolOverlays({ schema }: SketchToolOverlaysProps) {
   }
 
   return (
-    <div className="pointer-events-none absolute right-4 bottom-4 grid max-w-[280px] gap-1 rounded-lg border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.82)] p-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
+    <div className="pointer-events-none absolute right-4 bottom-4 grid max-w-[280px] gap-1 rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
       {overlays.map((overlay) => (
         <div key={overlay.id} className="flex items-center justify-between gap-3">
           <span className="text-[var(--cad-foreground)]">{overlay.label}</span>

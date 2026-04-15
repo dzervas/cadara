@@ -25,4 +25,9 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
     tooltipMarkup.includes('Choose a pattern tool.'),
     'Tooltips should show descriptive copy beneath the heading.',
   )
+  assert(
+    tooltipMarkup.includes('--workbench-tooltip-title') &&
+      tooltipMarkup.includes('--workbench-tooltip-description'),
+    'Toolbar tooltip copy should derive its contrast treatment from shared workbench theme variables.',
+  )
 })

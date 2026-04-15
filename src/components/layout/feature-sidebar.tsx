@@ -79,21 +79,21 @@ export function FeatureSidebar({
       radius={0}
       className="flex h-full min-h-0 flex-col overflow-hidden"
       style={{
-        background: 'linear-gradient(180deg, rgba(17, 21, 28, 0.96), rgba(11, 15, 21, 0.98))',
-        borderRight: '1px solid var(--mantine-color-dark-5)',
+        background: 'var(--workbench-shell-surface-panel)',
+        borderRight: '1px solid var(--workbench-shell-border)',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
       <section
         className="grid min-h-0 flex-[1.35] grid-rows-[minmax(0,1.1fr)_minmax(0,0.9fr)] overflow-hidden"
-        style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}
+        style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
       >
         <div
           className="flex min-h-0 flex-col overflow-hidden"
-          style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}
+          style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
         >
-          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
             <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
               Parts & Objects
             </Text>
@@ -111,8 +111,8 @@ export function FeatureSidebar({
                 return (
                   <div
                     key={item.id}
-                    className={`-mx-3 flex items-start gap-2 px-5 py-1.5 transition hover:bg-[rgba(94,130,171,0.18)] ${
-                      isSelected ? 'bg-[rgba(94,130,171,0.18)]' : ''
+                    className={`-mx-3 flex items-center gap-2 px-5 py-1.5 transition hover:bg-[var(--workbench-shell-accent-surface)] ${
+                      isSelected ? 'bg-[var(--workbench-shell-accent-surface)]' : ''
                     } ${isHidden ? 'opacity-55' : ''}`}
                   >
                     <button
@@ -129,9 +129,9 @@ export function FeatureSidebar({
                       aria-disabled={!isAllowed || isHidden}
                       title={!isAllowed ? 'Filtered out by the current command' : isHidden ? 'Hidden in the viewport' : undefined}
                     >
-                      <div className="flex items-start gap-2">
+                      <div className="flex items-center gap-2">
                         <span
-                          className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center"
+                          className="flex h-4 w-4 shrink-0 items-center justify-center"
                           style={{ color: 'var(--mantine-color-workbench-4)' }}
                         >
                           {item.kind === 'body' ? (
@@ -150,7 +150,6 @@ export function FeatureSidebar({
                     <ActionIcon
                       component="button"
                       onClick={() => onToggleTargetVisibility(target)}
-                      className="mt-0.5"
                       variant="subtle"
                       color="gray"
                       size={24}
@@ -167,7 +166,7 @@ export function FeatureSidebar({
         </div>
 
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
             <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
               Snapshot References
             </Text>
@@ -188,11 +187,17 @@ export function FeatureSidebar({
                       }
                       onSelectTarget(reference.target)
                     }}
-                    className={`block w-full rounded-md border px-2 py-2 text-left transition hover:bg-[rgba(94,130,171,0.18)] ${
-                      reference.invalidation
-                        ? 'border-[rgba(214,106,106,0.4)] bg-[rgba(49,22,24,0.72)]'
-                        : 'border-[var(--mantine-color-dark-5)] bg-[rgba(10,14,20,0.72)]'
-                    } ${!isAllowed ? 'cursor-not-allowed opacity-45' : ''}`}
+                    className={`block w-full rounded-md border px-2 py-2 text-left transition hover:bg-[var(--workbench-shell-accent-surface)] ${
+                      !isAllowed ? 'cursor-not-allowed opacity-45' : ''
+                    }`}
+                    style={{
+                      backgroundColor: reference.invalidation
+                        ? 'var(--workbench-shell-danger-surface)'
+                        : 'var(--workbench-shell-overlay)',
+                      borderColor: reference.invalidation
+                        ? 'var(--workbench-shell-danger-border)'
+                        : 'var(--workbench-shell-border)',
+                    }}
                     aria-disabled={!isAllowed}
                     aria-label={`Select ${reference.label} ${targetLabel}`}
                     title={!isAllowed ? 'Filtered out by the current command' : undefined}
@@ -205,7 +210,7 @@ export function FeatureSidebar({
                       Owner {snapshot ? formatReferenceOwner(snapshot, reference.ownerFeatureId, reference.ownerSketchId) : 'n/a'}
                     </span>
                     {getReferenceStatus(reference) ? (
-                      <span className="mt-1 block text-xs text-[rgb(241,160,160)]">{getReferenceStatus(reference)}</span>
+                      <span className="mt-1 block text-xs text-[var(--workbench-shell-danger-text)]">{getReferenceStatus(reference)}</span>
                     ) : null}
                   </button>
                 )
@@ -217,9 +222,9 @@ export function FeatureSidebar({
 
       <section
         className="flex min-h-0 flex-[0.85] flex-col overflow-hidden"
-        style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}
+        style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
       >
-        <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+        <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
           <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
             Document Diagnostics
           </Text>
@@ -230,15 +235,33 @@ export function FeatureSidebar({
               snapshot.document.diagnostics.map((diagnostic, index) => (
                 <div
                   key={`${diagnostic.code}-${diagnostic.message}-${index}`}
-                  className={`rounded-md border px-2 py-2 ${
-                    diagnostic.severity === 'error'
-                      ? 'border-[rgba(214,106,106,0.45)] bg-[rgba(49,22,24,0.72)]'
-                      : diagnostic.severity === 'warning'
-                        ? 'border-[rgba(196,152,84,0.45)] bg-[rgba(46,33,17,0.72)]'
-                        : 'border-[var(--mantine-color-dark-5)] bg-[rgba(10,14,20,0.72)]'
-                  }`}
+                  className="rounded-md border px-2 py-2"
+                  style={{
+                    backgroundColor:
+                      diagnostic.severity === 'error'
+                        ? 'var(--workbench-shell-danger-surface)'
+                        : diagnostic.severity === 'warning'
+                          ? 'var(--workbench-shell-warning-surface)'
+                          : 'var(--workbench-shell-overlay)',
+                    borderColor:
+                      diagnostic.severity === 'error'
+                        ? 'var(--workbench-shell-danger-border)'
+                        : diagnostic.severity === 'warning'
+                          ? 'var(--workbench-shell-warning-border)'
+                          : 'var(--workbench-shell-border)',
+                  }}
                 >
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+                  <p
+                    className="text-[11px] uppercase tracking-[0.18em]"
+                    style={{
+                      color:
+                        diagnostic.severity === 'error'
+                          ? 'var(--workbench-shell-danger-text)'
+                          : diagnostic.severity === 'warning'
+                            ? 'var(--workbench-shell-warning-text)'
+                            : 'var(--workbench-shell-text-dim)',
+                    }}
+                  >
                     {diagnostic.severity}
                   </p>
                   <p className="mt-1 text-sm text-[var(--mantine-color-dark-0)]">{diagnostic.message}</p>

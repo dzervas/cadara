@@ -624,7 +624,7 @@ export function ThreeCadViewport({
       <div
         ref={viewCubeRef}
         data-testid="view-cube"
-        className="pointer-events-auto absolute right-4 top-4 overflow-hidden rounded-xl border border-[var(--cad-border-strong)] bg-[rgba(8,12,17,0.78)] shadow-[var(--cad-panel-shadow)]"
+        className="pointer-events-auto absolute right-4 top-4 overflow-hidden rounded-xl border border-[var(--cad-border-strong)] bg-[var(--workbench-viewport-overlay-muted)] shadow-[var(--cad-panel-shadow)]"
         style={{ width: VIEW_CUBE_SIZE, height: VIEW_CUBE_SIZE }}
       />
     </div>

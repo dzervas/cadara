@@ -42,7 +42,7 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
       {diagnostics.map((diagnostic, index) => (
         <div
           key={`${diagnostic.code}-${diagnostic.message}-${index}`}
-          className="rounded-lg border border-[var(--mantine-color-dark-5)] bg-[rgba(12,16,22,0.8)] px-3 py-2"
+          className="rounded-lg border border-[var(--workbench-shell-border)] bg-[var(--workbench-shell-surface)] px-3 py-2"
         >
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
             {diagnostic.severity}
@@ -95,7 +95,7 @@ function isPrimitiveRefValue(value: unknown): value is PrimitiveRef {
 
 function fieldBorderClass(field: Pick<FeatureEditorFormField, 'error'>, isActive = false) {
   if (field.error) {
-    return 'border-red-500 text-red-100'
+    return 'border-[var(--workbench-shell-danger-border)] text-[var(--workbench-shell-danger-text)]'
   }
 
   if (isActive) {
@@ -107,7 +107,7 @@ function fieldBorderClass(field: Pick<FeatureEditorFormField, 'error'>, isActive
 
 function FieldMessage(props: { helper?: string; error?: { message: string } | null }) {
   if (props.error) {
-    return <p className="text-xs text-red-300">{props.error.message}</p>
+    return <p className="text-xs text-[var(--workbench-shell-danger-text)]">{props.error.message}</p>
   }
 
   return props.helper ? (
@@ -158,7 +158,7 @@ function NumericField(props: {
               }
             }}
             aria-invalid={props.field.error ? true : undefined}
-            className={`h-10 rounded-md bg-[rgba(12,16,22,0.8)] ${fieldBorderClass(props.field)}`}
+            className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] ${fieldBorderClass(props.field)}`}
           />
           <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
         </section>
@@ -200,15 +200,17 @@ function EnumField(props: {
                 styles={{
                   root: {
                     backgroundColor:
-                      field.value === option.value ? 'rgba(94, 130, 171, 0.18)' : 'rgba(12, 16, 22, 0.8)',
+                      field.value === option.value
+                        ? 'var(--workbench-shell-accent-surface)'
+                        : 'var(--workbench-shell-surface)',
                     borderColor:
                       field.value === option.value
-                        ? 'var(--mantine-color-dark-4)'
-                        : 'var(--mantine-color-dark-5)',
+                        ? 'var(--workbench-shell-border-strong)'
+                        : 'var(--workbench-shell-border)',
                     color:
                       field.value === option.value
-                        ? 'var(--mantine-color-dark-0)'
-                        : 'var(--mantine-color-dark-2)',
+                        ? 'var(--workbench-shell-text)'
+                        : 'var(--workbench-shell-text-muted)',
                   },
                 }}
               >
@@ -233,11 +235,11 @@ function ReferenceCard(props: {
   onClear?: () => void
   clearDisabled?: boolean
 }) {
-  const className = `w-full rounded-md border bg-[rgba(12,16,22,0.8)] px-3 py-3 text-left transition ${fieldBorderClass({ error: props.error }, props.isActive)}`
+  const className = `w-full rounded-md border bg-[var(--workbench-shell-surface)] px-3 py-3 text-left transition ${fieldBorderClass({ error: props.error }, props.isActive)}`
   const labelContent = (
     <>
       <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.title}</p>
-      <p className={`mt-1 text-sm ${props.error ? 'text-red-100' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
+      <p className={`mt-1 text-sm ${props.error ? 'text-[var(--workbench-shell-danger-text)]' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
         {props.value}
       </p>
     </>
@@ -261,9 +263,9 @@ function ReferenceCard(props: {
               size={28}
               styles={{
                 root: {
-                  backgroundColor: 'rgba(12, 16, 22, 0.8)',
-                  borderColor: 'var(--mantine-color-dark-5)',
-                  color: 'var(--mantine-color-dark-2)',
+                  backgroundColor: 'var(--workbench-shell-surface)',
+                  borderColor: 'var(--workbench-shell-border)',
+                  color: 'var(--workbench-shell-text-muted)',
                 },
               }}
             >
@@ -293,9 +295,9 @@ function ReferenceCard(props: {
             size={28}
             styles={{
               root: {
-                backgroundColor: 'rgba(12, 16, 22, 0.8)',
-                borderColor: 'var(--mantine-color-dark-5)',
-                color: 'var(--mantine-color-dark-2)',
+                backgroundColor: 'var(--workbench-shell-surface)',
+                borderColor: 'var(--workbench-shell-border)',
+                color: 'var(--workbench-shell-text-muted)',
               },
             }}
           >
@@ -344,7 +346,7 @@ function ReferenceCollectionCard(props: {
 
         return (
           <Paper
-            className={`rounded-md border bg-[rgba(12,16,22,0.8)] px-3 py-3 ${fieldBorderClass(props.field, props.isActive)}`}
+            className={`rounded-md border bg-[var(--workbench-shell-surface)] px-3 py-3 ${fieldBorderClass(props.field, props.isActive)}`}
           >
             <div className="flex items-start justify-between gap-2">
               <button
@@ -371,9 +373,9 @@ function ReferenceCollectionCard(props: {
                 size={28}
                 styles={{
                   root: {
-                    backgroundColor: 'rgba(12, 16, 22, 0.8)',
-                    borderColor: 'var(--mantine-color-dark-5)',
-                    color: 'var(--mantine-color-dark-2)',
+                    backgroundColor: 'var(--workbench-shell-surface)',
+                    borderColor: 'var(--workbench-shell-border)',
+                    color: 'var(--workbench-shell-text-muted)',
                   },
                 }}
               >
@@ -385,7 +387,7 @@ function ReferenceCollectionCard(props: {
                 {selected.map((target) => (
                   <div
                     key={getPrimitiveRefLabel(target)}
-                    className="flex items-center justify-between gap-2 rounded-md border border-[var(--mantine-color-dark-5)] bg-[rgba(7,10,14,0.72)] px-2 py-2"
+                    className="flex items-center justify-between gap-2 rounded-md border border-[var(--workbench-shell-border)] bg-[var(--workbench-shell-overlay)] px-2 py-2"
                   >
                     <span className="min-w-0 truncate text-xs text-[var(--mantine-color-dark-0)]">
                       {props.field.picker.itemLabel ?? props.field.label}: {getPrimitiveRefLabel(target)}
@@ -405,9 +407,9 @@ function ReferenceCollectionCard(props: {
                               size={24}
                               styles={{
                                 root: {
-                                  backgroundColor: 'rgba(12, 16, 22, 0.8)',
-                                  borderColor: 'var(--mantine-color-dark-5)',
-                                  color: 'var(--mantine-color-dark-2)',
+                                  backgroundColor: 'var(--workbench-shell-surface)',
+                                  borderColor: 'var(--workbench-shell-border)',
+                                  color: 'var(--workbench-shell-text-muted)',
                                 },
                               }}
                             >
@@ -424,9 +426,9 @@ function ReferenceCollectionCard(props: {
                               size={24}
                               styles={{
                                 root: {
-                                  backgroundColor: 'rgba(12, 16, 22, 0.8)',
-                                  borderColor: 'var(--mantine-color-dark-5)',
-                                  color: 'var(--mantine-color-dark-2)',
+                                  backgroundColor: 'var(--workbench-shell-surface)',
+                                  borderColor: 'var(--workbench-shell-border)',
+                                  color: 'var(--workbench-shell-text-muted)',
                                 },
                               }}
                             >
@@ -446,9 +448,9 @@ function ReferenceCollectionCard(props: {
                           size={24}
                           styles={{
                             root: {
-                              backgroundColor: 'rgba(12, 16, 22, 0.8)',
-                              borderColor: 'var(--mantine-color-dark-5)',
-                              color: 'var(--mantine-color-dark-2)',
+                              backgroundColor: 'var(--workbench-shell-surface)',
+                              borderColor: 'var(--workbench-shell-border)',
+                              color: 'var(--workbench-shell-text-muted)',
                             },
                           }}
                         >
@@ -592,13 +594,13 @@ export function FeatureInspector({
       component="aside"
       className="flex h-full max-h-full w-[320px] min-w-[320px] flex-col overflow-hidden"
       style={{
-        background: 'linear-gradient(180deg, rgba(16, 21, 29, 0.98), rgba(10, 14, 20, 0.98))',
-        border: '1px solid var(--mantine-color-dark-5)',
+        background: 'var(--workbench-shell-surface-panel)',
+        border: '1px solid var(--workbench-shell-border)',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <header className="px-4 py-4" style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
+      <header className="px-4 py-4" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
         <div className="flex items-center gap-2">
           <ThemeIcon variant="light" color="workbench" size={20}>
             <Layers3 className="h-4 w-4" />
@@ -630,7 +632,7 @@ export function FeatureInspector({
         ))}
       </div>
 
-      <footer className="grid grid-cols-2 gap-2 px-4 py-4" style={{ borderTop: '1px solid var(--mantine-color-dark-5)' }}>
+      <footer className="grid grid-cols-2 gap-2 px-4 py-4" style={{ borderTop: '1px solid var(--workbench-shell-border)' }}>
         <Button
           type="button"
           onClick={onCancel}
@@ -638,9 +640,9 @@ export function FeatureInspector({
           leftSection={<CircleSlash className="h-4 w-4" />}
           styles={{
             root: {
-              backgroundColor: 'rgba(12, 16, 22, 0.8)',
-              borderColor: 'var(--mantine-color-dark-5)',
-              color: 'var(--mantine-color-dark-2)',
+              backgroundColor: 'var(--workbench-shell-surface)',
+              borderColor: 'var(--workbench-shell-border)',
+              color: 'var(--workbench-shell-text-muted)',
             },
           }}
         >
@@ -654,9 +656,9 @@ export function FeatureInspector({
           leftSection={<Check className="h-4 w-4" />}
           styles={{
             root: {
-              backgroundColor: 'rgba(94, 130, 171, 0.22)',
-              borderColor: 'var(--mantine-color-workbench-4)',
-              color: 'var(--mantine-color-dark-0)',
+              backgroundColor: 'var(--workbench-shell-accent-surface)',
+              borderColor: 'var(--workbench-shell-accent)',
+              color: 'var(--workbench-shell-text)',
             },
           }}
         >

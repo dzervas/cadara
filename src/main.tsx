@@ -4,11 +4,15 @@ import { createRoot } from 'react-dom/client'
 import '@mantine/core/styles.css'
 import './index.css'
 import App from './App.tsx'
-import { workbenchTheme } from '@/theme/workbench-theme'
+import { workbenchCssVariablesResolver, workbenchTheme } from '@/theme/workbench-theme'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+    <MantineProvider
+      theme={workbenchTheme}
+      defaultColorScheme="dark"
+      cssVariablesResolver={workbenchCssVariablesResolver}
+    >
       <App />
     </MantineProvider>
   </StrictMode>,

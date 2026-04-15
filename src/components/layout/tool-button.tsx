@@ -19,6 +19,20 @@ export function ToolButton({
   active = false,
 }: ToolButtonProps) {
   const { triggerTool } = useToolActions()
+  const isSuccessAction = tool.id === 'finishSketch'
+  const emphasisBackground = isSuccessAction
+    ? 'var(--workbench-shell-success-surface)'
+    : active
+      ? 'var(--workbench-shell-accent-surface)'
+      : 'transparent'
+  const emphasisBorder = isSuccessAction
+    ? 'var(--workbench-shell-success-border)'
+    : active
+      ? 'var(--workbench-shell-accent)'
+      : 'transparent'
+  const emphasisColor = isSuccessAction
+    ? 'var(--workbench-shell-success-text)'
+    : 'var(--workbench-shell-text)'
 
   const handleClick = () => {
     triggerTool(tool.id, {
@@ -40,10 +54,10 @@ export function ToolButton({
         radius="md"
         px="sm"
         py={10}
-        withBorder={active}
+        withBorder={active || isSuccessAction}
         style={{
-          backgroundColor: active ? 'rgba(94, 130, 171, 0.2)' : 'transparent',
-          borderColor: 'var(--mantine-color-dark-5)',
+          backgroundColor: emphasisBackground,
+          borderColor: active || isSuccessAction ? emphasisBorder : 'var(--workbench-shell-border)',
         }}
       >
         <div className="flex items-center gap-3">
@@ -52,17 +66,25 @@ export function ToolButton({
             withBorder
             p={8}
             style={{
-              backgroundColor: 'var(--mantine-color-dark-8)',
-              borderColor: 'var(--mantine-color-dark-5)',
+              backgroundColor: 'var(--workbench-shell-control-surface)',
+              borderColor: 'var(--workbench-shell-border)',
             }}
           >
             <ToolbarToolIcon icon={tool.icon} />
           </Paper>
           <div className="min-w-0 flex-1">
-            <Text size="sm" fw={500} c="dark.0" truncate="end">
+            <Text size="sm" fw={500} truncate="end" style={{ color: emphasisColor }}>
               {tool.name}
             </Text>
-            <Text size="xs" c="dimmed" truncate="end">
+            <Text
+              size="xs"
+              truncate="end"
+              style={{
+                color: isSuccessAction
+                  ? 'var(--workbench-shell-success-text)'
+                  : 'var(--workbench-shell-text-muted)',
+              }}
+            >
               {tool.tooltip}
             </Text>
           </div>
@@ -82,11 +104,9 @@ export function ToolButton({
       data-tool-tooltip={tool.tooltip}
       styles={{
         root: {
-          border: active
-            ? '1px solid var(--mantine-color-workbench-4)'
-            : '1px solid transparent',
-          backgroundColor: active ? 'rgba(94, 130, 171, 0.22)' : 'transparent',
-          color: 'var(--mantine-color-dark-0)',
+          border: `1px solid ${active || isSuccessAction ? emphasisBorder : 'transparent'}`,
+          backgroundColor: emphasisBackground,
+          color: emphasisColor,
         },
       }}
     >

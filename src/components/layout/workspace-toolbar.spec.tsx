@@ -7,6 +7,8 @@ import {
   getEditorViewState,
   initialEditorState,
 } from '@/contracts/editor/state-machine'
+import { createNewSketchSession } from '@/domain/editor/sketch-session'
+import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 import { EditorContext } from '@/hooks/editor-context'
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
@@ -51,4 +53,39 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   assert(!toolbarMarkup.includes('Filter:'), 'Toolbar should not duplicate the selection filter debugger readout.')
   assert(!toolbarMarkup.includes('Requirement:'), 'Toolbar should not duplicate the requirement debugger readout.')
   assert(!toolbarMarkup.includes('Slots:'), 'Toolbar should not duplicate the slot-count debugger readout.')
+
+  const sketchToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: {
+            ...getEditorViewState(initialEditorState),
+            mode: 'sketch',
+            activeCommand: {
+              commandSessionId: 'command_sketch-1',
+              toolId: 'line',
+              phase: 'editing',
+            },
+            sketchSession: createNewSketchSession(createStandardPlaneDefinition('xy')),
+          },
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    sketchToolbarMarkup.includes('aria-label="Finish Sketch"'),
+    'Toolbar should render Finish Sketch while a sketch session is active.',
+  )
+  assert(
+    sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)') &&
+      sketchToolbarMarkup.includes('var(--workbench-shell-success-border)'),
+    'Finish Sketch should use the semantic success treatment from the shared workbench theme.',
+  )
 })
