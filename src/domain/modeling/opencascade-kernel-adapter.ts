@@ -697,6 +697,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
   }
 
+  private buildInitialSnapshotWithoutRuntime() {
+    const authoringState = createOccAuthoringState({} as OpenCascadeInstance, {
+      documentId: this.documentId,
+      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+
+    return buildOccWorkspaceSnapshot(authoringState)
+  }
+
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
     this.runtimeState = runtimeState
     this.initializationPromise = Promise.resolve(runtimeState)
@@ -1033,6 +1043,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (!this.runtimeState && !this.initializationPromise) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        snapshot: this.buildInitialSnapshotWithoutRuntime(),
+      }
+    }
+
     const runtimeState = await this.getRuntimeState()
 
     return {

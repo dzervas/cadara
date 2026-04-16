@@ -1,5 +1,5 @@
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
-import { isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
+import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, revolveSelectionFilter } from '@/domain/editor/schema'
 import { REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
@@ -116,15 +116,30 @@ export const revolveAuthoringDefinition = {
     return `${prefix} revolve with explicit profile and axis`
   },
   getMissingInputsDiagnostics(input) {
-    return [createMissingInputDiagnostic({
-      feature: 'revolve',
-      phase: input.phase,
-      suffix: 'references',
-      message: 'Revolve preview requires both a profile and an axis reference.',
-    })]
+    const diagnostics = []
+
+    if (input.draft.profileTargets.length === 0 || !input.draft.axisTarget) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'revolve',
+        phase: input.phase,
+        suffix: 'references',
+        message: 'Revolve preview requires both a profile and an axis reference.',
+      }))
+    }
+
+    if (!hasBooleanTargetScope(input.draft.operation, input.draft.booleanScope)) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'revolve',
+        phase: input.phase,
+        suffix: 'boolean-target',
+        message: 'Select at least one target body before previewing revolve.',
+      }))
+    }
+
+    return diagnostics
   },
   buildDefinition(draft) {
-    return draft.profileTargets.length > 0 && draft.axisTarget
+    return draft.profileTargets.length > 0 && draft.axisTarget && hasBooleanTargetScope(draft.operation, draft.booleanScope)
       ? {
           kind: 'revolve',
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
@@ -145,6 +160,7 @@ export const revolveAuthoringDefinition = {
       : null
   },
   getFormSchema(session) {
+    const booleanTargetBodies = getBooleanScopeBodyTargets(session.draft.booleanScope)
     return {
       sections: [
         {
@@ -214,6 +230,31 @@ export const revolveAuthoringDefinition = {
                 { value: 'intersect', label: 'intersect' },
               ],
               patch: { patchKey: 'operation' },
+            },
+            {
+              kind: 'referenceCollection',
+              id: 'revolve-target-bodies',
+              label: 'Boolean target bodies',
+              value: booleanTargetBodies,
+              emptyLabel: 'None selected',
+              helper: 'Join, cut, and intersect require at least one explicit target body.',
+              hidden: session.draft.operation === 'newBody',
+              error: session.draft.operation === 'newBody' || booleanTargetBodies.length > 0
+                ? null
+                : { message: 'Select at least one target body.' },
+              advancedParticipant: {
+                role: 'targetBody',
+                required: session.draft.operation !== 'newBody',
+                cardinality: { min: session.draft.operation === 'newBody' ? 0 : 1, max: null },
+                selectedCount: booleanTargetBodies.length,
+              },
+              picker: {
+                mode: 'appendUnique',
+                allowsMultiple: true,
+                selectionFilter: createSelectionFilterForRequirement(revolveSelectionFilter, 'revolve-boolean-target', 'Revolve target body'),
+                itemLabel: 'Target body',
+              },
+              patch: { patchKey: 'booleanTargetBodyIds' },
             },
           ],
         },

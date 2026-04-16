@@ -1,5 +1,5 @@
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
-import { isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
+import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, extrudeSelectionFilter } from '@/domain/editor/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { appendUniqueTarget, asBodyRef, asExtrudeProfileRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
@@ -95,15 +95,30 @@ export const extrudeAuthoringDefinition = {
       : 'Select one or more sketch regions or planar faces for extrude'
   },
   getMissingInputsDiagnostics(input) {
-    return [createMissingInputDiagnostic({
-      feature: 'extrude',
-      phase: input.phase,
-      suffix: 'profile',
-      message: 'Select a derived sketch region or planar face before previewing extrude.',
-    })]
+    const diagnostics = []
+
+    if (input.draft.profileTargets.length === 0) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'extrude',
+        phase: input.phase,
+        suffix: 'profile',
+        message: 'Select a derived sketch region or planar face before previewing extrude.',
+      }))
+    }
+
+    if (!hasBooleanTargetScope(input.draft.operation, input.draft.booleanScope)) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'extrude',
+        phase: input.phase,
+        suffix: 'boolean-target',
+        message: 'Select at least one target body before previewing extrude.',
+      }))
+    }
+
+    return diagnostics
   },
   buildDefinition(draft) {
-    return draft.profileTargets.length > 0
+    return draft.profileTargets.length > 0 && hasBooleanTargetScope(draft.operation, draft.booleanScope)
       ? {
           kind: 'extrude',
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -122,6 +137,7 @@ export const extrudeAuthoringDefinition = {
       : null
   },
   getFormSchema(session) {
+    const booleanTargetBodies = getBooleanScopeBodyTargets(session.draft.booleanScope)
     return {
       sections: [
         {
@@ -176,6 +192,31 @@ export const extrudeAuthoringDefinition = {
                 { value: 'intersect', label: 'intersect' },
               ],
               patch: { patchKey: 'operation' },
+            },
+            {
+              kind: 'referenceCollection',
+              id: 'extrude-target-bodies',
+              label: 'Boolean target bodies',
+              value: booleanTargetBodies,
+              emptyLabel: 'None selected',
+              helper: 'Join, cut, and intersect require at least one explicit target body.',
+              hidden: session.draft.operation === 'newBody',
+              error: session.draft.operation === 'newBody' || booleanTargetBodies.length > 0
+                ? null
+                : { message: 'Select at least one target body.' },
+              advancedParticipant: {
+                role: 'targetBody',
+                required: session.draft.operation !== 'newBody',
+                cardinality: { min: session.draft.operation === 'newBody' ? 0 : 1, max: null },
+                selectedCount: booleanTargetBodies.length,
+              },
+              picker: {
+                mode: 'appendUnique',
+                allowsMultiple: true,
+                selectionFilter: createSelectionFilterForRequirement(extrudeSelectionFilter, 'extrude-target-body', 'Extrude target body'),
+                itemLabel: 'Target body',
+              },
+              patch: { patchKey: 'booleanTargetBodyIds' },
             },
           ],
         },

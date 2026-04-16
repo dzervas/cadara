@@ -255,12 +255,45 @@ export function isBooleanOperation(value: unknown): value is FeatureBooleanOpera
   return value === 'newBody' || value === 'join' || value === 'cut' || value === 'intersect'
 }
 
+export function getBooleanScopeBodyTargets(
+  booleanScope: FeatureBooleanScope,
+): readonly Extract<PrimitiveRef, { kind: 'body' }>[] {
+  if (booleanScope.kind === 'targetBody') {
+    return [{ kind: 'body', bodyId: booleanScope.bodyId }]
+  }
+
+  if (booleanScope.kind === 'targetBodies') {
+    return booleanScope.bodyIds.map((bodyId) => ({ kind: 'body', bodyId }))
+  }
+
+  return []
+}
+
+export function hasBooleanTargetScope(
+  operation: FeatureBooleanOperation,
+  booleanScope: FeatureBooleanScope,
+): boolean {
+  return operation === 'newBody'
+    ? booleanScope.kind === 'standalone'
+    : getBooleanScopeBodyTargets(booleanScope).length > 0
+}
+
 export function toBodyIds(value: unknown): readonly BodyId[] | null {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+  if (!Array.isArray(value)) {
     return null
   }
 
-  return value as readonly BodyId[]
+  const bodyIds = value.map((entry) => {
+    if (typeof entry === 'string') {
+      return entry as BodyId
+    }
+
+    return entry && typeof entry === 'object' && 'kind' in entry && entry.kind === 'body' && 'bodyId' in entry && typeof entry.bodyId === 'string'
+      ? entry.bodyId as BodyId
+      : null
+  })
+
+  return bodyIds.some((entry) => entry === null) ? null : bodyIds as readonly BodyId[]
 }
 
 export function toBooleanScope(patch: FeatureDraftPatch, current: FeatureBooleanScope): FeatureBooleanScope {
@@ -293,10 +326,12 @@ export function toBooleanScope(patch: FeatureDraftPatch, current: FeatureBoolean
 
   const bodyIds = toBodyIds(patch.booleanTargetBodyIds)
   if (bodyIds) {
-    return bodyIds.length <= 1
-      ? bodyIds[0]
-        ? { kind: 'targetBody', bodyId: bodyIds[0] }
-        : current
+    if (bodyIds.length === 0) {
+      return { kind: 'standalone' }
+    }
+
+    return bodyIds.length === 1
+      ? { kind: 'targetBody', bodyId: bodyIds[0]! }
       : { kind: 'targetBodies', bodyIds }
   }
 

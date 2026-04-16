@@ -30,7 +30,7 @@ RUN curl -fsSL https://bun.com/install | bash
 ENV PATH=$PATH:/root/.bun/bin
 
 # Install codex from npm globally
-RUN bun install -g @openai/codex@latest @fission-ai/openspec@latest
+RUN bun install -g @openai/codex@latest @fission-ai/openspec@latest openspecui@latest
 RUN bun install -g @mariozechner/pi-coding-agent task-factory
 
 RUN bunx playwright install --with-deps chrome chromium-headless-shell
@@ -44,3 +44,5 @@ ENV CODEX_UNSAFE_ALLOW_NO_SANDBOX=1
 
 RUN mkdir -p /app
 WORKDIR /app
+
+CMD [ "openspecui" ]

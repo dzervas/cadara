@@ -1,5 +1,5 @@
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
-import { isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
+import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, shellSelectionFilter } from '@/domain/editor/schema'
 import { SHELL_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { appendUniqueTarget, asBodyRef, asFaceRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
@@ -30,6 +30,13 @@ export const shellAuthoringDefinition = {
       required: true,
       cardinality: { min: 1, max: null },
       acceptedKinds: ['face'],
+    },
+    {
+      role: 'targetBody',
+      label: 'Boolean target bodies',
+      required: false,
+      cardinality: { min: 0, max: null },
+      acceptedKinds: ['body'],
     },
   ],
   operationIntent: {
@@ -108,15 +115,30 @@ export const shellAuthoringDefinition = {
     return `${prefix} shell on ${draft.bodyTarget.bodyId}`
   },
   getMissingInputsDiagnostics(input) {
-    return [createMissingInputDiagnostic({
-      feature: 'shell',
-      phase: input.phase,
-      suffix: 'shell-inputs',
-      message: 'Shell preview requires one body and at least one removable face.',
-    })]
+    const diagnostics = []
+
+    if (!input.draft.bodyTarget || input.draft.faceTargets.length === 0) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'shell',
+        phase: input.phase,
+        suffix: 'shell-inputs',
+        message: 'Shell preview requires one body and at least one removable face.',
+      }))
+    }
+
+    if (!hasBooleanTargetScope(input.draft.operation, input.draft.booleanScope)) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'shell',
+        phase: input.phase,
+        suffix: 'boolean-target',
+        message: 'Select at least one target body before previewing shell.',
+      }))
+    }
+
+    return diagnostics
   },
   buildDefinition(draft) {
-    return draft.bodyTarget && draft.faceTargets.length > 0
+    return draft.bodyTarget && draft.faceTargets.length > 0 && hasBooleanTargetScope(draft.operation, draft.booleanScope)
       ? {
           kind: 'shell',
           featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
@@ -131,6 +153,7 @@ export const shellAuthoringDefinition = {
       : null
   },
   getFormSchema(session) {
+    const booleanTargetBodies = getBooleanScopeBodyTargets(session.draft.booleanScope)
     return {
       sections: [
         {
@@ -199,6 +222,31 @@ export const shellAuthoringDefinition = {
                 { value: 'intersect', label: 'intersect' },
               ],
               patch: { patchKey: 'operation' },
+            },
+            {
+              kind: 'referenceCollection',
+              id: 'shell-target-bodies',
+              label: 'Boolean target bodies',
+              value: booleanTargetBodies,
+              emptyLabel: 'None selected',
+              helper: 'Join, cut, and intersect require at least one explicit target body.',
+              hidden: session.draft.operation === 'newBody',
+              error: session.draft.operation === 'newBody' || booleanTargetBodies.length > 0
+                ? null
+                : { message: 'Select at least one target body.' },
+              advancedParticipant: {
+                role: 'targetBody',
+                required: session.draft.operation !== 'newBody',
+                cardinality: { min: session.draft.operation === 'newBody' ? 0 : 1, max: null },
+                selectedCount: booleanTargetBodies.length,
+              },
+              picker: {
+                mode: 'appendUnique',
+                allowsMultiple: true,
+                selectionFilter: createSelectionFilterForRequirement(shellSelectionFilter, 'shell-boolean-target', 'Shell target body'),
+                itemLabel: 'Target body',
+              },
+              patch: { patchKey: 'booleanTargetBodyIds' },
             },
           ],
         },

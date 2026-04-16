@@ -25,6 +25,12 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     }
   }
 
+  function getFormField(session: Parameters<typeof getFeatureEditorFormSchema>[0], fieldId: string) {
+    return getFeatureEditorFormSchema(session)
+      .sections.flatMap((section) => section.fields)
+      .find((field) => field.id === fieldId)
+  }
+
   function testRegistryContainsCurrentFeatureSet() {
     const registeredKinds = getRegisteredFeatureAuthoringDefinitions()
       .map((definition) => definition.metadata.kind)
@@ -56,6 +62,115 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     assert(definition.parameters.axis.kind === 'edge', 'The selected edge should become the revolve axis.')
   }
 
+  function testExtrudeBooleanTargetSelectorVisibilityAndScope() {
+    const profile = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
+    const targetBodyA = { kind: 'body' as const, bodyId: 'body_target_a' as const }
+    const targetBodyB = { kind: 'body' as const, bodyId: 'body_target_b' as const }
+    const initialSession = createFeatureEditSession({
+      featureType: 'extrude',
+      selectedTarget: profile,
+    })
+    const operationField = getFormField(initialSession, 'extrude-operation')
+    const hiddenTargetField = getFormField(initialSession, 'extrude-target-bodies')
+
+    assert(operationField?.kind === 'enum', 'Extrude schema should expose operation as a generic enum field.')
+    assert(hiddenTargetField?.kind === 'referenceCollection', 'Extrude schema should expose boolean target bodies as a reference collection.')
+    assert(hiddenTargetField.hidden === true, 'Extrude should hide boolean target bodies for newBody operation.')
+
+    const joinSession = patchFeatureEditSession(initialSession, createFeatureEditorFieldPatch(operationField, 'join'))
+    const visibleTargetField = getFormField(joinSession, 'extrude-target-bodies')
+
+    assert(visibleTargetField?.kind === 'referenceCollection', 'Extrude target bodies field should remain a reference collection.')
+    assert(visibleTargetField.hidden !== true, 'Extrude should show boolean target bodies for join operation.')
+    assert(visibleTargetField.error?.message === 'Select at least one target body.', 'Extrude should mark missing boolean target bodies as invalid.')
+    assert(buildFeatureDefinition(joinSession) === null, 'Extrude boolean drafts without target bodies should not build a definition.')
+
+    const oneTargetSession = patchFeatureEditSession(
+      joinSession,
+      createFeatureEditorReferenceSelectionPatch(visibleTargetField, targetBodyA),
+    )
+    const oneTargetDefinition = buildFeatureDefinition(oneTargetSession)
+
+    assert(
+      oneTargetDefinition?.kind === 'extrude' &&
+        oneTargetDefinition.parameters.operation === 'join' &&
+        oneTargetDefinition.parameters.booleanScope.kind === 'targetBody' &&
+        oneTargetDefinition.parameters.booleanScope.bodyId === targetBodyA.bodyId,
+      'Extrude boolean target selection should build a targetBody boolean scope.',
+    )
+
+    const twoTargetField = getFormField(oneTargetSession, 'extrude-target-bodies')
+    assert(twoTargetField?.kind === 'referenceCollection', 'Extrude target bodies field should hydrate selected target bodies.')
+
+    const twoTargetSession = patchFeatureEditSession(
+      oneTargetSession,
+      createFeatureEditorReferenceSelectionPatch(twoTargetField, targetBodyB),
+    )
+    const twoTargetDefinition = buildFeatureDefinition(twoTargetSession)
+
+    assert(
+      twoTargetDefinition?.kind === 'extrude' &&
+        twoTargetDefinition.parameters.booleanScope.kind === 'targetBodies' &&
+        twoTargetDefinition.parameters.booleanScope.bodyIds.length === 2,
+      'Extrude should preserve multiple selected boolean target bodies.',
+    )
+
+    const resetOperationField = getFormField(twoTargetSession, 'extrude-operation')
+    assert(resetOperationField?.kind === 'enum', 'Extrude operation field should remain available after target body selection.')
+
+    const resetSession = patchFeatureEditSession(
+      twoTargetSession,
+      createFeatureEditorFieldPatch(resetOperationField, 'newBody'),
+    )
+    const resetDefinition = buildFeatureDefinition(resetSession)
+
+    assert(
+      resetDefinition?.kind === 'extrude' && resetDefinition.parameters.booleanScope.kind === 'standalone',
+      'Extrude should reset boolean scope to standalone when switching back to newBody.',
+    )
+    assert(getFormField(resetSession, 'extrude-target-bodies')?.hidden === true, 'Extrude should hide target bodies after switching back to newBody.')
+  }
+
+  function testRevolveBooleanTargetSelectorVisibilityAndScope() {
+    const profile = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
+    const axis = { kind: 'edge' as const, bodyId: 'body_axis' as const, edgeId: 'edge_axis' as const }
+    const targetBody = { kind: 'body' as const, bodyId: 'body_target' as const }
+    const initialSession = applySelectionToFeatureEditSession(
+      createFeatureEditSession({
+        featureType: 'revolve',
+        selectedTarget: profile,
+      }),
+      axis,
+    )
+    const operationField = getFormField(initialSession, 'revolve-operation')
+    const hiddenTargetField = getFormField(initialSession, 'revolve-target-bodies')
+
+    assert(operationField?.kind === 'enum', 'Revolve schema should expose operation as a generic enum field.')
+    assert(hiddenTargetField?.kind === 'referenceCollection', 'Revolve schema should expose boolean target bodies as a reference collection.')
+    assert(hiddenTargetField.hidden === true, 'Revolve should hide boolean target bodies for newBody operation.')
+
+    const cutSession = patchFeatureEditSession(initialSession, createFeatureEditorFieldPatch(operationField, 'cut'))
+    const visibleTargetField = getFormField(cutSession, 'revolve-target-bodies')
+
+    assert(visibleTargetField?.kind === 'referenceCollection', 'Revolve target bodies field should remain a reference collection.')
+    assert(visibleTargetField.hidden !== true, 'Revolve should show boolean target bodies for cut operation.')
+    assert(buildFeatureDefinition(cutSession) === null, 'Revolve boolean drafts without target bodies should not build a definition.')
+
+    const targetSession = patchFeatureEditSession(
+      cutSession,
+      createFeatureEditorReferenceSelectionPatch(visibleTargetField, targetBody),
+    )
+    const definition = buildFeatureDefinition(targetSession)
+
+    assert(
+      definition?.kind === 'revolve' &&
+        definition.parameters.operation === 'cut' &&
+        definition.parameters.booleanScope.kind === 'targetBody' &&
+        definition.parameters.booleanScope.bodyId === targetBody.bodyId,
+      'Revolve boolean target selection should build a targetBody boolean scope.',
+    )
+  }
+
   function testSweepDraftSelectionAndDefinitionBuilder() {
     const profile = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
     const path = { kind: 'edge' as const, bodyId: 'body_a' as const, edgeId: 'edge_path' as const }
@@ -84,6 +199,9 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const schema = getFeatureEditorFormSchema(completedSession)
     const operationField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'sweep-operation-intent')
     assert(operationField?.kind === 'enum', 'Sweep form schema should expose operation intent as a generic enum field.')
+    const hiddenTargetBodiesField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'sweep-target-bodies')
+    assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
+    assert(hiddenTargetBodiesField.hidden === true, 'Sweep should hide target bodies for create operation.')
 
     const subtractSession = patchFeatureEditSession(
       completedSession,
@@ -95,6 +213,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'sweep-target-bodies')
     assert(targetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
+    assert(targetBodiesField.hidden !== true, 'Sweep should show target bodies for subtract operation.')
 
     const booleanSession = patchFeatureEditSession(
       subtractSession,
@@ -203,6 +322,17 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       definition.parameters.participants.some((participant) => participant.role === 'guideCurve' && participant.targets[0] === guideCurve),
       'Loft definitions should preserve optional guide-curve participants.',
     )
+
+    const createOperationField = getFormField(guideSession, 'loft-operation-intent')
+    const hiddenTargetBodiesField = getFormField(guideSession, 'loft-target-bodies')
+    assert(createOperationField?.kind === 'enum', 'Loft schema should expose operation intent as a generic enum field.')
+    assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Loft form schema should expose target bodies as a reference collection.')
+    assert(hiddenTargetBodiesField.hidden === true, 'Loft should hide target bodies for create operation.')
+
+    const addSession = patchFeatureEditSession(guideSession, createFeatureEditorFieldPatch(createOperationField, 'add'))
+    const visibleTargetBodiesField = getFormField(addSession, 'loft-target-bodies')
+    assert(visibleTargetBodiesField?.kind === 'referenceCollection', 'Loft target bodies field should remain a reference collection.')
+    assert(visibleTargetBodiesField.hidden !== true, 'Loft should show target bodies for add operation.')
   }
 
   function testLoftHydrationPreservesOrderedProfilesForEditing() {
@@ -275,6 +405,9 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
     assert(thicknessField?.kind === 'numeric', 'Thicken form schema should expose thickness as a numeric field.')
     assert(operationField?.kind === 'enum', 'Thicken form schema should expose operation intent as a generic enum field.')
+    const hiddenTargetBodiesField = getFormField(multiFaceSession, 'thicken-target-bodies')
+    assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Thicken form schema should expose target bodies as a reference collection.')
+    assert(hiddenTargetBodiesField.hidden === true, 'Thicken should hide target bodies for create operation.')
 
     const subtractSession = patchFeatureEditSession(
       patchFeatureEditSession(
@@ -289,6 +422,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'thicken-target-bodies')
     assert(targetBodiesField?.kind === 'referenceCollection', 'Thicken form schema should expose target bodies as a reference collection.')
+    assert(targetBodiesField.hidden !== true, 'Thicken should show target bodies for subtract operation.')
 
     const completeSession = patchFeatureEditSession(
       subtractSession,
@@ -626,6 +760,41 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     assert(fieldIds.includes('shell-faces'), 'Shell form schema should describe its removable-face collection.')
   }
 
+  function testShellBooleanTargetSelectorVisibilityAndScope() {
+    const targetBody = { kind: 'body' as const, bodyId: 'body_boolean_target' as const }
+    const initialSession = createFeatureEditSession({
+      featureType: 'shell',
+      selectedTarget: { kind: 'face', bodyId: 'body_source', faceId: 'face_top' },
+    })
+    const operationField = getFormField(initialSession, 'shell-operation')
+    const hiddenTargetField = getFormField(initialSession, 'shell-target-bodies')
+
+    assert(operationField?.kind === 'enum', 'Shell schema should expose operation as a generic enum field.')
+    assert(hiddenTargetField?.kind === 'referenceCollection', 'Shell schema should expose boolean target bodies as a reference collection.')
+    assert(hiddenTargetField.hidden === true, 'Shell should hide boolean target bodies for newBody operation.')
+
+    const intersectSession = patchFeatureEditSession(initialSession, createFeatureEditorFieldPatch(operationField, 'intersect'))
+    const visibleTargetField = getFormField(intersectSession, 'shell-target-bodies')
+
+    assert(visibleTargetField?.kind === 'referenceCollection', 'Shell target bodies field should remain a reference collection.')
+    assert(visibleTargetField.hidden !== true, 'Shell should show boolean target bodies for intersect operation.')
+    assert(buildFeatureDefinition(intersectSession) === null, 'Shell boolean drafts without target bodies should not build a definition.')
+
+    const targetSession = patchFeatureEditSession(
+      intersectSession,
+      createFeatureEditorReferenceSelectionPatch(visibleTargetField, targetBody),
+    )
+    const definition = buildFeatureDefinition(targetSession)
+
+    assert(
+      definition?.kind === 'shell' &&
+        definition.parameters.operation === 'intersect' &&
+        definition.parameters.booleanScope.kind === 'targetBody' &&
+        definition.parameters.booleanScope.bodyId === targetBody.bodyId,
+      'Shell boolean target selection should build a targetBody boolean scope.',
+    )
+  }
+
   function testAdvancedParticipantDescriptorsAreMachineReadable() {
     const definitions: readonly FeatureAuthoringDefinition[] = getRegisteredFeatureAuthoringDefinitions()
     const extrude = definitions.find((definition) => definition.metadata.kind === 'extrude')
@@ -823,6 +992,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
   testRegistryContainsCurrentFeatureSet()
   testRevolveDraftSelectionAndDefinitionBuilder()
+  testExtrudeBooleanTargetSelectorVisibilityAndScope()
+  testRevolveBooleanTargetSelectorVisibilityAndScope()
   testSweepDraftSelectionAndDefinitionBuilder()
   testChamferDraftSelectionDistanceAndDefinitionBuilder()
   testLoftDraftSelectionReorderingAndDefinitionBuilder()
@@ -835,6 +1006,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testTransformDraftSelectionAndDefinitionBuilder()
   testProfileBasedAuthoringUsesReferenceCollections()
   testShellOwnsFaceSelectionDefaultsAndFormSchema()
+  testShellBooleanTargetSelectorVisibilityAndScope()
   testAdvancedParticipantDescriptorsAreMachineReadable()
   testAdvancedAuthoringAndInspectorDoNotImportKernelModules()
   testGenericFormEventsPatchRevolveAndShellDrafts()

@@ -221,6 +221,20 @@ export const extrudeSelectionFilter: SelectionFilter = {
         },
       ],
     },
+    {
+      id: 'extrude-target-body',
+      label: 'Boolean target body',
+      description: 'The active extrude boolean target selector accepts durable body targets only.',
+      slots: [
+        {
+          id: 'extrude-target-body',
+          label: 'Boolean target body',
+          description: 'Select one target body for the extrude boolean operation.',
+          acceptedKinds: ['body'],
+          acceptedSemantics: ['body'],
+        },
+      ],
+    },
   ],
 }
 
@@ -614,6 +628,20 @@ export const shellSelectionFilter: SelectionFilter = {
           description: 'Select one face to remove.',
           acceptedKinds: ['face'],
           acceptedSemantics: ['face'],
+        },
+      ],
+    },
+    {
+      id: 'shell-boolean-target',
+      label: 'Boolean target body',
+      description: 'The active shell boolean target selector accepts durable body targets only.',
+      slots: [
+        {
+          id: 'shell-boolean-target',
+          label: 'Boolean target body',
+          description: 'Select one target body for the shell boolean operation.',
+          acceptedKinds: ['body'],
+          acceptedSemantics: ['body'],
         },
       ],
     },
