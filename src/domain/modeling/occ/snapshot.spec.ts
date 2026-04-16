@@ -24,6 +24,7 @@ import {
   type SketchDefinition,
   type SketchRecord,
 } from '@/contracts/sketch/schema'
+import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import {
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
@@ -481,6 +482,112 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testNestedSketchRegionsExportSeparateMeshes() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const sketchId = 'sketch_phase6_nested_regions' as SketchId
+    const points = [
+      { id: pointId(`${sketchId}_bottom_left`), position: [0, 0] as const },
+      { id: pointId(`${sketchId}_bottom_right`), position: [6, 0] as const },
+      { id: pointId(`${sketchId}_top_right`), position: [6, 6] as const },
+      { id: pointId(`${sketchId}_top_left`), position: [0, 6] as const },
+      { id: pointId(`${sketchId}_circle_center`), position: [3, 3] as const },
+    ]
+    const entities: SketchDefinition['entities'] = [
+      {
+        kind: 'lineSegment',
+        entityId: entityId(`${sketchId}_bottom`),
+        label: 'bottom',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_bottom`) },
+        isConstruction: false,
+        startPointId: points[0]!.id,
+        endPointId: points[1]!.id,
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId(`${sketchId}_right`),
+        label: 'right',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_right`) },
+        isConstruction: false,
+        startPointId: points[1]!.id,
+        endPointId: points[2]!.id,
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId(`${sketchId}_top`),
+        label: 'top',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_top`) },
+        isConstruction: false,
+        startPointId: points[2]!.id,
+        endPointId: points[3]!.id,
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId(`${sketchId}_left`),
+        label: 'left',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_left`) },
+        isConstruction: false,
+        startPointId: points[3]!.id,
+        endPointId: points[0]!.id,
+      },
+      {
+        kind: 'circle',
+        entityId: entityId(`${sketchId}_circle`),
+        label: 'circle',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_circle`) },
+        isConstruction: false,
+        centerPointId: points[4]!.id,
+        radius: 1,
+      },
+    ]
+    const definition = createSketchDefinition(sketchId, points, entities)
+    const solvedEntities: SketchRecord['solvedSnapshot']['solvedEntities'] = [
+      { kind: 'lineSegment', entityId: entities[0]!.entityId, startPosition: [0, 0], endPosition: [6, 0] },
+      { kind: 'lineSegment', entityId: entities[1]!.entityId, startPosition: [6, 0], endPosition: [6, 6] },
+      { kind: 'lineSegment', entityId: entities[2]!.entityId, startPosition: [6, 6], endPosition: [0, 6] },
+      { kind: 'lineSegment', entityId: entities[3]!.entityId, startPosition: [0, 6], endPosition: [0, 0] },
+      { kind: 'circle', entityId: entities[4]!.entityId, centerPosition: [3, 3], solvedRadius: 1 },
+    ]
+    const derived = deriveSketchRegionsCore({
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      sketchId,
+      definition,
+      solvedSnapshot: {
+        schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+        status: { solveState: 'solved', constraintState: 'wellConstrained' },
+        solvedEntities,
+        solvedPoints: [],
+        constraintStatuses: [],
+        dimensionStatuses: [],
+        diagnostics: [],
+      },
+    })
+
+    const state = createOccAuthoringState(oc, {
+      sketches: [createSketchRecord(sketchId, plane, definition, solvedEntities, derived.regions)],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+    const snapshot = buildOccWorkspaceSnapshot(state)
+    const regionMeshes = snapshot.document.render.records.filter((record) =>
+      record.binding.semanticClass === 'region'
+      && record.binding.target.kind === 'region'
+      && record.geometry.kind === 'mesh',
+    )
+
+    assert(derived.regions.length === 2, 'Nested square/circle sketch should derive two bounded profile cells.')
+    assert(regionMeshes.length === 2, 'Render export must include one pickable mesh per bounded sketch region.')
+    assert(
+      derived.regions.every((region) =>
+        regionMeshes.some((record) =>
+          record.binding.target.kind === 'region'
+          && record.binding.target.regionId === region.regionId,
+        ),
+      ),
+      'Every derived bounded region should have a matching render mesh.',
+    )
+  }
+
   async function testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology() {
     const oc = await getDefaultOpenCascadeInstance()
     const baseBody = await createBoxBody({
@@ -611,6 +718,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
   }
 
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
+  await testNestedSketchRegionsExportSeparateMeshes()
   await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
   await testOccSnapshotSurfacesSketchNavigationAndHistory()

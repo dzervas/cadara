@@ -37,6 +37,18 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     }
   }
 
+  function makeCircle(entityId: string, label: string, centerPointId: string, radius: number) {
+    return {
+      kind: 'circle' as const,
+      entityId: entityId as `sketch_entity_${string}`,
+      label,
+      target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: entityId as `sketch_entity_${string}` } as const,
+      isConstruction: false,
+      centerPointId: centerPointId as `sketch_point_${string}`,
+      radius,
+    }
+  }
+
   function makeSolvedSnapshot(definition: SketchDefinition): SolvedSketchSnapshot {
     const solvedPoints = definition.points.map((point) => ({
       pointId: point.pointId,
@@ -54,21 +66,34 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       },
       solvedPoints,
       solvedEntities: definition.entities.flatMap((entity) => {
-        if (entity.kind !== 'lineSegment') {
-          return []
+        if (entity.kind === 'lineSegment') {
+          const start = pointMap.get(entity.startPointId)
+          const end = pointMap.get(entity.endPointId)
+          if (!start || !end) {
+            return []
+          }
+          return [{
+            kind: 'lineSegment' as const,
+            entityId: entity.entityId,
+            target: entity.target,
+            startPosition: start.position,
+            endPosition: end.position,
+          }]
         }
-        const start = pointMap.get(entity.startPointId)
-        const end = pointMap.get(entity.endPointId)
-        if (!start || !end) {
-          return []
+        if (entity.kind === 'circle') {
+          const center = pointMap.get(entity.centerPointId)
+          if (!center) {
+            return []
+          }
+          return [{
+            kind: 'circle' as const,
+            entityId: entity.entityId,
+            target: entity.target,
+            centerPosition: center.position,
+            solvedRadius: entity.radius,
+          }]
         }
-        return [{
-          kind: 'lineSegment' as const,
-          entityId: entity.entityId,
-          target: entity.target,
-          startPosition: start.position,
-          endPosition: end.position,
-        }]
+        return []
       }),
       constraintStatuses: [],
       dimensionStatuses: [],
@@ -198,16 +223,114 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     })
 
     assert(derived.diagnostics.length === 0, 'Region derivation should not emit diagnostics for solved nested rectangles.')
-    assert(derived.regions.length === 1, 'Nested rectangles should derive one outer region with one inner void.')
+    assert(derived.regions.length === 2, 'Nested rectangles should derive every bounded region.')
     assert(derived.regions[0]?.loops.length === 2, 'Derived region should contain outer and inner loops.')
     assert(derived.regions[0]?.loops[0]?.role === 'outer', 'First loop should be outer.')
     assert(derived.regions[0]?.loops[1]?.role === 'inner', 'Second loop should be inner.')
+    assert(derived.regions[1]?.loops.length === 1, 'Inner rectangle should also be selectable as its own region.')
+    assert(derived.regions[1]?.loops[0]?.role === 'outer', 'Inner selectable region should expose its boundary as an outer loop.')
+  }
+
+  async function testFindCircleRegion() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_center'],
+      points: [
+        makePoint('sketch_point_center', 'Center', 1, 2),
+      ],
+      entityIds: ['sketch_entity_circle'],
+      entities: [
+        makeCircle('sketch_entity_circle', 'Circle', 'sketch_point_center', 3),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const solvedSnapshot = makeSolvedSnapshot(definition)
+    const found = findSketchRings(definition, solvedSnapshot)
+    assert(found.rings.length === 1, 'A standalone circle should produce one ring.')
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot,
+    })
+
+    assert(derived.regions.length === 1, 'A standalone circle should derive one selectable region.')
+    assert(derived.regions[0]?.loops[0]?.segments.length === 1, 'Circle regions should use the circle entity as one closed segment.')
+    assert(derived.regions[0]?.loops[0]?.segments[0]?.startPointId === null, 'Circle region segments should not invent boundary points.')
+  }
+
+  async function testSquareWithInnerCircleDerivesAllBoundedCells() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_a',
+        'sketch_point_b',
+        'sketch_point_c',
+        'sketch_point_d',
+        'sketch_point_center',
+      ],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 8, 0),
+        makePoint('sketch_point_c', 'C', 8, 8),
+        makePoint('sketch_point_d', 'D', 0, 8),
+        makePoint('sketch_point_center', 'Center', 4, 4),
+      ],
+      entityIds: [
+        'sketch_entity_ab',
+        'sketch_entity_bc',
+        'sketch_entity_cd',
+        'sketch_entity_da',
+        'sketch_entity_circle',
+      ],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_da', 'DA', 'sketch_point_d', 'sketch_point_a'),
+        makeCircle('sketch_entity_circle', 'Circle', 'sketch_point_center', 2),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const solvedSnapshot = makeSolvedSnapshot(definition)
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot,
+    })
+
+    assert(derived.regions.length === 2, 'A square with an inner circle should derive outer-with-hole and inner disk regions.')
+    assert(derived.regions[0]?.loops.length === 2, 'Outer cell should include the circle as an inner loop.')
+    assert(derived.regions[1]?.loops.length === 1, 'Inner disk should be independently selectable.')
+    assert(
+      derived.regions[1]?.loops[0]?.segments[0]?.source.kind === 'entity'
+      && derived.regions[1]?.loops[0]?.segments[0]?.source.entityId === 'sketch_entity_circle',
+      'Inner disk should be bounded by the circle entity.',
+    )
   }
 
   async function run() {
     await testFindRingsNone()
     await testFindRingsOne()
     await testFindRingsMultipleAndDeriveRegions()
+    await testFindCircleRegion()
+    await testSquareWithInnerCircleDerivesAllBoundedCells()
   }
 
   run().catch((error: unknown) => {

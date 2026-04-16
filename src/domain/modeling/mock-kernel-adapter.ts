@@ -74,7 +74,7 @@ const CONTRACT_VERSION = 'modeling-contract/v1alpha1' as const
 const REVISION_ID = 'rev_0001' as const
 const DOCUMENT_ID = 'doc_workspace' as const
 const SKETCH_ID = 'sketch_primary' as const
-const CONSTRUCTION_PICK_PRIORITY = 5
+const CONSTRUCTION_PICK_PRIORITY = 40
 
 function applyCursorToMockSnapshot(snapshot: DocumentSnapshot) {
   const appliedFeatureIds = getAppliedFeatureIdsForDocumentCursor(

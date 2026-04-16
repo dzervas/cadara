@@ -49,6 +49,8 @@ type SegmentRecord = {
   endAngle: number
 }
 
+const CIRCLE_REGION_SAMPLE_COUNT = 64
+
 function makeDiagnostic(
   code: string,
   severity: SketchSolveDiagnostic['severity'],
@@ -166,30 +168,101 @@ function buildSegments(
       .filter((entity): entity is Extract<SolvedSketchEntityGeometryRecord, { kind: 'lineSegment' }> => entity.kind === 'lineSegment')
       .map((entity) => [entity.entityId, entity]),
   )
+  const solvedArcMap = new Map(
+    solvedSnapshot.solvedEntities
+      .filter((entity): entity is Extract<SolvedSketchEntityGeometryRecord, { kind: 'arc' }> => entity.kind === 'arc')
+      .map((entity) => [entity.entityId, entity]),
+  )
 
   return definition.entities.flatMap((entity) => {
-    if (entity.kind !== 'lineSegment' || entity.isConstruction) {
+    if (entity.isConstruction) {
       return []
     }
-    const solved = solvedLineMap.get(entity.entityId)
+
+    if (entity.kind === 'lineSegment') {
+      const solved = solvedLineMap.get(entity.entityId)
+      if (!solved) {
+        return []
+      }
+      return [{
+        entityId: entity.entityId,
+        startPointId: entity.startPointId,
+        endPointId: entity.endPointId,
+        start: solved.startPosition,
+        end: solved.endPosition,
+        startAngle: Math.atan2(
+          solved.endPosition[1] - solved.startPosition[1],
+          solved.endPosition[0] - solved.startPosition[0],
+        ),
+        endAngle: Math.atan2(
+          solved.endPosition[1] - solved.startPosition[1],
+          solved.endPosition[0] - solved.startPosition[0],
+        ),
+      } satisfies SegmentRecord]
+    }
+
+    if (entity.kind === 'arc') {
+      const solved = solvedArcMap.get(entity.entityId)
+      if (!solved) {
+        return []
+      }
+
+      return [{
+        entityId: entity.entityId,
+        startPointId: entity.startPointId,
+        endPointId: entity.endPointId,
+        start: solved.startPosition,
+        end: solved.endPosition,
+        startAngle: Math.atan2(
+          solved.startPosition[1] - solved.centerPosition[1],
+          solved.startPosition[0] - solved.centerPosition[0],
+        ),
+        endAngle: Math.atan2(
+          solved.endPosition[1] - solved.centerPosition[1],
+          solved.endPosition[0] - solved.centerPosition[0],
+        ),
+      } satisfies SegmentRecord]
+    }
+
+    return []
+  })
+}
+
+function buildCircleRings(
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+) {
+  const solvedCircleMap = new Map(
+    solvedSnapshot.solvedEntities
+      .filter((entity): entity is Extract<SolvedSketchEntityGeometryRecord, { kind: 'circle' }> => entity.kind === 'circle')
+      .map((entity) => [entity.entityId, entity]),
+  )
+
+  return definition.entities.flatMap((entity) => {
+    if (entity.kind !== 'circle' || entity.isConstruction) {
+      return []
+    }
+
+    const solved = solvedCircleMap.get(entity.entityId)
     if (!solved) {
       return []
     }
+
+    const points = Array.from({ length: CIRCLE_REGION_SAMPLE_COUNT }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / CIRCLE_REGION_SAMPLE_COUNT
+      return [
+        solved.centerPosition[0] + Math.cos(angle) * solved.solvedRadius,
+        solved.centerPosition[1] + Math.sin(angle) * solved.solvedRadius,
+      ] satisfies SketchPoint2D
+    })
+
     return [{
-      entityId: entity.entityId,
-      startPointId: entity.startPointId,
-      endPointId: entity.endPointId,
-      start: solved.startPosition,
-      end: solved.endPosition,
-      startAngle: Math.atan2(
-        solved.endPosition[1] - solved.startPosition[1],
-        solved.endPosition[0] - solved.startPosition[0],
-      ),
-      endAngle: Math.atan2(
-        solved.endPosition[1] - solved.startPosition[1],
-        solved.endPosition[0] - solved.startPosition[0],
-      ),
-    } satisfies SegmentRecord]
+      kind: 'segments' as const,
+      boundaryEntityIds: [entity.entityId],
+      boundaryPointIds: [],
+      points,
+      signedArea: signedArea(points),
+    } satisfies SketchRingCandidate]
   })
 }
 
@@ -228,7 +301,7 @@ export function findSketchRings(
   const allSegments = [...initialSegments, ...initialSegments.map(reverseSegment)]
 
   const used = new Set<number>()
-  const rings: SketchRingCandidate[] = []
+  const rings: SketchRingCandidate[] = buildCircleRings(definition, solvedSnapshot)
 
   for (const [segmentIndex, segment] of allSegments.entries()) {
     if (used.has(segmentIndex)) {
@@ -268,9 +341,23 @@ export function findSketchRings(
     }
   }
 
-  rings.sort((left, right) => left.signedArea - right.signedArea)
+  rings.sort(compareRingsByAreaThenKey)
   const unusedSegments = initialSegments.filter((_, index) => !used.has(index))
   return { rings, unusedSegments }
+}
+
+function compareRingsByAreaThenKey(left: SketchRingCandidate, right: SketchRingCandidate) {
+  const areaDelta = Math.abs(right.signedArea) - Math.abs(left.signedArea)
+
+  if (areaDelta !== 0) {
+    return areaDelta
+  }
+
+  return getRingStableKey(left).localeCompare(getRingStableKey(right))
+}
+
+function getRingStableKey(ring: SketchRingCandidate) {
+  return ring.boundaryEntityIds.join('|')
 }
 
 function usedForRing(used: Set<number>, ringIndices: Array<[number, SegmentRecord]>) {
@@ -318,7 +405,7 @@ export function deriveSketchRegionsCore(
   }
 
   const { rings } = findSketchRings(input.definition, input.solvedSnapshot)
-  const sorted = [...rings].sort((left, right) => Math.abs(right.signedArea) - Math.abs(left.signedArea))
+  const sorted = [...rings].sort(compareRingsByAreaThenKey)
   const childrenByParent = new Map<number, number[]>()
   const parentByRing = new Map<number, number | null>()
 
@@ -326,18 +413,20 @@ export function deriveSketchRegionsCore(
     const child = sorted[childIndex]!
     const marker = centroid(child.points)
     let parent: number | null = null
+    let parentArea = Number.POSITIVE_INFINITY
 
     for (let parentIndex = 0; parentIndex < sorted.length; parentIndex += 1) {
       if (parentIndex === childIndex) {
         continue
       }
       const candidate = sorted[parentIndex]!
-      if (Math.abs(candidate.signedArea) <= Math.abs(child.signedArea)) {
+      const candidateArea = Math.abs(candidate.signedArea)
+      if (candidateArea <= Math.abs(child.signedArea) || candidateArea >= parentArea) {
         continue
       }
       if (pointInPolygon(marker, candidate.points)) {
         parent = parentIndex
-        break
+        parentArea = candidateArea
       }
     }
 
@@ -349,45 +438,19 @@ export function deriveSketchRegionsCore(
     }
   }
 
-  const topLevel = sorted
-    .map((ring, index) => ({ ring, index }))
-    .filter(({ index }) => parentByRing.get(index) === null)
-
-  const regions = topLevel.map(({ ring, index }, regionOrdinal) => {
-    const regionId = createRegionId(input.sketchId, regionOrdinal)
-    const outerLoop: RegionLoopRecord = {
-      loopId: createRegionLoopId(regionId, 0),
-      role: 'outer',
-      orientation: ring.signedArea >= 0 ? 'counterClockwise' : 'clockwise',
-      segments: ring.boundaryEntityIds.map((entityId, segmentIndex) => ({
-        source: { kind: 'entity', entityId },
-        startPointId: ring.boundaryPointIds[segmentIndex] ?? null,
-        endPointId: ring.boundaryPointIds[(segmentIndex + 1) % ring.boundaryPointIds.length] ?? null,
-      })),
-      boundaryPointIds: ring.boundaryPointIds,
-      isClosed: true,
-    }
+  const regions = sorted.map((ring, index) => {
+    const regionId = createRegionId(input.sketchId, index)
+    const outerLoop = createLoopRecord(regionId, 0, 'outer', ring, false)
 
     const innerLoops = (childrenByParent.get(index) ?? []).map((childIndex, loopOrdinal) => {
       const child = sorted[childIndex]!
-      return {
-        loopId: createRegionLoopId(regionId, loopOrdinal + 1),
-        role: 'inner',
-        orientation: child.signedArea >= 0 ? 'counterClockwise' : 'clockwise',
-        segments: child.boundaryEntityIds.map((entityId, segmentIndex) => ({
-          source: { kind: 'entity', entityId },
-          startPointId: child.boundaryPointIds[segmentIndex] ?? null,
-          endPointId: child.boundaryPointIds[(segmentIndex + 1) % child.boundaryPointIds.length] ?? null,
-        })),
-        boundaryPointIds: child.boundaryPointIds,
-        isClosed: true,
-      } satisfies RegionLoopRecord
+      return createLoopRecord(regionId, loopOrdinal + 1, 'inner', child, true)
     })
 
     return {
       ...createOwnershipRecord(input),
       regionId,
-      label: regionOrdinal === 0 ? 'Outer region' : `Loop region ${regionOrdinal + 1}`,
+      label: index === 0 ? 'Outer region' : `Loop region ${index + 1}`,
       target: { kind: 'region', sketchId: input.sketchId, regionId },
       sourceSketch: { kind: 'sketch', sketchId: input.sketchId },
       loops: [outerLoop, ...innerLoops],
@@ -399,4 +462,52 @@ export function deriveSketchRegionsCore(
     regions,
     diagnostics: [],
   }
+}
+
+function createLoopRecord(
+  regionId: RegionId,
+  ordinal: number,
+  role: RegionLoopRecord['role'],
+  ring: SketchRingCandidate,
+  reverse: boolean,
+): RegionLoopRecord {
+  if (!reverse) {
+    return {
+      loopId: createRegionLoopId(regionId, ordinal),
+      role,
+      orientation: ring.signedArea >= 0 ? 'counterClockwise' : 'clockwise',
+      segments: ring.boundaryEntityIds.map((entityId, segmentIndex) => ({
+        source: { kind: 'entity', entityId },
+        startPointId: ring.boundaryPointIds[segmentIndex] ?? null,
+        endPointId: getNextBoundaryPointId(ring.boundaryPointIds, segmentIndex),
+      })),
+      boundaryPointIds: ring.boundaryPointIds,
+      isClosed: true,
+    }
+  }
+
+  const lastIndex = ring.boundaryEntityIds.length - 1
+  const reversedPointIds = ring.boundaryPointIds.length > 0
+    ? ring.boundaryEntityIds.map((_, index) => {
+        const originalIndex = lastIndex - index
+        return ring.boundaryPointIds[(originalIndex + 1) % ring.boundaryPointIds.length]!
+      })
+    : []
+
+  return {
+    loopId: createRegionLoopId(regionId, ordinal),
+    role,
+    orientation: ring.signedArea >= 0 ? 'clockwise' : 'counterClockwise',
+    segments: [...ring.boundaryEntityIds].reverse().map((entityId, segmentIndex) => ({
+      source: { kind: 'entity', entityId },
+      startPointId: reversedPointIds[segmentIndex] ?? null,
+      endPointId: getNextBoundaryPointId(reversedPointIds, segmentIndex),
+    })),
+    boundaryPointIds: reversedPointIds,
+    isClosed: true,
+  }
+}
+
+function getNextBoundaryPointId(pointIds: SketchPointId[], index: number) {
+  return pointIds.length > 0 ? pointIds[(index + 1) % pointIds.length]! : null
 }

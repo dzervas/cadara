@@ -17,6 +17,7 @@ export interface CollectedBindings {
 
 interface PickResolutionOptions {
   wireOcclusionTolerance?: number
+  sameLayerTolerance?: number
 }
 
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
@@ -30,6 +31,7 @@ const VISIBLE_MARKER_SCALE_FACTOR = 0.44
 const MARKER_PICK_SCALE_FACTOR = 1.45
 export const DEFAULT_LINE_PICK_THRESHOLD = 0.75
 const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01
+const DEFAULT_SAME_LAYER_TOLERANCE = 0.004
 
 export const SURFACE_COLORS = {
   bodyFace: 0xf1eee4,
@@ -48,6 +50,7 @@ export function resolvePickTarget(
   options: PickResolutionOptions = {},
 ) {
   const wireOcclusionTolerance = options.wireOcclusionTolerance ?? DEFAULT_WIRE_OCCLUSION_TOLERANCE
+  const sameLayerTolerance = options.sameLayerTolerance ?? DEFAULT_SAME_LAYER_TOLERANCE
   const resolvedHits = intersections
     .map((intersection) => {
       const target = getBoundTarget(intersection.object)
@@ -68,11 +71,18 @@ export function resolvePickTarget(
       }
     })
     .filter((hit): hit is NonNullable<typeof hit> => hit !== null)
+    .filter(createUniqueHitFilter())
     .sort((left, right) => {
       const distanceDelta = left.intersection.distance - right.intersection.distance
 
-      if (distanceDelta !== 0) {
+      if (Math.abs(distanceDelta) > sameLayerTolerance) {
         return distanceDelta
+      }
+
+      const rankDelta = getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
+
+      if (rankDelta !== 0) {
+        return rankDelta
       }
 
       const priorityDelta = left.priority - right.priority
@@ -81,7 +91,7 @@ export function resolvePickTarget(
         return priorityDelta
       }
 
-      return getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
+      return getHitStableKey(left).localeCompare(getHitStableKey(right))
     })
 
   const nearestOccludingFaceDistance = resolvedHits.reduce<number | null>((nearest, hit) => {
@@ -259,14 +269,50 @@ function getInteractionSortRank(semanticClass: RenderableEntityRecord['binding']
     case 'featureEdge':
     case 'sketchCurve':
       return 1
+    case 'region':
+      return 2
     case 'bodyFace':
     case 'planarFace':
-      return 2
-    case 'region':
       return 3
     case 'construction':
       return 4
   }
+}
+
+function createUniqueHitFilter() {
+  const seen = new Set<string>()
+
+  return (hit: {
+    pickId: string | null
+    target: PrimitiveRef
+    semanticClass: RenderableEntityRecord['binding']['semanticClass']
+    renderable: RenderableEntityRecord | null
+  }) => {
+    const key = hit.pickId
+      ?? hit.renderable?.id
+      ?? `${hit.semanticClass}:${getPrimitiveRefKey(hit.target)}`
+
+    if (seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  }
+}
+
+function getHitStableKey(hit: {
+  pickId: string | null
+  target: PrimitiveRef
+  semanticClass: RenderableEntityRecord['binding']['semanticClass']
+  renderable: RenderableEntityRecord | null
+}) {
+  return [
+    hit.pickId ?? '',
+    hit.renderable?.id ?? '',
+    hit.semanticClass,
+    getPrimitiveRefKey(hit.target),
+  ].join(':')
 }
 
 function getBaseMeshOpacity(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {

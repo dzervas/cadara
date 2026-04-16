@@ -161,20 +161,20 @@ export const sketchSelectionFilter: SelectionFilter = {
 
 export const sketchStartSelectionFilter: SelectionFilter = {
   kind: 'sketchStart',
-  allowedKinds: ['construction', 'sketch'],
-  label: 'Sketch planes or sketches',
+  allowedKinds: ['construction', 'face', 'sketch'],
+  label: 'Sketch planes, planar faces, or sketches',
   requirements: [
     {
       id: 'sketch-plane',
       label: 'Sketch plane',
-      description: 'Start a sketch from a construction plane or reopen an existing sketch.',
+      description: 'Start a sketch from a construction plane or planar face, or reopen an existing sketch.',
       slots: [
         {
           id: 'sketch-start-target',
           label: 'Sketch start target',
-          description: 'Select one construction plane or one existing sketch.',
-          acceptedKinds: ['construction', 'sketch'],
-          acceptedSemantics: ['constructionPlane', 'existingSketch'],
+          description: 'Select one construction plane, one planar face, or one existing sketch.',
+          acceptedKinds: ['construction', 'face', 'sketch'],
+          acceptedSemantics: ['constructionPlane', 'planarFace', 'planarReference', 'existingSketch'],
         },
       ],
     },

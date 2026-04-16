@@ -18,11 +18,10 @@ import {
   type ValidateSketchResponse,
 } from '@/contracts/solver/schema'
 import { sketchSolverEnvelopeSchema } from '@/contracts/solver/runtime-schema'
+import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   type ProjectedSketchGeometryRef,
-  type RegionRecord,
-  type RegionLoopRecord,
   type SketchDefinition,
   type SketchEntityDefinition,
   type SketchPoint2D,
@@ -37,8 +36,6 @@ import type {
   DocumentId,
   ProjectedGeometryId,
   ReferenceId,
-  RegionId,
-  RegionLoopId,
   RequestId,
   RevisionId,
   SketchEntityId,
@@ -609,63 +606,6 @@ function solveDefinition(
   }
 }
 
-function createRegionId(sketchId: SketchId, ordinal: number): RegionId {
-  const suffix = sketchId.startsWith('sketch_') ? sketchId.slice('sketch_'.length) : sketchId
-  return (ordinal === 0 ? `region_${suffix}-outer` : `region_${suffix}-loop-${ordinal + 1}`) as RegionId
-}
-
-function createRegionLoopId(regionId: RegionId, ordinal: number): RegionLoopId {
-  return `region_loop_${regionId}_${ordinal}` as RegionLoopId
-}
-
-function deriveClosedLineLoops(definition: SketchDefinition) {
-  const lineEntities = definition.entities.filter(
-    (entity): entity is Extract<SketchEntityDefinition, { kind: 'lineSegment' }> =>
-      entity.kind === 'lineSegment' && !entity.isConstruction,
-  )
-  const remaining = [...lineEntities]
-  const loops: Array<{
-    boundaryEntityIds: SketchEntityId[]
-    boundaryPointIds: SketchPointId[]
-  }> = []
-
-  while (remaining.length > 0) {
-    const first = remaining.shift()
-
-    if (!first) {
-      break
-    }
-
-    const boundaryEntityIds: SketchEntityId[] = [first.entityId]
-    const boundaryPointIds: SketchPointId[] = [first.startPointId, first.endPointId]
-    let currentPointId = first.endPointId
-    let closed = first.endPointId === first.startPointId
-
-    while (!closed) {
-      const nextIndex = remaining.findIndex((candidate) => candidate.startPointId === currentPointId)
-
-      if (nextIndex < 0) {
-        break
-      }
-
-      const [next] = remaining.splice(nextIndex, 1)
-      boundaryEntityIds.push(next.entityId)
-      boundaryPointIds.push(next.endPointId)
-      currentPointId = next.endPointId
-      closed = currentPointId === boundaryPointIds[0]
-    }
-
-    if (closed && boundaryEntityIds.length >= 3) {
-      loops.push({
-        boundaryEntityIds,
-        boundaryPointIds: boundaryPointIds.slice(0, -1),
-      })
-    }
-  }
-
-  return loops
-}
-
 function deriveRegions(
   documentId: DocumentId,
   revisionId: RevisionId,
@@ -673,53 +613,13 @@ function deriveRegions(
   solvedSnapshot: SolvedSketchSnapshot,
   definition: SketchDefinition,
 ) {
-  if (
-    solvedSnapshot.status.solveState === 'failed'
-    || solvedSnapshot.status.solveState === 'notEvaluated'
-  ) {
-    return {
-      regions: [] as RegionRecord[],
-      diagnostics: [
-        makeDiagnostic('regions-unavailable', 'warning', 'Closed regions are unavailable until the sketch reaches a usable solved state.', null),
-      ],
-    }
-  }
-
-  const loops = deriveClosedLineLoops(definition)
-  const regions = loops.map((loop, index) => {
-    const regionId = createRegionId(sketchId, index)
-    const loopRecord: RegionLoopRecord = {
-      loopId: createRegionLoopId(regionId, 0),
-      role: 'outer',
-      orientation: 'counterClockwise',
-      segments: loop.boundaryEntityIds.map((entityId, segmentIndex) => ({
-        source: { kind: 'entity', entityId },
-        startPointId: loop.boundaryPointIds[segmentIndex] ?? null,
-        endPointId: loop.boundaryPointIds[(segmentIndex + 1) % loop.boundaryPointIds.length] ?? null,
-      })),
-      boundaryPointIds: loop.boundaryPointIds,
-      isClosed: true,
-    }
-
-    return {
-      ownerDocumentId: documentId,
-      ownerRevisionId: revisionId,
-      ownerFeatureId: null,
-      ownerSketchId: sketchId,
-      ownerBodyId: null,
-      regionId,
-      label: index === 0 ? 'Outer region' : `Loop region ${index + 1}`,
-      target: { kind: 'region', sketchId, regionId },
-      sourceSketch: { kind: 'sketch', sketchId },
-      loops: [loopRecord],
-      isClosed: true,
-    } satisfies RegionRecord
+  return deriveSketchRegionsCore({
+    documentId,
+    revisionId,
+    sketchId,
+    solvedSnapshot,
+    definition,
   })
-
-  return {
-    regions,
-    diagnostics: [] as SketchSolveDiagnostic[],
-  }
 }
 
 export const DEFAULT_MOCK_SKETCH_PLANE_FRAME: SketchPlaneFrame = {

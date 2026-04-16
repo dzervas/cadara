@@ -369,7 +369,11 @@ function buildLoopWire(
       }
       case 'circle': {
         const edge = buildCircleEdge(oc, plane, geometry)
-        wireBuilder.Add_1(edge)
+        wireBuilder.Add_1(
+          loop.role === 'inner'
+            ? oc.TopoDS.Edge_1(edge.Reversed())
+            : edge,
+        )
         break
       }
       case 'arc': {

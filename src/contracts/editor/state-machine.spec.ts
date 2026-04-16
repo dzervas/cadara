@@ -318,6 +318,31 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
+  function testSketchActivationAcceptsPlanarFaces() {
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sketch',
+      },
+    )
+    const openResult = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+    })
+
+    assert(openResult.effects.length === 1, 'Selecting a planar face should emit one open-session effect.')
+    assert(openResult.effects[0]?.type === 'sketch.openSession', 'Planar-face sketch selection should open a sketch session.')
+  }
+
   function testSketchSessionPreservesStoredPlaneDefinition() {
     const yzPlane: SketchPlaneDefinition = {
       support: { kind: 'construction', constructionId: 'construction_plane-yz' as ConstructionId },
@@ -988,6 +1013,59 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  async function testRuntimeLoopOpensSketchFromPlanarFace() {
+    const runtimeSnapshot = await createMockWorkspaceSnapshot()
+    const planarFace = runtimeSnapshot.document.render.records.find((record) =>
+      record.binding.target.kind === 'face'
+      && record.binding.semanticClass === 'planarFace',
+    )?.binding.target
+    assert(planarFace?.kind === 'face', 'Mock runtime snapshot should expose a planar face render target.')
+
+    const runtime: EditorEffectRuntime = {
+      getCurrentDocumentSnapshot: async () => runtimeSnapshot,
+      commitSketch: async () => null,
+      evaluatePreview: async () => ({
+        revisionId: runtimeSnapshot.revisionId,
+        stale: false,
+        diagnostics: [],
+        renderables: [],
+      }),
+      commitFeature: async () => ({
+        revisionId: runtimeSnapshot.revisionId,
+        featureId: 'feature_alpha' as const,
+        accepted: true,
+        diagnostics: [],
+      }),
+    }
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'effect.snapshotLoaded',
+          payload: {
+            requestId: 'request_snapshot-1',
+            documentId: runtimeSnapshot.documentId,
+            revisionId: runtimeSnapshot.revisionId,
+            snapshot: runtimeSnapshot,
+            selectionCatalog: buildSelectionTargetCatalog(runtimeSnapshot),
+          },
+        },
+        { type: 'tool.activated', toolId: 'sketch' },
+        {
+          type: 'viewport.selectionRequested',
+          target: planarFace,
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'editingSketch', 'Runtime loop should enter sketch editing after selecting a planar face.')
+    assert(result.state.session.planeTarget.kind === 'face', 'Face-backed sketch session should preserve the selected face support.')
+    assert(result.state.session.plane.support.kind === 'face', 'Face-backed sketch session should derive a face-supported plane.')
+    assert(result.state.session.plane.frame.origin[2] === 12, 'Face-backed sketch plane should derive its origin from the selected face mesh.')
+  }
+
   async function testRuntimeLoopOpensSketchFromNonXYConstruction() {
     const runtimeSnapshot: DocumentSnapshot = {
       ...createSnapshot(),
@@ -1417,6 +1495,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
+  testSketchActivationAcceptsPlanarFaces()
   testSketchSessionPreservesStoredPlaneDefinition()
   testFeaturePreviewIgnoresStaleResponseIds()
   testRevolveActivationStartsFeaturePreviewFlow()
@@ -1431,6 +1510,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testReplayIsDeterministic()
   testSelectionKeyUsesDurableRefs()
   await testRuntimeLoopProcessesSketchOpen()
+  await testRuntimeLoopOpensSketchFromPlanarFace()
   await testRuntimeLoopOpensSketchFromNonXYConstruction()
   await testRuntimeLoopReopensStoredSketchPlane()
   await testRuntimeLoopReopensCommittedFeatureFromExplicitIntent()

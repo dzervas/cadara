@@ -198,6 +198,19 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     } as THREE.Intersection<THREE.Object3D>
   }
 
+  function createBoundObject(renderable: RenderableEntityRecord) {
+    const object = new THREE.Object3D()
+    bindRenderableObject(
+      object,
+      renderable.binding.pickId,
+      renderable.binding.target,
+      renderable.binding.semanticClass,
+      'document',
+      renderable,
+    )
+    return object
+  }
+
   {
     const faceMesh = createBoundMesh(faceRenderable)
     const edgeLine = createBoundLine(edgeRenderable)
@@ -243,6 +256,225 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
       resolved?.target,
       edgeRenderable.binding.target,
       'Equal-distance ties must still prefer lower pickPriority.',
+    )
+  }
+
+  {
+    const constructionRenderable: RenderableEntityRecord = {
+      id: 'renderable_construction_plane',
+      label: 'XY Plane',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_construction_plane',
+        pickPriority: 5,
+        target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        topology: null,
+        semanticClass: 'construction',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const sketchRenderable: RenderableEntityRecord = {
+      id: 'renderable_sketch_curve',
+      label: 'Sketch curve',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_sketch_curve',
+        pickPriority: 12,
+        target: { kind: 'sketchEntity', sketchId: 'sketch_a', entityId: 'sketch_entity_a' },
+        topology: null,
+        semanticClass: 'sketchCurve',
+      },
+      geometry: {
+        kind: 'polyline',
+        points: [[0, 0, 0], [2, 0, 0]],
+        isClosed: false,
+      },
+    }
+    const construction = createBoundObject(constructionRenderable)
+    const sketch = createBoundObject(sketchRenderable)
+
+    const resolved = resolvePickTarget([
+      createIntersection(construction, 1),
+      createIntersection(sketch, 1.003),
+    ])
+
+    assertDeepEqual(
+      resolved?.target,
+      sketchRenderable.binding.target,
+      'Coplanar sketch curves must beat construction planes even when the plane has a slightly nearer ray hit.',
+    )
+  }
+
+  {
+    const constructionRenderable: RenderableEntityRecord = {
+      id: 'renderable_construction_plane_region',
+      label: 'XY Plane',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_construction_plane_region',
+        pickPriority: 5,
+        target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        topology: null,
+        semanticClass: 'construction',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const regionRenderable: RenderableEntityRecord = {
+      id: 'renderable_region',
+      label: 'Region',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_region',
+        pickPriority: 8,
+        target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+        topology: null,
+        semanticClass: 'region',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const construction = createBoundObject(constructionRenderable)
+    const region = createBoundObject(regionRenderable)
+
+    const resolved = resolvePickTarget([
+      createIntersection(construction, 1),
+      createIntersection(region, 1.003),
+    ])
+
+    assertDeepEqual(
+      resolved?.target,
+      regionRenderable.binding.target,
+      'Coplanar regions must beat construction planes within same-layer tolerance.',
+    )
+  }
+
+  {
+    const regionRenderable: RenderableEntityRecord = {
+      id: 'renderable_region_boundary',
+      label: 'Region',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_region_boundary',
+        pickPriority: 8,
+        target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+        topology: null,
+        semanticClass: 'region',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const sketchRenderable: RenderableEntityRecord = {
+      id: 'renderable_sketch_curve_boundary',
+      label: 'Sketch curve',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_sketch_curve_boundary',
+        pickPriority: 12,
+        target: { kind: 'sketchEntity', sketchId: 'sketch_a', entityId: 'sketch_entity_a' },
+        topology: null,
+        semanticClass: 'sketchCurve',
+      },
+      geometry: {
+        kind: 'polyline',
+        points: [[0, 0, 0], [2, 0, 0]],
+        isClosed: false,
+      },
+    }
+    const region = createBoundObject(regionRenderable)
+    const sketch = createBoundObject(sketchRenderable)
+    const intersections = [
+      createIntersection(region, 1),
+      createIntersection(sketch, 1),
+    ]
+
+    const curveResolved = resolvePickTarget(intersections)
+    assertDeepEqual(
+      curveResolved?.target,
+      sketchRenderable.binding.target,
+      'Sketch curves must beat filled regions at the same apparent depth.',
+    )
+
+    const regionResolved = resolvePickTarget(
+      intersections,
+      (target) => target.kind === 'region',
+    )
+    assertDeepEqual(
+      regionResolved?.target,
+      regionRenderable.binding.target,
+      'Active selection filters must allow region picking when overlapping curves are rejected.',
+    )
+  }
+
+  {
+    const firstRegionRenderable: RenderableEntityRecord = {
+      id: 'renderable_region_a',
+      label: 'Region A',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_region_a',
+        pickPriority: 8,
+        target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+        topology: null,
+        semanticClass: 'region',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const secondRegionRenderable: RenderableEntityRecord = {
+      ...firstRegionRenderable,
+      id: 'renderable_region_b',
+      label: 'Region B',
+      binding: {
+        ...firstRegionRenderable.binding,
+        pickId: 'pick_region_b',
+        target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_b' },
+      },
+    }
+    const first = createBoundObject(firstRegionRenderable)
+    const second = createBoundObject(secondRegionRenderable)
+
+    const forward = resolvePickTarget([
+      createIntersection(first, 1),
+      createIntersection(second, 1),
+    ])
+    const reverse = resolvePickTarget([
+      createIntersection(second, 1),
+      createIntersection(first, 1),
+    ])
+
+    assertDeepEqual(
+      forward?.target,
+      reverse?.target,
+      'Equal candidates must resolve to the same target regardless of raycaster hit order.',
     )
   }
 

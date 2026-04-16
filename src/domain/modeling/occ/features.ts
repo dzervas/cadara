@@ -1772,7 +1772,7 @@ export function createConstructionPresentationArtifacts(
     ownerFeatureId: construction.ownerFeatureId,
     binding: {
       pickId: constructionPickId(construction.constructionId),
-      pickPriority: 5,
+      pickPriority: 40,
       target: { kind: 'construction', constructionId: construction.constructionId },
       topology: null,
       semanticClass: 'construction',

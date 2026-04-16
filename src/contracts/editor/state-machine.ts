@@ -2354,7 +2354,7 @@ export async function runEditorEffect(
             documentId: snapshot.documentId,
             revisionId: snapshot.revisionId,
             commandSessionId: effect.commandSessionId,
-            message: 'Sketch requires an existing sketch or construction plane selection.',
+            message: 'Sketch requires an existing sketch, construction plane, or planar face selection.',
           }
         }
 

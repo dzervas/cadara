@@ -492,6 +492,122 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
     assertClose(await faceArea(profile.face), 32, 1e-5, 'Inner loops should subtract hole area from the outer face')
   }
 
+  async function testCircleNestedInRectangleBuildsBothCells() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createSketchPlane()
+    const sketchId = 'sketch_phase3_circle_cell' as SketchId
+    const points = [
+      { id: pointId('outer_bl'), position: [0, 0] as const },
+      { id: pointId('outer_br'), position: [6, 0] as const },
+      { id: pointId('outer_tr'), position: [6, 6] as const },
+      { id: pointId('outer_tl'), position: [0, 6] as const },
+      { id: pointId('circle_center'), position: [3, 3] as const },
+    ]
+    const definition = createSketchDefinition(sketchId, points, [
+      {
+        kind: 'lineSegment',
+        entityId: entityId('outer_bottom'),
+        label: 'outer_bottom',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('outer_bottom') },
+        isConstruction: false,
+        startPointId: pointId('outer_bl'),
+        endPointId: pointId('outer_br'),
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId('outer_right'),
+        label: 'outer_right',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('outer_right') },
+        isConstruction: false,
+        startPointId: pointId('outer_br'),
+        endPointId: pointId('outer_tr'),
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId('outer_top'),
+        label: 'outer_top',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('outer_top') },
+        isConstruction: false,
+        startPointId: pointId('outer_tr'),
+        endPointId: pointId('outer_tl'),
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId('outer_left'),
+        label: 'outer_left',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('outer_left') },
+        isConstruction: false,
+        startPointId: pointId('outer_tl'),
+        endPointId: pointId('outer_bl'),
+      },
+      {
+        kind: 'circle',
+        entityId: entityId('circle'),
+        label: 'circle',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('circle') },
+        isConstruction: false,
+        centerPointId: pointId('circle_center'),
+        radius: 1,
+      },
+    ])
+    const sketch = createSketchRecord(sketchId, definition, [
+      { kind: 'lineSegment', entityId: entityId('outer_bottom'), startPosition: [0, 0], endPosition: [6, 0] },
+      { kind: 'lineSegment', entityId: entityId('outer_right'), startPosition: [6, 0], endPosition: [6, 6] },
+      { kind: 'lineSegment', entityId: entityId('outer_top'), startPosition: [6, 6], endPosition: [0, 6] },
+      { kind: 'lineSegment', entityId: entityId('outer_left'), startPosition: [0, 6], endPosition: [0, 0] },
+      { kind: 'circle', entityId: entityId('circle'), centerPosition: [3, 3], solvedRadius: 1 },
+    ])
+    const segment = (name: string, start: string, end: string): RegionBoundarySegmentRecord => ({
+      source: { kind: 'entity', entityId: entityId(name) },
+      startPointId: pointId(start),
+      endPointId: pointId(end),
+    })
+    const circleSegment: RegionBoundarySegmentRecord = {
+      source: { kind: 'entity', entityId: entityId('circle') },
+      startPointId: null,
+      endPointId: null,
+    }
+    const outerCell = createRegion(sketchId, 'outer_with_circle_hole', [
+      {
+        loopId: loopId('outer'),
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [
+          segment('outer_bottom', 'outer_bl', 'outer_br'),
+          segment('outer_right', 'outer_br', 'outer_tr'),
+          segment('outer_top', 'outer_tr', 'outer_tl'),
+          segment('outer_left', 'outer_tl', 'outer_bl'),
+        ],
+        boundaryPointIds: [pointId('outer_bl'), pointId('outer_br'), pointId('outer_tr'), pointId('outer_tl')],
+        isClosed: true,
+      },
+      {
+        loopId: loopId('circle_hole'),
+        role: 'inner',
+        orientation: 'clockwise',
+        segments: [circleSegment],
+        boundaryPointIds: [],
+        isClosed: true,
+      },
+    ])
+    const innerCell = createRegion(sketchId, 'inner_circle', [
+      {
+        loopId: loopId('circle_outer'),
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [circleSegment],
+        boundaryPointIds: [],
+        isClosed: true,
+      },
+    ])
+
+    const outerProfile = buildRegionProfileFace(oc, { plane, sketch }, outerCell)
+    const innerProfile = buildRegionProfileFace(oc, { plane, sketch }, innerCell)
+
+    assertClose(await faceArea(outerProfile.face), 36 - Math.PI, 1e-5, 'Outer cell should subtract the circular inner loop')
+    assertClose(await faceArea(innerProfile.face), Math.PI, 1e-5, 'Inner circle cell should build as an independent profile')
+  }
+
   async function testRejectsMultipleOuterLoops() {
     const oc = await getDefaultOpenCascadeInstance()
     const plane = createSketchPlane()
@@ -526,6 +642,7 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
   await testCircleProfileUsesSolvedCenterOffset()
   await testArcProfileRespectsReversedLoopTraversal()
   await testInnerLoopHoleReducesFaceArea()
+  await testCircleNestedInRectangleBuildsBothCells()
   await testRejectsMultipleOuterLoops()
 
   console.log('OCC phase 3 sketch profile tests passed.')
