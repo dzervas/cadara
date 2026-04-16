@@ -1,0 +1,71 @@
+# sketch-tool-definition Specification
+
+## Purpose
+TBD - created by archiving change sketch-tool-authoring-spec. Update Purpose after archive.
+## Requirements
+### Requirement: Each sketch tool SHALL be defined by its own tool module
+The system SHALL define each sketch drawing tool in its own authoring file, and that file MUST be the authoritative source for the tool's identity, behavior, and sketch-session integration metadata.
+
+#### Scenario: Runtime resolves a tool from a registry
+- **WHEN** the sketch session runtime needs behavior for a tool such as `line`, `rectangle`, or `circle`
+- **THEN** it resolves that behavior through the registered sketch tool definition for that tool ID rather than a shared tool-kind switch
+
+#### Scenario: Adding a new sketch tool
+- **WHEN** a new sketch tool is introduced
+- **THEN** the implementation MUST add a new sketch tool module and register it without requiring unrelated sketch tools to be edited in a shared behavior switch
+
+### Requirement: Sketch tool definitions SHALL own sketch-tool metadata
+Each sketch tool definition SHALL declare the metadata needed by the workbench and sketch runtime, including stable tool identity, human-readable name, icon metadata, toolbar grouping metadata, and allowed mode.
+
+#### Scenario: Toolbar renders sketch tool metadata
+- **WHEN** the toolbar or command system needs to display or activate a sketch tool
+- **THEN** it uses metadata declared by the sketch tool definition rather than duplicated tool metadata in a separate UI-only mapping
+
+#### Scenario: Runtime checks sketch-mode availability
+- **WHEN** the editor determines whether a sketch tool is available in the current mode
+- **THEN** it uses the mode metadata declared by that sketch tool definition
+
+### Requirement: Sketch tool definitions SHALL own activation and pointer lifecycle behavior
+Each sketch tool definition SHALL define how the tool activates, how pointer events are interpreted, and how those events update the staged sketch draft.
+
+#### Scenario: Activating a drawing tool
+- **WHEN** the user activates a sketch tool while a sketch session is open
+- **THEN** the runtime initializes that tool through its sketch tool definition
+
+#### Scenario: Processing pointer movement and release
+- **WHEN** the user moves or releases the pointer during an active sketch tool interaction
+- **THEN** the active sketch tool definition interprets those events into staged draft updates according to tool-specific rules
+
+### Requirement: Sketch tool definitions SHALL own staged geometry and validation behavior
+Each sketch tool definition SHALL define the staged geometry, live measurements, validation messages, and completion readiness associated with its current draft interaction.
+
+#### Scenario: Producing staged geometry
+- **WHEN** a sketch tool is mid-interaction
+- **THEN** the active sketch tool definition provides the staged geometry and related overlay state needed to present the in-progress result
+
+#### Scenario: Rejecting incomplete or invalid input
+- **WHEN** a sketch tool lacks the required points, dimensions, or valid geometry to complete an action
+- **THEN** the active sketch tool definition returns validation state that prevents invalid staged results from being committed
+
+### Requirement: Sketch tool definitions SHALL contribute to sketch commit preparation without importing solver or kernel implementations
+Each sketch tool definition SHALL translate its staged interaction into sketch draft updates or staged entities consumable by the shared sketch session runtime, and this behavior MUST depend only on shared contracts and runtime-owned sketch state rather than solver or kernel implementation modules.
+
+#### Scenario: Completing a tool interaction
+- **WHEN** a sketch tool interaction is completed successfully
+- **THEN** the sketch tool definition produces the staged entities or draft mutations needed for the shared sketch session to include that result in the next commit
+
+#### Scenario: Preserving boundary separation
+- **WHEN** a sketch tool definition is implemented
+- **THEN** it MUST NOT import solver implementation modules or kernel-specific modeling modules to perform its authoring behavior
+
+### Requirement: Sketch tool definitions SHALL integrate with a generic sketch tool presentation contract
+Each sketch tool definition SHALL describe its prompts, controls, and transient presentation through the shared sketch tool editor schema and MUST be consumable by generic runtime/UI surfaces unless it uses an approved extension point from that schema.
+
+#### Scenario: Rendering standard sketch tool prompts
+- **WHEN** the active sketch tool uses only standard prompt and control elements
+- **THEN** the sketch UI renders those elements from the declarative schema without tool-specific UI branching
+
+#### Scenario: Using an approved extension point
+- **WHEN** a sketch tool has presentation needs not covered by the standard schema
+- **THEN** it may use a documented extension point without forcing the generic sketch surfaces to import tool-specific business logic
+

@@ -3,9 +3,7 @@
 ## Purpose
 
 Define the plane-owned sketch session behavior that keeps pointer projection, preview rendering, and committed geometry aligned to the active sketch plane.
-
 ## Requirements
-
 ### Requirement: Sketch sessions preserve an explicit plane definition
 The system MUST preserve a sketch session's full `SketchPlaneDefinition` for the entire session lifetime instead of inferring sketch axes from ambient viewport state.
 
@@ -38,3 +36,15 @@ The system MUST render sketch previews and accepted sketch geometry on the activ
 #### Scenario: Draw a rectangle on the XZ plane
 - **WHEN** the user previews and places a rectangle in an active `XZ` sketch
 - **THEN** the preview and accepted geometry remain on the `XZ` plane without collapsing onto the wrong axes
+
+### Requirement: Sketch entry camera aligns to the active sketch plane and visible sketch content
+The system MUST orient the camera to a view parallel to the active sketch plane whenever a sketch session opens and MUST frame the visible extent for that session.
+
+#### Scenario: Start a new sketch
+- **WHEN** the user opens a new sketch on any supported sketch plane
+- **THEN** the camera is oriented parallel to that plane and fit to a default plane-centered sketch extent
+
+#### Scenario: Edit an existing sketch
+- **WHEN** the user opens an existing sketch containing authored entities
+- **THEN** the camera is oriented parallel to that sketch plane and zoomed so the full sketch geometry is visible with padding
+
