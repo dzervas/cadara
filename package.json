@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc -b && vite build",
+    "build:single": "tsc -b && vite build --config vite.single.config.ts",
     "lint": "eslint .",
     "preview": "vite preview",
     "load-time": "bun ./scripts/load-time.ts",

@@ -18,7 +18,10 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "vite.single.config.ts"]
 }

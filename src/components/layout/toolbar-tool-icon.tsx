@@ -1,5 +1,5 @@
 import type { ToolIconId } from '@/domain/tools/schema'
-import { toolbarToolIconAssetMap } from '@/components/layout/toolbar-tool-icon-assets'
+import { getToolbarToolIconSrc } from '@/components/layout/toolbar-tool-icon-src'
 import { cn } from '@/lib/utils'
 
 interface ToolbarToolIconProps {
@@ -10,7 +10,7 @@ interface ToolbarToolIconProps {
 export function ToolbarToolIcon({ icon, className }: ToolbarToolIconProps) {
   return (
     <img
-      src={`/icons/${toolbarToolIconAssetMap[icon]}`}
+      src={getToolbarToolIconSrc(icon)}
       alt=""
       aria-hidden="true"
       className={cn('h-4 w-4 shrink-0', className)}

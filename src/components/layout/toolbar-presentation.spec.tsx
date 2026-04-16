@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
+import { getToolbarToolIconSrc } from '@/components/layout/toolbar-tool-icon-src'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 
 test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
@@ -15,6 +16,26 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
 
   assert(iconMarkup.includes('/icons/extrude.svg'), 'Toolbar icons should resolve to local SVG assets.')
   assert(!iconMarkup.includes('lucide'), 'Toolbar icons should not render Lucide glyph markup.')
+
+  const runtimeGlobal = globalThis as typeof globalThis & {
+    __CADARA_SINGLE_ASSETS__?: Window['__CADARA_SINGLE_ASSETS__']
+  }
+  const previousAssets = runtimeGlobal.__CADARA_SINGLE_ASSETS__
+
+  try {
+    runtimeGlobal.__CADARA_SINGLE_ASSETS__ = {
+      icons: {
+        'extrude.svg': 'data:image/svg+xml;base64,PHN2Zy8+',
+      },
+    }
+
+    assert(
+      getToolbarToolIconSrc('extrude') === 'data:image/svg+xml;base64,PHN2Zy8+',
+      'Toolbar icons should use injected single-file SVG assets when present.',
+    )
+  } finally {
+    runtimeGlobal.__CADARA_SINGLE_ASSETS__ = previousAssets
+  }
 
   const tooltipMarkup = renderToStaticMarkup(
     <ToolbarTooltipContent title="Pattern" description="Choose a pattern tool." />,
