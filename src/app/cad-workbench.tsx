@@ -72,6 +72,7 @@ export function CadWorkbench() {
   const previewRenderables = machineState.previewRenderables
   const [hiddenTargetKeys, setHiddenTargetKeys] = useState<Record<string, boolean>>({})
   const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
+  const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null)
   const [workbenchStatusMessage, setWorkbenchStatusMessage] = useState<string | null>(null)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
@@ -334,13 +335,28 @@ export function CadWorkbench() {
       valueText: next.valueText,
     }).then((result) => {
       if (result.revisionState.kind !== 'accepted') {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Update ${variable.name || variable.variableId} failed.`)
+        const message = result.diagnostics[0]?.message ?? `Update ${variable.name || variable.variableId} failed.`
+        setInvalidVariableValueMessages((current) => ({
+          ...current,
+          [variable.variableId]: message,
+        }))
+        setWorkbenchStatusMessage(message)
         return
       }
 
+      setInvalidVariableValueMessages((current) => {
+        const nextMessages = { ...current }
+        delete nextMessages[variable.variableId]
+        return nextMessages
+      })
       dispatch({ type: 'document.refreshRequested' })
     }).catch((error: unknown) => {
-      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Update ${variable.name || variable.variableId} failed.`)
+      const message = error instanceof Error ? error.message : `Update ${variable.name || variable.variableId} failed.`
+      setInvalidVariableValueMessages((current) => ({
+        ...current,
+        [variable.variableId]: message,
+      }))
+      setWorkbenchStatusMessage(message)
     })
   }
 
@@ -609,6 +625,7 @@ export function CadWorkbench() {
           <FeatureSidebar
             snapshot={snapshot}
             hiddenTargetKeys={visibleHiddenTargetKeys}
+            invalidVariableValueMessages={invalidVariableValueMessages}
             objectLabelOverrides={objectLabelOverrides}
             onAddVariable={handleVariableAdd}
             onInspectDiagnostic={handleDiagnosticInspectPlaceholder}

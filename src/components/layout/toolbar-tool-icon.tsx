@@ -13,7 +13,7 @@ export function ToolbarToolIcon({ icon, className }: ToolbarToolIconProps) {
       src={getToolbarToolIconSrc(icon)}
       alt=""
       aria-hidden="true"
-      className={cn('h-4 w-4 shrink-0', className)}
+      className={cn('h-8 w-8 shrink-0', className)}
       loading="lazy"
       decoding="async"
     />

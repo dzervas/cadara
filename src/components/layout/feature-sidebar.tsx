@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionIcon, Paper, Text, Tooltip } from '@mantine/core'
 import { Box, Component, Download, Eye, EyeOff, Info, MousePointer2, PencilRuler, Plus, Trash2, Type } from 'lucide-react'
 
@@ -11,11 +11,13 @@ import {
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
 import type { DocumentSnapshot, DocumentVariableRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
+import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureSidebarProps {
   hiddenTargetKeys: Record<string, boolean>
   invalidVariableValueIds?: Record<string, boolean>
+  invalidVariableValueMessages?: Record<string, string>
   objectLabelOverrides: Record<string, string>
   onAddVariable: () => void
   onInspectDiagnostic: (diagnostic: ModelingDiagnostic) => void
@@ -53,10 +55,82 @@ function formatDocumentDiagnosticDetail(diagnostic: ModelingDiagnostic) {
   }
 }
 
+type VariableResultPresentation =
+  | { kind: 'success'; text: string }
+  | { kind: 'error'; text: '???'; message: string }
+
+function formatVariableResult(value: number) {
+  return Number.isInteger(value) ? String(value) : Number.parseFloat(value.toPrecision(12)).toString()
+}
+
+function getVariableResultPresentations(
+  variables: readonly DocumentVariableRecord[],
+  invalidVariableValueIds: Record<string, boolean>,
+  invalidVariableValueMessages: Record<string, string>,
+) {
+  const evaluation = evaluateDocumentVariableExpressions(variables)
+  const diagnosticsByVariableId = new Map<DocumentVariableRecord['variableId'], string>()
+  const presentations = new Map<DocumentVariableRecord['variableId'], VariableResultPresentation>()
+
+  if (!evaluation.ok) {
+    for (const diagnostic of evaluation.diagnostics) {
+      if (!diagnosticsByVariableId.has(diagnostic.variableId)) {
+        diagnosticsByVariableId.set(diagnostic.variableId, diagnostic.message)
+      }
+    }
+  }
+
+  for (const variable of variables) {
+    const runtimeError =
+      invalidVariableValueMessages[variable.variableId]
+      ?? (invalidVariableValueIds[variable.variableId] ? 'Variable expression failed to evaluate.' : null)
+    const evaluationError =
+      runtimeError
+      ?? diagnosticsByVariableId.get(variable.variableId)
+      ?? (!evaluation.ok ? 'Variable expression evaluation is blocked by another variable error.' : null)
+
+    if (evaluationError) {
+      presentations.set(variable.variableId, {
+        kind: 'error',
+        text: '???',
+        message: evaluationError,
+      })
+      continue
+    }
+
+    if (!evaluation.ok) {
+      presentations.set(variable.variableId, {
+        kind: 'error',
+        text: '???',
+        message: 'Variable expression result is unavailable.',
+      })
+      continue
+    }
+
+    const evaluatedValue = evaluation.valuesById.get(variable.variableId)
+    if (evaluatedValue === undefined) {
+      presentations.set(variable.variableId, {
+        kind: 'error',
+        text: '???',
+        message: 'Variable expression result is unavailable.',
+      })
+      continue
+    }
+
+    presentations.set(variable.variableId, {
+      kind: 'success',
+      text: formatVariableResult(evaluatedValue),
+    })
+  }
+
+  return presentations
+}
+
 export function FeatureSidebar({
   snapshot,
   hiddenTargetKeys,
   invalidVariableValueIds = {},
+  invalidVariableValueMessages = {},
   objectLabelOverrides,
   onAddVariable,
   onInspectDiagnostic,
@@ -75,6 +149,10 @@ export function FeatureSidebar({
   const [editingVariableId, setEditingVariableId] = useState<string | null>(null)
   const [variableDrafts, setVariableDrafts] = useState<Record<string, Pick<DocumentVariableRecord, 'name' | 'valueText'>>>({})
   const previousVariableIdsRef = useRef<Set<string> | null>(null)
+  const variableResultPresentations = useMemo(
+    () => getVariableResultPresentations(snapshot?.document.variables ?? [], invalidVariableValueIds, invalidVariableValueMessages),
+    [invalidVariableValueIds, invalidVariableValueMessages, snapshot],
+  )
 
   useEffect(() => {
     if (!snapshot) {
@@ -293,8 +371,41 @@ export function FeatureSidebar({
             <div className="space-y-2 px-3 py-3">
               {(snapshot?.document.variables ?? []).map((variable) => {
                 const draft = getVariableDraft(variable)
-                const isValueInvalid = invalidVariableValueIds[variable.variableId] === true
+                const variableResult = variableResultPresentations.get(variable.variableId) ?? {
+                  kind: 'error',
+                  text: '???',
+                  message: 'Variable expression result is unavailable.',
+                }
+                const isValueInvalid = variableResult.kind === 'error'
                 const isEditingVariable = editingVariableId === variable.variableId || variable.valueText === ''
+                const variableResultChip = (
+                  <span
+                    className="min-w-12 shrink-0 truncate rounded border px-2 py-1 text-right font-mono text-[12px] leading-4"
+                    aria-label={
+                      variableResult.kind === 'error'
+                        ? `Variable result error: ${variableResult.message}`
+                        : `Variable result: ${variableResult.text}`
+                    }
+                    data-variable-result={variable.variableId}
+                    data-result-state={variableResult.kind}
+                    style={{
+                      backgroundColor:
+                        variableResult.kind === 'error'
+                          ? 'var(--workbench-shell-danger-surface)'
+                          : 'var(--workbench-shell-success-surface)',
+                      borderColor:
+                        variableResult.kind === 'error'
+                          ? 'var(--workbench-shell-danger-border)'
+                          : 'var(--workbench-shell-success-border)',
+                      color:
+                        variableResult.kind === 'error'
+                          ? 'var(--workbench-shell-danger-text)'
+                          : 'var(--workbench-shell-success-text)',
+                    }}
+                  >
+                    {variableResult.text}
+                  </span>
+                )
 
                 return (
                   <div
@@ -368,11 +479,29 @@ export function FeatureSidebar({
                         <span className="min-w-0 truncate text-[13px] font-medium leading-5 text-[var(--mantine-color-dark-0)]">
                           {variable.name || 'Unnamed variable'}
                         </span>
-                        <span
-                          className="min-w-12 max-w-[58%] shrink-0 truncate rounded px-2 py-1 text-right font-mono text-[12px] leading-4 text-[var(--mantine-color-dark-1)]"
-                          style={{ backgroundColor: 'var(--mantine-color-dark-8)' }}
-                        >
-                          {variable.valueText}
+                        <span className="ml-auto flex min-w-0 max-w-[68%] shrink-0 items-center justify-end gap-1.5">
+                          <span
+                            className="min-w-0 truncate rounded border px-2 py-1 text-right font-mono text-[12px] leading-4 text-[var(--mantine-color-dark-1)]"
+                            data-variable-expression={variable.variableId}
+                            style={{
+                              backgroundColor: 'var(--mantine-color-dark-8)',
+                              borderColor: 'var(--workbench-shell-border)',
+                            }}
+                          >
+                            {variable.valueText}
+                          </span>
+                          {variableResult.kind === 'error' ? (
+                            <Tooltip
+                              label={variableResult.message}
+                              opened
+                              withArrow
+                              multiline
+                              position="right"
+                              w={240}
+                            >
+                              {variableResultChip}
+                            </Tooltip>
+                          ) : variableResultChip}
                         </span>
                       </button>
                     )}

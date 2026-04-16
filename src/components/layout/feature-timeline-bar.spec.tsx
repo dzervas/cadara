@@ -91,27 +91,27 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
     'Sidebar object rows should highlight across the full row container with the shared workbench accent surface.',
   )
 
-  const variableSnapshot = {
+  const variableResultSnapshot = {
     ...snapshot,
     document: {
       ...snapshot.document,
       variables: [
-        { variableId: 'variable_width' as const, name: 'width', valueText: '12 mm' },
-        { variableId: 'variable_depth' as const, name: 'depth', valueText: '' },
+        { variableId: 'variable_width' as const, name: 'width', valueText: '10 + 2' },
+        { variableId: 'variable_depth' as const, name: 'depth', valueText: 'width * 3' },
       ],
     },
     variables: [
-      { variableId: 'variable_width' as const, name: 'width', valueText: '12 mm' },
-      { variableId: 'variable_depth' as const, name: 'depth', valueText: '' },
+      { variableId: 'variable_width' as const, name: 'width', valueText: '10 + 2' },
+      { variableId: 'variable_depth' as const, name: 'depth', valueText: 'width * 3' },
     ],
   }
   const variableSidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <EditorContext.Provider value={editorValue}>
         <FeatureSidebar
-          snapshot={variableSnapshot}
+          snapshot={variableResultSnapshot}
           hiddenTargetKeys={{}}
-          invalidVariableValueIds={{ variable_width: true }}
+          invalidVariableValueIds={{}}
           objectLabelOverrides={{}}
           visibleSelection={[]}
           onAddVariable={() => undefined}
@@ -130,10 +130,77 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
 
   assert(variableSidebarMarkup.includes('aria-label="Edit variable variable_width"'), 'Existing variables should expose a double-click row edit control.')
   assert(!variableSidebarMarkup.includes('aria-label="Variable name variable_width"'), 'Existing variables should render read-only rows until edited.')
-  assert(variableSidebarMarkup.includes('font-mono') && variableSidebarMarkup.includes('12 mm'), 'Variable values should render in a monospace value chip.')
-  assert(variableSidebarMarkup.includes('aria-label="Variable name variable_depth"'), 'New blank variables should render name text inputs.')
-  assert(variableSidebarMarkup.includes('aria-label="Variable value variable_depth"'), 'New blank variables should render value text inputs.')
-  assert(variableSidebarMarkup.includes('data-invalid-value="true"'), 'Runtime invalid variable state should render danger styling.')
+  assert(variableSidebarMarkup.includes('data-variable-expression="variable_width"') && variableSidebarMarkup.includes('10 + 2'), 'Read-only variable rows should keep the authored expression visible.')
+  assert(variableSidebarMarkup.includes('font-mono') && variableSidebarMarkup.includes('>12</span>'), 'Variable expression results should render in a monospace value chip.')
+  assert(variableSidebarMarkup.includes('var(--workbench-shell-success-surface)'), 'Successful variable results should use the shared success background.')
+  assert(variableSidebarMarkup.includes('data-result-state="success"'), 'Successful variable results should expose success state metadata.')
+
+  const invalidVariableSidebarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureSidebar
+          snapshot={variableResultSnapshot}
+          hiddenTargetKeys={{}}
+          invalidVariableValueMessages={{ variable_width: 'Width expression failed.' }}
+          objectLabelOverrides={{}}
+          visibleSelection={[]}
+          onAddVariable={() => undefined}
+          onInspectDiagnostic={() => undefined}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+          onUpdateVariable={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(invalidVariableSidebarMarkup.includes('>???</span>'), 'Invalid variable results should render the placeholder result.')
+  assert(invalidVariableSidebarMarkup.includes('data-result-state="error"'), 'Invalid variable results should expose error state metadata.')
+  assert(invalidVariableSidebarMarkup.includes('var(--workbench-shell-danger-text)'), 'Invalid variable results should use the shared danger color.')
+  assert(invalidVariableSidebarMarkup.includes('Variable result error: Width expression failed.'), 'Invalid variable results should expose the same error message used by the persistent tooltip.')
+  assert(invalidVariableSidebarMarkup.includes('data-invalid-value="true"'), 'Runtime invalid variable state should render danger styling.')
+
+  const blankVariableSnapshot = {
+    ...snapshot,
+    document: {
+      ...snapshot.document,
+      variables: [
+        { variableId: 'variable_depth' as const, name: 'depth', valueText: '' },
+      ],
+    },
+    variables: [
+      { variableId: 'variable_depth' as const, name: 'depth', valueText: '' },
+    ],
+  }
+  const blankVariableSidebarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureSidebar
+          snapshot={blankVariableSnapshot}
+          hiddenTargetKeys={{}}
+          invalidVariableValueIds={{}}
+          objectLabelOverrides={{}}
+          visibleSelection={[]}
+          onAddVariable={() => undefined}
+          onInspectDiagnostic={() => undefined}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+          onUpdateVariable={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(blankVariableSidebarMarkup.includes('aria-label="Variable name variable_depth"'), 'New blank variables should render name text inputs.')
+  assert(blankVariableSidebarMarkup.includes('aria-label="Variable value variable_depth"'), 'New blank variables should render value text inputs.')
 
   const hiddenObjectMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
