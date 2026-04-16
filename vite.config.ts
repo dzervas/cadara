@@ -12,6 +12,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    entries: ['index.html'],
+  },
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {
@@ -46,7 +49,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     watch: {
-      ignored: ['e2e', '.playwright', '.playwright-cli', '.tmp*', 'Dockerfile*', '.*']
+      ignored: ['/e2e', '/tmp-*', '/.tmp*', '**/Dockerfile*', '**/.*']
     }
   },
 })
