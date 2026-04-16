@@ -521,6 +521,33 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assert(result.bodies[0]?.bodyId === bodyA.bodyId, 'Sequential join should preserve the first target body id.')
   }
 
+  async function testExtrudeJoinRefinesSameDomainTopology() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const baseBody = await makeBoxBody(oc, 'body_phase4_join_refine_base' as BodyId, 4, 3, 5, 'feature_phase4_join_refine_base' as FeatureId)
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase4_join_refine' as SketchId, plane)
+    const context = await createContext({ sketches: [sketch], bodies: [baseBody] })()
+
+    const result = executeOccFeature(context, 'feature_phase4_join_refine' as FeatureId, {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 8 },
+        operation: 'join',
+        booleanScope: { kind: 'targetBody', bodyId: baseBody.bodyId },
+      },
+    })
+    const [joinedBody] = result.bodies
+
+    assert(joinedBody?.bodyId === baseBody.bodyId, 'Join refinement should preserve the target body id.')
+    assert(joinedBody.topology.faceIds.length === 6, `Joined rectangular extension should have only the six end/side faces, got ${joinedBody.topology.faceIds.length}.`)
+    assert(joinedBody.topology.edgeIds.length === 12, `Joined rectangular extension should not keep middle seam edges, got ${joinedBody.topology.edgeIds.length}.`)
+    assert(joinedBody.topology.vertexIds.length === 8, `Joined rectangular extension should not keep middle seam vertices, got ${joinedBody.topology.vertexIds.length}.`)
+    assertClose(await bodyVolume(context.oc, joinedBody.shape), 96, 1e-6, 'Joined rectangular extension should preserve the full extended prism volume.')
+  }
+
   async function testExtrudeJoinRejectsMultiSolidResultShapes() {
     const oc = await getDefaultOpenCascadeInstance()
     const bodyA = await makeBoxBody(oc, 'body_phase4_join_multi_a' as BodyId, 1, 1, 1, 'feature_box_multi_a' as FeatureId, [20, 0, 0])
@@ -1252,6 +1279,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testPlaneFeatureBuildsFaceBackedConstructionPlane()
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion()
   await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy()
+  await testExtrudeJoinRefinesSameDomainTopology()
   await testExtrudeJoinRejectsMultiSolidResultShapes()
   await testExtrudeRejectsInvalidExtentAndBooleanScope()
   await testCutAndIntersectApplyPerTargetPolicy()

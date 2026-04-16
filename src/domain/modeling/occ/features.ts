@@ -175,6 +175,19 @@ function createBooleanBuilder(
   }
 }
 
+function refineBooleanResultShape(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+) {
+  const unifier = new oc.ShapeUpgrade_UnifySameDomain_2(shape, true, true, true)
+  unifier.AllowInternalEdges(false)
+  unifier.SetSafeInputMode(true)
+  unifier.SetLinearTolerance(0.001)
+  unifier.SetAngularTolerance(0.001)
+  unifier.Build()
+  return unifier.Shape()
+}
+
 function runBoolean(
   oc: OpenCascadeInstance,
   operation: Exclude<FeatureBooleanOperation, 'newBody'>,
@@ -189,8 +202,10 @@ function runBoolean(
     throw new Error(`OCC boolean ${operation} failed to build.`)
   }
 
+  builder.SimplifyResult(true, true, 1e-7)
+
   return {
-    shape: builder.Shape(),
+    shape: refineBooleanResultShape(oc, builder.Shape()),
     builder,
   }
 }

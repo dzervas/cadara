@@ -256,19 +256,13 @@ function enumerateFaces(
 ) {
   const faceIds: FaceId[] = []
   const facesById = new Map<FaceId, InstanceType<OpenCascadeInstance['TopoDS_Face']>>()
-  const explorer = new oc.TopExp_Explorer_2(
-    shape,
-    faceShapeType(oc) as never,
-    anyShapeType(oc) as never,
-  )
-  let index = 1
+  const faceMap = new oc.TopTools_IndexedMapOfShape_1()
+  oc.TopExp.MapShapes_1(shape, faceShapeType(oc) as never, faceMap)
 
-  while (explorer.More()) {
+  for (let index = 1; index <= faceMap.Size(); index += 1) {
     const faceId = `face_${bodyId}_${topologyToken}_${index}` as FaceId
     faceIds.push(faceId)
-    facesById.set(faceId, oc.TopoDS.Face_1(explorer.Current()))
-    explorer.Next()
-    index += 1
+    facesById.set(faceId, oc.TopoDS.Face_1(faceMap.FindKey(index)))
   }
 
   return { faceIds, facesById }
@@ -282,19 +276,13 @@ function enumerateEdges(
 ) {
   const edgeIds: EdgeId[] = []
   const edgesById = new Map<EdgeId, InstanceType<OpenCascadeInstance['TopoDS_Edge']>>()
-  const explorer = new oc.TopExp_Explorer_2(
-    shape,
-    edgeShapeType(oc) as never,
-    anyShapeType(oc) as never,
-  )
-  let index = 1
+  const edgeMap = new oc.TopTools_IndexedMapOfShape_1()
+  oc.TopExp.MapShapes_1(shape, edgeShapeType(oc) as never, edgeMap)
 
-  while (explorer.More()) {
+  for (let index = 1; index <= edgeMap.Size(); index += 1) {
     const edgeId = `edge_${bodyId}_${topologyToken}_${index}` as EdgeId
     edgeIds.push(edgeId)
-    edgesById.set(edgeId, oc.TopoDS.Edge_1(explorer.Current()))
-    explorer.Next()
-    index += 1
+    edgesById.set(edgeId, oc.TopoDS.Edge_1(edgeMap.FindKey(index)))
   }
 
   return { edgeIds, edgesById }
@@ -308,19 +296,13 @@ function enumerateVertices(
 ) {
   const vertexIds: VertexId[] = []
   const verticesById = new Map<VertexId, InstanceType<OpenCascadeInstance['TopoDS_Vertex']>>()
-  const explorer = new oc.TopExp_Explorer_2(
-    shape,
-    vertexShapeType(oc) as never,
-    anyShapeType(oc) as never,
-  )
-  let index = 1
+  const vertexMap = new oc.TopTools_IndexedMapOfShape_1()
+  oc.TopExp.MapShapes_1(shape, vertexShapeType(oc) as never, vertexMap)
 
-  while (explorer.More()) {
+  for (let index = 1; index <= vertexMap.Size(); index += 1) {
     const vertexId = `vertex_${bodyId}_${topologyToken}_${index}` as VertexId
     vertexIds.push(vertexId)
-    verticesById.set(vertexId, oc.TopoDS.Vertex_1(explorer.Current()))
-    explorer.Next()
-    index += 1
+    verticesById.set(vertexId, oc.TopoDS.Vertex_1(vertexMap.FindKey(index)))
   }
 
   return { vertexIds, verticesById }

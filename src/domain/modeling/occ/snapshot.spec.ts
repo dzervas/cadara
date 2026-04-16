@@ -10,7 +10,7 @@ import type {
   GetDocumentSnapshotResponse,
   SketchSnapshotRecord,
 } from '@/contracts/modeling/schema'
-import type { FeatureId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
+import type { BodyId, FeatureId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -273,14 +273,24 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     }
   }
 
-  async function createBoxBody() {
+  async function createBoxBody(options: {
+    bodyId?: BodyId
+    width?: number
+    depth?: number
+    height?: number
+  } = {}) {
     const oc = await getDefaultOpenCascadeInstance()
-    const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 8, 6)
+    const box = new oc.BRepPrimAPI_MakeBox_3(
+      toGpPnt(oc, [0, 0, 0]),
+      options.width ?? 10,
+      options.depth ?? 8,
+      options.height ?? 6,
+    )
     box.Build(new oc.Message_ProgressRange_1())
     assert(box.IsDone(), 'Expected OCC box builder to succeed for phase 6 snapshot tests.')
 
     return trackNewSolidBody(oc, {
-      bodyId: 'body_phase6_seed',
+      bodyId: options.bodyId ?? 'body_phase6_seed',
       label: 'Seed Body',
       ownerFeatureId: 'feature_seed',
       shape: box.Shape(),
@@ -471,6 +481,60 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const baseBody = await createBoxBody({
+      bodyId: 'body_phase6_join_refine_seed' as BodyId,
+      width: 4,
+      depth: 3,
+      height: 5,
+    })
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase6_join_refine' as SketchId, plane)
+    const initialState = createOccAuthoringState(oc, {
+      bodies: [baseBody],
+      sketches: [sketch],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+    const rebuilt = rebuildOccAuthoringState(initialState, [
+      {
+        featureId: 'feature_phase6_join_refine' as FeatureId,
+        definition: {
+          kind: 'extrude',
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [{
+              kind: 'region',
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            }],
+            startExtent: { kind: 'profilePlane' },
+            endExtent: { kind: 'blind', direction: 'positive', distance: 8 },
+            operation: 'join',
+            booleanScope: { kind: 'targetBody', bodyId: baseBody.bodyId },
+          },
+        },
+      },
+    ])
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
+    const bodyRecords = snapshot.document.render.records.filter((record) =>
+      record.ownerBodyId === baseBody.bodyId,
+    )
+    const faceRecords = bodyRecords.filter((record) =>
+      record.binding.topology === 'face' && record.binding.semanticClass === 'planarFace',
+    )
+    const edgeRecords = bodyRecords.filter((record) =>
+      record.binding.topology === 'edge' && record.binding.semanticClass === 'featureEdge',
+    )
+    const vertexRecords = bodyRecords.filter((record) =>
+      record.binding.topology === 'vertex' && record.binding.semanticClass === 'featureVertex',
+    )
+
+    assert(faceRecords.length === 6, `Joined extrude snapshot should render six prism faces, got ${faceRecords.length}.`)
+    assert(edgeRecords.length === 12, `Joined extrude snapshot should not render middle seam edges, got ${edgeRecords.length}.`)
+    assert(vertexRecords.length === 8, `Joined extrude snapshot should not render middle seam vertices, got ${vertexRecords.length}.`)
+  }
+
   async function testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics() {
     const oc = await getDefaultOpenCascadeInstance()
     const baseBody = await createBoxBody()
@@ -547,6 +611,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
   }
 
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
+  await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
   await testOccSnapshotSurfacesSketchNavigationAndHistory()
 
