@@ -18,6 +18,7 @@ import type {
   AuthoredFeatureKind,
 } from '@/contracts/modeling/schema'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
+import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 import type { BodyId } from '@/contracts/shared/ids'
 import type {
   ExtrudeFeatureSchemaVersion,
@@ -33,23 +34,23 @@ import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-sc
 
 export interface ExtrudeFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[]
-  depth: number
-  operation: FeatureBooleanOperation
+  depth: MaybeAuthoredValue<number>
+  operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
 
 export interface RevolveFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[]
   axisTarget: RevolveAxisRef | null
-  startAngle: number
-  angle: number
-  operation: FeatureBooleanOperation
+  startAngle: MaybeAuthoredValue<number>
+  angle: MaybeAuthoredValue<number>
+  operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
 
 export interface FilletFeatureParameterDraft {
   edgeTargets: readonly Extract<PrimitiveRef, { kind: 'edge' }>[]
-  radius: number
+  radius: MaybeAuthoredValue<number>
 }
 
 export interface PlaneFeatureParameterDraft {
@@ -59,8 +60,8 @@ export interface PlaneFeatureParameterDraft {
 export interface ShellFeatureParameterDraft {
   bodyTarget: Extract<PrimitiveRef, { kind: 'body' }> | null
   faceTargets: readonly Extract<PrimitiveRef, { kind: 'face' }>[]
-  thickness: number
-  operation: FeatureBooleanOperation
+  thickness: MaybeAuthoredValue<number>
+  operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
 
@@ -68,7 +69,7 @@ export interface SweepFeatureParameterDraft {
   profileTargets: readonly Extract<PrimitiveRef, { kind: 'region' | 'face' }>[]
   pathTarget: Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }> | null
   guideCurveTargets: readonly Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }>[]
-  operationIntent: AdvancedSolidOperationIntent
+  operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
   options: Record<string, unknown>
 }
@@ -76,23 +77,23 @@ export interface SweepFeatureParameterDraft {
 export interface LoftFeatureParameterDraft {
   profileTargets: readonly Extract<PrimitiveRef, { kind: 'region' | 'face' }>[]
   guideCurveTargets: readonly Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }>[]
-  operationIntent: AdvancedSolidOperationIntent
+  operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
   options: Record<string, unknown>
 }
 
 export interface ChamferFeatureParameterDraft {
   edgeTargets: readonly Extract<PrimitiveRef, { kind: 'edge' }>[]
-  distance: number
+  distance: MaybeAuthoredValue<number>
 }
 
 export interface ThickenFeatureParameterDraft {
   faceTargets: readonly Extract<PrimitiveRef, { kind: 'face' }>[]
-  operationIntent: AdvancedSolidOperationIntent
+  operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
   options: {
-    thickness: number
-    side: 'oneSide' | 'symmetric'
+    thickness: MaybeAuthoredValue<number>
+    side: MaybeAuthoredValue<'oneSide' | 'symmetric'>
   }
 }
 
@@ -108,13 +109,13 @@ export interface DeleteSolidFeatureParameterDraft {
 export interface MirrorFeatureParameterDraft {
   bodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
   planeTarget: Extract<PrimitiveRef, { kind: 'construction' | 'face' }> | null
-  copy: boolean
+  copy: MaybeAuthoredValue<boolean>
 }
 
 export interface TransformFeatureParameterDraft {
   bodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
   transformReferenceTarget: Extract<PrimitiveRef, { kind: 'construction' | 'face' }> | null
-  distance: number
+  distance: MaybeAuthoredValue<number>
 }
 
 export interface FeatureDraftByKind {

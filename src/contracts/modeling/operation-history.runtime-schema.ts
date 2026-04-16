@@ -163,7 +163,11 @@ const rawFeatureDefinitionSchema = z.unknown().superRefine((value, ctx) => {
     if (typeof definition.kind === 'string' && advancedFeatureKinds.has(definition.kind) && typeof definition.parameters === 'object' && definition.parameters !== null && !Array.isArray(definition.parameters)) {
       const parameters = definition.parameters as Record<string, unknown>
       const operationIntent = parameters.operationIntent
-      if (operationIntent !== undefined && (typeof operationIntent !== 'string' || !advancedOperationIntents.has(operationIntent))) {
+      if (
+        operationIntent !== undefined
+        && typeof operationIntent === 'string'
+        && !advancedOperationIntents.has(operationIntent)
+      ) {
         ctx.addIssue({
           code: 'custom',
           message: 'Advanced feature has an invalid operation intent.',

@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, revolveSelectionFilter } from '@/domain/editor/schema'
 import { REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const revolveAuthoringDefinition = {
   metadata: {
@@ -81,9 +81,9 @@ export const revolveAuthoringDefinition = {
               : draft.profileTargets,
       axisTarget:
         patch.axisTarget === undefined ? draft.axisTarget : asRevolveAxisRef(patch.axisTarget as Parameters<typeof asRevolveAxisRef>[0]),
-      startAngle: typeof patch.startAngle === 'number' ? patch.startAngle : draft.startAngle,
-      angle: typeof patch.angle === 'number' ? patch.angle : draft.angle,
-      operation: isBooleanOperation(patch.operation) ? patch.operation : draft.operation,
+      startAngle: acceptAuthoredPatch(patch.startAngle, draft.startAngle, (value): value is number => typeof value === 'number'),
+      angle: acceptAuthoredPatch(patch.angle, draft.angle, (value): value is number => typeof value === 'number'),
+      operation: acceptAuthoredPatch(patch.operation, draft.operation, isBooleanOperation),
       booleanScope: toBooleanScope(patch, draft.booleanScope),
     }
   },
@@ -99,7 +99,7 @@ export const revolveAuthoringDefinition = {
     }
 
     const bodyTarget = asBodyRef(target)
-    return bodyTarget && draft.operation !== 'newBody'
+    return bodyTarget && authoredStringLiteral(draft.operation, 'newBody') !== 'newBody'
       ? this.applyPatch(draft, { booleanTargetBodyId: bodyTarget.bodyId })
       : draft
   },
@@ -127,7 +127,7 @@ export const revolveAuthoringDefinition = {
       }))
     }
 
-    if (!hasBooleanTargetScope(input.draft.operation, input.draft.booleanScope)) {
+    if (!hasBooleanTargetScope(authoredStringLiteral(input.draft.operation, 'newBody'), input.draft.booleanScope)) {
       diagnostics.push(createMissingInputDiagnostic({
         feature: 'revolve',
         phase: input.phase,
@@ -139,21 +139,22 @@ export const revolveAuthoringDefinition = {
     return diagnostics
   },
   buildDefinition(draft) {
-    return draft.profileTargets.length > 0 && draft.axisTarget && hasBooleanTargetScope(draft.operation, draft.booleanScope)
+    const operation = authoredStringLiteral(draft.operation, 'newBody')
+    return draft.profileTargets.length > 0 && draft.axisTarget && hasBooleanTargetScope(operation, draft.booleanScope)
       ? {
           kind: 'revolve',
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
           parameters: {
             profiles: draft.profileTargets as readonly [typeof draft.profileTargets[number], ...typeof draft.profileTargets[number][]],
             axis: draft.axisTarget,
-            startAngle: draft.startAngle,
+            startAngle: authoredDefinitionValue(draft.startAngle, 0) as number,
             extent: {
               kind: 'angle',
               direction: 'counterClockwise',
-              radians: draft.angle,
+              radians: authoredDefinitionValue(draft.angle, Math.PI * 2) as number,
             },
-            angle: draft.angle,
-            operation: draft.operation,
+            angle: authoredDefinitionValue(draft.angle, Math.PI * 2) as number,
+            operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
             booleanScope: draft.booleanScope,
           },
         }
@@ -161,6 +162,7 @@ export const revolveAuthoringDefinition = {
   },
   getFormSchema(session) {
     const booleanTargetBodies = getBooleanScopeBodyTargets(session.draft.booleanScope)
+    const operation = authoredStringLiteral(session.draft.operation, 'newBody')
     return {
       sections: [
         {
@@ -216,19 +218,20 @@ export const revolveAuthoringDefinition = {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: session.draft.angle * (180 / Math.PI), input: 'angleDegrees', step: 1, error: session.draft.angle > 0 ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
-            { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: session.draft.startAngle * (180 / Math.PI), input: 'angleDegrees', step: 1, patch: { patchKey: 'startAngle' } },
+            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } }, error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
+            { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: { expressionCapable: true, valueKind: { kind: 'angle' } }, patch: { patchKey: 'startAngle' } },
             {
               kind: 'enum',
               id: 'revolve-operation',
               label: 'Operation',
-              value: session.draft.operation,
+              value: operation,
               options: [
                 { value: 'newBody', label: 'newBody' },
                 { value: 'join', label: 'join' },
                 { value: 'cut', label: 'cut' },
                 { value: 'intersect', label: 'intersect' },
               ],
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] } },
               patch: { patchKey: 'operation' },
             },
             {
@@ -238,14 +241,14 @@ export const revolveAuthoringDefinition = {
               value: booleanTargetBodies,
               emptyLabel: 'None selected',
               helper: 'Join, cut, and intersect require at least one explicit target body.',
-              hidden: session.draft.operation === 'newBody',
-              error: session.draft.operation === 'newBody' || booleanTargetBodies.length > 0
+              hidden: operation === 'newBody',
+              error: operation === 'newBody' || booleanTargetBodies.length > 0
                 ? null
                 : { message: 'Select at least one target body.' },
               advancedParticipant: {
                 role: 'targetBody',
-                required: session.draft.operation !== 'newBody',
-                cardinality: { min: session.draft.operation === 'newBody' ? 0 : 1, max: null },
+                required: operation !== 'newBody',
+                cardinality: { min: operation === 'newBody' ? 0 : 1, max: null },
                 selectedCount: booleanTargetBodies.length,
               },
               picker: {

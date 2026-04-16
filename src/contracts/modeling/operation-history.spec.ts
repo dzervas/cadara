@@ -22,6 +22,7 @@ import {
   thickenAdvancedFeatureExample,
   transformAdvancedFeatureExample,
 } from '@/contracts/modeling/advanced-solid'
+import { getAuthoredLiteralValue } from '@/contracts/modeling/authored-values'
 
 test('src/contracts/modeling/operation-history.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -495,7 +496,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         result.ok &&
         result.payload.entries[0]?.kind === 'createFeature' &&
         result.payload.entries[0].payload.definition.kind === 'sweep' &&
-        result.payload.entries[0].payload.definition.parameters.operationIntent === 'subtract' &&
+        getAuthoredLiteralValue(result.payload.entries[0].payload.definition.parameters.operationIntent) === 'subtract' &&
         result.payload.entries[1]?.kind === 'updateFeature' &&
         result.payload.entries[1].payload.definition.kind === 'sweep' &&
         result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'targetBody'),
@@ -537,7 +538,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'edge') &&
         result.payload.entries[1]?.kind === 'updateFeature' &&
         result.payload.entries[1].payload.definition.kind === 'chamfer' &&
-        result.payload.entries[1].payload.definition.parameters.options?.distance === 2,
+        getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.distance) === 2,
       'Chamfer operation history must preserve edge participant roles and distance options across create and update entries.',
     )
   }
@@ -729,8 +730,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'face') &&
         result.payload.entries[1]?.kind === 'updateFeature' &&
         result.payload.entries[1].payload.definition.kind === 'thicken' &&
-        result.payload.entries[1].payload.definition.parameters.options?.thickness === 2 &&
-        result.payload.entries[1].payload.definition.parameters.options?.side === 'symmetric',
+        getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.thickness) === 2 &&
+        getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.side) === 'symmetric',
       'Thicken operation history must preserve face participants and option payloads across updates.',
     )
   }
@@ -769,7 +770,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'plane')
         && result.payload.entries[1]?.kind === 'updateFeature'
         && result.payload.entries[1].payload.definition.kind === 'mirror'
-        && result.payload.entries[1].payload.definition.parameters.options?.copy === false,
+        && getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.copy) === false,
       'Mirror operation history must preserve explicit plane participants and copy policy options across updates.',
     )
   }
@@ -808,7 +809,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'transformReference')
         && result.payload.entries[1]?.kind === 'updateFeature'
         && result.payload.entries[1].payload.definition.kind === 'transform'
-        && result.payload.entries[1].payload.definition.parameters.options?.distance === 7.5,
+        && getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.distance) === 7.5,
       'Transform operation history must preserve explicit transform references and distance options across updates.',
     )
   }

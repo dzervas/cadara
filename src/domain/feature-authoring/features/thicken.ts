@@ -6,7 +6,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { FeatureAuthoringDefinition, ThickenFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, thickenSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
-import { appendUniqueTarget, asBodyRef, asFaceRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asFaceRef, authoredDefinitionValue, authoredNumberFormValue, authoredNumberLiteral, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const thickenParticipants = [
   {
@@ -47,7 +47,7 @@ function isOperationIntent(value: unknown): value is AdvancedSolidOperationInten
   return value === 'create' || value === 'add' || value === 'subtract' || value === 'intersect'
 }
 
-function isThickenSide(value: unknown): value is ThickenFeatureParameterDraft['options']['side'] {
+function isThickenSide(value: unknown): value is 'oneSide' | 'symmetric' {
   return value === 'oneSide' || value === 'symmetric'
 }
 
@@ -85,25 +85,25 @@ function buildThickenDefinition(draft: ThickenFeatureParameterDraft) {
     kind: 'thicken' as const,
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
-      operationIntent: draft.operationIntent,
+      operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
       participants: buildThickenParticipants(draft),
       options: {
-        thickness: draft.options.thickness,
-        side: draft.options.side,
+        thickness: authoredDefinitionValue(draft.options.thickness, 1),
+        side: authoredDefinitionValue(draft.options.side, 'oneSide'),
       },
     },
   }
 }
 
 function getThickenValidationDiagnostics(draft: ThickenFeatureParameterDraft) {
-  const diagnostics = validateAdvancedSolidFeatureDefinition(buildThickenDefinition(draft), {
+  const diagnostics = validateAdvancedSolidFeatureDefinition(buildThickenDefinition(draft) as never, {
     featureKind: 'thicken',
     participants: thickenParticipants,
     operationIntent: thickenOperationIntent,
     options: thickenOptions,
   })
 
-  if (!isThickenSide(draft.options.side)) {
+  if (!isThickenSide(authoredStringLiteral(draft.options.side, 'oneSide'))) {
     diagnostics.push({
       code: 'advanced-feature-invalid-option',
       severity: 'error',
@@ -153,8 +153,8 @@ export const thickenAuthoringDefinition = {
       operationIntent: feature.parameters.operationIntent ?? 'create',
       targetBodyTargets: filterTargets(getParticipantTargets('targetBody'), asBodyRef),
       options: {
-        thickness: typeof thickness === 'number' ? thickness : 1,
-        side: isThickenSide(side) ? side : 'oneSide',
+        thickness: (thickness ?? 1) as ThickenFeatureParameterDraft['options']['thickness'],
+        side: (isThickenSide(side) ? side : side ?? 'oneSide') as ThickenFeatureParameterDraft['options']['side'],
       },
     }
   },
@@ -170,24 +170,24 @@ export const thickenAuthoringDefinition = {
             : asFaceRef(patch.faceTarget as PrimitiveRef | null)
               ? [patch.faceTarget as typeof draft.faceTargets[number]]
               : draft.faceTargets,
-      operationIntent: isOperationIntent(patch.operationIntent) ? patch.operationIntent : draft.operationIntent,
+      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isOperationIntent),
       targetBodyTargets:
         patch.targetBodyTargets === undefined
           ? draft.targetBodyTargets
           : filterTargets(patch.targetBodyTargets, asBodyRef),
       options: {
         thickness:
-          typeof patch.thickness === 'number'
-            ? patch.thickness
-            : optionPatch && typeof optionPatch === 'object' && typeof (optionPatch as { thickness?: unknown }).thickness === 'number'
-              ? (optionPatch as { thickness: number }).thickness
-              : draft.options.thickness,
+          acceptAuthoredPatch(
+            patch.thickness ?? (optionPatch && typeof optionPatch === 'object' ? (optionPatch as { thickness?: unknown }).thickness : undefined),
+            draft.options.thickness,
+            (value): value is number => typeof value === 'number',
+          ),
         side:
-          isThickenSide(patch.side)
-            ? patch.side
-            : optionPatch && typeof optionPatch === 'object' && isThickenSide((optionPatch as { side?: unknown }).side)
-              ? (optionPatch as { side: 'oneSide' | 'symmetric' }).side
-              : draft.options.side,
+          acceptAuthoredPatch(
+            patch.side ?? (optionPatch && typeof optionPatch === 'object' ? (optionPatch as { side?: unknown }).side : undefined),
+            draft.options.side,
+            isThickenSide,
+          ) as ThickenFeatureParameterDraft['options']['side'],
       },
     }
   },
@@ -201,7 +201,7 @@ export const thickenAuthoringDefinition = {
     }
 
     const bodyTarget = asBodyRef(target)
-    return bodyTarget && draft.operationIntent !== 'create'
+    return bodyTarget && authoredStringLiteral(draft.operationIntent, 'create') !== 'create'
       ? this.applyPatch(draft, { targetBodyTargets: appendUniqueTarget(draft.targetBodyTargets, bodyTarget) })
       : draft
   },
@@ -212,10 +212,11 @@ export const thickenAuthoringDefinition = {
     if (draft.faceTargets.length === 0) {
       return 'Select one or more faces for thicken'
     }
-    if (!(draft.options.thickness > 0) || !Number.isFinite(draft.options.thickness)) {
+    const thickness = authoredNumberLiteral(draft.options.thickness)
+    if (thickness !== null && thickness <= 0) {
       return 'Enter a positive thicken thickness'
     }
-    if (draft.operationIntent !== 'create' && draft.targetBodyTargets.length === 0) {
+    if (authoredStringLiteral(draft.operationIntent, 'create') !== 'create' && draft.targetBodyTargets.length === 0) {
       return 'Select a target body for thicken boolean operation'
     }
     return `${prefix} thicken on ${draft.faceTargets.length} face${draft.faceTargets.length === 1 ? '' : 's'}`
@@ -243,10 +244,12 @@ export const thickenAuthoringDefinition = {
     })]
   },
   buildDefinition(draft) {
-    return getThickenValidationDiagnostics(draft).length === 0 ? buildThickenDefinition(draft) : null
+    return getThickenValidationDiagnostics(draft).length === 0 ? buildThickenDefinition(draft) as never : null
   },
   getFormSchema(session) {
     const diagnostics = session.diagnostics
+    const operationIntent = authoredStringLiteral(session.draft.operationIntent, 'create')
+    const side = authoredStringLiteral(session.draft.options.side, 'oneSide')
     return {
       sections: [
         {
@@ -281,17 +284,17 @@ export const thickenAuthoringDefinition = {
               label: 'Boolean target bodies',
               value: session.draft.targetBodyTargets,
               emptyLabel: 'None selected',
-              hidden: session.draft.operationIntent === 'create',
+              hidden: operationIntent === 'create',
               helper: 'Boolean intents require explicit durable target bodies.',
               error:
-                session.draft.operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
+                operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
                   ? null
                   : { message: 'Select at least one target body.' },
               advancedParticipant: {
                 role: 'targetBody',
-                required: session.draft.operationIntent !== 'create',
+                required: operationIntent !== 'create',
                 cardinality: {
-                  min: session.draft.operationIntent === 'create' ? 0 : 1,
+                  min: operationIntent === 'create' ? 0 : 1,
                   max: null,
                 },
                 selectedCount: session.draft.targetBodyTargets.length,
@@ -314,37 +317,40 @@ export const thickenAuthoringDefinition = {
               kind: 'numeric',
               id: 'thicken-thickness',
               label: 'Thickness',
-              value: session.draft.options.thickness,
+              value: authoredNumberFormValue(session.draft.options.thickness),
               input: 'number',
               step: 0.1,
               error:
-                session.draft.options.thickness > 0 && Number.isFinite(session.draft.options.thickness)
+                isPositiveAuthoredNumber(session.draft.options.thickness)
                   ? null
                   : { message: 'Thickness must be greater than zero.' },
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
               patch: { patchKey: 'thickness' },
             },
             {
               kind: 'enum',
               id: 'thicken-side',
               label: 'Side',
-              value: session.draft.options.side,
+              value: side,
               options: [
                 { value: 'oneSide', label: 'oneSide' },
                 { value: 'symmetric', label: 'symmetric' },
               ],
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['oneSide', 'symmetric'] } },
               patch: { patchKey: 'side' },
             },
             {
               kind: 'enum',
               id: 'thicken-operation-intent',
               label: 'Operation',
-              value: session.draft.operationIntent,
+              value: operationIntent,
               options: [
                 { value: 'create', label: 'create' },
                 { value: 'add', label: 'add' },
                 { value: 'subtract', label: 'subtract' },
                 { value: 'intersect', label: 'intersect' },
               ],
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] } },
               patch: { patchKey: 'operationIntent' },
             },
           ],

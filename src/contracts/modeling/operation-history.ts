@@ -17,6 +17,7 @@ import {
   type OperationHistorySchemaVersion,
 } from '@/contracts/shared/versioning'
 import { parseOperationHistoryPayload } from '@/contracts/modeling/operation-history.runtime-schema'
+import { normalizeFeatureDefinitionAuthoredValues } from '@/domain/modeling/feature-value-expressions'
 
 export type PersistedCommitSketchPayload = Omit<
   CommitSketchRequest,
@@ -133,7 +134,7 @@ export function createCreateFeatureHistoryEntry(
     kind: 'createFeature',
     payload: {
       featureLabel: payload.featureLabel,
-      definition: payload.definition,
+      definition: normalizeFeatureDefinitionAuthoredValues(payload.definition),
     },
   }
 }
@@ -146,7 +147,7 @@ export function createUpdateFeatureHistoryEntry(
     payload: {
       featureId: payload.featureId,
       featureLabel: payload.featureLabel,
-      definition: payload.definition,
+      definition: normalizeFeatureDefinitionAuthoredValues(payload.definition),
     },
   }
 }

@@ -15,6 +15,7 @@ import {
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from '@/domain/modeling/occ/features'
+import { resolveFeatureDefinitionValues } from '@/domain/modeling/feature-value-expressions'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 import {
   createOccReferenceState,
@@ -235,10 +236,19 @@ export function applyOccFeatureToAuthoringState(
   state: OccAuthoringState,
   feature: OccAuthoringFeatureRecord,
 ) {
+  const resolvedDefinition = resolveFeatureDefinitionValues({
+    definition: feature.definition,
+    variables: state.variables,
+  })
+
+  if (!resolvedDefinition.ok) {
+    throw new Error(resolvedDefinition.diagnostics.map((diagnostic) => diagnostic.message).join(' '))
+  }
+
   return applyFeatureResult(
     state,
     feature,
-    executeOccFeature(state, feature.featureId, feature.definition),
+    executeOccFeature(state, feature.featureId, resolvedDefinition.definition),
   )
 }
 

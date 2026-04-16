@@ -8,6 +8,7 @@ import {
 } from '@/domain/feature-authoring/form-adapter'
 import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
 import { createFeatureEditSession, patchFeatureEditSession } from '@/domain/editor/feature-editing'
+import { isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 
 test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -38,9 +39,11 @@ test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
     numericPatch?.thickness === 1.25,
     'Adapter numeric values should translate valid RHF strings back into the existing feature patch shape.',
   )
+  const expressionPatch = createFeatureEditorPatchFromFormValue(shellThicknessField, 'wall + 1')
   assert(
-    createFeatureEditorPatchFromFormValue(shellThicknessField, '-') === null,
-    'Adapter numeric values should ignore intermediate invalid input instead of emitting a draft patch.',
+    isExpressionAuthoredValue(expressionPatch?.thickness) &&
+      expressionPatch.thickness.valueText === 'wall + 1',
+    'Adapter numeric values should preserve non-literal text as authored expression patches.',
   )
 
   const revolveSession = createFeatureEditSession({

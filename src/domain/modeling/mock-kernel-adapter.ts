@@ -32,6 +32,7 @@ import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
 } from '@/domain/modeling/document-variable-expressions'
+import { resolveFeatureDefinitionValues } from '@/domain/modeling/feature-value-expressions'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type {
@@ -2277,7 +2278,33 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
-    const validation = validateFeatureDefinitionAgainstSnapshot(request.definition, snapshot)
+    const resolvedDefinition = resolveFeatureDefinitionValues({
+      definition: request.definition,
+      variables: snapshot.document.variables,
+    })
+
+    if (!resolvedDefinition.ok) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: request.baseRevisionId,
+        featureId: `feature_${getFeatureDefinitionLabel(request.definition)}-preview`,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: resolvedDefinition.diagnostics[0]?.code ?? 'feature-value-expression-invalid',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics: resolvedDefinition.diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics: resolvedDefinition.diagnostics,
+      }
+    }
+
+    const validation = validateFeatureDefinitionAgainstSnapshot(resolvedDefinition.definition, snapshot)
 
     if (!validation.accepted) {
       return {
@@ -2303,7 +2330,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       const featureId = allocateFeatureId(mutableSnapshot, request.definition.kind)
       const featureIndex = mutableSnapshot.document.features.filter((feature) => feature.definition.kind === request.definition.kind).length + 1
-      const changedTargets = getFeatureDefinitionChangedTargets(request.definition)
+      const changedTargets = getFeatureDefinitionChangedTargets(resolvedDefinition.definition)
 
       const featureLabel = request.featureLabel ?? `${request.definition.kind[0]!.toUpperCase()}${request.definition.kind.slice(1)} ${featureIndex}`
       const nextFeature = {
@@ -2711,7 +2738,33 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
-    const validation = validateFeatureDefinitionAgainstSnapshot(request.definition, snapshot)
+    const resolvedDefinition = resolveFeatureDefinitionValues({
+      definition: request.definition,
+      variables: snapshot.document.variables,
+    })
+
+    if (!resolvedDefinition.ok) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: request.baseRevisionId,
+        featureId: request.featureId,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: resolvedDefinition.diagnostics[0]?.code ?? 'feature-value-expression-invalid',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics: resolvedDefinition.diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics: resolvedDefinition.diagnostics,
+      }
+    }
+
+    const validation = validateFeatureDefinitionAgainstSnapshot(resolvedDefinition.definition, snapshot)
 
     if (!validation.accepted) {
       return {
@@ -2739,7 +2792,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       mutableFeature.definition = request.definition
       mutableFeature.label = request.featureLabel ?? mutableFeature.label
       mutableFeature.ownerRevisionId = nextRevisionId
-      mutableFeature.producedTargets = getFeatureDefinitionChangedTargets(request.definition)
+      mutableFeature.producedTargets = getFeatureDefinitionChangedTargets(resolvedDefinition.definition)
 
       const featureEntity = mutableSnapshot.presentation.entities.find(
         (entry) => entry.target.kind === 'feature' && entry.target.featureId === request.featureId,
@@ -3413,7 +3466,17 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   async evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse> {
     assertSupportedModelingRequest(request)
     const snapshot = await this.getSnapshot()
-    const validation = validateFeatureDefinitionAgainstSnapshot(request.definition, snapshot)
+    const resolvedDefinition = resolveFeatureDefinitionValues({
+      definition: request.definition,
+      variables: snapshot.document.variables,
+    })
+    const validation = resolvedDefinition.ok
+      ? validateFeatureDefinitionAgainstSnapshot(resolvedDefinition.definition, snapshot)
+      : {
+          accepted: false as const,
+          reasonCode: resolvedDefinition.diagnostics[0]?.code ?? 'feature-value-expression-invalid',
+          diagnostics: resolvedDefinition.diagnostics,
+        }
     return {
       contractVersion: CONTRACT_VERSION,
       documentId: request.documentId,
@@ -3428,7 +3491,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           },
       render: {
         schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
-        records: validation.accepted ? buildPreviewRenderables(request.definition, snapshot) : [],
+        records: validation.accepted && resolvedDefinition.ok ? buildPreviewRenderables(resolvedDefinition.definition, snapshot) : [],
       },
       diagnostics: validation.diagnostics,
     }

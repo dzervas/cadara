@@ -1,7 +1,7 @@
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, filletSelectionFilter } from '@/domain/editor/schema'
 import { FILLET_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { appendUniqueTarget, asEdgeRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asEdgeRef, authoredDefinitionValue, authoredNumberFormValue, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const filletAuthoringDefinition = {
   metadata: {
@@ -48,7 +48,7 @@ export const filletAuthoringDefinition = {
             : asEdgeRef(patch.edgeTarget as Parameters<typeof asEdgeRef>[0])
               ? [patch.edgeTarget as typeof draft.edgeTargets[number]]
               : draft.edgeTargets,
-      radius: typeof patch.radius === 'number' ? patch.radius : draft.radius,
+      radius: acceptAuthoredPatch(patch.radius, draft.radius, (value): value is number => typeof value === 'number'),
     }
   },
   applySelection(draft, target) {
@@ -82,7 +82,7 @@ export const filletAuthoringDefinition = {
           featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
           parameters: {
             edgeTargets: draft.edgeTargets,
-            radius: draft.radius,
+            radius: authoredDefinitionValue(draft.radius, 1) as number,
           },
         }
       : null
@@ -123,10 +123,11 @@ export const filletAuthoringDefinition = {
             kind: 'numeric',
             id: 'fillet-radius',
             label: 'Radius',
-            value: session.draft.radius,
+            value: authoredNumberFormValue(session.draft.radius),
             input: 'number',
             step: 0.1,
-            error: session.draft.radius > 0 ? null : { message: 'Radius must be greater than zero.' },
+            authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+            error: isPositiveAuthoredNumber(session.draft.radius) ? null : { message: 'Radius must be greater than zero.' },
             patch: { patchKey: 'radius' },
           }],
         },

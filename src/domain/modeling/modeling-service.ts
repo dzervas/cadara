@@ -113,6 +113,7 @@ import {
   type ModelingOperationHistoryEntry,
   type ModelingOperationHistoryPayload,
 } from '@/contracts/modeling/operation-history'
+import { getAuthoredLiteralValue, isExpressionAuthoredValue, type MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 import type {
   ConstraintStatusRecord,
   ConstraintDefinition,
@@ -645,22 +646,22 @@ function normalizeExtrudeFeatureParameters(value: unknown): ExtrudeFeatureParame
     throw new Error('Legacy extrude profile, depth, and direction aliases are not supported; use profiles and endExtent.')
   }
 
-  if (!isRecord(value.endExtent) || value.endExtent.kind !== 'blind' || typeof value.endExtent.distance !== 'number') {
+  if (!isRecord(value.endExtent) || value.endExtent.kind !== 'blind' || !isAuthoredNumberLike(value.endExtent.distance)) {
     throw new Error('Invalid extrude feature parameters payload.')
   }
 
-  const distance =
-    value.endExtent.distance
+  const distance = value.endExtent.distance as ExtrudeFeatureParameters['endExtent']['distance']
+  const literalDistance = getAuthoredLiteralValue(distance)
 
   if (value.endExtent.direction !== 'positive' && value.endExtent.direction !== 'negative') {
     throw new Error('Invalid extrude end extent direction payload.')
   }
 
-  if (distance <= 0) {
+  if (literalDistance !== null && literalDistance <= 0) {
     throw new Error('Extrude depth must be positive.')
   }
 
-  if (value.operation !== 'newBody' && value.operation !== 'join' && value.operation !== 'cut' && value.operation !== 'intersect') {
+  if (!isAuthoredEnumLike(value.operation, ['newBody', 'join', 'cut', 'intersect'])) {
     throw new Error('Invalid extrude operation payload.')
   }
 
@@ -672,7 +673,7 @@ function normalizeExtrudeFeatureParameters(value: unknown): ExtrudeFeatureParame
       direction: value.endExtent.direction,
       distance,
     },
-    operation: value.operation,
+    operation: value.operation as ExtrudeFeatureParameters['operation'],
     booleanScope:
       isRecord(value.booleanScope) && value.booleanScope.kind === 'targetBody' && isString(value.booleanScope.bodyId)
         ? { kind: 'targetBody', bodyId: value.booleanScope.bodyId as BodyId }
@@ -680,6 +681,16 @@ function normalizeExtrudeFeatureParameters(value: unknown): ExtrudeFeatureParame
           ? { kind: 'targetBodies', bodyIds: value.booleanScope.bodyIds.map((bodyId) => assertBodyId(bodyId)) }
           : { kind: 'standalone' },
   }
+}
+
+function isAuthoredNumberLike(value: unknown) {
+  const literal = getAuthoredLiteralValue(value as MaybeAuthoredValue<unknown>)
+  return typeof literal === 'number' || isExpressionAuthoredValue(value)
+}
+
+function isAuthoredEnumLike(value: unknown, options: readonly string[]) {
+  const literal = getAuthoredLiteralValue(value as MaybeAuthoredValue<unknown>)
+  return (typeof literal === 'string' && options.includes(literal)) || isExpressionAuthoredValue(value)
 }
 
 function normalizeFilletFeatureParameters(value: unknown): FilletFeatureParameters {

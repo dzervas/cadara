@@ -1,4 +1,5 @@
 import { primitiveRefEquals, type PrimitiveRef } from '@/domain/editor/schema'
+import { createExpressionAuthoredValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 
 import { createFeatureEditorFieldPatch } from '@/domain/feature-authoring/form-events'
 import type {
@@ -120,10 +121,28 @@ export function createFeatureEditorPatchFromFormValue(
   switch (field.kind) {
     case 'numeric': {
       const parsed = parseNumericFormValue(value)
-      return parsed === null ? null : createFeatureEditorFieldPatch(field, parsed)
+      if (parsed !== null) {
+        return createFeatureEditorFieldPatch(field, parsed)
+      }
+
+      if (field.authoredValue?.expressionCapable && typeof value === 'string' && value.trim().length > 0) {
+        return createFeatureEditorFieldPatch(field, createExpressionAuthoredValue(value.trim()))
+      }
+
+      return null
     }
     case 'enum':
-      return createFeatureEditorFieldPatch(field, typeof value === 'string' ? value : field.value)
+      if (typeof value === 'string') {
+        const literal = field.options.some((option) => option.value === value)
+        return createFeatureEditorFieldPatch(
+          field,
+          field.authoredValue?.expressionCapable && !literal
+            ? createExpressionAuthoredValue(value.trim())
+            : value,
+        )
+      }
+
+      return createFeatureEditorFieldPatch(field, field.value)
     case 'referencePicker':
       return createFeatureEditorFieldPatch(field, normalizeReferenceFormValue(value))
     case 'referenceCollection':
@@ -161,6 +180,10 @@ function normalizeFeatureEditorFieldValue(
 }
 
 function normalizeNumericFormValue(value: unknown): string {
+  if (isExpressionAuthoredValue(value)) {
+    return value.valueText
+  }
+
   if (typeof value === 'string') {
     return value
   }

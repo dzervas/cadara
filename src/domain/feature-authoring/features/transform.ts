@@ -5,10 +5,15 @@ import {
 import type { FeatureAuthoringDefinition, TransformFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, transformSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
 import {
+  acceptAuthoredPatch,
   appendUniqueTarget,
   asBodyRef,
   asPlaneReferenceTarget,
+  authoredDefinitionValue,
+  authoredNumberFormValue,
+  authoredNumberLiteral,
   createMissingInputDiagnostic,
+  isPositiveAuthoredNumber,
 } from '@/domain/feature-authoring/features/shared'
 
 export const transformParticipants = [
@@ -53,7 +58,7 @@ function buildTransformDefinition(draft: TransformFeatureParameterDraft) {
         ...(draft.transformReferenceTarget ? [{ role: 'transformReference' as const, targets: [draft.transformReferenceTarget] }] : []),
       ],
       options: {
-        distance: draft.distance,
+        distance: authoredDefinitionValue(draft.distance, 1),
       },
     },
   }
@@ -93,7 +98,7 @@ export const transformAuthoringDefinition = {
     return {
       bodyTargets: filterBodyTargets(feature.parameters.participants.find((participant) => participant.role === 'body')?.targets ?? []),
       transformReferenceTarget: asPlaneReferenceTarget(feature.parameters.participants.find((participant) => participant.role === 'transformReference')?.targets[0] ?? null),
-      distance: typeof feature.parameters.options?.distance === 'number' ? feature.parameters.options.distance : 1,
+      distance: (feature.parameters.options?.distance ?? 1) as TransformFeatureParameterDraft['distance'],
     }
   },
   applyPatch(draft, patch) {
@@ -108,9 +113,7 @@ export const transformAuthoringDefinition = {
           ? draft.transformReferenceTarget
           : asPlaneReferenceTarget(patch.transformReferenceTarget as PrimitiveRef | null),
       distance:
-        typeof patch.distance === 'number'
-          ? patch.distance
-          : draft.distance,
+        acceptAuthoredPatch(patch.distance, draft.distance, (value): value is number => typeof value === 'number'),
     }
   },
   applySelection(draft, target) {
@@ -132,7 +135,8 @@ export const transformAuthoringDefinition = {
     if (!draft.transformReferenceTarget) {
       return 'Select one transform reference plane'
     }
-    if (!(draft.distance > 0) || !Number.isFinite(draft.distance)) {
+    const distance = authoredNumberLiteral(draft.distance)
+    if (distance !== null && distance <= 0) {
       return 'Enter a positive transform distance'
     }
     return `${prefix} transform on ${draft.bodyTargets.length} bod${draft.bodyTargets.length === 1 ? 'y' : 'ies'}`
@@ -222,13 +226,14 @@ export const transformAuthoringDefinition = {
               kind: 'numeric',
               id: 'transform-distance',
               label: 'Distance',
-              value: session.draft.distance,
+              value: authoredNumberFormValue(session.draft.distance),
               input: 'number',
               step: 0.1,
               error:
-                session.draft.distance > 0 && Number.isFinite(session.draft.distance)
+                isPositiveAuthoredNumber(session.draft.distance)
                   ? null
                   : { message: 'Distance must be greater than zero.' },
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
               patch: { patchKey: 'distance' },
             },
           ],

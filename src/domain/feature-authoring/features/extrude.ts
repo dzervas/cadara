@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, extrudeSelectionFilter } from '@/domain/editor/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { appendUniqueTarget, asBodyRef, asExtrudeProfileRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const extrudeAuthoringDefinition = {
   metadata: {
@@ -68,8 +68,8 @@ export const extrudeAuthoringDefinition = {
             : asExtrudeProfileRef(patch.profileTarget as Parameters<typeof asExtrudeProfileRef>[0])
               ? [patch.profileTarget as typeof draft.profileTargets[number]]
               : draft.profileTargets,
-      depth: typeof patch.depth === 'number' ? patch.depth : draft.depth,
-      operation: isBooleanOperation(patch.operation) ? patch.operation : draft.operation,
+      depth: acceptAuthoredPatch(patch.depth, draft.depth, (value): value is number => typeof value === 'number'),
+      operation: acceptAuthoredPatch(patch.operation, draft.operation, isBooleanOperation),
       booleanScope: toBooleanScope(patch, draft.booleanScope),
     }
   },
@@ -82,7 +82,7 @@ export const extrudeAuthoringDefinition = {
     }
 
     const bodyTarget = asBodyRef(target)
-    return bodyTarget && draft.operation !== 'newBody'
+    return bodyTarget && authoredStringLiteral(draft.operation, 'newBody') !== 'newBody'
       ? this.applyPatch(draft, { booleanTargetBodyId: bodyTarget.bodyId })
       : draft
   },
@@ -106,7 +106,7 @@ export const extrudeAuthoringDefinition = {
       }))
     }
 
-    if (!hasBooleanTargetScope(input.draft.operation, input.draft.booleanScope)) {
+    if (!hasBooleanTargetScope(authoredStringLiteral(input.draft.operation, 'newBody'), input.draft.booleanScope)) {
       diagnostics.push(createMissingInputDiagnostic({
         feature: 'extrude',
         phase: input.phase,
@@ -118,7 +118,8 @@ export const extrudeAuthoringDefinition = {
     return diagnostics
   },
   buildDefinition(draft) {
-    return draft.profileTargets.length > 0 && hasBooleanTargetScope(draft.operation, draft.booleanScope)
+    const operation = authoredStringLiteral(draft.operation, 'newBody')
+    return draft.profileTargets.length > 0 && hasBooleanTargetScope(operation, draft.booleanScope)
       ? {
           kind: 'extrude',
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -128,9 +129,9 @@ export const extrudeAuthoringDefinition = {
             endExtent: {
               kind: 'blind',
               direction: 'positive',
-              distance: draft.depth,
+              distance: authoredDefinitionValue(draft.depth, 12) as number,
             },
-            operation: draft.operation,
+            operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
             booleanScope: draft.booleanScope,
           },
         }
@@ -138,6 +139,7 @@ export const extrudeAuthoringDefinition = {
   },
   getFormSchema(session) {
     const booleanTargetBodies = getBooleanScopeBodyTargets(session.draft.booleanScope)
+    const operation = authoredStringLiteral(session.draft.operation, 'newBody')
     return {
       sections: [
         {
@@ -174,23 +176,25 @@ export const extrudeAuthoringDefinition = {
               kind: 'numeric',
               id: 'extrude-depth',
               label: 'Depth',
-              value: session.draft.depth,
+              value: authoredNumberFormValue(session.draft.depth),
               input: 'number',
               step: 0.1,
-              error: session.draft.depth > 0 ? null : { message: 'Depth must be greater than zero.' },
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+              error: isPositiveAuthoredNumber(session.draft.depth) ? null : { message: 'Depth must be greater than zero.' },
               patch: { patchKey: 'depth' },
             },
             {
               kind: 'enum',
               id: 'extrude-operation',
               label: 'Operation',
-              value: session.draft.operation,
+              value: operation,
               options: [
                 { value: 'newBody', label: 'newBody' },
                 { value: 'join', label: 'join' },
                 { value: 'cut', label: 'cut' },
                 { value: 'intersect', label: 'intersect' },
               ],
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] } },
               patch: { patchKey: 'operation' },
             },
             {
@@ -200,14 +204,14 @@ export const extrudeAuthoringDefinition = {
               value: booleanTargetBodies,
               emptyLabel: 'None selected',
               helper: 'Join, cut, and intersect require at least one explicit target body.',
-              hidden: session.draft.operation === 'newBody',
-              error: session.draft.operation === 'newBody' || booleanTargetBodies.length > 0
+              hidden: operation === 'newBody',
+              error: operation === 'newBody' || booleanTargetBodies.length > 0
                 ? null
                 : { message: 'Select at least one target body.' },
               advancedParticipant: {
                 role: 'targetBody',
-                required: session.draft.operation !== 'newBody',
-                cardinality: { min: session.draft.operation === 'newBody' ? 0 : 1, max: null },
+                required: operation !== 'newBody',
+                cardinality: { min: operation === 'newBody' ? 0 : 1, max: null },
                 selectedCount: booleanTargetBodies.length,
               },
               picker: {

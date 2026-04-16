@@ -58,6 +58,7 @@ import type {
   ShellFeatureSchemaVersion,
   SnapshotSchemaVersion,
 } from '@/contracts/shared/versioning'
+import type { AuthoredValue } from '@/contracts/modeling/authored-values'
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
@@ -109,6 +110,37 @@ const advancedOperationIntentSchema = z.union([
   z.literal('intersect'),
 ]).transform((value) => value as AdvancedSolidOperationIntent)
 
+function authoredValueSchema<TValue>(valueSchema: z.ZodType<TValue>, label: string) {
+  return z.union([
+    z.object({
+      source: z.literal('literal'),
+      value: valueSchema,
+    }).strict(),
+    z.object({
+      source: z.literal('expression'),
+      valueText: z.string().trim().min(1, `${label} expression text is required.`),
+    }).strict(),
+    valueSchema.transform((value) => ({ source: 'literal' as const, value })),
+  ]).transform((value) => value as AuthoredValue<TValue>)
+}
+
+function authoredEnumValueSchema<const TValues extends readonly [string, ...string[]]>(
+  values: TValues,
+  label: string,
+) {
+  return authoredValueSchema(z.enum(values), label)
+}
+
+const authoredPositiveNumberSchema = (message: string) =>
+  authoredValueSchema(positiveNumberSchema(message), message)
+
+const authoredNumberSchema = (label: string) => authoredValueSchema(numberSchema, label)
+const authoredBooleanSchema = (label: string) => authoredValueSchema(z.boolean(), label)
+
+const booleanOperationAuthoredSchema = authoredEnumValueSchema(['newBody', 'join', 'cut', 'intersect'], 'Boolean operation')
+const advancedOperationIntentAuthoredSchema = authoredEnumValueSchema(['create', 'add', 'subtract', 'intersect'], 'Advanced operation intent')
+const thickenSideAuthoredSchema = authoredEnumValueSchema(['oneSide', 'symmetric'], 'Thicken side')
+
 const extrudeDefinitionSchema = z.object({
   kind: z.literal('extrude'),
   featureTypeVersion: z.literal(EXTRUDE_FEATURE_SCHEMA_VERSION).transform((value) => value as ExtrudeFeatureSchemaVersion),
@@ -121,9 +153,9 @@ const extrudeDefinitionSchema = z.object({
     endExtent: z.object({
       kind: z.literal('blind'),
       direction: z.union([z.literal('positive'), z.literal('negative')]),
-      distance: positiveNumberSchema('Extrude distance must be positive.'),
+      distance: authoredPositiveNumberSchema('Extrude distance must be positive.'),
     }).passthrough(),
-    operation: z.union([z.literal('newBody'), z.literal('join'), z.literal('cut'), z.literal('intersect')]),
+    operation: booleanOperationAuthoredSchema,
     booleanScope: z.object({ kind: z.string() }).passthrough(),
   }).passthrough(),
 })
@@ -134,13 +166,14 @@ const revolveDefinitionSchema = z.object({
   parameters: z.object({
     profiles: z.array(z.unknown()).nonempty('Revolve profiles must be non-empty.'),
     axis: z.unknown(),
-    startAngle: z.number(),
+    startAngle: authoredNumberSchema('Revolve start angle'),
     extent: z.object({
       kind: z.literal('angle'),
       direction: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
-      radians: z.number(),
+      radians: authoredPositiveNumberSchema('Revolve angle must be positive.'),
     }).passthrough(),
-    operation: z.union([z.literal('newBody'), z.literal('join'), z.literal('cut'), z.literal('intersect')]),
+    angle: authoredPositiveNumberSchema('Revolve angle must be positive.').optional(),
+    operation: booleanOperationAuthoredSchema,
     booleanScope: z.object({ kind: z.string() }).passthrough(),
   }).passthrough(),
 })
@@ -150,7 +183,7 @@ const filletDefinitionSchema = z.object({
   featureTypeVersion: z.literal(FILLET_FEATURE_SCHEMA_VERSION).transform((value) => value as FilletFeatureSchemaVersion),
   parameters: z.object({
     edgeTargets: z.array(z.unknown()),
-    radius: positiveNumberSchema('Fillet radius must be positive.'),
+    radius: authoredPositiveNumberSchema('Fillet radius must be positive.'),
   }).passthrough(),
 })
 
@@ -170,8 +203,31 @@ const shellDefinitionSchema = z.object({
   featureTypeVersion: z.literal(SHELL_FEATURE_SCHEMA_VERSION).transform((value) => value as ShellFeatureSchemaVersion),
   parameters: z.object({
     faces: z.array(z.unknown()),
-    thickness: positiveNumberSchema('Shell thickness must be positive.'),
+    thickness: authoredPositiveNumberSchema('Shell thickness must be positive.'),
+    operation: booleanOperationAuthoredSchema.optional(),
   }).passthrough(),
+})
+
+const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional().transform((options) => {
+  if (!options) {
+    return options
+  }
+
+  const next = { ...options }
+  if ('distance' in next) {
+    next.distance = authoredPositiveNumberSchema('Advanced distance must be positive.').parse(next.distance)
+  }
+  if ('thickness' in next) {
+    next.thickness = authoredPositiveNumberSchema('Advanced thickness must be positive.').parse(next.thickness)
+  }
+  if ('copy' in next) {
+    next.copy = authoredBooleanSchema('Mirror copy').parse(next.copy)
+  }
+  if ('side' in next) {
+    next.side = thickenSideAuthoredSchema.parse(next.side)
+  }
+
+  return next
 })
 
 const advancedDefinitionSchema = z.object({
@@ -196,8 +252,8 @@ const advancedDefinitionSchema = z.object({
       role: advancedParticipantRoleSchema,
       targets: z.array(durableRefSchema),
     })),
-    operationIntent: advancedOperationIntentSchema.optional(),
-    options: z.record(z.string(), z.unknown()).optional(),
+    operationIntent: z.union([advancedOperationIntentAuthoredSchema, advancedOperationIntentSchema]).optional(),
+    options: advancedOptionsAuthoredSchema,
   }),
 }).transform((value) => value as AdvancedSolidFeatureDefinition)
 

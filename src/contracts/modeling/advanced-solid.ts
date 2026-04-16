@@ -1,5 +1,6 @@
 import type { BodyId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
+import { getAuthoredLiteralValue, type MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 
 export const ADVANCED_SOLID_FEATURE_SCHEMA_VERSION = 'advanced-solid-feature/v0' as const
 
@@ -172,6 +173,8 @@ export function validateAdvancedSolidFeatureDefinition(
   }
 
   const operationIntent = definition.parameters.operationIntent
+    ? getAuthoredLiteralValue(definition.parameters.operationIntent)
+    : undefined
   if (operationIntent && !descriptor.operationIntent?.supportedIntents.includes(operationIntent)) {
     diagnostics.push(createAdvancedDiagnostic({
       code: 'advanced-feature-unsupported-operation',
@@ -221,7 +224,8 @@ export function validateAdvancedSolidFeatureDefinition(
 
   const options = definition.parameters.options ?? {}
   for (const option of descriptor.options ?? []) {
-    const value = options[option.key]
+    const optionValue = options[option.key]
+    const value = optionValue === undefined ? undefined : getAuthoredLiteralValue(optionValue as MaybeAuthoredValue<unknown>)
 
     if (option.required && value === undefined) {
       diagnostics.push(createAdvancedDiagnostic({

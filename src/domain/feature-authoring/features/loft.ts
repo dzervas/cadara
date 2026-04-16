@@ -7,10 +7,13 @@ import {
 import { primitiveRefEquals, createSelectionFilterForRequirement, loftSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
 import type { FeatureAuthoringDefinition, LoftFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import {
+  acceptAuthoredPatch,
   appendUniqueTarget,
   asBodyRef,
   asExtrudeProfileRef,
   asSweepPathRef,
+  authoredDefinitionValue,
+  authoredStringLiteral,
   createMissingInputDiagnostic,
 } from '@/domain/feature-authoring/features/shared'
 
@@ -87,7 +90,7 @@ function getLoftValidationDiagnostics(draft: LoftFeatureParameterDraft) {
     kind: 'loft',
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
-      operationIntent: draft.operationIntent,
+      operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
       participants: buildLoftParticipants(draft),
       ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
     },
@@ -170,7 +173,7 @@ export const loftAuthoringDefinition = {
         patch.guideCurveTargets === undefined
           ? draft.guideCurveTargets
           : filterTargets(patch.guideCurveTargets, asSweepPathRef),
-      operationIntent: isOperationIntent(patch.operationIntent) ? patch.operationIntent : draft.operationIntent,
+      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isOperationIntent),
       targetBodyTargets:
         patch.targetBodyTargets === undefined
           ? draft.targetBodyTargets
@@ -198,7 +201,7 @@ export const loftAuthoringDefinition = {
     }
 
     const bodyTarget = asBodyRef(target)
-    return bodyTarget && draft.operationIntent !== 'create'
+    return bodyTarget && authoredStringLiteral(draft.operationIntent, 'create') !== 'create'
       ? this.applyPatch(draft, { targetBodyTargets: appendUniqueTarget(draft.targetBodyTargets, bodyTarget) })
       : draft
   },
@@ -209,7 +212,7 @@ export const loftAuthoringDefinition = {
     if (draft.profileTargets.length < 2) {
       return 'Select at least two sketch regions or planar faces for loft'
     }
-    if (draft.operationIntent !== 'create' && draft.targetBodyTargets.length === 0) {
+    if (authoredStringLiteral(draft.operationIntent, 'create') !== 'create' && draft.targetBodyTargets.length === 0) {
       return 'Select a target body for loft boolean operation'
     }
     return `${prefix} loft with explicit profile order`
@@ -242,7 +245,7 @@ export const loftAuthoringDefinition = {
           kind: 'loft',
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: draft.operationIntent,
+            operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
             participants: buildLoftParticipants(draft),
             ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
           },
@@ -251,6 +254,7 @@ export const loftAuthoringDefinition = {
   },
   getFormSchema(session) {
     const diagnostics = session.diagnostics
+    const operationIntent = authoredStringLiteral(session.draft.operationIntent, 'create')
     return {
       sections: [
         {
@@ -314,13 +318,14 @@ export const loftAuthoringDefinition = {
               kind: 'enum',
               id: 'loft-operation-intent',
               label: 'Operation',
-              value: session.draft.operationIntent,
+              value: operationIntent,
               options: [
                 { value: 'create', label: 'create' },
                 { value: 'add', label: 'add' },
                 { value: 'subtract', label: 'subtract' },
                 { value: 'intersect', label: 'intersect' },
               ],
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] } },
               patch: { patchKey: 'operationIntent' },
             },
             {
@@ -330,14 +335,14 @@ export const loftAuthoringDefinition = {
               value: session.draft.targetBodyTargets,
               emptyLabel: 'None selected',
               helper: 'Add, subtract, and intersect require at least one explicit target body.',
-              hidden: session.draft.operationIntent === 'create',
-              error: session.draft.operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
+              hidden: operationIntent === 'create',
+              error: operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
                 ? null
                 : { message: 'Select at least one target body.' },
               advancedParticipant: {
                 role: 'targetBody',
-                required: session.draft.operationIntent !== 'create',
-                cardinality: { min: session.draft.operationIntent === 'create' ? 0 : 1, max: null },
+                required: operationIntent !== 'create',
+                cardinality: { min: operationIntent === 'create' ? 0 : 1, max: null },
                 selectedCount: session.draft.targetBodyTargets.length,
               },
               picker: {

@@ -6,7 +6,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { FeatureAuthoringDefinition, SweepFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, sweepSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
-import { appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asSweepPathRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asSweepPathRef, authoredDefinitionValue, authoredStringLiteral, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
 
 const sweepParticipants = [
   {
@@ -90,7 +90,7 @@ function getSweepValidationDiagnostics(draft: SweepFeatureParameterDraft) {
     kind: 'sweep',
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
-      operationIntent: draft.operationIntent,
+      operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
       participants: buildSweepParticipants(draft),
       ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
     },
@@ -158,7 +158,7 @@ export const sweepAuthoringDefinition = {
         patch.guideCurveTargets === undefined
           ? draft.guideCurveTargets
           : filterTargets(patch.guideCurveTargets, asSweepPathRef),
-      operationIntent: isOperationIntent(patch.operationIntent) ? patch.operationIntent : draft.operationIntent,
+      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isOperationIntent),
       targetBodyTargets:
         patch.targetBodyTargets === undefined
           ? draft.targetBodyTargets
@@ -182,7 +182,7 @@ export const sweepAuthoringDefinition = {
     }
 
     const bodyTarget = asBodyRef(target)
-    return bodyTarget && draft.operationIntent !== 'create'
+    return bodyTarget && authoredStringLiteral(draft.operationIntent, 'create') !== 'create'
       ? this.applyPatch(draft, { targetBodyTargets: appendUniqueTarget(draft.targetBodyTargets, bodyTarget) })
       : draft
   },
@@ -196,7 +196,7 @@ export const sweepAuthoringDefinition = {
     if (!draft.pathTarget) {
       return 'Select one edge or sketch entity for sweep path'
     }
-    if (draft.operationIntent !== 'create' && draft.targetBodyTargets.length === 0) {
+    if (authoredStringLiteral(draft.operationIntent, 'create') !== 'create' && draft.targetBodyTargets.length === 0) {
       return 'Select a target body for sweep boolean operation'
     }
     return `${prefix} sweep with explicit profile and path`
@@ -229,7 +229,7 @@ export const sweepAuthoringDefinition = {
           kind: 'sweep',
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: draft.operationIntent,
+            operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
             participants: buildSweepParticipants(draft),
             ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
           },
@@ -238,6 +238,7 @@ export const sweepAuthoringDefinition = {
   },
   getFormSchema(session) {
     const diagnostics = session.diagnostics
+    const operationIntent = authoredStringLiteral(session.draft.operationIntent, 'create')
     return {
       sections: [
         {
@@ -318,13 +319,14 @@ export const sweepAuthoringDefinition = {
               kind: 'enum',
               id: 'sweep-operation-intent',
               label: 'Operation',
-              value: session.draft.operationIntent,
+              value: operationIntent,
               options: [
                 { value: 'create', label: 'create' },
                 { value: 'add', label: 'add' },
                 { value: 'subtract', label: 'subtract' },
                 { value: 'intersect', label: 'intersect' },
               ],
+              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] } },
               patch: { patchKey: 'operationIntent' },
             },
             {
@@ -334,14 +336,14 @@ export const sweepAuthoringDefinition = {
               value: session.draft.targetBodyTargets,
               emptyLabel: 'None selected',
               helper: 'Add, subtract, and intersect require at least one explicit target body.',
-              hidden: session.draft.operationIntent === 'create',
-              error: session.draft.operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
+              hidden: operationIntent === 'create',
+              error: operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
                 ? null
                 : { message: 'Select at least one target body.' },
               advancedParticipant: {
                 role: 'targetBody',
-                required: session.draft.operationIntent !== 'create',
-                cardinality: { min: session.draft.operationIntent === 'create' ? 0 : 1, max: null },
+                required: operationIntent !== 'create',
+                cardinality: { min: operationIntent === 'create' ? 0 : 1, max: null },
                 selectedCount: session.draft.targetBodyTargets.length,
               },
               picker: {

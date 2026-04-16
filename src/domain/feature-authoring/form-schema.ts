@@ -1,11 +1,17 @@
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { AdvancedParticipantDescriptor, AdvancedParticipantRole } from '@/contracts/modeling/schema'
+import type { FeatureValueKindDescriptor } from '@/contracts/modeling/authored-values'
 import type { PrimitiveRef, SelectionFilter } from '@/domain/editor/schema'
 
 export type FeatureEditorPatch = Record<string, unknown>
 
 export interface FeatureEditorPatchBinding {
   patchKey: string
+}
+
+export interface FeatureEditorAuthoredValueBinding {
+  expressionCapable: true
+  valueKind: FeatureValueKindDescriptor
 }
 
 export interface FeatureEditorFieldError {
@@ -51,9 +57,10 @@ export interface FeatureAdvancedParticipantBinding {
 
 export interface FeatureNumericField extends FeatureFormFieldBase {
   kind: 'numeric'
-  value: number
+  value: number | string
   input: 'number' | 'angleDegrees'
   step?: number
+  authoredValue?: FeatureEditorAuthoredValueBinding
   patch: FeatureEditorPatchBinding
 }
 
@@ -61,6 +68,7 @@ export interface FeatureEnumField extends FeatureFormFieldBase {
   kind: 'enum'
   value: string
   options: readonly FeatureEnumFieldOption[]
+  authoredValue?: FeatureEditorAuthoredValueBinding
   patch: FeatureEditorPatchBinding
 }
 

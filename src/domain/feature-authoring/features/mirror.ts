@@ -5,9 +5,12 @@ import {
 import type { FeatureAuthoringDefinition, MirrorFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, mirrorSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
 import {
+  acceptAuthoredPatch,
   appendUniqueTarget,
   asBodyRef,
   asPlaneReferenceTarget,
+  authoredDefinitionValue,
+  authoredBooleanLiteral,
   createMissingInputDiagnostic,
 } from '@/domain/feature-authoring/features/shared'
 
@@ -53,7 +56,7 @@ function buildMirrorDefinition(draft: MirrorFeatureParameterDraft) {
         ...(draft.planeTarget ? [{ role: 'plane' as const, targets: [draft.planeTarget] }] : []),
       ],
       options: {
-        copy: draft.copy,
+        copy: authoredDefinitionValue(draft.copy, true),
       },
     },
   }
@@ -94,7 +97,7 @@ export const mirrorAuthoringDefinition = {
     return {
       bodyTargets: filterBodyTargets(feature.parameters.participants.find((participant) => participant.role === 'body')?.targets ?? []),
       planeTarget,
-      copy: feature.parameters.options?.copy !== false,
+      copy: (feature.parameters.options?.copy ?? true) as MirrorFeatureParameterDraft['copy'],
     }
   },
   applyPatch(draft, patch) {
@@ -115,6 +118,8 @@ export const mirrorAuthoringDefinition = {
             ? false
             : typeof patch.copy === 'boolean'
               ? patch.copy
+              : patch.copyMode && typeof patch.copyMode === 'object'
+                ? acceptAuthoredPatch(patch.copyMode, draft.copy, (value): value is boolean => typeof value === 'boolean')
               : draft.copy,
     }
   },
@@ -137,7 +142,7 @@ export const mirrorAuthoringDefinition = {
     if (!draft.planeTarget) {
       return 'Select one mirror plane'
     }
-    if (!draft.copy) {
+    if (!authoredBooleanLiteral(draft.copy, true)) {
       return 'Mirror replace is defined but not supported in the first slice'
     }
     return `${prefix} mirror on ${draft.bodyTargets.length} bod${draft.bodyTargets.length === 1 ? 'y' : 'ies'}`
@@ -227,7 +232,7 @@ export const mirrorAuthoringDefinition = {
               kind: 'enum',
               id: 'mirror-copy-mode',
               label: 'Result policy',
-              value: session.draft.copy ? 'copy' : 'replace',
+              value: authoredBooleanLiteral(session.draft.copy, true) ? 'copy' : 'replace',
               options: [
                 { value: 'copy', label: 'copy' },
                 { value: 'replace', label: 'replace' },

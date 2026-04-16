@@ -4,7 +4,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { ChamferFeatureParameterDraft, FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
 import { chamferSelectionFilter, createSelectionFilterForRequirement, type PrimitiveRef } from '@/domain/editor/schema'
-import { appendUniqueTarget, asEdgeRef, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asEdgeRef, authoredDefinitionValue, authoredNumberFormValue, authoredNumberLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const chamferParticipants = [
   {
@@ -39,7 +39,7 @@ function buildChamferDefinition(draft: ChamferFeatureParameterDraft) {
       participants: [
         { role: 'edge' as const, targets: draft.edgeTargets },
       ],
-      options: { distance: draft.distance },
+      options: { distance: authoredDefinitionValue(draft.distance, 1) },
     },
   }
 }
@@ -77,7 +77,7 @@ export const chamferAuthoringDefinition = {
     const distance = feature.parameters.options?.distance
     return {
       edgeTargets: filterEdgeTargets(edgeTargets),
-      distance: typeof distance === 'number' ? distance : 1,
+      distance: (distance ?? 1) as ChamferFeatureParameterDraft['distance'],
     }
   },
   applyPatch(draft, patch) {
@@ -91,7 +91,7 @@ export const chamferAuthoringDefinition = {
             : asEdgeRef(patch.edgeTarget as PrimitiveRef | null)
               ? [patch.edgeTarget as typeof draft.edgeTargets[number]]
               : draft.edgeTargets,
-      distance: typeof patch.distance === 'number' ? patch.distance : draft.distance,
+      distance: acceptAuthoredPatch(patch.distance, draft.distance, (value): value is number => typeof value === 'number'),
     }
   },
   applySelection(draft, target) {
@@ -109,7 +109,8 @@ export const chamferAuthoringDefinition = {
     if (draft.edgeTargets.length === 0) {
       return 'Select one or more edges for chamfer'
     }
-    if (draft.distance <= 0 || !Number.isFinite(draft.distance)) {
+    const distance = authoredNumberLiteral(draft.distance)
+    if (distance !== null && distance <= 0) {
       return 'Enter a positive chamfer distance'
     }
     return `${prefix} chamfer on ${draft.edgeTargets.length} edge${draft.edgeTargets.length === 1 ? '' : 's'}`
@@ -177,10 +178,11 @@ export const chamferAuthoringDefinition = {
             kind: 'numeric',
             id: 'chamfer-distance',
             label: 'Distance',
-            value: session.draft.distance,
+            value: authoredNumberFormValue(session.draft.distance),
             input: 'number',
             step: 0.1,
-            error: session.draft.distance > 0 && Number.isFinite(session.draft.distance)
+            authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+            error: isPositiveAuthoredNumber(session.draft.distance)
               ? null
               : { message: 'Distance must be greater than zero.' },
             patch: { patchKey: 'distance' },
