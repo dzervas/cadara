@@ -952,6 +952,10 @@ function sampleCurveByParameters(
   }
 }
 
+function countDistinctRenderPoints(points: readonly RenderPoint3D[]) {
+  return new Set(points.map((point) => `${point[0]}:${point[1]}:${point[2]}`)).size
+}
+
 function buildEdgePolylineFromTriangulation(
   state: OccAuthoringState,
   edge: InstanceType<OccAuthoringState['oc']['TopoDS_Edge']>,
@@ -985,10 +989,12 @@ function buildEdgePolylineFromTriangulation(
       points.push(applyLocationToPoint(triangulation.Node(nodeIndex), polygonLocation))
     }
 
-    if (points.length >= 2) {
+    const isClosed = state.oc.BRep_Tool.IsClosed_4(edge, triangulationHandle, polygonLocation)
+
+    if (points.length >= 2 && (!isClosed || countDistinctRenderPoints(points) >= 3)) {
       return {
         points,
-        isClosed: state.oc.BRep_Tool.IsClosed_4(edge, triangulationHandle, polygonLocation),
+        isClosed,
       }
     }
   }

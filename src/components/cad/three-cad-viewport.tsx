@@ -339,7 +339,7 @@ export function ThreeCadViewport({
       updatePointerFromClientPoint(pointerRef.current, canvasElement, clientX, clientY)
       raycasterRef.current.setFromCamera(pointerRef.current, camera)
       raycasterRef.current.params.Line.threshold = DEFAULT_LINE_PICK_THRESHOLD
-      ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true
+      ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = false
 
       const intersections = raycasterRef.current.intersectObjects(bindings.pickables, true)
       const acceptsTarget = (target: PrimitiveRef) => selectionFilterAllowsTarget(
@@ -568,7 +568,7 @@ export function ThreeCadViewport({
         <directionalLight args={[0x91b4d8, 0.52]} position={[-12, 14, 18]} />
         <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
         <WorkspaceSceneScaffold />
-        <Bvh key={bvhSceneKey} enabled firstHitOnly>
+        <Bvh key={bvhSceneKey} enabled>
           <group ref={pickRootRef}>
             {renderables.map((entry) => (
               <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />

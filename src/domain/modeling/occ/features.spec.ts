@@ -497,6 +497,38 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assertClose(await bodyVolume(context.oc, producedBody.shape), 60, 1e-6, '4x3 rectangle extruded by 5 should produce the expected prism volume.')
   }
 
+  async function testExtrudeFeatureCreatesBodiesFromMultipleRegions() {
+    const plane = createStandardPlaneDefinition('xy')
+    const primary = createRectangleSketch('sketch_phase4_extrude_multi_a' as SketchId, plane)
+    const secondary = createRectangleSketch('sketch_phase4_extrude_multi_b' as SketchId, plane, {
+      origin: [8, 0],
+      width: 2,
+      height: 3,
+    })
+    const context = await createContext({ sketches: [primary.sketch, secondary.sketch] })()
+
+    const result = executeOccFeature(context, 'feature_phase4_extrude_multi' as FeatureId, {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [
+          { kind: 'region', sketchId: primary.sketch.sketchId, regionId: primary.region.regionId },
+          { kind: 'region', sketchId: secondary.sketch.sketchId, regionId: secondary.region.regionId },
+        ],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 5 },
+        operation: 'newBody',
+        booleanScope: { kind: 'standalone' },
+      },
+    })
+
+    assert(result.producedTargets.length === 2, 'Multi-profile standalone extrude must report every produced body target.')
+    assert(result.producedTargets.every((target) => target.kind === 'body'), 'Multi-profile extrude targets must be bodies.')
+    assert(result.bodies.length === 2, 'Multi-profile standalone extrude must append one body per disjoint profile result.')
+    assertClose(await bodyVolume(context.oc, result.bodies[0]!.shape), 60, 1e-6, 'First extruded profile should preserve its prism volume.')
+    assertClose(await bodyVolume(context.oc, result.bodies[1]!.shape), 30, 1e-6, 'Second extruded profile should preserve its prism volume.')
+  }
+
   async function testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy() {
     const oc = await getDefaultOpenCascadeInstance()
     const bodyA = await makeBoxBody(oc, 'body_phase4_join_a' as BodyId, 1, 1, 1, 'feature_box_a' as FeatureId, [0, 0, 0])
@@ -1278,6 +1310,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts()
   await testPlaneFeatureBuildsFaceBackedConstructionPlane()
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion()
+  await testExtrudeFeatureCreatesBodiesFromMultipleRegions()
   await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy()
   await testExtrudeJoinRefinesSameDomainTopology()
   await testExtrudeJoinRejectsMultiSolidResultShapes()

@@ -117,6 +117,10 @@ function pointInPolygon(point: SketchPoint2D, polygon: SketchPoint2D[]) {
   return inside
 }
 
+function ringContainsRing(parent: SketchRingCandidate, child: SketchRingCandidate) {
+  return child.points.every((point) => pointInPolygon(point, parent.points))
+}
+
 function centroid(points: SketchPoint2D[]): SketchPoint2D {
   let x = 0
   let y = 0
@@ -424,7 +428,7 @@ export function deriveSketchRegionsCore(
       if (candidateArea <= Math.abs(child.signedArea) || candidateArea >= parentArea) {
         continue
       }
-      if (pointInPolygon(marker, candidate.points)) {
+      if (pointInPolygon(marker, candidate.points) && ringContainsRing(candidate, child)) {
         parent = parentIndex
         parentArea = candidateArea
       }

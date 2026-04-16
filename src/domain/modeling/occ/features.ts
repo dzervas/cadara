@@ -355,6 +355,32 @@ function trackSingleResultBody(
   })
 }
 
+function trackNewBodyResults(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  label: string,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+) {
+  const solids = extractSolidShapes(context.oc, shape)
+
+  if (solids.length === 1) {
+    return [trackSingleResultBody(context, ownerFeatureId, label, shape)]
+  }
+
+  if (solids.length === 0) {
+    throw new Error(
+      `Feature ${ownerFeatureId} produced 0 solids; Phase 4 only accepts solid body results.`,
+    )
+  }
+
+  return solids.map((solid, index) => trackNewSolidBody(context.oc, {
+    bodyId: `body_${ownerFeatureId}_${index + 1}` as BodyId,
+    label: `${label}_${index + 1}`,
+    ownerFeatureId,
+    shape: solid,
+  }))
+}
+
 function assertBooleanScopeCompatible(
   operation: FeatureBooleanOperation,
   booleanScope: FeatureBooleanScope,
@@ -390,13 +416,13 @@ function applyBooleanPolicy(
   assertBooleanScopeCompatible(operation, booleanScope)
 
   if (operation === 'newBody') {
-    const body = trackSingleResultBody(context, ownerFeatureId, ownerFeatureId, featureShape)
+    const newBodies = trackNewBodyResults(context, ownerFeatureId, ownerFeatureId, featureShape)
     return {
       bodies: [
         ...context.bodies,
-        body,
+        ...newBodies,
       ],
-      producedTargets: [{ kind: 'body', bodyId: body.bodyId }] as DurableRef[],
+      producedTargets: newBodies.map((body) => ({ kind: 'body', bodyId: body.bodyId }) as DurableRef),
       historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
     }
   }
@@ -575,11 +601,36 @@ function buildExtrudeFeatureShape(
     throw new Error('Extrude endExtent.distance must be positive.')
   }
 
-  if (parameters.profiles.length > 1) {
-    throw new Error('unsupported-profile-group: OCC extrude does not support multi-profile groups yet.')
+  const profileKeys = new Set<string>()
+  for (const profile of parameters.profiles) {
+    const key = getOccDurableRefKey(profile)
+    if (profileKeys.has(key)) {
+      throw new Error('unsupported-profile-group: OCC extrude does not support duplicate profile references.')
+    }
+    profileKeys.add(key)
   }
 
-  const profile = parameters.profiles[0]
+  const extrudedShapes = parameters.profiles.map((profile) => buildExtrudeProfileShape(context, profile, parameters))
+
+  if (extrudedShapes.length === 1) {
+    return extrudedShapes[0]!
+  }
+
+  const builder = new context.oc.BRep_Builder()
+  const compound = new context.oc.TopoDS_Compound()
+  builder.MakeCompound(compound)
+  for (const shape of extrudedShapes) {
+    builder.Add(compound, shape)
+  }
+
+  return compound
+}
+
+function buildExtrudeProfileShape(
+  context: OccFeatureExecutionContext,
+  profile: ExtrudeFeatureParameters['profiles'][number],
+  parameters: ExtrudeFeatureParameters,
+) {
   let profileShape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
   let extrusionNormal: Vec3
 

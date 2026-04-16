@@ -54,6 +54,11 @@ import {
   createStandardPlaneDefinition,
 } from '@/domain/modeling/opencascade-kernel-seed'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
+import { createModelingService } from '@/domain/modeling/modeling-service'
+import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
+import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
+import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
+import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -1142,8 +1147,36 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     })
     const currentPathBody = requireBody(snapshot.snapshot, pathBody.bodyId)
     const guideEdgeId = currentPathBody.topology.edgeIds.find((edgeId) => edgeId !== pathEdgeId) ?? pathEdgeId
+    const faceProfileId = currentPathBody.topology.faceIds[0]
     const region = sweepSketch.sketch.regions[0]
     assert(region, 'Committed sketch must expose a region for unsupported sweep coverage.')
+    assert(faceProfileId, 'Sweep source body must expose a face for multi-profile sweep diagnostics.')
+    const unsupportedMultiProfile = await adapter.evaluatePreview({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: created.revisionId,
+      previewId: 'preview_sweep_unsupported_multi_profile',
+      definition: {
+        kind: 'sweep',
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: 'create',
+          participants: [
+            {
+              role: 'profile',
+              targets: [
+                { kind: 'region', sketchId: sweepSketch.sketchId, regionId: region.regionId },
+                { kind: 'face', bodyId: pathBody.bodyId, faceId: faceProfileId },
+              ],
+            },
+            {
+              role: 'path',
+              targets: [{ kind: 'edge', bodyId: pathBody.bodyId, edgeId: pathEdgeId }],
+            },
+          ],
+        },
+      },
+    })
     const unsupportedGuide = await adapter.evaluatePreview({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -1177,6 +1210,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       },
     })
 
+    assert(
+      unsupportedMultiProfile.diagnostics.some((diagnostic) => diagnostic.code === 'advanced-feature-unsupported-kernel-case'),
+      'Multi-profile sweep previews should return an explicit unsupported-kernel diagnostic.',
+    )
     assert(hasErrorDiagnostics(unsupportedGuide.diagnostics), 'Guide-curve sweep preview must emit explicit unsupported diagnostics.')
     assert(unsupportedBoolean.revisionState.kind === 'rejected', 'Boolean sweep create must reject unsupported composition explicitly.')
     assert(
@@ -2638,25 +2675,442 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     const secondRegion = secondSketch.sketch.regions[0]
     assert(secondRegion, 'Second sketch must expose a region for multi-profile adapter coverage.')
 
+    const multiProfileDefinition = {
+      ...extrudeDefinition,
+      parameters: {
+        ...extrudeDefinition.parameters,
+        profiles: [
+          extrudeDefinition.parameters.profiles[0],
+          { kind: 'region', sketchId: secondSketch.sketchId, regionId: secondRegion.regionId },
+        ],
+      },
+    } satisfies FeatureDefinition
+    const service = createModelingService(adapter, { currentDocumentId: 'doc_workspace' })
     const multi = await adapter.evaluatePreview({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
       baseRevisionId: offsetSketchCommit.revisionId,
       previewId: 'preview_multi_profile_extrude',
+      definition: multiProfileDefinition,
+    })
+    const createdMulti = await service.createFeature({
+      baseRevisionId: offsetSketchCommit.revisionId,
+      definition: multiProfileDefinition,
+    })
+
+    assertNoErrorDiagnostics(multi.diagnostics, 'Multi-profile extrude previews should be supported by the OCC adapter.')
+    assert(multi.render.records.length > 0, 'Multi-profile extrude previews should return transient renderables.')
+    assert(createdMulti.revisionState.kind === 'accepted', 'Multi-profile extrude creates should be accepted through the modeling service.')
+    assert(
+      createdMulti.changedTargets.filter((target) => target.kind === 'body').length === 2,
+      'Multi-profile extrude creates should report every produced body target.',
+    )
+    const afterMulti = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const committedMulti = afterMulti.snapshot.features.find((feature) => feature.featureId === createdMulti.featureId)
+    assert(committedMulti?.definition.kind === 'extrude', 'Multi-profile extrude creates should persist the committed feature.')
+    assert(committedMulti.producedTargets.length === 2, 'Committed multi-profile extrude should persist both produced body targets.')
+    assert(
+      committedMulti.producedTargets.every((target) => target.kind === 'body' && afterMulti.snapshot.bodies.some((body) => body.bodyId === target.bodyId)),
+      'Committed multi-profile extrude body targets should resolve to snapshot bodies.',
+    )
+    const serviceSnapshot = await service.getCurrentDocumentSnapshot()
+    const serviceFeature = serviceSnapshot.features.find((feature) => feature.featureId === createdMulti.featureId)
+    assert(serviceFeature?.definition.kind === 'extrude', 'Modeling service snapshots should expose committed multi-profile extrude features.')
+    assert(serviceFeature.producedTargets.length === 2, 'Modeling service snapshots should expose both multi-profile extrude body targets.')
+  }
+
+  async function testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions() {
+    const store = createMemoryOperationHistoryStore()
+    const adapter = createAdapter()
+    const service = createModelingService(adapter, {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: store,
+    })
+    const yzPlane = createStandardPlaneDefinition('yz')
+    const firstRequest = createSketchCommitRequest('rev_0001', {
+      sketchLabel: 'YZ Profile A',
+      plane: yzPlane,
+    })
+    const first = await service.commitSketch({
+      baseRevisionId: firstRequest.baseRevisionId,
+      solverCorrelation: firstRequest.solverCorrelation,
+      sketchId: firstRequest.sketchId,
+      sketchLabel: firstRequest.sketchLabel,
+      plane: firstRequest.plane,
+      planeTarget: firstRequest.planeTarget,
+      planeKey: firstRequest.planeKey,
+      definition: firstRequest.definition,
+    })
+    assert(first.revisionState.kind === 'accepted', 'First YZ sketch should commit before restore coverage.')
+
+    const secondRequest = createSketchCommitRequest(first.revisionId, {
+      sketchLabel: 'YZ Profile B',
+      plane: yzPlane,
+      definition: translateSeedDefinition(14, 0),
+    })
+    const second = await service.commitSketch({
+      baseRevisionId: secondRequest.baseRevisionId,
+      solverCorrelation: secondRequest.solverCorrelation,
+      sketchId: secondRequest.sketchId,
+      sketchLabel: secondRequest.sketchLabel,
+      plane: secondRequest.plane,
+      planeTarget: secondRequest.planeTarget,
+      planeKey: secondRequest.planeKey,
+      definition: secondRequest.definition,
+    })
+    assert(second.revisionState.kind === 'accepted', 'Second YZ sketch should commit before restore coverage.')
+
+    const beforeExtrude = await service.getCurrentDocumentSnapshot()
+    const firstSketch = beforeExtrude.sketches.find((sketch) => sketch.sketchId === first.sketchId)
+    const secondSketch = beforeExtrude.sketches.find((sketch) => sketch.sketchId === second.sketchId)
+    const firstRegion = firstSketch?.sketch.regions[0]
+    const secondRegion = secondSketch?.sketch.regions[0]
+    assert(firstSketch && firstRegion, 'First YZ sketch should expose a selectable region.')
+    assert(secondSketch && secondRegion, 'Second YZ sketch should expose a selectable region.')
+
+    const created = await service.createFeature({
+      baseRevisionId: beforeExtrude.revisionId,
       definition: {
-        ...extrudeDefinition,
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
-          ...extrudeDefinition.parameters,
           profiles: [
-            extrudeDefinition.parameters.profiles[0],
+            { kind: 'region', sketchId: firstSketch.sketchId, regionId: firstRegion.regionId },
             { kind: 'region', sketchId: secondSketch.sketchId, regionId: secondRegion.regionId },
           ],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 5 },
+          operation: 'newBody',
+          booleanScope: { kind: 'standalone' },
         },
       },
     })
+    assert(created.revisionState.kind === 'accepted', 'YZ multi-profile extrude should commit before restore coverage.')
+
+    const preRefresh = await service.getCurrentDocumentSnapshot()
+    assert(preRefresh.features.some((feature) => feature.featureId === created.featureId), 'Committed YZ multi-profile feature should be visible before refresh.')
+    assert(preRefresh.bodies.length >= 2, 'Committed YZ multi-profile extrude should create bodies before refresh.')
     assert(
-      multi.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-profile-group'),
-      'Multi-profile extrude groups should return an explicit unsupported profile group diagnostic.',
+      preRefresh.render.records.some((record) => record.binding.target.kind === 'region' && record.binding.target.sketchId === secondSketch.sketchId),
+      'Second YZ sketch region should remain renderable before refresh.',
+    )
+
+    const restoredService = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: store,
+    })
+    const restored = await restoredService.getCurrentDocumentSnapshot()
+    const restoredFeature = restored.features.find((feature) => feature.featureId === created.featureId)
+
+    assert(restoredFeature?.definition.kind === 'extrude', 'Restored YZ multi-profile feature should survive operation-history replay.')
+    assert(restoredFeature.producedTargets.length === 2, 'Restored YZ multi-profile feature should preserve both body targets.')
+    assert(restoredFeature.producedTargets.every((target) => target.kind === 'body' && restored.bodies.some((body) => body.bodyId === target.bodyId)), 'Restored YZ body targets should resolve to snapshot bodies.')
+    assert(
+      restored.render.records.some((record) => record.binding.target.kind === 'region' && record.binding.target.sketchId === secondSketch.sketchId),
+      'Second YZ sketch region should remain renderable after refresh.',
+    )
+  }
+
+  async function testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable() {
+    const history = {
+      contractVersion: CONTRACT_VERSION,
+      schemaVersion: 'modeling-operation-history/v1alpha1',
+      documentId: 'doc_workspace',
+      entries: [
+        {
+          kind: 'commitSketch',
+          payload: {
+            sketchId: 'sketch_primary',
+            sketchLabel: 'Sketch Draft',
+            plane: {
+              support: {
+                kind: 'construction',
+                constructionId: 'construction_plane-xy',
+              },
+              frame: {
+                origin: [0, 0, 0],
+                xAxis: [1, 0, 0],
+                yAxis: [0, 1, 0],
+                normal: [0, 0, 1],
+                linearUnit: 'documentLength',
+                handedness: 'rightHanded',
+              },
+              key: 'xy',
+            },
+            planeTarget: {
+              kind: 'construction',
+              constructionId: 'construction_plane-xy',
+            },
+            planeKey: 'xy',
+            definition: {
+              schemaVersion: 'sketch-definition/v1alpha1',
+              referenceIds: [],
+              references: [],
+              pointIds: [
+                'sketch_point_1_rect-bottom-left',
+                'sketch_point_1_rect-bottom-right',
+                'sketch_point_1_rect-top-right',
+                'sketch_point_1_rect-top-left',
+                'sketch_point_2_circle-center',
+              ],
+              points: [
+                {
+                  pointId: 'sketch_point_1_rect-bottom-left',
+                  label: 'Rectangle 1 bottom left',
+                  target: {
+                    kind: 'sketchPoint',
+                    sketchId: 'sketch_primary',
+                    pointId: 'sketch_point_1_rect-bottom-left',
+                  },
+                  position: [-18.21739449786329, -2.09804353632479],
+                  isConstruction: false,
+                },
+                {
+                  pointId: 'sketch_point_1_rect-bottom-right',
+                  label: 'Rectangle 1 bottom right',
+                  target: {
+                    kind: 'sketchPoint',
+                    sketchId: 'sketch_primary',
+                    pointId: 'sketch_point_1_rect-bottom-right',
+                  },
+                  position: [-12.020556223290626, -2.09804353632479],
+                  isConstruction: false,
+                },
+                {
+                  pointId: 'sketch_point_1_rect-top-right',
+                  label: 'Rectangle 1 top right',
+                  target: {
+                    kind: 'sketchPoint',
+                    sketchId: 'sketch_primary',
+                    pointId: 'sketch_point_1_rect-top-right',
+                  },
+                  position: [-12.020556223290626, 5.219768295940183],
+                  isConstruction: false,
+                },
+                {
+                  pointId: 'sketch_point_1_rect-top-left',
+                  label: 'Rectangle 1 top left',
+                  target: {
+                    kind: 'sketchPoint',
+                    sketchId: 'sketch_primary',
+                    pointId: 'sketch_point_1_rect-top-left',
+                  },
+                  position: [-18.21739449786329, 5.219768295940183],
+                  isConstruction: false,
+                },
+                {
+                  pointId: 'sketch_point_2_circle-center',
+                  label: 'Circle 2 center',
+                  target: {
+                    kind: 'sketchPoint',
+                    sketchId: 'sketch_primary',
+                    pointId: 'sketch_point_2_circle-center',
+                  },
+                  position: [-15.495896768162432, 4.313959001068386],
+                  isConstruction: false,
+                },
+              ],
+              entityIds: [
+                'sketch_entity_1_rect-bottom',
+                'sketch_entity_1_rect-right',
+                'sketch_entity_1_rect-top',
+                'sketch_entity_1_rect-left',
+                'sketch_entity_2_circle',
+              ],
+              entities: [
+                {
+                  kind: 'lineSegment',
+                  entityId: 'sketch_entity_1_rect-bottom',
+                  label: 'Rectangle 1 bottom',
+                  target: {
+                    kind: 'sketchEntity',
+                    sketchId: 'sketch_primary',
+                    entityId: 'sketch_entity_1_rect-bottom',
+                  },
+                  isConstruction: false,
+                  startPointId: 'sketch_point_1_rect-bottom-left',
+                  endPointId: 'sketch_point_1_rect-bottom-right',
+                },
+                {
+                  kind: 'lineSegment',
+                  entityId: 'sketch_entity_1_rect-right',
+                  label: 'Rectangle 1 right',
+                  target: {
+                    kind: 'sketchEntity',
+                    sketchId: 'sketch_primary',
+                    entityId: 'sketch_entity_1_rect-right',
+                  },
+                  isConstruction: false,
+                  startPointId: 'sketch_point_1_rect-bottom-right',
+                  endPointId: 'sketch_point_1_rect-top-right',
+                },
+                {
+                  kind: 'lineSegment',
+                  entityId: 'sketch_entity_1_rect-top',
+                  label: 'Rectangle 1 top',
+                  target: {
+                    kind: 'sketchEntity',
+                    sketchId: 'sketch_primary',
+                    entityId: 'sketch_entity_1_rect-top',
+                  },
+                  isConstruction: false,
+                  startPointId: 'sketch_point_1_rect-top-right',
+                  endPointId: 'sketch_point_1_rect-top-left',
+                },
+                {
+                  kind: 'lineSegment',
+                  entityId: 'sketch_entity_1_rect-left',
+                  label: 'Rectangle 1 left',
+                  target: {
+                    kind: 'sketchEntity',
+                    sketchId: 'sketch_primary',
+                    entityId: 'sketch_entity_1_rect-left',
+                  },
+                  isConstruction: false,
+                  startPointId: 'sketch_point_1_rect-top-left',
+                  endPointId: 'sketch_point_1_rect-bottom-left',
+                },
+                {
+                  kind: 'circle',
+                  entityId: 'sketch_entity_2_circle',
+                  label: 'Circle 2',
+                  target: {
+                    kind: 'sketchEntity',
+                    sketchId: 'sketch_primary',
+                    entityId: 'sketch_entity_2_circle',
+                  },
+                  isConstruction: false,
+                  centerPointId: 'sketch_point_2_circle-center',
+                  radius: 3.1230939897294947,
+                },
+              ],
+              constraintIds: [
+                'constraint_1_bottom-horizontal',
+                'constraint_1_top-horizontal',
+                'constraint_1_right-vertical',
+                'constraint_1_left-vertical',
+              ],
+              constraints: [
+                {
+                  constraintId: 'constraint_1_bottom-horizontal',
+                  kind: 'horizontal',
+                  label: 'Rectangle 1 bottom horizontal',
+                  entityId: 'sketch_entity_1_rect-bottom',
+                },
+                {
+                  constraintId: 'constraint_1_top-horizontal',
+                  kind: 'horizontal',
+                  label: 'Rectangle 1 top horizontal',
+                  entityId: 'sketch_entity_1_rect-top',
+                },
+                {
+                  constraintId: 'constraint_1_right-vertical',
+                  kind: 'vertical',
+                  label: 'Rectangle 1 right vertical',
+                  entityId: 'sketch_entity_1_rect-right',
+                },
+                {
+                  constraintId: 'constraint_1_left-vertical',
+                  kind: 'vertical',
+                  label: 'Rectangle 1 left vertical',
+                  entityId: 'sketch_entity_1_rect-left',
+                },
+              ],
+              dimensionIds: [
+                'dimension_1_width',
+                'dimension_1_height',
+                'dimension_2_radius',
+              ],
+              dimensions: [
+                {
+                  dimensionId: 'dimension_1_width',
+                  kind: 'distance',
+                  label: 'Rectangle 1 width',
+                  axis: 'horizontal',
+                  pointIds: [
+                    'sketch_point_1_rect-bottom-left',
+                    'sketch_point_1_rect-bottom-right',
+                  ],
+                  value: 6.196838274572663,
+                },
+                {
+                  dimensionId: 'dimension_1_height',
+                  kind: 'distance',
+                  label: 'Rectangle 1 height',
+                  axis: 'vertical',
+                  pointIds: [
+                    'sketch_point_1_rect-bottom-left',
+                    'sketch_point_1_rect-top-left',
+                  ],
+                  value: 7.317811832264972,
+                },
+                {
+                  dimensionId: 'dimension_2_radius',
+                  kind: 'circleRadius',
+                  label: 'Circle 2 radius',
+                  entityId: 'sketch_entity_2_circle',
+                  value: 3.1230939897294947,
+                },
+              ],
+            },
+          },
+        },
+      ],
+    } satisfies ModelingOperationHistoryPayload
+    const service = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(history),
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+    assert(restoreState.kind === 'restored', 'Overlapping rectangle/circle history should restore without emptying the workspace.')
+    assert(restoreState.entriesReplayed === 1, 'The minimal overlapping sketch history should replay its sketch entry.')
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const sketch = snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')
+    assert(sketch, 'Restored overlapping rectangle/circle sketch should exist in the snapshot.')
+    assert(sketch.sketch.regions.length >= 2, 'Restored overlapping rectangle/circle sketch should expose multiple selectable regions.')
+
+    const regionRenderRecords = snapshot.render.records.filter((record) => record.binding.semanticClass === 'region')
+    assert(regionRenderRecords.length >= 2, 'Restored overlapping rectangle/circle regions should remain renderable after reload.')
+    assert(snapshot.render.records.length > regionRenderRecords.length, 'Restored overlapping rectangle/circle snapshot should include visible sketch curves or points.')
+
+    const selectionCatalog = buildSelectionTargetCatalog(snapshot)
+    assert(
+      sketch.sketch.regions.every((region) => selectionCatalog.selectableTargetKeys.includes(getOccDurableRefKey(region.target))),
+      'Every restored overlapping rectangle/circle region should remain selectable after reload.',
+    )
+
+    const created = await service.createFeature({
+      baseRevisionId: snapshot.revisionId,
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: sketch.sketch.regions.map((region) => ({
+            kind: 'region' as const,
+            sketchId: sketch.sketchId,
+            regionId: region.regionId,
+          })),
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 5 },
+          operation: 'newBody',
+          booleanScope: { kind: 'standalone' },
+        },
+      },
+    })
+    assert(created.revisionState.kind === 'accepted', 'New-body extrude of every restored overlapping profile should commit.')
+
+    const afterExtrude = await service.getCurrentDocumentSnapshot()
+    const committed = afterExtrude.features.find((feature) => feature.featureId === created.featureId)
+    assert(committed?.definition.kind === 'extrude', 'Committed overlapping multi-profile extrude should appear in the refreshed snapshot.')
+    assert(committed.producedTargets.length === sketch.sketch.regions.length, 'Committed overlapping multi-profile extrude should produce one body target per selected profile.')
+    assert(
+      committed.producedTargets.every((target) => target.kind === 'body' && afterExtrude.bodies.some((body) => body.bodyId === target.bodyId)),
+      'Committed overlapping multi-profile extrude targets should resolve to snapshot bodies.',
     )
   }
 
@@ -2687,6 +3141,8 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testMultiBodyBooleanPolicyIntersectDropsEmptyTargets()
   await testUnknownPrefixedRebuildErrorsFallbackToOccRebuildFailure()
   await testProfileCollectionAdapterDiagnostics()
+  await testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions()
+  await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
 
   console.log('OCC phase 8 adapter tests passed.')
 })

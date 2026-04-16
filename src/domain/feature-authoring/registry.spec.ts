@@ -1012,3 +1012,82 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testGenericFormEventsPatchRevolveAndShellDrafts()
   testGenericReferenceFormEventsPatchSingleAndMultiReferences()
 })
+
+test('feature authoring preserves multiple selected profile references in order', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const profileA = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
+  const profileB = { kind: 'face' as const, bodyId: 'body_b' as const, faceId: 'face_b' as const }
+  const path = { kind: 'edge' as const, bodyId: 'body_path' as const, edgeId: 'edge_path' as const }
+  const axis = { kind: 'edge' as const, bodyId: 'body_axis' as const, edgeId: 'edge_axis' as const }
+
+  const extrudeSession = createFeatureEditSession({
+    featureType: 'extrude',
+    selectedTarget: profileA,
+  })
+  const extrudeProfileField = getFeatureEditorFormSchema(extrudeSession)
+    .sections.flatMap((section) => section.fields)
+    .find((field) => field.id === 'extrude-profile')
+  assert(extrudeProfileField?.kind === 'referenceCollection', 'Extrude profiles should be collection-backed.')
+  assert(extrudeProfileField.picker.allowsMultiple, 'Extrude profile picker should accept multiple profiles.')
+
+  const extrudeMultiProfile = patchFeatureEditSession(
+    extrudeSession,
+    createFeatureEditorReferenceSelectionPatch(extrudeProfileField, profileB),
+  )
+  const extrudeDefinition = buildFeatureDefinition(extrudeMultiProfile)
+  assert(extrudeDefinition?.kind === 'extrude', 'Multi-profile extrude drafts should build an extrude definition.')
+  assert(extrudeDefinition.parameters.profiles[0] === profileA, 'Extrude definitions should preserve the first selected profile.')
+  assert(extrudeDefinition.parameters.profiles[1] === profileB, 'Extrude definitions should preserve the appended selected profile.')
+
+  const revolveSession = createFeatureEditSession({
+    featureType: 'revolve',
+    selectedTarget: profileA,
+  })
+  const revolveProfileField = getFeatureEditorFormSchema(revolveSession)
+    .sections.flatMap((section) => section.fields)
+    .find((field) => field.id === 'revolve-profile')
+  assert(revolveProfileField?.kind === 'referenceCollection', 'Revolve profiles should be collection-backed.')
+  assert(revolveProfileField.picker.allowsMultiple, 'Revolve profile picker should accept multiple profiles.')
+
+  const revolveMultiProfile = applySelectionToFeatureEditSession(
+    patchFeatureEditSession(
+      revolveSession,
+      createFeatureEditorReferenceSelectionPatch(revolveProfileField, profileB),
+    ),
+    axis,
+  )
+  const revolveDefinition = buildFeatureDefinition(revolveMultiProfile)
+  assert(revolveDefinition?.kind === 'revolve', 'Multi-profile revolve drafts should build a revolve definition.')
+  assert(revolveDefinition.parameters.profiles[0] === profileA, 'Revolve definitions should preserve the first selected profile.')
+  assert(revolveDefinition.parameters.profiles[1] === profileB, 'Revolve definitions should preserve the appended selected profile.')
+  assert(revolveDefinition.parameters.axis === axis, 'Revolve definitions should keep the axis separate from profiles.')
+
+  const sweepSession = createFeatureEditSession({
+    featureType: 'sweep',
+    selectedTarget: profileA,
+  })
+  const sweepProfileField = getFeatureEditorFormSchema(sweepSession)
+    .sections.flatMap((section) => section.fields)
+    .find((field) => field.id === 'sweep-profile')
+  assert(sweepProfileField?.kind === 'referenceCollection', 'Sweep profiles should be collection-backed.')
+  assert(sweepProfileField.picker.allowsMultiple, 'Sweep profile picker should accept multiple profile participants.')
+
+  const sweepMultiProfile = applySelectionToFeatureEditSession(
+    patchFeatureEditSession(
+      sweepSession,
+      createFeatureEditorReferenceSelectionPatch(sweepProfileField, profileB),
+    ),
+    path,
+  )
+  const sweepDefinition = buildFeatureDefinition(sweepMultiProfile)
+  const sweepProfiles = sweepDefinition?.kind === 'sweep'
+    ? sweepDefinition.parameters.participants.find((participant) => participant.role === 'profile')?.targets
+    : null
+  assert(sweepProfiles?.[0] === profileA, 'Sweep profile participants should preserve the first selected profile.')
+  assert(sweepProfiles?.[1] === profileB, 'Sweep profile participants should preserve the appended selected profile.')
+})
