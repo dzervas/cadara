@@ -7,12 +7,17 @@ import { SketchToolOverlays } from '@/components/cad/sketch-tool-overlays'
 import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
-import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
+import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
 import { WorkbenchInspectorOverlay } from '@/components/layout/workbench-inspector-overlay'
 import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
 import { WorkbenchStateDebugger, type WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
-import { composeViewportRenderables } from '@/app/viewport-renderables'
-import type { DocumentFeatureCursor } from '@/contracts/modeling/schema'
+import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
+import type {
+  DocumentFeatureCursor,
+  DocumentHistoryItemRecord,
+  ModelingDiagnostic,
+  ReferenceRecord,
+} from '@/contracts/modeling/schema'
 import {
   getSketchAnnotationDescriptors,
   getSketchToolPresentation,
@@ -42,6 +47,9 @@ import {
   getWorkbenchSidebarWidthFromPointer,
 } from '@/app/workbench-shell-layout'
 
+type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
+type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
+
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
   const modelingService = useModelingService()
@@ -63,7 +71,9 @@ export function CadWorkbench() {
   const snapshot = machineState.snapshot
   const previewRenderables = machineState.previewRenderables
   const [hiddenTargetKeys, setHiddenTargetKeys] = useState<Record<string, boolean>>({})
+  const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null)
+  const [workbenchStatusMessage, setWorkbenchStatusMessage] = useState<string | null>(null)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const shellFrameRef = useRef<HTMLDivElement | null>(null)
 
@@ -150,11 +160,11 @@ export function CadWorkbench() {
   }, [hiddenTargetKeys, snapshot])
 
   const visibleSelection = useMemo(
-    () => selection.filter((target) => !visibleHiddenTargetKeys[getPrimitiveRefKey(target)]),
+    () => selection.filter((target) => !isTargetHidden(target, visibleHiddenTargetKeys)),
     [selection, visibleHiddenTargetKeys],
   )
   const visibleHoverTarget =
-    hoverTarget && !visibleHiddenTargetKeys[getPrimitiveRefKey(hoverTarget)] ? hoverTarget : null
+    hoverTarget && !isTargetHidden(hoverTarget, visibleHiddenTargetKeys) ? hoverTarget : null
 
   const primarySelection = visibleSelection[0] ?? visibleHoverTarget ?? null
   const selectionDetail =
@@ -256,9 +266,217 @@ export function CadWorkbench() {
       [targetKey]: nextHidden,
     }))
 
-    if (nextHidden && hoverTarget && primitiveRefEquals(hoverTarget, target)) {
+    if (
+      nextHidden
+      && hoverTarget
+      && (
+        primitiveRefEquals(hoverTarget, target)
+        || isTargetHidden(hoverTarget, { ...hiddenTargetKeys, [targetKey]: true })
+      )
+    ) {
       dispatch({ type: 'viewport.hoverCleared' })
     }
+  }
+
+  const showPlaceholderStatus = (message: string) => {
+    setWorkbenchStatusMessage(message)
+  }
+
+  const handleObjectDeletePlaceholder = (_target: PrimitiveRef, label: string) => {
+    showPlaceholderStatus(`Delete for ${label} is not implemented yet.`)
+  }
+
+  const handleObjectExportPlaceholder = (_target: PrimitiveRef, label: string) => {
+    showPlaceholderStatus(`Export for ${label} is not implemented yet.`)
+  }
+
+  const handleReferenceInspectPlaceholder = (reference: ReferenceRecord) => {
+    showPlaceholderStatus(`Inspect reference for ${reference.label} is not implemented yet.`)
+  }
+
+  const handleDiagnosticInspectPlaceholder = (diagnostic: ModelingDiagnostic) => {
+    showPlaceholderStatus(`Inspect diagnostic ${diagnostic.code} is not implemented yet.`)
+  }
+
+  const handleFeatureSuppressPlaceholder = (item: FeatureHistoryItem) => {
+    showPlaceholderStatus(`Suppress for ${item.label} is not implemented yet.`)
+  }
+
+  const handleFeatureDelete = (item: FeatureHistoryItem) => {
+    if (!snapshot) {
+      return
+    }
+
+    void modelingService.deleteFeature({
+      baseRevisionId: snapshot.document.revisionId,
+      featureId: item.featureId,
+    }).then((result) => {
+      if (result.revisionState.kind !== 'accepted') {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Delete ${item.label} failed.`)
+        return
+      }
+
+      setWorkbenchStatusMessage(`Deleted ${item.label}.`)
+      dispatch({ type: 'document.refreshRequested' })
+    }).catch((error: unknown) => {
+      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Delete ${item.label} failed.`)
+    })
+  }
+
+  const requestRenameLabel = (currentLabel: string) => {
+    const nextLabel = window.prompt('Rename', currentLabel)?.trim()
+
+    if (nextLabel === undefined) {
+      return null
+    }
+
+    if (!nextLabel) {
+      setWorkbenchStatusMessage('Name cannot be empty.')
+      return null
+    }
+
+    if (nextLabel === currentLabel) {
+      return null
+    }
+
+    return nextLabel
+  }
+
+  const handleSketchRename = (item: SketchHistoryItem | { sketchId: SketchHistoryItem['sketchId']; label: string }) => {
+    if (!snapshot) {
+      return
+    }
+
+    const nextLabel = requestRenameLabel(item.label)
+    if (!nextLabel) {
+      return
+    }
+
+    const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === item.sketchId)
+    if (!sketch) {
+      setWorkbenchStatusMessage(`Could not find ${item.label}.`)
+      return
+    }
+
+    void modelingService.commitSketch({
+      baseRevisionId: snapshot.document.revisionId,
+      solverCorrelation: null,
+      sketchId: sketch.sketchId,
+      sketchLabel: nextLabel,
+      plane: sketch.plane,
+      planeTarget: sketch.planeTarget,
+      planeKey: sketch.planeKey,
+      definition: sketch.sketch.definition,
+    }).then((result) => {
+      if (result.revisionState.kind !== 'accepted') {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Rename ${item.label} failed.`)
+        return
+      }
+
+      setWorkbenchStatusMessage(`Renamed ${item.label} to ${nextLabel}.`)
+      dispatch({ type: 'document.refreshRequested' })
+    }).catch((error: unknown) => {
+      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Rename ${item.label} failed.`)
+    })
+  }
+
+  const handleFeatureRename = (item: FeatureHistoryItem | { featureId: FeatureHistoryItem['featureId']; label: string }) => {
+    if (!snapshot) {
+      return
+    }
+
+    const nextLabel = requestRenameLabel(item.label)
+    if (!nextLabel) {
+      return
+    }
+
+    const feature = snapshot.document.features.find((entry) => entry.featureId === item.featureId)
+    if (!feature) {
+      setWorkbenchStatusMessage(`Could not find ${item.label}.`)
+      return
+    }
+
+    void modelingService.updateFeature({
+      baseRevisionId: snapshot.document.revisionId,
+      featureId: feature.featureId,
+      featureLabel: nextLabel,
+      definition: feature.definition,
+    }).then((result) => {
+      if (result.revisionState.kind !== 'accepted') {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Rename ${item.label} failed.`)
+        return
+      }
+
+      setWorkbenchStatusMessage(`Renamed ${item.label} to ${nextLabel}.`)
+      dispatch({ type: 'document.refreshRequested' })
+    }).catch((error: unknown) => {
+      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Rename ${item.label} failed.`)
+    })
+  }
+
+  const handleDocumentHistoryRename = (item: DocumentHistoryItemRecord) => {
+    if (item.kind === 'sketch') {
+      handleSketchRename(item)
+      return
+    }
+
+    handleFeatureRename(item)
+  }
+
+  const handleTargetRename = (target: PrimitiveRef, label: string) => {
+    if (target.kind === 'sketch') {
+      handleSketchRename({ sketchId: target.sketchId, label })
+      return
+    }
+
+    if (target.kind === 'feature') {
+      handleFeatureRename({ featureId: target.featureId, label })
+      return
+    }
+
+    if (target.kind === 'body') {
+      if (!snapshot) {
+        return
+      }
+
+      const nextLabel = requestRenameLabel(label)
+      if (!nextLabel) {
+        return
+      }
+
+      void modelingService.renameBody({
+        baseRevisionId: snapshot.document.revisionId,
+        bodyId: target.bodyId,
+        bodyLabel: nextLabel,
+      }).then((result) => {
+        if (result.revisionState.kind !== 'accepted') {
+          setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Rename ${label} failed.`)
+          return
+        }
+
+        setObjectLabelOverrides((current) => {
+          const next = { ...current }
+          delete next[getPrimitiveRefKey(target)]
+          return next
+        })
+        setWorkbenchStatusMessage(`Renamed ${label} to ${nextLabel}.`)
+        dispatch({ type: 'document.refreshRequested' })
+      }).catch((error: unknown) => {
+        setWorkbenchStatusMessage(error instanceof Error ? error.message : `Rename ${label} failed.`)
+      })
+      return
+    }
+
+    const nextLabel = requestRenameLabel(label)
+    if (!nextLabel) {
+      return
+    }
+
+    setObjectLabelOverrides((current) => ({
+      ...current,
+      [getPrimitiveRefKey(target)]: nextLabel,
+    }))
+    setWorkbenchStatusMessage(`Renamed ${label} to ${nextLabel}.`)
   }
 
   const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
@@ -271,13 +489,13 @@ export function CadWorkbench() {
       cursor,
     }).then((result) => {
       if (result.revisionState.kind !== 'accepted') {
-        setRestoreMessage(result.diagnostics[0]?.message ?? 'Feature cursor rollback failed.')
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Feature cursor rollback failed.')
         return
       }
 
       dispatch({ type: 'document.refreshRequested' })
     }).catch((error: unknown) => {
-      setRestoreMessage(error instanceof Error ? error.message : 'Feature cursor rollback failed.')
+      setWorkbenchStatusMessage(error instanceof Error ? error.message : 'Feature cursor rollback failed.')
     })
   }
 
@@ -349,6 +567,13 @@ export function CadWorkbench() {
           <FeatureSidebar
             snapshot={snapshot}
             hiddenTargetKeys={visibleHiddenTargetKeys}
+            objectLabelOverrides={objectLabelOverrides}
+            onInspectDiagnostic={handleDiagnosticInspectPlaceholder}
+            onInspectReference={handleReferenceInspectPlaceholder}
+            onObjectDelete={handleObjectDeletePlaceholder}
+            onObjectExport={handleObjectExportPlaceholder}
+            onRenameTarget={handleTargetRename}
+            onReopenTarget={handleNavigationReopen}
             onSelectTarget={handleShellSelect}
             onToggleTargetVisibility={handleTargetVisibilityToggle}
             visibleSelection={visibleSelection}
@@ -406,6 +631,23 @@ export function CadWorkbench() {
                 </button>
               </div>
             ) : null}
+            {workbenchStatusMessage ? (
+              <div
+                role="status"
+                className="absolute right-4 z-20 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
+                style={{ top: restoreMessage ? 136 : 16 }}
+              >
+                <div className="font-medium">Workbench action</div>
+                <div className="mt-1 text-[var(--cad-muted-foreground)]">{workbenchStatusMessage}</div>
+                <button
+                  className="mt-3 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface)] px-2 py-1 text-[var(--cad-foreground)]"
+                  type="button"
+                  onClick={() => setWorkbenchStatusMessage(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
             <WorkbenchStateDebugger state={debuggerState} />
             {activeEditSession ? (
               <WorkbenchInspectorOverlay>
@@ -420,12 +662,17 @@ export function CadWorkbench() {
               </WorkbenchInspectorOverlay>
             ) : null}
           </main>
-          <FeatureTimelineBar
+          <HistoryTimelineShell
             snapshot={snapshot}
+            sketchSession={sketchSession}
             visibleSelection={visibleSelection}
             onSelectTarget={handleShellSelect}
             onReopenTarget={handleNavigationReopen}
-            onCursorRequested={handleTimelineCursorRequested}
+            onDocumentCursorRequested={handleTimelineCursorRequested}
+            onSketchCursorRequested={(cursor) => dispatch({ type: 'sketch.historyCursorRequested', cursor })}
+            onDeleteFeature={handleFeatureDelete}
+            onRenameDocumentItem={handleDocumentHistoryRename}
+            onSuppressFeature={handleFeatureSuppressPlaceholder}
           />
         </div>
       </div>

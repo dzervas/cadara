@@ -985,6 +985,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       documentId: 'doc_workspace',
       baseRevisionId: created.revisionId,
       featureId: created.featureId,
+      featureLabel: 'Renamed OCC Extrude',
       definition: createExtrudeDefinition(sketch, 20),
     })
 
@@ -1003,6 +1004,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(
       committedBodySignature(updatedSnapshot.snapshot, createdBodyTarget.bodyId) !== createdSignature,
       'Extrude update must commit changed body topology into later snapshots.',
+    )
+    assert(
+      updatedSnapshot.snapshot.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed OCC Extrude',
+      'Extrude update must commit renamed feature labels into later snapshots.',
     )
   }
 

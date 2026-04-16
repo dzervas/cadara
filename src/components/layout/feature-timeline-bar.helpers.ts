@@ -1,16 +1,15 @@
-import type { DocumentFeatureCursor, FeatureSnapshotRecord } from '@/contracts/modeling/schema'
+import type { DocumentFeatureCursor, DocumentHistoryItemRecord } from '@/contracts/modeling/schema'
+import {
+  getDocumentHistoryCursorIndex,
+} from '@/domain/modeling/document-history'
 
 export const TIMELINE_CURSOR_GLYPH = '↕'
 
 export function getTimelineCursorIndex(
-  features: readonly FeatureSnapshotRecord[],
+  items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ) {
-  if (cursor.kind === 'empty') {
-    return -1
-  }
-
-  return features.findIndex((feature) => feature.featureId === cursor.featureId)
+  return getDocumentHistoryCursorIndex(items, cursor)
 }
 
 export function getNearestTimelineAnchorIndex(
@@ -36,19 +35,19 @@ export function getNearestTimelineAnchorIndex(
 }
 
 export function getTimelineCursorAriaLabel(
-  features: readonly FeatureSnapshotRecord[],
+  items: readonly DocumentHistoryItemRecord[],
   cursorIndex: number,
 ) {
-  if (features.length === 0) {
+  if (items.length === 0) {
     return 'Timeline cursor at empty document'
   }
 
   if (cursorIndex < 0) {
-    return 'Timeline cursor before first feature'
+    return 'Timeline cursor before first history item'
   }
 
-  const feature = features[cursorIndex]
-  return feature
-    ? `Timeline cursor after ${feature.label}`
-    : 'Timeline cursor before first feature'
+  const item = items[cursorIndex]
+  return item
+    ? `Timeline cursor after ${item.label}`
+    : 'Timeline cursor before first history item'
 }

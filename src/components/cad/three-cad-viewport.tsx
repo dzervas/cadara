@@ -658,7 +658,7 @@ function createViewCubeScene(): ViewCubeSceneState {
     const faceNormal = new THREE.Vector3(...faceTarget.position).normalize()
     const fill = new THREE.Mesh(faceFillGeometry, faceFillMaterial)
     fill.position.copy(faceNormal.clone().multiplyScalar(VIEW_CUBE_FACE_FILL_OFFSET))
-    fill.rotation.set(...faceTarget.rotation)
+    applyViewCubeRotation(fill, faceTarget.rotation)
     cubeGroup.add(fill)
 
     const outlineMaterial = new THREE.LineBasicMaterial({
@@ -668,7 +668,7 @@ function createViewCubeScene(): ViewCubeSceneState {
     })
     const outline = new THREE.LineLoop(faceOutlineGeometry, outlineMaterial)
     outline.position.fromArray(faceTarget.position)
-    outline.rotation.set(...faceTarget.rotation)
+    applyViewCubeRotation(outline, faceTarget.rotation)
     cubeGroup.add(outline)
 
     const label = createViewCubeLabelMesh(faceTarget.label, faceLabelGeometry)
@@ -684,7 +684,7 @@ function createViewCubeScene(): ViewCubeSceneState {
 
     const hitTarget = new THREE.Mesh(faceHitGeometry, faceHitMaterial)
     hitTarget.position.fromArray(faceTarget.position)
-    hitTarget.rotation.set(...faceTarget.rotation)
+    applyViewCubeRotation(hitTarget, faceTarget.rotation)
     hitTarget.userData.presetId = faceTarget.presetId
     cubeGroup.add(hitTarget)
     interactiveObjects.push(hitTarget)
@@ -780,6 +780,13 @@ function createViewCubeFaceOutlineGeometry(size: number) {
     new THREE.Vector3(halfSize, halfSize, 0),
     new THREE.Vector3(-halfSize, halfSize, 0),
   ])
+}
+
+function applyViewCubeRotation(
+  object: THREE.Object3D,
+  rotation: readonly [number, number, number],
+) {
+  object.rotation.set(rotation[0], rotation[1], rotation[2])
 }
 
 function createViewCubeCornerFaceGeometry(size: number) {

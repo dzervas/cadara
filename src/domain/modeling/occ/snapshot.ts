@@ -59,6 +59,7 @@ import {
   OCC_KERNEL_CAPABILITIES,
   OCC_KERNEL_SETTINGS,
 } from '@/domain/modeling/opencascade-kernel-seed'
+import { createDocumentHistoryItems } from '@/domain/modeling/document-history'
 import { extractPlanarFaceData } from '@/domain/modeling/occ/planes'
 import { buildRegionProfileFace } from '@/domain/modeling/occ/sketch-profile'
 import {
@@ -355,19 +356,31 @@ function buildSnapshotPresentationRecords(
       target: construction.target,
       ownerBodyId: null,
       ownerFeatureId: construction.ownerFeatureId,
+      ownerSketchId: null,
     })
   }
 
   for (const sketch of state.sketches) {
+    const target = { kind: 'sketch', sketchId: sketch.sketchId } as const
     featureTree.push({
-      id: createFeatureTreeNodeId('sketch', { kind: 'sketch', sketchId: sketch.sketchId }),
+      id: createFeatureTreeNodeId('sketch', target),
       label: sketch.label,
       description: 'Authored sketch',
       kind: 'sketch',
-      target: { kind: 'sketch', sketchId: sketch.sketchId },
+      target,
       ownerFeatureId: sketch.ownerFeatureId,
       ownerSketchId: sketch.sketchId,
       sourceFeatureId: sketch.ownerFeatureId,
+    })
+    objects.push({
+      id: createObjectTreeNodeId('sketch', target),
+      label: sketch.label,
+      description: 'Authored sketch',
+      kind: 'sketch',
+      target,
+      ownerBodyId: null,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
     })
   }
 
@@ -407,6 +420,7 @@ function buildSnapshotPresentationRecords(
       target,
       ownerBodyId: body.bodyId,
       ownerFeatureId: body.ownerFeatureId,
+      ownerSketchId: null,
     })
   }
 
@@ -1373,6 +1387,11 @@ export function buildOccWorkspaceSnapshot(
   const presentation: DocumentPresentationSnapshot = {
     featureTree: document.featureTree,
     objects: document.objects,
+    documentHistory: createDocumentHistoryItems({
+      featureTree: document.featureTree,
+      features: document.features,
+      sketches: document.sketches,
+    }),
     entities: document.entities,
   }
 
@@ -1387,6 +1406,7 @@ export function buildOccWorkspaceSnapshot(
     capabilities: document.capabilities,
     featureTree: presentation.featureTree,
     objects: presentation.objects,
+    documentHistory: presentation.documentHistory,
     features: document.features,
     cursor: document.cursor,
     sketches: document.sketches,

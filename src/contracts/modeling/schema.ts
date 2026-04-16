@@ -1,6 +1,7 @@
 import type {
   BodyId,
   ConstructionId,
+  DocumentHistoryItemId,
   DocumentId,
   EdgeId,
   FaceId,
@@ -540,14 +541,54 @@ export interface ObjectTreeNodeRecord {
   /** Human-readable secondary description owned by the snapshot producer. */
   description: string
   /** Tree row family used for iconography and grouping. */
-  kind: 'body' | 'construction'
+  kind: 'body' | 'construction' | 'sketch'
   /** Durable target represented by this tree row. */
   target: PrimitiveRef
   /** Owning body when this row represents body topology; otherwise null. */
   ownerBodyId: BodyId | null
   /** Owning feature when this row is feature-authored; otherwise null. */
   ownerFeatureId: FeatureId | null
+  /** Owning sketch when this row represents committed sketch-authored state; otherwise null. */
+  ownerSketchId: SketchId | null
 }
+
+/**
+ * Presentational document-history item derived from durable authored state.
+ * `id` is a UI/view-model key only; durable identity is carried by `target`.
+ */
+export type DocumentHistoryItemRecord =
+  | {
+      /** Presentational timeline key scoped to one snapshot payload. */
+      id: DocumentHistoryItemId
+      /** Human-readable item label shown in the document history. */
+      label: string
+      /** Human-readable secondary description owned by the snapshot producer. */
+      description: string
+      /** Authored document row family used for iconography and edit routing. */
+      kind: 'sketch'
+      /** Durable target represented by this history item. */
+      target: { kind: 'sketch'; sketchId: SketchId }
+      /** Durable sketch identity represented by this item. */
+      sketchId: SketchId
+      /** Feature identity is absent for committed sketch items. */
+      featureId: null
+    }
+  | {
+      /** Presentational timeline key scoped to one snapshot payload. */
+      id: DocumentHistoryItemId
+      /** Human-readable item label shown in the document history. */
+      label: string
+      /** Human-readable secondary description owned by the snapshot producer. */
+      description: string
+      /** Authored document row family used for iconography and edit routing. */
+      kind: 'feature'
+      /** Durable target represented by this history item. */
+      target: { kind: 'feature'; featureId: FeatureId }
+      /** Sketch identity is absent for committed feature items. */
+      sketchId: null
+      /** Durable feature identity represented by this item. */
+      featureId: FeatureId
+    }
 
 /**
  * Durable named reference record.
@@ -634,6 +675,12 @@ export type DocumentFeatureCursor =
   | {
       /** No authored features exist in the document. */
       kind: 'empty'
+    }
+  | {
+      /** Last applied committed sketch in durable authored document order. */
+      kind: 'sketch'
+      /** Durable sketch identity referenced by the cursor. */
+      sketchId: SketchId
     }
   | {
       /** Last applied feature in durable document feature order. */
@@ -771,6 +818,8 @@ export interface DocumentPresentationSnapshot {
   featureTree: FeatureTreeNodeRecord[]
   /** Presentational object-tree rows derived from durable state. */
   objects: ObjectTreeNodeRecord[]
+  /** Presentational authored document-history rows derived from durable state. */
+  documentHistory: DocumentHistoryItemRecord[]
   /** Presentational entity rows for selection and inspection surfaces. */
   entities: SnapshotEntityRecord[]
 }
@@ -800,6 +849,8 @@ export interface WorkspaceSnapshot {
   featureTree: DocumentPresentationSnapshot['featureTree']
   /** Deprecated passthrough for `presentation.objects`. */
   objects: DocumentPresentationSnapshot['objects']
+  /** Deprecated passthrough for `presentation.documentHistory`. */
+  documentHistory: DocumentPresentationSnapshot['documentHistory']
   /** Deprecated passthrough for `document.features`. */
   features: KernelDocumentSnapshot['features']
   /** Deprecated passthrough for `document.cursor`. */
@@ -896,6 +947,8 @@ export interface GetDocumentSnapshotResponse {
  * with machine-readable diagnostics and no committed mutation.
  */
 export interface FeatureMutationRequest extends DocumentMutationRequest {
+  /** Optional human-readable feature label override for create or update flows. */
+  featureLabel?: string
   /**
    * Exact feature definition owned by the request.
    * The kernel must reject invalid references or unsupported parameter
@@ -1031,6 +1084,24 @@ export interface DeleteFeatureRequest extends DocumentMutationRequest {
 export interface DeleteFeatureResponse extends ModelingOperationResult {
   /** Durable feature identity that was deleted. */
   deletedFeatureId: FeatureId
+}
+
+/**
+ * Body rename request.
+ */
+export interface RenameBodyRequest extends DocumentMutationRequest {
+  /** Durable body identity to rename in-place. */
+  bodyId: BodyId
+  /** Human-readable body label to store on the document body record. */
+  bodyLabel: string
+}
+
+/**
+ * Body rename response.
+ */
+export interface RenameBodyResponse extends ModelingOperationResult {
+  /** Durable body identity that was targeted by the rename. */
+  bodyId: BodyId
 }
 
 /**

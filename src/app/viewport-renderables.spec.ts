@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import { composeViewportRenderables } from '@/app/viewport-renderables'
+import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
 
 test('src/app/viewport-renderables.spec.ts', async () => {
   function assert(condition: unknown, message = 'Assertion failed'): asserts condition {
@@ -75,6 +75,28 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     },
   }
 
+  const committedSketchCurve: RenderableEntityRecord = {
+    id: 'renderable_sketch_curve_committed',
+    label: 'Committed sketch curve',
+    ownerBodyId: null,
+    ownerFeatureId: null,
+    binding: {
+      pickId: 'pick_sketch_curve_committed',
+      pickPriority: 5,
+      target: { kind: 'sketchEntity', sketchId: 'sketch_a', entityId: 'sketch_entity_a' },
+      topology: null,
+      semanticClass: 'sketchCurve',
+    },
+    geometry: {
+      kind: 'polyline',
+      points: [
+        [0, 0, 0],
+        [1, 0, 0],
+      ],
+      isClosed: false,
+    },
+  }
+
   {
     const composed = composeViewportRenderables({
       snapshotRenderables: [committedFace, committedEdge],
@@ -103,16 +125,24 @@ test('src/app/viewport-renderables.spec.ts', async () => {
 
   {
     const composed = composeViewportRenderables({
-      snapshotRenderables: [committedFace, committedEdge],
+      snapshotRenderables: [committedFace, committedEdge, committedSketchCurve],
       previewRenderables: [previewFace],
       sketchSession: null,
       hiddenTargetKeys: {
-        'edge:body_a:edge_a': true,
+        'sketch:sketch_a': true,
       },
     })
 
-    assertEqual(composed.documentRenderables.length, 2)
+    assertEqual(composed.documentRenderables.length, 3)
     assertEqual(composed.documentRenderables[0]?.renderable.id, committedFace.id)
-    assertEqual(composed.documentRenderables[1]?.renderable.id, previewFace.id)
+    assertEqual(composed.documentRenderables[1]?.renderable.id, committedEdge.id)
+    assertEqual(composed.documentRenderables[2]?.renderable.id, previewFace.id)
+    assert(
+      isTargetHidden(
+        { kind: 'sketchPoint', sketchId: 'sketch_a', pointId: 'sketch_point_a' },
+        { 'sketch:sketch_a': true },
+      ),
+      'Sketch-owned selection targets should be hidden when their owning committed sketch is hidden.',
+    )
   }
 })

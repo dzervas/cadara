@@ -2,6 +2,7 @@ import type {
   CommitSketchRequest,
   CreateFeatureRequest,
   DeleteFeatureRequest,
+  RenameBodyRequest,
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
   UpdateFeatureRequest,
@@ -31,6 +32,10 @@ export type PersistedDeleteFeaturePayload = Omit<
   DeleteFeatureRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
 >
+export type PersistedRenameBodyPayload = Omit<
+  RenameBodyRequest,
+  'contractVersion' | 'documentId' | 'baseRevisionId'
+>
 export type PersistedReorderFeaturePayload = Omit<
   ReorderFeatureRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
@@ -45,6 +50,7 @@ export type ModelingOperationHistoryEntry =
   | { kind: 'createFeature'; payload: PersistedCreateFeaturePayload }
   | { kind: 'updateFeature'; payload: PersistedUpdateFeaturePayload }
   | { kind: 'deleteFeature'; payload: PersistedDeleteFeaturePayload }
+  | { kind: 'renameBody'; payload: PersistedRenameBodyPayload }
   | { kind: 'reorderFeature'; payload: PersistedReorderFeaturePayload }
   | { kind: 'setFeatureCursor'; payload: PersistedSetFeatureCursorPayload }
 
@@ -114,6 +120,7 @@ export function createCreateFeatureHistoryEntry(
   return {
     kind: 'createFeature',
     payload: {
+      featureLabel: payload.featureLabel,
       definition: payload.definition,
     },
   }
@@ -126,6 +133,7 @@ export function createUpdateFeatureHistoryEntry(
     kind: 'updateFeature',
     payload: {
       featureId: payload.featureId,
+      featureLabel: payload.featureLabel,
       definition: payload.definition,
     },
   }
@@ -138,6 +146,18 @@ export function createDeleteFeatureHistoryEntry(
     kind: 'deleteFeature',
     payload: {
       featureId: payload.featureId,
+    },
+  }
+}
+
+export function createRenameBodyHistoryEntry(
+  payload: RenameBodyRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: 'renameBody',
+    payload: {
+      bodyId: payload.bodyId,
+      bodyLabel: payload.bodyLabel,
     },
   }
 }

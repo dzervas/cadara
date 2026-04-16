@@ -106,6 +106,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
       featureTree: [],
       objects: [],
+      documentHistory: [],
       references: [],
       render: {
         schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
@@ -207,6 +208,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       presentation: {
         featureTree: [],
         objects: [],
+        documentHistory: [],
         entities: [
           {
             ownerDocumentId: 'doc_workspace',

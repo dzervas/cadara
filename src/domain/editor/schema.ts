@@ -8,6 +8,7 @@ export type {
   ConstructionId,
   ConstraintId,
   DimensionId,
+  DocumentHistoryItemId,
   DocumentId,
   EdgeId,
   FaceId,

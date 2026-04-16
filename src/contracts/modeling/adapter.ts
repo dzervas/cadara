@@ -9,6 +9,8 @@ import type {
   EvaluatePreviewResponse,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
+  RenameBodyRequest,
+  RenameBodyResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   ResolveReferenceRequest,
@@ -36,6 +38,8 @@ export interface ModelingKernelAdapter {
   updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>
   /** Deletes an existing durable feature from the document. */
   deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>
+  /** Renames an existing durable body without changing its topology. */
+  renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>
   /** Reorders an existing durable feature within the document feature list. */
   reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse>
   /** Moves the document feature cursor without deleting durable feature records. */

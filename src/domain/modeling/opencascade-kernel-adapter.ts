@@ -17,6 +17,8 @@ import type {
   GetDocumentSnapshotResponse,
   ModelingDiagnostic,
   ModelingDiagnosticDetail,
+  RenameBodyRequest,
+  RenameBodyResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   ResolveReferenceRequest,
@@ -95,6 +97,7 @@ const DEFAULT_SOLVER_TOLERANCES: SolverTolerancePolicy = {
 const OCC_REVISION_CONFLICT_CODE = 'occ-revision-conflict'
 const OCC_VALIDATION_ERROR_CODE = 'occ-validation-error'
 const OCC_MISSING_FEATURE_CODE = 'occ-missing-feature'
+const OCC_MISSING_BODY_CODE = 'occ-missing-body'
 const OCC_MISSING_REORDER_ANCHOR_CODE = 'occ-missing-reorder-anchor'
 const OCC_REBUILD_FAILURE_CODE = 'occ-rebuild-failure'
 const OCC_STALE_PREVIEW_CODE = 'occ-stale-preview'
@@ -174,6 +177,15 @@ function createMissingFeatureDiagnostic(featureId: FeatureId): ModelingDiagnosti
     'error',
     `Feature ${featureId} does not resolve in the current OCC authoring state.`,
     { kind: 'feature', featureId },
+  )
+}
+
+function createMissingBodyDiagnostic(bodyId: BodyId): ModelingDiagnostic {
+  return createDiagnostic(
+    OCC_MISSING_BODY_CODE,
+    'error',
+    `Body ${bodyId} does not resolve in the current OCC authoring state.`,
+    { kind: 'body', bodyId },
   )
 }
 
@@ -403,14 +415,20 @@ function featureOrdinalForLabel(
   return state.features.filter((feature) => feature.definition.kind === kind).length + 1
 }
 
-function isValidFeatureCursor(cursor: OccAuthoringState['cursor'], features: readonly OccAuthoringFeatureRecord[]) {
-  return cursor.kind === 'empty'
-    ? features.length === 0
-    : features.some((feature) => feature.featureId === cursor.featureId)
+function isValidFeatureCursor(state: OccAuthoringState, cursor: OccAuthoringState['cursor']) {
+  if (cursor.kind === 'empty') {
+    return true
+  }
+
+  if (cursor.kind === 'sketch') {
+    return state.sketches.some((sketch) => sketch.sketchId === cursor.sketchId)
+  }
+
+  return state.features.some((feature) => feature.featureId === cursor.featureId)
 }
 
 function getCursorInsertionIndex(cursor: OccAuthoringState['cursor'], features: readonly OccAuthoringFeatureRecord[]) {
-  if (cursor.kind === 'empty') {
+  if (cursor.kind === 'empty' || cursor.kind === 'sketch') {
     return 0
   }
 
@@ -422,7 +440,7 @@ function getAppliedFeatures(
   features: readonly OccAuthoringFeatureRecord[],
   cursor: OccAuthoringState['cursor'],
 ) {
-  if (cursor.kind === 'empty') {
+  if (cursor.kind === 'empty' || cursor.kind === 'sketch') {
     return []
   }
 
@@ -693,6 +711,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     input: {
       revisionId: RevisionId
       sketches?: readonly SketchSnapshotRecord[]
+      bodyLabels?: ReadonlyMap<BodyId, string>
       features?: readonly OccAuthoringFeatureRecord[]
       cursor?: OccAuthoringState['cursor']
     },
@@ -703,6 +722,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       bodies: runtimeState.authoringState.baseBodies,
+      bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
     })
@@ -916,6 +936,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     input: {
       revisionId: RevisionId
       sketches?: readonly SketchSnapshotRecord[]
+      bodyLabels?: ReadonlyMap<BodyId, string>
       features?: readonly OccAuthoringFeatureRecord[]
       cursor?: OccAuthoringState['cursor']
     },
@@ -928,6 +949,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       bodies: runtimeState.authoringState.baseBodies,
+      bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       previousReferenceState: runtimeState.authoringState.referenceState,
@@ -1203,7 +1225,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     const feature: OccAuthoringFeatureRecord = {
       featureId,
-      label: `${capitalizeFeatureKind(request.definition.kind)} ${featureOrdinalForLabel(runtimeState.authoringState, request.definition.kind)}`,
+      label: request.featureLabel ?? `${capitalizeFeatureKind(request.definition.kind)} ${featureOrdinalForLabel(runtimeState.authoringState, request.definition.kind)}`,
       definition: request.definition,
     }
     const nextSequence = runtimeState.revisionSequence + 1
@@ -1298,6 +1320,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       feature.featureId === request.featureId
         ? {
             ...feature,
+            label: request.featureLabel ?? feature.label,
             definition: request.definition,
           }
         : feature,
@@ -1385,11 +1408,18 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const nextFeatures = runtimeState.authoringState.features.filter(
       (feature) => feature.featureId !== request.featureId,
     )
-    const nextCursor = isValidFeatureCursor(runtimeState.authoringState.cursor, nextFeatures)
-      ? runtimeState.authoringState.cursor
+    const currentCursor = runtimeState.authoringState.cursor
+    const nextCursor = currentCursor.kind !== 'feature'
+      || nextFeatures.some((feature) => feature.featureId === currentCursor.featureId)
+      ? currentCursor
       : (() => {
           const tail = nextFeatures.at(-1)
-          return tail ? { kind: 'feature' as const, featureId: tail.featureId } : { kind: 'empty' as const }
+          const sketch = runtimeState.authoringState.sketches.at(-1)
+          return tail
+            ? { kind: 'feature' as const, featureId: tail.featureId }
+            : sketch
+              ? { kind: 'sketch' as const, sketchId: sketch.sketchId }
+              : { kind: 'empty' as const }
         })()
 
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
@@ -1428,6 +1458,76 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ...accepted,
       }),
     }
+  }
+
+  async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(request.baseRevisionId, currentRevisionId)
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        bodyId: request.bodyId,
+        changedTargets: [],
+        ...conflict,
+      }
+    }
+
+    if (!runtimeState.authoringState.bodies.some((body) => body.bodyId === request.bodyId)) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        [createMissingBodyDiagnostic(request.bodyId)],
+        OCC_MISSING_BODY_CODE,
+      )
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        bodyId: request.bodyId,
+        changedTargets: [],
+        ...rejected,
+      }
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1
+    const nextRevisionId = createRevisionId(nextSequence)
+    const nextBodyLabels = new Map(runtimeState.authoringState.bodyLabels)
+    nextBodyLabels.set(request.bodyId, request.bodyLabel)
+    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+      revisionId: nextRevisionId,
+      bodyLabels: nextBodyLabels,
+    })
+
+    if (!nextAuthoringState.ok) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        nextAuthoringState.diagnostics,
+        nextAuthoringState.reasonCode,
+      )
+
+      return this.withOperationEnvelope({
+        bodyId: request.bodyId,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState.state,
+      revisionSequence: nextSequence,
+    })
+
+    const bodyTarget = { kind: 'body' as const, bodyId: request.bodyId }
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+
+    return this.withOperationEnvelope({
+      bodyId: request.bodyId,
+      changedTargets: [bodyTarget],
+      ...accepted,
+    })
   }
 
   async reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse> {
@@ -1556,14 +1656,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
-    if (!isValidFeatureCursor(request.cursor, runtimeState.authoringState.features)) {
+    if (!isValidFeatureCursor(runtimeState.authoringState, request.cursor)) {
       const diagnostics = request.cursor.kind === 'feature'
         ? [createMissingFeatureDiagnostic(request.cursor.featureId)]
         : [createRebuildFailureDiagnostic(
             'occ-invalid-document-cursor',
-            'The empty document cursor is only valid when the document has no features.',
+            'The requested document cursor does not resolve to an authored history item.',
             [],
-            [],
+            request.cursor.kind === 'sketch'
+              ? [{ kind: 'sketch' as const, sketchId: request.cursor.sketchId }]
+              : [],
           )]
       const rejected = this.buildRejectedResult(
         request.baseRevisionId,
@@ -1612,6 +1714,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor: request.cursor,
       changedTargets: request.cursor.kind === 'feature'
         ? [{ kind: 'feature' as const, featureId: request.cursor.featureId }]
+        : request.cursor.kind === 'sketch'
+          ? [{ kind: 'sketch' as const, sketchId: request.cursor.sketchId }]
         : [],
       ...accepted,
     })

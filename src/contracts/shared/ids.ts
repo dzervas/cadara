@@ -129,6 +129,12 @@ export type FeatureTreeNodeId = `feature_tree_node_${string}`
 export type ObjectTreeNodeId = `object_tree_node_${string}`
 
 /**
+ * Presentational document-history item identifier used only for timeline view models.
+ * This key is not a durable modeling reference.
+ */
+export type DocumentHistoryItemId = `document_history_item_${string}`
+
+/**
  * Presentational snapshot entity key used for sidebar/detail view models.
  * This key is not a durable modeling reference.
  */

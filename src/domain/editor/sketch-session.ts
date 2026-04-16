@@ -85,6 +85,8 @@ export interface SketchSessionState {
   planeKey: SketchPlaneKey | null
   entities: SketchDraftEntity[]
   definition: SketchDefinition
+  fullDefinition: SketchDefinition
+  historyCursor: SketchHistoryCursor
   activeTool: SketchAuthoringToolId | null
   status: SketchSessionStatus
   pointerDownPoint: SketchPoint | null
@@ -104,6 +106,30 @@ export interface SketchSessionDisplayRenderable {
   geometry: RenderableEntityRecord['geometry']
   target: PrimitiveRef | null
 }
+
+export type SketchHistoryCursor =
+  | { kind: 'empty' }
+  | { kind: 'item'; itemId: string }
+
+export type SketchHistoryItem =
+  | {
+      kind: 'entity'
+      id: SketchEntityId
+      label: string
+      target: SketchEntityRef
+    }
+  | {
+      kind: 'constraint'
+      id: ConstraintId
+      label: string
+      target: SketchConstraintRef
+    }
+  | {
+      kind: 'dimension'
+      id: DimensionId
+      label: string
+      target: SketchDimensionRef
+    }
 
 export function derivePlaneKeyFromTarget(target: SketchPlaneSupportRef): SketchPlaneKey | null {
   if (target.kind !== 'construction') {
@@ -199,6 +225,113 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
   }
 }
 
+function getHistorySequence(id: string) {
+  const match = id.match(/_(\d+)_/)
+  const parsed = match ? Number.parseInt(match[1], 10) : Number.NaN
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed
+}
+
+function getDefinitionSketchId(definition: SketchDefinition) {
+  return definition.entities[0]?.target.sketchId
+    ?? definition.points[0]?.target.sketchId
+    ?? ('sketch_draft' as SketchId)
+}
+
+export function getSketchHistoryItems(definition: SketchDefinition): SketchHistoryItem[] {
+  const sketchId = getDefinitionSketchId(definition)
+
+  return [
+    ...definition.entities.map((entity) => ({
+      kind: 'entity' as const,
+      id: entity.entityId,
+      label: entity.label,
+      target: createSketchEntityRef(sketchId, entity.entityId),
+    })),
+    ...definition.constraints.map((constraint) => ({
+      kind: 'constraint' as const,
+      id: constraint.constraintId,
+      label: constraint.label,
+      target: createSketchConstraintRef(sketchId, constraint.constraintId),
+    })),
+    ...definition.dimensions.map((dimension) => ({
+      kind: 'dimension' as const,
+      id: dimension.dimensionId,
+      label: dimension.label,
+      target: createSketchDimensionRef(sketchId, dimension.dimensionId),
+    })),
+  ].sort((left, right) => {
+    const sequenceDelta = getHistorySequence(left.id) - getHistorySequence(right.id)
+    return sequenceDelta === 0 ? left.id.localeCompare(right.id) : sequenceDelta
+  })
+}
+
+export function createTailSketchHistoryCursor(definition: SketchDefinition): SketchHistoryCursor {
+  const tail = getSketchHistoryItems(definition).at(-1)
+  return tail ? { kind: 'item', itemId: tail.id } : { kind: 'empty' }
+}
+
+export function getSketchHistoryCursorIndex(
+  items: readonly SketchHistoryItem[],
+  cursor: SketchHistoryCursor,
+) {
+  if (cursor.kind === 'empty') {
+    return -1
+  }
+
+  return items.findIndex((item) => item.id === cursor.itemId)
+}
+
+export function getSketchHistoryCursorForIndex(
+  items: readonly SketchHistoryItem[],
+  index: number,
+): SketchHistoryCursor {
+  const item = items[index]
+  return item ? { kind: 'item', itemId: item.id } : { kind: 'empty' }
+}
+
+function getEntityPointIds(entity: SketchEntityDefinition) {
+  switch (entity.kind) {
+    case 'lineSegment':
+      return [entity.startPointId, entity.endPointId]
+    case 'arc':
+      return [entity.startPointId, entity.endPointId, entity.centerPointId]
+    case 'circle':
+      return [entity.centerPointId]
+    case 'point':
+      return [entity.pointId]
+  }
+}
+
+export function filterSketchDefinitionThroughCursor(
+  definition: SketchDefinition,
+  cursor: SketchHistoryCursor,
+): SketchDefinition {
+  const items = getSketchHistoryItems(definition)
+  const cursorIndex = getSketchHistoryCursorIndex(items, cursor)
+  const visibleItemIds = new Set(
+    cursor.kind === 'empty'
+      ? []
+      : items.slice(0, cursorIndex + 1).map((item) => item.id),
+  )
+  const entities = definition.entities.filter((entity) => visibleItemIds.has(entity.entityId))
+  const visiblePointIds = new Set(entities.flatMap((entity) => getEntityPointIds(entity)))
+  const points = definition.points.filter((point) => visiblePointIds.has(point.pointId))
+  const constraints = definition.constraints.filter((constraint) => visibleItemIds.has(constraint.constraintId))
+  const dimensions = definition.dimensions.filter((dimension) => visibleItemIds.has(dimension.dimensionId))
+
+  return {
+    ...definition,
+    pointIds: points.map((point) => point.pointId),
+    points,
+    entityIds: entities.map((entity) => entity.entityId),
+    entities,
+    constraintIds: constraints.map((constraint) => constraint.constraintId),
+    constraints,
+    dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+    dimensions,
+  }
+}
+
 function getNextDefinitionSequence(definition: SketchDefinition) {
   const ids = [
     ...definition.referenceIds,
@@ -223,8 +356,11 @@ function getNextDefinitionSequence(definition: SketchDefinition) {
 }
 
 export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): SketchSessionState {
-  const entities = sketch.sketch.definition.entities.flatMap((entity) =>
-    mapDefinitionEntityToDraftEntity(sketch.sketchId, sketch.sketch.definition.points, entity),
+  const fullDefinition = cloneDefinition(sketch.sketch.definition)
+  const historyCursor = createTailSketchHistoryCursor(fullDefinition)
+  const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
+  const entities = definition.entities.flatMap((entity) =>
+    mapDefinitionEntityToDraftEntity(sketch.sketchId, definition.points, entity),
   )
 
   return {
@@ -234,7 +370,9 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     planeTarget: sketch.planeTarget,
     planeKey: sketch.planeKey ?? 'xy',
     entities,
-    definition: cloneDefinition(sketch.sketch.definition),
+    definition,
+    fullDefinition,
+    historyCursor,
     activeTool: null,
     status: 'idle',
     pointerDownPoint: null,
@@ -250,7 +388,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
       plane: sketch.plane,
       planeTarget: sketch.planeTarget,
       planeKey: sketch.planeKey ?? 'xy',
-      definition: sketch.sketch.definition,
+      definition,
     }),
     validationMessage: null,
   }
@@ -258,6 +396,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
 
 export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSessionState {
   const planeKey = plane.key
+  const definition = createEmptyDefinition()
 
   return {
     sketchId: null,
@@ -266,7 +405,9 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     planeTarget: plane.support,
     planeKey,
     entities: [],
-    definition: createEmptyDefinition(),
+    definition,
+    fullDefinition: cloneDefinition(definition),
+    historyCursor: { kind: 'empty' },
     activeTool: null,
     status: 'idle',
     pointerDownPoint: null,
@@ -467,90 +608,51 @@ function appendDefinition(definition: SketchDefinition, patch: SketchToolCommitC
   }
 }
 
-function buildAcceptedEntities(
-  definitionPatch: SketchToolCommitContribution,
-): SketchDraftEntity[] {
-  const pointById = new Map(definitionPatch.points.map((point) => [point.pointId, point.position]))
-  const acceptedEntities: SketchDraftEntity[] = []
+function truncateDefinitionAfterCursor(
+  definition: SketchDefinition,
+  cursor: SketchHistoryCursor,
+) {
+  return filterSketchDefinitionThroughCursor(definition, cursor)
+}
 
-  for (const entity of definitionPatch.entities) {
-    if (entity.kind === 'lineSegment') {
-      const start = pointById.get(entity.startPointId)
-      const end = pointById.get(entity.endPointId)
+function applySketchHistoryContribution(
+  session: SketchSessionState,
+  patch: SketchToolCommitContribution,
+) {
+  const truncatedDefinition = truncateDefinitionAfterCursor(session.fullDefinition, session.historyCursor)
+  const fullDefinition = appendDefinition(truncatedDefinition, patch)
+  const historyCursor = createTailSketchHistoryCursor(fullDefinition)
+  const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
 
-      if (!start || !end) {
-        continue
-      }
-
-      acceptedEntities.push({
-        id: entity.entityId,
-        kind: 'line',
-        start,
-        end,
-        entityId: entity.entityId,
-        status: 'accepted',
-        label: entity.label,
-      })
-      continue
-    }
-
-    if (entity.kind === 'point') {
-      const point = pointById.get(entity.pointId)
-
-      if (!point) {
-        continue
-      }
-
-      acceptedEntities.push({
-        id: entity.entityId,
-        kind: 'circle',
-        center: point,
-        radius: 0.1,
-        entityId: entity.entityId,
-        status: 'accepted',
-        label: entity.label,
-      })
-      continue
-    }
-
-    if (entity.kind === 'circle') {
-      const center = pointById.get(entity.centerPointId)
-
-      if (!center) {
-        continue
-      }
-
-      acceptedEntities.push({
-        id: entity.entityId,
-        kind: 'circle',
-        center,
-        radius: entity.radius,
-        entityId: entity.entityId,
-        status: 'accepted',
-        label: entity.label,
-      })
-      continue
-    }
-
-    const start = pointById.get(entity.startPointId)
-    const end = pointById.get(entity.endPointId)
-
-    if (!start || !end) {
-      continue
-    }
-
-    acceptedEntities.push({
-      id: entity.entityId,
-      kind: 'line',
-      start,
-      end,
-      entityId: entity.entityId,
-      status: 'accepted',
-      label: entity.label,
-    })
+  return {
+    fullDefinition,
+    historyCursor,
+    definition,
   }
+}
 
-  return acceptedEntities
+export function moveSketchHistoryCursor(
+  session: SketchSessionState,
+  cursor: SketchHistoryCursor,
+): SketchSessionState {
+  const items = getSketchHistoryItems(session.fullDefinition)
+  const normalizedCursor =
+    cursor.kind === 'empty' || items.some((item) => item.id === cursor.itemId)
+      ? cursor
+      : createTailSketchHistoryCursor(session.fullDefinition)
+  const definition = filterSketchDefinitionThroughCursor(session.fullDefinition, normalizedCursor)
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+
+  return {
+    ...session,
+    historyCursor: normalizedCursor,
+    definition,
+    entities: definition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
+    ),
+    selectedAnnotation: null,
+    commitRequest: rebuildSessionCommitRequest(session, definition),
+  }
 }
 
 function buildConstraintSelectionGuide(
@@ -854,13 +956,17 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
         createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius),
     },
   })
-  const definition = appendDefinition(session.definition, definitionPatch)
-  const acceptedEntities = [...session.entities.filter((entity) => entity.status === 'accepted'), ...buildAcceptedEntities(definitionPatch)]
+  const history = applySketchHistoryContribution(session, definitionPatch)
+  const acceptedEntities = history.definition.entities.flatMap((entity) =>
+    mapDefinitionEntityToDraftEntity(sketchId, history.definition.points, entity),
+  )
 
   return {
     ...session,
     entities: acceptedEntities,
-    definition,
+    definition: history.definition,
+    fullDefinition: history.fullDefinition,
+    historyCursor: history.historyCursor,
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
@@ -871,7 +977,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       plane: session.plane,
       planeTarget: session.planeTarget,
       planeKey: session.planeKey,
-      definition,
+      definition: history.definition,
     }),
     validationMessage: null,
     toolPresentation: result.presentation,
@@ -1068,7 +1174,7 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     createConstraintId: (suffix) => createConstraintId(session.sequence + 1, suffix),
     createDimensionId: (suffix) => createDimensionId(session.sequence + 1, suffix),
   })
-  const nextDefinition = appendDefinition(session.definition, {
+  const history = applySketchHistoryContribution(session, {
     points: [],
     entities: [],
     ...contribution,
@@ -1076,11 +1182,13 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
 
   return {
     ...session,
-    definition: nextDefinition,
+    definition: history.definition,
+    fullDefinition: history.fullDefinition,
+    historyCursor: history.historyCursor,
     sequence: session.sequence + 1,
     status: 'idle',
     constraintAuthoring: null,
-    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    commitRequest: rebuildSessionCommitRequest(session, history.definition),
     selectedAnnotation: null,
     toolPresentation: null,
     activeTool: null,
@@ -1104,30 +1212,38 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
     return session
   }
 
-  const nextDefinition =
+  const nextFullDefinition =
     selectedAnnotation.kind === 'constraint'
       ? {
-          ...session.definition,
-          constraintIds: session.definition.constraintIds.filter(
+          ...session.fullDefinition,
+          constraintIds: session.fullDefinition.constraintIds.filter(
             (constraintId) => constraintId !== selectedAnnotation.constraintId,
           ),
-          constraints: session.definition.constraints.filter(
+          constraints: session.fullDefinition.constraints.filter(
             (constraint) => constraint.constraintId !== selectedAnnotation.constraintId,
           ),
         }
       : {
-          ...session.definition,
-          dimensionIds: session.definition.dimensionIds.filter(
+          ...session.fullDefinition,
+          dimensionIds: session.fullDefinition.dimensionIds.filter(
             (dimensionId) => dimensionId !== selectedAnnotation.dimensionId,
           ),
-          dimensions: session.definition.dimensions.filter(
+          dimensions: session.fullDefinition.dimensions.filter(
             (dimension) => dimension.dimensionId !== selectedAnnotation.dimensionId,
           ),
         }
+  const historyCursor = createTailSketchHistoryCursor(nextFullDefinition)
+  const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, historyCursor)
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
 
   return {
     ...session,
+    fullDefinition: nextFullDefinition,
     definition: nextDefinition,
+    historyCursor,
+    entities: nextDefinition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, nextDefinition.points, entity),
+    ),
     selectedAnnotation: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
   }

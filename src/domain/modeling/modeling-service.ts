@@ -31,6 +31,7 @@ import type {
   DeleteFeatureRequest,
   DocumentSnapshot,
   DocumentFeatureCursor,
+  DocumentHistoryItemRecord,
   EvaluatePreviewRequest,
   EvaluatePreviewResponse,
   ExtrudeFeatureParameters,
@@ -52,6 +53,8 @@ import type {
   PreviewFreshness,
   RebuildResult,
   ReferenceRecord,
+  RenameBodyRequest,
+  RenameBodyResponse,
   ResolvedReferenceRecord,
   ResolveReferenceRequest,
   ResolveReferenceResponse,
@@ -80,6 +83,7 @@ import {
   evaluatePreviewResponseSchema,
   getDocumentSnapshotResponseSchema,
   kernelDocumentSnapshotSchema,
+  renameBodyResponseSchema,
   reorderFeatureResponseSchema,
   resolveReferenceResponseSchema,
   setFeatureCursorResponseSchema,
@@ -91,6 +95,7 @@ import {
   createCreateFeatureHistoryEntry,
   createDeleteFeatureHistoryEntry,
   createEmptyOperationHistory,
+  createRenameBodyHistoryEntry,
   createReorderFeatureHistoryEntry,
   createSetFeatureCursorHistoryEntry,
   createUpdateFeatureHistoryEntry,
@@ -146,6 +151,7 @@ export interface ModelingService {
   createFeature(input: ModelingCreateFeatureInput): Promise<ModelingFeatureMutationResult>
   updateFeature(input: ModelingUpdateFeatureInput): Promise<ModelingFeatureMutationResult>
   deleteFeature(input: ModelingDeleteFeatureInput): Promise<ModelingDeleteFeatureResult>
+  renameBody(input: ModelingRenameBodyInput): Promise<ModelingRenameBodyResult>
   reorderFeature(input: ModelingReorderFeatureInput): Promise<ModelingReorderFeatureResult>
   setFeatureCursor(input: ModelingSetFeatureCursorInput): Promise<ModelingSetFeatureCursorResult>
   evaluatePreview(input: ModelingEvaluatePreviewInput): Promise<ModelingPreviewResult>
@@ -207,6 +213,15 @@ export interface ModelingDeleteFeatureResult {
   diagnostics: ModelingDiagnostic[]
 }
 
+export interface ModelingRenameBodyResult {
+  revisionId: DocumentSnapshot['revisionId']
+  bodyId: BodyId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
 export interface ModelingReorderFeatureResult {
   revisionId: DocumentSnapshot['revisionId']
   featureId: FeatureId
@@ -238,6 +253,7 @@ export interface ModelingCommitSketchResult {
 export type ModelingCreateFeatureInput = Omit<CreateFeatureRequest, 'contractVersion' | 'documentId'>
 export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'>
 export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'>
+export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'>
 export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'>
 export type ModelingSetFeatureCursorInput = Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'>
 export interface ModelingCommitSketchCorrelation {
@@ -1112,6 +1128,7 @@ function normalizeDocumentPresentation(value: unknown): DocumentSnapshot['presen
   return {
     featureTree: normalizeFeatureTree(value.featureTree),
     objects: normalizeObjects(value.objects),
+    documentHistory: normalizeDocumentHistory(value.documentHistory),
     entities: normalizeEntities(value.entities),
   }
 }
@@ -1127,7 +1144,7 @@ function normalizeObjects(value: unknown): ObjectTreeNodeRecord[] {
       !isString(entry.id) ||
       !isString(entry.label) ||
       !isString(entry.description) ||
-      (entry.kind !== 'body' && entry.kind !== 'construction')
+      (entry.kind !== 'body' && entry.kind !== 'construction' && entry.kind !== 'sketch')
     ) {
       throw new Error('Invalid object tree record.')
     }
@@ -1140,6 +1157,49 @@ function normalizeObjects(value: unknown): ObjectTreeNodeRecord[] {
       target: assertDurableRef(entry.target),
       ownerBodyId: entry.ownerBodyId === null ? null : assertBodyId(entry.ownerBodyId),
       ownerFeatureId: entry.ownerFeatureId === null ? null : assertFeatureId(entry.ownerFeatureId),
+      ownerSketchId: entry.ownerSketchId === null ? null : assertSketchId(entry.ownerSketchId),
+    }
+  })
+}
+
+function normalizeDocumentHistory(value: unknown): DocumentHistoryItemRecord[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid document history payload.')
+  }
+
+  return value.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      !isString(entry.id) ||
+      !isString(entry.label) ||
+      !isString(entry.description) ||
+      (entry.kind !== 'sketch' && entry.kind !== 'feature')
+    ) {
+      throw new Error('Invalid document history item.')
+    }
+
+    if (entry.kind === 'sketch') {
+      const sketchId = assertSketchId(entry.sketchId)
+      return {
+        id: entry.id as DocumentHistoryItemRecord['id'],
+        label: entry.label,
+        description: entry.description,
+        kind: 'sketch',
+        target: { kind: 'sketch', sketchId },
+        sketchId,
+        featureId: null,
+      }
+    }
+
+    const featureId = assertFeatureId(entry.featureId)
+    return {
+      id: entry.id as DocumentHistoryItemRecord['id'],
+      label: entry.label,
+      description: entry.description,
+      kind: 'feature',
+      target: { kind: 'feature', featureId },
+      sketchId: null,
+      featureId,
     }
   })
 }
@@ -2283,17 +2343,24 @@ function normalizeFeatures(value: unknown): FeatureSnapshotRecord[] {
 function normalizeDocumentFeatureCursor(
   value: unknown,
   features: readonly FeatureSnapshotRecord[],
+  sketches: readonly SketchSnapshotRecord[] = [],
 ): DocumentFeatureCursor {
   if (!isRecord(value) || !isString(value.kind)) {
     throw new Error('Invalid document feature cursor payload.')
   }
 
   if (value.kind === 'empty') {
-    if (features.length > 0) {
-      throw new Error('Document feature cursor cannot be empty when features exist.')
+    return { kind: 'empty' }
+  }
+
+  if (value.kind === 'sketch' && isString(value.sketchId)) {
+    const sketchId = assertSketchId(value.sketchId)
+
+    if (!sketches.some((sketch) => sketch.sketchId === sketchId)) {
+      throw new Error(`Document feature cursor references missing sketch ${sketchId}.`)
     }
 
-    return { kind: 'empty' }
+    return { kind: 'sketch', sketchId }
   }
 
   if (value.kind === 'feature' && isString(value.featureId)) {
@@ -2460,6 +2527,7 @@ function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
     capabilities: document.capabilities,
     featureTree: presentation.featureTree,
     objects: presentation.objects,
+    documentHistory: presentation.documentHistory,
     features: document.features,
     cursor: document.cursor,
     sketches: document.sketches,
@@ -2556,6 +2624,23 @@ function mapDeleteFeatureResponse(
   return {
     revisionId: parsed.revisionId,
     deletedFeatureId: parsed.deletedFeatureId,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
+  }
+}
+
+function mapRenameBodyResponse(
+  response: RenameBodyResponse,
+  expectedDocumentId: DocumentId,
+): ModelingRenameBodyResult {
+  const parsed = renameBodyResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Rename body')
+  return {
+    revisionId: parsed.revisionId,
+    bodyId: parsed.bodyId,
     revisionState: parsed.revisionState,
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
@@ -2696,6 +2781,19 @@ function normalizeDeleteFeatureInput(
   input: ModelingDeleteFeatureInput,
   documentId: DocumentId,
 ): DeleteFeatureRequest {
+  assertMutationBase(input)
+
+  return {
+    ...input,
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  }
+}
+
+function normalizeRenameBodyInput(
+  input: ModelingRenameBodyInput,
+  documentId: DocumentId,
+): RenameBodyRequest {
   assertMutationBase(input)
 
   return {
@@ -2940,6 +3038,19 @@ async function replayHistoryEntry(input: {
         cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
       }
     }
+    case 'renameBody': {
+      const response = await input.adapter.renameBody({
+        ...input.entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      })
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      }
+    }
     case 'reorderFeature': {
       const response = await input.adapter.reorderFeature({
         ...input.entry.payload,
@@ -3143,6 +3254,16 @@ export function createModelingService(
       }
 
       return mapDeleteFeatureResponse(response, currentDocumentId)
+    },
+    async renameBody(input) {
+      await restorePromise
+      const request = normalizeRenameBodyInput(input, currentDocumentId)
+      const response = await adapter.renameBody(request)
+      if (isAcceptedMutation(response)) {
+        appendOperationHistoryEntry(createRenameBodyHistoryEntry(request))
+      }
+
+      return mapRenameBodyResponse(response, currentDocumentId)
     },
     async reorderFeature(input) {
       await restorePromise

@@ -1,8 +1,8 @@
-import { Layers3 } from 'lucide-react'
+import { Ban, History, Layers3, Pencil, PencilRuler, Trash2, Type } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Tooltip } from '@mantine/core'
 
-import type { DocumentFeatureCursor, DocumentSnapshot, FeatureSnapshotRecord } from '@/contracts/modeling/schema'
+import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
+import type { DocumentFeatureCursor, DocumentHistoryItemRecord, DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import {
   getPrimitiveRefKey,
@@ -15,17 +15,23 @@ import {
   getTimelineCursorIndex,
   TIMELINE_CURSOR_GLYPH,
 } from '@/components/layout/feature-timeline-bar.helpers'
+import { getDocumentHistoryCursorForIndex } from '@/domain/modeling/document-history'
+
+type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 
 interface FeatureTimelineBarProps {
   snapshot: DocumentSnapshot | null
   onSelectTarget: (target: PrimitiveRef) => void
   onReopenTarget: (target: PrimitiveRef) => void
   onCursorRequested?: (cursor: DocumentFeatureCursor) => void
+  onDeleteFeature: (item: FeatureHistoryItem) => void
+  onRenameItem: (item: DocumentHistoryItemRecord) => void
+  onSuppressFeature: (item: FeatureHistoryItem) => void
   visibleSelection: PrimitiveRef[]
 }
 
-function getFeatureDescription(feature: FeatureSnapshotRecord) {
-  return `${feature.definition.kind} feature`
+function getHistoryItemDescription(item: DocumentHistoryItemRecord) {
+  return item.description
 }
 
 export function FeatureTimelineBar({
@@ -33,31 +39,29 @@ export function FeatureTimelineBar({
   onSelectTarget,
   onReopenTarget,
   onCursorRequested,
+  onDeleteFeature,
+  onRenameItem,
+  onSuppressFeature,
   visibleSelection,
 }: FeatureTimelineBarProps) {
   const {
     state: { selection, selectionFilter, selectionCatalog },
   } = useEditorState()
-  const features = useMemo(() => snapshot?.document.features ?? [], [snapshot])
+  const historyItems = useMemo(() => snapshot?.presentation.documentHistory ?? [], [snapshot])
   const cursor = snapshot?.document.cursor ?? { kind: 'empty' as const }
-  const cursorIndex = getTimelineCursorIndex(features, cursor)
+  const cursorIndex = getTimelineCursorIndex(historyItems, cursor)
   const trackRef = useRef<HTMLDivElement | null>(null)
   const handleRef = useRef<HTMLButtonElement | null>(null)
   const anchorRefs = useRef<Array<HTMLDivElement | null>>([])
   const [dragCursorIndex, setDragCursorIndex] = useState<number | null>(null)
   const activeCursorIndex = dragCursorIndex ?? cursorIndex
   const anchorElements = useMemo(
-    () => Array.from({ length: features.length + 1 }, (_, index) => index),
-    [features.length],
+    () => Array.from({ length: historyItems.length + 1 }, (_, index) => index),
+    [historyItems.length],
   )
   const getPositionCursor = useCallback((index: number): DocumentFeatureCursor => {
-    if (index < 0) {
-      return { kind: 'empty' }
-    }
-
-    const feature = features[index]
-    return feature ? { kind: 'feature', featureId: feature.featureId } : { kind: 'empty' }
-  }, [features])
+    return getDocumentHistoryCursorForIndex(historyItems, index)
+  }, [historyItems])
 
   useEffect(() => {
     if (dragCursorIndex === null) {
@@ -128,7 +132,7 @@ export function FeatureTimelineBar({
     return () => {
       window.removeEventListener('resize', updateHandleLeft)
     }
-  }, [activeCursorIndex, features.length])
+  }, [activeCursorIndex, historyItems.length])
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault()
@@ -179,7 +183,7 @@ export function FeatureTimelineBar({
                 opacity: 0,
                 transform: 'translate(-50%, -50%)',
               }}
-              aria-label={getTimelineCursorAriaLabel(features, activeCursorIndex)}
+              aria-label={getTimelineCursorAriaLabel(historyItems, activeCursorIndex)}
               aria-current={dragCursorIndex === null ? 'step' : undefined}
               aria-grabbed={dragCursorIndex !== null}
               onPointerDown={handlePointerDown}
@@ -197,7 +201,7 @@ export function FeatureTimelineBar({
                 {TIMELINE_CURSOR_GLYPH}
               </span>
             </button>
-            {features.length === 0 ? (
+            {historyItems.length === 0 ? (
               <>
                 <div
                   ref={(element) => {
@@ -217,10 +221,10 @@ export function FeatureTimelineBar({
                 </span>
               </>
             ) : null}
-            {features.length > 0
+            {historyItems.length > 0
               ? anchorElements.map((anchorIndex) => {
-                  const feature = features[anchorIndex]
-                  const target = feature ? { kind: 'feature' as const, featureId: feature.featureId } : null
+                  const item = historyItems[anchorIndex]
+                  const target = item?.target ?? null
                   const targetKey = target ? getPrimitiveRefKey(target) : null
                   const isSelected =
                     targetKey !== null
@@ -230,7 +234,53 @@ export function FeatureTimelineBar({
                     target
                       ? selectionFilterAllowsTarget(selectionFilter, selection, target, selectionCatalog)
                       : false
-                  const isAfterCursor = feature ? anchorIndex > cursorIndex : false
+                  const isAfterCursor = item ? anchorIndex > cursorIndex : false
+                  const menuItems: WorkbenchContextMenuEntry[] = item ? [
+                    {
+                      kind: 'item',
+                      id: 'edit',
+                      label: 'Edit',
+                      icon: <Pencil className="h-3.5 w-3.5" />,
+                      onSelect: () => onReopenTarget(item.target),
+                    },
+                    {
+                      kind: 'item',
+                      id: 'rename',
+                      label: 'Rename',
+                      icon: <Type className="h-3.5 w-3.5" />,
+                      onSelect: () => onRenameItem(item),
+                    },
+                    ...(item.kind === 'feature' ? [
+                      {
+                        kind: 'item' as const,
+                        id: 'suppress',
+                        label: 'Suppress',
+                        icon: <Ban className="h-3.5 w-3.5" />,
+                        onSelect: () => onSuppressFeature(item),
+                      },
+                    ] : []),
+                    {
+                      kind: 'item',
+                      id: 'roll-cursor-here',
+                      label: 'Roll cursor here',
+                      icon: <History className="h-3.5 w-3.5" />,
+                      onSelect: () => onCursorRequested?.(getPositionCursor(anchorIndex)),
+                    },
+                    ...(item.kind === 'feature' ? [
+                      {
+                        kind: 'divider' as const,
+                        id: 'feature-destructive-divider',
+                      },
+                      {
+                        kind: 'item' as const,
+                        id: 'delete',
+                        label: 'Delete',
+                        icon: <Trash2 className="h-3.5 w-3.5" />,
+                        danger: true,
+                        onSelect: () => onDeleteFeature(item),
+                      },
+                    ] : []),
+                  ] : []
 
                   return (
                     <div key={`segment-${anchorIndex}`} className="flex h-10 items-center">
@@ -246,22 +296,8 @@ export function FeatureTimelineBar({
                           style={{ backgroundColor: 'var(--mantine-color-dark-4)' }}
                         />
                       </div>
-                      {feature ? (
-                        <Tooltip
-                          label={(
-                            <div className="max-w-56">
-                              <div className="font-medium">{feature.label}</div>
-                              <div style={{ color: 'var(--workbench-shell-text-muted)' }}>
-                                {getFeatureDescription(feature)}
-                              </div>
-                              {isAfterCursor ? (
-                                <div style={{ color: 'var(--workbench-shell-text-muted)' }}>
-                                  After current cursor
-                                </div>
-                              ) : null}
-                            </div>
-                          )}
-                        >
+                      {item ? (
+                        <WorkbenchContextMenu label={`${item.label} actions`} items={menuItems}>
                           <button
                             type="button"
                             onClick={() => {
@@ -284,13 +320,17 @@ export function FeatureTimelineBar({
                                 : 'transparent',
                               color: 'var(--workbench-shell-text)',
                             }}
-                            aria-label={`Select ${feature.label}. Double-click to reopen.`}
+                            aria-label={`Select ${item.label}. Double-click to reopen.`}
                             aria-disabled={!isAllowed}
-                            title="Double-click to reopen authoring in place"
+                            title={`${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
                           >
-                            <Layers3 className="h-4 w-4" />
+                            {item.kind === 'sketch' ? (
+                              <PencilRuler className="h-4 w-4" />
+                            ) : (
+                              <Layers3 className="h-4 w-4" />
+                            )}
                           </button>
-                        </Tooltip>
+                        </WorkbenchContextMenu>
                       ) : null}
                     </div>
                   )

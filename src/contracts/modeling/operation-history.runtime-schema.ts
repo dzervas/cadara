@@ -7,6 +7,7 @@ import type {
   PersistedCommitSketchPayload,
   PersistedCreateFeaturePayload,
   PersistedDeleteFeaturePayload,
+  PersistedRenameBodyPayload,
   PersistedReorderFeaturePayload,
   PersistedSetFeatureCursorPayload,
   PersistedUpdateFeaturePayload,
@@ -16,6 +17,7 @@ import { OPERATION_HISTORY_SCHEMA_VERSION, type OperationHistorySchemaVersion } 
 import {
   contractVersionSchema,
   documentIdSchema,
+  bodyIdSchema,
   featureIdSchema,
   literalVersionSchema,
   stringSchema,
@@ -207,22 +209,31 @@ const rawFeatureDefinitionSchema = z.unknown().superRefine((value, ctx) => {
 })
 
 const persistedCreateFeaturePayloadSchema = z.object({
+  featureLabel: stringSchema.optional(),
   definition: rawFeatureDefinitionSchema,
 }).transform((value) => ({
+  featureLabel: value.featureLabel,
   definition: featureDefinitionSchema.parse(value.definition),
 }) as PersistedCreateFeaturePayload)
 
 const persistedUpdateFeaturePayloadSchema = z.object({
   featureId: featureIdSchema,
+  featureLabel: stringSchema.optional(),
   definition: rawFeatureDefinitionSchema,
 }).transform((value) => ({
   featureId: value.featureId,
+  featureLabel: value.featureLabel,
   definition: featureDefinitionSchema.parse(value.definition),
 }) as PersistedUpdateFeaturePayload)
 
 const persistedDeleteFeaturePayloadSchema = z.object({
   featureId: featureIdSchema,
 }).transform((value) => value as PersistedDeleteFeaturePayload)
+
+const persistedRenameBodyPayloadSchema = z.object({
+  bodyId: bodyIdSchema,
+  bodyLabel: stringSchema,
+}).transform((value) => value as PersistedRenameBodyPayload)
 
 const persistedReorderFeaturePayloadSchema = z.object({
   featureId: featureIdSchema,
@@ -242,6 +253,7 @@ const operationHistoryEntrySchema = z.object({
     z.literal('createFeature'),
     z.literal('updateFeature'),
     z.literal('deleteFeature'),
+    z.literal('renameBody'),
     z.literal('reorderFeature'),
     z.literal('setFeatureCursor'),
   ]),
@@ -266,6 +278,8 @@ const operationHistoryEntrySchema = z.object({
         return persistedUpdateFeaturePayloadSchema
       case 'deleteFeature':
         return persistedDeleteFeaturePayloadSchema
+      case 'renameBody':
+        return persistedRenameBodyPayloadSchema
       case 'reorderFeature':
         return persistedReorderFeaturePayloadSchema
       case 'setFeatureCursor':
@@ -304,6 +318,8 @@ const operationHistoryEntrySchema = z.object({
       return { kind: value.kind, payload: persistedUpdateFeaturePayloadSchema.parse(value.payload) }
     case 'deleteFeature':
       return { kind: value.kind, payload: persistedDeleteFeaturePayloadSchema.parse(value.payload) }
+    case 'renameBody':
+      return { kind: value.kind, payload: persistedRenameBodyPayloadSchema.parse(value.payload) }
     case 'reorderFeature':
       return { kind: value.kind, payload: persistedReorderFeaturePayloadSchema.parse(value.payload) }
     case 'setFeatureCursor':

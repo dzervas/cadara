@@ -242,6 +242,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       },
       featureTree: [],
       objects: [],
+      documentHistory: [],
       features,
       cursor: { kind: 'empty' as const },
       sketches,
@@ -281,6 +282,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       presentation: {
         featureTree: [],
         objects: [],
+        documentHistory: [],
         entities: [],
       },
     }
@@ -366,6 +368,9 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         throw new Error('Not implemented for legacy commitSketch replay test.')
       },
       async deleteFeature() {
+        throw new Error('Not implemented for legacy commitSketch replay test.')
+      },
+      async renameBody() {
         throw new Error('Not implemented for legacy commitSketch replay test.')
       },
       async reorderFeature() {
@@ -532,6 +537,9 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         throw new Error('Not implemented for strict replay test.')
       },
       async deleteFeature() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async renameBody() {
         throw new Error('Not implemented for strict replay test.')
       },
       async reorderFeature() {

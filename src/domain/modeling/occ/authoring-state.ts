@@ -1,7 +1,7 @@
 import type { DurableRef } from '@/contracts/shared/references'
 import type { DocumentFeatureCursor, FeatureDefinition, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import type { ConstructionId, FeatureId } from '@/contracts/shared/ids'
+import type { BodyId, ConstructionId, FeatureId, SketchId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
   OCC_KERNEL_DOCUMENT_ID,
@@ -33,6 +33,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   baseBodies: readonly OccTrackedBody[]
   baseConstructions: OccFeatureExecutionContext['constructions']
   baseConstructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>
+  bodyLabels: ReadonlyMap<BodyId, string>
   features: readonly OccAuthoringFeatureRecord[]
   cursor: DocumentFeatureCursor
   entities: readonly SnapshotEntityRecord[]
@@ -40,9 +41,31 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   referenceState: OccReferenceState
 }
 
-function createTailCursor(features: readonly { featureId: FeatureId }[]): DocumentFeatureCursor {
+function createTailCursor(
+  features: readonly { featureId: FeatureId }[],
+  sketches: readonly { sketchId: SketchId }[],
+): DocumentFeatureCursor {
   const tail = features.at(-1)
-  return tail ? { kind: 'feature', featureId: tail.featureId } : { kind: 'empty' }
+  if (tail) {
+    return { kind: 'feature', featureId: tail.featureId }
+  }
+
+  const sketch = sketches.at(-1)
+  return sketch ? { kind: 'sketch', sketchId: sketch.sketchId } : { kind: 'empty' }
+}
+
+function applyBodyLabels(
+  bodies: readonly OccTrackedBody[],
+  bodyLabels: ReadonlyMap<BodyId, string>,
+): OccTrackedBody[] {
+  if (bodyLabels.size === 0) {
+    return [...bodies]
+  }
+
+  return bodies.map((body) => {
+    const label = bodyLabels.get(body.bodyId)
+    return label ? { ...body, label } : body
+  })
 }
 
 function createStandardConstructionState(
@@ -103,6 +126,7 @@ export function createOccAuthoringState(
   input: {
     sketches?: readonly SketchSnapshotRecord[]
     bodies?: readonly OccTrackedBody[]
+    bodyLabels?: ReadonlyMap<BodyId, string>
     features?: readonly OccAuthoringFeatureRecord[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
@@ -129,10 +153,11 @@ export function createOccAuthoringState(
     ...Array.from(input.constructionPlanes?.entries() ?? []),
   ])
   const baseConstructions = [...constructionById.values()]
-  const baseBodies = [...(input.bodies ?? [])]
+  const bodyLabels = new Map<BodyId, string>(input.bodyLabels ?? [])
+  const baseBodies = applyBodyLabels(input.bodies ?? [], bodyLabels)
   const features = [...(input.features ?? [])]
-  const cursor = input.cursor ?? createTailCursor(features)
   const sketches = input.sketches ?? []
+  const cursor = input.cursor ?? createTailCursor(features, sketches)
   const referenceState = createOccReferenceState({
     documentId,
     revisionId,
@@ -155,6 +180,7 @@ export function createOccAuthoringState(
     baseBodies,
     baseConstructions,
     baseConstructionPlanes: constructionPlanes,
+    bodyLabels,
     features,
     cursor,
     entities: [],
@@ -176,10 +202,11 @@ function applyFeatureResult(
       producedTargets: [...result.producedTargets],
     },
   ]
+  const bodies = applyBodyLabels(result.bodies, state.bodyLabels)
   const referenceState = createOccReferenceState({
     documentId: state.documentId,
     revisionId: state.revisionId,
-    bodies: result.bodies,
+    bodies,
     constructions: result.constructions,
     sketches: state.sketches,
     features,
@@ -189,7 +216,7 @@ function applyFeatureResult(
 
   return {
     ...state,
-    bodies: result.bodies,
+    bodies,
     constructions: result.constructions,
     constructionPlanes: result.constructionPlanes,
     features,
@@ -221,6 +248,7 @@ export function rebuildOccAuthoringState(
     modelingTolerance: state.modelingTolerance,
     sketches: state.sketches,
     bodies: state.baseBodies,
+    bodyLabels: state.bodyLabels,
     constructions: state.baseConstructions,
     constructionPlanes: state.baseConstructionPlanes,
     features: [],

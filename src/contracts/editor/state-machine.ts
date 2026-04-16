@@ -24,6 +24,7 @@ import {
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
   getSketchSessionPreviewLabel,
+  moveSketchHistoryCursor,
   patchSketchConstraintValue,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
@@ -31,6 +32,7 @@ import {
   updateSketchConstraintHover,
   updateSketchPointer,
   type SketchSessionState,
+  type SketchHistoryCursor,
 } from '@/domain/editor/sketch-session'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import {
@@ -292,6 +294,13 @@ export interface SketchActiveToolClearedEvent {
   type: 'sketch.activeToolCleared'
 }
 
+/** Moves the active sketch-local history cursor. */
+export interface SketchHistoryCursorRequestedEvent {
+  type: 'sketch.historyCursorRequested'
+  /** Cursor position requested by the sketch-local history view. */
+  cursor: SketchHistoryCursor
+}
+
 /** Deletes the currently selected committed sketch annotation, if any. */
 export interface SketchAnnotationDeleteRequestedEvent {
   type: 'sketch.annotationDeleteRequested'
@@ -355,6 +364,7 @@ export type EditorEvent =
   | SketchPointerReleasedEvent
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
+  | SketchHistoryCursorRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
   | FormFeaturePatchedEvent
   | FormReferencePickerActivatedEvent
@@ -1735,6 +1745,32 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
               toolId: 'sketch',
               phase: 'editing',
             },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+    case 'sketch.historyCursorRequested':
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = moveSketchHistoryCursor(state.session, event.cursor)
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
             preview: {
               kind: 'sketch',
               label: getSketchSessionPreviewLabel(session),

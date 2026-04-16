@@ -307,6 +307,9 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       async deleteFeature() {
         throw new Error('Not implemented in phase 6 snapshot test adapter.')
       },
+      async renameBody() {
+        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+      },
       async reorderFeature() {
         throw new Error('Not implemented in phase 6 snapshot test adapter.')
       },
@@ -516,8 +519,36 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testOccSnapshotSurfacesSketchNavigationAndHistory() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch } = createRectangleSketch('sketch_phase6_history' as SketchId, plane)
+    const state = createOccAuthoringState(oc, {
+      sketches: [sketch],
+    })
+    const snapshot = buildOccWorkspaceSnapshot(state)
+
+    assert(
+      snapshot.presentation.objects.some((item) =>
+        item.kind === 'sketch'
+        && item.target.kind === 'sketch'
+        && item.target.sketchId === sketch.sketchId,
+      ),
+      'OCC snapshot object navigation must include committed sketch rows.',
+    )
+    assert(
+      snapshot.presentation.documentHistory.some((item) =>
+        item.kind === 'sketch'
+        && item.target.kind === 'sketch'
+        && item.target.sketchId === sketch.sketchId,
+      ),
+      'OCC snapshot document history must include committed sketch items.',
+    )
+  }
+
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
+  await testOccSnapshotSurfacesSketchNavigationAndHistory()
 
   console.log('OCC phase 6 snapshot/export tests passed.')
 })

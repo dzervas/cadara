@@ -1455,6 +1455,32 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(features[1]?.definition.parameters.options?.distance === 2, 'Feature snapshot normalization should preserve transform distance options.')
   }
 
+  async function testMockSnapshotSurfacesSketchNavigationAndHistory() {
+    const adapter = new MockKernelAdapter()
+    const response = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const snapshot = response.snapshot
+
+    assert(
+      snapshot.presentation.objects.some((item) =>
+        item.kind === 'sketch'
+        && item.target.kind === 'sketch'
+        && item.target.sketchId === 'sketch_primary',
+      ),
+      'Mock snapshot object navigation must include committed sketch rows.',
+    )
+    assert(
+      snapshot.presentation.documentHistory.some((item) =>
+        item.kind === 'sketch'
+        && item.target.kind === 'sketch'
+        && item.target.sketchId === 'sketch_primary',
+      ),
+      'Mock snapshot document history must include committed sketch items.',
+    )
+  }
+
   await testExtrudePreviewDependsOnDefinition()
   await testProfileCollectionContractBoundaryRejectsInvalidPayloads()
   await testUnsupportedFeatureDefinitionsAreRejectedByMock()
@@ -1482,4 +1508,5 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   testResolvePickTargetUsesKernelPriority()
   testRenderValidatorRejectsInvalidGeometry()
   testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions()
+  await testMockSnapshotSurfacesSketchNavigationAndHistory()
 })

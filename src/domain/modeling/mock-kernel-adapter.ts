@@ -3,6 +3,7 @@ import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import type {
   ConstraintId,
+  BodyId,
   ConstructionId,
   FaceId,
   DimensionId,
@@ -19,6 +20,13 @@ import type {
   SnapshotEntityId,
 } from '@/contracts/shared/ids'
 import { getPrimitiveRefKey } from '@/domain/editor/schema'
+import {
+  createDocumentHistoryItems,
+  createTailDocumentCursor,
+  getAppliedFeatureIdsForDocumentCursor,
+  getFeatureInsertionIndexForDocumentCursor,
+  isValidDocumentHistoryCursor,
+} from '@/domain/modeling/document-history'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type {
@@ -29,12 +37,13 @@ import type {
   DeleteFeatureRequest,
   DeleteFeatureResponse,
   DocumentSnapshot,
-  DocumentFeatureCursor,
   EvaluatePreviewRequest,
   EvaluatePreviewResponse,
   FeatureDefinition,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
+  RenameBodyRequest,
+  RenameBodyResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   ResolveReferenceRequest,
@@ -67,38 +76,11 @@ const DOCUMENT_ID = 'doc_workspace' as const
 const SKETCH_ID = 'sketch_primary' as const
 const CONSTRUCTION_PICK_PRIORITY = 5
 
-function createTailCursor(features: readonly { featureId: FeatureId }[]): DocumentFeatureCursor {
-  const tail = features.at(-1)
-  return tail ? { kind: 'feature', featureId: tail.featureId } : { kind: 'empty' }
-}
-
-function isValidDocumentCursor(cursor: DocumentFeatureCursor, features: readonly { featureId: FeatureId }[]) {
-  return cursor.kind === 'empty'
-    ? features.length === 0
-    : features.some((feature) => feature.featureId === cursor.featureId)
-}
-
-function getCursorInsertionIndex(cursor: DocumentFeatureCursor, features: readonly { featureId: FeatureId }[]) {
-  if (cursor.kind === 'empty') {
-    return 0
-  }
-
-  const index = features.findIndex((feature) => feature.featureId === cursor.featureId)
-  return index < 0 ? features.length : index + 1
-}
-
-function getAppliedFeatureIds(cursor: DocumentFeatureCursor, features: readonly { featureId: FeatureId }[]) {
-  if (cursor.kind === 'empty') {
-    return new Set<FeatureId>()
-  }
-
-  const cursorIndex = features.findIndex((feature) => feature.featureId === cursor.featureId)
-  const appliedFeatures = cursorIndex < 0 ? features : features.slice(0, cursorIndex + 1)
-  return new Set(appliedFeatures.map((feature) => feature.featureId))
-}
-
 function applyCursorToMockSnapshot(snapshot: DocumentSnapshot) {
-  const appliedFeatureIds = getAppliedFeatureIds(snapshot.document.cursor, snapshot.document.features)
+  const appliedFeatureIds = getAppliedFeatureIdsForDocumentCursor(
+    snapshot.presentation.documentHistory,
+    snapshot.document.cursor,
+  )
 
   snapshot.document.render.records = snapshot.document.render.records.filter(
     (record) => record.ownerFeatureId === null || appliedFeatureIds.has(record.ownerFeatureId),
@@ -274,6 +256,18 @@ function createSketchTarget(sketchId: SketchId): DurableRef {
   return { kind: 'sketch', sketchId }
 }
 
+function isSketchRenameOnlyRequest(
+  request: CommitSketchRequest,
+  existing: DocumentSnapshot['document']['sketches'][number] | undefined,
+) {
+  if (!existing || !request.sketchId || existing.label === request.sketchLabel) {
+    return false
+  }
+
+  return JSON.stringify(existing.plane) === JSON.stringify(request.plane)
+    && JSON.stringify(existing.sketch.definition) === JSON.stringify(request.definition)
+}
+
 function getFeatureDefinitionLabel(definition: FeatureDefinition) {
   return definition.kind
 }
@@ -352,6 +346,25 @@ function createMissingFeatureAnchorDiagnostic(featureId: FeatureId) {
         reason: 'mock-missing-reorder-anchor',
         target: { kind: 'feature' as const, featureId },
         ownerFeatureId: featureId,
+        ownerSketchId: null,
+        sourceTarget: null,
+      },
+    },
+  }
+}
+
+function createMissingBodyDiagnostic(bodyId: BodyId) {
+  return {
+    code: 'mock-missing-body',
+    severity: 'error' as const,
+    message: `Body ${bodyId} does not resolve in the current revision.`,
+    target: { kind: 'body' as const, bodyId },
+    detail: {
+      kind: 'invalidReference' as const,
+      reference: {
+        reason: 'mock-missing-body',
+        target: { kind: 'body' as const, bodyId },
+        ownerFeatureId: null,
         ownerSketchId: null,
         sourceTarget: null,
       },
@@ -1768,6 +1781,17 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
         target: { kind: 'body', bodyId: 'body_part-1' },
         ownerBodyId: 'body_part-1',
         ownerFeatureId: 'feature_extrude-1',
+        ownerSketchId: null,
+      },
+      {
+        id: 'object_tree_node_sketch_1' as ObjectTreeNodeId,
+        label: 'Sketch 1',
+        description: 'Primary sketch on the XY plane',
+        kind: 'sketch',
+        target: { kind: 'sketch', sketchId: SKETCH_ID },
+        ownerBodyId: null,
+        ownerFeatureId: null,
+        ownerSketchId: SKETCH_ID,
       },
       {
         id: 'object_tree_node_plane_xy' as ObjectTreeNodeId,
@@ -1777,10 +1801,11 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
         target: { kind: 'construction', constructionId: 'construction_plane-xy' },
         ownerBodyId: null,
         ownerFeatureId: null,
+        ownerSketchId: null,
       },
     ],
     features,
-    cursor: createTailCursor(features),
+    cursor: { kind: 'empty' },
     sketches: [
       {
         ownerDocumentId: DOCUMENT_ID,
@@ -1925,10 +1950,20 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
       ],
     },
   }
+  document.cursor = createTailDocumentCursor(createDocumentHistoryItems({
+    featureTree: document.featureTree,
+    features: document.features,
+    sketches: document.sketches,
+  }))
 
   const presentation: DocumentSnapshot['presentation'] = {
     featureTree: document.featureTree,
     objects: document.objects,
+    documentHistory: createDocumentHistoryItems({
+      featureTree: document.featureTree,
+      features: document.features,
+      sketches: document.sketches,
+    }),
     entities,
   }
 
@@ -1943,6 +1978,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
     capabilities: document.capabilities,
     featureTree: presentation.featureTree,
     objects: presentation.objects,
+    documentHistory: presentation.documentHistory,
     features: document.features,
     cursor: document.cursor,
     sketches: document.sketches,
@@ -2106,6 +2142,31 @@ function rebuildFeatureTree(snapshot: DocumentSnapshot) {
     })),
   ]
   snapshot.featureTree = snapshot.presentation.featureTree
+  snapshot.presentation.documentHistory = createDocumentHistoryItems({
+    featureTree: snapshot.presentation.featureTree,
+    features: snapshot.document.features,
+    sketches: snapshot.document.sketches,
+  })
+  snapshot.documentHistory = snapshot.presentation.documentHistory
+}
+
+function rebuildObjectTree(snapshot: DocumentSnapshot) {
+  const nonSketchObjects = snapshot.presentation.objects.filter((item) => item.kind !== 'sketch')
+  snapshot.presentation.objects = [
+    ...nonSketchObjects,
+    ...snapshot.document.sketches.map((sketch, index) => ({
+      id: (index === 0 ? 'object_tree_node_sketch_1' : `object_tree_node_sketch_${index + 1}`) as ObjectTreeNodeId,
+      label: sketch.label,
+      description: `Sketch on ${(sketch.planeKey ?? 'xy').toUpperCase()} plane`,
+      kind: 'sketch' as const,
+      target: { kind: 'sketch' as const, sketchId: sketch.sketchId },
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      ownerSketchId: sketch.sketchId,
+    })),
+  ]
+  snapshot.document.objects = snapshot.presentation.objects
+  snapshot.objects = snapshot.presentation.objects
 }
 
 function allocateFeatureId(snapshot: DocumentSnapshot, kind: FeatureDefinition['kind']): FeatureId {
@@ -2219,6 +2280,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       const featureIndex = mutableSnapshot.document.features.filter((feature) => feature.definition.kind === request.definition.kind).length + 1
       const changedTargets = getFeatureDefinitionChangedTargets(request.definition)
 
+      const featureLabel = request.featureLabel ?? `${request.definition.kind[0]!.toUpperCase()}${request.definition.kind.slice(1)} ${featureIndex}`
       const nextFeature = {
         ownerDocumentId: DOCUMENT_ID,
         ownerRevisionId: nextRevisionId,
@@ -2226,12 +2288,15 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         ownerSketchId: null,
         ownerBodyId: null,
         featureId,
-        label: `${request.definition.kind[0]!.toUpperCase()}${request.definition.kind.slice(1)} ${featureIndex}`,
+        label: featureLabel,
         definition: request.definition,
         producedTargets: changedTargets,
       }
       mutableSnapshot.document.features.splice(
-        getCursorInsertionIndex(mutableSnapshot.document.cursor, mutableSnapshot.document.features),
+        getFeatureInsertionIndexForDocumentCursor(
+          mutableSnapshot.presentation.documentHistory,
+          mutableSnapshot.document.cursor,
+        ),
         0,
         nextFeature,
       )
@@ -2243,7 +2308,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         ownerSketchId: null,
         ownerBodyId: null,
         id: `snapshot_entity_${featureId}` as SnapshotEntityId,
-        label: `${request.definition.kind[0]!.toUpperCase()}${request.definition.kind.slice(1)} ${featureIndex}`,
+        label: featureLabel,
         target: { kind: 'feature', featureId },
         relatedTargets: changedTargets,
         consumedByFeatureIds: [],
@@ -2251,6 +2316,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
       updateFeatureEntityRelationship(mutableSnapshot, featureId, changedTargets)
       rebuildFeatureTree(mutableSnapshot)
+      rebuildObjectTree(mutableSnapshot)
 
       const diagnostics = [
         {
@@ -2312,6 +2378,57 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         changedTargets: [],
         diagnostics,
       }
+    }
+
+    const existingSketch = snapshot.document.sketches.find((entry) => entry.sketchId === request.sketchId)
+    if (isSketchRenameOnlyRequest(request, existingSketch)) {
+      return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+        const mutableSketch = mutableSnapshot.document.sketches.find((entry) => entry.sketchId === request.sketchId)!
+        mutableSketch.label = request.sketchLabel
+        mutableSketch.ownerRevisionId = nextRevisionId
+        mutableSketch.sketch = {
+          ...mutableSketch.sketch,
+          label: request.sketchLabel,
+          ownerRevisionId: nextRevisionId,
+        }
+
+        for (const entityRecord of mutableSnapshot.presentation.entities) {
+          if (entityRecord.target.kind === 'sketch' && entityRecord.target.sketchId === request.sketchId) {
+            entityRecord.label = request.sketchLabel
+          }
+        }
+
+        rebuildFeatureTree(mutableSnapshot)
+        rebuildObjectTree(mutableSnapshot)
+
+        const diagnostics = [
+          {
+            code: 'mock-rename-sketch',
+            severity: 'info' as const,
+            message: 'Mock kernel renamed the sketch without rebuilding unchanged geometry.',
+            target: createSketchTarget(request.sketchId!),
+            detail: null,
+          },
+        ]
+
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: request.documentId,
+          revisionId: nextRevisionId,
+          sketchId: request.sketchId!,
+          revisionState: {
+            kind: 'accepted' as const,
+            baseRevisionId: request.baseRevisionId,
+          },
+          rebuildResult: createRebuildResult({
+            kind: 'rebuilt',
+            revisionId: nextRevisionId,
+            diagnostics,
+          }),
+          changedTargets: [createSketchTarget(request.sketchId!)],
+          diagnostics,
+        }
+      })
     }
 
     const projection = await this.solverAdapter.projectExternalReferences({
@@ -2487,6 +2604,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       mutableSnapshot.entities = mutableSnapshot.presentation.entities
 
       rebuildFeatureTree(mutableSnapshot)
+      rebuildObjectTree(mutableSnapshot)
 
       const diagnostics = [
         ...commitDiagnostics,
@@ -2594,6 +2712,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       const mutableFeature = mutableSnapshot.document.features.find((feature) => feature.featureId === request.featureId)!
       mutableFeature.definition = request.definition
+      mutableFeature.label = request.featureLabel ?? mutableFeature.label
       mutableFeature.ownerRevisionId = nextRevisionId
       mutableFeature.producedTargets = getFeatureDefinitionChangedTargets(request.definition)
 
@@ -2601,6 +2720,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         (entry) => entry.target.kind === 'feature' && entry.target.featureId === request.featureId,
       )
       if (featureEntity) {
+        featureEntity.label = mutableFeature.label
         featureEntity.relatedTargets = mutableFeature.producedTargets
       }
 
@@ -2687,8 +2807,9 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       mutableSnapshot.document.features = mutableSnapshot.document.features.filter((feature) => feature.featureId !== request.featureId)
-      if (!isValidDocumentCursor(mutableSnapshot.document.cursor, mutableSnapshot.document.features)) {
-        mutableSnapshot.document.cursor = createTailCursor(mutableSnapshot.document.features)
+      rebuildFeatureTree(mutableSnapshot)
+      if (!isValidDocumentHistoryCursor(mutableSnapshot.presentation.documentHistory, mutableSnapshot.document.cursor)) {
+        mutableSnapshot.document.cursor = createTailDocumentCursor(mutableSnapshot.presentation.documentHistory)
         mutableSnapshot.cursor = mutableSnapshot.document.cursor
       }
       mutableSnapshot.presentation.entities = mutableSnapshot.presentation.entities.filter(
@@ -2698,8 +2819,6 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       for (const entityRecord of mutableSnapshot.presentation.entities) {
         entityRecord.consumedByFeatureIds = entityRecord.consumedByFeatureIds.filter((featureId) => featureId !== request.featureId)
       }
-      rebuildFeatureTree(mutableSnapshot)
-
       const diagnostics: DeleteFeatureResponse['diagnostics'] = [
         {
           code: 'mock-delete-feature',
@@ -2725,6 +2844,109 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           diagnostics,
         }),
         changedTargets: [{ kind: 'feature', featureId: request.featureId }],
+        diagnostics,
+      }
+    })
+  }
+
+  async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {
+    assertSupportedModelingRequest(request)
+    const snapshot = await this.getSnapshot()
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [createRevisionConflictDiagnostic(request.baseRevisionId, this.currentRevisionId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        bodyId: request.bodyId,
+        revisionState: {
+          kind: 'conflict',
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'revisionConflict',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    if (!snapshot.document.bodies.some((body) => body.bodyId === request.bodyId)) {
+      const diagnostics = [createMissingBodyDiagnostic(request.bodyId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        bodyId: request.bodyId,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'mock-missing-body',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      const bodyTarget = { kind: 'body' as const, bodyId: request.bodyId }
+      for (const body of mutableSnapshot.document.bodies) {
+        if (body.bodyId === request.bodyId) {
+          body.label = request.bodyLabel
+          body.ownerRevisionId = nextRevisionId
+        }
+      }
+      for (const item of mutableSnapshot.presentation.objects) {
+        if (item.target.kind === 'body' && item.target.bodyId === request.bodyId) {
+          item.label = request.bodyLabel
+        }
+      }
+      for (const item of mutableSnapshot.document.objects) {
+        if (item.target.kind === 'body' && item.target.bodyId === request.bodyId) {
+          item.label = request.bodyLabel
+        }
+      }
+      for (const entityRecord of mutableSnapshot.presentation.entities) {
+        if (entityRecord.target.kind === 'body' && entityRecord.target.bodyId === request.bodyId) {
+          entityRecord.label = request.bodyLabel
+        }
+      }
+      mutableSnapshot.document.entities = mutableSnapshot.presentation.entities
+      mutableSnapshot.entities = mutableSnapshot.presentation.entities
+
+      const diagnostics: RenameBodyResponse['diagnostics'] = [
+        {
+          code: 'mock-rename-body',
+          severity: 'info',
+          message: 'Mock kernel committed the body rename into the current revision.',
+          target: bodyTarget,
+          detail: null,
+        },
+      ]
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        bodyId: request.bodyId,
+        revisionState: {
+          kind: 'accepted',
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'rebuilt',
+          revisionId: nextRevisionId,
+          diagnostics,
+        }),
+        changedTargets: [bodyTarget],
         diagnostics,
       }
     })
@@ -2868,15 +3090,16 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
-    if (!isValidDocumentCursor(request.cursor, snapshot.document.features)) {
-      const featureId = request.cursor.kind === 'feature' ? request.cursor.featureId : null
-      const diagnostics = featureId
-        ? [createMissingFeatureDiagnostic(featureId)]
+    if (!isValidDocumentHistoryCursor(snapshot.presentation.documentHistory, request.cursor)) {
+      const diagnostics = request.cursor.kind === 'feature'
+        ? [createMissingFeatureDiagnostic(request.cursor.featureId)]
         : [{
             code: 'mock-invalid-document-cursor',
             severity: 'error' as const,
-            message: 'The empty document cursor is only valid when the document has no features.',
-            target: null,
+            message: 'The requested document cursor does not resolve to an authored history item.',
+            target: request.cursor.kind === 'sketch'
+              ? { kind: 'sketch' as const, sketchId: request.cursor.sketchId }
+              : null,
             detail: null,
           }]
 
@@ -2903,9 +3126,12 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       mutableSnapshot.document.cursor = request.cursor
       mutableSnapshot.cursor = mutableSnapshot.document.cursor
-      const changedTargets = request.cursor.kind === 'feature'
-        ? [{ kind: 'feature' as const, featureId: request.cursor.featureId }]
-        : []
+      const changedTargets =
+        request.cursor.kind === 'feature'
+          ? [{ kind: 'feature' as const, featureId: request.cursor.featureId }]
+          : request.cursor.kind === 'sketch'
+            ? [{ kind: 'sketch' as const, sketchId: request.cursor.sketchId }]
+            : []
       const diagnostics: SetFeatureCursorResponse['diagnostics'] = [
         {
           code: 'mock-set-feature-cursor',

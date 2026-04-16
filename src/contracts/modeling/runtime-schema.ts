@@ -15,6 +15,7 @@ import type {
   MutationRevisionState,
   RebuildResult,
   ReferenceRecord,
+  RenameBodyResponse,
   ResolvedReferenceRecord,
   ResolveReferenceResponse,
   ReorderFeatureResponse,
@@ -71,6 +72,10 @@ export const snapshotSchemaVersionSchema = literalVersionSchema<SnapshotSchemaVe
 const documentFeatureCursorSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('empty'),
+  }),
+  z.object({
+    kind: z.literal('sketch'),
+    sketchId: sketchIdSchema,
   }),
   z.object({
     kind: z.literal('feature'),
@@ -320,6 +325,7 @@ export const workspaceSnapshotSchema = z.object({
   presentation: z.object({
     featureTree: z.array(z.unknown()),
     objects: z.array(z.unknown()),
+    documentHistory: z.array(z.unknown()),
     entities: z.array(z.unknown()),
   }),
 }).transform((value) => {
@@ -337,6 +343,7 @@ export const workspaceSnapshotSchema = z.object({
     capabilities: document.capabilities,
     featureTree: presentation.featureTree,
     objects: presentation.objects,
+    documentHistory: presentation.documentHistory,
     features: document.features,
     cursor: document.cursor,
     sketches: document.sketches,
@@ -375,6 +382,10 @@ export const updateFeatureResponseSchema = modelingOperationResponseBaseSchema.e
 export const deleteFeatureResponseSchema = modelingOperationResponseBaseSchema.extend({
   deletedFeatureId: featureIdSchema,
 }).transform((value) => value as DeleteFeatureResponse)
+
+export const renameBodyResponseSchema = modelingOperationResponseBaseSchema.extend({
+  bodyId: bodyIdSchema,
+}).transform((value) => value as RenameBodyResponse)
 
 export const reorderFeatureResponseSchema = modelingOperationResponseBaseSchema.extend({
   featureId: featureIdSchema,
