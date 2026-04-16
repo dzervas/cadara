@@ -7,6 +7,7 @@ import type {
   ConstructionId,
   FaceId,
   DimensionId,
+  DocumentVariableId,
   FeatureId,
   FeatureTreeNodeId,
   ObjectTreeNodeId,
@@ -32,6 +33,8 @@ import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runt
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
+  AddDocumentVariableRequest,
+  AddDocumentVariableResponse,
   CreateFeatureRequest,
   CreateFeatureResponse,
   DeleteFeatureRequest,
@@ -53,6 +56,8 @@ import type {
   SnapshotEntityRecord,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
+  UpdateDocumentVariableRequest,
+  UpdateDocumentVariableResponse,
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
@@ -1878,6 +1883,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
         target: { kind: 'construction', constructionId: 'construction_plane-xz' },
       },
     ],
+    variables: [],
     entities,
     references: [
       {
@@ -1984,6 +1990,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
     sketches: document.sketches,
     bodies: document.bodies,
     constructions: document.constructions,
+    variables: document.variables,
     entities: presentation.entities,
     references: document.references,
     diagnostics: document.diagnostics,
@@ -2186,6 +2193,20 @@ function allocateFeatureId(snapshot: DocumentSnapshot, kind: FeatureDefinition['
   }
 
   return `${prefix}${nextOrdinal}` as FeatureId
+}
+
+function allocateDocumentVariableId(snapshot: DocumentSnapshot): DocumentVariableId {
+  let nextOrdinal = 1
+
+  for (const variable of snapshot.document.variables) {
+    const ordinalText = variable.variableId.slice('variable_'.length)
+    const ordinal = Number.parseInt(ordinalText, 10)
+    if (Number.isFinite(ordinal)) {
+      nextOrdinal = Math.max(nextOrdinal, ordinal + 1)
+    }
+  }
+
+  return `variable_${nextOrdinal}` as DocumentVariableId
 }
 
 export class MockKernelAdapter implements ModelingKernelAdapter {
@@ -3157,6 +3178,166 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           diagnostics,
         }),
         changedTargets,
+        diagnostics,
+      }
+    })
+  }
+
+  async addDocumentVariable(request: AddDocumentVariableRequest): Promise<AddDocumentVariableResponse> {
+    assertSupportedModelingRequest(request)
+    const snapshot = await this.getSnapshot()
+    const variableId = request.variableId ?? allocateDocumentVariableId(snapshot)
+
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [createRevisionConflictDiagnostic(request.baseRevisionId, this.currentRevisionId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        variableId,
+        revisionState: {
+          kind: 'conflict',
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'revisionConflict',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      mutableSnapshot.document.variables.push({
+        variableId,
+        name: request.name,
+        valueText: request.valueText,
+      })
+      mutableSnapshot.variables = mutableSnapshot.document.variables
+
+      const diagnostics: AddDocumentVariableResponse['diagnostics'] = [
+        {
+          code: 'mock-add-document-variable',
+          severity: 'info',
+          message: 'Mock kernel committed the document variable create request.',
+          target: null,
+          detail: null,
+        },
+      ]
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        variableId,
+        revisionState: {
+          kind: 'accepted',
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'rebuilt',
+          revisionId: nextRevisionId,
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    })
+  }
+
+  async updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse> {
+    assertSupportedModelingRequest(request)
+    const snapshot = await this.getSnapshot()
+
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [createRevisionConflictDiagnostic(request.baseRevisionId, this.currentRevisionId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        variableId: request.variableId,
+        revisionState: {
+          kind: 'conflict',
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'revisionConflict',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    if (!snapshot.document.variables.some((variable) => variable.variableId === request.variableId)) {
+      const diagnostics: UpdateDocumentVariableResponse['diagnostics'] = [
+        {
+          code: 'mock-missing-document-variable',
+          severity: 'error',
+          message: `Document variable ${request.variableId} does not resolve in the current revision.`,
+          target: null,
+          detail: null,
+        },
+      ]
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        variableId: request.variableId,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'mock-missing-document-variable',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      mutableSnapshot.document.variables = mutableSnapshot.document.variables.map((variable) =>
+        variable.variableId === request.variableId
+          ? { variableId: request.variableId, name: request.name, valueText: request.valueText }
+          : variable,
+      )
+      mutableSnapshot.variables = mutableSnapshot.document.variables
+
+      const diagnostics: UpdateDocumentVariableResponse['diagnostics'] = [
+        {
+          code: 'mock-update-document-variable',
+          severity: 'info',
+          message: 'Mock kernel committed the document variable update request.',
+          target: null,
+          detail: null,
+        },
+      ]
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        variableId: request.variableId,
+        revisionState: {
+          kind: 'accepted',
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'rebuilt',
+          revisionId: nextRevisionId,
+          diagnostics,
+        }),
+        changedTargets: [],
         diagnostics,
       }
     })

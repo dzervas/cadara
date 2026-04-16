@@ -6,6 +6,7 @@ import type {
   ConstraintId,
   DimensionId,
   DocumentId,
+  DocumentVariableId,
   EdgeId,
   FaceId,
   FeatureId,
@@ -55,6 +56,7 @@ export const contractVersionSchema = literalVersionSchema<ContractVersion>(
 )
 
 export const documentIdSchema = prefixedIdSchema<DocumentId>('doc_', 'Document ID')
+export const documentVariableIdSchema = prefixedIdSchema<DocumentVariableId>('variable_', 'Document variable ID')
 export const revisionIdSchema = prefixedIdSchema<RevisionId>('rev_', 'Revision ID')
 export const featureIdSchema = prefixedIdSchema<FeatureId>('feature_', 'Feature ID')
 export const sketchIdSchema = prefixedIdSchema<SketchId>('sketch_', 'Sketch ID')

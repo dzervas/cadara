@@ -130,6 +130,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
           target: { kind: 'construction', constructionId: 'construction_plane-xy' as ConstructionId },
         },
       ],
+      variables: [],
       entities: [
         {
           ownerDocumentId: 'doc_workspace',
@@ -183,6 +184,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
             target: { kind: 'construction', constructionId: 'construction_plane-xy' as ConstructionId },
           },
         ],
+        variables: [],
         entities: [
           {
             ownerDocumentId: 'doc_workspace',

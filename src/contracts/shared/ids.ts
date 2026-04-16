@@ -5,6 +5,11 @@
 export type DocumentId = `doc_${string}`
 
 /**
+ * Durable document variable identifier owned by the modeling backend.
+ */
+export type DocumentVariableId = `variable_${string}`
+
+/**
  * Durable revision identifier owned by the modeling backend.
  * Changes whenever document state changes.
  */

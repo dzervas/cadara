@@ -1,10 +1,12 @@
 import type {
   CommitSketchRequest,
+  AddDocumentVariableRequest,
   CreateFeatureRequest,
   DeleteFeatureRequest,
   RenameBodyRequest,
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
+  UpdateDocumentVariableRequest,
   UpdateFeatureRequest,
 } from '@/contracts/modeling/schema'
 import type { DocumentId, SketchId } from '@/contracts/shared/ids'
@@ -44,6 +46,14 @@ export type PersistedSetFeatureCursorPayload = Omit<
   SetFeatureCursorRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
 >
+export type PersistedAddDocumentVariablePayload = Omit<
+  AddDocumentVariableRequest,
+  'contractVersion' | 'documentId' | 'baseRevisionId'
+>
+export type PersistedUpdateDocumentVariablePayload = Omit<
+  UpdateDocumentVariableRequest,
+  'contractVersion' | 'documentId' | 'baseRevisionId'
+>
 
 export type ModelingOperationHistoryEntry =
   | { kind: 'commitSketch'; payload: PersistedCommitSketchPayload }
@@ -53,6 +63,8 @@ export type ModelingOperationHistoryEntry =
   | { kind: 'renameBody'; payload: PersistedRenameBodyPayload }
   | { kind: 'reorderFeature'; payload: PersistedReorderFeaturePayload }
   | { kind: 'setFeatureCursor'; payload: PersistedSetFeatureCursorPayload }
+  | { kind: 'addDocumentVariable'; payload: PersistedAddDocumentVariablePayload }
+  | { kind: 'updateDocumentVariable'; payload: PersistedUpdateDocumentVariablePayload }
 
 export interface ModelingOperationHistoryPayload {
   contractVersion: ContractVersion
@@ -181,6 +193,33 @@ export function createSetFeatureCursorHistoryEntry(
     kind: 'setFeatureCursor',
     payload: {
       cursor: payload.cursor,
+    },
+  }
+}
+
+export function createAddDocumentVariableHistoryEntry(
+  payload: AddDocumentVariableRequest,
+  variableId: NonNullable<AddDocumentVariableRequest['variableId']>,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: 'addDocumentVariable',
+    payload: {
+      variableId,
+      name: payload.name,
+      valueText: payload.valueText,
+    },
+  }
+}
+
+export function createUpdateDocumentVariableHistoryEntry(
+  payload: UpdateDocumentVariableRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: 'updateDocumentVariable',
+    payload: {
+      variableId: payload.variableId,
+      name: payload.name,
+      valueText: payload.valueText,
     },
   }
 }

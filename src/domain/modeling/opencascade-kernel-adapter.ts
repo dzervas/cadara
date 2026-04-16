@@ -6,6 +6,8 @@ import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
+  AddDocumentVariableRequest,
+  AddDocumentVariableResponse,
   CreateFeatureRequest,
   CreateFeatureResponse,
   DeleteFeatureRequest,
@@ -26,6 +28,8 @@ import type {
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
   SketchSnapshotRecord,
+  UpdateDocumentVariableRequest,
+  UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from '@/contracts/modeling/schema'
@@ -33,6 +37,7 @@ import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
   DocumentId,
+  DocumentVariableId,
   FeatureId,
   RegionId,
   RevisionId,
@@ -408,6 +413,19 @@ function allocateFeatureId(
   return `feature_${kind}-${maxOrdinal + 1}` as FeatureId
 }
 
+function allocateDocumentVariableId(state: OccAuthoringState) {
+  let maxOrdinal = 0
+
+  for (const variable of state.variables) {
+    const match = /^variable_(\d+)$/.exec(variable.variableId)
+    if (match) {
+      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+    }
+  }
+
+  return `variable_${maxOrdinal + 1}` as DocumentVariableId
+}
+
 function featureOrdinalForLabel(
   state: OccAuthoringState,
   kind: FeatureDefinition['kind'],
@@ -722,6 +740,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: RevisionId
       sketches?: readonly SketchSnapshotRecord[]
       bodyLabels?: ReadonlyMap<BodyId, string>
+      variables?: OccAuthoringState['variables']
       features?: readonly OccAuthoringFeatureRecord[]
       cursor?: OccAuthoringState['cursor']
     },
@@ -731,6 +750,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
+      variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       constructions: runtimeState.authoringState.baseConstructions,
@@ -947,6 +967,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: RevisionId
       sketches?: readonly SketchSnapshotRecord[]
       bodyLabels?: ReadonlyMap<BodyId, string>
+      variables?: OccAuthoringState['variables']
       features?: readonly OccAuthoringFeatureRecord[]
       cursor?: OccAuthoringState['cursor']
     },
@@ -958,6 +979,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
+      variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       constructions: runtimeState.authoringState.baseConstructions,
@@ -1735,6 +1757,138 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         : request.cursor.kind === 'sketch'
           ? [{ kind: 'sketch' as const, sketchId: request.cursor.sketchId }]
         : [],
+      ...accepted,
+    })
+  }
+
+  async addDocumentVariable(request: AddDocumentVariableRequest): Promise<AddDocumentVariableResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+    const variableId = request.variableId ?? allocateDocumentVariableId(runtimeState.authoringState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(request.baseRevisionId, currentRevisionId)
+      return this.withOperationEnvelope({
+        variableId,
+        changedTargets: [],
+        ...conflict,
+      })
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1
+    const nextRevisionId = createRevisionId(nextSequence)
+    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+      revisionId: nextRevisionId,
+      variables: [
+        ...runtimeState.authoringState.variables,
+        {
+          variableId,
+          name: request.name,
+          valueText: request.valueText,
+        },
+      ],
+    })
+
+    if (!nextAuthoringState.ok) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        nextAuthoringState.diagnostics,
+        nextAuthoringState.reasonCode,
+      )
+
+      return this.withOperationEnvelope({
+        variableId,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState.state,
+      revisionSequence: nextSequence,
+    })
+
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+
+    return this.withOperationEnvelope({
+      variableId,
+      changedTargets: [],
+      ...accepted,
+    })
+  }
+
+  async updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(request.baseRevisionId, currentRevisionId)
+      return this.withOperationEnvelope({
+        variableId: request.variableId,
+        changedTargets: [],
+        ...conflict,
+      })
+    }
+
+    if (!runtimeState.authoringState.variables.some((variable) => variable.variableId === request.variableId)) {
+      const diagnostics = [
+        createDiagnostic(
+          'occ-missing-document-variable',
+          'error',
+          `Document variable ${request.variableId} does not resolve in the current OCC authoring state.`,
+          null,
+        ),
+      ]
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        diagnostics,
+        'occ-missing-document-variable',
+      )
+
+      return this.withOperationEnvelope({
+        variableId: request.variableId,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1
+    const nextRevisionId = createRevisionId(nextSequence)
+    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+      revisionId: nextRevisionId,
+      variables: runtimeState.authoringState.variables.map((variable) =>
+        variable.variableId === request.variableId
+          ? { variableId: request.variableId, name: request.name, valueText: request.valueText }
+          : variable,
+      ),
+    })
+
+    if (!nextAuthoringState.ok) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        nextAuthoringState.diagnostics,
+        nextAuthoringState.reasonCode,
+      )
+
+      return this.withOperationEnvelope({
+        variableId: request.variableId,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState.state,
+      revisionSequence: nextSequence,
+    })
+
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+
+    return this.withOperationEnvelope({
+      variableId: request.variableId,
+      changedTargets: [],
       ...accepted,
     })
   }

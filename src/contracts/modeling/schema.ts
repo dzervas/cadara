@@ -3,6 +3,7 @@ import type {
   ConstructionId,
   DocumentHistoryItemId,
   DocumentId,
+  DocumentVariableId,
   EdgeId,
   FaceId,
   FeatureId,
@@ -113,6 +114,20 @@ export interface ModelingDocumentSettings {
   modelingTolerance: number
   /** Angular modeling tolerance in radians. */
   angularToleranceRadians: number
+}
+
+/**
+ * Durable document variable authored by the user.
+ * Values are raw text so future expression support can evaluate them without
+ * losing the original input.
+ */
+export interface DocumentVariableRecord {
+  /** Stable durable variable identity. */
+  variableId: DocumentVariableId
+  /** User-authored variable name text. */
+  name: string
+  /** User-authored raw value text. */
+  valueText: string
 }
 
 /**
@@ -798,6 +813,8 @@ export interface KernelDocumentSnapshot {
   bodies: BodySnapshotRecord[]
   /** Durable construction/reference-geometry records owned by this revision. */
   constructions: ConstructionSnapshotRecord[]
+  /** Ordered document-level variables owned by this revision. */
+  variables: DocumentVariableRecord[]
   /** Presentational entity rows for selection and inspection surfaces. */
   entities: SnapshotEntityRecord[]
   /** Named durable references available at this revision. */
@@ -861,6 +878,8 @@ export interface WorkspaceSnapshot {
   bodies: KernelDocumentSnapshot['bodies']
   /** Deprecated passthrough for `document.constructions`. */
   constructions: KernelDocumentSnapshot['constructions']
+  /** Deprecated passthrough for `document.variables`. */
+  variables: KernelDocumentSnapshot['variables']
   /** Deprecated passthrough for `presentation.entities`. */
   entities: DocumentPresentationSnapshot['entities']
   /** Deprecated passthrough for `document.references`. */
@@ -1102,6 +1121,46 @@ export interface RenameBodyRequest extends DocumentMutationRequest {
 export interface RenameBodyResponse extends ModelingOperationResult {
   /** Durable body identity that was targeted by the rename. */
   bodyId: BodyId
+}
+
+/**
+ * Variable creation request.
+ */
+export interface AddDocumentVariableRequest extends DocumentMutationRequest {
+  /** Optional durable variable identity. Kernels allocate one when omitted. */
+  variableId?: DocumentVariableId
+  /** User-authored variable name text. */
+  name: string
+  /** User-authored raw value text. */
+  valueText: string
+}
+
+/**
+ * Variable creation response.
+ */
+export interface AddDocumentVariableResponse extends ModelingOperationResult {
+  /** Durable variable identity allocated or retained for the request. */
+  variableId: DocumentVariableId
+}
+
+/**
+ * Variable update request.
+ */
+export interface UpdateDocumentVariableRequest extends DocumentMutationRequest {
+  /** Durable variable identity to update in place. */
+  variableId: DocumentVariableId
+  /** User-authored variable name text. */
+  name: string
+  /** User-authored raw value text. */
+  valueText: string
+}
+
+/**
+ * Variable update response.
+ */
+export interface UpdateDocumentVariableResponse extends ModelingOperationResult {
+  /** Durable variable identity that was targeted by the update. */
+  variableId: DocumentVariableId
 }
 
 /**

@@ -248,6 +248,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       sketches,
       bodies: [],
       constructions: [],
+      variables: [],
       entities: [],
       references: [],
       diagnostics: [],
@@ -271,6 +272,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       sketches,
       bodies: [],
       constructions: [],
+      variables: [],
       entities: [],
       references: [],
       diagnostics: [],
@@ -377,6 +379,12 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         throw new Error('Not implemented for legacy commitSketch replay test.')
       },
       async setFeatureCursor() {
+        throw new Error('Not implemented for legacy commitSketch replay test.')
+      },
+      async addDocumentVariable() {
+        throw new Error('Not implemented for legacy commitSketch replay test.')
+      },
+      async updateDocumentVariable() {
         throw new Error('Not implemented for legacy commitSketch replay test.')
       },
       async evaluatePreview() {
@@ -546,6 +554,12 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         throw new Error('Not implemented for strict replay test.')
       },
       async setFeatureCursor() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async addDocumentVariable() {
+        throw new Error('Not implemented for strict replay test.')
+      },
+      async updateDocumentVariable() {
         throw new Error('Not implemented for strict replay test.')
       },
       async evaluatePreview() {

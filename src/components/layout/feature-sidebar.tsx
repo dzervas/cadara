@@ -1,5 +1,6 @@
-import { ActionIcon, Paper, Text } from '@mantine/core'
-import { Box, Component, Download, Eye, EyeOff, Info, MousePointer2, PencilRuler, Trash2, Type } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ActionIcon, Paper, Text, Tooltip } from '@mantine/core'
+import { Box, Component, Download, Eye, EyeOff, Info, MousePointer2, PencilRuler, Plus, Trash2, Type } from 'lucide-react'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -9,42 +10,24 @@ import {
   getPrimitiveRefLabel,
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
-import type { DocumentSnapshot, ModelingDiagnostic, ReferenceRecord } from '@/contracts/modeling/schema'
+import type { DocumentSnapshot, DocumentVariableRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureSidebarProps {
   hiddenTargetKeys: Record<string, boolean>
+  invalidVariableValueIds?: Record<string, boolean>
   objectLabelOverrides: Record<string, string>
+  onAddVariable: () => void
   onInspectDiagnostic: (diagnostic: ModelingDiagnostic) => void
-  onInspectReference: (reference: ReferenceRecord) => void
   onObjectDelete: (target: PrimitiveRef, label: string) => void
   onObjectExport: (target: PrimitiveRef, label: string) => void
   onRenameTarget: (target: PrimitiveRef, label: string) => void
   onReopenTarget: (target: PrimitiveRef) => void
   onToggleTargetVisibility: (target: PrimitiveRef) => void
+  onUpdateVariable: (variable: DocumentVariableRecord, next: Pick<DocumentVariableRecord, 'name' | 'valueText'>) => void
   snapshot: DocumentSnapshot | null
   onSelectTarget: (target: PrimitiveRef) => void
   visibleSelection: PrimitiveRef[]
-}
-
-function formatReferenceOwner(snapshot: DocumentSnapshot, featureId: string | null, sketchId: string | null) {
-  if (featureId) {
-    return snapshot.document.features.find((feature) => feature.featureId === featureId)?.label ?? featureId
-  }
-
-  if (sketchId) {
-    return snapshot.document.sketches.find((sketch) => sketch.sketchId === sketchId)?.label ?? sketchId
-  }
-
-  return 'Document root'
-}
-
-function getReferenceStatus(reference: ReferenceRecord) {
-  if (!reference.invalidation) {
-    return null
-  }
-
-  return `${getPrimitiveRefLabel(reference.invalidation.target)} invalid: ${reference.invalidation.reason}`
 }
 
 function formatDocumentDiagnosticDetail(diagnostic: ModelingDiagnostic) {
@@ -73,20 +56,87 @@ function formatDocumentDiagnosticDetail(diagnostic: ModelingDiagnostic) {
 export function FeatureSidebar({
   snapshot,
   hiddenTargetKeys,
+  invalidVariableValueIds = {},
   objectLabelOverrides,
+  onAddVariable,
   onInspectDiagnostic,
-  onInspectReference,
   onObjectDelete,
   onObjectExport,
   onRenameTarget,
   onReopenTarget,
   onSelectTarget,
   onToggleTargetVisibility,
+  onUpdateVariable,
   visibleSelection,
 }: FeatureSidebarProps) {
   const {
     state: { selection, selectionFilter, selectionCatalog },
   } = useEditorState()
+  const [editingVariableId, setEditingVariableId] = useState<string | null>(null)
+  const [variableDrafts, setVariableDrafts] = useState<Record<string, Pick<DocumentVariableRecord, 'name' | 'valueText'>>>({})
+  const previousVariableIdsRef = useRef<Set<string> | null>(null)
+
+  useEffect(() => {
+    if (!snapshot) {
+      previousVariableIdsRef.current = null
+      return
+    }
+
+    const previousVariableIds = previousVariableIdsRef.current
+    const variables = snapshot.document.variables
+    if (previousVariableIds) {
+      const addedVariable = variables.find((variable) => !previousVariableIds.has(variable.variableId))
+      if (addedVariable) {
+        setEditingVariableId(addedVariable.variableId)
+      }
+    }
+    previousVariableIdsRef.current = new Set(variables.map((variable) => variable.variableId))
+  }, [snapshot])
+
+  const getVariableDraft = (variable: DocumentVariableRecord) =>
+    variableDrafts[variable.variableId] ?? {
+      name: variable.name,
+      valueText: variable.valueText,
+    }
+
+  const patchVariableDraft = (
+    variable: DocumentVariableRecord,
+    patch: Partial<Pick<DocumentVariableRecord, 'name' | 'valueText'>>,
+  ) => {
+    setVariableDrafts((current) => ({
+      ...current,
+      [variable.variableId]: {
+        ...getVariableDraft(variable),
+        ...patch,
+      },
+    }))
+  }
+
+  const resetVariableDraft = (variable: DocumentVariableRecord) => {
+    setVariableDrafts((current) => {
+      const next = { ...current }
+      delete next[variable.variableId]
+      return next
+    })
+  }
+
+  const commitVariableDraft = (variable: DocumentVariableRecord) => {
+    const draft = getVariableDraft(variable)
+    if (draft.name !== variable.name || draft.valueText !== variable.valueText) {
+      onUpdateVariable(variable, draft)
+    }
+    resetVariableDraft(variable)
+  }
+
+  const finishVariableEdit = (variable: DocumentVariableRecord) => {
+    commitVariableDraft(variable)
+    setEditingVariableId(null)
+  }
+
+  const cancelVariableEdit = (variable: DocumentVariableRecord) => {
+    resetVariableDraft(variable)
+    setEditingVariableId(null)
+  }
 
   return (
     <Paper
@@ -222,80 +272,123 @@ export function FeatureSidebar({
         </div>
 
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
+          <header className="flex items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
             <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
-              Snapshot References
+              Variables
             </Text>
+            <Tooltip label="Add variable" withArrow>
+              <ActionIcon
+                type="button"
+                variant="subtle"
+                color="gray"
+                size={24}
+                aria-label="Add variable"
+                onClick={onAddVariable}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </ActionIcon>
+            </Tooltip>
           </header>
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-2 px-3 py-3">
-              {(snapshot?.document.references ?? []).map((reference) => {
-                const isAllowed = selectionFilterAllowsTarget(selectionFilter, selection, reference.target, selectionCatalog)
-                const targetLabel = getPrimitiveRefLabel(reference.target)
-                const menuItems: WorkbenchContextMenuEntry[] = [
-                  {
-                    kind: 'item',
-                    id: 'select-target',
-                    label: 'Select target',
-                    icon: <MousePointer2 className="h-3.5 w-3.5" />,
-                    disabled: !isAllowed,
-                    onSelect: () => onSelectTarget(reference.target),
-                  },
-                  {
-                    kind: 'item',
-                    id: 'inspect-reference',
-                    label: 'Inspect reference',
-                    icon: <Info className="h-3.5 w-3.5" />,
-                    onSelect: () => onInspectReference(reference),
-                  },
-                ]
+              {(snapshot?.document.variables ?? []).map((variable) => {
+                const draft = getVariableDraft(variable)
+                const isValueInvalid = invalidVariableValueIds[variable.variableId] === true
+                const isEditingVariable = editingVariableId === variable.variableId || variable.valueText === ''
 
                 return (
-                  <WorkbenchContextMenu key={reference.id} label={`${reference.label} actions`} items={menuItems}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!isAllowed) {
-                          return
-                        }
-                        onSelectTarget(reference.target)
-                      }}
-                      className={`block w-full rounded-md border px-2 py-2 text-left transition hover:bg-[var(--workbench-shell-accent-surface)] ${
-                        !isAllowed ? 'cursor-not-allowed opacity-45' : ''
-                      }`}
-                      style={{
-                        backgroundColor: reference.invalidation
-                          ? 'var(--workbench-shell-danger-surface)'
-                          : 'var(--workbench-shell-overlay)',
-                        borderColor: reference.invalidation
-                          ? 'var(--workbench-shell-danger-border)'
-                          : 'var(--workbench-shell-border)',
-                      }}
-                      aria-disabled={!isAllowed}
-                      aria-label={`Select ${reference.label} ${targetLabel}`}
-                      title={!isAllowed ? 'Filtered out by the current command' : undefined}
-                    >
-                      <span className="block truncate text-sm font-medium text-[var(--mantine-color-dark-0)]">{reference.label}</span>
-                      <span className="block truncate text-xs text-[var(--mantine-color-dark-2)]">
-                        {targetLabel}
-                      </span>
-                      <span className="mt-1 block truncate text-[11px] uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
-                        Owner {snapshot ? formatReferenceOwner(snapshot, reference.ownerFeatureId, reference.ownerSketchId) : 'n/a'}
-                      </span>
-                      {getReferenceStatus(reference) ? (
-                        <span className="mt-1 block text-xs text-[var(--workbench-shell-danger-text)]">{getReferenceStatus(reference)}</span>
-                      ) : null}
-                    </button>
-                  </WorkbenchContextMenu>
+                  <div
+                    key={variable.variableId}
+                    className="rounded-md border"
+                    data-variable-row={variable.variableId}
+                    data-invalid-value={isValueInvalid ? 'true' : undefined}
+                    data-variable-editing={isEditingVariable ? 'true' : undefined}
+                    style={{
+                      backgroundColor: isValueInvalid
+                        ? 'var(--workbench-shell-danger-surface)'
+                        : 'transparent',
+                      borderColor: isValueInvalid
+                        ? 'var(--workbench-shell-danger-border)'
+                        : 'transparent',
+                    }}
+                  >
+                    {isEditingVariable ? (
+                      <div
+                        className="grid grid-cols-[minmax(0,1fr)_minmax(5rem,0.75fr)] gap-2 px-2 py-1.5"
+                        onBlur={(event) => {
+                          const nextFocusTarget = event.relatedTarget
+                          if (nextFocusTarget instanceof Node && event.currentTarget.contains(nextFocusTarget)) {
+                            return
+                          }
+                          finishVariableEdit(variable)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            finishVariableEdit(variable)
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault()
+                            cancelVariableEdit(variable)
+                          }
+                        }}
+                      >
+                        <input
+                          aria-label={`Variable name ${variable.variableId}`}
+                          autoFocus
+                          className="h-7 min-w-0 rounded border bg-[var(--workbench-shell-overlay)] px-2 text-[13px] font-medium text-[var(--mantine-color-dark-0)] outline-none focus:border-[var(--workbench-shell-accent)]"
+                          style={{ borderColor: 'var(--workbench-shell-border)' }}
+                          value={draft.name}
+                          onChange={(event) => patchVariableDraft(variable, { name: event.currentTarget.value })}
+                        />
+                        <input
+                          aria-label={`Variable value ${variable.variableId}`}
+                          className="h-7 min-w-0 rounded border px-2 font-mono text-xs text-[var(--mantine-color-dark-1)] outline-none focus:border-[var(--workbench-shell-accent)]"
+                          style={{
+                            backgroundColor: 'var(--mantine-color-dark-8)',
+                            borderColor: isValueInvalid
+                              ? 'var(--workbench-shell-danger-border)'
+                              : 'var(--workbench-shell-border)',
+                          }}
+                          value={draft.valueText}
+                          onChange={(event) => patchVariableDraft(variable, { valueText: event.currentTarget.value })}
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-[var(--workbench-shell-accent-surface)] focus:outline-none focus:ring-1 focus:ring-[var(--workbench-shell-accent)]"
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 0,
+                        }}
+                        aria-label={`Edit variable ${variable.variableId}`}
+                        onDoubleClick={() => setEditingVariableId(variable.variableId)}
+                      >
+                        <span className="min-w-0 truncate text-[13px] font-medium leading-5 text-[var(--mantine-color-dark-0)]">
+                          {variable.name || 'Unnamed variable'}
+                        </span>
+                        <span
+                          className="min-w-12 max-w-[58%] shrink-0 truncate rounded px-2 py-1 text-right font-mono text-[12px] leading-4 text-[var(--mantine-color-dark-1)]"
+                          style={{ backgroundColor: 'var(--mantine-color-dark-8)' }}
+                        >
+                          {variable.valueText}
+                        </span>
+                      </button>
+                    )}
+                  </div>
                 )
               })}
+              {snapshot && snapshot.document.variables.length === 0 ? (
+                <p className="text-xs text-[var(--mantine-color-dark-2)]">No document variables.</p>
+              ) : null}
             </div>
           </ScrollArea>
         </div>
       </section>
 
       <section
-        className="flex min-h-0 flex-[0.85] flex-col overflow-hidden"
+        className="flex min-h-0 max-h-56 flex-[0.85] flex-col overflow-hidden"
         style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
       >
         <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>

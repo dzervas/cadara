@@ -4,12 +4,14 @@ import type {
   ModelingOperationHistoryEntry,
   ModelingOperationHistoryPayload,
   OperationHistoryValidationResult,
+  PersistedAddDocumentVariablePayload,
   PersistedCommitSketchPayload,
   PersistedCreateFeaturePayload,
   PersistedDeleteFeaturePayload,
   PersistedRenameBodyPayload,
   PersistedReorderFeaturePayload,
   PersistedSetFeatureCursorPayload,
+  PersistedUpdateDocumentVariablePayload,
   PersistedUpdateFeaturePayload,
 } from '@/contracts/modeling/operation-history'
 import { featureDefinitionSchema } from '@/contracts/modeling/runtime-schema'
@@ -18,6 +20,7 @@ import {
   contractVersionSchema,
   documentIdSchema,
   bodyIdSchema,
+  documentVariableIdSchema,
   featureIdSchema,
   literalVersionSchema,
   stringSchema,
@@ -247,6 +250,18 @@ const persistedSetFeatureCursorPayloadSchema = z.object({
   ]),
 }).transform((value) => value as PersistedSetFeatureCursorPayload)
 
+const persistedAddDocumentVariablePayloadSchema = z.object({
+  variableId: documentVariableIdSchema,
+  name: stringSchema,
+  valueText: stringSchema,
+}).strict().transform((value) => value as PersistedAddDocumentVariablePayload)
+
+const persistedUpdateDocumentVariablePayloadSchema = z.object({
+  variableId: documentVariableIdSchema,
+  name: stringSchema,
+  valueText: stringSchema,
+}).strict().transform((value) => value as PersistedUpdateDocumentVariablePayload)
+
 const operationHistoryEntrySchema = z.object({
   kind: z.union([
     z.literal('commitSketch'),
@@ -256,6 +271,8 @@ const operationHistoryEntrySchema = z.object({
     z.literal('renameBody'),
     z.literal('reorderFeature'),
     z.literal('setFeatureCursor'),
+    z.literal('addDocumentVariable'),
+    z.literal('updateDocumentVariable'),
   ]),
   payload: z.record(z.string(), z.unknown()),
 }).superRefine((value, ctx) => {
@@ -284,6 +301,10 @@ const operationHistoryEntrySchema = z.object({
         return persistedReorderFeaturePayloadSchema
       case 'setFeatureCursor':
         return persistedSetFeatureCursorPayloadSchema
+      case 'addDocumentVariable':
+        return persistedAddDocumentVariablePayloadSchema
+      case 'updateDocumentVariable':
+        return persistedUpdateDocumentVariablePayloadSchema
       default:
         return null
     }
@@ -324,6 +345,10 @@ const operationHistoryEntrySchema = z.object({
       return { kind: value.kind, payload: persistedReorderFeaturePayloadSchema.parse(value.payload) }
     case 'setFeatureCursor':
       return { kind: value.kind, payload: persistedSetFeatureCursorPayloadSchema.parse(value.payload) }
+    case 'addDocumentVariable':
+      return { kind: value.kind, payload: persistedAddDocumentVariablePayloadSchema.parse(value.payload) }
+    case 'updateDocumentVariable':
+      return { kind: value.kind, payload: persistedUpdateDocumentVariablePayloadSchema.parse(value.payload) }
   }
 }) as z.ZodType<ModelingOperationHistoryEntry>
 

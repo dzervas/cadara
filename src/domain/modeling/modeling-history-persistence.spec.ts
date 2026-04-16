@@ -254,6 +254,50 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     )
   }
 
+  async function testPersistedHistoryReplaysDocumentVariables() {
+    const { service, store } = await createServiceWithStore()
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const added = await service.addDocumentVariable({
+      baseRevisionId: snapshot.revisionId,
+      variableId: 'variable_width',
+      name: 'width',
+      valueText: '12 mm',
+    })
+    assert(added.revisionState.kind === 'accepted', 'Variable add should be stored for replay.')
+
+    const updated = await service.updateDocumentVariable({
+      baseRevisionId: added.revisionId,
+      variableId: added.variableId,
+      name: 'width',
+      valueText: '18 mm',
+    })
+    assert(updated.revisionState.kind === 'accepted', 'Variable update should be stored for replay.')
+
+    const finalHistory = store.savedPayloads.at(-1)
+    assert(finalHistory, 'Variable mutations should save history.')
+    assert(finalHistory.entries[0]?.kind === 'addDocumentVariable', 'Variable create should persist as document history.')
+    assert(finalHistory.entries[1]?.kind === 'updateDocumentVariable', 'Variable edit should persist as document history.')
+    assert(!('isValid' in finalHistory.entries[1]!.payload), 'Variable history must not persist validation state.')
+
+    const restoredService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(finalHistory),
+    })
+    const restoreState = await restoredService.getHistoryRestoreState()
+    const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+
+    assert(restoreState.kind === 'restored', 'Variable history should restore explicitly.')
+    assert(
+      restoredSnapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join(',')
+        === 'variable_width:width:18 mm',
+      'Replay should restore ordered document variable records without expression evaluation.',
+    )
+    assert(
+      restoredSnapshot.document.references.length > 0,
+      'Variable replay should preserve snapshot reference records.',
+    )
+  }
+
   async function testUnsupportedHistoryVersionFailsRestore() {
     const store = createMemoryOperationHistoryStore({
       ...createEmptyOperationHistory('doc_workspace'),
@@ -324,6 +368,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
   await testOnlyCommittedMutationsAreStored()
   await testPersistedHistoryReplaysSketchAndFeatureMutations()
   await testDeleteFeatureReplayMatchesFinalState()
+  await testPersistedHistoryReplaysDocumentVariables()
   await testUnsupportedHistoryVersionFailsRestore()
   await testInvalidCursorHistoryFailsRestore()
   await testStartupSnapshotWaitsForReplay()

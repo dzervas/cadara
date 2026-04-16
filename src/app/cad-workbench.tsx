@@ -15,8 +15,8 @@ import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-rende
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
+  DocumentVariableRecord,
   ModelingDiagnostic,
-  ReferenceRecord,
 } from '@/contracts/modeling/schema'
 import {
   getSketchAnnotationDescriptors,
@@ -290,16 +290,58 @@ export function CadWorkbench() {
     showPlaceholderStatus(`Export for ${label} is not implemented yet.`)
   }
 
-  const handleReferenceInspectPlaceholder = (reference: ReferenceRecord) => {
-    showPlaceholderStatus(`Inspect reference for ${reference.label} is not implemented yet.`)
-  }
-
   const handleDiagnosticInspectPlaceholder = (diagnostic: ModelingDiagnostic) => {
     showPlaceholderStatus(`Inspect diagnostic ${diagnostic.code} is not implemented yet.`)
   }
 
   const handleFeatureSuppressPlaceholder = (item: FeatureHistoryItem) => {
     showPlaceholderStatus(`Suppress for ${item.label} is not implemented yet.`)
+  }
+
+  const handleVariableAdd = () => {
+    if (!snapshot) {
+      return
+    }
+
+    void modelingService.addDocumentVariable({
+      baseRevisionId: snapshot.document.revisionId,
+      name: `var${snapshot.document.variables.length + 1}`,
+      valueText: '',
+    }).then((result) => {
+      if (result.revisionState.kind !== 'accepted') {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Add variable failed.')
+        return
+      }
+
+      dispatch({ type: 'document.refreshRequested' })
+    }).catch((error: unknown) => {
+      setWorkbenchStatusMessage(error instanceof Error ? error.message : 'Add variable failed.')
+    })
+  }
+
+  const handleVariableUpdate = (
+    variable: DocumentVariableRecord,
+    next: Pick<DocumentVariableRecord, 'name' | 'valueText'>,
+  ) => {
+    if (!snapshot) {
+      return
+    }
+
+    void modelingService.updateDocumentVariable({
+      baseRevisionId: snapshot.document.revisionId,
+      variableId: variable.variableId,
+      name: next.name,
+      valueText: next.valueText,
+    }).then((result) => {
+      if (result.revisionState.kind !== 'accepted') {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Update ${variable.name || variable.variableId} failed.`)
+        return
+      }
+
+      dispatch({ type: 'document.refreshRequested' })
+    }).catch((error: unknown) => {
+      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Update ${variable.name || variable.variableId} failed.`)
+    })
   }
 
   const handleFeatureDelete = (item: FeatureHistoryItem) => {
@@ -568,14 +610,15 @@ export function CadWorkbench() {
             snapshot={snapshot}
             hiddenTargetKeys={visibleHiddenTargetKeys}
             objectLabelOverrides={objectLabelOverrides}
+            onAddVariable={handleVariableAdd}
             onInspectDiagnostic={handleDiagnosticInspectPlaceholder}
-            onInspectReference={handleReferenceInspectPlaceholder}
             onObjectDelete={handleObjectDeletePlaceholder}
             onObjectExport={handleObjectExportPlaceholder}
             onRenameTarget={handleTargetRename}
             onReopenTarget={handleNavigationReopen}
             onSelectTarget={handleShellSelect}
             onToggleTargetVisibility={handleTargetVisibilityToggle}
+            onUpdateVariable={handleVariableUpdate}
             visibleSelection={visibleSelection}
           />
           <div

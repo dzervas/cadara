@@ -1,5 +1,5 @@
 import type { DurableRef } from '@/contracts/shared/references'
-import type { DocumentFeatureCursor, FeatureDefinition, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
+import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { BodyId, ConstructionId, FeatureId, SketchId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
@@ -34,6 +34,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   baseConstructions: OccFeatureExecutionContext['constructions']
   baseConstructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>
   bodyLabels: ReadonlyMap<BodyId, string>
+  variables: readonly DocumentVariableRecord[]
   features: readonly OccAuthoringFeatureRecord[]
   cursor: DocumentFeatureCursor
   entities: readonly SnapshotEntityRecord[]
@@ -127,6 +128,7 @@ export function createOccAuthoringState(
     sketches?: readonly SketchSnapshotRecord[]
     bodies?: readonly OccTrackedBody[]
     bodyLabels?: ReadonlyMap<BodyId, string>
+    variables?: readonly DocumentVariableRecord[]
     features?: readonly OccAuthoringFeatureRecord[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
@@ -154,6 +156,7 @@ export function createOccAuthoringState(
   ])
   const baseConstructions = [...constructionById.values()]
   const bodyLabels = new Map<BodyId, string>(input.bodyLabels ?? [])
+  const variables = [...(input.variables ?? [])]
   const baseBodies = applyBodyLabels(input.bodies ?? [], bodyLabels)
   const features = [...(input.features ?? [])]
   const sketches = input.sketches ?? []
@@ -181,6 +184,7 @@ export function createOccAuthoringState(
     baseConstructions,
     baseConstructionPlanes: constructionPlanes,
     bodyLabels,
+    variables,
     features,
     cursor,
     entities: [],
@@ -247,6 +251,7 @@ export function rebuildOccAuthoringState(
     revisionId: state.revisionId,
     modelingTolerance: state.modelingTolerance,
     sketches: state.sketches,
+    variables: state.variables,
     bodies: state.baseBodies,
     bodyLabels: state.bodyLabels,
     constructions: state.baseConstructions,

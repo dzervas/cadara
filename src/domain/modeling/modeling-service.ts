@@ -3,6 +3,7 @@ import type {
   BodyId,
   ConstructionId,
   DocumentId,
+  DocumentVariableId,
   EdgeId,
   FaceId,
   FeatureId,
@@ -24,12 +25,15 @@ import type {
   BodySnapshotRecord,
   CommitSketchResponse,
   CommitSketchRequest,
+  AddDocumentVariableRequest,
+  AddDocumentVariableResponse,
   ConstructionSnapshotRecord,
   CreateFeatureResponse,
   CreateFeatureRequest,
   DeleteFeatureResponse,
   DeleteFeatureRequest,
   DocumentSnapshot,
+  DocumentVariableRecord,
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   EvaluatePreviewRequest,
@@ -66,6 +70,8 @@ import type {
   SnapshotEntityRecord,
   UpdateFeatureResponse,
   UpdateFeatureRequest,
+  UpdateDocumentVariableRequest,
+  UpdateDocumentVariableResponse,
   WorkspaceSnapshot,
   PlaneFeatureParameters,
   RevolveAxisRef,
@@ -78,6 +84,7 @@ import { renderExportSchema } from '@/contracts/render/runtime-schema'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, isAdvancedParticipantRole, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import {
   commitSketchResponseSchema,
+  addDocumentVariableResponseSchema,
   createFeatureResponseSchema,
   deleteFeatureResponseSchema,
   evaluatePreviewResponseSchema,
@@ -87,17 +94,20 @@ import {
   reorderFeatureResponseSchema,
   resolveReferenceResponseSchema,
   setFeatureCursorResponseSchema,
+  updateDocumentVariableResponseSchema,
   updateFeatureResponseSchema,
   workspaceSnapshotSchema,
 } from '@/contracts/modeling/runtime-schema'
 import {
   createCommitSketchHistoryEntry,
+  createAddDocumentVariableHistoryEntry,
   createCreateFeatureHistoryEntry,
   createDeleteFeatureHistoryEntry,
   createEmptyOperationHistory,
   createRenameBodyHistoryEntry,
   createReorderFeatureHistoryEntry,
   createSetFeatureCursorHistoryEntry,
+  createUpdateDocumentVariableHistoryEntry,
   createUpdateFeatureHistoryEntry,
   type PersistedCommitSketchPayload,
   type ModelingOperationHistoryEntry,
@@ -148,6 +158,8 @@ export interface ModelingService {
   resetOperationHistory(): void
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
   commitSketch(input: ModelingCommitSketchInput): Promise<ModelingCommitSketchResult>
+  addDocumentVariable(input: ModelingAddDocumentVariableInput): Promise<ModelingDocumentVariableMutationResult>
+  updateDocumentVariable(input: ModelingUpdateDocumentVariableInput): Promise<ModelingDocumentVariableMutationResult>
   createFeature(input: ModelingCreateFeatureInput): Promise<ModelingFeatureMutationResult>
   updateFeature(input: ModelingUpdateFeatureInput): Promise<ModelingFeatureMutationResult>
   deleteFeature(input: ModelingDeleteFeatureInput): Promise<ModelingDeleteFeatureResult>
@@ -250,8 +262,19 @@ export interface ModelingCommitSketchResult {
   diagnostics: ModelingDiagnostic[]
 }
 
+export interface ModelingDocumentVariableMutationResult {
+  revisionId: DocumentSnapshot['revisionId']
+  variableId: DocumentVariableId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
 export type ModelingCreateFeatureInput = Omit<CreateFeatureRequest, 'contractVersion' | 'documentId'>
+export type ModelingAddDocumentVariableInput = Omit<AddDocumentVariableRequest, 'contractVersion' | 'documentId'>
 export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'>
+export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableRequest, 'contractVersion' | 'documentId'>
 export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'>
 export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'>
 export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'>
@@ -312,6 +335,14 @@ function assertDocumentId(value: unknown): DocumentId {
   }
 
   return value as DocumentId
+}
+
+function assertDocumentVariableId(value: unknown): DocumentVariableId {
+  if (!isString(value)) {
+    throw new Error('Invalid document variable ID payload.')
+  }
+
+  return value as DocumentVariableId
 }
 
 function assertRevisionId(value: unknown): RevisionId {
@@ -1243,6 +1274,24 @@ function normalizeReferences(value: unknown): ReferenceRecord[] {
       ownerSketchId: entry.ownerSketchId === null ? null : assertSketchId(entry.ownerSketchId),
       ownerBodyId: entry.ownerBodyId === null ? null : assertBodyId(entry.ownerBodyId),
       invalidation: entry.invalidation === null ? null : normalizeInvalidReferenceDetail(entry.invalidation),
+    }
+  })
+}
+
+function normalizeDocumentVariables(value: unknown): DocumentVariableRecord[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid document variables payload.')
+  }
+
+  return value.map((entry) => {
+    if (!isRecord(entry) || !isString(entry.variableId) || !isString(entry.name) || !isString(entry.valueText)) {
+      throw new Error('Invalid document variable record.')
+    }
+
+    return {
+      variableId: assertDocumentVariableId(entry.variableId),
+      name: entry.name,
+      valueText: entry.valueText,
     }
   })
 }
@@ -2533,6 +2582,7 @@ function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
     sketches: document.sketches,
     bodies: document.bodies,
     constructions: document.constructions,
+    variables: document.variables,
     entities: presentation.entities,
     references: document.references,
     diagnostics: document.diagnostics,
@@ -2645,6 +2695,24 @@ function mapRenameBodyResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
+  }
+}
+
+function mapDocumentVariableResponse(
+  response: AddDocumentVariableResponse | UpdateDocumentVariableResponse,
+  expectedDocumentId: DocumentId,
+): ModelingDocumentVariableMutationResult {
+  const parsed = addDocumentVariableResponseSchema.safeParse(response)
+  const normalized = parsed.success ? parsed.data : updateDocumentVariableResponseSchema.parse(response)
+  assertKernelContractVersion(normalized.contractVersion)
+  assertKernelDocumentIdMatches(normalized.documentId, expectedDocumentId, 'Document variable mutation')
+  return {
+    revisionId: normalized.revisionId,
+    variableId: normalized.variableId,
+    revisionState: normalized.revisionState,
+    rebuildResult: normalized.rebuildResult,
+    changedTargets: normalized.changedTargets,
+    diagnostics: normalized.diagnostics,
   }
 }
 
@@ -2798,6 +2866,34 @@ function normalizeRenameBodyInput(
 
   return {
     ...input,
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  }
+}
+
+function normalizeAddDocumentVariableInput(
+  input: ModelingAddDocumentVariableInput,
+  documentId: DocumentId,
+): AddDocumentVariableRequest {
+  assertMutationBase(input)
+
+  return {
+    ...input,
+    variableId: input.variableId === undefined ? undefined : assertDocumentVariableId(input.variableId),
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  }
+}
+
+function normalizeUpdateDocumentVariableInput(
+  input: ModelingUpdateDocumentVariableInput,
+  documentId: DocumentId,
+): UpdateDocumentVariableRequest {
+  assertMutationBase(input)
+
+  return {
+    ...input,
+    variableId: assertDocumentVariableId(input.variableId),
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
@@ -3076,6 +3172,32 @@ async function replayHistoryEntry(input: {
         cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
       }
     }
+    case 'addDocumentVariable': {
+      const response = await input.adapter.addDocumentVariable({
+        ...input.entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      })
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      }
+    }
+    case 'updateDocumentVariable': {
+      const response = await input.adapter.updateDocumentVariable({
+        ...input.entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      })
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      }
+    }
     default:
       input.entry satisfies never
       throw new Error('Unsupported operation history entry.')
@@ -3225,6 +3347,26 @@ export function createModelingService(
 
       return mapCommitSketchResponse(response, currentDocumentId)
     },
+    async addDocumentVariable(input) {
+      await restorePromise
+      const request = normalizeAddDocumentVariableInput(input, currentDocumentId)
+      const response = await adapter.addDocumentVariable(request)
+      if (isAcceptedMutation(response)) {
+        appendOperationHistoryEntry(createAddDocumentVariableHistoryEntry(request, response.variableId))
+      }
+
+      return mapDocumentVariableResponse(response, currentDocumentId)
+    },
+    async updateDocumentVariable(input) {
+      await restorePromise
+      const request = normalizeUpdateDocumentVariableInput(input, currentDocumentId)
+      const response = await adapter.updateDocumentVariable(request)
+      if (isAcceptedMutation(response)) {
+        appendOperationHistoryEntry(createUpdateDocumentVariableHistoryEntry(request))
+      }
+
+      return mapDocumentVariableResponse(response, currentDocumentId)
+    },
     async createFeature(input) {
       await restorePromise
       const request = normalizeCreateFeatureInput(input, currentDocumentId)
@@ -3321,6 +3463,7 @@ export const modelingRuntimeValidators = {
   featureTree: normalizeFeatureTree,
   objects: normalizeObjects,
   references: normalizeReferences,
+  variables: normalizeDocumentVariables,
   renderables: normalizeRenderables,
   renderExport: (value: unknown) => renderExportSchema.parse(value),
   sketches: normalizeSketches,

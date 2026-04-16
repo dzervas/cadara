@@ -1,13 +1,15 @@
 import { test } from 'bun:test'
 import {
+  createAddDocumentVariableHistoryEntry,
   createCommitSketchHistoryEntry,
   createCreateFeatureHistoryEntry,
   createEmptyOperationHistory,
   createReorderFeatureHistoryEntry,
+  createUpdateDocumentVariableHistoryEntry,
   validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
 } from '@/contracts/modeling/operation-history'
-import type { CommitSketchRequest, CreateFeatureRequest, FeatureDefinition, ReorderFeatureRequest } from '@/contracts/modeling/schema'
+import type { AddDocumentVariableRequest, CommitSketchRequest, CreateFeatureRequest, FeatureDefinition, ReorderFeatureRequest, UpdateDocumentVariableRequest } from '@/contracts/modeling/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
@@ -811,6 +813,60 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     )
   }
 
+  function testValidatesDocumentVariableHistoryWithoutRuntimeState() {
+    const addVariableRequest: AddDocumentVariableRequest = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_0004',
+      name: 'width',
+      valueText: '12 mm',
+    }
+    const updateVariableRequest: UpdateDocumentVariableRequest = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_0005',
+      variableId: 'variable_width',
+      name: 'width',
+      valueText: '18 mm',
+    }
+    const payload: ModelingOperationHistoryPayload = {
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        createAddDocumentVariableHistoryEntry(addVariableRequest, 'variable_width'),
+        createUpdateDocumentVariableHistoryEntry(updateVariableRequest),
+      ],
+    }
+
+    const result = validateOperationHistoryPayload(payload)
+
+    assert(result.ok, 'Document variable add/update history entries should validate.')
+    assert(
+      result.ok
+        && result.payload.entries[0]?.kind === 'addDocumentVariable'
+        && result.payload.entries[0].payload.variableId === 'variable_width'
+        && result.payload.entries[1]?.kind === 'updateDocumentVariable'
+        && result.payload.entries[1].payload.valueText === '18 mm',
+      'Document variable history should preserve stable id, name, and raw value text.',
+    )
+
+    const invalidRuntimeStatePayload = validateOperationHistoryPayload({
+      ...payload,
+      entries: [
+        {
+          kind: 'addDocumentVariable',
+          payload: {
+            variableId: 'variable_bad',
+            name: 'bad',
+            valueText: 'not evaluated',
+            isValid: false,
+          },
+        },
+      ],
+    })
+
+    assert(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime validation state.')
+  }
+
   testValidatesRepresentativeHistory()
   testNormalizesCommittedCommitSketchTargets()
   testAcceptsLegacyDraftCommitSketchTargets()
@@ -828,4 +884,5 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   testPreservesThickenParticipantsAndOptions()
   testPreservesMirrorParticipantsAndCopyOptionAcrossCreateAndUpdateEntries()
   testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdateEntries()
+  testValidatesDocumentVariableHistoryWithoutRuntimeState()
 })

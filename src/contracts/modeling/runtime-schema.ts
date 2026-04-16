@@ -2,8 +2,10 @@ import { z } from 'zod'
 
 import type {
   CommitSketchResponse,
+  AddDocumentVariableResponse,
   CreateFeatureResponse,
   DeleteFeatureResponse,
+  DocumentVariableRecord,
   DocumentFeatureCursor,
   DocumentSnapshot,
   EvaluatePreviewResponse,
@@ -20,6 +22,7 @@ import type {
   ResolveReferenceResponse,
   ReorderFeatureResponse,
   SetFeatureCursorResponse,
+  UpdateDocumentVariableResponse,
   UpdateFeatureResponse,
   WorkspaceSnapshot,
 } from '@/contracts/modeling/schema'
@@ -37,6 +40,7 @@ import {
   bodyIdSchema,
   contractVersionSchema,
   documentIdSchema,
+  documentVariableIdSchema,
   featureIdSchema,
   literalVersionSchema,
   numberSchema,
@@ -224,6 +228,12 @@ export const modelingDiagnosticSchema = z.object({
   }).passthrough().nullable(),
 }).transform((value) => value as ModelingDiagnostic)
 
+export const documentVariableRecordSchema = z.object({
+  variableId: documentVariableIdSchema,
+  name: stringSchema,
+  valueText: stringSchema,
+}).strict().transform((value) => value as DocumentVariableRecord)
+
 export const mutationRevisionStateSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('accepted'),
@@ -314,6 +324,7 @@ export const kernelDocumentSnapshotSchema = z.object({
   sketches: z.array(sketchSnapshotRecordSchema),
   bodies: z.array(z.unknown()),
   constructions: z.array(z.unknown()),
+  variables: z.array(documentVariableRecordSchema),
   entities: z.array(z.unknown()),
   references: z.array(z.unknown()).transform((value) => value as ReferenceRecord[]),
   diagnostics: z.array(modelingDiagnosticSchema),
@@ -349,6 +360,7 @@ export const workspaceSnapshotSchema = z.object({
     sketches: document.sketches,
     bodies: document.bodies,
     constructions: document.constructions,
+    variables: document.variables,
     entities: presentation.entities,
     references: document.references,
     diagnostics: document.diagnostics,
@@ -386,6 +398,14 @@ export const deleteFeatureResponseSchema = modelingOperationResponseBaseSchema.e
 export const renameBodyResponseSchema = modelingOperationResponseBaseSchema.extend({
   bodyId: bodyIdSchema,
 }).transform((value) => value as RenameBodyResponse)
+
+export const addDocumentVariableResponseSchema = modelingOperationResponseBaseSchema.extend({
+  variableId: documentVariableIdSchema,
+}).transform((value) => value as AddDocumentVariableResponse)
+
+export const updateDocumentVariableResponseSchema = modelingOperationResponseBaseSchema.extend({
+  variableId: documentVariableIdSchema,
+}).transform((value) => value as UpdateDocumentVariableResponse)
 
 export const reorderFeatureResponseSchema = modelingOperationResponseBaseSchema.extend({
   featureId: featureIdSchema,

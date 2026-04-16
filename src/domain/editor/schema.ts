@@ -10,6 +10,7 @@ export type {
   DimensionId,
   DocumentHistoryItemId,
   DocumentId,
+  DocumentVariableId,
   EdgeId,
   FaceId,
   FeatureId,

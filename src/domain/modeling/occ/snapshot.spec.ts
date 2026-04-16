@@ -327,6 +327,12 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       async setFeatureCursor() {
         throw new Error('Not implemented in phase 6 snapshot test adapter.')
       },
+      async addDocumentVariable() {
+        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+      },
+      async updateDocumentVariable() {
+        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+      },
       async evaluatePreview() {
         throw new Error('Not implemented in phase 6 snapshot test adapter.')
       },
