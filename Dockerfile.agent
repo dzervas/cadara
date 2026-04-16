@@ -1,5 +1,7 @@
 FROM ubuntu:24.04
 
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+
 # Install basic development tools, ca-certificates, and iptables/ipset, then clean up apt cache to reduce image size
 RUN apt-get update && apt-get install -y --no-install-recommends \
   aggregate \
@@ -19,12 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   procps \
   unzip \
   ripgrep \
-  zsh \
-  && rm -rf /var/lib/apt/lists/*
+  zsh
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-  && apt-get install -y --no-install-recommends nodejs \
-  && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends nodejs
 
 RUN curl -fsSL https://bun.com/install | bash
 ENV PATH=$PATH:/root/.bun/bin
