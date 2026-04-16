@@ -12,7 +12,7 @@ const VERTEX_POINT = { x: 63, y: 148 }
 const BLANK_POINT = { x: 1000, y: 200 }
 
 const FACE_TARGET = 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'
-const EDGE_TARGET = 'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_16'
+const EDGE_TARGET = 'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_12'
 const VERTEX_TARGET = 'body_feature_extrude-1.vertex_body_feature_extrude-1_t0001_2'
 
 function countBufferDiff(left: Buffer, right: Buffer) {

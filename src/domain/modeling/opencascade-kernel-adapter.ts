@@ -70,6 +70,10 @@ import {
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
 import {
+  createDocumentVariableExpressionDiagnostics,
+  evaluateDocumentVariableExpressions,
+} from '@/domain/modeling/document-variable-expressions'
+import {
   getOccDurableRefKey,
   resolveOccReference,
 } from '@/domain/modeling/occ/topology'
@@ -1776,18 +1780,36 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       })
     }
 
+    const candidateVariables = [
+      ...runtimeState.authoringState.variables,
+      {
+        variableId,
+        name: request.name,
+        valueText: request.valueText,
+      },
+    ]
+    const variableValidation = evaluateDocumentVariableExpressions(candidateVariables)
+
+    if (!variableValidation.ok) {
+      const diagnostics = createDocumentVariableExpressionDiagnostics(variableValidation.diagnostics)
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        diagnostics,
+        diagnostics[0]?.code ?? 'document-variable-invalid-expression',
+      )
+
+      return this.withOperationEnvelope({
+        variableId,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
     const nextSequence = runtimeState.revisionSequence + 1
     const nextRevisionId = createRevisionId(nextSequence)
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
-      variables: [
-        ...runtimeState.authoringState.variables,
-        {
-          variableId,
-          name: request.name,
-          valueText: request.valueText,
-        },
-      ],
+      variables: candidateVariables,
     })
 
     if (!nextAuthoringState.ok) {
@@ -1854,15 +1876,33 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       })
     }
 
+    const candidateVariables = runtimeState.authoringState.variables.map((variable) =>
+      variable.variableId === request.variableId
+        ? { variableId: request.variableId, name: request.name, valueText: request.valueText }
+        : variable,
+    )
+    const variableValidation = evaluateDocumentVariableExpressions(candidateVariables)
+
+    if (!variableValidation.ok) {
+      const diagnostics = createDocumentVariableExpressionDiagnostics(variableValidation.diagnostics)
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        diagnostics,
+        diagnostics[0]?.code ?? 'document-variable-invalid-expression',
+      )
+
+      return this.withOperationEnvelope({
+        variableId: request.variableId,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
     const nextSequence = runtimeState.revisionSequence + 1
     const nextRevisionId = createRevisionId(nextSequence)
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
-      variables: runtimeState.authoringState.variables.map((variable) =>
-        variable.variableId === request.variableId
-          ? { variableId: request.variableId, name: request.name, valueText: request.valueText }
-          : variable,
-      ),
+      variables: candidateVariables,
     })
 
     if (!nextAuthoringState.ok) {

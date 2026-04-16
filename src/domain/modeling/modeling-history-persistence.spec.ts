@@ -7,6 +7,7 @@ import {
   createModelingService,
   type ModelingService,
 } from '@/domain/modeling/modeling-service'
+import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 
 test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
@@ -261,7 +262,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       baseRevisionId: snapshot.revisionId,
       variableId: 'variable_width',
       name: 'width',
-      valueText: '12 mm',
+      valueText: '12',
     })
     assert(added.revisionState.kind === 'accepted', 'Variable add should be stored for replay.')
 
@@ -269,14 +270,23 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       baseRevisionId: added.revisionId,
       variableId: added.variableId,
       name: 'width',
-      valueText: '18 mm',
+      valueText: '18',
     })
     assert(updated.revisionState.kind === 'accepted', 'Variable update should be stored for replay.')
+
+    const dependent = await service.addDocumentVariable({
+      baseRevisionId: updated.revisionId,
+      variableId: 'variable_depth',
+      name: 'depth',
+      valueText: 'width + 50',
+    })
+    assert(dependent.revisionState.kind === 'accepted', 'Dependent variable add should be stored for replay.')
 
     const finalHistory = store.savedPayloads.at(-1)
     assert(finalHistory, 'Variable mutations should save history.')
     assert(finalHistory.entries[0]?.kind === 'addDocumentVariable', 'Variable create should persist as document history.')
     assert(finalHistory.entries[1]?.kind === 'updateDocumentVariable', 'Variable edit should persist as document history.')
+    assert(finalHistory.entries[2]?.kind === 'addDocumentVariable', 'Dependent variable create should persist as document history.')
     assert(!('isValid' in finalHistory.entries[1]!.payload), 'Variable history must not persist validation state.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
@@ -289,9 +299,11 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     assert(restoreState.kind === 'restored', 'Variable history should restore explicitly.')
     assert(
       restoredSnapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join(',')
-        === 'variable_width:width:18 mm',
+        === 'variable_width:width:18,variable_depth:depth:width + 50',
       'Replay should restore ordered document variable records without expression evaluation.',
     )
+    const evaluation = evaluateDocumentVariableExpressions(restoredSnapshot.document.variables)
+    assert(evaluation.ok && evaluation.valuesByName.get('depth') === 68, 'Restored dependent variable expressions should remain evaluable.')
     assert(
       restoredSnapshot.document.references.length > 0,
       'Variable replay should preserve snapshot reference records.',

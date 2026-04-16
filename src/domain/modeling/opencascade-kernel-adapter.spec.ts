@@ -3114,6 +3114,69 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testDocumentVariableExpressionsValidateBeforeOccMutation() {
+    const adapter = createAdapter()
+    const initial = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+
+    const x = await adapter.addDocumentVariable({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: initial.snapshot.revisionId,
+      variableId: 'variable_x',
+      name: 'x',
+      valueText: '50',
+    })
+    assert(x.revisionState.kind === 'accepted', 'OCC should accept valid variable literals.')
+
+    const y = await adapter.addDocumentVariable({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: x.revisionId,
+      variableId: 'variable_y',
+      name: 'y',
+      valueText: 'x + 50',
+    })
+    assert(y.revisionState.kind === 'accepted', 'OCC should accept dependent variable expressions.')
+
+    const acceptedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    assert(
+      acceptedSnapshot.snapshot.document.variables.some((variable) =>
+        variable.variableId === 'variable_y' && variable.name === 'y' && variable.valueText === 'x + 50',
+      ),
+      'OCC should persist raw variable expression text.',
+    )
+
+    const rejected = await adapter.updateDocumentVariable({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: y.revisionId,
+      variableId: 'variable_y',
+      name: 'y',
+      valueText: 'x + unknown',
+    })
+    assert(rejected.revisionState.kind === 'rejected', 'OCC should reject invalid variable expressions.')
+    assert(
+      rejected.diagnostics.some((diagnostic) => diagnostic.code === 'document-variable-unresolved-reference'),
+      'OCC rejection should expose shared expression diagnostics.',
+    )
+
+    const rejectedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    assert(
+      rejectedSnapshot.snapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join('|')
+        === acceptedSnapshot.snapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join('|'),
+      'OCC rejected variable expressions should leave authoring variables unchanged.',
+    )
+  }
+
   await testSnapshotFetchAndSketchCommit()
   await testPlaneFeatureCreateSupportsConstructionAndPlanarFaceReferences()
   await testExtrudePreviewCreateAndUpdateCommitGeometry()
@@ -3143,6 +3206,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testProfileCollectionAdapterDiagnostics()
   await testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions()
   await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
+  await testDocumentVariableExpressionsValidateBeforeOccMutation()
 
   console.log('OCC phase 8 adapter tests passed.')
 })

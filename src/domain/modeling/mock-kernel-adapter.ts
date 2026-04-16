@@ -28,6 +28,10 @@ import {
   getFeatureInsertionIndexForDocumentCursor,
   isValidDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
+import {
+  createDocumentVariableExpressionDiagnostics,
+  evaluateDocumentVariableExpressions,
+} from '@/domain/modeling/document-variable-expressions'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type {
@@ -3210,6 +3214,38 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
+    const variableValidation = evaluateDocumentVariableExpressions([
+      ...snapshot.document.variables,
+      {
+        variableId,
+        name: request.name,
+        valueText: request.valueText,
+      },
+    ])
+
+    if (!variableValidation.ok) {
+      const diagnostics = createDocumentVariableExpressionDiagnostics(variableValidation.diagnostics)
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        variableId,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: diagnostics[0]?.code ?? 'document-variable-invalid-expression',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       mutableSnapshot.document.variables.push({
         variableId,
@@ -3294,6 +3330,37 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           kind: 'rejected',
           baseRevisionId: request.baseRevisionId,
           reasonCode: 'mock-missing-document-variable',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    const variableValidation = evaluateDocumentVariableExpressions(
+      snapshot.document.variables.map((variable) =>
+        variable.variableId === request.variableId
+          ? { variableId: request.variableId, name: request.name, valueText: request.valueText }
+          : variable,
+      ),
+    )
+
+    if (!variableValidation.ok) {
+      const diagnostics = createDocumentVariableExpressionDiagnostics(variableValidation.diagnostics)
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        variableId: request.variableId,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: diagnostics[0]?.code ?? 'document-variable-invalid-expression',
         },
         rebuildResult: createRebuildResult({
           kind: 'skipped',

@@ -48,9 +48,9 @@ export interface ModelingKernelAdapter {
   reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse>
   /** Moves the document feature cursor without deleting durable feature records. */
   setFeatureCursor(request: SetFeatureCursorRequest): Promise<SetFeatureCursorResponse>
-  /** Adds a durable document variable record without evaluating its value text. */
+  /** Adds a durable document variable record after validating its raw expression text. */
   addDocumentVariable(request: AddDocumentVariableRequest): Promise<AddDocumentVariableResponse>
-  /** Updates a durable document variable record without evaluating its value text. */
+  /** Updates a durable document variable record after validating its raw expression text. */
   updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse>
   /** Evaluates a transient preview for a typed feature definition. */
   evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse>

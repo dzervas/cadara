@@ -819,7 +819,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       documentId: 'doc_workspace',
       baseRevisionId: 'rev_0004',
       name: 'width',
-      valueText: '12 mm',
+      valueText: '10 + 2',
     }
     const updateVariableRequest: UpdateDocumentVariableRequest = {
       contractVersion: 'modeling-contract/v1alpha1',
@@ -827,7 +827,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       baseRevisionId: 'rev_0005',
       variableId: 'variable_width',
       name: 'width',
-      valueText: '18 mm',
+      valueText: 'width + 6',
     }
     const payload: ModelingOperationHistoryPayload = {
       ...createEmptyOperationHistory('doc_workspace'),
@@ -845,7 +845,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         && result.payload.entries[0]?.kind === 'addDocumentVariable'
         && result.payload.entries[0].payload.variableId === 'variable_width'
         && result.payload.entries[1]?.kind === 'updateDocumentVariable'
-        && result.payload.entries[1].payload.valueText === '18 mm',
+        && result.payload.entries[1].payload.valueText === 'width + 6'
+        && !('calculatedValue' in result.payload.entries[1].payload),
       'Document variable history should preserve stable id, name, and raw value text.',
     )
 
@@ -858,13 +859,13 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
             variableId: 'variable_bad',
             name: 'bad',
             valueText: 'not evaluated',
-            isValid: false,
+            calculatedValue: 42,
           },
         },
       ],
     })
 
-    assert(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime validation state.')
+    assert(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime calculation state.')
   }
 
   testValidatesRepresentativeHistory()

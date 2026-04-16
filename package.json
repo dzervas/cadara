@@ -21,6 +21,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.7.0",
+    "mathjs": "^15.2.0",
     "opencascade.js": "^2.0.0-beta.b5ff984",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

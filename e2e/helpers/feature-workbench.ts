@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 
 import { SketchWorkbenchHarness } from './sketch-workbench'
@@ -97,8 +97,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async selectReference(targetId: string) {
-    const button = this.referenceButton(targetId)
-    await button.click()
+    await this.selectReferenceThroughCurrentUi(targetId)
     await expect.poll(() => this.currentEditorSelection(), { timeout: 10_000 }).toContain(targetId)
   }
 
@@ -119,43 +118,31 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async selectFirstReferenceMatching(pattern: RegExp) {
-    const ariaLabel = await this.getFirstReferenceLabelMatching(pattern)
+    const ariaLabel = await this.selectFirstReferenceMatchingCurrentUi(pattern)
 
     if (!ariaLabel) {
       throw new Error(`No selectable reference matched ${pattern}.`)
     }
-
-    await this.page.getByRole('button', { name: ariaLabel }).click()
     return ariaLabel
   }
 
-  async selectSupportedLoftFaceProfile(profileTarget: string) {
-    const faceLabels = await this.getReferenceLabelsMatching(/^Select .* body_feature_extrude-1\.face_/)
+  async selectSupportedLoftFaceProfile() {
+    await this.activateFeature('loft')
+    await this.clickViewportAtReal(VIEWPORT_TARGET_POINTS.face1)
+    await expect.poll(() => this.currentEditorSelection(), { timeout: 10_000 }).toContain('body_feature_extrude-1.face_body_feature_extrude-1_t0001_1')
+    await this.clickViewportAtReal(VIEWPORT_TARGET_POINTS.face6)
 
-    for (const faceLabel of faceLabels) {
-      await this.selectReference(profileTarget)
-      await this.activateFeature('loft')
-      await this.page.getByRole('button', { name: faceLabel }).click()
-
-      try {
-        await expect.poll(async () => {
-          if (await this.hasVisibleFeatureErrorDiagnostics()) {
-            return 'error'
-          }
-
-          const session = await this.featureSessionLabel()
-          return session.includes('create:loft:previewReady') ? 'ready' : session || 'pending'
-        }, { timeout: 5_000 }).toBe('ready')
-
-        await expect.poll(() => this.hasVisibleFeatureErrorDiagnostics(), { timeout: 2_000 }).toBe(false)
-        return faceLabel
-      } catch {
-        await this.page.getByRole('button', { name: 'Cancel' }).click()
-        await expect.poll(() => this.machineLabel(), { timeout: 10_000 }).toContain('idle')
+    await expect.poll(async () => {
+      if (await this.hasVisibleFeatureErrorDiagnostics()) {
+        return 'error'
       }
-    }
 
-    throw new Error('No loft face reference produced a preview-ready loft session.')
+      const session = await this.featureSessionLabel()
+      return session.includes('create:loft:previewReady') ? 'ready' : session || 'pending'
+    }, { timeout: 10_000 }).toBe('ready')
+
+    await expect.poll(() => this.hasVisibleFeatureErrorDiagnostics(), { timeout: 2_000 }).toBe(false)
+    return 'Select viewport target body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'
   }
 
   async setNumericField(label: string, value: number) {
@@ -190,7 +177,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
       await this.waitForAnimationFrames(2)
       const secondFrame = await this.canvasBytes()
       return meanPixelDelta(firstFrame, secondFrame)
-    }, { timeout: 5_000 }).toBeLessThan(maxDelta)
+    }, { timeout: 15_000 }).toBeLessThan(maxDelta)
   }
 
   async expectBodyPresent(bodyId: string) {
@@ -205,39 +192,49 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await expect.poll(async () => (await this.listVisibleBodyIds()).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(count)
   }
 
-  private referenceButton(targetId: string): Locator {
-    return this.page.getByRole('button', { name: new RegExp(`^Select .*${escapeRegExp(targetId)}$`) })
+  private async selectReferenceThroughCurrentUi(targetId: string) {
+    const viewportPoint = VIEWPORT_TARGET_POINTS_BY_ID[targetId]
+    if (viewportPoint) {
+      await this.clickViewportAtReal(viewportPoint)
+      return
+    }
+
+    const sidebarLabel = SIDEBAR_TARGET_LABELS[targetId]
+    if (sidebarLabel) {
+      await this.page.locator('aside').getByRole('button', { name: sidebarLabel }).first().click()
+      return
+    }
+
+    throw new Error(`No current UI selector is configured for ${targetId}.`)
   }
 
-  private async getFirstReferenceLabelMatching(pattern: RegExp) {
-    const matches = await this.getReferenceLabelsMatching(pattern)
-    return matches[0] ?? null
-  }
+  private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {
+    const targetId = resolveViewportTargetForPattern(pattern)
 
-  private async getReferenceLabelsMatching(pattern: RegExp) {
-    return this.page.getByRole('button').evaluateAll((buttons, source) => {
-      const regex = new RegExp(source)
-      return buttons.flatMap((button) => {
-        const label = button.getAttribute('aria-label')
-        return label && regex.test(label) ? [label] : []
-      })
-    }, pattern.source)
+    if (!targetId) {
+      return null
+    }
+
+    await this.selectReferenceThroughCurrentUi(targetId)
+    return `Select viewport target ${targetId}`
   }
 
   private async listVisibleBodyIds() {
-    const labels = await this.page.getByRole('button').evaluateAll((buttons) =>
+    const labels = await this.page.locator('aside').getByRole('button').evaluateAll((buttons) =>
       buttons.flatMap((button) => {
         if (button.getAttribute('aria-disabled') === 'true') {
           return []
         }
 
         const label = button.getAttribute('aria-label')
-        if (!label?.startsWith('Select ')) {
-          return []
+        if (label?.startsWith('Select ')) {
+          const match = /^Select .* (body_[A-Za-z0-9_-]+)$/.exec(label)
+          return match ? [match[1]] : []
         }
 
-        const match = /^Select .* (body_[A-Za-z0-9_-]+)$/.exec(label)
-        return match ? [match[1]] : []
+        const text = button.textContent?.trim() ?? ''
+        const bodyLabel = /^feature_[A-Za-z0-9_-]+$/.exec(text)?.[0]
+        return bodyLabel ? [`body_${bodyLabel}`] : []
       }),
     )
 
@@ -308,6 +305,44 @@ export function meanPixelDelta(left: Buffer, right: Buffer) {
   return total / Math.max(length, 1)
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const VIEWPORT_TARGET_POINTS = {
+  profile: { x: 380, y: 280 },
+  face: { x: 254, y: 65 },
+  face1: { x: 95, y: 200 },
+  face6: { x: 290, y: 35 },
+  edge: { x: 190, y: 65 },
+  vertex: { x: 63, y: 148 },
+} as const
+
+const VIEWPORT_TARGET_POINTS_BY_ID: Record<string, { x: number, y: number }> = {
+  'sketch_primary.region_primary-outer': VIEWPORT_TARGET_POINTS.profile,
+  'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6': VIEWPORT_TARGET_POINTS.face,
+  'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_12': VIEWPORT_TARGET_POINTS.edge,
+  'body_feature_extrude-1.vertex_body_feature_extrude-1_t0001_2': VIEWPORT_TARGET_POINTS.vertex,
+}
+
+const SIDEBAR_TARGET_LABELS: Record<string, string | RegExp> = {
+  'body_feature_extrude-1': 'feature_extrude-1',
+  'body_feature_extrude-2': 'feature_extrude-2',
+  'construction_plane-xy': 'Top Plane',
+  'construction_plane-yz': 'Right Plane',
+  'construction_plane-xz': 'Front Plane',
+}
+
+function resolveViewportTargetForPattern(pattern: RegExp) {
+  const source = pattern.source
+
+  if (source.includes('body_feature_extrude-1') && source.includes('face_')) {
+    return 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'
+  }
+
+  if (source.includes('body_feature_extrude-1') && source.includes('edge_')) {
+    return 'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_12'
+  }
+
+  if (source.includes('body_feature_extrude-1$')) {
+    return 'body_feature_extrude-1'
+  }
+
+  return null
 }

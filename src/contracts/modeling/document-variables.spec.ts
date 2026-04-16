@@ -23,7 +23,7 @@ test('src/contracts/modeling/document-variables.spec.ts', async () => {
         {
           variableId: 'variable_width' as const,
           name: 'width',
-          valueText: '12 mm',
+          valueText: '10 + 2',
         },
       ],
     },
@@ -31,7 +31,7 @@ test('src/contracts/modeling/document-variables.spec.ts', async () => {
       {
         variableId: 'variable_width' as const,
         name: 'width',
-        valueText: '12 mm',
+        valueText: '10 + 2',
       },
     ],
   }
@@ -40,7 +40,8 @@ test('src/contracts/modeling/document-variables.spec.ts', async () => {
 
   assert(parsed.document.variables[0]?.variableId === 'variable_width', 'Snapshot validation should preserve variable ids.')
   assert(parsed.document.variables[0]?.name === 'width', 'Snapshot validation should preserve variable names.')
-  assert(parsed.document.variables[0]?.valueText === '12 mm', 'Snapshot validation should preserve raw variable value text.')
+  assert(parsed.document.variables[0]?.valueText === '10 + 2', 'Snapshot validation should preserve raw variable value text.')
+  assert(!('calculatedValue' in parsed.document.variables[0]!), 'Snapshot validation should not add calculated variable values.')
   assert(
     parsed.document.references.length === response.snapshot.document.references.length,
     'Snapshot validation should not change snapshot reference records.',
@@ -55,13 +56,13 @@ test('src/contracts/modeling/document-variables.spec.ts', async () => {
           {
             variableId: 'variable_width',
             name: 'width',
-            valueText: '12 mm',
-            isValid: true,
+            valueText: '10 + 2',
+            calculatedValue: 12,
           },
         ],
       },
     })
-    assert(false, 'Snapshot validation should reject persisted variable runtime validation state.')
+    assert(false, 'Snapshot validation should reject persisted variable runtime calculation state.')
   } catch (error) {
     assert(error instanceof Error, 'Snapshot validation should report invalid variable records.')
   }

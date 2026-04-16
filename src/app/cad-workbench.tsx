@@ -306,7 +306,7 @@ export function CadWorkbench() {
     void modelingService.addDocumentVariable({
       baseRevisionId: snapshot.document.revisionId,
       name: `var${snapshot.document.variables.length + 1}`,
-      valueText: '',
+      valueText: '0',
     }).then((result) => {
       if (result.revisionState.kind !== 'accepted') {
         setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Add variable failed.')

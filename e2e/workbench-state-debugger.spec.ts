@@ -4,6 +4,7 @@ import { FeatureWorkbenchHarness, FEATURE_FIXTURE } from './helpers/feature-work
 import { createBaseExtrudeOperationHistory } from './helpers/modeling-fixtures'
 
 test.setTimeout(90_000)
+test.use({ viewport: { width: 1440, height: 960 } })
 
 test('state debugger owns workbench debug readouts and collapses locally', async ({ page }) => {
   await page.goto('/')
@@ -29,8 +30,8 @@ test('feature inspector omits debugger-only contract and revision readouts', asy
   const workbench = new FeatureWorkbenchHarness(page)
 
   await workbench.openWithRectangleProfileFixture()
-  await workbench.selectReference(FEATURE_FIXTURE.profile)
   await workbench.activateFeature('extrude')
+  await workbench.selectReference(FEATURE_FIXTURE.profile)
 
   const inspector = page.locator('aside').filter({ hasText: 'Feature Session' })
   await expect(inspector).toBeVisible()
@@ -40,21 +41,20 @@ test('feature inspector omits debugger-only contract and revision readouts', asy
   await expect(inspector.getByRole('button', { name: 'Cancel' })).toBeVisible()
 })
 
-test('snapshot references and diagnostics stay in-frame without page scrollbars', async ({ page }) => {
+test('diagnostics and debugger stay in-frame without page scrollbars', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
   const viewportHeight = page.viewportSize()?.height ?? 960
 
   await workbench.openWithOperationHistory(createBaseExtrudeOperationHistory())
 
-  const snapshotReferences = page.getByText('Snapshot References', { exact: true })
   const documentDiagnostics = page.getByText('Document Diagnostics', { exact: true })
   const stateDebugger = page.getByText('State Debugger', { exact: true })
 
-  await expect(snapshotReferences).toBeVisible()
+  await expect(page.getByText('Snapshot References', { exact: true })).toHaveCount(0)
   await expect(documentDiagnostics).toBeVisible()
   await expect(stateDebugger).toBeVisible()
 
-  for (const locator of [snapshotReferences, documentDiagnostics, stateDebugger]) {
+  for (const locator of [documentDiagnostics, stateDebugger]) {
     const box = await locator.boundingBox()
 
     if (!box) {

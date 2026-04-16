@@ -118,8 +118,8 @@ export interface ModelingDocumentSettings {
 
 /**
  * Durable document variable authored by the user.
- * Values are raw text so future expression support can evaluate them without
- * losing the original input.
+ * Values are validated expression text persisted raw so editing and replay keep
+ * the original input.
  */
 export interface DocumentVariableRecord {
   /** Stable durable variable identity. */

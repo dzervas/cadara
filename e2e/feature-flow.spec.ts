@@ -3,37 +3,38 @@ import { expect, test } from '@playwright/test'
 import { FeatureWorkbenchHarness, FEATURE_FIXTURE, meanPixelDelta } from './helpers/feature-workbench'
 
 test.setTimeout(90_000)
+test.use({ viewport: { width: 1440, height: 960 } })
 
 test('extrude previews and commits from the shared feature harness', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
   await workbench.openWithRectangleProfileFixture()
-  await workbench.selectReference(FEATURE_FIXTURE.profile)
   await workbench.activateFeature('extrude')
+  await workbench.selectReference(FEATURE_FIXTURE.profile)
 
   await workbench.expectFeaturePreviewReady('extrude')
   await workbench.commitFeature('feature_extrude-1')
 })
 
-test('revolve previews and commits with a region profile and durable edge axis', async ({ page }) => {
+test('revolve previews and commits with a planar profile and durable edge axis', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
   await workbench.openWithBaseExtrudeFixture()
-  await workbench.selectReference(FEATURE_FIXTURE.profile)
   await workbench.activateFeature('revolve')
-  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.edge_body_feature_extrude-1_t0001_10$/)
+  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.face_/)
+  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.edge_/)
 
   await workbench.expectFeaturePreviewReady('revolve')
   await workbench.commitFeature('feature_revolve-1')
 })
 
-test('sweep previews and commits with a region profile and durable edge path', async ({ page }) => {
+test('sweep previews and commits with a planar profile and durable edge path', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
-  const fixture = await workbench.openWithBaseExtrudeFixture()
+  await workbench.openWithBaseExtrudeFixture()
 
-  await workbench.selectReference(fixture.profileTarget)
   await workbench.activateFeature('sweep')
+  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.face_/)
   await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.edge_/)
 
   await workbench.expectFeaturePreviewReady('sweep')
@@ -43,8 +44,8 @@ test('sweep previews and commits with a region profile and durable edge path', a
 test('loft previews and commits with ordered profile selection', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 
-  const fixture = await workbench.openWithBaseExtrudeFixture()
-  await workbench.selectSupportedLoftFaceProfile(fixture.profileTarget)
+  await workbench.openWithBaseExtrudeFixture()
+  await workbench.selectSupportedLoftFaceProfile()
 
   await workbench.expectFeaturePreviewReady('loft')
   await workbench.commitFeature('feature_loft-1')
@@ -174,8 +175,8 @@ test('extrude boolean scope previews and commits with an explicit target body', 
   const workbench = new FeatureWorkbenchHarness(page)
 
   await workbench.openWithBaseExtrudeFixture()
-  await workbench.selectReference(FEATURE_FIXTURE.profile)
   await workbench.activateFeature('extrude')
+  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.face_/)
   await workbench.setOperation('join')
   await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1$/)
 

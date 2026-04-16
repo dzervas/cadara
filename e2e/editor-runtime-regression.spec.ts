@@ -4,6 +4,7 @@ import { FeatureWorkbenchHarness } from './helpers/feature-workbench'
 import { createBaseExtrudeOperationHistory } from './helpers/modeling-fixtures'
 
 test.setTimeout(90_000)
+test.use({ viewport: { width: 1440, height: 960 } })
 
 test('bootstraps editor state and restores persisted geometry across reload', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)

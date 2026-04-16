@@ -1481,6 +1481,78 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testDocumentVariableExpressionsValidateBeforeMutation() {
+    const adapter = new MockKernelAdapter()
+    const initial = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const initialVariables = [...initial.snapshot.document.variables]
+
+    const x = await adapter.addDocumentVariable({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: initial.snapshot.revisionId,
+      variableId: 'variable_x',
+      name: 'x',
+      valueText: '50',
+    })
+    assert(x.revisionState.kind === 'accepted', 'Valid variable literals should be accepted.')
+
+    const y = await adapter.addDocumentVariable({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: x.revisionId,
+      variableId: 'variable_y',
+      name: 'y',
+      valueText: 'x + 50',
+    })
+    assert(y.revisionState.kind === 'accepted', 'Dependent variable expressions should be accepted.')
+
+    const acceptedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      acceptedSnapshot.snapshot.document.variables.some((variable) =>
+        variable.variableId === 'variable_y' && variable.name === 'y' && variable.valueText === 'x + 50',
+      ),
+      'Accepted variable expressions should persist raw valueText.',
+    )
+
+    const rejected = await adapter.updateDocumentVariable({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: y.revisionId,
+      variableId: 'variable_y',
+      name: 'y',
+      valueText: 'missing + 1',
+    })
+    assert(rejected.revisionState.kind === 'rejected', 'Invalid variable expressions should be rejected.')
+    assert(
+      rejected.diagnostics.some((diagnostic) => diagnostic.code === 'document-variable-unresolved-reference'),
+      'Rejected variable expressions should report expression diagnostics.',
+    )
+
+    const rejectedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      rejectedSnapshot.snapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join('|')
+        === acceptedSnapshot.snapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join('|'),
+      'Rejected variable expressions should leave document variables unchanged.',
+    )
+    assert(
+      initialVariables.every((variable) =>
+        rejectedSnapshot.snapshot.document.variables.some((next) =>
+          next.variableId === variable.variableId && next.name === variable.name && next.valueText === variable.valueText,
+        ),
+      ),
+      'Existing variable records should remain present after expression validation.',
+    )
+  }
+
   await testExtrudePreviewDependsOnDefinition()
   await testProfileCollectionContractBoundaryRejectsInvalidPayloads()
   await testUnsupportedFeatureDefinitionsAreRejectedByMock()
@@ -1509,4 +1581,5 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   testRenderValidatorRejectsInvalidGeometry()
   testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions()
   await testMockSnapshotSurfacesSketchNavigationAndHistory()
+  await testDocumentVariableExpressionsValidateBeforeMutation()
 })
