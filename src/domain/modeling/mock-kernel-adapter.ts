@@ -14,6 +14,7 @@ import type {
   PickId,
   RegionId,
   RenderableId,
+  RequestId,
   RevisionId,
   SketchId,
   SketchEntityId,
@@ -70,6 +71,7 @@ import type {
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
 } from '@/contracts/modeling/schema'
+import type { AuthoredModelDocument as RepositoryAuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
 import { getAdvancedParticipant, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
@@ -2287,6 +2289,11 @@ function allocateDocumentVariableId(snapshot: DocumentSnapshot): DocumentVariabl
   return `variable_${nextOrdinal}` as DocumentVariableId
 }
 
+function parseMockRevisionSequence(revisionId: RevisionId) {
+  const sequence = Number(revisionId.replace(/^rev_/, ''))
+  return Number.isFinite(sequence) && sequence > 0 ? sequence : 1
+}
+
 export class MockKernelAdapter implements ModelingKernelAdapter {
   private readonly solverAdapter: SketchSolverAdapter
 
@@ -2304,6 +2311,93 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     }
 
     return this.snapshotPromise
+  }
+
+  async restoreAuthoredModelDocument(document: RepositoryAuthoredModelDocument): Promise<void> {
+    const snapshot = structuredClone(await this.getSnapshot())
+    const featureTargets = new Map(snapshot.document.features.map((feature) => [feature.featureId, feature.producedTargets]))
+    const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
+    const orderedFeatures = document.featureOrder
+      .map((featureId) => featureById.get(featureId))
+      .filter((feature): feature is RepositoryAuthoredModelDocument['features'][number] => Boolean(feature))
+
+    snapshot.document.revisionId = document.revisionId
+    snapshot.revisionId = document.revisionId
+    snapshot.document.settings = structuredClone(document.settings)
+    snapshot.settings = snapshot.document.settings
+    snapshot.document.variables = structuredClone(document.variables)
+    snapshot.variables = snapshot.document.variables
+    snapshot.document.sketches = document.sketches.map((sketch) => {
+      const evaluation = evaluateMockSketchDefinition({
+        documentId: document.documentId,
+        revisionId: document.revisionId,
+        sketchId: sketch.sketchId,
+        plane: sketch.plane.frame,
+        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        definition: sketch.definition,
+        requestId: `request_restore_${sketch.sketchId}_regions` as RequestId,
+      })
+      const sketchRecord: SketchRecord = {
+        ownerDocumentId: document.documentId,
+        ownerRevisionId: document.revisionId,
+        ownerFeatureId: null,
+        ownerSketchId: sketch.sketchId,
+        ownerBodyId: null,
+        sketchId: sketch.sketchId,
+        label: sketch.label,
+        planeSupport: sketch.plane.support,
+        definition: structuredClone(sketch.definition),
+        solvedSnapshot: evaluation.solve.solvedSnapshot,
+        regions: evaluation.regions.regions.map((region) => ({ ...region, ownerRevisionId: document.revisionId })),
+      }
+
+      return {
+        ownerDocumentId: document.documentId,
+        ownerRevisionId: document.revisionId,
+        ownerFeatureId: null,
+        ownerSketchId: sketch.sketchId,
+        ownerBodyId: null,
+        sketchId: sketch.sketchId,
+        label: sketch.label,
+        plane: structuredClone(sketch.plane),
+        planeTarget: structuredClone(sketch.planeTarget),
+        planeKey: sketch.planeKey,
+        sketch: sketchRecord,
+      }
+    })
+    snapshot.sketches = snapshot.document.sketches
+    snapshot.document.features = orderedFeatures.map((feature) => ({
+      ownerDocumentId: document.documentId,
+      ownerRevisionId: document.revisionId,
+      ownerFeatureId: feature.featureId,
+      ownerSketchId: null,
+      ownerBodyId: null,
+      featureId: feature.featureId,
+      label: feature.label,
+      definition: structuredClone(feature.definition),
+      producedTargets: structuredClone(featureTargets.get(feature.featureId) ?? []),
+    }))
+    snapshot.features = snapshot.document.features
+    snapshot.document.cursor = structuredClone(document.cursor)
+    snapshot.cursor = snapshot.document.cursor
+
+    for (const label of document.bodyLabels) {
+      const body = snapshot.document.bodies.find((entry) => entry.bodyId === label.bodyId)
+      if (body) {
+        body.label = label.label
+      }
+      const object = snapshot.presentation.objects.find((entry) => entry.target.kind === 'body' && entry.target.bodyId === label.bodyId)
+      if (object) {
+        object.label = label.label
+      }
+    }
+
+    rebuildFeatureTree(snapshot)
+    rebuildObjectTree(snapshot)
+    stampSnapshotRevision(snapshot, document.revisionId)
+    this.currentRevisionId = document.revisionId
+    this.revisionSequence = parseMockRevisionSequence(document.revisionId)
+    this.snapshotPromise = Promise.resolve(snapshot)
   }
 
   private async mutateSnapshot<TResponse>(mutate: (snapshot: DocumentSnapshot, nextRevisionId: RevisionId) => TResponse): Promise<TResponse> {

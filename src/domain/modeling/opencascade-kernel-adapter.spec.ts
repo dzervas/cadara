@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import { strFromU8, unzipSync } from 'fflate'
+import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import type {
   DeriveSketchRegionsRequest,
@@ -3317,6 +3318,75 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testAuthoredRestoreAppliesOnlyFeaturesThroughCursor() {
+    const source = createAdapter()
+    const committedSketch = await commitSeedSketch(source)
+    assert(committedSketch.revisionState.kind === 'accepted', 'Seed sketch should commit before authored restore setup.')
+
+    const sketchSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(sketchSnapshot.snapshot)
+    const firstFeature = await source.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: committedSketch.revisionId,
+      definition: createExtrudeDefinition(sketch, 5),
+    })
+    assert(firstFeature.revisionState.kind === 'accepted', 'First restore setup feature should commit.')
+
+    const firstFeatureSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const secondFeature = await source.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: firstFeatureSnapshot.snapshot.revisionId,
+      definition: createExtrudeDefinition(sketch, 8),
+    })
+    assert(secondFeature.revisionState.kind === 'accepted', 'Second restore setup feature should commit.')
+
+    const fullSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const authoredDocument = createAuthoredModelDocumentFromSnapshot(fullSnapshot.snapshot)
+
+    async function restore(cursor: typeof authoredDocument.cursor) {
+      const target = createAdapter()
+      await target.restoreAuthoredModelDocument({
+        ...authoredDocument,
+        cursor,
+      })
+
+      return (await target.getDocumentSnapshot({
+        contractVersion: CONTRACT_VERSION,
+        documentId: 'doc_workspace',
+      })).snapshot
+    }
+
+    const emptyCursorSnapshot = await restore({ kind: 'empty' })
+    assert(emptyCursorSnapshot.cursor.kind === 'empty', 'Restored empty cursor should remain empty.')
+    assert(emptyCursorSnapshot.features.length === 0, 'Empty cursor restore should not apply downstream features.')
+
+    const sketchCursorSnapshot = await restore({ kind: 'sketch', sketchId: sketch.sketchId })
+    assert(sketchCursorSnapshot.cursor.kind === 'sketch', 'Restored sketch cursor should remain on the sketch.')
+    assert(sketchCursorSnapshot.features.length === 0, 'Sketch cursor restore should not apply features after that sketch.')
+
+    const firstFeatureCursorSnapshot = await restore({ kind: 'feature', featureId: firstFeature.featureId })
+    assert(firstFeatureCursorSnapshot.cursor.kind === 'feature', 'Restored feature cursor should remain on the feature.')
+    assert(
+      firstFeatureCursorSnapshot.features.map((feature) => feature.featureId).join('|') === firstFeature.featureId,
+      'Feature cursor restore should apply only features through the persisted cursor.',
+    )
+    assert(
+      firstFeatureCursorSnapshot.bodies.every((body) => body.ownerFeatureId !== secondFeature.featureId),
+      'Feature cursor restore should not expose bodies produced by later features.',
+    )
+  }
+
   await testSnapshotFetchAndSketchCommit()
   await testPlaneFeatureCreateSupportsConstructionAndPlanarFaceReferences()
   await testExtrudePreviewCreateAndUpdateCommitGeometry()
@@ -3347,6 +3417,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions()
   await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
   await testDocumentVariableExpressionsValidateBeforeOccMutation()
+  await testAuthoredRestoreAppliesOnlyFeaturesThroughCursor()
   await testOccGeometryExportsProduceRealPayloads()
   await testOccGeometryExportsRejectInvalidTargets()
 

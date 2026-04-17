@@ -108,6 +108,7 @@ import {
   updateFeatureResponseSchema,
   workspaceSnapshotSchema,
 } from '@/contracts/modeling/runtime-schema'
+import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import {
   createCommitSketchHistoryEntry,
   createAddDocumentVariableHistoryEntry,
@@ -153,6 +154,7 @@ import {
   loadOrCreateOperationHistory,
   type OperationHistoryStore,
 } from '@/domain/modeling/modeling-history-persistence'
+import type { DocumentRepository, DocumentRepositoryRestoreStatus } from '@/domain/modeling/document-repository'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -186,6 +188,7 @@ export interface ModelingServiceOptions {
   currentDocumentId: DocumentSnapshot['documentId']
   sketchSolver?: SketchSolverBoundary
   operationHistoryStore?: OperationHistoryStore | null
+  documentRepository?: DocumentRepository | null
 }
 
 export interface ModelingHistoryRestoreDiagnostic {
@@ -3091,6 +3094,28 @@ function createRestoreFailure(
   }
 }
 
+function createRepositoryRestoreFailure(
+  status: Extract<DocumentRepositoryRestoreStatus, { kind: 'failed' }>,
+  entriesReplayed = 0,
+): ModelingHistoryRestoreState {
+  return createRestoreFailure(
+    status.diagnostic.reasonCode,
+    status.diagnostic.message,
+    null,
+    entriesReplayed,
+  )
+}
+
+function createDocumentRepositoryDiagnostic(status: Extract<DocumentRepositoryRestoreStatus, { kind: 'failed' }>): ModelingDiagnostic {
+  return {
+    code: status.diagnostic.reasonCode,
+    severity: 'error',
+    message: status.diagnostic.message,
+    target: null,
+    detail: null,
+  }
+}
+
 function isAcceptedMutation(response: ModelingOperationResult) {
   return response.revisionState.kind === 'accepted'
 }
@@ -3325,39 +3350,21 @@ export function createModelingService(
   const currentDocumentId = normalizeCurrentDocumentId(options.currentDocumentId)
   const sketchSolver = options.sketchSolver ? createSketchSolverService(options.sketchSolver) : null
   const operationHistoryStore = options.operationHistoryStore ?? null
+  const documentRepository = options.documentRepository ?? null
   let operationHistoryPayload: ModelingOperationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
   let canPersistOperationHistory = true
+  let canPersistAuthoredDocument = true
   let historyRestoreState: ModelingHistoryRestoreState = {
     kind: 'pending',
     entriesReplayed: 0,
     diagnostics: [],
   }
 
-  const restorePromise = (async () => {
-    const loadResult = loadOrCreateOperationHistory(operationHistoryStore, currentDocumentId)
-
-    if (!loadResult.ok) {
-      canPersistOperationHistory = false
-      historyRestoreState = createRestoreFailure(loadResult.reasonCode, loadResult.message, null, 0)
-      return
-    }
-
-    if (loadResult.payload.documentId !== currentDocumentId) {
-      canPersistOperationHistory = false
-      historyRestoreState = createRestoreFailure(
-        'document-id-mismatch',
-        'Operation history document identity does not match the active document.',
-        null,
-        0,
-      )
-      return
-    }
-
-    operationHistoryPayload = structuredClone(loadResult.payload)
-
+  async function replayOperationHistoryPayload(loadResultPayload: ModelingOperationHistoryPayload) {
+    operationHistoryPayload = structuredClone(loadResultPayload)
     let replayCursor = await getAdapterReplayCursor(adapter, currentDocumentId)
 
-    for (const [entryIndex, entry] of loadResult.payload.entries.entries()) {
+    for (const [entryIndex, entry] of loadResultPayload.entries.entries()) {
       const { response, cursor } = await replayHistoryEntry({
         adapter,
         documentId: currentDocumentId,
@@ -3387,15 +3394,123 @@ export function createModelingService(
       }
     }
 
-    historyRestoreState = loadResult.payload.entries.length === 0
+    historyRestoreState = loadResultPayload.entries.length === 0
       ? { kind: 'empty', entriesReplayed: 0, diagnostics: [] }
       : {
           kind: 'restored',
-          entriesReplayed: loadResult.payload.entries.length,
+          entriesReplayed: loadResultPayload.entries.length,
           diagnostics: [],
         }
+  }
+
+  async function restoreOperationHistoryCompatibility() {
+    const loadResult = loadOrCreateOperationHistory(operationHistoryStore, currentDocumentId)
+
+    if (!loadResult.ok) {
+      canPersistOperationHistory = false
+      historyRestoreState = createRestoreFailure(loadResult.reasonCode, loadResult.message, null, 0)
+      return
+    }
+
+    if (loadResult.payload.documentId !== currentDocumentId) {
+      canPersistOperationHistory = false
+      historyRestoreState = createRestoreFailure(
+        'document-id-mismatch',
+        'Operation history document identity does not match the active document.',
+        null,
+        0,
+      )
+      return
+    }
+
+    await replayOperationHistoryPayload(loadResult.payload)
+  }
+
+  async function restoreRepositoryBackedDocument() {
+    const seedSnapshot = validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+      currentDocumentId,
+    )
+    const loadResult = await documentRepository!.load({
+      documentId: currentDocumentId,
+      seedDocument: createAuthoredModelDocumentFromSnapshot(seedSnapshot),
+    })
+
+    if (!loadResult.ok) {
+      canPersistOperationHistory = false
+      canPersistAuthoredDocument = false
+      historyRestoreState = createRepositoryRestoreFailure(loadResult.status)
+      return
+    }
+
+    if (loadResult.status.kind === 'restored') {
+      await adapter.restoreAuthoredModelDocument?.(loadResult.document)
+      operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+      historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
+      return
+    }
+
+    const historyLoadResult = operationHistoryStore?.load()
+    if (historyLoadResult && !historyLoadResult.ok) {
+      await documentRepository!.reset(currentDocumentId)
+      canPersistOperationHistory = false
+      canPersistAuthoredDocument = false
+      historyRestoreState = createRestoreFailure(historyLoadResult.reasonCode, historyLoadResult.message, null, 0)
+      return
+    }
+
+    if (historyLoadResult?.payload && historyLoadResult.payload.entries.length > 0) {
+      if (historyLoadResult.payload.documentId !== currentDocumentId) {
+        await documentRepository!.reset(currentDocumentId)
+        canPersistOperationHistory = false
+        canPersistAuthoredDocument = false
+        historyRestoreState = createRestoreFailure(
+          'document-id-mismatch',
+          'Operation history document identity does not match the active document.',
+          null,
+          0,
+        )
+        return
+      }
+
+      await replayOperationHistoryPayload(historyLoadResult.payload)
+      if (historyRestoreState.kind === 'failed') {
+        await documentRepository!.reset(currentDocumentId)
+        canPersistAuthoredDocument = false
+        return
+      }
+
+      const migratedSnapshot = validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+        currentDocumentId,
+      )
+      const writeResult = await documentRepository!.mutate({
+        documentId: currentDocumentId,
+        document: createAuthoredModelDocumentFromSnapshot(migratedSnapshot),
+      })
+      if (!writeResult.ok) {
+        await documentRepository!.reset(currentDocumentId)
+        canPersistOperationHistory = false
+        canPersistAuthoredDocument = false
+        historyRestoreState = createRepositoryRestoreFailure(writeResult.status, historyRestoreState.entriesReplayed)
+      }
+      return
+    }
+
+    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+    historyRestoreState = { kind: 'empty', entriesReplayed: 0, diagnostics: [] }
+  }
+
+  const restorePromise = (async () => {
+    if (documentRepository) {
+      await restoreRepositoryBackedDocument()
+      return
+    }
+
+    await restoreOperationHistoryCompatibility()
   })().catch((error: unknown) => {
     canPersistOperationHistory = false
+    canPersistAuthoredDocument = false
     historyRestoreState = createRestoreFailure(
       'replay-exception',
       error instanceof Error ? error.message : 'Operation history replay failed unexpectedly.',
@@ -3406,8 +3521,10 @@ export function createModelingService(
 
   function resetOperationHistory() {
     operationHistoryStore?.clear()
+    void documentRepository?.reset(currentDocumentId)
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
     canPersistOperationHistory = true
+    canPersistAuthoredDocument = true
     historyRestoreState = {
       kind: 'empty',
       entriesReplayed: 0,
@@ -3438,6 +3555,41 @@ export function createModelingService(
     }
   }
 
+  async function persistAcceptedAuthoredDocument<T extends { diagnostics: ModelingDiagnostic[] }>(result: T): Promise<T> {
+    if (!documentRepository) {
+      return result
+    }
+
+    if (!canPersistAuthoredDocument) {
+      const status = documentRepository.getRestoreStatus(currentDocumentId)
+      return status.kind === 'failed'
+        ? {
+            ...result,
+            diagnostics: [...result.diagnostics, createDocumentRepositoryDiagnostic(status)],
+          }
+        : result
+    }
+
+    const snapshot = validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+      currentDocumentId,
+    )
+    const writeResult = await documentRepository.mutate({
+      documentId: currentDocumentId,
+      document: createAuthoredModelDocumentFromSnapshot(snapshot),
+    })
+
+    if (writeResult.ok) {
+      return result
+    }
+
+    canPersistAuthoredDocument = false
+    return {
+      ...result,
+      diagnostics: [...result.diagnostics, createDocumentRepositoryDiagnostic(writeResult.status)],
+    }
+  }
+
   return {
     currentDocumentId,
     sketchSolver,
@@ -3459,7 +3611,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createCommitSketchHistoryEntry(request, response.sketchId))
       }
 
-      return mapCommitSketchResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapCommitSketchResponse(response, currentDocumentId))
+        : mapCommitSketchResponse(response, currentDocumentId)
     },
     async addDocumentVariable(input) {
       await restorePromise
@@ -3469,7 +3623,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createAddDocumentVariableHistoryEntry(request, response.variableId))
       }
 
-      return mapDocumentVariableResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapDocumentVariableResponse(response, currentDocumentId))
+        : mapDocumentVariableResponse(response, currentDocumentId)
     },
     async updateDocumentVariable(input) {
       await restorePromise
@@ -3479,7 +3635,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createUpdateDocumentVariableHistoryEntry(request))
       }
 
-      return mapDocumentVariableResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapDocumentVariableResponse(response, currentDocumentId))
+        : mapDocumentVariableResponse(response, currentDocumentId)
     },
     async createFeature(input) {
       await restorePromise
@@ -3489,7 +3647,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createCreateFeatureHistoryEntry(request))
       }
 
-      return mapFeatureMutationResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapFeatureMutationResponse(response, currentDocumentId))
+        : mapFeatureMutationResponse(response, currentDocumentId)
     },
     async updateFeature(input) {
       await restorePromise
@@ -3499,7 +3659,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createUpdateFeatureHistoryEntry(request))
       }
 
-      return mapFeatureMutationResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapFeatureMutationResponse(response, currentDocumentId))
+        : mapFeatureMutationResponse(response, currentDocumentId)
     },
     async deleteFeature(input) {
       await restorePromise
@@ -3509,7 +3671,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createDeleteFeatureHistoryEntry(request))
       }
 
-      return mapDeleteFeatureResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapDeleteFeatureResponse(response, currentDocumentId))
+        : mapDeleteFeatureResponse(response, currentDocumentId)
     },
     async renameBody(input) {
       await restorePromise
@@ -3519,7 +3683,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createRenameBodyHistoryEntry(request))
       }
 
-      return mapRenameBodyResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapRenameBodyResponse(response, currentDocumentId))
+        : mapRenameBodyResponse(response, currentDocumentId)
     },
     async reorderFeature(input) {
       await restorePromise
@@ -3529,7 +3695,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createReorderFeatureHistoryEntry(request))
       }
 
-      return mapReorderFeatureResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapReorderFeatureResponse(response, currentDocumentId))
+        : mapReorderFeatureResponse(response, currentDocumentId)
     },
     async setFeatureCursor(input) {
       await restorePromise
@@ -3539,7 +3707,9 @@ export function createModelingService(
         appendOperationHistoryEntry(createSetFeatureCursorHistoryEntry(request))
       }
 
-      return mapSetFeatureCursorResponse(response, currentDocumentId)
+      return isAcceptedMutation(response)
+        ? persistAcceptedAuthoredDocument(mapSetFeatureCursorResponse(response, currentDocumentId))
+        : mapSetFeatureCursorResponse(response, currentDocumentId)
     },
     async evaluatePreview(input) {
       await restorePromise

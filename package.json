@@ -14,6 +14,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@automerge/automerge-repo": "^2.5.5",
+    "@automerge/automerge-repo-storage-indexeddb": "^2.5.5",
     "@mantine/core": "^9.0.2",
     "@mantine/hooks": "^9.0.2",
     "@react-three/drei": "^10.7.7",

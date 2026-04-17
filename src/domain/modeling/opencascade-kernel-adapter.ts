@@ -38,6 +38,7 @@ import type {
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from '@/contracts/modeling/schema'
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
@@ -45,6 +46,7 @@ import type {
   DocumentVariableId,
   FeatureId,
   RegionId,
+  RequestId,
   RevisionId,
   SketchEntityId,
   SketchId,
@@ -406,6 +408,30 @@ function buildSketchChangedTargets(sketch: SketchSnapshotRecord) {
   ]
 }
 
+function createRestoreSolverCorrelation(sketchId: SketchId, revisionId: RevisionId) {
+  const requestId = `request_restore_${sketchId}_${revisionId}` as RequestId
+
+  return {
+    requestId,
+    projectionRequestId: `${requestId}_project` as RequestId,
+    validationRequestId: `${requestId}_validate` as RequestId,
+    solveRequestId: `${requestId}_solve` as RequestId,
+    regionRequestId: `${requestId}_regions` as RequestId,
+  }
+}
+
+function createRestoreSolverTolerances(
+  document: AuthoredModelDocument,
+  fallback: SolverTolerancePolicy,
+): SolverTolerancePolicy {
+  return {
+    ...fallback,
+    coincidence: document.settings.modelingTolerance,
+    angleRadians: document.settings.angularToleranceRadians,
+    minimumSegmentLength: document.settings.modelingTolerance,
+  }
+}
+
 function capitalizeFeatureKind(kind: FeatureDefinition['kind']) {
   return `${kind[0]!.toUpperCase()}${kind.slice(1)}`
 }
@@ -736,6 +762,141 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       authoringState,
       revisionSequence: parseRevisionSequence(OCC_KERNEL_INITIAL_REVISION_ID),
     }
+  }
+
+  private async rebuildAuthoredSketchRecord(
+    document: AuthoredModelDocument,
+    sketch: AuthoredModelDocument['sketches'][number],
+  ): Promise<SketchSnapshotRecord> {
+    const sketchId = sketch.sketchId
+    const definition = normalizeSketchDefinitionForSketchId(structuredClone(sketch.definition), sketchId)
+    const correlation = createRestoreSolverCorrelation(sketchId, document.revisionId)
+    const solverAdapter = this.getSolverAdapter(document.revisionId)
+    const tolerances = createRestoreSolverTolerances(document, this.tolerances)
+    const projection = await solverAdapter.projectExternalReferences({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: correlation.projectionRequestId,
+      documentId: document.documentId,
+      revisionId: document.revisionId,
+      sketchId,
+      plane: sketch.plane.frame,
+      tolerances,
+      references: definition.references.map((reference) => ({
+        referenceId: reference.referenceId,
+        reference,
+      })),
+    })
+    const validation = await solverAdapter.validateSketch({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: correlation.validationRequestId,
+      documentId: document.documentId,
+      revisionId: document.revisionId,
+      sketchId,
+      plane: sketch.plane.frame,
+      tolerances,
+      definition,
+      projectedReferences: projection.projectedReferences,
+    })
+    const solved = await solverAdapter.solveSketch({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: correlation.solveRequestId,
+      documentId: document.documentId,
+      revisionId: document.revisionId,
+      sketchId,
+      plane: sketch.plane.frame,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+      definition,
+      projectedReferences: projection.projectedReferences,
+      incrementalEdit: null,
+    })
+    const regions = await solverAdapter.deriveSketchRegions({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: correlation.regionRequestId,
+      documentId: document.documentId,
+      revisionId: document.revisionId,
+      sketchId,
+      solvedSnapshot: solved.solvedSnapshot,
+      definition,
+    })
+
+    if (!validation.isValid || solved.status.solveState !== 'solved') {
+      throw new Error(`Authored sketch ${sketchId} could not be restored from persisted authored inputs.`)
+    }
+
+    return buildSketchSnapshotRecord(
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: document.documentId,
+        baseRevisionId: document.revisionId,
+        solverCorrelation: correlation,
+        sketchId,
+        sketchLabel: sketch.label,
+        plane: structuredClone(sketch.plane),
+        planeTarget: structuredClone(sketch.planeTarget),
+        planeKey: sketch.planeKey,
+        definition,
+      },
+      sketchId,
+      document.revisionId,
+      definition,
+      normalizeDerivedRegionsForSketchId(regions.regions, sketchId, document.revisionId),
+      solved.solvedSnapshot,
+    )
+  }
+
+  private getRestoredFeaturesForCursor(
+    document: AuthoredModelDocument,
+    features: readonly OccAuthoringFeatureRecord[],
+  ) {
+    if (document.cursor.kind === 'empty' || document.cursor.kind === 'sketch') {
+      return []
+    }
+
+    const cursorIndex = features.findIndex((feature) => feature.featureId === document.cursor.featureId)
+    return cursorIndex < 0 ? [] : features.slice(0, cursorIndex + 1)
+  }
+
+  async restoreAuthoredModelDocument(document: AuthoredModelDocument): Promise<void> {
+    const oc = await this.loadOpenCascadeInstance()
+    const sketches = await Promise.all(
+      document.sketches.map((sketch) => this.rebuildAuthoredSketchRecord(document, sketch)),
+    )
+    const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
+    const features: OccAuthoringFeatureRecord[] = document.featureOrder
+      .map((featureId) => featureById.get(featureId))
+      .filter((feature): feature is AuthoredModelDocument['features'][number] => Boolean(feature))
+      .map((feature) => ({
+        featureId: feature.featureId,
+        label: feature.label,
+        definition: structuredClone(feature.definition),
+      }))
+    let authoringState = createOccAuthoringState(oc, {
+      documentId: document.documentId,
+      revisionId: document.revisionId,
+      modelingTolerance: document.settings.modelingTolerance,
+      sketches,
+      variables: structuredClone(document.variables),
+      bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
+      cursor: { kind: 'empty' },
+    })
+
+    for (const feature of this.getRestoredFeaturesForCursor(document, features)) {
+      authoringState = applyOccFeatureToAuthoringState(authoringState, feature)
+    }
+
+    authoringState = {
+      ...authoringState,
+      cursor: document.cursor,
+    }
+    this.replaceRuntimeState({
+      authoringState,
+      revisionSequence: parseRevisionSequence(document.revisionId),
+    })
   }
 
   private buildInitialSnapshotWithoutRuntime() {

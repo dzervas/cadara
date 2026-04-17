@@ -3,6 +3,10 @@ import { useMemo } from 'react'
 import { CadWorkbench } from '@/app/cad-workbench'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { createLocalStorageOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
+import {
+  createIndexedDbAutomergeDocumentRepository,
+  createLocalStorageDocumentRepositoryUrlStore,
+} from '@/domain/modeling/automerge-indexeddb-document-repository'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import {
   OCC_KERNEL_DOCUMENT_ID,
@@ -44,6 +48,12 @@ function App() {
           typeof window === 'undefined'
             ? null
             : createLocalStorageOperationHistoryStore(window.localStorage),
+        documentRepository:
+          typeof window === 'undefined'
+            ? null
+            : createIndexedDbAutomergeDocumentRepository({
+                urlStore: createLocalStorageDocumentRepositoryUrlStore(window.localStorage),
+              }),
       }),
     [kernelAdapter, sketchSolver],
   )

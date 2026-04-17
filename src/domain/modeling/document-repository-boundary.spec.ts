@@ -1,0 +1,42 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { test } from 'bun:test'
+
+test('src/domain/modeling/document-repository-boundary.spec.ts', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const sourceRoot = join(process.cwd(), 'src')
+  const offenders: string[] = []
+
+  for (const file of walkTypescriptFiles(sourceRoot)) {
+    const relativePath = relative(process.cwd(), file)
+    const source = readFileSync(file, 'utf8')
+    if (
+      source.includes('@automerge/automerge')
+      && !relativePath.includes('src/domain/modeling/automerge-indexeddb-document-repository.ts')
+      && !relativePath.includes('src/domain/modeling/document-repository-boundary.spec.ts')
+    ) {
+      offenders.push(relativePath)
+    }
+  }
+
+  assert(
+    offenders.length === 0,
+    `Automerge imports must stay inside the repository implementation layer: ${offenders.join(', ')}`,
+  )
+})
+
+function walkTypescriptFiles(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const path = join(directory, entry)
+    const stat = statSync(path)
+    if (stat.isDirectory()) {
+      return walkTypescriptFiles(path)
+    }
+    return path.endsWith('.ts') || path.endsWith('.tsx') ? [path] : []
+  })
+}

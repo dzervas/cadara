@@ -18,6 +18,12 @@ export type SnapshotSchemaVersion = 'document-snapshot/v1alpha1'
 export type OperationHistorySchemaVersion = 'modeling-operation-history/v1alpha1'
 
 /**
+ * Authored model document payload schema version.
+ * This version applies only to the local-first persisted authored CAD state.
+ */
+export type AuthoredModelDocumentSchemaVersion = 'authored-model-document/v1alpha1'
+
+/**
  * Versioned schema for extrude feature definitions.
  */
 export type ExtrudeFeatureSchemaVersion = 'feature-type/extrude/v1alpha1'
@@ -77,6 +83,11 @@ export const SNAPSHOT_SCHEMA_VERSION: SnapshotSchemaVersion = 'document-snapshot
  * Current modeling operation-history schema version literal.
  */
 export const OPERATION_HISTORY_SCHEMA_VERSION: OperationHistorySchemaVersion = 'modeling-operation-history/v1alpha1'
+
+/**
+ * Current authored model document schema version literal.
+ */
+export const AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION: AuthoredModelDocumentSchemaVersion = 'authored-model-document/v1alpha1'
 
 /**
  * Current extrude feature schema version literal.

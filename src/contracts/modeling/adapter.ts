@@ -28,6 +28,7 @@ import type {
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from '@/contracts/modeling/schema'
+import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
 
 /**
  * Public modeling-kernel boundary for durable document queries and feature
@@ -36,6 +37,8 @@ import type {
  * inferring omitted semantics from UI conventions.
  */
 export interface ModelingKernelAdapter {
+  /** Rehydrates kernel runtime state from a repository-authored document when supported. */
+  restoreAuthoredModelDocument?(document: AuthoredDocument): Promise<void>
   /** Returns the authoritative typed snapshot for the requested document. */
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */
