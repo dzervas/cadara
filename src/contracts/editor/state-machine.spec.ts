@@ -5,11 +5,17 @@ import {
   initialEditorState,
   replayEditorEvents,
   replayEditorEventsWithRuntime,
+  type SketchEditorState,
   transitionEditorState,
   type EditorEvent,
 } from './state-machine'
 import { createEditorRuntimeActor } from './runtime-machine'
-import type { SelectionTargetCatalog } from '@/domain/editor/schema'
+import {
+  getDefaultSelectionFilterForMode,
+  primitiveRefEquals,
+  type PrimitiveRef,
+  type SelectionTargetCatalog,
+} from '@/domain/editor/schema'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
@@ -25,9 +31,13 @@ import {
   SNAPSHOT_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 import {
+  acceptSketchDraw,
+  beginSketchTool,
   createNewSketchSession,
   createSketchSessionFromSnapshot,
+  getSketchSessionPreviewLabel,
   mapSketchPointToWorld,
+  startSketchDraw,
 } from '@/domain/editor/sketch-session'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
@@ -1495,6 +1505,98 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(cleared.state.command.toolId === 'sketch', 'Clearing an active sketch tool should restore sketch-session command identity.')
   }
 
+  function createConstraintAuthoringEditorState(): {
+    state: SketchEditorState
+    pointTarget: PrimitiveRef
+    lineTarget: PrimitiveRef
+  } {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [10, 0])
+    session = beginSketchTool(session, 'dimensionDistance')
+
+    const pointTarget = session.definition.points[0]?.target
+    const lineTarget = session.definition.entities[0]?.target
+
+    assert(pointTarget, 'Constraint routing fixture should create a selectable sketch point.')
+    assert(lineTarget, 'Constraint routing fixture should create a selectable sketch entity.')
+
+    return {
+      pointTarget,
+      lineTarget,
+      state: {
+        ...initialEditorState,
+        kind: 'editingSketch',
+        mode: 'sketch',
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selection: [],
+        hoverTarget: null,
+        selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+        selectionCatalog: null,
+        preview: {
+          kind: 'sketch',
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+        command: {
+          commandSessionId: 'command_dimensionDistance-1',
+          toolId: 'dimensionDistance',
+          phase: 'editing',
+        },
+        session,
+        pendingCommitRequestId: null,
+      },
+    }
+  }
+
+  function testConstraintAuthoringReceivesViewportHoverAndSelection() {
+    const { state, pointTarget } = createConstraintAuthoringEditorState()
+
+    const hovered = transitionEditorState(state, {
+      type: 'viewport.hovered',
+      target: pointTarget,
+    })
+
+    assert(hovered.state.kind === 'editingSketch', 'Hover fixture should remain in sketch editing.')
+    assert(
+      hovered.state.session.constraintAuthoring?.hoverTarget?.target &&
+        primitiveRefEquals(hovered.state.session.constraintAuthoring.hoverTarget.target, pointTarget),
+      'Active constraint authoring should record valid viewport hover targets.',
+    )
+
+    const selected = transitionEditorState(hovered.state, {
+      type: 'viewport.selectionRequested',
+      target: pointTarget,
+    })
+
+    assert(selected.state.kind === 'editingSketch', 'Selection fixture should remain in sketch editing.')
+    assert(
+      selected.state.session.constraintAuthoring?.selectedTargets.length === 1 &&
+        primitiveRefEquals(selected.state.session.constraintAuthoring.selectedTargets[0]!.target, pointTarget),
+      'Active constraint authoring should record valid viewport click targets.',
+    )
+  }
+
+  function testConstraintAuthoringIgnoresInvalidViewportSelection() {
+    const { state, lineTarget } = createConstraintAuthoringEditorState()
+
+    const selected = transitionEditorState(state, {
+      type: 'viewport.selectionRequested',
+      target: lineTarget,
+    })
+
+    assert(selected.state.kind === 'editingSketch', 'Invalid constraint selection fixture should remain in sketch editing.')
+    assert(
+      selected.state.session.constraintAuthoring?.selectedTargets.length === 0,
+      'Dimension point authoring should ignore viewport clicks on rejected sketch entity targets.',
+    )
+  }
+
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
   testSketchActivationAcceptsPlanarFaces()
@@ -1509,6 +1611,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testActiveReferencePickerRoutesSingleAndMultiSelections()
   testReferencePickerCancellationAndSessionCleanup()
   testSketchToolClearStaysInSketchEditing()
+  testConstraintAuthoringReceivesViewportHoverAndSelection()
+  testConstraintAuthoringIgnoresInvalidViewportSelection()
   testReplayIsDeterministic()
   testSelectionKeyUsesDurableRefs()
   await testRuntimeLoopProcessesSketchOpen()

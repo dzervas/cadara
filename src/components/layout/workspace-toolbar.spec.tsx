@@ -84,6 +84,11 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     'Toolbar should render Finish Sketch while a sketch session is active.',
   )
   assert(
+    sketchToolbarMarkup.includes('/icons/sketch-line-segment.svg') &&
+      sketchToolbarMarkup.includes('/icons/sketch-dimension.svg'),
+    'Sketch toolbar buttons and dropdown triggers should keep local SVG icons.',
+  )
+  assert(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)') &&
       sketchToolbarMarkup.includes('var(--workbench-shell-success-border)'),
     'Finish Sketch should use the semantic success treatment from the shared workbench theme.',

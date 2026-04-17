@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
@@ -16,6 +17,25 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
 
   assert(iconMarkup.includes('/icons/extrude.svg'), 'Toolbar icons should resolve to local SVG assets.')
   assert(!iconMarkup.includes('lucide'), 'Toolbar icons should not render Lucide glyph markup.')
+  assert(!iconMarkup.includes('filter:'), 'Toolbar icons should preserve their authored SVG colors.')
+
+  const sketchLineAsset = readFileSync('public/icons/sketch-line-segment.svg', 'utf8')
+  assert(
+    sketchLineAsset.includes('#CDCDCD') && sketchLineAsset.includes('#1651B0'),
+    'Sketch toolbar assets should use light neutral strokes while preserving blue highlights.',
+  )
+  assert(!sketchLineAsset.includes('#333333'), 'Sketch toolbar assets should not use dark neutral strokes.')
+
+  for (const iconPath of [
+    'public/icons/undo.svg',
+    'public/icons/redo.svg',
+    'public/icons/measure.svg',
+    'public/icons/SectionView-Linked.svg',
+  ]) {
+    const asset = readFileSync(iconPath, 'utf8')
+    assert(asset.includes('#CDCDCD'), `${iconPath} should use a light neutral toolbar stroke.`)
+    assert(!asset.includes('#333333'), `${iconPath} should not use dark neutral toolbar strokes.`)
+  }
 
   const runtimeGlobal = globalThis as typeof globalThis & {
     __CADARA_SINGLE_ASSETS__?: Window['__CADARA_SINGLE_ASSETS__']

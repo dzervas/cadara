@@ -6,6 +6,8 @@ import type {
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
+import type { SketchAuthoringToolId } from '@/domain/editor/sketch-session'
+import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 
 export function getNavigationReopenRequest(
   snapshot: DocumentSnapshot | null,
@@ -63,4 +65,10 @@ export function getEscapeEvent(
   }
 
   return null
+}
+
+export function shouldViewportClickRequestSelection(
+  activeSketchTool: SketchAuthoringToolId | null | undefined,
+) {
+  return activeSketchTool == null || isRegisteredSketchConstraintToolId(activeSketchTool)
 }

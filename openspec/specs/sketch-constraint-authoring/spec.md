@@ -36,6 +36,17 @@ The system SHALL support a generic floating input surface for constraint or dime
 - **WHEN** the user cancels the floating value-entry prompt for a pending constraint operation
 - **THEN** the pending preview and authored-value draft are discarded without appending a durable constraint or dimension record
 
+### Requirement: Constraint target selection SHALL work while a constraint tool is active
+The system SHALL allow active sketch constraint tools to collect valid sketch point, entity, and annotation targets from viewport selections during their target-collection phase.
+
+#### Scenario: Hovered constraint target is selected
+- **WHEN** a constraint tool shows a valid hover candidate and the user clicks that candidate
+- **THEN** the active constraint authoring state records the clicked target as the next selected constraint target
+
+#### Scenario: Invalid target click is ignored with existing feedback
+- **WHEN** a constraint tool is active and the user clicks a target rejected by that tool's selection rules
+- **THEN** the authoring state does not record the target and the editor preserves or reports the existing selection rejection feedback
+
 ### Requirement: Committed constraints SHALL remain durable sketch document records
 The system SHALL store each committed sketch constraint or dimension as durable authored sketch data keyed by stable constraint or dimension identifiers rather than as viewport-only presentation state.
 
@@ -68,4 +79,3 @@ The system SHALL keep target picking, cursor state, preview rendering, and float
 #### Scenario: Committed constraint needs solve feedback
 - **WHEN** a committed constraint changes the sketch solve result
 - **THEN** the resulting solved geometry and constraint status are produced through the solver boundary rather than inferred by the viewport renderer itself
-

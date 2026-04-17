@@ -4,7 +4,11 @@ import { createNewSketchSession } from '@/domain/editor/sketch-session'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
-import { getEscapeEvent, getNavigationReopenRequest } from './workbench-interactions'
+import {
+  getEscapeEvent,
+  getNavigationReopenRequest,
+  shouldViewportClickRequestSelection,
+} from './workbench-interactions'
 
 test('src/domain/editor/workbench-interactions.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -96,9 +100,25 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     )
   }
 
+  function testViewportClickSelectionRoutingAllowsConstraintsOnly() {
+    assert(
+      shouldViewportClickRequestSelection(null),
+      'Viewport clicks should request selection when no sketch tool is active.',
+    )
+    assert(
+      shouldViewportClickRequestSelection('constraintCoincident'),
+      'Viewport clicks should request selection while a constraint tool is active.',
+    )
+    assert(
+      !shouldViewportClickRequestSelection('line'),
+      'Viewport clicks should keep drawing tools on the pointer construction path.',
+    )
+  }
+
   testFeatureReopenIntentUsesCommittedFeatureKind()
   testSketchReopenIntentUsesSketchFlow()
   testEscapePrefersReferencePickerCancellation()
   testEscapeClearsActiveSketchToolBeforeExitingSketch()
   testEscapeExitsSketchWhenNoToolIsActive()
+  testViewportClickSelectionRoutingAllowsConstraintsOnly()
 })

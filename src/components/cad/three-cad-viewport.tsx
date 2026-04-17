@@ -27,6 +27,7 @@ import {
   updateWorkspaceHighlight,
 } from '@/domain/workspace/render-picking'
 import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
+import { shouldViewportClickRequestSelection } from '@/domain/editor/workbench-interactions'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import {
@@ -496,7 +497,7 @@ export function ThreeCadViewport({
       const eventTarget = event.target instanceof Node ? event.target : null
       const isCanvasClick = eventTarget === canvasElement
 
-      if (!isCanvasClick || sketchSession?.activeTool != null) {
+      if (!isCanvasClick || !shouldViewportClickRequestSelection(sketchSession?.activeTool)) {
         return
       }
 
