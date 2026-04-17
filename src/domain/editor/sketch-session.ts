@@ -344,6 +344,29 @@ export function getSketchHistoryCursorForIndex(
   return item ? { kind: 'item', itemId: item.id } : { kind: 'empty' }
 }
 
+export function getPreviousSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
+  const items = getSketchHistoryItems(session.fullDefinition)
+  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
+
+  if (session.historyCursor.kind !== 'empty' && cursorIndex < 0) {
+    return null
+  }
+
+  return cursorIndex > -1 ? getSketchHistoryCursorForIndex(items, cursorIndex - 1) : null
+}
+
+export function getNextSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
+  const items = getSketchHistoryItems(session.fullDefinition)
+  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
+
+  if (session.historyCursor.kind !== 'empty' && cursorIndex < 0) {
+    return null
+  }
+
+  const nextIndex = cursorIndex + 1
+  return nextIndex < items.length ? getSketchHistoryCursorForIndex(items, nextIndex) : null
+}
+
 function getEntityPointIds(entity: SketchEntityDefinition) {
   switch (entity.kind) {
     case 'lineSegment':
@@ -1860,7 +1883,10 @@ function patchSketchAnnotationEditValue(
     }
   }
 
-  return commitSketchAnnotationEditValue(session, edit)
+  return commitSketchAnnotationEditValue(session, {
+    ...edit,
+    pendingValue: edit.pendingValue,
+  })
 }
 
 function clearSketchAnnotationEdit(session: SketchSessionState): SketchSessionState {
@@ -1875,7 +1901,7 @@ function clearSketchAnnotationEdit(session: SketchSessionState): SketchSessionSt
 
 function commitSketchAnnotationEditValue(
   session: SketchSessionState,
-  edit: SketchAnnotationEditState,
+  edit: SketchAnnotationEditState & { pendingValue: number },
 ): SketchSessionState {
   const updatedFullDefinition = updateAnnotationValueInDefinition(
     session.fullDefinition,

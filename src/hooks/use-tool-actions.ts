@@ -30,6 +30,22 @@ export function useToolActions() {
 
   return {
     triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
+      if (toolId === 'undo') {
+        if (machineState.kind === 'editingSketch') {
+          dispatch({ type: 'history.undoRequested' })
+        }
+        context.actionBus.triggerTool(toolId, machineState.mode, metadata)
+        return
+      }
+
+      if (toolId === 'redo') {
+        if (machineState.kind === 'editingSketch') {
+          dispatch({ type: 'history.redoRequested' })
+        }
+        context.actionBus.triggerTool(toolId, machineState.mode, metadata)
+        return
+      }
+
       const nextMode =
         toolId === 'sketch'
           ? 'part'

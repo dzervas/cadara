@@ -21,6 +21,17 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     }
   }
 
+  function getToolMarkup(markup: string, toolId: string) {
+    const toolIdIndex = markup.indexOf(`data-tool-id="${toolId}"`)
+    assert(toolIdIndex >= 0, `Expected ${toolId} tool markup to exist.`)
+
+    const start = markup.lastIndexOf('<button', toolIdIndex)
+    assert(start >= 0, `Expected ${toolId} tool button markup to exist.`)
+
+    const end = markup.indexOf('</button>', toolIdIndex)
+    return end >= 0 ? markup.slice(start, end) : markup.slice(start)
+  }
+
   const toolbarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <EditorContext.Provider
@@ -49,6 +60,12 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   assert(
     toolbarMarkup.includes('aria-label="Extrude"'),
     'Toolbar buttons should expose concise accessibility labels based on the tool name.',
+  )
+  assert(
+    toolbarMarkup.includes('data-tool-id="undo"') &&
+      toolbarMarkup.includes('data-tool-id="redo"') &&
+      getToolMarkup(toolbarMarkup, 'undo').includes('data-disabled="true"'),
+    'Undo should render disabled when no history step is available.',
   )
   assert(!toolbarMarkup.includes('Filter:'), 'Toolbar should not duplicate the selection filter debugger readout.')
   assert(!toolbarMarkup.includes('Requirement:'), 'Toolbar should not duplicate the requirement debugger readout.')
@@ -128,5 +145,36 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     constructionToolbarMarkup.includes('aria-label="Construction"') &&
       constructionToolbarMarkup.includes('aria-pressed="true"'),
     'Construction should render selected while acting as a sketch modifier.',
+  )
+
+  const historyToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: {
+            ...getEditorViewState(initialEditorState),
+            history: {
+              canUndo: true,
+              canRedo: false,
+            },
+          },
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    getToolMarkup(historyToolbarMarkup, 'redo').includes('data-disabled="true"'),
+    'Redo should render disabled when no redo step is available.',
+  )
+  assert(
+    !getToolMarkup(historyToolbarMarkup, 'undo').includes('data-disabled="true"'),
+    'Undo should render enabled when an undo step is available.',
   )
 })

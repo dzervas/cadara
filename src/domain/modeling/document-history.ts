@@ -1,4 +1,5 @@
 import type {
+  DocumentSnapshot,
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   FeatureSnapshotRecord,
@@ -128,6 +129,31 @@ export function getDocumentHistoryCursorForIndex(
   return item.kind === 'sketch'
     ? { kind: 'sketch', sketchId: item.sketchId }
     : { kind: 'feature', featureId: item.featureId }
+}
+
+export function getPreviousDocumentHistoryCursor(snapshot: DocumentSnapshot): DocumentFeatureCursor | null {
+  const items = snapshot.presentation.documentHistory
+  const cursor = snapshot.document.cursor
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
+
+  if (cursor.kind !== 'empty' && cursorIndex < 0) {
+    return null
+  }
+
+  return cursorIndex > -1 ? getDocumentHistoryCursorForIndex(items, cursorIndex - 1) : null
+}
+
+export function getNextDocumentHistoryCursor(snapshot: DocumentSnapshot): DocumentFeatureCursor | null {
+  const items = snapshot.presentation.documentHistory
+  const cursor = snapshot.document.cursor
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
+
+  if (cursor.kind !== 'empty' && cursorIndex < 0) {
+    return null
+  }
+
+  const nextIndex = cursorIndex + 1
+  return nextIndex < items.length ? getDocumentHistoryCursorForIndex(items, nextIndex) : null
 }
 
 export function isValidDocumentHistoryCursor(

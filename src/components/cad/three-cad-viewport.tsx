@@ -21,6 +21,10 @@ import {
 } from '@/domain/editor/schema'
 import type { SketchAnnotationDescriptor, SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type {
+  SketchConstraintRef,
+  SketchDimensionRef,
+} from '@/contracts/shared/references'
 import {
   MARKER_SPHERE_GEOMETRY,
   bindRenderableObject,
@@ -809,7 +813,9 @@ export function ThreeCadViewport({
         annotations={sketchAnnotations}
         projections={sketchAnnotationProjections}
         hoveredAnnotation={isAnnotationTarget(hoverTarget) ? hoverTarget : null}
-        selectedAnnotation={isAnnotationTarget(selection[0] ?? null) ? selection[0] : null}
+        selectedAnnotation={isAnnotationTarget(selection[0] ?? null)
+          ? (selection[0] as SketchConstraintRef | SketchDimensionRef)
+          : null}
         onHover={(target) => hoverRef.current(target)}
         onClearHover={() => clearHoverRef.current()}
         onSelect={(target) => selectRef.current(target)}
@@ -1763,7 +1769,7 @@ function getGeometryToken(
 
 function isAnnotationTarget(
   target: PrimitiveRef | null,
-): target is Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }> {
+): target is SketchConstraintRef | SketchDimensionRef {
   return target?.kind === 'constraint' || target?.kind === 'dimension'
 }
 

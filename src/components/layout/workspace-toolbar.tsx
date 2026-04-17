@@ -13,15 +13,24 @@ import {
 } from '@/domain/tools/tool-registry'
 import { isSketchConstructionSelected } from '@/domain/editor/sketch-session'
 import { useEditorState } from '@/hooks/use-editor-state'
+import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 
-export function WorkspaceToolbar() {
+interface WorkspaceToolbarProps {
+  historyAvailability?: EditorHistoryAvailability
+}
+
+export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
-    state: { activeCommand, mode, sketchSession },
+    state: { activeCommand, history, mode, sketchSession },
   } = useEditorState()
+  const visibleHistory = historyAvailability ?? history
   const visibleSections = useMemo(() => getToolbarSectionsForMode(mode), [mode])
   const searchResults = useMemo(() => searchToolDefinitions(searchQuery), [searchQuery])
   const hasActiveSketchSession = sketchSession !== null
+
+  const isToolDisabled = (tool: RegisteredToolDefinition) =>
+    (tool.id === 'undo' && !visibleHistory.canUndo) || (tool.id === 'redo' && !visibleHistory.canRedo)
 
   const renderTool = (tool: RegisteredToolDefinition) => {
     if (tool.id === 'sketch' && hasActiveSketchSession) {
@@ -38,6 +47,8 @@ export function WorkspaceToolbar() {
       (isDropdownTool(tool) &&
         tool.dropdown.variantIds.some((variantId) => variantId === activeCommand?.toolId))
 
+    const disabled = isToolDisabled(tool)
+
     if (isDropdownTool(tool)) {
       const variantTools = tool.dropdown.variantIds.map((toolId) => getToolById(toolId))
       return (
@@ -50,7 +61,7 @@ export function WorkspaceToolbar() {
       )
     }
 
-    return <ToolButton key={tool.id} tool={tool} active={isActive} />
+    return <ToolButton key={tool.id} tool={tool} active={isActive} disabled={disabled} />
   }
 
   return (
@@ -116,6 +127,7 @@ export function WorkspaceToolbar() {
                           tool={tool}
                           inline
                           active={activeCommand?.toolId === tool.id}
+                          disabled={isToolDisabled(tool)}
                           onTrigger={() => setSearchQuery('')}
                         />
                       )

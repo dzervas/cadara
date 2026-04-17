@@ -10,6 +10,7 @@ interface ToolButtonProps {
   inline?: boolean
   onTrigger?: () => void
   active?: boolean
+  disabled?: boolean
 }
 
 export function ToolButton({
@@ -17,6 +18,7 @@ export function ToolButton({
   inline = false,
   onTrigger,
   active = false,
+  disabled = false,
 }: ToolButtonProps) {
   const { triggerTool } = useToolActions()
   const isSuccessAction = tool.id === 'finishSketch'
@@ -35,6 +37,10 @@ export function ToolButton({
     : 'var(--workbench-shell-text)'
 
   const handleClick = () => {
+    if (disabled) {
+      return
+    }
+
     triggerTool(tool.id, {
       source: inline ? 'search' : 'toolbar',
     })
@@ -46,9 +52,11 @@ export function ToolButton({
       type="button"
       onClick={handleClick}
       aria-label={tool.name}
+      disabled={disabled}
       data-tool-id={tool.id}
       data-tool-source="search"
       data-tool-tooltip={tool.tooltip}
+      data-disabled={disabled || undefined}
     >
       <Paper
         radius="md"
@@ -99,9 +107,11 @@ export function ToolButton({
       color="workbench"
       aria-label={tool.name}
       aria-pressed={active}
+      disabled={disabled}
       data-tool-id={tool.id}
       data-tool-source="toolbar"
       data-tool-tooltip={tool.tooltip}
+      data-disabled={disabled || undefined}
       styles={{
         root: {
           border: `1px solid ${active || isSuccessAction ? emphasisBorder : 'transparent'}`,

@@ -26,6 +26,8 @@ import {
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
   finishSketchGeometryDrag,
+  getNextSketchHistoryCursor,
+  getPreviousSketchHistoryCursor,
   getSketchSessionPreviewLabel,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
@@ -60,6 +62,7 @@ import {
 } from '@/domain/editor/schema'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import type {
+  DocumentFeatureCursor,
   DocumentSnapshot,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
@@ -131,6 +134,8 @@ interface EditorStateBase {
   nextRequestSequence: number
   /** Snapshot request currently in flight, or null when no refresh is pending. */
   pendingSnapshotRequestId: RequestId | null
+  /** Document history cursor mutation currently in flight, or null when no history move is pending. */
+  pendingHistoryCursorRequestId: RequestId | null
 }
 
 /**
@@ -331,6 +336,16 @@ export interface SketchHistoryCursorRequestedEvent {
   cursor: SketchHistoryCursor
 }
 
+/** Requests an undo step in the active authored history context. */
+export interface HistoryUndoRequestedEvent {
+  type: 'history.undoRequested'
+}
+
+/** Requests a redo step in the active authored history context. */
+export interface HistoryRedoRequestedEvent {
+  type: 'history.redoRequested'
+}
+
 /** Deletes the currently selected committed sketch annotation, if any. */
 export interface SketchAnnotationDeleteRequestedEvent {
   type: 'sketch.annotationDeleteRequested'
@@ -405,6 +420,8 @@ export type EditorEvent =
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
   | SketchHistoryCursorRequestedEvent
+  | HistoryUndoRequestedEvent
+  | HistoryRedoRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
   | SketchAnnotationEditRequestedEvent
   | FormFeaturePatchedEvent
@@ -562,6 +579,34 @@ export type EditorEvent =
       /** Human-readable failure summary for this sketch commit request. */
       message: string
     }
+  | {
+      type: 'effect.documentCursorMoved'
+      /** Effect request being completed by this document history cursor mutation. */
+      requestId: RequestId
+      /** Durable document identity for the cursor mutation result. */
+      documentId: DocumentId
+      /** Base revision used when the cursor mutation was issued. */
+      baseRevisionId: RevisionId
+      /** Revision returned by the backend after processing the cursor mutation. */
+      revisionId: RevisionId
+      /** Whether the cursor mutation was accepted against `baseRevisionId`. */
+      accepted: boolean
+      /** Machine-readable diagnostics returned by the mutation. */
+      diagnostics: ModelingDiagnostic[]
+      /** Actual revision encountered when `accepted` is false due to conflict. */
+      actualRevisionId?: RevisionId
+    }
+  | {
+      type: 'effect.documentCursorMoveFailed'
+      /** Effect request that failed during document history cursor mutation. */
+      requestId: RequestId
+      /** Durable document identity for the failed cursor mutation request. */
+      documentId: DocumentId
+      /** Base revision used when the cursor mutation was issued. */
+      baseRevisionId: RevisionId
+      /** Human-readable failure summary for this cursor mutation request. */
+      message: string
+    }
 
 /**
  * Explicit side-effect requests emitted by the pure transition function.
@@ -644,6 +689,17 @@ export type EditorEffect =
       /** Sketch session snapshot captured when the commit request was emitted. */
       session: SketchSessionState
     }
+  | {
+      type: 'document.moveHistoryCursor'
+      /** Editor-owned correlation ID for this document history cursor mutation. */
+      requestId: RequestId
+      /** Durable document identity against which the cursor move was requested. */
+      documentId: DocumentId
+      /** Base revision against which the cursor mutation must be applied. */
+      baseRevisionId: RevisionId
+      /** Target document history cursor. */
+      cursor: DocumentFeatureCursor
+    }
 
 /**
  * Pure transition result containing the next machine state plus any explicit effects.
@@ -681,6 +737,7 @@ function createInitialState(): EditorState {
     nextCommandSequence: 1,
     nextRequestSequence: 1,
     pendingSnapshotRequestId: null,
+    pendingHistoryCursorRequestId: null,
   }
 }
 
@@ -725,6 +782,16 @@ export interface EditorEffectRuntime {
   }): Promise<{
     revisionId: RevisionId
     featureId: FeatureId
+    accepted: boolean
+    diagnostics: ModelingDiagnostic[]
+    actualRevisionId?: RevisionId
+  }>
+  /** Moves the committed document history cursor against a base revision. */
+  setDocumentCursor?(input: {
+    baseRevisionId: RevisionId
+    cursor: DocumentFeatureCursor
+  }): Promise<{
+    revisionId: RevisionId
     accepted: boolean
     diagnostics: ModelingDiagnostic[]
     actualRevisionId?: RevisionId
@@ -774,6 +841,7 @@ function toIdleState(state: EditorState, mode: ToolbarMode): IdleEditorState {
     nextCommandSequence: state.nextCommandSequence,
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
   }
 }
 
@@ -798,6 +866,7 @@ function createCommandState(
     nextCommandSequence: state.nextCommandSequence + 1,
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
     pendingRequestId: null,
     command: {
       commandSessionId: nextCommandSessionId(state, toolId),
@@ -849,6 +918,7 @@ function createFeatureEditingState(
     nextCommandSequence: state.nextCommandSequence,
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
     command: {
       ...command,
       phase: 'editing',
@@ -1254,6 +1324,14 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'session.started':
       return emitSnapshotFetch(state, null)
     case 'tool.activated': {
+      if (event.toolId === 'undo') {
+        return transitionEditorState(state, { type: 'history.undoRequested' })
+      }
+
+      if (event.toolId === 'redo') {
+        return transitionEditorState(state, { type: 'history.redoRequested' })
+      }
+
       if (event.toolId === 'finishSketch' && state.kind === 'editingSketch') {
         return emitSketchCommit(state)
       }
@@ -1355,6 +1433,86 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           filter,
           createSelectionPreview(state, filter),
         ),
+        effects: [],
+      }
+    }
+    case 'history.undoRequested': {
+      if (!getEditorHistoryAvailability(state).canUndo) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      if (state.kind === 'editingSketch') {
+        const cursor = getPreviousSketchHistoryCursor(state.session)
+        if (!cursor) {
+          return {
+            state,
+            effects: [],
+          }
+        }
+
+        const session = moveSketchHistoryCursor(state.session, cursor)
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      return {
+        state,
+        effects: [],
+      }
+    }
+    case 'history.redoRequested': {
+      if (!getEditorHistoryAvailability(state).canRedo) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      if (state.kind === 'editingSketch') {
+        const cursor = getNextSketchHistoryCursor(state.session)
+        if (!cursor) {
+          return {
+            state,
+            effects: [],
+          }
+        }
+
+        const session = moveSketchHistoryCursor(state.session, cursor)
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      return {
+        state,
         effects: [],
       }
     }
@@ -2090,6 +2248,76 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     }
     case 'document.refreshRequested':
       return emitSnapshotFetch(state, null)
+    case 'effect.documentCursorMoved': {
+      if (
+        state.pendingHistoryCursorRequestId !== event.requestId ||
+        !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      if (!event.accepted) {
+        const message =
+          event.diagnostics[0]?.message ??
+          `Document history cursor move rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+
+        return {
+          state: withPreview(
+            {
+              ...state,
+              pendingHistoryCursorRequestId: null,
+            },
+            {
+              kind: 'selection',
+              label: message,
+              target: state.selection[0] ?? null,
+            },
+          ),
+          effects: [],
+        }
+      }
+
+      return emitSnapshotFetch(
+        {
+          ...state,
+          document: {
+            ...state.document,
+            revisionId: event.revisionId,
+          },
+          pendingHistoryCursorRequestId: null,
+          preview: null,
+        },
+        null,
+      )
+    }
+    case 'effect.documentCursorMoveFailed':
+      if (
+        state.pendingHistoryCursorRequestId !== event.requestId ||
+        !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: withPreview(
+          {
+            ...state,
+            pendingHistoryCursorRequestId: null,
+          },
+          {
+            kind: 'selection',
+            label: event.message,
+            target: state.selection[0] ?? null,
+          },
+        ),
+        effects: [],
+      }
     case 'effect.snapshotLoaded':
       if (state.pendingSnapshotRequestId !== event.payload.requestId) {
         return {
@@ -2163,6 +2391,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           nextCommandSequence: state.nextCommandSequence,
           nextRequestSequence: state.nextRequestSequence,
           pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+          pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
           command: {
             ...state.command,
             phase: 'editing',
@@ -2730,6 +2959,37 @@ export async function runEditorEffect(
         }
       }
     }
+    case 'document.moveHistoryCursor': {
+      try {
+        if (!runtime.setDocumentCursor) {
+          throw new Error('Document history cursor mutation runtime is not available.')
+        }
+
+        const result = await runtime.setDocumentCursor({
+          baseRevisionId: effect.baseRevisionId,
+          cursor: effect.cursor,
+        })
+
+        return {
+          type: 'effect.documentCursorMoved',
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          baseRevisionId: effect.baseRevisionId,
+          revisionId: result.revisionId,
+          accepted: result.accepted,
+          diagnostics: result.diagnostics,
+          actualRevisionId: result.actualRevisionId,
+        }
+      } catch (error: unknown) {
+        return {
+          type: 'effect.documentCursorMoveFailed',
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          baseRevisionId: effect.baseRevisionId,
+          message: error instanceof Error ? error.message : 'Document history cursor move failed.',
+        }
+      }
+    }
     default:
       return {
         type: 'effect.snapshotFailed',
@@ -2826,6 +3086,17 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       | { kind: 'rejected'; reasonCode: string }
     diagnostics: ModelingDiagnostic[]
   }>
+  setFeatureCursor: (input: {
+    baseRevisionId: RevisionId
+    cursor: DocumentFeatureCursor
+  }) => Promise<{
+    revisionId: RevisionId
+    revisionState:
+      | { kind: 'accepted' }
+      | { kind: 'conflict'; actualRevisionId: RevisionId }
+      | { kind: 'rejected'; reasonCode: string }
+    diagnostics: ModelingDiagnostic[]
+  }>
 }): EditorEffectRuntime {
   return {
     getCurrentDocumentSnapshot: () => modelingService.getCurrentDocumentSnapshot(),
@@ -2907,6 +3178,17 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           result.revisionState.kind === 'conflict' ? result.revisionState.actualRevisionId : undefined,
       }
     },
+    async setDocumentCursor(input) {
+      const result = await modelingService.setFeatureCursor(input)
+
+      return {
+        revisionId: result.revisionId,
+        accepted: result.revisionState.kind === 'accepted',
+        diagnostics: result.diagnostics,
+        actualRevisionId:
+          result.revisionState.kind === 'conflict' ? result.revisionState.actualRevisionId : undefined,
+      }
+    },
   }
 }
 
@@ -2940,6 +3222,34 @@ export interface EditorViewState {
   snapshot: DocumentSnapshot | null
   /** Most recent accepted preview renderables, or null when none are active. */
   previewRenderables: RenderableEntityRecord[] | null
+  /** Availability of toolbar history actions in the active editor context. */
+  history: EditorHistoryAvailability
+}
+
+export interface EditorHistoryAvailability {
+  canUndo: boolean
+  canRedo: boolean
+}
+
+export function getEditorHistoryAvailability(state: EditorState): EditorHistoryAvailability {
+  if (state.kind === 'editingSketch') {
+    if (state.pendingCommitRequestId !== null) {
+      return { canUndo: false, canRedo: false }
+    }
+
+    return {
+      canUndo: getPreviousSketchHistoryCursor(state.session) !== null,
+      canRedo: getNextSketchHistoryCursor(state.session) !== null,
+    }
+  }
+
+  if (
+    state.kind !== 'idle'
+  ) {
+    return { canUndo: false, canRedo: false }
+  }
+
+  return { canUndo: false, canRedo: false }
 }
 
 /**
@@ -2959,6 +3269,7 @@ export function getEditorViewState(state: EditorState): EditorViewState {
     sketchSession: state.kind === 'editingSketch' ? state.session : null,
     snapshot: state.snapshot,
     previewRenderables: state.previewRenderables,
+    history: getEditorHistoryAvailability(state),
   }
 }
 

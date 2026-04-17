@@ -7,6 +7,8 @@ import {
   getSketchHistoryCursorForIndex,
   getSketchHistoryCursorIndex,
   getSketchHistoryItems,
+  getNextSketchHistoryCursor,
+  getPreviousSketchHistoryCursor,
   moveSketchHistoryCursor,
   startSketchDraw,
 } from '@/domain/editor/sketch-session'
@@ -35,10 +37,33 @@ test('src/domain/editor/sketch-session-history.spec.ts', () => {
   const fullItems = getSketchHistoryItems(session.fullDefinition)
   assert(fullItems.length === 2, 'Sketch history should include ordered authored entities.')
   assert(getSketchHistoryCursorIndex(fullItems, session.historyCursor) === 1, 'Sketch cursor should advance to the newest item.')
+  assert(
+    getPreviousSketchHistoryCursor(session)?.kind === 'item' &&
+      getPreviousSketchHistoryCursor(session)?.itemId === fullItems[0]?.id,
+    'Previous sketch cursor should step back one authored item.',
+  )
+  assert(getNextSketchHistoryCursor(session) === null, 'Next sketch cursor should be unavailable at the tail.')
 
   const rolledBack = moveSketchHistoryCursor(session, getSketchHistoryCursorForIndex(fullItems, 0))
   assert(rolledBack.definition.entityIds.length === 1, 'Rolling back should filter displayed sketch entities after the cursor.')
   assert(session.fullDefinition.entityIds.length === 2, 'Rolling back must not mutate the prior full draft definition.')
+  assert(
+    getPreviousSketchHistoryCursor(rolledBack)?.kind === 'empty',
+    'Previous sketch cursor should move to the before-first position.',
+  )
+  assert(
+    getNextSketchHistoryCursor(rolledBack)?.kind === 'item' &&
+      getNextSketchHistoryCursor(rolledBack)?.itemId === fullItems[1]?.id,
+    'Next sketch cursor should step toward after-cursor authored items.',
+  )
+
+  const beforeFirst = moveSketchHistoryCursor(session, { kind: 'empty' })
+  assert(getPreviousSketchHistoryCursor(beforeFirst) === null, 'Undo should be unavailable before the first sketch item.')
+  assert(
+    getNextSketchHistoryCursor(beforeFirst)?.kind === 'item' &&
+      getNextSketchHistoryCursor(beforeFirst)?.itemId === fullItems[0]?.id,
+    'Redo should be available from the before-first sketch cursor position.',
+  )
 
   const inserted = addLine(rolledBack, [0, 2], [1, 2])
   const insertedItems = getSketchHistoryItems(inserted.fullDefinition)

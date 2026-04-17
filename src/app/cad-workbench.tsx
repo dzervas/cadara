@@ -21,6 +21,7 @@ import type {
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
+import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
   getSketchAnnotationDescriptors,
   getSketchToolPresentation,
@@ -58,6 +59,15 @@ import {
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
+type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
+type WorkbenchUndoEntry =
+  | {
+      kind: 'updateVariable'
+      variableId: DocumentVariableRecord['variableId']
+      before: DocumentVariablePatch
+      after: DocumentVariablePatch
+      label: string
+    }
 
 function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement
@@ -81,6 +91,7 @@ export function CadWorkbench() {
       preview,
       selectionFilter,
       activeReferencePickerFieldId,
+      history,
     },
     dispatch,
   } = useEditorState()
@@ -93,10 +104,33 @@ export function CadWorkbench() {
   const [workbenchStatusMessage, setWorkbenchStatusMessage] = useState<string | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
+  const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
+  const [redoStack, setRedoStack] = useState<WorkbenchUndoEntry[]>([])
+  const [isUndoRedoRunning, setIsUndoRedoRunning] = useState(false)
   const shellFrameRef = useRef<HTMLDivElement | null>(null)
+  const snapshotRef = useRef(snapshot)
+  const undoStackRef = useRef(undoStack)
+  const redoStackRef = useRef(redoStack)
+  const sketchSessionRef = useRef(sketchSession)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
+
+  useEffect(() => {
+    snapshotRef.current = snapshot
+  }, [snapshot])
+
+  useEffect(() => {
+    undoStackRef.current = undoStack
+  }, [undoStack])
+
+  useEffect(() => {
+    redoStackRef.current = redoStack
+  }, [redoStack])
+
+  useEffect(() => {
+    sketchSessionRef.current = sketchSession
+  }, [sketchSession])
 
   useEffect(() => {
     let disposed = false
@@ -252,6 +286,12 @@ export function CadWorkbench() {
     },
     hoverTarget: visibleHoverTarget ? getPrimitiveRefLabel(visibleHoverTarget) : 'none',
   }
+  const toolbarHistoryAvailability: EditorHistoryAvailability = sketchSession
+    ? history
+    : {
+        canUndo: undoStack.length > 0 && !isUndoRedoRunning,
+        canRedo: redoStack.length > 0 && !isUndoRedoRunning,
+      }
 
   const handleViewportHover = (target: PrimitiveRef) => {
     dispatch({ type: 'viewport.hovered', target })
@@ -348,9 +388,118 @@ export function CadWorkbench() {
     })
   }
 
+  const applyVariablePatch = async (
+    variableId: DocumentVariableRecord['variableId'],
+    next: DocumentVariablePatch,
+    failureLabel: string,
+  ) => {
+    const currentSnapshot = snapshotRef.current
+    if (!currentSnapshot) {
+      return false
+    }
+
+    try {
+      const result = await modelingService.updateDocumentVariable({
+        baseRevisionId: currentSnapshot.document.revisionId,
+        variableId,
+        name: next.name,
+        valueText: next.valueText,
+      })
+
+      if (result.revisionState.kind !== 'accepted') {
+        const message = result.diagnostics[0]?.message ?? `${failureLabel} failed.`
+        setInvalidVariableValueMessages((current) => ({
+          ...current,
+          [variableId]: message,
+        }))
+        setWorkbenchStatusMessage(message)
+        return false
+      }
+
+      setInvalidVariableValueMessages((current) => {
+        const nextMessages = { ...current }
+        delete nextMessages[variableId]
+        return nextMessages
+      })
+      dispatch({ type: 'document.refreshRequested' })
+      return true
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : `${failureLabel} failed.`
+      setInvalidVariableValueMessages((current) => ({
+        ...current,
+        [variableId]: message,
+      }))
+      setWorkbenchStatusMessage(message)
+      return false
+    }
+  }
+
+  const applyUndoEntry = (entry: WorkbenchUndoEntry, direction: 'undo' | 'redo') => {
+    switch (entry.kind) {
+      case 'updateVariable':
+        return applyVariablePatch(
+          entry.variableId,
+          direction === 'undo' ? entry.before : entry.after,
+          direction === 'undo' ? `Undo ${entry.label}` : `Redo ${entry.label}`,
+        )
+    }
+  }
+
+  const performWorkbenchUndo = async () => {
+    if (sketchSessionRef.current || isUndoRedoRunning) {
+      return
+    }
+
+    const entry = undoStackRef.current.at(-1)
+    if (!entry) {
+      return
+    }
+
+    setIsUndoRedoRunning(true)
+    const accepted = await applyUndoEntry(entry, 'undo')
+    if (accepted) {
+      setUndoStack((current) => current.slice(0, -1))
+      setRedoStack((current) => [...current, entry])
+    }
+    setIsUndoRedoRunning(false)
+  }
+
+  const performWorkbenchRedo = async () => {
+    if (sketchSessionRef.current || isUndoRedoRunning) {
+      return
+    }
+
+    const entry = redoStackRef.current.at(-1)
+    if (!entry) {
+      return
+    }
+
+    setIsUndoRedoRunning(true)
+    const accepted = await applyUndoEntry(entry, 'redo')
+    if (accepted) {
+      setRedoStack((current) => current.slice(0, -1))
+      setUndoStack((current) => [...current, entry])
+    }
+    setIsUndoRedoRunning(false)
+  }
+
+  useEffect(() => {
+    const unsubscribeUndo = actionBus.subscribeToTool('undo', () => {
+      void performWorkbenchUndo()
+    })
+    const unsubscribeRedo = actionBus.subscribeToTool('redo', () => {
+      void performWorkbenchRedo()
+    })
+
+    return () => {
+      unsubscribeUndo()
+      unsubscribeRedo()
+    }
+  })
+
   const handleVariableUpdate = (
     variable: DocumentVariableRecord,
-    next: Pick<DocumentVariableRecord, 'name' | 'valueText'>,
+    next: DocumentVariablePatch,
   ) => {
     if (!snapshot) {
       return
@@ -377,6 +526,20 @@ export function CadWorkbench() {
         delete nextMessages[variable.variableId]
         return nextMessages
       })
+      setUndoStack((current) => [
+        ...current,
+        {
+          kind: 'updateVariable',
+          variableId: variable.variableId,
+          before: {
+            name: variable.name,
+            valueText: variable.valueText,
+          },
+          after: next,
+          label: variable.name || variable.variableId,
+        },
+      ])
+      setRedoStack([])
       dispatch({ type: 'document.refreshRequested' })
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : `Update ${variable.name || variable.variableId} failed.`
@@ -659,7 +822,7 @@ export function CadWorkbench() {
 
   return (
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
-      <WorkspaceToolbar />
+      <WorkspaceToolbar historyAvailability={toolbarHistoryAvailability} />
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar

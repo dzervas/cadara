@@ -42,6 +42,9 @@ const editorEventTypes = [
   'sketch.geometryDragEnded',
   'sketch.toolPatched',
   'sketch.activeToolCleared',
+  'sketch.historyCursorRequested',
+  'history.undoRequested',
+  'history.redoRequested',
   'sketch.annotationDeleteRequested',
   'sketch.annotationEditRequested',
   'form.featurePatched',
@@ -59,6 +62,8 @@ const editorEventTypes = [
   'effect.featureCommitFailed',
   'effect.sketchCommitted',
   'effect.sketchCommitFailed',
+  'effect.documentCursorMoved',
+  'effect.documentCursorMoveFailed',
 ] as const satisfies readonly EditorEvent['type'][]
 
 const sharedEventHandlers = Object.fromEntries(
@@ -99,6 +104,8 @@ function effectMatchesState(effect: EditorEffect, state: EditorState) {
         && state.pendingCommitRequestId === effect.requestId
         && state.command.commandSessionId === effect.commandSessionId
       )
+    case 'document.moveHistoryCursor':
+      return state.pendingHistoryCursorRequestId === effect.requestId
     default:
       return false
   }
