@@ -666,7 +666,7 @@ export function buildOccSnapshotDiagnostics(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[],
 ): ModelingDiagnostic[] {
-  const diagnostics = [...extraDiagnostics]
+  const diagnostics = [...state.diagnostics, ...extraDiagnostics]
 
   for (const construction of state.constructions) {
     if (construction.ownerFeatureId !== null) {
@@ -1405,6 +1405,7 @@ export function buildOccWorkspaceSnapshot(
   return {
     document,
     presentation,
+    provenance: null,
     contractVersion: document.contractVersion,
     schemaVersion: document.schemaVersion,
     documentId: document.documentId,

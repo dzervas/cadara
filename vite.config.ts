@@ -8,9 +8,16 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   assetsInclude: ['**/*.wasm'],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [
+      {
+        find: '@',
+        replacement: path.resolve(__dirname, './src'),
+      },
+      {
+        find: /^@automerge\/automerge$/,
+        replacement: path.resolve(__dirname, './node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js'),
+      },
+    ],
   },
   optimizeDeps: {
     entries: ['index.html'],

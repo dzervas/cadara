@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@automerge/automerge-repo": "^2.5.5",
+    "@automerge/automerge-repo-network-broadcastchannel": "^2.5.5",
     "@automerge/automerge-repo-storage-indexeddb": "^2.5.5",
     "@mantine/core": "^9.0.2",
     "@mantine/hooks": "^9.0.2",

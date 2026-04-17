@@ -154,7 +154,13 @@ import {
   loadOrCreateOperationHistory,
   type OperationHistoryStore,
 } from '@/domain/modeling/modeling-history-persistence'
-import type { DocumentRepository, DocumentRepositoryRestoreStatus } from '@/domain/modeling/document-repository'
+import { normalizeCollaborativeAuthoredModelDocument } from '@/domain/modeling/collaborative-authored-document'
+import type {
+  DocumentRepository,
+  DocumentRepositoryChangeEvent,
+  DocumentRepositoryMetadata,
+  DocumentRepositoryRestoreStatus,
+} from '@/domain/modeling/document-repository'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -167,6 +173,7 @@ import {
 export interface ModelingService {
   readonly currentDocumentId: DocumentId
   readonly sketchSolver: SketchSolverService | null
+  subscribeToDocumentChanges(listener: (event: ModelingServiceDocumentChangeEvent) => void): () => void
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
@@ -189,6 +196,11 @@ export interface ModelingServiceOptions {
   sketchSolver?: SketchSolverBoundary
   operationHistoryStore?: OperationHistoryStore | null
   documentRepository?: DocumentRepository | null
+}
+
+export interface ModelingServiceDocumentChangeEvent {
+  documentId: DocumentId
+  metadata: DocumentRepositoryMetadata
 }
 
 export interface ModelingHistoryRestoreDiagnostic {
@@ -344,6 +356,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isString(value: unknown): value is string {
   return typeof value === 'string'
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  const rightSet = new Set(right)
+  return left.every((value) => rightSet.has(value))
 }
 
 function assertDocumentId(value: unknown): DocumentId {
@@ -3359,6 +3380,169 @@ export function createModelingService(
     entriesReplayed: 0,
     diagnostics: [],
   }
+  let currentRepositoryMetadata: DocumentRepositoryMetadata | null = null
+  let snapshotRepositoryHeads: readonly string[] | null = null
+  let repositoryChangePromise = Promise.resolve()
+  let isRestoringRepositoryDocument = documentRepository !== null
+  const documentChangeListeners = new Set<(event: ModelingServiceDocumentChangeEvent) => void>()
+
+  function rememberRepositoryMetadata(metadata: DocumentRepositoryMetadata) {
+    currentRepositoryMetadata = {
+      ...metadata,
+      heads: [...metadata.heads],
+    }
+  }
+
+  function attachRepositoryProvenance(snapshot: DocumentSnapshot): DocumentSnapshot {
+    const metadata = documentRepository ? currentRepositoryMetadata ?? documentRepository.getMetadata(currentDocumentId) : null
+    if (!metadata) {
+      return {
+        ...snapshot,
+        provenance: null,
+      }
+    }
+
+    snapshotRepositoryHeads = [...metadata.heads]
+
+    return {
+      ...snapshot,
+      provenance: {
+        repositoryHeads: [...metadata.heads],
+        repositorySource: metadata.source,
+      },
+    }
+  }
+
+  function repositoryHeadsChangedSinceSnapshot() {
+    if (!currentRepositoryMetadata || !snapshotRepositoryHeads) {
+      return false
+    }
+
+    return !sameStringSet(currentRepositoryMetadata.heads, snapshotRepositoryHeads)
+  }
+
+  function addRepositoryFreshnessDiagnostic<T extends { revisionState: MutationRevisionState; diagnostics: ModelingDiagnostic[] }>(
+    result: T,
+  ): T {
+    if (!repositoryHeadsChangedSinceSnapshot()) {
+      return result
+    }
+
+    return {
+      ...result,
+      diagnostics: [
+        ...result.diagnostics,
+        {
+          code: 'repository-head-conflict',
+          severity: 'error',
+          message: 'The authored document changed after the current snapshot was loaded. Refresh before retrying this mutation.',
+          target: null,
+          detail: null,
+        },
+      ],
+    }
+  }
+
+  async function restoreAuthoredRepositoryDocument(document: Parameters<NonNullable<ModelingKernelAdapter['restoreAuthoredModelDocument']>>[0]) {
+    const normalized = normalizeCollaborativeAuthoredModelDocument(document)
+    await adapter.restoreAuthoredModelDocument?.(normalized.document, normalized.diagnostics)
+  }
+
+  async function createRepositoryHeadConflictResult<
+    T extends {
+      revisionId: RevisionId
+      revisionState: MutationRevisionState
+      rebuildResult: RebuildResult
+      changedTargets: PrimitiveRef[]
+      diagnostics: ModelingDiagnostic[]
+    },
+  >(result: T): Promise<T> {
+    await repositoryChangePromise
+    const snapshot = validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+      currentDocumentId,
+    )
+    const diagnostics = result.diagnostics.some((diagnostic) => diagnostic.code === 'repository-head-conflict')
+      ? result.diagnostics
+      : addRepositoryFreshnessDiagnostic(result).diagnostics
+    const expectedRevisionId = result.revisionState.kind === 'accepted'
+      ? result.revisionState.baseRevisionId
+      : result.revisionId
+
+    return {
+      ...result,
+      revisionId: snapshot.revisionId,
+      revisionState: {
+        kind: 'conflict',
+        expectedRevisionId,
+        actualRevisionId: snapshot.revisionId,
+      },
+      rebuildResult: {
+        kind: 'skipped',
+        reasonCode: 'revisionConflict',
+        invalidatedTargets: [],
+        diagnostics,
+      },
+      changedTargets: [],
+      diagnostics,
+    }
+  }
+
+  async function finalizeMutationResult<T extends {
+    revisionId: RevisionId
+    revisionState: MutationRevisionState
+    rebuildResult: RebuildResult
+    changedTargets: PrimitiveRef[]
+    diagnostics: ModelingDiagnostic[]
+  }>(
+    response: ModelingOperationResult,
+    result: T,
+    createHistoryEntry: (() => ModelingOperationHistoryEntry) | null,
+  ): Promise<T> {
+    const repositoryConflict = repositoryHeadsChangedSinceSnapshot()
+    const freshResult = repositoryConflict ? addRepositoryFreshnessDiagnostic(result) : result
+
+    if (!isAcceptedMutation(response)) {
+      return freshResult
+    }
+
+    if (repositoryConflict) {
+      return createRepositoryHeadConflictResult(freshResult)
+    }
+
+    if (createHistoryEntry) {
+      appendOperationHistoryEntry(createHistoryEntry())
+    }
+
+    return persistAcceptedAuthoredDocument(freshResult)
+  }
+
+  function notifyModelingDocumentChange(event: DocumentRepositoryChangeEvent) {
+    const serviceEvent: ModelingServiceDocumentChangeEvent = {
+      documentId: currentDocumentId,
+      metadata: event.metadata,
+    }
+    for (const listener of documentChangeListeners) {
+      listener(serviceEvent)
+    }
+  }
+
+  documentRepository?.subscribe(currentDocumentId, (event) => {
+    if (isRestoringRepositoryDocument) {
+      return
+    }
+
+    rememberRepositoryMetadata(event.metadata)
+    if (event.metadata.source !== 'peer') {
+      notifyModelingDocumentChange(event)
+      return
+    }
+
+    repositoryChangePromise = repositoryChangePromise.then(async () => {
+      await restoreAuthoredRepositoryDocument(event.document)
+      notifyModelingDocumentChange(event)
+    })
+  })
 
   async function replayOperationHistoryPayload(loadResultPayload: ModelingOperationHistoryPayload) {
     operationHistoryPayload = structuredClone(loadResultPayload)
@@ -3443,8 +3627,10 @@ export function createModelingService(
       return
     }
 
+    rememberRepositoryMetadata(loadResult.metadata)
+
     if (loadResult.status.kind === 'restored') {
-      await adapter.restoreAuthoredModelDocument?.(loadResult.document)
+      await restoreAuthoredRepositoryDocument(loadResult.document)
       operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
       historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
       return
@@ -3494,6 +3680,9 @@ export function createModelingService(
         canPersistAuthoredDocument = false
         historyRestoreState = createRepositoryRestoreFailure(writeResult.status, historyRestoreState.entriesReplayed)
       }
+      if (writeResult.ok) {
+        rememberRepositoryMetadata(writeResult.metadata)
+      }
       return
     }
 
@@ -3517,6 +3706,8 @@ export function createModelingService(
       historyRestoreState.entriesReplayed,
       historyRestoreState.entriesReplayed,
     )
+  }).finally(() => {
+    isRestoringRepositoryDocument = false
   })
 
   function resetOperationHistory() {
@@ -3580,6 +3771,7 @@ export function createModelingService(
     })
 
     if (writeResult.ok) {
+      rememberRepositoryMetadata(writeResult.metadata)
       return result
     }
 
@@ -3593,132 +3785,133 @@ export function createModelingService(
   return {
     currentDocumentId,
     sketchSolver,
+    subscribeToDocumentChanges(listener) {
+      documentChangeListeners.add(listener)
+      return () => {
+        documentChangeListeners.delete(listener)
+      }
+    },
     async getHistoryRestoreState() {
       await restorePromise
+      await repositoryChangePromise
       return historyRestoreState
     },
     resetOperationHistory,
     async getCurrentDocumentSnapshot() {
       await restorePromise
+      await repositoryChangePromise
       const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId))
-      return validateSnapshotResponse(response, currentDocumentId)
+      return attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId))
     },
     async commitSketch(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeCommitSketchInput(input, currentDocumentId)
       const response = await adapter.commitSketch(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createCommitSketchHistoryEntry(request, response.sketchId))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapCommitSketchResponse(response, currentDocumentId))
-        : mapCommitSketchResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapCommitSketchResponse(response, currentDocumentId),
+        () => createCommitSketchHistoryEntry(request, response.sketchId),
+      )
     },
     async addDocumentVariable(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeAddDocumentVariableInput(input, currentDocumentId)
       const response = await adapter.addDocumentVariable(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createAddDocumentVariableHistoryEntry(request, response.variableId))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapDocumentVariableResponse(response, currentDocumentId))
-        : mapDocumentVariableResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapDocumentVariableResponse(response, currentDocumentId),
+        () => createAddDocumentVariableHistoryEntry(request, response.variableId),
+      )
     },
     async updateDocumentVariable(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeUpdateDocumentVariableInput(input, currentDocumentId)
       const response = await adapter.updateDocumentVariable(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createUpdateDocumentVariableHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapDocumentVariableResponse(response, currentDocumentId))
-        : mapDocumentVariableResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapDocumentVariableResponse(response, currentDocumentId),
+        () => createUpdateDocumentVariableHistoryEntry(request),
+      )
     },
     async createFeature(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeCreateFeatureInput(input, currentDocumentId)
       const response = await adapter.createFeature(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createCreateFeatureHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapFeatureMutationResponse(response, currentDocumentId))
-        : mapFeatureMutationResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapFeatureMutationResponse(response, currentDocumentId),
+        () => createCreateFeatureHistoryEntry(request),
+      )
     },
     async updateFeature(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeUpdateFeatureInput(input, currentDocumentId)
       const response = await adapter.updateFeature(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createUpdateFeatureHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapFeatureMutationResponse(response, currentDocumentId))
-        : mapFeatureMutationResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapFeatureMutationResponse(response, currentDocumentId),
+        () => createUpdateFeatureHistoryEntry(request),
+      )
     },
     async deleteFeature(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeDeleteFeatureInput(input, currentDocumentId)
       const response = await adapter.deleteFeature(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createDeleteFeatureHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapDeleteFeatureResponse(response, currentDocumentId))
-        : mapDeleteFeatureResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapDeleteFeatureResponse(response, currentDocumentId),
+        () => createDeleteFeatureHistoryEntry(request),
+      )
     },
     async renameBody(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeRenameBodyInput(input, currentDocumentId)
       const response = await adapter.renameBody(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createRenameBodyHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapRenameBodyResponse(response, currentDocumentId))
-        : mapRenameBodyResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapRenameBodyResponse(response, currentDocumentId),
+        () => createRenameBodyHistoryEntry(request),
+      )
     },
     async reorderFeature(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeReorderFeatureInput(input, currentDocumentId)
       const response = await adapter.reorderFeature(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createReorderFeatureHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapReorderFeatureResponse(response, currentDocumentId))
-        : mapReorderFeatureResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapReorderFeatureResponse(response, currentDocumentId),
+        () => createReorderFeatureHistoryEntry(request),
+      )
     },
     async setFeatureCursor(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeSetFeatureCursorInput(input, currentDocumentId)
       const response = await adapter.setFeatureCursor(request)
-      if (isAcceptedMutation(response)) {
-        appendOperationHistoryEntry(createSetFeatureCursorHistoryEntry(request))
-      }
-
-      return isAcceptedMutation(response)
-        ? persistAcceptedAuthoredDocument(mapSetFeatureCursorResponse(response, currentDocumentId))
-        : mapSetFeatureCursorResponse(response, currentDocumentId)
+      return finalizeMutationResult(
+        response,
+        mapSetFeatureCursorResponse(response, currentDocumentId),
+        () => createSetFeatureCursorHistoryEntry(request),
+      )
     },
     async evaluatePreview(input) {
       await restorePromise
+      await repositoryChangePromise
       const response = await adapter.evaluatePreview(normalizePreviewInput(input, currentDocumentId))
 
       return mapPreviewResponse(response, currentDocumentId)
     },
     async exportDocument(input) {
       await restorePromise
+      await repositoryChangePromise
       const request = normalizeExportDocumentInput(input, currentDocumentId)
 
       if (request.format !== 'cadara') {
@@ -3756,6 +3949,7 @@ export function createModelingService(
     },
     async resolveReference(target) {
       await restorePromise
+      await repositoryChangePromise
       const response = await adapter.resolveReference(
         normalizeResolveReferenceInput(target, currentDocumentId),
       )

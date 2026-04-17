@@ -128,7 +128,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
   async selectSupportedLoftFaceProfile() {
     await this.activateFeature('loft')
+    await expect.poll(() => this.featureSessionLabel(), { timeout: 10_000 }).toContain('create:loft:')
+    await this.collapseStateDebuggerIfExpanded()
     await this.clickViewportAtReal(VIEWPORT_TARGET_POINTS.face1)
+    await this.expandStateDebuggerIfCollapsed()
     await expect.poll(() => this.currentEditorSelection(), { timeout: 10_000 }).toContain('body_feature_extrude-1.face_body_feature_extrude-1_t0001_1')
     await this.clickViewportAtReal(VIEWPORT_TARGET_POINTS.face6)
 
@@ -146,7 +149,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async setNumericField(label: string, value: number) {
-    await this.page.getByLabel(label).fill(String(value))
+    await this.page.getByRole('spinbutton', { name: label }).fill(String(value))
   }
 
   async setOperation(operation: 'newBody' | 'join' | 'cut' | 'intersect') {
@@ -264,6 +267,26 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   private async hasVisibleFeatureErrorDiagnostics() {
     return this.page.locator('aside').getByText(/^error$/i).isVisible().catch(() => false)
   }
+
+  private async collapseStateDebuggerIfExpanded() {
+    const collapseButton = this.page.getByRole('button', {
+      name: 'Collapse state debugger',
+    })
+
+    if (await collapseButton.isVisible().catch(() => false)) {
+      await collapseButton.click()
+    }
+  }
+
+  private async expandStateDebuggerIfCollapsed() {
+    const expandButton = this.page.getByRole('button', {
+      name: 'Expand state debugger',
+    })
+
+    if (await expandButton.isVisible().catch(() => false)) {
+      await expandButton.click()
+    }
+  }
 }
 
 export class FeatureChainHarness {
@@ -308,7 +331,7 @@ export function meanPixelDelta(left: Buffer, right: Buffer) {
 const VIEWPORT_TARGET_POINTS = {
   profile: { x: 380, y: 280 },
   face: { x: 254, y: 65 },
-  face1: { x: 95, y: 200 },
+  face1: { x: 90, y: 195 },
   face6: { x: 290, y: 35 },
   edge: { x: 190, y: 65 },
   vertex: { x: 63, y: 148 },

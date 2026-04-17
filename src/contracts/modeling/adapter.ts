@@ -27,6 +27,7 @@ import type {
   UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
+  ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
 
@@ -38,7 +39,7 @@ import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/mode
  */
 export interface ModelingKernelAdapter {
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */
-  restoreAuthoredModelDocument?(document: AuthoredDocument): Promise<void>
+  restoreAuthoredModelDocument?(document: AuthoredDocument, diagnostics?: readonly ModelingDiagnostic[]): Promise<void>
   /** Returns the authoritative typed snapshot for the requested document. */
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */

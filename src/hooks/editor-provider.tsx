@@ -35,15 +35,21 @@ export function EditorProvider({ modelingService, children }: EditorProviderProp
     })
 
     actor.start()
+    const documentSubscription = modelingService.subscribeToDocumentChanges((event) => {
+      if (event.metadata.source === 'peer') {
+        actor.send({ type: 'document.refreshRequested' })
+      }
+    })
 
     return () => {
+      documentSubscription()
       subscription.unsubscribe()
       if (actorRef.current === actor) {
         actorRef.current = null
       }
       actor.stop()
     }
-  }, [runtime])
+  }, [modelingService, runtime])
 
   const dispatch = useCallback((event: EditorEvent) => {
     actorRef.current?.send(event)

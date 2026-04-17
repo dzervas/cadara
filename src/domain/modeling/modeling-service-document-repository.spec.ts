@@ -5,7 +5,7 @@ import {
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
-import type { FeatureDefinition } from '@/contracts/modeling/schema'
+import type { CreateFeatureRequest, CreateFeatureResponse, FeatureDefinition } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
@@ -291,10 +291,107 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
+  async function testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const definition = await getSeedExtrudeDefinition(service)
+    const peerDocument = createAuthoredModelDocumentFromSnapshot(snapshot)
+    peerDocument.revisionId = 'rev_9999'
+    peerDocument.bodyLabels = peerDocument.bodyLabels.map((label) =>
+      label.bodyId === 'body_part-1'
+        ? { ...label, label: 'Peer Synced Body' }
+        : label,
+    )
+
+    let peerEventCount = 0
+    const unsubscribe = service.subscribeToDocumentChanges((event) => {
+      if (event.metadata.source === 'peer') {
+        peerEventCount += 1
+      }
+    })
+    const peerResult = documentRepository.receivePeerDocument(peerDocument)
+    assert(peerResult.ok, 'Test peer document should be accepted by the repository.')
+
+    const staleMutation = await service.createFeature({
+      baseRevisionId: snapshot.revisionId,
+      definition,
+    })
+    assert(staleMutation.revisionState.kind === 'conflict', 'Mutations against a peer-superseded snapshot should conflict.')
+    assert(
+      staleMutation.diagnostics.some((diagnostic) => diagnostic.code === 'repository-head-conflict'),
+      'Stale repository heads should be reported with a stable diagnostic code.',
+    )
+
+    const refreshed = await service.getCurrentDocumentSnapshot()
+    assert(peerEventCount === 1, 'Modeling service subscribers should receive peer repository events.')
+    assert(refreshed.provenance?.repositorySource === 'peer', 'Peer-refreshed snapshots should carry peer provenance.')
+    assert(
+      refreshed.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Peer Synced Body',
+      'Peer repository changes should hydrate the modeling snapshot through the service.',
+    )
+    unsubscribe()
+  }
+
+  async function testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory() {
+    const documentRepository = createMemoryDocumentRepository()
+    const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
+    let publishPeerDocument = () => {}
+    class PeerDuringAcceptedMutationAdapter extends MockKernelAdapter {
+      override async createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse> {
+        const response = await super.createFeature(request)
+        publishPeerDocument()
+        return response
+      }
+    }
+    const service = createModelingService(new PeerDuringAcceptedMutationAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const definition = await getSeedExtrudeDefinition(service)
+    const peerDocument = createAuthoredModelDocumentFromSnapshot(snapshot)
+    peerDocument.revisionId = 'rev_9999'
+    peerDocument.bodyLabels = peerDocument.bodyLabels.map((label) =>
+      label.bodyId === 'body_part-1'
+        ? { ...label, label: 'In-flight Peer Body' }
+        : label,
+    )
+    publishPeerDocument = () => {
+      publishPeerDocument = () => {}
+      const peerResult = documentRepository.receivePeerDocument(peerDocument)
+      assert(peerResult.ok, 'In-flight peer document should be accepted by the repository.')
+    }
+
+    const result = await service.createFeature({
+      baseRevisionId: snapshot.revisionId,
+      definition,
+    })
+    assert(result.revisionState.kind === 'conflict', 'In-flight repository head changes should convert accepted mutations to conflicts.')
+    assert(
+      result.diagnostics.some((diagnostic) => diagnostic.code === 'repository-head-conflict'),
+      'In-flight repository head conflicts should retain a stable diagnostic.',
+    )
+    assert(documentRepository.savedDocuments.length === 0, 'Repository head conflicts should not persist stale authored documents.')
+    assert(historyStore.savedPayloads.length === 0, 'Repository head conflicts should not append operation history.')
+
+    const refreshed = await service.getCurrentDocumentSnapshot()
+    assert(
+      refreshed.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'In-flight Peer Body',
+      'Repository head conflict handling should leave the service on the peer-authored snapshot.',
+    )
+  }
+
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryRestoreHydratesFreshModelingService()
   await testRepositoryRestoreIgnoresStaleOperationHistory()
   await testOperationHistoryMigratesOnlyWhenRepositoryIsMissing()
   await testMigrationWriteFailureResetsSeededRepositoryForRetry()
   await testInvalidRepositoryDocumentBlocksFutureWrites()
+  await testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict()
+  await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
 })

@@ -1,5 +1,6 @@
 import { Repo } from '@automerge/automerge-repo'
 import type { AutomergeUrl } from '@automerge/automerge-repo'
+import { BroadcastChannelNetworkAdapter } from '@automerge/automerge-repo-network-broadcastchannel'
 import { IndexedDBStorageAdapter } from '@automerge/automerge-repo-storage-indexeddb'
 
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
@@ -7,6 +8,9 @@ import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/c
 import type { DocumentId } from '@/contracts/shared/ids'
 import type {
   DocumentRepository,
+  DocumentRepositoryChangeEvent,
+  DocumentRepositoryChangeSource,
+  DocumentRepositoryMetadata,
   DocumentRepositoryLoadResult,
   DocumentRepositoryMutationResult,
   DocumentRepositoryRestoreStatus,
@@ -16,11 +20,19 @@ interface AutomergeDocumentEnvelope {
   authoredDocument: AuthoredModelDocument
 }
 
+interface LocalPeerDocumentMessage {
+  type: 'cad-authored-document-repository/document-updated'
+  senderId: string
+  documentId: DocumentId
+  document: AuthoredModelDocument
+}
+
 interface AutomergeHandleLike<T> {
   readonly url: AutomergeUrl
   readonly documentId: string
   whenReady(): Promise<void>
   doc(): T
+  heads?(): readonly string[]
   change(callback: (document: T) => void): void
   on(event: 'change', callback: () => void): void
 }
@@ -43,6 +55,10 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
   urlStore?: DocumentRepositoryUrlStore
   databaseName?: string
   storeName?: string
+  localPeerSync?: false | {
+    channelName?: string
+    peerWaitMs?: number
+  }
 }
 
 class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
@@ -108,14 +124,25 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
   private readonly repo: AutomergeRepositoryLike
   private readonly urlStore: DocumentRepositoryUrlStore
   private readonly statuses = new Map<DocumentId, DocumentRepositoryRestoreStatus>()
+  private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>()
   private readonly handles = new Map<DocumentId, AutomergeHandleLike<AutomergeDocumentEnvelope>>()
-  private readonly listeners = new Map<DocumentId, Set<(document: AuthoredModelDocument, status: DocumentRepositoryRestoreStatus) => void>>()
+  private readonly installedListeners = new Set<string>()
+  private readonly pendingLocalChanges = new Set<DocumentId>()
+  private readonly pendingSeedEchoes = new Map<DocumentId, AuthoredModelDocument>()
+  private readonly listeners = new Map<DocumentId, Set<(event: DocumentRepositoryChangeEvent) => void>>()
+  private readonly localPeerId = `peer-${Math.random().toString(36).slice(2)}`
+  private readonly localPeerDocumentChannel: BroadcastChannel | null
 
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
     this.repo = options.repo ?? new Repo({
       storage: new IndexedDBStorageAdapter(options.databaseName ?? 'cad-authored-documents', options.storeName ?? 'documents'),
+      network: createLocalPeerNetwork(options.localPeerSync),
     }) as AutomergeRepositoryLike
     this.urlStore = options.urlStore ?? new MemoryDocumentRepositoryUrlStore()
+    this.localPeerDocumentChannel = createLocalPeerDocumentChannel(options.localPeerSync)
+    this.localPeerDocumentChannel?.addEventListener('message', (event: MessageEvent<unknown>) => {
+      this.receiveLocalPeerDocumentMessage(event.data)
+    })
   }
 
   async load(input: { documentId: DocumentId; seedDocument: AuthoredModelDocument }): Promise<DocumentRepositoryLoadResult> {
@@ -135,8 +162,10 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       }
 
       const status = { kind: 'restored' as const, documentId: input.documentId }
+      const metadata = this.createMetadata(input.documentId, handle, 'restore')
       this.statuses.set(input.documentId, status)
-      return { ok: true, document: parsed.document, status }
+      this.metadata.set(input.documentId, metadata)
+      return { ok: true, document: parsed.document, status, metadata }
     } catch (error: unknown) {
       return this.fail(input.documentId, createFailureDiagnostic('automerge-load-failed', error, 'Authored document could not be loaded.'))
     }
@@ -150,22 +179,26 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
 
     try {
       const handle = await this.getHandle(input.documentId, parsed.document)
+      this.pendingLocalChanges.add(input.documentId)
       handle.change((doc) => {
         doc.authoredDocument = structuredClone(parsed.document)
       })
       await this.flush(handle)
       const status = { kind: 'restored' as const, documentId: input.documentId }
+      const metadata = this.createMetadata(input.documentId, handle, 'local')
       this.statuses.set(input.documentId, status)
-      this.notify(input.documentId, parsed.document, status)
-      return { ok: true, document: parsed.document, status }
+      this.metadata.set(input.documentId, metadata)
+      this.broadcastLocalPeerDocument(input.documentId, parsed.document)
+      return { ok: true, document: parsed.document, status, metadata }
     } catch (error: unknown) {
+      this.pendingLocalChanges.delete(input.documentId)
       return this.fail(input.documentId, createFailureDiagnostic('automerge-write-failed', error, 'Authored document could not be written.'))
     }
   }
 
   subscribe(
     documentId: DocumentId,
-    listener: (document: AuthoredModelDocument, status: DocumentRepositoryRestoreStatus) => void,
+    listener: (event: DocumentRepositoryChangeEvent) => void,
   ) {
     const listeners = this.listeners.get(documentId) ?? new Set()
     listeners.add(listener)
@@ -185,11 +218,16 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     this.urlStore.delete(documentId)
     const status = { kind: 'reset' as const, documentId }
     this.statuses.set(documentId, status)
+    this.metadata.set(documentId, { documentId, heads: [], source: 'reset' })
     return status
   }
 
   getRestoreStatus(documentId: DocumentId): DocumentRepositoryRestoreStatus {
     return this.statuses.get(documentId) ?? { kind: 'pending', documentId }
+  }
+
+  getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
+    return this.metadata.get(documentId) ?? { documentId, heads: [], source: 'restore' }
   }
 
   private async createSeedDocument(documentId: DocumentId, seedDocument: AuthoredModelDocument): Promise<DocumentRepositoryLoadResult> {
@@ -204,12 +242,15 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     await handle.whenReady()
     this.handles.set(documentId, handle)
     this.urlStore.set(documentId, handle.url)
-    this.installHandleListener(documentId, handle)
     await this.flush(handle)
     const status = { kind: 'seeded' as const, documentId }
+    const metadata = this.createMetadata(documentId, handle, 'seed')
     this.statuses.set(documentId, status)
-    this.notify(documentId, parsed.document, status)
-    return { ok: true, document: parsed.document, status }
+    this.metadata.set(documentId, metadata)
+    this.pendingSeedEchoes.set(documentId, structuredClone(parsed.document))
+    this.installHandleListener(documentId, handle)
+    this.notify(documentId, parsed.document, status, metadata)
+    return { ok: true, document: parsed.document, status, metadata }
   }
 
   private async getHandle(documentId: DocumentId, seedDocument: AuthoredModelDocument) {
@@ -235,6 +276,12 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
   }
 
   private installHandleListener(documentId: DocumentId, handle: AutomergeHandleLike<AutomergeDocumentEnvelope>) {
+    const listenerKey = `${documentId}:${handle.documentId}`
+    if (this.installedListeners.has(listenerKey)) {
+      return
+    }
+    this.installedListeners.add(listenerKey)
+
     const callback = () => {
       const parsed = parseAuthoredModelDocument(structuredClone(handle.doc().authoredDocument))
       if (!parsed.ok) {
@@ -243,8 +290,24 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       }
 
       const status = { kind: 'restored' as const, documentId }
+      const source = this.pendingLocalChanges.has(documentId) ? 'local' : 'peer'
+      this.pendingLocalChanges.delete(documentId)
+      const metadata = this.createMetadata(documentId, handle, source)
+      const previousMetadata = this.metadata.get(documentId)
+      if (
+        source === 'peer'
+        && previousMetadata?.source === 'seed'
+        && (
+          sameStringSet(previousMetadata.heads, metadata.heads)
+          || documentsEqual(this.pendingSeedEchoes.get(documentId), parsed.document)
+        )
+      ) {
+        return
+      }
+      this.pendingSeedEchoes.delete(documentId)
       this.statuses.set(documentId, status)
-      this.notify(documentId, parsed.document, status)
+      this.metadata.set(documentId, metadata)
+      this.notify(documentId, parsed.document, status, metadata)
     }
     handle.on('change', callback)
   }
@@ -262,10 +325,63 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     return { ok: false, status }
   }
 
-  private notify(documentId: DocumentId, document: AuthoredModelDocument, status: DocumentRepositoryRestoreStatus) {
-    for (const listener of this.listeners.get(documentId) ?? []) {
-      listener(structuredClone(document), status)
+  private createMetadata(
+    documentId: DocumentId,
+    handle: AutomergeHandleLike<AutomergeDocumentEnvelope>,
+    source: DocumentRepositoryChangeSource,
+  ): DocumentRepositoryMetadata {
+    const heads = handle.heads?.() ?? [`automerge:${handle.documentId}:${handle.doc().authoredDocument.revisionId}`]
+    return {
+      documentId,
+      heads: [...heads].sort(),
+      source,
     }
+  }
+
+  private notify(
+    documentId: DocumentId,
+    document: AuthoredModelDocument,
+    status: DocumentRepositoryRestoreStatus,
+    metadata: DocumentRepositoryMetadata,
+  ) {
+    for (const listener of this.listeners.get(documentId) ?? []) {
+      listener({
+        document: structuredClone(document),
+        status,
+        metadata,
+      })
+    }
+  }
+
+  private broadcastLocalPeerDocument(documentId: DocumentId, document: AuthoredModelDocument) {
+    this.localPeerDocumentChannel?.postMessage({
+      type: 'cad-authored-document-repository/document-updated',
+      senderId: this.localPeerId,
+      documentId,
+      document: structuredClone(document),
+    } satisfies LocalPeerDocumentMessage)
+  }
+
+  private receiveLocalPeerDocumentMessage(data: unknown) {
+    if (!isLocalPeerDocumentMessage(data) || data.senderId === this.localPeerId) {
+      return
+    }
+
+    const parsed = parseAuthoredModelDocument(structuredClone(data.document))
+    if (!parsed.ok) {
+      this.fail(data.documentId, parsed.diagnostic)
+      return
+    }
+
+    const status = { kind: 'restored' as const, documentId: data.documentId }
+    const metadata: DocumentRepositoryMetadata = {
+      documentId: data.documentId,
+      heads: [`local-peer:${data.senderId}:${parsed.document.revisionId}`],
+      source: 'peer',
+    }
+    this.statuses.set(data.documentId, status)
+    this.metadata.set(data.documentId, metadata)
+    this.notify(data.documentId, parsed.document, status, metadata)
   }
 }
 
@@ -278,4 +394,53 @@ function createFailureDiagnostic(reasonCode: string, error: unknown, fallbackMes
 
 export function createIndexedDbAutomergeDocumentRepository(options?: IndexedDbAutomergeDocumentRepositoryOptions) {
   return new IndexedDbAutomergeDocumentRepository(options)
+}
+
+function createLocalPeerNetwork(
+  options: IndexedDbAutomergeDocumentRepositoryOptions['localPeerSync'],
+) {
+  if (!options || typeof BroadcastChannel === 'undefined') {
+    return []
+  }
+
+  return [
+    new BroadcastChannelNetworkAdapter({
+      channelName: options?.channelName ?? 'cad-authored-documents',
+      peerWaitMs: options?.peerWaitMs ?? 100,
+    }),
+  ]
+}
+
+function createLocalPeerDocumentChannel(
+  options: IndexedDbAutomergeDocumentRepositoryOptions['localPeerSync'],
+) {
+  if (!options || typeof BroadcastChannel === 'undefined') {
+    return null
+  }
+
+  const channelName = options.channelName ?? 'cad-authored-documents'
+  return new BroadcastChannel(`${channelName}:documents`)
+}
+
+function isLocalPeerDocumentMessage(value: unknown): value is LocalPeerDocumentMessage {
+  return typeof value === 'object'
+    && value !== null
+    && (value as { type?: unknown }).type === 'cad-authored-document-repository/document-updated'
+    && typeof (value as { senderId?: unknown }).senderId === 'string'
+    && typeof (value as { documentId?: unknown }).documentId === 'string'
+    && typeof (value as { document?: unknown }).document === 'object'
+    && (value as { document?: unknown }).document !== null
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  const rightSet = new Set(right)
+  return left.every((value) => rightSet.has(value))
+}
+
+function documentsEqual(left: AuthoredModelDocument | undefined, right: AuthoredModelDocument) {
+  return left !== undefined && JSON.stringify(left) === JSON.stringify(right)
 }

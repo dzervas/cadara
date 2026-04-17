@@ -57,6 +57,7 @@ import type {
   FeatureDefinition,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
+  ModelingDiagnostic,
   RenameBodyRequest,
   RenameBodyResponse,
   ReorderFeatureRequest,
@@ -2056,6 +2057,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
   return {
     document,
     presentation,
+    provenance: null,
     contractVersion: document.contractVersion,
     schemaVersion: document.schemaVersion,
     documentId: document.documentId,
@@ -2313,7 +2315,10 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     return this.snapshotPromise
   }
 
-  async restoreAuthoredModelDocument(document: RepositoryAuthoredModelDocument): Promise<void> {
+  async restoreAuthoredModelDocument(
+    document: RepositoryAuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+  ): Promise<void> {
     const snapshot = structuredClone(await this.getSnapshot())
     const featureTargets = new Map(snapshot.document.features.map((feature) => [feature.featureId, feature.producedTargets]))
     const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
@@ -2394,6 +2399,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
     rebuildFeatureTree(snapshot)
     rebuildObjectTree(snapshot)
+    snapshot.document.diagnostics = [...snapshot.document.diagnostics, ...diagnostics]
+    snapshot.diagnostics = snapshot.document.diagnostics
     stampSnapshotRevision(snapshot, document.revisionId)
     this.currentRevisionId = document.revisionId
     this.revisionSequence = parseMockRevisionSequence(document.revisionId)

@@ -861,7 +861,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return cursorIndex < 0 ? [] : features.slice(0, cursorIndex + 1)
   }
 
-  async restoreAuthoredModelDocument(document: AuthoredModelDocument): Promise<void> {
+  async restoreAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+  ): Promise<void> {
     const oc = await this.loadOpenCascadeInstance()
     const sketches = await Promise.all(
       document.sketches.map((sketch) => this.rebuildAuthoredSketchRecord(document, sketch)),
@@ -882,6 +885,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketches,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
+      diagnostics,
       cursor: { kind: 'empty' },
     })
 

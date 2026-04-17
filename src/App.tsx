@@ -53,6 +53,8 @@ function App() {
             ? null
             : createIndexedDbAutomergeDocumentRepository({
                 urlStore: createLocalStorageDocumentRepositoryUrlStore(window.localStorage),
+                localPeerSync: getDevLocalPeerSyncOptions(),
+                databaseName: getDevRepositoryDatabaseName(),
               }),
       }),
     [kernelAdapter, sketchSolver],
@@ -67,6 +69,30 @@ function App() {
       </EditorProvider>
     </ModelingServiceProvider>
   )
+}
+
+function getDevLocalPeerSyncOptions() {
+  if (typeof window === 'undefined' || !import.meta.env.DEV) {
+    return false
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('cadLocalPeerSync') !== '1') {
+    return false
+  }
+
+  return {
+    channelName: params.get('cadLocalPeerSyncChannel') ?? 'cad-authored-documents-dev',
+    peerWaitMs: 25,
+  }
+}
+
+function getDevRepositoryDatabaseName() {
+  if (typeof window === 'undefined' || !import.meta.env.DEV) {
+    return undefined
+  }
+
+  return new URLSearchParams(window.location.search).get('cadRepositoryDbName') ?? undefined
 }
 
 export default App

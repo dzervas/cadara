@@ -31,8 +31,10 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     assert(loaded.status.kind === 'seeded', 'Missing memory documents should report seeded status.')
 
     let observed: AuthoredModelDocument | null = null
-    const unsubscribe = repository.subscribe(seed.documentId, (document) => {
-      observed = document
+    let observedHeads: readonly string[] = []
+    const unsubscribe = repository.subscribe(seed.documentId, (event) => {
+      observed = event.document
+      observedHeads = event.metadata.heads
     })
     const mutated = await repository.mutate({
       documentId: seed.documentId,
@@ -45,7 +47,11 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     })
     assert(mutated.ok, 'Memory repository should accept plain authored document mutations.')
     assert(observed?.bodyLabels.some((label) => label.label === 'Repository Body'), 'Subscribers should receive plain authored documents.')
+    assert(observedHeads[0] === `memory:${mutated.document.revisionId}`, 'Memory repository changes should include head metadata.')
     unsubscribe()
+    observed = null
+    await repository.mutate({ documentId: seed.documentId, document: seed })
+    assert(observed === null, 'Unsubscribed memory repository listeners should not receive later changes.')
 
     const reset = await repository.reset(seed.documentId)
     assert(reset.kind === 'reset', 'Repository reset should report reset status.')
@@ -59,8 +65,14 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     const repo = createFakeAutomergeRepo()
     const repository = new IndexedDbAutomergeDocumentRepository({ repo, urlStore })
 
+    const seedEvents: string[] = []
+    repository.subscribe(seed.documentId, (event) => {
+      seedEvents.push(event.metadata.source)
+    })
     const loaded = await repository.load({ documentId: seed.documentId, seedDocument: seed })
     assert(loaded.ok && loaded.status.kind === 'seeded', 'IndexedDB repository should seed missing Automerge documents.')
+    assert(loaded.ok && loaded.metadata.heads.length > 0, 'Seeded Automerge documents should expose causal heads.')
+    assert(seedEvents.every((source) => source !== 'peer'), 'Seeded Automerge documents should not emit peer-originated changes.')
     assert(repo.createdCount === 1, 'IndexedDB repository should create an internal Automerge handle for missing documents.')
     assert(urlStore.get(seed.documentId) !== null, 'IndexedDB repository should persist the app document to Automerge URL mapping.')
 
@@ -72,7 +84,26 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
       },
     })
     assert(restored.ok && restored.status.kind === 'restored', 'A new repository instance should restore through the stored Automerge URL.')
+    assert(restored.ok && restored.metadata.source === 'restore', 'Restored Automerge documents should identify restore as the change source.')
     assert(restored.ok && restored.document.bodyLabels.length === seed.bodyLabels.length, 'Refresh restore should use the stored authored document.')
+
+    const events: string[] = []
+    const unsubscribe = repository.subscribe(seed.documentId, (event) => {
+      events.push(`${event.metadata.source}:${event.metadata.heads.join('|')}`)
+    })
+    repo.pushPeerChange(urlStore.get(seed.documentId)!, {
+      authoredDocument: {
+        ...seed,
+        bodyLabels: seed.bodyLabels.map((label) =>
+          label.bodyId === 'body_part-1' ? { ...label, label: 'Peer Body' } : label,
+        ),
+      },
+    })
+    assert(events.some((event) => event.startsWith('peer:')), 'Peer-originated handle changes should notify subscribers.')
+    unsubscribe()
+    const eventCount = events.length
+    repo.pushPeerChange(urlStore.get(seed.documentId)!, { authoredDocument: seed })
+    assert(events.length === eventCount, 'Unsubscribed Automerge repository listeners should not receive later peer changes.')
 
     const unsupported = await repository.mutate({
       documentId: seed.documentId,
@@ -155,6 +186,13 @@ function createFakeAutomergeRepo() {
     delete(url: string) {
       handles.delete(url)
     },
+    pushPeerChange<T>(url: string, value: T) {
+      const handle = handles.get(url) as FakeAutomergeHandle<T> | undefined
+      if (!handle) {
+        throw new Error('DocHandle missing.')
+      }
+      handle.pushPeerChange(value)
+    },
     async flush() {},
   }
 }
@@ -165,6 +203,7 @@ class FakeAutomergeHandle<T> {
   private value: T
   private readonly listeners = new Set<() => void>()
   private readonly shouldFailChange: () => boolean
+  private headSequence = 0
 
   constructor(url: string, initialValue: T | undefined, shouldFailChange: () => boolean) {
     this.url = url
@@ -179,12 +218,25 @@ class FakeAutomergeHandle<T> {
     return this.value
   }
 
+  heads() {
+    return [`head_${this.headSequence}`]
+  }
+
   change(callback: (document: T) => void) {
     if (this.shouldFailChange()) {
       throw new Error('DocHandle change failed.')
     }
 
     callback(this.value)
+    this.headSequence += 1
+    for (const listener of this.listeners) {
+      listener()
+    }
+  }
+
+  pushPeerChange(value: T) {
+    this.value = value
+    this.headSequence += 1
     for (const listener of this.listeners) {
       listener()
     }

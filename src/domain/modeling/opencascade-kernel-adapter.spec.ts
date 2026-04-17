@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 import { strFromU8, unzipSync } from 'fflate'
-import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
+import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import type {
   DeriveSketchRegionsRequest,
@@ -58,6 +58,8 @@ import {
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
+import type { DocumentRepository } from '@/domain/modeling/document-repository'
+import { COLLABORATIVE_MERGE_DIAGNOSTIC_CODES } from '@/domain/modeling/collaborative-authored-document'
 import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
@@ -247,6 +249,41 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       solverAdapter: createSolverAdapter(),
       solverAdapterFactory: () => createSolverAdapter(),
     })
+  }
+
+  function createPermissiveRestoredRepository(document: AuthoredModelDocument): DocumentRepository {
+    const metadata = {
+      documentId: document.documentId,
+      heads: [`test:${document.revisionId}`],
+      source: 'restore' as const,
+    }
+    const status = { kind: 'restored' as const, documentId: document.documentId }
+
+    return {
+      async load() {
+        return {
+          ok: true,
+          document: structuredClone(document),
+          status,
+          metadata,
+        }
+      },
+      async mutate() {
+        throw new Error('Test repository should not receive OCC restore writes.')
+      },
+      subscribe() {
+        return () => {}
+      },
+      async reset() {
+        return { kind: 'reset' as const, documentId: document.documentId }
+      },
+      getRestoreStatus() {
+        return status
+      },
+      getMetadata() {
+        return metadata
+      },
+    }
   }
 
   function createSolverCorrelation(prefix: string) {
@@ -3387,6 +3424,63 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore() {
+    const seedSnapshot = (await createAdapter().getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const authoredDocument = createAuthoredModelDocumentFromSnapshot(seedSnapshot)
+    const invalidReferenceDefinition: FeatureDefinition = {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [{ kind: 'region', sketchId: 'sketch_deleted', regionId: 'region_deleted' }],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 1 },
+        operation: 'newBody',
+        booleanScope: { kind: 'standalone' },
+      },
+    }
+    const repositoryDocument: AuthoredModelDocument = {
+      ...authoredDocument,
+      features: [{
+        featureId: 'feature_invalid-ref' as AuthoredModelDocument['features'][number]['featureId'],
+        label: 'Invalid Ref',
+        definition: invalidReferenceDefinition,
+      }],
+      featureOrder: [
+        'feature_missing' as AuthoredModelDocument['featureOrder'][number],
+        'feature_invalid-ref' as AuthoredModelDocument['featureOrder'][number],
+      ],
+      cursor: {
+        kind: 'feature',
+        featureId: 'feature_deleted' as AuthoredModelDocument['features'][number]['featureId'],
+      },
+    }
+    const service = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository: createPermissiveRestoredRepository(repositoryDocument),
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+    const snapshot = await service.getCurrentDocumentSnapshot()
+
+    assert(restoreState.kind === 'restored', 'Collaborative repository documents should restore through the OCC adapter.')
+    assert(snapshot.cursor.kind === 'empty', 'Missing repository cursors should normalize before OCC restore.')
+    assert(
+      snapshot.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget),
+      'Missing cursor targets should surface as stable OCC snapshot diagnostics.',
+    )
+    assert(
+      snapshot.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder),
+      'Invalid merged feature order should surface as stable OCC snapshot diagnostics.',
+    )
+    assert(
+      snapshot.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference),
+      'Invalid durable references should surface as stable OCC snapshot diagnostics.',
+    )
+  }
+
   await testSnapshotFetchAndSketchCommit()
   await testPlaneFeatureCreateSupportsConstructionAndPlanarFaceReferences()
   await testExtrudePreviewCreateAndUpdateCommitGeometry()
@@ -3418,6 +3512,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
   await testDocumentVariableExpressionsValidateBeforeOccMutation()
   await testAuthoredRestoreAppliesOnlyFeaturesThroughCursor()
+  await testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
   await testOccGeometryExportsRejectInvalidTargets()
 

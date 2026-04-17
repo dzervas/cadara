@@ -41,6 +41,7 @@ import {
   contractVersionSchema,
   documentIdSchema,
   documentVariableIdSchema,
+  faceIdSchema,
   featureIdSchema,
   literalVersionSchema,
   numberSchema,
@@ -202,9 +203,11 @@ const shellDefinitionSchema = z.object({
   kind: z.literal('shell'),
   featureTypeVersion: z.literal(SHELL_FEATURE_SCHEMA_VERSION).transform((value) => value as ShellFeatureSchemaVersion),
   parameters: z.object({
-    faces: z.array(z.unknown()),
+    bodyTarget: z.object({ kind: z.literal('body'), bodyId: bodyIdSchema }),
+    faceTargets: z.array(z.object({ kind: z.literal('face'), bodyId: bodyIdSchema, faceId: faceIdSchema })),
     thickness: authoredPositiveNumberSchema('Shell thickness must be positive.'),
     operation: booleanOperationAuthoredSchema.optional(),
+    booleanScope: z.object({ kind: z.string() }).passthrough(),
   }).passthrough(),
 })
 
@@ -395,6 +398,16 @@ export const workspaceSnapshotSchema = z.object({
     documentHistory: z.array(z.unknown()),
     entities: z.array(z.unknown()),
   }),
+  provenance: z.object({
+    repositoryHeads: z.array(z.string()),
+    repositorySource: z.union([
+      z.literal('local'),
+      z.literal('peer'),
+      z.literal('restore'),
+      z.literal('seed'),
+      z.literal('reset'),
+    ]).nullable(),
+  }).nullable().optional(),
 }).transform((value) => {
   const document = value.document
   const presentation = value.presentation
@@ -402,6 +415,7 @@ export const workspaceSnapshotSchema = z.object({
   return {
     document,
     presentation,
+    provenance: value.provenance ?? null,
     contractVersion: document.contractVersion,
     schemaVersion: document.schemaVersion,
     documentId: document.documentId,

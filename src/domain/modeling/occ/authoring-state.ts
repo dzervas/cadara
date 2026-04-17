@@ -1,5 +1,5 @@
 import type { DurableRef } from '@/contracts/shared/references'
-import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
+import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { BodyId, ConstructionId, FeatureId, SketchId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
@@ -38,6 +38,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   variables: readonly DocumentVariableRecord[]
   features: readonly OccAuthoringFeatureRecord[]
   cursor: DocumentFeatureCursor
+  diagnostics: readonly ModelingDiagnostic[]
   entities: readonly SnapshotEntityRecord[]
   renderRecords: readonly RenderableEntityRecord[]
   referenceState: OccReferenceState
@@ -138,6 +139,7 @@ export function createOccAuthoringState(
     revisionId?: OccFeatureExecutionContext['revisionId']
     modelingTolerance?: number
     previousReferenceState?: OccReferenceState
+    diagnostics?: readonly ModelingDiagnostic[]
   } = {},
 ): OccAuthoringState {
   const documentId = input.documentId ?? OCC_KERNEL_DOCUMENT_ID
@@ -188,6 +190,7 @@ export function createOccAuthoringState(
     variables,
     features,
     cursor,
+    diagnostics: [...(input.diagnostics ?? [])],
     entities: [],
     renderRecords: [],
     referenceState,

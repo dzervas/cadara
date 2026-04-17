@@ -37,6 +37,12 @@ import type {
   SnapshotSchemaVersion,
 } from '@/contracts/shared/versioning'
 import type { AdvancedFeatureValidationDiagnostic, AdvancedSolidFeatureDefinition, AdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
+
+export interface DocumentSnapshotProvenance {
+  repositoryHeads: readonly string[]
+  repositorySource: 'local' | 'peer' | 'restore' | 'seed' | 'reset' | null
+}
+
 export type {
   AdvancedFeatureValidationDiagnostic,
   AdvancedFeatureOptionDescriptor,
@@ -850,6 +856,8 @@ export interface WorkspaceSnapshot {
   document: KernelDocumentSnapshot
   /** UI/view-model payload derived from `document`. */
   presentation: DocumentPresentationSnapshot
+  /** Repository metadata used to build this snapshot, when backed by a repository. */
+  provenance: DocumentSnapshotProvenance | null
   /** Deprecated passthrough for `document.contractVersion`. */
   contractVersion: KernelDocumentSnapshot['contractVersion']
   /** Deprecated passthrough for `document.schemaVersion`. */
