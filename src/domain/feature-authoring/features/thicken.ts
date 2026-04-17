@@ -6,7 +6,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { FeatureAuthoringDefinition, ThickenFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, thickenSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asFaceRef, authoredDefinitionValue, authoredNumberFormValue, authoredNumberLiteral, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asFaceRef, authoredDefinitionValue, authoredNumberFormValue, authoredNumberLiteral, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const thickenParticipants = [
   {
@@ -324,7 +324,7 @@ export const thickenAuthoringDefinition = {
                 isPositiveAuthoredNumber(session.draft.options.thickness)
                   ? null
                   : { message: 'Thickness must be greater than zero.' },
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.options.thickness, { kind: 'positiveNumber' }),
               patch: { patchKey: 'thickness' },
             },
             {
@@ -336,7 +336,7 @@ export const thickenAuthoringDefinition = {
                 { value: 'oneSide', label: 'oneSide' },
                 { value: 'symmetric', label: 'symmetric' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['oneSide', 'symmetric'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.options.side, { kind: 'enumString', options: ['oneSide', 'symmetric'] }),
               patch: { patchKey: 'side' },
             },
             {
@@ -350,7 +350,7 @@ export const thickenAuthoringDefinition = {
                 { value: 'subtract', label: 'subtract' },
                 { value: 'intersect', label: 'intersect' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.operationIntent, { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] }),
               patch: { patchKey: 'operationIntent' },
             },
           ],

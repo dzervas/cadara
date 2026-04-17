@@ -12,6 +12,8 @@ export interface FeatureEditorPatchBinding {
 export interface FeatureEditorAuthoredValueBinding {
   expressionCapable: true
   valueKind: FeatureValueKindDescriptor
+  source?: 'literal' | 'expression'
+  expressionText?: string | null
 }
 
 export interface FeatureEditorFieldError {

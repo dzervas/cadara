@@ -1,7 +1,7 @@
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, filletSelectionFilter } from '@/domain/editor/schema'
 import { FILLET_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asEdgeRef, authoredDefinitionValue, authoredNumberFormValue, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asEdgeRef, authoredDefinitionValue, authoredNumberFormValue, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const filletAuthoringDefinition = {
   metadata: {
@@ -126,7 +126,7 @@ export const filletAuthoringDefinition = {
             value: authoredNumberFormValue(session.draft.radius),
             input: 'number',
             step: 0.1,
-            authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+            authoredValue: expressionCapableAuthoredValue(session.draft.radius, { kind: 'positiveNumber' }),
             error: isPositiveAuthoredNumber(session.draft.radius) ? null : { message: 'Radius must be greater than zero.' },
             patch: { patchKey: 'radius' },
           }],

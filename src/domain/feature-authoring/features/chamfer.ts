@@ -4,7 +4,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { ChamferFeatureParameterDraft, FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
 import { chamferSelectionFilter, createSelectionFilterForRequirement, type PrimitiveRef } from '@/domain/editor/schema'
-import { acceptAuthoredPatch, appendUniqueTarget, asEdgeRef, authoredDefinitionValue, authoredNumberFormValue, authoredNumberLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asEdgeRef, authoredDefinitionValue, authoredNumberFormValue, authoredNumberLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const chamferParticipants = [
   {
@@ -181,7 +181,7 @@ export const chamferAuthoringDefinition = {
             value: authoredNumberFormValue(session.draft.distance),
             input: 'number',
             step: 0.1,
-            authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+            authoredValue: expressionCapableAuthoredValue(session.draft.distance, { kind: 'positiveNumber' }),
             error: isPositiveAuthoredNumber(session.draft.distance)
               ? null
               : { message: 'Distance must be greater than zero.' },

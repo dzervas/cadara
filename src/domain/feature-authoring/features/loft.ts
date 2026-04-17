@@ -15,6 +15,7 @@ import {
   authoredDefinitionValue,
   authoredStringLiteral,
   createMissingInputDiagnostic,
+  expressionCapableAuthoredValue,
 } from '@/domain/feature-authoring/features/shared'
 
 const loftParticipants = [
@@ -325,7 +326,7 @@ export const loftAuthoringDefinition = {
                 { value: 'subtract', label: 'subtract' },
                 { value: 'intersect', label: 'intersect' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.operationIntent, { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] }),
               patch: { patchKey: 'operationIntent' },
             },
             {

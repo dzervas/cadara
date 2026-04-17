@@ -5,7 +5,9 @@ import {
   isAuthoredValue,
   isExpressionAuthoredValue,
   type MaybeAuthoredValue,
+  type FeatureValueKindDescriptor,
 } from '@/contracts/modeling/authored-values'
+import type { FeatureEditorAuthoredValueBinding } from '@/domain/feature-authoring/form-schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { primitiveRefEquals } from '@/domain/editor/schema'
 
@@ -110,6 +112,18 @@ export function authoredDefinitionValue<T>(value: MaybeAuthoredValue<T>, fallbac
 
 export function authoredNumberFormValue(value: MaybeAuthoredValue<number>, mapLiteral?: (value: number) => number): string | number {
   return getAuthoredFormText(value, (literal) => String(mapLiteral ? mapLiteral(literal) : literal))
+}
+
+export function expressionCapableAuthoredValue(
+  value: MaybeAuthoredValue<unknown>,
+  valueKind: FeatureValueKindDescriptor,
+): FeatureEditorAuthoredValueBinding {
+  return {
+    expressionCapable: true,
+    valueKind,
+    source: isExpressionAuthoredValue(value) ? 'expression' : 'literal',
+    expressionText: isExpressionAuthoredValue(value) ? value.valueText : null,
+  }
 }
 
 export function isPositiveAuthoredNumber(value: MaybeAuthoredValue<number>) {

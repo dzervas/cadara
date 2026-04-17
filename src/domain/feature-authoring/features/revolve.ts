@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, revolveSelectionFilter } from '@/domain/editor/schema'
 import { REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const revolveAuthoringDefinition = {
   metadata: {
@@ -218,8 +218,8 @@ export const revolveAuthoringDefinition = {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } }, error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
-            { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: { expressionCapable: true, valueKind: { kind: 'angle' } }, patch: { patchKey: 'startAngle' } },
+            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.angle, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
+            { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.startAngle, { kind: 'angle' }), patch: { patchKey: 'startAngle' } },
             {
               kind: 'enum',
               id: 'revolve-operation',
@@ -231,7 +231,7 @@ export const revolveAuthoringDefinition = {
                 { value: 'cut', label: 'cut' },
                 { value: 'intersect', label: 'intersect' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.operation, { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] }),
               patch: { patchKey: 'operation' },
             },
             {

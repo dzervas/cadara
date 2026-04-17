@@ -6,7 +6,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { FeatureAuthoringDefinition, SweepFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, sweepSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asSweepPathRef, authoredDefinitionValue, authoredStringLiteral, createMissingInputDiagnostic } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asSweepPathRef, authoredDefinitionValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue } from '@/domain/feature-authoring/features/shared'
 
 const sweepParticipants = [
   {
@@ -326,7 +326,7 @@ export const sweepAuthoringDefinition = {
                 { value: 'subtract', label: 'subtract' },
                 { value: 'intersect', label: 'intersect' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.operationIntent, { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] }),
               patch: { patchKey: 'operationIntent' },
             },
             {

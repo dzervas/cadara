@@ -2,10 +2,13 @@ import { test } from 'bun:test'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { FeatureInspector } from '@/components/layout/feature-inspector'
+import { FeatureExpressionEditorControl, FeatureInspector } from '@/components/layout/feature-inspector'
 import { initialEditorState, type EditorViewState } from '@/contracts/editor/state-machine'
+import { createExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
+import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import {
   createFeatureEditorFormValues,
+  previewFeatureEditorFieldExpression,
   shouldResetFeatureEditorFormValues,
 } from '@/domain/feature-authoring/form-adapter'
 import {
@@ -27,6 +30,7 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
   function renderInspector(input: {
     activeEditSession: NonNullable<EditorViewState['activeEditSession']>
     activeReferencePickerFieldId?: string | null
+    snapshot?: DocumentSnapshot | null
   }) {
     const viewState: EditorViewState = {
       mode: 'part',
@@ -43,7 +47,7 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
       activeEditSession: input.activeEditSession,
       activeReferencePickerFieldId: input.activeReferencePickerFieldId ?? null,
       sketchSession: null,
-      snapshot: null,
+      snapshot: input.snapshot ?? null,
       previewRenderables: null,
     }
 
@@ -85,6 +89,15 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
   assert(
     incompleteRevolveMarkup.includes('Clear Profile targets'),
     'Feature inspector should render a clear control for single-reference fields.',
+  )
+  assert(
+    incompleteRevolveMarkup.includes('Edit Angle (degrees) expression') &&
+      incompleteRevolveMarkup.includes('Edit Operation expression'),
+    'Feature inspector should render f(x) affordances for expression-capable numeric and enum fields.',
+  )
+  assert(
+    !incompleteRevolveMarkup.includes('Edit Profile targets expression'),
+    'Feature inspector should not render expression affordances for reference fields.',
   )
 
   const baseShellSession = createFeatureEditSession({
@@ -153,5 +166,81 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
       nextValues: activeShellValues,
     }),
     'Feature inspector should reset RHF values when the editor session changes externally, such as after reference picking.',
+  )
+
+  const expressionShellSession = patchFeatureEditSession(baseShellSession, {
+    thickness: createExpressionAuthoredValue('wall + 1'),
+    operation: createExpressionAuthoredValue('"join"'),
+  })
+  const expressionShellMarkup = renderInspector({
+    activeEditSession: expressionShellSession,
+    snapshot: {
+      variables: [{ variableId: 'variable_wall', name: 'wall', valueText: '2' }],
+    } as DocumentSnapshot,
+  })
+
+  assert(
+    expressionShellMarkup.includes('aria-pressed="true"') &&
+      expressionShellMarkup.includes('value="3"') &&
+      expressionShellMarkup.includes('disabled=""'),
+    'Feature inspector should reopen expression-authored fields as active disabled controls with calculated previews.',
+  )
+
+  const expressionShellSchema = getFeatureEditorFormSchema(expressionShellSession)
+  const thicknessField = expressionShellSchema.sections
+    .flatMap((section) => section.fields)
+    .find((field) => field.id === 'shell-thickness')
+  assert(thicknessField?.kind === 'numeric', 'Expression editor tests need the shell thickness numeric field.')
+
+  const validPreview = previewFeatureEditorFieldExpression({
+    field: thicknessField,
+    expressionText: 'wall + 1',
+    variables: [{ variableId: 'variable_wall', name: 'wall', valueText: '2' }],
+  })
+  const expressionEditorMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <FeatureExpressionEditorControl
+        id="shell-thickness-expression"
+        fieldLabel="Thickness"
+        expressionText="wall + 1"
+        preview={validPreview}
+        hasError={!validPreview.ok}
+        onAccept={() => undefined}
+        onChangeText={() => undefined}
+        onClear={() => undefined}
+      />
+    </MantineProvider>,
+  )
+  assert(
+    expressionEditorMarkup.includes('aria-label="Thickness expression"') &&
+      expressionEditorMarkup.includes('Clear Thickness expression') &&
+      expressionEditorMarkup.includes('>3</span>'),
+    'Expression editor should render edit mode with live preview and a red clear action.',
+  )
+
+  const invalidPreview = previewFeatureEditorFieldExpression({
+    field: thicknessField,
+    expressionText: 'wall + * 2',
+    variables: [{ variableId: 'variable_wall', name: 'wall', valueText: '2' }],
+  })
+  assert(!invalidPreview.ok, 'Expression preview test should use invalid expression text.')
+  const invalidEditorMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <FeatureExpressionEditorControl
+        id="shell-thickness-expression"
+        fieldLabel="Thickness"
+        expressionText="wall + * 2"
+        preview={invalidPreview}
+        hasError={!invalidPreview.ok}
+        onAccept={() => undefined}
+        onChangeText={() => undefined}
+        onClear={() => undefined}
+      />
+    </MantineProvider>,
+  )
+  assert(
+    invalidEditorMarkup.includes('aria-invalid="true"') &&
+      !invalidEditorMarkup.includes('pointer-events-none absolute right-2'),
+    'Expression editor should render invalid preview feedback without replacing authored text.',
   )
 })

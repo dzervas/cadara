@@ -1,5 +1,7 @@
 import { primitiveRefEquals, type PrimitiveRef } from '@/domain/editor/schema'
 import { createExpressionAuthoredValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
+import type { DocumentVariableRecord } from '@/contracts/modeling/schema'
+import { previewFeatureValueExpression } from '@/domain/modeling/feature-value-expressions'
 
 import { createFeatureEditorFieldPatch } from '@/domain/feature-authoring/form-events'
 import type {
@@ -13,7 +15,20 @@ type FeatureEditorPatchableField = Extract<
   { kind: 'numeric' | 'enum' | 'referencePicker' | 'referenceCollection' }
 >
 
-export type FeatureEditorFormValue = string | PrimitiveRef | PrimitiveRef[] | null
+export type FeatureEditorExpressionField = Extract<FeatureEditorFormField, { kind: 'numeric' | 'enum' }>
+
+export interface FeatureEditorControlFormValue {
+  formValueKind: 'featureEditorControl'
+  source: 'literal' | 'expression'
+  value: string
+  expressionText: string | null
+}
+
+export type FeatureEditorExpressionPreview =
+  | { ok: true; value: unknown; formValue: string; displayText: string }
+  | { ok: false; message: string }
+
+export type FeatureEditorFormValue = FeatureEditorControlFormValue | string | PrimitiveRef | PrimitiveRef[] | null
 
 export type FeatureEditorFormValues = Record<string, FeatureEditorFormValue>
 
@@ -64,7 +79,7 @@ export function featureEditorFormValuesEqual(
     const rightValue = normalizedRight[field.id]
 
     if (field.kind === 'numeric') {
-      if (!numericFormValuesEqual(leftValue, rightValue)) {
+      if (!controlFormValuesEqual(field, leftValue, rightValue)) {
         return false
       }
 
@@ -72,7 +87,7 @@ export function featureEditorFormValuesEqual(
     }
 
     if (field.kind === 'enum') {
-      if (leftValue !== rightValue) {
+      if (!controlFormValuesEqual(field, leftValue, rightValue)) {
         return false
       }
 
@@ -120,29 +135,26 @@ export function createFeatureEditorPatchFromFormValue(
 ): FeatureEditorPatch | null {
   switch (field.kind) {
     case 'numeric': {
-      const parsed = parseNumericFormValue(value)
+      const controlValue = normalizeControlFormValue(field, value)
+      if (controlValue.source === 'expression') {
+        return createFeatureEditorPatchFromExpression(field, controlValue.expressionText ?? '')
+      }
+
+      const parsed = parseNumericFormValue(controlValue.value)
       if (parsed !== null) {
         return createFeatureEditorFieldPatch(field, parsed)
       }
 
-      if (field.authoredValue?.expressionCapable && typeof value === 'string' && value.trim().length > 0) {
-        return createFeatureEditorFieldPatch(field, createExpressionAuthoredValue(value.trim()))
-      }
-
       return null
     }
-    case 'enum':
-      if (typeof value === 'string') {
-        const literal = field.options.some((option) => option.value === value)
-        return createFeatureEditorFieldPatch(
-          field,
-          field.authoredValue?.expressionCapable && !literal
-            ? createExpressionAuthoredValue(value.trim())
-            : value,
-        )
+    case 'enum': {
+      const controlValue = normalizeControlFormValue(field, value)
+      if (controlValue.source === 'expression') {
+        return createFeatureEditorPatchFromExpression(field, controlValue.expressionText ?? '')
       }
 
-      return createFeatureEditorFieldPatch(field, field.value)
+      return createFeatureEditorFieldPatch(field, controlValue.value)
+    }
     case 'referencePicker':
       return createFeatureEditorFieldPatch(field, normalizeReferenceFormValue(value))
     case 'referenceCollection':
@@ -150,12 +162,87 @@ export function createFeatureEditorPatchFromFormValue(
   }
 }
 
+export function createFeatureEditorPatchFromExpression(
+  field: FeatureEditorExpressionField,
+  expressionText: string,
+): FeatureEditorPatch | null {
+  const trimmed = expressionText.trim()
+  return trimmed.length > 0
+    ? createFeatureEditorFieldPatch(field, createExpressionAuthoredValue(trimmed))
+    : null
+}
+
+export function createFeatureEditorLiteralControlFormValue(
+  value: string,
+): FeatureEditorControlFormValue {
+  return {
+    formValueKind: 'featureEditorControl',
+    source: 'literal',
+    value,
+    expressionText: null,
+  }
+}
+
+export function createFeatureEditorExpressionControlFormValue(
+  value: string,
+  expressionText: string,
+): FeatureEditorControlFormValue {
+  return {
+    formValueKind: 'featureEditorControl',
+    source: 'expression',
+    value,
+    expressionText,
+  }
+}
+
+export function getFeatureEditorControlFormValueText(value: unknown): string {
+  return isFeatureEditorControlFormValue(value)
+    ? value.value
+    : typeof value === 'string'
+      ? value
+      : typeof value === 'number' && Number.isFinite(value)
+        ? String(value)
+        : ''
+}
+
+export function getFeatureEditorExpressionSourceState(
+  field: FeatureEditorExpressionField,
+  value: unknown,
+): FeatureEditorControlFormValue | null {
+  return field.authoredValue?.expressionCapable ? normalizeControlFormValue(field, value) : null
+}
+
+export function previewFeatureEditorFieldExpression(input: {
+  field: FeatureEditorExpressionField
+  expressionText: string
+  variables: readonly DocumentVariableRecord[]
+}): FeatureEditorExpressionPreview {
+  const preview = previewFeatureValueExpression({
+    expressionText: input.expressionText,
+    label: input.field.label,
+    valueKind: input.field.authoredValue?.valueKind ?? { kind: 'string' },
+    variables: input.variables,
+  })
+
+  if (!preview.ok) {
+    return { ok: false, message: preview.diagnostic.message }
+  }
+
+  const formValue = formatResolvedExpressionFormValue(input.field, preview.value)
+  return {
+    ok: true,
+    value: preview.value,
+    formValue,
+    displayText: formValue,
+  }
+}
+
 function getFeatureEditorFieldValue(field: FeatureEditorPatchableField): FeatureEditorFormValue {
   switch (field.kind) {
     case 'numeric':
-      return String(field.value)
+      return createControlFormValue(field, String(field.value))
     case 'enum':
-      return field.value
+      return createControlFormValue(field, field.value)
     case 'referencePicker':
       return field.value
     case 'referenceCollection':
@@ -169,9 +256,9 @@ function normalizeFeatureEditorFieldValue(
 ): FeatureEditorFormValue {
   switch (field.kind) {
     case 'numeric':
-      return normalizeNumericFormValue(value)
+      return normalizeControlFormValue(field, value)
     case 'enum':
-      return typeof value === 'string' ? value : field.value
+      return normalizeControlFormValue(field, value)
     case 'referencePicker':
       return normalizeReferenceFormValue(value)
     case 'referenceCollection':
@@ -179,20 +266,60 @@ function normalizeFeatureEditorFieldValue(
   }
 }
 
-function normalizeNumericFormValue(value: unknown): string {
+function createControlFormValue(
+  field: FeatureEditorExpressionField,
+  value: string,
+): FeatureEditorControlFormValue {
+  const source = field.authoredValue?.source === 'expression' ? 'expression' : 'literal'
+  const expressionText = source === 'expression'
+    ? field.authoredValue?.expressionText ?? value
+    : null
+
+  return {
+    formValueKind: 'featureEditorControl',
+    source,
+    value,
+    expressionText,
+  }
+}
+
+function normalizeControlFormValue(
+  field: FeatureEditorExpressionField,
+  value: unknown,
+): FeatureEditorControlFormValue {
+  if (isFeatureEditorControlFormValue(value)) {
+    return {
+      formValueKind: 'featureEditorControl',
+      source: value.source,
+      value: value.value,
+      expressionText: value.source === 'expression' ? value.expressionText ?? value.value : null,
+    }
+  }
+
   if (isExpressionAuthoredValue(value)) {
-    return value.valueText
+    return createFeatureEditorExpressionControlFormValue(value.valueText, value.valueText)
   }
 
   if (typeof value === 'string') {
-    return value
+    return createFeatureEditorLiteralControlFormValue(value)
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value)
+    return createFeatureEditorLiteralControlFormValue(String(value))
   }
 
-  return ''
+  return createControlFormValue(field, field.kind === 'numeric' ? String(field.value) : field.value)
+}
+
+function isFeatureEditorControlFormValue(value: unknown): value is FeatureEditorControlFormValue {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && (value as { formValueKind?: unknown }).formValueKind === 'featureEditorControl'
+    && ((value as { source?: unknown }).source === 'literal' || (value as { source?: unknown }).source === 'expression')
+    && typeof (value as { value?: unknown }).value === 'string'
+  )
 }
 
 function parseNumericFormValue(value: unknown): number | null {
@@ -214,18 +341,54 @@ function parseNumericFormValue(value: unknown): number | null {
 }
 
 function numericFormValuesEqual(left: FeatureEditorFormValue, right: FeatureEditorFormValue): boolean {
-  if (typeof left !== 'string' || typeof right !== 'string') {
-    return left === right
+  const leftText = getFeatureEditorControlFormValueText(left)
+  const rightText = getFeatureEditorControlFormValueText(right)
+
+  if (leftText.length === 0 || rightText.length === 0) {
+    return leftText === rightText
   }
 
-  const leftNumber = parseNumericFormValue(left)
-  const rightNumber = parseNumericFormValue(right)
+  const leftNumber = parseNumericFormValue(leftText)
+  const rightNumber = parseNumericFormValue(rightText)
 
   if (leftNumber !== null && rightNumber !== null) {
     return leftNumber === rightNumber
   }
 
-  return left === right
+  return leftText === rightText
+}
+
+function controlFormValuesEqual(
+  field: FeatureEditorExpressionField,
+  left: FeatureEditorFormValue,
+  right: FeatureEditorFormValue,
+): boolean {
+  const leftValue = normalizeControlFormValue(field, left)
+  const rightValue = normalizeControlFormValue(field, right)
+
+  if (leftValue.source !== rightValue.source) {
+    return false
+  }
+
+  if (leftValue.source === 'expression') {
+    return leftValue.expressionText === rightValue.expressionText
+  }
+
+  return field.kind === 'numeric'
+    ? numericFormValuesEqual(leftValue, rightValue)
+    : leftValue.value === rightValue.value
+}
+
+function formatResolvedExpressionFormValue(field: FeatureEditorExpressionField, value: unknown): string {
+  if (field.kind === 'numeric') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return ''
+    }
+
+    return String(field.input === 'angleDegrees' ? value * (180 / Math.PI) : value)
+  }
+
+  return typeof value === 'string' ? value : ''
 }
 
 function normalizeReferenceFormValue(value: unknown): PrimitiveRef | null {

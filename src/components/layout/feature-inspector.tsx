@@ -1,17 +1,25 @@
 import { ActionIcon, Button, Paper, Text, ThemeIcon } from '@mantine/core'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, CircleSlash, Layers3, X } from 'lucide-react'
-import { Controller, type Control, useForm } from 'react-hook-form'
+import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
 import { Input } from '@/components/ui/input'
-import type { FeatureSnapshotRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type { DocumentVariableRecord, FeatureSnapshotRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { getPrimitiveRefLabel, primitiveRefEquals, type PrimitiveRef } from '@/domain/editor/schema'
 import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
 import {
+  createFeatureEditorExpressionControlFormValue,
+  createFeatureEditorLiteralControlFormValue,
   createFeatureEditorFormValues,
+  createFeatureEditorPatchFromExpression,
   createFeatureEditorPatchFromFormValue,
+  getFeatureEditorControlFormValueText,
+  getFeatureEditorExpressionSourceState,
   normalizeFeatureEditorFormValues,
+  previewFeatureEditorFieldExpression,
   shouldResetFeatureEditorFormValues,
+  type FeatureEditorExpressionField,
+  type FeatureEditorExpressionPreview,
   type FeatureEditorFormValues,
 } from '@/domain/feature-authoring/form-adapter'
 import {
@@ -127,41 +135,280 @@ function formatParticipantHelper(field: FeatureEditorFormField) {
   return field.helper ? `${participantStatus} ${field.helper}` : participantStatus
 }
 
-function NumericField(props: {
+function FunctionIcon() {
+  return (
+    <span
+      aria-hidden="true"
+      className="block h-4 w-4"
+      style={{
+        backgroundColor: 'currentColor',
+        maskImage: 'url(/icons/function.svg)',
+        maskRepeat: 'no-repeat',
+        maskPosition: 'center',
+        maskSize: 'contain',
+      }}
+    />
+  )
+}
+
+function ExpressionAffordance(props: {
+  fieldLabel: string
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <ActionIcon
+      component="button"
+      type="button"
+      onClick={props.onClick}
+      disabled={props.disabled}
+      aria-label={`Edit ${props.fieldLabel} expression`}
+      aria-pressed={props.active}
+      variant="default"
+      size={40}
+      styles={{
+        root: {
+          backgroundColor: 'var(--workbench-shell-surface)',
+          borderColor: props.active ? 'var(--mantine-color-workbench-5)' : 'var(--workbench-shell-border)',
+          color: props.active ? 'var(--mantine-color-workbench-4)' : 'var(--workbench-shell-text-muted)',
+          flex: '0 0 auto',
+        },
+      }}
+    >
+      <FunctionIcon />
+    </ActionIcon>
+  )
+}
+
+export function FeatureExpressionEditorControl(props: {
+  id: string
+  fieldLabel: string
+  expressionText: string
+  preview: FeatureEditorExpressionPreview
+  hasError: boolean
+  onChangeText: (nextText: string) => void
+  onAccept: () => void
+  onClear: () => void
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <div className="relative min-w-0 flex-1">
+        <Input
+          id={props.id}
+          aria-label={`${props.fieldLabel} expression`}
+          value={props.expressionText}
+          onBlur={props.onAccept}
+          onChange={(event) => props.onChangeText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              props.onAccept()
+            }
+          }}
+          aria-invalid={props.hasError || undefined}
+          error={props.hasError}
+          className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] pr-20 ${fieldBorderClass({ error: props.hasError ? { message: '' } : null })}`}
+        />
+        {props.preview.ok ? (
+          <span className="pointer-events-none absolute right-2 top-1/2 max-w-[45%] -translate-y-1/2 truncate rounded bg-[var(--workbench-shell-overlay)] px-2 py-0.5 text-xs text-[var(--mantine-color-dark-1)]">
+            {props.preview.displayText}
+          </span>
+        ) : null}
+      </div>
+      <ActionIcon
+        component="button"
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={props.onClear}
+        aria-label={`Clear ${props.fieldLabel} expression`}
+        variant="default"
+        color="red"
+        size={40}
+        styles={{
+          root: {
+            backgroundColor: 'var(--workbench-shell-surface)',
+            borderColor: 'var(--workbench-shell-danger-border)',
+            color: 'var(--workbench-shell-danger-text)',
+            flex: '0 0 auto',
+          },
+        }}
+      >
+        <X className="h-4 w-4" />
+      </ActionIcon>
+    </div>
+  )
+}
+
+type ControllerField = ControllerRenderProps<FeatureEditorFormValues, string>
+
+interface ExpressionControlRenderInput {
+  id: string
+  value: string
+  disabled: boolean
+  hasError: boolean
+  onBlur: () => void
+  onLiteralChange: (nextValue: string) => void
+}
+
+function ExpressionFieldShell(props: {
   control: Control<FeatureEditorFormValues>
-  field: FeatureNumericField
+  field: FeatureEditorExpressionField
+  documentVariables: readonly DocumentVariableRecord[]
   onPatch: (patch: Record<string, unknown>) => void
+  renderControl: (input: ExpressionControlRenderInput) => ReactNode
 }) {
   return (
     <Controller
       control={props.control}
       name={props.field.id}
       render={({ field }) => (
-        <section className="space-y-2">
-          <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]" htmlFor={props.field.id}>
-            {props.field.label}
-          </label>
-          <Input
-            id={props.field.id}
-            type="number"
-            value={typeof field.value === 'string' ? field.value : ''}
-            step={props.field.step ?? 0.1}
-            disabled={props.field.disabled}
-            onBlur={field.onBlur}
-            onChange={(event) => {
-              const nextValue = event.target.value
-              field.onChange(nextValue)
+        <ExpressionFieldShellInner
+          controllerField={field}
+          documentVariables={props.documentVariables}
+          field={props.field}
+          onPatch={props.onPatch}
+          renderControl={props.renderControl}
+        />
+      )}
+    />
+  )
+}
 
-              const patch = createFeatureEditorPatchFromFormValue(props.field, nextValue)
-              if (patch) {
-                props.onPatch(patch)
-              }
+function ExpressionFieldShellInner(props: {
+  controllerField: ControllerField
+  documentVariables: readonly DocumentVariableRecord[]
+  field: FeatureEditorExpressionField
+  onPatch: (patch: Record<string, unknown>) => void
+  renderControl: (input: ExpressionControlRenderInput) => ReactNode
+}) {
+  const sourceState = getFeatureEditorExpressionSourceState(props.field, props.controllerField.value)
+  const activeExpression = sourceState?.source === 'expression'
+  const [editingExpression, setEditingExpression] = useState(false)
+  const [expressionText, setExpressionText] = useState(() =>
+    activeExpression ? sourceState.expressionText ?? '' : getFeatureEditorControlFormValueText(props.controllerField.value),
+  )
+
+  const preview = useMemo(
+    () => previewFeatureEditorFieldExpression({
+      field: props.field,
+      expressionText,
+      variables: props.documentVariables,
+    }),
+    [expressionText, props.documentVariables, props.field],
+  )
+  const normalValue = activeExpression && preview.ok
+    ? preview.formValue
+    : getFeatureEditorControlFormValueText(props.controllerField.value)
+  const fieldError = editingExpression && !preview.ok ? { message: preview.message } : props.field.error
+  const hasError = !!fieldError
+
+  function patchLiteral(nextValue: string) {
+    const nextFormValue = createFeatureEditorLiteralControlFormValue(nextValue)
+    props.controllerField.onChange(nextFormValue)
+
+    const patch = createFeatureEditorPatchFromFormValue(props.field, nextFormValue)
+    if (patch) {
+      props.onPatch(patch)
+    }
+  }
+
+  function acceptExpression() {
+    if (!preview.ok) {
+      return
+    }
+
+    const trimmed = expressionText.trim()
+    const patch = createFeatureEditorPatchFromExpression(props.field, trimmed)
+    if (!patch) {
+      return
+    }
+
+    props.controllerField.onChange(createFeatureEditorExpressionControlFormValue(preview.formValue, trimmed))
+    props.onPatch(patch)
+    setEditingExpression(false)
+  }
+
+  function clearExpression() {
+    const nextValue = preview.ok ? preview.formValue : normalValue
+    patchLiteral(nextValue)
+    setEditingExpression(false)
+  }
+
+  return (
+    <section className="space-y-2">
+      <label
+        className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]"
+        htmlFor={editingExpression ? `${props.field.id}-expression` : props.field.id}
+      >
+        {props.field.label}
+      </label>
+
+      {editingExpression ? (
+        <FeatureExpressionEditorControl
+          id={`${props.field.id}-expression`}
+          fieldLabel={props.field.label}
+          expressionText={expressionText}
+          preview={preview}
+          hasError={hasError}
+          onAccept={acceptExpression}
+          onChangeText={setExpressionText}
+          onClear={clearExpression}
+        />
+      ) : (
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            {props.renderControl({
+              id: props.field.id,
+              value: normalValue,
+              disabled: !!props.field.disabled || activeExpression,
+              hasError,
+              onBlur: props.controllerField.onBlur,
+              onLiteralChange: patchLiteral,
+            })}
+          </div>
+          <ExpressionAffordance
+            fieldLabel={props.field.label}
+            active={activeExpression}
+            disabled={props.field.disabled}
+            onClick={() => {
+              setExpressionText(activeExpression ? sourceState.expressionText ?? '' : normalValue)
+              setEditingExpression(true)
             }}
-            aria-invalid={props.field.error ? true : undefined}
-            className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] ${fieldBorderClass(props.field)}`}
           />
-          <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
-        </section>
+        </div>
+      )}
+
+      <FieldMessage helper={formatParticipantHelper(props.field)} error={fieldError} />
+    </section>
+  )
+}
+
+function NumericField(props: {
+  control: Control<FeatureEditorFormValues>
+  field: FeatureNumericField
+  documentVariables: readonly DocumentVariableRecord[]
+  onPatch: (patch: Record<string, unknown>) => void
+}) {
+  return (
+    <ExpressionFieldShell
+      control={props.control}
+      field={props.field}
+      documentVariables={props.documentVariables}
+      onPatch={props.onPatch}
+      renderControl={({ id, value, disabled, hasError, onBlur, onLiteralChange }) => (
+        <Input
+          id={id}
+          type="number"
+          value={value}
+          step={props.field.step ?? 0.1}
+          disabled={disabled}
+          onBlur={onBlur}
+          onChange={(event) => onLiteralChange(event.target.value)}
+          aria-invalid={hasError || undefined}
+          error={hasError}
+          className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] ${fieldBorderClass({ error: hasError ? props.field.error ?? { message: '' } : null })}`}
+        />
       )}
     />
   )
@@ -170,56 +417,46 @@ function NumericField(props: {
 function EnumField(props: {
   control: Control<FeatureEditorFormValues>
   field: Extract<FeatureEditorFormField, { kind: 'enum' }>
+  documentVariables: readonly DocumentVariableRecord[]
   onPatch: (patch: Record<string, unknown>) => void
 }) {
   return (
-    <Controller
+    <ExpressionFieldShell
       control={props.control}
-      name={props.field.id}
-      render={({ field }) => (
-        <section className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]">
-            {props.field.label}
-          </p>
-          <div className="grid grid-cols-4 gap-2">
-            {props.field.options.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                disabled={props.field.disabled}
-                variant={field.value === option.value ? 'light' : 'default'}
-                color="workbench"
-                onClick={() => {
-                  field.onChange(option.value)
-
-                  const patch = createFeatureEditorPatchFromFormValue(props.field, option.value)
-                  if (patch) {
-                    props.onPatch(patch)
-                  }
-                }}
-                styles={{
-                  root: {
-                    backgroundColor:
-                      field.value === option.value
-                        ? 'var(--workbench-shell-accent-surface)'
-                        : 'var(--workbench-shell-surface)',
-                    borderColor:
-                      field.value === option.value
-                        ? 'var(--workbench-shell-border-strong)'
-                        : 'var(--workbench-shell-border)',
-                    color:
-                      field.value === option.value
-                        ? 'var(--workbench-shell-text)'
-                        : 'var(--workbench-shell-text-muted)',
-                  },
-                }}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
-          <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
-        </section>
+      field={props.field}
+      documentVariables={props.documentVariables}
+      onPatch={props.onPatch}
+      renderControl={({ value, disabled, onLiteralChange }) => (
+        <div className="grid grid-cols-4 gap-2">
+          {props.field.options.map((option) => (
+            <Button
+              key={option.value}
+              type="button"
+              disabled={disabled}
+              variant={value === option.value ? 'light' : 'default'}
+              color="workbench"
+              onClick={() => onLiteralChange(option.value)}
+              styles={{
+                root: {
+                  backgroundColor:
+                    value === option.value
+                      ? 'var(--workbench-shell-accent-surface)'
+                      : 'var(--workbench-shell-surface)',
+                  borderColor:
+                    value === option.value
+                      ? 'var(--workbench-shell-border-strong)'
+                      : 'var(--workbench-shell-border)',
+                  color:
+                    value === option.value
+                      ? 'var(--workbench-shell-text)'
+                      : 'var(--workbench-shell-text-muted)',
+                },
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
       )}
     />
   )
@@ -475,6 +712,7 @@ function ReferenceCollectionCard(props: {
 function FeatureFormFieldRenderer(props: {
   control: Control<FeatureEditorFormValues>
   field: FeatureEditorFormField
+  documentVariables: readonly DocumentVariableRecord[]
   activeReferencePickerFieldId: string | null
   onReferencePickerActivate: (fieldId: string) => void
   onPatch: (patch: Record<string, unknown>) => void
@@ -485,9 +723,9 @@ function FeatureFormFieldRenderer(props: {
 
   switch (props.field.kind) {
     case 'numeric':
-      return <NumericField control={props.control} field={props.field} onPatch={props.onPatch} />
+      return <NumericField control={props.control} field={props.field} documentVariables={props.documentVariables} onPatch={props.onPatch} />
     case 'enum':
-      return <EnumField control={props.control} field={props.field} onPatch={props.onPatch} />
+      return <EnumField control={props.control} field={props.field} documentVariables={props.documentVariables} onPatch={props.onPatch} />
     case 'referencePicker': {
       const field = props.field
       return (
@@ -543,12 +781,12 @@ export function FeatureInspector({
   onCommit,
   onCancel,
 }: FeatureInspectorProps) {
-  const {
-    state: { activeCommand, activeEditSession, activeReferencePickerFieldId },
-    dispatch,
-  } = useEditorState()
+  const editor = useEditorState()
+  const { activeCommand, activeEditSession, activeReferencePickerFieldId } = editor.state
+  const { dispatch } = editor
   const activeCommandSessionId = activeCommand?.commandSessionId ?? null
   const formSchema = activeEditSession ? getFeatureEditorFormSchema(activeEditSession) : null
+  const documentVariables = editor.state.snapshot?.variables ?? []
   const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
   const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })
   const lastSessionKeyRef = useRef<string | null>(null)
@@ -623,6 +861,7 @@ export function FeatureInspector({
                 key={field.id}
                 control={form.control}
                 field={field}
+                documentVariables={documentVariables}
                 activeReferencePickerFieldId={activeReferencePickerFieldId}
                 onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
                 onPatch={onPatch}

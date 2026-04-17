@@ -13,6 +13,7 @@ import {
   authoredNumberFormValue,
   authoredNumberLiteral,
   createMissingInputDiagnostic,
+  expressionCapableAuthoredValue,
   isPositiveAuthoredNumber,
 } from '@/domain/feature-authoring/features/shared'
 
@@ -233,7 +234,7 @@ export const transformAuthoringDefinition = {
                 isPositiveAuthoredNumber(session.draft.distance)
                   ? null
                   : { message: 'Distance must be greater than zero.' },
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.distance, { kind: 'positiveNumber' }),
               patch: { patchKey: 'distance' },
             },
           ],

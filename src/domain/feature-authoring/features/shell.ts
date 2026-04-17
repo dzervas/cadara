@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, shellSelectionFilter } from '@/domain/editor/schema'
 import { SHELL_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asFaceRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asFaceRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const shellAuthoringDefinition = {
   metadata: {
@@ -211,7 +211,7 @@ export const shellAuthoringDefinition = {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            { kind: 'numeric', id: 'shell-thickness', label: 'Thickness', value: authoredNumberFormValue(session.draft.thickness), input: 'number', step: 0.1, authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } }, error: isPositiveAuthoredNumber(session.draft.thickness) ? null : { message: 'Thickness must be greater than zero.' }, patch: { patchKey: 'thickness' } },
+            { kind: 'numeric', id: 'shell-thickness', label: 'Thickness', value: authoredNumberFormValue(session.draft.thickness), input: 'number', step: 0.1, authoredValue: expressionCapableAuthoredValue(session.draft.thickness, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.thickness) ? null : { message: 'Thickness must be greater than zero.' }, patch: { patchKey: 'thickness' } },
             {
               kind: 'enum',
               id: 'shell-operation',
@@ -223,7 +223,7 @@ export const shellAuthoringDefinition = {
                 { value: 'cut', label: 'cut' },
                 { value: 'intersect', label: 'intersect' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.operation, { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] }),
               patch: { patchKey: 'operation' },
             },
             {

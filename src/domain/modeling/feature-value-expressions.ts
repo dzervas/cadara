@@ -2,6 +2,7 @@ import * as math from 'mathjs'
 
 import type { DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import {
+  createExpressionAuthoredValue,
   ensureLiteralAuthoredValue,
   isAuthoredValue,
   isExpressionAuthoredValue,
@@ -31,6 +32,10 @@ export interface FeatureValueExpressionFieldDescriptor {
 export type FeatureValueExpressionResolution =
   | { ok: true; definition: FeatureDefinition }
   | { ok: false; diagnostics: ModelingDiagnostic[] }
+
+export type FeatureValueExpressionPreview =
+  | { ok: true; value: unknown }
+  | { ok: false; diagnostic: ModelingDiagnostic }
 
 const MATH_GLOBAL_SYMBOLS = new Set(['Infinity', 'NaN'])
 const BOOLEAN_OPERATION_OPTIONS = ['newBody', 'join', 'cut', 'intersect'] as const
@@ -82,6 +87,34 @@ export function normalizeFeatureDefinitionAuthoredValues(definition: FeatureDefi
   }
 
   return normalized
+}
+
+export function previewFeatureValueExpression(input: {
+  expressionText: string
+  label: string
+  valueKind: FeatureValueKindDescriptor
+  variables: readonly DocumentVariableRecord[]
+}): FeatureValueExpressionPreview {
+  const variableEvaluation = evaluateDocumentVariableExpressions(input.variables)
+  if (!variableEvaluation.ok) {
+    return {
+      ok: false,
+      diagnostic: createDocumentVariableExpressionDiagnostics(variableEvaluation.diagnostics)[0] ?? createDiagnostic(
+        'feature-value-expression-evaluation-failed',
+        `${input.label} could not evaluate document variables.`,
+      ),
+    }
+  }
+
+  return resolveAuthoredFeatureValue({
+    value: createExpressionAuthoredValue(input.expressionText),
+    field: {
+      path: [],
+      label: input.label,
+      valueKind: input.valueKind,
+    },
+    variablesByName: variableEvaluation.valuesByName,
+  })
 }
 
 export function getFeatureValueExpressionFields(definition: FeatureDefinition): FeatureValueExpressionFieldDescriptor[] {

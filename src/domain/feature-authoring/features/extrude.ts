@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, extrudeSelectionFilter } from '@/domain/editor/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 export const extrudeAuthoringDefinition = {
   metadata: {
@@ -179,7 +179,7 @@ export const extrudeAuthoringDefinition = {
               value: authoredNumberFormValue(session.draft.depth),
               input: 'number',
               step: 0.1,
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'positiveNumber' } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.depth, { kind: 'positiveNumber' }),
               error: isPositiveAuthoredNumber(session.draft.depth) ? null : { message: 'Depth must be greater than zero.' },
               patch: { patchKey: 'depth' },
             },
@@ -194,7 +194,7 @@ export const extrudeAuthoringDefinition = {
                 { value: 'cut', label: 'cut' },
                 { value: 'intersect', label: 'intersect' },
               ],
-              authoredValue: { expressionCapable: true, valueKind: { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] } },
+              authoredValue: expressionCapableAuthoredValue(session.draft.operation, { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] }),
               patch: { patchKey: 'operation' },
             },
             {
