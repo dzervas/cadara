@@ -26,6 +26,7 @@ function buildLinePreview(start: SketchPoint, end: SketchPoint): readonly Sketch
       entityId: null,
       status: 'preview',
       label: 'Line preview',
+      isConstruction: false,
     },
   ]
 }

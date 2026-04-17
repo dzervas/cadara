@@ -65,7 +65,8 @@ import { getSketchToolDefinition } from '@/domain/sketch-tools/registry'
 export type { SketchDraftEntity, SketchToolId } from '@/domain/sketch-tools/definition'
 export type { SketchConstraintToolId } from '@/domain/sketch-constraints/definition'
 
-export type SketchAuthoringToolId = SketchToolId | SketchConstraintToolId
+export type SketchConstructionToolId = 'construction'
+export type SketchAuthoringToolId = SketchToolId | SketchConstraintToolId | SketchConstructionToolId
 export type SketchSessionStatus = 'idle' | 'drawing' | 'collectingTargets' | 'awaitingValue'
 
 export interface SketchConstraintAuthoringState {
@@ -128,6 +129,8 @@ export interface SketchSessionState {
   historyCursor: SketchHistoryCursor
   activeTool: SketchAuthoringToolId | null
   status: SketchSessionStatus
+  constructionTargetPicking: boolean
+  constructionModifierActive: boolean
   pointerDownPoint: SketchPoint | null
   livePoint: SketchPoint | null
   toolPresentation: SketchToolPresentationSchema | null
@@ -156,6 +159,7 @@ export interface SketchSessionDisplayRenderable {
   label: string
   geometry: RenderableEntityRecord['geometry']
   target: PrimitiveRef | null
+  linePattern: 'solid' | 'dashed'
 }
 
 export type SketchHistoryCursor =
@@ -426,6 +430,8 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     historyCursor,
     activeTool: null,
     status: 'idle',
+    constructionTargetPicking: false,
+    constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
     toolPresentation: null,
@@ -464,6 +470,8 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     historyCursor: { kind: 'empty' },
     activeTool: null,
     status: 'idle',
+    constructionTargetPicking: false,
+    constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
     toolPresentation: null,
@@ -501,6 +509,7 @@ function mapDefinitionEntityToDraftEntity(
         entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
         status: 'accepted',
         label: entity.label,
+        isConstruction: entity.isConstruction,
       },
     ]
   }
@@ -521,6 +530,7 @@ function mapDefinitionEntityToDraftEntity(
         entityId: entity.entityId,
         status: 'accepted',
         label: entity.label,
+        isConstruction: entity.isConstruction,
       },
     ]
   }
@@ -541,6 +551,7 @@ function mapDefinitionEntityToDraftEntity(
         entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
         status: 'accepted',
         label: entity.label,
+        isConstruction: entity.isConstruction,
       },
     ]
   }
@@ -561,6 +572,7 @@ function mapDefinitionEntityToDraftEntity(
       entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
       status: 'accepted',
       label: entity.label,
+      isConstruction: entity.isConstruction,
     },
   ]
 }
@@ -603,13 +615,14 @@ function createPointDefinition(
   pointId: SketchPointId,
   label: string,
   position: SketchPoint,
+  isConstruction = false,
 ): SketchPointDefinition {
   return {
     pointId,
     label,
     target: createSketchPointRef(sketchId, pointId),
     position,
-    isConstruction: false,
+    isConstruction,
   }
 }
 
@@ -619,13 +632,14 @@ function createLineEntityDefinition(
   label: string,
   startPointId: SketchPointId,
   endPointId: SketchPointId,
+  isConstruction = false,
 ): SketchEntityDefinition {
   return {
     kind: 'lineSegment',
     entityId,
     label,
     target: createSketchEntityRef(sketchId, entityId),
-    isConstruction: false,
+    isConstruction,
     startPointId,
     endPointId,
   }
@@ -637,13 +651,14 @@ function createCircleEntityDefinition(
   label: string,
   centerPointId: SketchPointId,
   radius: number,
+  isConstruction = false,
 ): SketchEntityDefinition {
   return {
     kind: 'circle',
     entityId,
     label,
     target: createSketchEntityRef(sketchId, entityId),
-    isConstruction: false,
+    isConstruction,
     centerPointId,
     radius,
   }
@@ -856,6 +871,8 @@ function activateSketchConstraintTool(
     ...session,
     activeTool: toolId,
     status: 'collectingTargets',
+    constructionTargetPicking: false,
+    constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
     entities: session.entities.filter((entity) => entity.status === 'accepted'),
@@ -919,18 +936,113 @@ function getTargetKey(target: PrimitiveRef) {
   }
 }
 
+function buildConstructionTargetPresentation(): SketchToolPresentationSchema {
+  return {
+    prompts: [
+      {
+        id: 'construction-prompt',
+        text: 'Select sketch geometry to toggle construction',
+      },
+    ],
+    steps: [{ id: 'construction-target', label: 'Sketch geometry' }],
+    selectionGuide: {
+      id: 'construction-selection-guide',
+      label: 'Select sketch geometry',
+      acceptedKinds: ['point', 'line', 'circle', 'arc'],
+      selectedCount: 0,
+      requiredCount: 1,
+      hoverLabel: null,
+    },
+    completionHints: [
+      {
+        id: 'construction-completion',
+        text: 'Select an edge or vertex to toggle construction',
+        ready: false,
+      },
+    ],
+  }
+}
+
+function withConstructionFlag(
+  entities: readonly SketchDraftEntity[],
+  isConstruction: boolean,
+): readonly SketchDraftEntity[] {
+  return isConstruction
+    ? entities.map((entity) => ({ ...entity, isConstruction: true }))
+    : entities
+}
+
+function isDrawingSketchTool(toolId: SketchAuthoringToolId | null): toolId is SketchToolId {
+  return toolId !== null && !isRegisteredSketchConstraintToolId(toolId) && toolId !== 'construction'
+}
+
+export function isSketchConstructionSelected(session: SketchSessionState) {
+  return session.constructionTargetPicking || session.constructionModifierActive
+}
+
+function beginSketchConstructionTool(session: SketchSessionState): SketchSessionState {
+  if (isSketchConstructionSelected(session)) {
+    return {
+      ...session,
+      activeTool: null,
+      status: 'idle',
+      constructionTargetPicking: false,
+      constructionModifierActive: false,
+      pointerDownPoint: null,
+      livePoint: null,
+      entities: session.entities.filter((entity) => entity.status === 'accepted'),
+      validationMessage: null,
+      toolPresentation: null,
+      constraintAuthoring: null,
+      activeAnnotationEdit: null,
+      selectedAnnotation: null,
+      activeEditTarget: null,
+      activeDrag: null,
+    }
+  }
+
+  return {
+    ...session,
+    activeTool: 'construction',
+    status: 'collectingTargets',
+    constructionTargetPicking: true,
+    constructionModifierActive: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    validationMessage: null,
+    toolPresentation: buildConstructionTargetPresentation(),
+    constraintAuthoring: null,
+    activeAnnotationEdit: null,
+    selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
+  }
+}
+
 export function beginSketchTool(session: SketchSessionState, toolId: SketchAuthoringToolId): SketchSessionState {
+  if (toolId === 'construction') {
+    return beginSketchConstructionTool(session)
+  }
+
   if (isRegisteredSketchConstraintToolId(toolId)) {
-    return activateSketchConstraintTool(session, toolId)
+    return {
+      ...activateSketchConstraintTool(session, toolId),
+      constructionTargetPicking: false,
+    }
   }
 
   const toolDefinition = getSketchToolDefinition(toolId)
   const activation = toolDefinition.activate()
+  const constructionModifierActive =
+    session.constructionModifierActive || session.constructionTargetPicking
 
   return {
     ...session,
     activeTool: toolId,
     status: activation.state.status,
+    constructionTargetPicking: false,
+    constructionModifierActive,
     pointerDownPoint: activation.state.pointerDownPoint,
     livePoint: activation.state.livePoint,
     entities: session.entities.filter((entity) => entity.status === 'accepted'),
@@ -945,7 +1057,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
 }
 
 export function clearActiveSketchTool(session: SketchSessionState): SketchSessionState {
-  if (session.activeTool === null) {
+  if (session.activeTool === null && !isSketchConstructionSelected(session)) {
     return session
   }
 
@@ -953,6 +1065,8 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     ...session,
     activeTool: null,
     status: 'idle',
+    constructionTargetPicking: false,
+    constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
     entities: session.entities.filter((entity) => entity.status === 'accepted'),
@@ -991,7 +1105,7 @@ export function updateSketchPointer(
     }
   }
 
-  if (session.activeTool === null) {
+  if (!isDrawingSketchTool(session.activeTool)) {
     return session
   }
 
@@ -1008,7 +1122,7 @@ export function updateSketchPointer(
     livePoint: result.state.livePoint,
     entities: [
       ...session.entities.filter((entity) => entity.status === 'accepted'),
-      ...result.stagedEntities,
+      ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     ],
     validationMessage: result.state.validationMessage,
     toolPresentation: result.presentation,
@@ -1049,7 +1163,7 @@ export function beginSketchGeometryDrag(
   if (
     target.kind !== 'sketchPoint'
     || session.status === 'drawing'
-    || (session.activeTool !== null && isRegisteredSketchConstraintToolId(session.activeTool))
+    || (session.activeTool !== null && !isDrawingSketchTool(session.activeTool))
   ) {
     return session
   }
@@ -1064,6 +1178,8 @@ export function beginSketchGeometryDrag(
     ...selected,
     activeTool: null,
     status: 'idle',
+    constructionTargetPicking: false,
+    constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
     toolPresentation: null,
@@ -1223,12 +1339,110 @@ function applyPointPositionsToDefinition(
   }
 }
 
+export function toggleSketchConstructionTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
+  if (
+    !session.constructionTargetPicking
+    || (target.kind !== 'sketchEntity' && target.kind !== 'sketchPoint')
+    || target.sketchId !== getSessionSketchId(session)
+  ) {
+    return session
+  }
+
+  const nextFullDefinition = toggleConstructionTargetInDefinition(session.fullDefinition, target)
+
+  if (nextFullDefinition === session.fullDefinition) {
+    return session
+  }
+
+  const definition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
+  const sketchId = getSessionSketchId(session)
+
+  return {
+    ...session,
+    activeTool: null,
+    status: 'idle',
+    constructionTargetPicking: false,
+    constructionModifierActive: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    toolPresentation: null,
+    constraintAuthoring: null,
+    activeAnnotationEdit: null,
+    selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    fullDefinition: nextFullDefinition,
+    definition,
+    entities: definition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
+    ),
+    commitRequest: rebuildSessionCommitRequest(session, definition),
+    validationMessage: null,
+  }
+}
+
+function toggleConstructionTargetInDefinition(
+  definition: SketchDefinition,
+  target: PrimitiveRef,
+): SketchDefinition {
+  if (target.kind === 'sketchEntity') {
+    const selectedEntity = definition.entities.find((entity) => entity.entityId === target.entityId)
+
+    if (!selectedEntity) {
+      return definition
+    }
+
+    const isConstruction = !selectedEntity.isConstruction
+    const points =
+      selectedEntity.kind === 'point'
+        ? definition.points.map((point) =>
+            point.pointId === selectedEntity.pointId ? { ...point, isConstruction } : point,
+          )
+        : definition.points
+
+    return {
+      ...definition,
+      points,
+      entities: definition.entities.map((entity) =>
+        entity.entityId === target.entityId ? { ...entity, isConstruction } : entity,
+      ),
+    }
+  }
+
+  if (target.kind !== 'sketchPoint') {
+    return definition
+  }
+
+  const selectedPoint = definition.points.find((point) => point.pointId === target.pointId)
+
+  if (!selectedPoint) {
+    return definition
+  }
+
+  const isConstruction = !selectedPoint.isConstruction
+
+  return {
+    ...definition,
+    points: definition.points.map((point) =>
+      point.pointId === target.pointId ? { ...point, isConstruction } : point,
+    ),
+    entities: definition.entities.map((entity) =>
+      entity.kind === 'point' && entity.pointId === target.pointId
+        ? { ...entity, isConstruction }
+        : entity,
+    ),
+  }
+}
+
 function getSessionSketchId(session: SketchSessionState): SketchId {
   return session.sketchId ?? ('sketch_draft' as SketchId)
 }
 
 export function startSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {
-  if (session.activeTool === null || isRegisteredSketchConstraintToolId(session.activeTool)) {
+  if (!isDrawingSketchTool(session.activeTool)) {
     return session
   }
   const toolDefinition = getSketchToolDefinition(session.activeTool)
@@ -1249,7 +1463,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
     livePoint: result.state.livePoint,
     entities: [
       ...session.entities.filter((entity) => entity.status === 'accepted'),
-      ...result.stagedEntities,
+      ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     ],
     validationMessage: result.state.validationMessage,
     toolPresentation: result.presentation,
@@ -1258,8 +1472,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
 
 export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {
   if (
-    session.activeTool === null
-    || isRegisteredSketchConstraintToolId(session.activeTool)
+    !isDrawingSketchTool(session.activeTool)
     || session.pointerDownPoint === null
   ) {
     return session
@@ -1289,17 +1502,18 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     sequence: nextSequence,
     start: session.pointerDownPoint,
     end: point,
+    isConstruction: session.constructionModifierActive,
     factories: {
       createPointId: (suffix) => createPointId(nextSequence, suffix),
       createEntityId: (suffix) => createEntityId(nextSequence, suffix),
       createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
       createDimensionId: (suffix) => createDimensionId(nextSequence, suffix),
       createPoint: (label, pointId, position) =>
-        createPointDefinition(sketchId, pointId, label, position),
+        createPointDefinition(sketchId, pointId, label, position, session.constructionModifierActive),
       createLineEntity: (label, entityId, startPointId, endPointId) =>
-        createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId),
+        createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId, session.constructionModifierActive),
       createCircleEntity: (label, entityId, centerPointId, radius) =>
-        createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius),
+        createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, session.constructionModifierActive),
     },
   })
   const history = applySketchHistoryContribution(session, definitionPatch)
@@ -1385,6 +1599,10 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
     return 'Sketch point selected'
   }
 
+  if (session.constructionTargetPicking) {
+    return 'Select sketch geometry to toggle construction'
+  }
+
   if (session.activeTool === null) {
     return session.definition.entityIds.length > 0
       ? `Sketch has ${session.definition.entityIds.length} authored entities`
@@ -1403,12 +1621,16 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
     return session.toolPresentation
   }
 
-  if (session.activeTool === null) {
-    return null
+  if (session.activeTool === 'construction') {
+    return session.toolPresentation
   }
 
-  if (isRegisteredSketchConstraintToolId(session.activeTool)) {
+  if (session.constraintAuthoring) {
     return session.toolPresentation
+  }
+
+  if (!isDrawingSketchTool(session.activeTool)) {
+    return null
   }
 
   return session.toolPresentation
@@ -2271,6 +2493,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
         position: mapSketchPointToWorld(session.plane, point.position),
         displayRadius: 0.16,
       },
+      linePattern: 'solid' as const,
     })),
     ...session.entities.map((entity, index) => createDisplayRenderableForEntity(session, entity, index)),
   ]
@@ -2296,6 +2519,7 @@ function createDisplayRenderableForEntity(
         ],
         isClosed: false,
       },
+      linePattern: entity.isConstruction ? 'dashed' : 'solid',
     }
   }
 
@@ -2319,6 +2543,7 @@ function createDisplayRenderableForEntity(
       points,
       isClosed: true,
     },
+    linePattern: entity.isConstruction ? 'dashed' : 'solid',
   }
 }
 

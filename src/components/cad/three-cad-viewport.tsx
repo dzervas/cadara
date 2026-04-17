@@ -173,7 +173,7 @@ export function ThreeCadViewport({
         return `${origin}:${renderable.id}:${renderable.binding.pickId}:${getGeometryToken(renderable.geometry)}`
       }),
       ...sketchDisplayRenderables.map((renderable) => {
-        return `sketch:${renderable.id}:${renderable.target ? JSON.stringify(renderable.target) : 'none'}:${getGeometryToken(renderable.geometry)}`
+        return `sketch:${renderable.id}:${renderable.linePattern}:${renderable.target ? JSON.stringify(renderable.target) : 'none'}:${getGeometryToken(renderable.geometry)}`
       }),
     ]
       .join('|'),
@@ -1446,14 +1446,27 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
             ]
           : geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2])),
       ),
-      new THREE.LineBasicMaterial({
-        color: SURFACE_COLORS.sketchCurve,
-        transparent: true,
-        opacity: 0.95,
-        depthTest: true,
-        depthWrite: false,
-      }),
+      renderable.linePattern === 'dashed'
+        ? new THREE.LineDashedMaterial({
+            color: SURFACE_COLORS.sketchCurve,
+            transparent: true,
+            opacity: 0.88,
+            depthTest: true,
+            depthWrite: false,
+            dashSize: 0.24,
+            gapSize: 0.14,
+          })
+        : new THREE.LineBasicMaterial({
+            color: SURFACE_COLORS.sketchCurve,
+            transparent: true,
+            opacity: 0.95,
+            depthTest: true,
+            depthWrite: false,
+          }),
     )
+    if (renderable.linePattern === 'dashed') {
+      nextLine.computeLineDistances()
+    }
     nextLine.renderOrder = 3
 
     if (renderable.target) {

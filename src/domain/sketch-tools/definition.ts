@@ -20,6 +20,7 @@ export type SketchDraftEntity =
       entityId: SketchEntityId | null
       status: 'preview' | 'accepted'
       label: string
+      isConstruction: boolean
     }
   | {
       id: string
@@ -29,6 +30,7 @@ export type SketchDraftEntity =
       entityId: SketchEntityId | null
       status: 'preview' | 'accepted'
       label: string
+      isConstruction: boolean
     }
 
 export interface SketchToolMetadata<TToolId extends SketchToolId = SketchToolId> {
@@ -93,6 +95,7 @@ export interface SketchToolCommitInput {
   sequence: number
   start: SketchPoint
   end: SketchPoint
+  isConstruction: boolean
   factories: SketchToolCommitFactories
 }
 

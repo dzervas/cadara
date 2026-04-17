@@ -25,13 +25,13 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     }
   }
 
-  function makeLine(entityId: string, label: string, startPointId: string, endPointId: string) {
+  function makeLine(entityId: string, label: string, startPointId: string, endPointId: string, isConstruction = false) {
     return {
       kind: 'lineSegment' as const,
       entityId: entityId as `sketch_entity_${string}`,
       label,
       target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: entityId as `sketch_entity_${string}` } as const,
-      isConstruction: false,
+      isConstruction,
       startPointId: startPointId as `sketch_point_${string}`,
       endPointId: endPointId as `sketch_point_${string}`,
     }
@@ -46,6 +46,27 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       isConstruction: false,
       centerPointId: centerPointId as `sketch_point_${string}`,
       radius,
+    }
+  }
+
+  function makeArc(
+    entityId: string,
+    label: string,
+    centerPointId: string,
+    startPointId: string,
+    endPointId: string,
+    isConstruction = false,
+  ) {
+    return {
+      kind: 'arc' as const,
+      entityId: entityId as `sketch_entity_${string}`,
+      label,
+      target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: entityId as `sketch_entity_${string}` } as const,
+      isConstruction,
+      centerPointId: centerPointId as `sketch_point_${string}`,
+      startPointId: startPointId as `sketch_point_${string}`,
+      endPointId: endPointId as `sketch_point_${string}`,
+      sweepDirection: 'counterClockwise' as const,
     }
   }
 
@@ -91,6 +112,23 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
             target: entity.target,
             centerPosition: center.position,
             solvedRadius: entity.radius,
+          }]
+        }
+        if (entity.kind === 'arc') {
+          const center = pointMap.get(entity.centerPointId)
+          const start = pointMap.get(entity.startPointId)
+          const end = pointMap.get(entity.endPointId)
+          if (!center || !start || !end) {
+            return []
+          }
+          return [{
+            kind: 'arc' as const,
+            entityId: entity.entityId,
+            target: entity.target,
+            centerPosition: center.position,
+            startPosition: start.position,
+            endPosition: end.position,
+            sweepDirection: entity.sweepDirection,
           }]
         }
         return []
@@ -325,12 +363,125 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     )
   }
 
+  async function testConstructionGeometryDoesNotSplitNormalProfile() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_a',
+        'sketch_point_b',
+        'sketch_point_c',
+        'sketch_point_d',
+        'sketch_point_cross_start',
+        'sketch_point_cross_end',
+        'sketch_point_arc_center',
+        'sketch_point_arc_start',
+        'sketch_point_arc_end',
+        'sketch_point_circle_center',
+      ],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 8, 0),
+        makePoint('sketch_point_c', 'C', 8, 8),
+        makePoint('sketch_point_d', 'D', 0, 8),
+        makePoint('sketch_point_cross_start', 'Cross start', 4, -1),
+        makePoint('sketch_point_cross_end', 'Cross end', 4, 9),
+        makePoint('sketch_point_arc_center', 'Arc center', 4, 4),
+        makePoint('sketch_point_arc_start', 'Arc start', 5, 4),
+        makePoint('sketch_point_arc_end', 'Arc end', 4, 5),
+        makePoint('sketch_point_circle_center', 'Circle center', 2, 2),
+      ],
+      entityIds: [
+        'sketch_entity_ab',
+        'sketch_entity_bc',
+        'sketch_entity_cd',
+        'sketch_entity_da',
+        'sketch_entity_cross',
+        'sketch_entity_arc',
+        'sketch_entity_circle',
+      ],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_da', 'DA', 'sketch_point_d', 'sketch_point_a'),
+        makeLine('sketch_entity_cross', 'Cross', 'sketch_point_cross_start', 'sketch_point_cross_end', true),
+        makeArc('sketch_entity_arc', 'Arc', 'sketch_point_arc_center', 'sketch_point_arc_start', 'sketch_point_arc_end', true),
+        {
+          ...makeCircle('sketch_entity_circle', 'Circle', 'sketch_point_circle_center', 1),
+          isConstruction: true,
+        },
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    })
+
+    assert(derived.regions.length === 1, 'Construction line, arc, and circle geometry must not split or remove a normal profile.')
+    assert(
+      derived.regions[0]?.loops[0]?.segments.every((segment) =>
+        segment.source.kind === 'entity'
+          && segment.source.entityId !== 'sketch_entity_cross'
+          && segment.source.entityId !== 'sketch_entity_arc'
+          && segment.source.entityId !== 'sketch_entity_circle',
+      ),
+      'Construction line, arc, and circle entities must be excluded from profile boundaries.',
+    )
+  }
+
+  async function testClosedConstructionCircleDoesNotCreateRegion() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_center'],
+      points: [
+        makePoint('sketch_point_center', 'Center', 0, 0),
+      ],
+      entityIds: ['sketch_entity_circle'],
+      entities: [
+        {
+          ...makeCircle('sketch_entity_circle', 'Circle', 'sketch_point_center', 2),
+          isConstruction: true,
+        },
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const found = findSketchRings(definition, makeSolvedSnapshot(definition))
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    })
+
+    assert(found.rings.length === 0, 'Closed construction circles should not produce sketch rings.')
+    assert(derived.regions.length === 0, 'Closed construction circles should not create selectable profile regions.')
+  }
+
   async function run() {
     await testFindRingsNone()
     await testFindRingsOne()
     await testFindRingsMultipleAndDeriveRegions()
     await testFindCircleRegion()
     await testSquareWithInnerCircleDerivesAllBoundedCells()
+    await testConstructionGeometryDoesNotSplitNormalProfile()
+    await testClosedConstructionCircleDoesNotCreateRegion()
   }
 
   run().catch((error: unknown) => {

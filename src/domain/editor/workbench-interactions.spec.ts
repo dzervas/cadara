@@ -111,6 +111,10 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       'Viewport clicks should request selection while a constraint tool is active.',
     )
     assert(
+      shouldViewportClickRequestSelection('construction'),
+      'Viewport clicks should request selection while Construction is picking an existing sketch target.',
+    )
+    assert(
       !shouldViewportClickRequestSelection('line'),
       'Viewport clicks should keep drawing tools on the pointer construction path.',
     )
@@ -132,6 +136,10 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     assert(
       !shouldViewportStartSketchGeometryDrag('constraintCoincident', 'collectingTargets'),
       'Viewport sketch geometry drags should not interrupt constraint target collection.',
+    )
+    assert(
+      !shouldViewportStartSketchGeometryDrag('construction', 'collectingTargets'),
+      'Viewport sketch geometry drags should not interrupt Construction target-picking.',
     )
   }
 

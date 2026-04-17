@@ -11,6 +11,7 @@ import {
   type RegisteredToolDefinition,
   searchToolDefinitions,
 } from '@/domain/tools/tool-registry'
+import { isSketchConstructionSelected } from '@/domain/editor/sketch-session'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 export function WorkspaceToolbar() {
@@ -32,6 +33,7 @@ export function WorkspaceToolbar() {
     }
 
     const isActive =
+      (tool.id === 'construction' && sketchSession !== null && isSketchConstructionSelected(sketchSession)) ||
       activeCommand?.toolId === tool.id ||
       (isDropdownTool(tool) &&
         tool.dropdown.variantIds.some((variantId) => variantId === activeCommand?.toolId))

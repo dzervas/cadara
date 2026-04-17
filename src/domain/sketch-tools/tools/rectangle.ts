@@ -42,6 +42,7 @@ function buildRectanglePreview(start: SketchPoint, end: SketchPoint): readonly S
       entityId: null,
       status: 'preview',
       label: 'Rectangle preview bottom',
+      isConstruction: false,
     },
     {
       id: 'preview-rectangle-right',
@@ -51,6 +52,7 @@ function buildRectanglePreview(start: SketchPoint, end: SketchPoint): readonly S
       entityId: null,
       status: 'preview',
       label: 'Rectangle preview right',
+      isConstruction: false,
     },
     {
       id: 'preview-rectangle-top',
@@ -60,6 +62,7 @@ function buildRectanglePreview(start: SketchPoint, end: SketchPoint): readonly S
       entityId: null,
       status: 'preview',
       label: 'Rectangle preview top',
+      isConstruction: false,
     },
     {
       id: 'preview-rectangle-left',
@@ -69,6 +72,7 @@ function buildRectanglePreview(start: SketchPoint, end: SketchPoint): readonly S
       entityId: null,
       status: 'preview',
       label: 'Rectangle preview left',
+      isConstruction: false,
     },
   ]
 }

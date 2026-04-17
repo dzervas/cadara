@@ -33,7 +33,7 @@ export function useToolActions() {
       const nextMode =
         toolId === 'sketch'
           ? 'part'
-          : isRegisteredSketchToolId(toolId) || isRegisteredSketchConstraintToolId(toolId) || toolId === 'finishSketch'
+          : isRegisteredSketchToolId(toolId) || isRegisteredSketchConstraintToolId(toolId) || toolId === 'construction' || toolId === 'finishSketch'
             ? 'sketch'
             : machineState.mode
 

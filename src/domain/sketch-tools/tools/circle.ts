@@ -24,6 +24,7 @@ function buildCirclePreview(start: SketchPoint, end: SketchPoint): readonly Sket
       entityId: null,
       status: 'preview',
       label: 'Circle preview',
+      isConstruction: false,
     },
   ]
 }

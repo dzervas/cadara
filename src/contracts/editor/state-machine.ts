@@ -34,6 +34,7 @@ import {
   selectSketchAnnotation,
   selectSketchConstraintTarget,
   startSketchDraw,
+  toggleSketchConstructionTarget,
   updateSketchGeometryDrag,
   updateSketchConstraintHover,
   updateSketchPointer,
@@ -1259,7 +1260,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (
         state.kind === 'editingSketch' &&
-        (isRegisteredSketchToolId(event.toolId) || isRegisteredSketchConstraintToolId(event.toolId))
+        (isRegisteredSketchToolId(event.toolId) || isRegisteredSketchConstraintToolId(event.toolId) || event.toolId === 'construction')
       ) {
         const session = beginSketchTool(state.session, event.toolId)
 
@@ -1340,6 +1341,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         event.toolId === 'line'
           || event.toolId === 'rectangle'
           || event.toolId === 'circle'
+          || event.toolId === 'construction'
           || isRegisteredSketchConstraintToolId(event.toolId)
           ? 'sketch'
           : state.mode
@@ -1529,6 +1531,30 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           activeReferencePickerFieldId: activeReferenceField?.id ?? state.activeReferencePickerFieldId,
           pendingPreviewRequestId: null,
         })
+      }
+
+      if (state.kind === 'editingSketch' && state.session.constructionTargetPicking) {
+        const session = toggleSketchConstructionTarget(state.session, event.target)
+
+        return {
+          state: {
+            ...state,
+            selection: [event.target],
+            hoverTarget: event.target,
+            session,
+            command: {
+              ...state.command,
+              toolId: session.activeTool ?? 'sketch',
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
       }
 
       if (

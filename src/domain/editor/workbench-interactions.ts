@@ -6,7 +6,11 @@ import type {
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
-import type { SketchAuthoringToolId, SketchSessionStatus } from '@/domain/editor/sketch-session'
+import {
+  isSketchConstructionSelected,
+  type SketchAuthoringToolId,
+  type SketchSessionStatus,
+} from '@/domain/editor/sketch-session'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 
 export function getNavigationReopenRequest(
@@ -53,7 +57,7 @@ export function getEscapeEvent(
     return { type: 'form.referencePickerCancelled' }
   }
 
-  if (state.sketchSession?.activeTool) {
+  if (state.sketchSession?.activeTool || (state.sketchSession && isSketchConstructionSelected(state.sketchSession))) {
     return { type: 'sketch.activeToolCleared' }
   }
 
@@ -70,7 +74,7 @@ export function getEscapeEvent(
 export function shouldViewportClickRequestSelection(
   activeSketchTool: SketchAuthoringToolId | null | undefined,
 ) {
-  return activeSketchTool == null || isRegisteredSketchConstraintToolId(activeSketchTool)
+  return activeSketchTool == null || activeSketchTool === 'construction' || isRegisteredSketchConstraintToolId(activeSketchTool)
 }
 
 export function shouldViewportStartSketchGeometryDrag(
@@ -81,5 +85,5 @@ export function shouldViewportStartSketchGeometryDrag(
     return false
   }
 
-  return activeSketchTool == null || !isRegisteredSketchConstraintToolId(activeSketchTool)
+  return activeSketchTool == null || (activeSketchTool !== 'construction' && !isRegisteredSketchConstraintToolId(activeSketchTool))
 }

@@ -9,6 +9,7 @@ export type ToolIconId =
   | 'line'
   | 'rectangle'
   | 'circle'
+  | 'construction'
   | 'spline'
   | 'dimension'
   | 'constraintCoincident'

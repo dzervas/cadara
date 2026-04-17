@@ -85,12 +85,48 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   )
   assert(
     sketchToolbarMarkup.includes('/icons/sketch-line-segment.svg') &&
-      sketchToolbarMarkup.includes('/icons/sketch-dimension.svg'),
+      sketchToolbarMarkup.includes('/icons/sketch-dimension.svg') &&
+      sketchToolbarMarkup.includes('/icons/sketch-construction.svg'),
     'Sketch toolbar buttons and dropdown triggers should keep local SVG icons.',
   )
   assert(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)') &&
       sketchToolbarMarkup.includes('var(--workbench-shell-success-border)'),
     'Finish Sketch should use the semantic success treatment from the shared workbench theme.',
+  )
+
+  const constructionSession = {
+    ...createNewSketchSession(createStandardPlaneDefinition('xy')),
+    constructionModifierActive: true,
+  }
+  const constructionToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: {
+            ...getEditorViewState(initialEditorState),
+            mode: 'sketch',
+            activeCommand: {
+              commandSessionId: 'command_sketch-1',
+              toolId: 'line',
+              phase: 'editing',
+            },
+            sketchSession: constructionSession,
+          },
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    constructionToolbarMarkup.includes('aria-label="Construction"') &&
+      constructionToolbarMarkup.includes('aria-pressed="true"'),
+    'Construction should render selected while acting as a sketch modifier.',
   )
 })

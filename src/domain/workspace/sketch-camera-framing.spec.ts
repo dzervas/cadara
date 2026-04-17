@@ -58,6 +58,7 @@ test('src/domain/workspace/sketch-camera-framing.spec.ts', async () => {
         points,
         isClosed: false,
       },
+      linePattern: 'solid',
     }
   }
 

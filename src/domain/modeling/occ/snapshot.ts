@@ -1231,7 +1231,15 @@ function buildSketchCurveRenderRecords(
   _state: OccAuthoringState,
   sketch: SketchSnapshotRecord,
 ) {
+  const authoredEntityMap = new Map(
+    sketch.sketch.definition.entities.map((entity) => [entity.entityId, entity] as const),
+  )
+
   return sketch.sketch.solvedSnapshot.solvedEntities.flatMap((entity) => {
+    if (authoredEntityMap.get(entity.entityId)?.isConstruction) {
+      return []
+    }
+
     const target: SketchEntityRef = {
       kind: 'sketchEntity',
       sketchId: sketch.sketchId,
@@ -1293,7 +1301,11 @@ function buildSketchPointRenderRecords(
     sketch.sketch.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition] as const),
   )
 
-  return sketch.sketch.definition.points.map((point) => {
+  return sketch.sketch.definition.points.flatMap((point) => {
+    if (point.isConstruction) {
+      return []
+    }
+
     const target: SketchPointRef = {
       kind: 'sketchPoint',
       sketchId: sketch.sketchId,
@@ -1301,7 +1313,7 @@ function buildSketchPointRenderRecords(
     }
     const position = solvedPointById.get(point.pointId) ?? point.position
 
-    return {
+    return [{
       id: createRenderableId(target),
       label: `${sketch.label} ${point.pointId}`,
       ownerBodyId: null,
@@ -1318,7 +1330,7 @@ function buildSketchPointRenderRecords(
         position: mapSketchPointToWorld(sketch.plane, position),
         displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
       },
-    } satisfies RenderableEntityRecord
+    } satisfies RenderableEntityRecord]
   })
 }
 

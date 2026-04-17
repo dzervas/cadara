@@ -208,6 +208,14 @@ export const toolDefinitions = [
     modes: ['sketch'],
   },
   {
+    id: 'construction',
+    group: 'sketchOps',
+    name: 'Construction',
+    tooltip: 'Toggle sketch geometry construction-only or mark new sketch geometry as construction.',
+    icon: 'construction',
+    modes: ['sketch'],
+  },
+  {
     id: 'offset',
     group: 'sketchOps',
     name: 'Offset',
@@ -362,7 +370,7 @@ const toolbarSections = [
     label: 'Edit',
     align: 'center',
     modes: ['sketch'],
-    toolIds: ['trim', 'offset'],
+    toolIds: ['trim', 'construction', 'offset'],
   },
   {
     id: 'features',

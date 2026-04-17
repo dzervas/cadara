@@ -807,7 +807,7 @@ function getTargetSemantics(
   const targetKey = getPrimitiveRefKey(target)
 
   const allowSessionOwnedTarget =
-    target.kind === 'sketchPoint' || target.kind === 'constraint' || target.kind === 'dimension'
+    target.kind === 'sketchEntity' || target.kind === 'sketchPoint' || target.kind === 'constraint' || target.kind === 'dimension'
 
   if (
     catalog?.selectableTargetKeys

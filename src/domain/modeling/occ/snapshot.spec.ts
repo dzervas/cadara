@@ -488,6 +488,58 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testConstructionSketchGeometryIsOmittedFromDocumentRenderExport() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const sketchId = 'sketch_phase6_construction_render' as SketchId
+    const { sketch } = createRectangleSketch(sketchId, plane)
+    const constructionEntityId = sketch.sketch.definition.entities[0]!.entityId
+    const constructionPointId = sketch.sketch.definition.points[0]!.pointId
+    const definition: SketchDefinition = {
+      ...sketch.sketch.definition,
+      points: sketch.sketch.definition.points.map((point) =>
+        point.pointId === constructionPointId ? { ...point, isConstruction: true } : point,
+      ),
+      entities: sketch.sketch.definition.entities.map((entity) =>
+        entity.entityId === constructionEntityId ? { ...entity, isConstruction: true } : entity,
+      ),
+    }
+    const constructionSketch: SketchSnapshotRecord = {
+      ...sketch,
+      sketch: {
+        ...sketch.sketch,
+        definition,
+      },
+    }
+    const initialState = createOccAuthoringState(oc, {
+      sketches: [constructionSketch],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+    const snapshot = buildOccWorkspaceSnapshot(initialState)
+
+    assert(
+      !snapshot.document.render.records.some((record) =>
+        record.binding.target.kind === 'sketchEntity'
+        && record.binding.target.entityId === constructionEntityId,
+      ),
+      'Document render export should omit construction sketch curves outside active sketch editing.',
+    )
+    assert(
+      !snapshot.document.render.records.some((record) =>
+        record.binding.target.kind === 'sketchPoint'
+        && record.binding.target.pointId === constructionPointId,
+      ),
+      'Document render export should omit construction sketch points outside active sketch editing.',
+    )
+    assert(
+      snapshot.document.render.records.some((record) =>
+        record.binding.target.kind === 'sketchEntity'
+        && record.binding.target.entityId === sketch.sketch.definition.entities[1]!.entityId,
+      ),
+      'Normal sketch curves should remain visible in the document render export.',
+    )
+  }
+
   async function testNestedSketchRegionsExportSeparateMeshes() {
     const oc = await getDefaultOpenCascadeInstance()
     const plane = createStandardPlaneDefinition('xy')
@@ -724,6 +776,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
   }
 
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
+  await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport()
   await testNestedSketchRegionsExportSeparateMeshes()
   await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()

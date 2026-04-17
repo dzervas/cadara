@@ -7,6 +7,7 @@ export const toolbarToolIconAssetMap: Record<ToolIconId, string> = {
   line: 'sketch-line-segment.svg',
   rectangle: 'sketch-rectangle.svg',
   circle: 'sketch-circle.svg',
+  construction: 'sketch-construction.svg',
   spline: 'sketch-spline.svg',
   dimension: 'sketch-dimension.svg',
   constraintCoincident: 'sketch-coincident.svg',
