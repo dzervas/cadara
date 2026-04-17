@@ -112,9 +112,9 @@ function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphK
     case 'constraintEqual':
       return getToolbarToolIconSrc('constraintEqual')
     case 'constraintHorizontal':
-      return '/icons/sketch-horizontal.svg'
+      return '/icons/sheet-width.svg'
     case 'constraintVertical':
-      return '/icons/sketch-vertical.svg'
+      return '/icons/sheet-height.svg'
     case 'constraintFixed':
       return '/icons/sketch-fix.svg'
     case 'constraintAngle':

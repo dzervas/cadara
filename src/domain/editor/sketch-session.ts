@@ -8,6 +8,7 @@ import type {
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
+  solveSketchDefinitionCore,
   solveSketchDefinitionWithDraggedPointTarget,
 } from '@/contracts/sketch/solver-core'
 import type {
@@ -148,6 +149,7 @@ const SKETCH_DIRECT_EDIT_TOLERANCES = {
 } as const
 
 const CONSTRAINED_DRAG_BLOCKED_MESSAGE = 'Geometry is constrained and cannot move to that position.'
+const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE = 'Could not solve the edited constraint value.'
 
 export interface SketchSessionDisplayRenderable {
   id: RenderableId
@@ -1625,8 +1627,15 @@ function patchSketchAnnotationEditValue(
     }
   }
 
-  if (intent !== 'commitAnnotationValue' || edit.pendingValue === null) {
+  if (intent !== 'commitAnnotationValue') {
     return session
+  }
+
+  if (edit.pendingValue === null) {
+    return {
+      ...session,
+      toolPresentation: buildAnnotationEditPresentation(session, edit, 'Enter a value before saving.'),
+    }
   }
 
   return commitSketchAnnotationEditValue(session, edit)
@@ -1646,16 +1655,27 @@ function commitSketchAnnotationEditValue(
   session: SketchSessionState,
   edit: SketchAnnotationEditState,
 ): SketchSessionState {
-  const nextFullDefinition = updateAnnotationValueInDefinition(
+  const updatedFullDefinition = updateAnnotationValueInDefinition(
     session.fullDefinition,
     edit.target,
     edit.pendingValue,
   )
 
-  if (nextFullDefinition === session.fullDefinition) {
+  if (updatedFullDefinition === session.fullDefinition) {
     return session
   }
 
+  const solved = solveEditedAnnotationDefinition(updatedFullDefinition)
+
+  if (solved.kind === 'blocked') {
+    return {
+      ...session,
+      toolPresentation: buildAnnotationEditPresentation(session, edit, solved.message),
+      validationMessage: solved.message,
+    }
+  }
+
+  const nextFullDefinition = solved.definition
   const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
 
@@ -1673,6 +1693,38 @@ function commitSketchAnnotationEditValue(
     activeDrag: null,
     validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+  }
+}
+
+function solveEditedAnnotationDefinition(definition: SketchDefinition) {
+  const solved = solveSketchDefinitionCore({
+    definition,
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'failOnConflict',
+  })
+  const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
+  const dimensionsSatisfied = solved.solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
+
+  if (
+    solved.status.solveState !== 'solved'
+    || !constraintsSatisfied
+    || !dimensionsSatisfied
+  ) {
+    return {
+      kind: 'blocked' as const,
+      message: solved.diagnostics[0]?.message ?? ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
+    }
+  }
+
+  return {
+    kind: 'accepted' as const,
+    definition: applyPointPositionsToDefinition(
+      definition,
+      solved.solvedSnapshot.solvedPoints.map((point) => ({
+        pointId: point.pointId,
+        position: point.solvedPosition,
+      })),
+    ),
   }
 }
 
@@ -1702,6 +1754,7 @@ function updateAnnotationValueInDefinition(
       : definition
   }
 
+  let editedCircleRadiusEntityId: SketchEntityId | null = null
   const dimensions = definition.dimensions.map((dimension) => {
     if (dimension.dimensionId !== target.dimensionId) {
       return dimension
@@ -1712,6 +1765,10 @@ function updateAnnotationValueInDefinition(
       case 'horizontalDistance':
       case 'verticalDistance':
       case 'circleRadius':
+        if (dimension.kind === 'circleRadius') {
+          editedCircleRadiusEntityId = dimension.entityId
+        }
+
         return {
           ...dimension,
           value,
@@ -1726,6 +1783,13 @@ function updateAnnotationValueInDefinition(
   return edited
     ? {
         ...definition,
+        entities: editedCircleRadiusEntityId
+          ? definition.entities.map((entity) =>
+              entity.entityId === editedCircleRadiusEntityId && entity.kind === 'circle'
+                ? { ...entity, radius: value }
+                : entity,
+            )
+          : definition.entities,
         dimensions,
       }
     : definition
@@ -1734,6 +1798,7 @@ function updateAnnotationValueInDefinition(
 function buildAnnotationEditPresentation(
   session: SketchSessionState,
   edit: SketchAnnotationEditState,
+  validationMessage: string | null = null,
 ): SketchToolPresentationSchema {
   const editable = getEditableAnnotationValue(session, edit.target)
   const label = editable?.label ?? 'Value'
@@ -1758,6 +1823,13 @@ function buildAnnotationEditPresentation(
       submitAction: { type: 'patch', patch: { intent: 'commitAnnotationValue' } },
       cancelAction: { type: 'patch', patch: { intent: 'cancelAnnotationValue' } },
     },
+    validation: validationMessage
+      ? [{
+          id: 'annotation-edit-value-required',
+          message: validationMessage,
+          severity: 'error',
+        }]
+      : [],
   }
 }
 

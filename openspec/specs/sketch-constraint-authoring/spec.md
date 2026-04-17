@@ -65,6 +65,14 @@ The system SHALL render committed sketch constraints and dimensions as viewport 
 - **WHEN** the viewport renders a solved sketch that has committed constraint or dimension records
 - **THEN** it shows the corresponding annotation glyphs, labels, or markers using descriptors keyed to the durable authored IDs
 
+#### Scenario: User hovers a committed annotation
+- **WHEN** the user hovers a committed constraint or dimension annotation glyph
+- **THEN** the editor highlights the affected sketch geometry without selecting that geometry
+
+#### Scenario: User selects a committed annotation
+- **WHEN** the user clicks a committed constraint or dimension annotation glyph
+- **THEN** the editor selects the annotation target and highlights the affected sketch geometry
+
 #### Scenario: User selects and deletes a committed annotation
 - **WHEN** the user selects a committed constraint or dimension annotation in the viewport and invokes delete
 - **THEN** the editor resolves that selection back to the durable authored ID and removes it through the documented sketch/modeling mutation flow

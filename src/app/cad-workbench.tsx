@@ -59,6 +59,13 @@ import {
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
 
+function isTextEditingTarget(target: EventTarget | null) {
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || (target instanceof HTMLElement && target.isContentEditable)
+}
+
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
   const modelingService = useModelingService()
@@ -142,6 +149,10 @@ export function CadWorkbench() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return
+      }
+
+      if (isTextEditingTarget(event.target)) {
         return
       }
 

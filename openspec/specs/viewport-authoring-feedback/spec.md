@@ -76,3 +76,14 @@ The viewport SHALL render active sketch constraint previews as transient authori
 #### Scenario: Constraint preview is removed after authoring
 - **WHEN** the active constraint operation is completed or cancelled
 - **THEN** the viewport removes the transient preview graphics unless committed annotation rendering independently displays durable annotation glyphs
+
+### Requirement: Viewport SHALL render and hit-test committed constraint glyphs
+The viewport SHALL render committed sketch constraint and dimension glyphs from annotation descriptors and expose hit targets that resolve to durable annotation references.
+
+#### Scenario: Annotation glyph is picked
+- **WHEN** the user clicks inside a committed annotation glyph hit target
+- **THEN** the viewport resolves the durable constraint or dimension reference for editor selection
+
+#### Scenario: Annotation glyph is hovered
+- **WHEN** the pointer hovers a committed annotation glyph
+- **THEN** the viewport exposes hover feedback for the annotation and affected sketch geometry

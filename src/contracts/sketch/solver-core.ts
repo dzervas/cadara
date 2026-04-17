@@ -538,11 +538,11 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           const index = dimension.axis === 'horizontal' ? 0 : 1
           const err = delta[index] - dimension.value
           if (index === 0) {
-            addPointGradient(gradient, left, err, 0)
-            addPointGradient(gradient, right, -err, 0)
+            addPointGradient(gradient, left, -err, 0)
+            addPointGradient(gradient, right, err, 0)
           } else {
-            addPointGradient(gradient, left, 0, err)
-            addPointGradient(gradient, right, 0, -err)
+            addPointGradient(gradient, left, 0, -err)
+            addPointGradient(gradient, right, 0, err)
           }
           return { residual: 0.5 * err * err, gradient }
         },

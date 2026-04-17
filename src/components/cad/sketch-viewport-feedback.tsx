@@ -307,9 +307,9 @@ function ViewportFloatingInput({
         step="any"
         type="number"
         onChange={(event) => {
-          const nextValue = Number(event.currentTarget.value)
+          const nextValue = parseFloatingInputNumber(event.currentTarget.value)
           onPatch({
-            value: Number.isNaN(nextValue) ? null : nextValue,
+            value: nextValue,
           })
         }}
       />
@@ -331,4 +331,13 @@ function ViewportFloatingInput({
       </div>
     </div>
   )
+}
+
+function parseFloatingInputNumber(value: string) {
+  if (value.trim() === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isNaN(parsed) ? null : parsed
 }

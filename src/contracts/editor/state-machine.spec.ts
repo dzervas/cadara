@@ -16,7 +16,7 @@ import {
   type PrimitiveRef,
   type SelectionTargetCatalog,
 } from '@/domain/editor/schema'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
   ConstructionId,
@@ -1769,6 +1769,60 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testRejectedSketchCommitShowsValidationMessage() {
+    const session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    const diagnostic: ModelingDiagnostic = {
+      code: 'mock-invalid-sketch',
+      severity: 'error',
+      message: 'Sketch solve ended with residual 12.',
+      target: null,
+      detail: null,
+    }
+    const state: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-commit-1',
+        toolId: 'finishSketch',
+        phase: 'awaitingEffect',
+      },
+      session,
+      pendingCommitRequestId: 'request_sketch-commit-1',
+    }
+
+    const rejected = transitionEditorState(state, {
+      type: 'effect.sketchCommitted',
+      requestId: 'request_sketch-commit-1',
+      documentId: 'doc_workspace',
+      commandSessionId: 'command_sketch-commit-1',
+      baseRevisionId: 'rev_1',
+      revisionId: 'rev_1',
+      accepted: false,
+      diagnostics: [diagnostic],
+    })
+
+    assert(rejected.state.kind === 'editingSketch', 'Rejected sketch commit should keep the sketch open.')
+    assert(
+      rejected.state.session.validationMessage === diagnostic.message,
+      'Rejected sketch commit diagnostics should surface in the visible sketch validation message.',
+    )
+  }
+
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
   testSketchActivationAcceptsPlanarFaces()
@@ -1787,6 +1841,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testConstraintAuthoringIgnoresInvalidViewportSelection()
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
+  testRejectedSketchCommitShowsValidationMessage()
   testReplayIsDeterministic()
   testSelectionKeyUsesDurableRefs()
   await testRuntimeLoopProcessesSketchOpen()

@@ -172,6 +172,73 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     )
   }
 
+  function testCommittedRectangleWidthEditSolvesDraftGeometry() {
+    let session = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+
+    session = beginSketchTool(session, 'rectangle')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [10, 5])
+
+    const annotation = getSketchAnnotationDescriptors(session).find(
+      (entry) => entry.glyphKind === 'dimensionHorizontal' && entry.target.kind === 'dimension',
+    )
+    assert(annotation?.target.kind === 'dimension', 'Rectangle width should expose an editable horizontal dimension.')
+
+    session = beginSketchAnnotationEdit(session, annotation.target)
+    session = patchSketchConstraintValue(session, { value: 20 })
+    session = patchSketchConstraintValue(session, { intent: 'commitAnnotationValue' })
+
+    const dimension = session.definition.dimensions.find((entry) => entry.dimensionId === annotation.target.dimensionId)
+    assert(dimension?.kind === 'distance' && dimension.value === 20, 'Width edit should update the durable dimension.')
+    assert(dimension.pointIds.length === 2, 'Width dimension should keep its point pair.')
+
+    const points = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
+    const left = points.get(dimension.pointIds[0]!)
+    const right = points.get(dimension.pointIds[1]!)
+    assert(left && right, 'Edited width dimension should reference solved draft points.')
+    assert(Math.abs((right[0] - left[0]) - 20) < 1e-4, 'Width edit should solve the draft geometry before finish.')
+    const payloadDimension = session.commitRequest?.definition.dimensions.find(
+      (entry) => entry.dimensionId === annotation.target.dimensionId,
+    )
+    assert(
+      payloadDimension?.kind === 'distance' && payloadDimension.value === 20,
+      'Width edit should update the durable sketch mutation payload.',
+    )
+  }
+
+  function testCommittedCircleRadiusEditUpdatesEntityRadius() {
+    let session = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [10, 0])
+
+    const annotation = getSketchAnnotationDescriptors(session).find(
+      (entry) => entry.glyphKind === 'dimensionRadius' && entry.target.kind === 'dimension',
+    )
+    assert(annotation?.target.kind === 'dimension', 'Circle radius should expose an editable radius dimension.')
+
+    session = beginSketchAnnotationEdit(session, annotation.target)
+    session = patchSketchConstraintValue(session, { value: 18 })
+    session = patchSketchConstraintValue(session, { intent: 'commitAnnotationValue' })
+
+    const dimension = session.definition.dimensions.find((entry) => entry.dimensionId === annotation.target.dimensionId)
+    assert(dimension?.kind === 'circleRadius' && dimension.value === 18, 'Radius edit should update the durable dimension.')
+    const circle = session.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(circle?.kind === 'circle' && circle.radius === 18, 'Radius edit should update the authored circle radius.')
+    const payloadCircle = session.commitRequest?.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(
+      payloadCircle?.kind === 'circle' && payloadCircle.radius === 18,
+      'Radius edit should update the durable sketch mutation payload.',
+    )
+  }
+
   function testDistancePreviewUsesPartialTargetAndPointer() {
     let session = createSessionWithTwoLines()
     const [firstPointId] = session.definition.pointIds
@@ -291,6 +358,8 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   testGeometricConstraintAuthoringCommitsDurableRecord()
   testDimensionalConstraintShowsFloatingInputAndSupportsDeletion()
   testCommittedDimensionAnnotationReopensValueInputAndEditsDurableRecord()
+  testCommittedRectangleWidthEditSolvesDraftGeometry()
+  testCommittedCircleRadiusEditUpdatesEntityRadius()
   testDistancePreviewUsesPartialTargetAndPointer()
   testPointDistanceReferenceSelectionFollowsPointer()
   testDistancePreviewUpdatesWhenPointerChangesReference()

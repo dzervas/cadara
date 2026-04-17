@@ -310,6 +310,74 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     assertGradientMatchesFiniteDifference(definition, 'dimension_vertical_distance', 1e-6)
   }
 
+  async function testAxisQualifiedDistance() {
+    const horizontal: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b'],
+      points: [
+        makePoint('sketch_point_a', 'A', 1, 0),
+        makePoint('sketch_point_b', 'B', 0, 1),
+      ],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: ['dimension_axis_horizontal'],
+      dimensions: [{
+        dimensionId: 'dimension_axis_horizontal',
+        kind: 'distance',
+        label: 'Width',
+        axis: 'horizontal',
+        pointIds: ['sketch_point_a', 'sketch_point_b'],
+        value: 3,
+      }],
+    }
+    const vertical: SketchDefinition = {
+      ...horizontal,
+      dimensionIds: ['dimension_axis_vertical'],
+      dimensions: [{
+        dimensionId: 'dimension_axis_vertical',
+        kind: 'distance',
+        label: 'Height',
+        axis: 'vertical',
+        pointIds: ['sketch_point_a', 'sketch_point_b'],
+        value: 4,
+      }],
+    }
+
+    const solvedHorizontal = solveSketchDefinitionCore({
+      definition: horizontal,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const [horizontalA, horizontalB] = solvedHorizontal.solvedSnapshot.solvedPoints
+    assert(horizontalA !== undefined && horizontalB !== undefined, 'Expected solved horizontal point pair.')
+    assertClose(
+      horizontalB.solvedPosition[0] - horizontalA.solvedPosition[0],
+      3,
+      1e-4,
+      'Axis-qualified horizontal distance should solve to 3.',
+    )
+    assertGradientMatchesFiniteDifference(horizontal, 'dimension_axis_horizontal', 1e-6)
+
+    const solvedVertical = solveSketchDefinitionCore({
+      definition: vertical,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const [verticalA, verticalB] = solvedVertical.solvedSnapshot.solvedPoints
+    assert(verticalA !== undefined && verticalB !== undefined, 'Expected solved vertical point pair.')
+    assertClose(
+      verticalB.solvedPosition[1] - verticalA.solvedPosition[1],
+      4,
+      1e-4,
+      'Axis-qualified vertical distance should solve to 4.',
+    )
+    assertGradientMatchesFiniteDifference(vertical, 'dimension_axis_vertical', 1e-6)
+  }
+
   async function testHorizontalLine() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -1134,6 +1202,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     await testEuclideanDistance()
     await testHorizontalDistance()
     await testVerticalDistance()
+    await testAxisQualifiedDistance()
     await testHorizontalLine()
     await testVerticalLine()
     await testAngleBetweenPoints()

@@ -2411,6 +2411,10 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
 
       if (!event.accepted) {
+        const message =
+          event.diagnostics[0]?.message ??
+          `Sketch commit rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+
         return {
           state: {
             ...state,
@@ -2421,10 +2425,12 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
             },
             preview: {
               kind: 'sketch',
-              label:
-                event.diagnostics[0]?.message ??
-                `Sketch commit rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`,
+              label: message,
               target: state.session.planeTarget,
+            },
+            session: {
+              ...state.session,
+              validationMessage: message,
             },
           },
           effects: [],
@@ -2476,6 +2482,10 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
             kind: 'sketch',
             label: event.message,
             target: state.session.planeTarget,
+          },
+          session: {
+            ...state.session,
+            validationMessage: event.message,
           },
         },
         effects: [],
