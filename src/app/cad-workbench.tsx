@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import { SketchConstraintAnnotations } from '@/components/cad/sketch-constraint-annotations'
-import { SketchFloatingInput } from '@/components/cad/sketch-floating-input'
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
-import { SketchToolOverlays } from '@/components/cad/sketch-tool-overlays'
 import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
@@ -673,17 +671,14 @@ export function CadWorkbench() {
               onClearHover={handleViewportHoverClear}
               onSketchMove={handleSketchMove}
               onSketchRelease={handleSketchRelease}
+              onSketchToolPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
               selection={visibleSelection}
+              sketchToolPresentation={sketchToolPresentation}
             />
             <SketchToolPanel
               schema={sketchToolPresentation}
               onPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
             />
-            <SketchFloatingInput
-              descriptor={sketchToolPresentation?.floatingInput}
-              onPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
-            />
-            <SketchToolOverlays schema={sketchToolPresentation} />
             <SketchConstraintAnnotations
               annotations={sketchAnnotations}
               selectedAnnotation={sketchSession?.selectedAnnotation ?? null}

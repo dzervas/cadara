@@ -1,6 +1,29 @@
 import type { SketchPoint } from '@/contracts/modeling/schema'
+import type { Vec3 } from '@/domain/modeling/occ/math'
 
 export type SketchToolControlValue = string | number | boolean | null
+
+export interface SketchToolAnchorOffset {
+  x: number
+  y: number
+}
+
+export type SketchToolAnchorDescriptor =
+  | {
+      kind: 'sketchPoint'
+      point: SketchPoint
+      offset?: SketchToolAnchorOffset
+    }
+  | {
+      kind: 'cursor'
+      point: SketchPoint
+      offset?: SketchToolAnchorOffset
+    }
+  | {
+      kind: 'worldPoint'
+      point: Vec3
+      offset?: SketchToolAnchorOffset
+    }
 
 export interface SketchToolActionDescriptor {
   type: 'patch'
@@ -76,14 +99,14 @@ export type SketchToolOverlayDescriptor =
       label: string
       value: number
       unit?: string
-      anchor: SketchPoint
+      anchor: SketchToolAnchorDescriptor
     }
   | {
       id: string
       kind: 'constraintPreview'
       label: string
       detail: string
-      anchor: SketchPoint
+      anchor: SketchToolAnchorDescriptor
     }
   | {
       id: string
@@ -113,7 +136,7 @@ export interface SketchToolFloatingInputDescriptor {
   confirmLabel: string
   cancelLabel: string
   min?: number
-  anchor?: SketchPoint
+  anchor?: SketchToolAnchorDescriptor
   submitAction: SketchToolActionDescriptor
   cancelAction: SketchToolActionDescriptor
 }

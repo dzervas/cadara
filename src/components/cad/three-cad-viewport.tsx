@@ -1,14 +1,22 @@
 import { Canvas } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 
+import {
+  SketchViewportFeedbackLayer,
+} from '@/components/cad/sketch-viewport-feedback'
+import {
+  collectSketchViewportFeedbackAnchors,
+  type SketchViewportFeedbackProjection,
+} from '@/components/cad/sketch-viewport-feedback-model'
 import {
   type PrimitiveRef,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
+import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import {
   MARKER_SPHERE_GEOMETRY,
   bindRenderableObject,
@@ -38,6 +46,8 @@ import {
   VIEW_CUBE_CORNER_TARGETS,
   VIEW_CUBE_FACE_TARGETS,
 } from '@/domain/workspace/view-cube-navigation'
+import { projectSketchFeedbackAnchor } from '@/domain/workspace/sketch-feedback-projection'
+import type { Vec3 } from '@/domain/modeling/occ/math'
 import { mapWorldPointToSketch } from '@/domain/modeling/occ/planes'
 import { useEditorState } from '@/hooks/use-editor-state'
 
@@ -60,7 +70,9 @@ interface ThreeCadViewportProps {
   onClearHover: () => void
   onSketchMove: (point: readonly [number, number]) => void
   onSketchRelease: (point: readonly [number, number]) => void
+  onSketchToolPatch: (patch: Record<string, unknown>) => void
   selection: PrimitiveRef[]
+  sketchToolPresentation: SketchToolPresentationSchema | null
 }
 
 interface ViewportCameraFrame {
@@ -93,7 +105,9 @@ export function ThreeCadViewport({
   onClearHover,
   onSketchMove,
   onSketchRelease,
+  onSketchToolPatch,
   selection,
+  sketchToolPresentation,
 }: ThreeCadViewportProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const viewCubeRef = useRef<HTMLDivElement | null>(null)
@@ -102,6 +116,7 @@ export function ThreeCadViewport({
   const controlsRef = useRef<ViewportCameraControls | null>(null)
   const controlsInitializedRef = useRef(false)
   const [canvasReadyVersion, setCanvasReadyVersion] = useState(0)
+  const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const raycasterRef = useRef(new THREE.Raycaster())
   const pointerRef = useRef(new THREE.Vector2())
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
@@ -118,6 +133,7 @@ export function ThreeCadViewport({
   const clearHoverRef = useRef(onClearHover)
   const sketchMoveRef = useRef(onSketchMove)
   const sketchReleaseRef = useRef(onSketchRelease)
+  const sketchToolPatchRef = useRef(onSketchToolPatch)
   const {
     state: { selectionFilter, selectionCatalog, sketchSession },
   } = useEditorState()
@@ -143,6 +159,7 @@ export function ThreeCadViewport({
     clearHoverRef.current = onClearHover
     sketchMoveRef.current = onSketchMove
     sketchReleaseRef.current = onSketchRelease
+    sketchToolPatchRef.current = onSketchToolPatch
     hoverTargetRef.current = hoverTarget
     selectionRef.current = selection
     selectionFilterRef.current = selectionFilter
@@ -154,10 +171,43 @@ export function ThreeCadViewport({
     onSelect,
     onSketchMove,
     onSketchRelease,
+    onSketchToolPatch,
     selection,
     selectionCatalog,
     selectionFilter,
   ])
+
+  const updateSketchFeedbackProjections = useCallback(() => {
+    const camera = cameraRef.current
+    const canvasElement = canvasElementRef.current
+    const plane = sketchSession?.plane
+
+    if (!camera || !canvasElement || !plane) {
+      setSketchFeedbackProjections([])
+      return
+    }
+
+    const rect = canvasElement.getBoundingClientRect()
+    const anchors = collectSketchViewportFeedbackAnchors(sketchToolPresentation)
+    const projections = anchors.flatMap((anchor) => {
+      const screenPoint = projectSketchFeedbackAnchor({
+        anchor: anchor.anchor,
+        plane,
+        viewport: {
+          width: rect.width,
+          height: rect.height,
+        },
+        projectWorldPoint: (point: Vec3) => {
+          const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
+          return { x: projected.x, y: projected.y, z: projected.z }
+        },
+      })
+
+      return screenPoint ? [{ id: anchor.id, x: screenPoint.x, y: screenPoint.y }] : []
+    })
+
+    setSketchFeedbackProjections(projections)
+  }, [sketchSession?.plane, sketchToolPresentation])
 
   useEffect(() => {
     const cubeElement = viewCubeRef.current
@@ -300,7 +350,27 @@ export function ThreeCadViewport({
     })
 
     sketchCameraSessionTokenRef.current = nextToken
-  }, [sketchDisplayRenderables, sketchSession])
+    window.requestAnimationFrame(updateSketchFeedbackProjections)
+  }, [sketchDisplayRenderables, sketchSession, updateSketchFeedbackProjections])
+
+  useEffect(() => {
+    const controls = controlsRef.current
+    let animationFrameId = window.requestAnimationFrame(updateSketchFeedbackProjections)
+
+    const requestProjectionUpdate = () => {
+      window.cancelAnimationFrame(animationFrameId)
+      animationFrameId = window.requestAnimationFrame(updateSketchFeedbackProjections)
+    }
+
+    controls?.addEventListener('change', requestProjectionUpdate)
+    window.addEventListener('resize', requestProjectionUpdate)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId)
+      controls?.removeEventListener('change', requestProjectionUpdate)
+      window.removeEventListener('resize', requestProjectionUpdate)
+    }
+  }, [canvasReadyVersion, updateSketchFeedbackProjections])
 
   useEffect(() => {
     if (bindingsRef.current) {
@@ -604,8 +674,13 @@ export function ThreeCadViewport({
       <div
         ref={viewCubeRef}
         data-testid="view-cube"
-        className="pointer-events-auto absolute right-4 top-4"
+        className="pointer-events-auto absolute right-4 top-4 z-20"
         style={{ width: VIEW_CUBE_SIZE, height: VIEW_CUBE_SIZE }}
+      />
+      <SketchViewportFeedbackLayer
+        schema={sketchToolPresentation}
+        projections={sketchFeedbackProjections}
+        onPatch={(patch) => sketchToolPatchRef.current(patch)}
       />
     </div>
   )

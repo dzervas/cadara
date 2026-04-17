@@ -11,7 +11,6 @@ import {
   createPointerMoveResult,
   createPointerReleaseResult,
   distanceBetween,
-  midpoint,
   validateDistance,
 } from '@/domain/sketch-tools/shared'
 
@@ -39,6 +38,7 @@ function buildCirclePresentation(state: SketchToolRuntimeState): SketchToolPrese
   const isDrawing = start !== null && end !== null
   const radius = isDrawing ? distanceBetween(start, end) : null
   const radiusValue = radius ?? 0
+  const diameterValue = radiusValue * 2
   const validation = state.validationMessage
     ? [{ id: 'circle-validation', message: state.validationMessage, severity: 'error' as const }]
     : []
@@ -68,7 +68,7 @@ function buildCirclePresentation(state: SketchToolRuntimeState): SketchToolPrese
     ],
     measurements: radius === null
       ? []
-      : [{ id: 'circle-radius-measure', label: 'Radius', value: radius, unit: 'mm' }],
+      : [{ id: 'circle-diameter-measure', label: 'Diameter', value: diameterValue, unit: 'mm' }],
     completionHints: [
       {
         id: 'circle-completion',
@@ -85,12 +85,12 @@ function buildCirclePresentation(state: SketchToolRuntimeState): SketchToolPrese
             point: start,
           },
           {
-            id: 'circle-radius-overlay',
+            id: 'circle-diameter-overlay',
             kind: 'measurement',
-            label: 'Radius',
-            value: radiusValue,
+            label: 'Diameter',
+            value: diameterValue,
             unit: 'mm',
-            anchor: midpoint(start, end),
+            anchor: { kind: 'cursor', point: end, offset: { x: 18, y: -18 } },
           },
           {
             id: 'circle-completion-cue',

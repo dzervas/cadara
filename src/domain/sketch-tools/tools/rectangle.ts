@@ -144,7 +144,11 @@ function buildRectanglePresentation(state: SketchToolRuntimeState): SketchToolPr
             label: 'Width',
             value: widthValue,
             unit: 'mm',
-            anchor: midpoint(start, [end[0], start[1]]),
+            anchor: {
+              kind: 'sketchPoint',
+              point: midpoint(start, [end[0], start[1]]),
+              offset: { x: 0, y: 22 },
+            },
           },
           {
             id: 'rectangle-height-overlay',
@@ -152,7 +156,11 @@ function buildRectanglePresentation(state: SketchToolRuntimeState): SketchToolPr
             label: 'Height',
             value: heightValue,
             unit: 'mm',
-            anchor: midpoint(start, [start[0], end[1]]),
+            anchor: {
+              kind: 'sketchPoint',
+              point: midpoint(start, [start[0], end[1]]),
+              offset: { x: 48, y: 0 },
+            },
           },
           {
             id: 'rectangle-completion-cue',

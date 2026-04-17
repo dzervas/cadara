@@ -7,6 +7,7 @@ import type {
 } from '@/domain/sketch-tools/definition'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import {
+  angleBetweenDegrees,
   createIdleState,
   createPointerMoveResult,
   createPointerReleaseResult,
@@ -40,8 +41,13 @@ function buildLinePresentation(state: SketchToolRuntimeState): SketchToolPresent
   const validation = state.validationMessage
     ? [{ id: 'line-validation', message: state.validationMessage, severity: 'error' as const }]
     : []
+  const length = isDrawing ? distanceBetween(start, end) : null
+  const angle = isDrawing ? angleBetweenDegrees(start, end) : null
   const measurements = isDrawing
-    ? [{ id: 'line-length', label: 'Length', value: distanceBetween(start, end), unit: 'mm' }]
+    ? [
+        { id: 'line-length', label: 'Length', value: length ?? 0, unit: 'mm' },
+        { id: 'line-angle', label: 'Angle', value: angle ?? 0, unit: 'deg' },
+      ]
     : []
   const overlays = isDrawing
     ? [
@@ -55,9 +61,17 @@ function buildLinePresentation(state: SketchToolRuntimeState): SketchToolPresent
           id: 'line-length-overlay',
           kind: 'measurement' as const,
           label: 'Length',
-          value: distanceBetween(start, end),
+          value: length ?? 0,
           unit: 'mm',
-          anchor: midpoint(start, end),
+          anchor: { kind: 'sketchPoint' as const, point: midpoint(start, end), offset: { x: 0, y: -28 } },
+        },
+        {
+          id: 'line-angle-overlay',
+          kind: 'measurement' as const,
+          label: 'Angle',
+          value: angle ?? 0,
+          unit: 'deg',
+          anchor: { kind: 'cursor' as const, point: end, offset: { x: 18, y: -18 } },
         },
         {
           id: 'line-completion-cue',

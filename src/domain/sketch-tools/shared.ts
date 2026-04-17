@@ -14,6 +14,11 @@ export function distanceBetween(start: SketchPoint, end: SketchPoint) {
   return Math.hypot(end[0] - start[0], end[1] - start[1])
 }
 
+export function angleBetweenDegrees(start: SketchPoint, end: SketchPoint) {
+  const angle = Math.atan2(end[1] - start[1], end[0] - start[0]) * (180 / Math.PI)
+  return angle < 0 ? angle + 360 : angle
+}
+
 export function midpoint(start: SketchPoint, end: SketchPoint): SketchPoint {
   return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
 }

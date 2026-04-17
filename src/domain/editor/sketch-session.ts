@@ -695,7 +695,13 @@ function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringSta
         min: definition.valueSpec.min,
         confirmLabel: 'Commit',
         cancelLabel: 'Cancel',
-        anchor: authoring.selectedTargets[authoring.selectedTargets.length - 1]?.anchor,
+        anchor: authoring.selectedTargets[authoring.selectedTargets.length - 1]?.anchor
+          ? {
+              kind: 'sketchPoint',
+              point: authoring.selectedTargets[authoring.selectedTargets.length - 1]!.anchor,
+              offset: { x: 18, y: -18 },
+            }
+          : undefined,
         submitAction: { type: 'patch', patch: { intent: 'commitConstraintValue' } },
         cancelAction: { type: 'patch', patch: { intent: 'cancelConstraintValue' } },
       }

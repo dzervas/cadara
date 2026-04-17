@@ -18,6 +18,13 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
   const controls = schema.controls ?? []
   const measurements = schema.measurements ?? []
   const hints = schema.completionHints ?? []
+  const hasViewportDrawingFeedback = !schema.selectionGuide && (schema.overlays ?? []).some(
+    (overlay) => overlay.kind === 'measurement' || overlay.kind === 'completionCue',
+  )
+
+  if (hasViewportDrawingFeedback) {
+    return null
+  }
 
   return (
     <div className="pointer-events-auto absolute left-4 top-4 w-[260px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">

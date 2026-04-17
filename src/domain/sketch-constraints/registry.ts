@@ -32,7 +32,7 @@ function buildSinglePreview(
       kind: 'constraintPreview' as const,
       label,
       detail,
-      anchor,
+      anchor: { kind: 'sketchPoint' as const, point: anchor },
     },
   ]
 }

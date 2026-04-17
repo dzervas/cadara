@@ -48,10 +48,24 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(moved.stagedEntities.length === 1, 'Line pointer movement should produce one staged line entity.')
     assert(moved.stagedEntities[0]?.kind === 'line', 'Line staged geometry should be a line entity.')
     assert(moved.presentation.measurements?.[0]?.label === 'Length', 'Line presentation should expose live length guidance.')
-    assert(moved.presentation.overlays?.some((overlay) => overlay.kind === 'measurement'), 'Line presentation should expose a generic measurement overlay.')
+    const lengthOverlay = moved.presentation.overlays?.find((overlay) => overlay.id === 'line-length-overlay')
+    const angleOverlay = moved.presentation.overlays?.find((overlay) => overlay.id === 'line-angle-overlay')
+    assert(
+      lengthOverlay?.kind === 'measurement'
+        && lengthOverlay.value === 10
+        && lengthOverlay.anchor.kind === 'sketchPoint',
+      'Line presentation should expose anchored live length guidance.',
+    )
+    assert(
+      angleOverlay?.kind === 'measurement'
+        && angleOverlay.label === 'Angle'
+        && angleOverlay.value === 0
+        && angleOverlay.unit === 'deg',
+      'Line presentation should expose anchored live angle guidance.',
+    )
   }
 
-  function testCirclePresentationSchemaExposesPromptControlAndOverlay() {
+  function testCirclePresentationSchemaExposesPromptControlAndDiameterOverlay() {
     const tool = getSketchToolDefinition('circle')
     const activated = tool.activate()
     const started = tool.pointerRelease({
@@ -65,7 +79,42 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
 
     assert(moved.presentation.prompts[0]?.text === 'Set radius', 'Circle presentation should update its prompt by interaction step.')
     assert(moved.presentation.controls?.some((control) => control.id === 'circle-radius'), 'Circle presentation should expose radius through a generic numeric control.')
-    assert(moved.presentation.overlays?.some((overlay) => overlay.id === 'circle-radius-overlay'), 'Circle presentation should expose radius through a generic overlay descriptor.')
+    const diameterOverlay = moved.presentation.overlays?.find((overlay) => overlay.id === 'circle-diameter-overlay')
+    assert(
+      diameterOverlay?.kind === 'measurement'
+        && diameterOverlay.label === 'Diameter'
+        && diameterOverlay.value === 10
+        && diameterOverlay.anchor.kind === 'cursor',
+      'Circle presentation should expose diameter at the active circle edge.',
+    )
+  }
+
+  function testRectanglePresentationSchemaExposesAnchoredWidthAndHeightOverlays() {
+    const tool = getSketchToolDefinition('rectangle')
+    const activated = tool.activate()
+    const started = tool.pointerRelease({
+      state: activated.state,
+      point: [0, 0],
+    })
+    const moved = tool.pointerMove({
+      state: started.state,
+      point: [4, 3],
+    })
+    const widthOverlay = moved.presentation.overlays?.find((overlay) => overlay.id === 'rectangle-width-overlay')
+    const heightOverlay = moved.presentation.overlays?.find((overlay) => overlay.id === 'rectangle-height-overlay')
+
+    assert(
+      widthOverlay?.kind === 'measurement'
+        && widthOverlay.value === 4
+        && widthOverlay.anchor.kind === 'sketchPoint',
+      'Rectangle presentation should expose anchored live width guidance.',
+    )
+    assert(
+      heightOverlay?.kind === 'measurement'
+        && heightOverlay.value === 3
+        && heightOverlay.anchor.kind === 'sketchPoint',
+      'Rectangle presentation should expose anchored live height guidance.',
+    )
   }
 
   function testSessionRuntimeDelegatesCommitOutputToToolModule() {
@@ -99,7 +148,8 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
 
   testRegistryContainsCurrentSketchToolSet()
   testLinePointerLifecycleProducesStagedGeometry()
-  testCirclePresentationSchemaExposesPromptControlAndOverlay()
+  testCirclePresentationSchemaExposesPromptControlAndDiameterOverlay()
+  testRectanglePresentationSchemaExposesAnchoredWidthAndHeightOverlays()
   testSessionRuntimeDelegatesCommitOutputToToolModule()
   testGenericPresentationAccessFromSession()
 })
