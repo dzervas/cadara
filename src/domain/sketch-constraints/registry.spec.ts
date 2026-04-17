@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import {
+  beginSketchAnnotationEdit,
   beginSketchTool,
   createNewSketchSessionFromSupport,
   deleteSelectedSketchAnnotation,
@@ -72,10 +73,20 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
 
     assert(session.definition.constraintIds.length === 1, 'Parallel authoring should append one durable constraint record.')
     assert(session.constraintAuthoring === null, 'Geometric constraints should commit immediately after the final selection.')
+    const annotation = getSketchAnnotationDescriptors(session).find((entry) => entry.target.kind === 'constraint')
+    assert(annotation, 'Committed geometric constraints should be exposed as durable annotation descriptors.')
+    assert(annotation.glyphKind === 'constraintParallel', 'Parallel constraints should expose a distinct glyph kind.')
+    assert(annotation.anchor.kind === 'sketchPoint', 'Constraint descriptors should expose a viewport anchor.')
     assert(
-      getSketchAnnotationDescriptors(session).some((annotation) => annotation.target.kind === 'constraint'),
-      'Committed geometric constraints should be exposed as durable annotation descriptors.',
+      annotation.affectedGeometryRefs.length === 2
+        && annotation.affectedGeometryRefs.every((target) => target.kind === 'sketchEntity'),
+      'Constraint descriptors should expose affected sketch geometry refs.',
     )
+
+    session = selectSketchAnnotation(session, annotation.target)
+    session = deleteSelectedSketchAnnotation(session)
+
+    assert(session.definition.constraintIds.length === 0, 'Deleting the selected constraint should remove the durable constraint record.')
   }
 
   function testDimensionalConstraintShowsFloatingInputAndSupportsDeletion() {
@@ -104,11 +115,61 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       (entry) => entry.target.kind === 'dimension',
     )
     assert(annotation, 'Committed dimensions should be exposed as durable annotation descriptors.')
+    assert(annotation.glyphKind === 'dimensionDistance', 'Distance dimensions should expose a distinct glyph kind.')
+    assert(annotation.anchor.kind === 'sketchPoint', 'Dimension descriptors should expose a viewport anchor.')
+    assert(
+      annotation.affectedGeometryRefs.length === 2
+        && annotation.affectedGeometryRefs.every((target) => target.kind === 'sketchPoint'),
+      'Dimension descriptors should expose affected sketch point refs.',
+    )
 
     session = selectSketchAnnotation(session, annotation!.target)
     session = deleteSelectedSketchAnnotation(session)
 
     assert(session.definition.dimensionIds.length === 0, 'Deleting the selected dimension should remove the durable dimension record.')
+  }
+
+  function testCommittedDimensionAnnotationReopensValueInputAndEditsDurableRecord() {
+    let session = createSessionWithTwoLines()
+    const [firstPointId, , , diagonalPointId] = session.definition.pointIds
+
+    session = beginSketchTool(session, 'dimensionDistance')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: firstPointId!,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: diagonalPointId!,
+    })
+    session = patchSketchConstraintValue(session, { value: 24 })
+    session = patchSketchConstraintValue(session, { intent: 'commitConstraintValue' })
+
+    const annotation = getSketchAnnotationDescriptors(session).find(
+      (entry) => entry.target.kind === 'dimension',
+    )
+    assert(annotation?.target.kind === 'dimension', 'Committed dimension should expose an editable annotation target.')
+
+    session = beginSketchAnnotationEdit(session, annotation.target)
+
+    const input = getSketchToolPresentation(session)?.floatingInput
+    assert(input?.label === 'Distance', 'Double-clicking a distance annotation should reopen its value input.')
+    assert(input.value === 24, 'The reopened distance input should use the durable dimension value.')
+
+    session = patchSketchConstraintValue(session, { value: 31 })
+    session = patchSketchConstraintValue(session, { intent: 'commitAnnotationValue' })
+
+    assert(
+      session.definition.dimensions[0]?.kind === 'distance' && session.definition.dimensions[0].value === 31,
+      'Committing the reopened distance input should update the durable dimension record.',
+    )
+    assert(
+      session.commitRequest?.definition.dimensions[0]?.kind === 'distance'
+        && session.commitRequest.definition.dimensions[0].value === 31,
+      'Committing the reopened distance input should update the durable sketch mutation payload.',
+    )
   }
 
   function testDistancePreviewUsesPartialTargetAndPointer() {
@@ -229,6 +290,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   testToolbarDefinitionsExposeConstraintFamilies()
   testGeometricConstraintAuthoringCommitsDurableRecord()
   testDimensionalConstraintShowsFloatingInputAndSupportsDeletion()
+  testCommittedDimensionAnnotationReopensValueInputAndEditsDurableRecord()
   testDistancePreviewUsesPartialTargetAndPointer()
   testPointDistanceReferenceSelectionFollowsPointer()
   testDistancePreviewUpdatesWhenPointerChangesReference()

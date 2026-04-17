@@ -534,6 +534,24 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
   }
 
   {
+    const marker = createBoundMarker(vertexRenderable)
+    const root = new THREE.Group()
+    root.add(marker.group)
+
+    const bindings = collectBindings(root)
+    assert(bindings !== null)
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [], null, [vertexRenderable.binding.target])
+
+    assert(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
+    assertEqual(
+      marker.visibleMesh.material.color.getHex(),
+      0xf0a14a,
+      'Annotation-related geometry must receive hover highlight without becoming selected.',
+    )
+  }
+
+  {
     const invisible = createInvisiblePickMaterial()
     assertEqual(invisible.opacity, 0, 'Invisible pick material must stay fully transparent.')
     assertEqual(invisible.colorWrite, false, 'Invisible pick material must not write color.')

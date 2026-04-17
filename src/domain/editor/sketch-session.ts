@@ -76,13 +76,36 @@ export interface SketchConstraintAuthoringState {
   pendingValue: number | null
 }
 
+export interface SketchAnnotationEditState {
+  target: SketchConstraintRef | SketchDimensionRef
+  pendingValue: number | null
+}
+
 export interface SketchAnnotationDescriptor {
   id: string
   target: SketchConstraintRef | SketchDimensionRef
+  glyphKind: SketchAnnotationGlyphKind
+  anchor: SketchToolAnchorDescriptor
+  affectedGeometryRefs: readonly (SketchEntityRef | SketchPointRef)[]
   label: string
   detail: string
   status: 'constraint' | 'dimension'
 }
+
+export type SketchAnnotationGlyphKind =
+  | 'constraintCoincident'
+  | 'constraintParallel'
+  | 'constraintEqual'
+  | 'constraintHorizontal'
+  | 'constraintVertical'
+  | 'constraintFixed'
+  | 'constraintAngle'
+  | 'constraintPerpendicular'
+  | 'dimensionDistance'
+  | 'dimensionHorizontal'
+  | 'dimensionVertical'
+  | 'dimensionRadius'
+  | 'dimensionCoincident'
 
 export interface SketchGeometryDragState {
   target: SketchPointRef
@@ -108,6 +131,7 @@ export interface SketchSessionState {
   livePoint: SketchPoint | null
   toolPresentation: SketchToolPresentationSchema | null
   constraintAuthoring: SketchConstraintAuthoringState | null
+  activeAnnotationEdit: SketchAnnotationEditState | null
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null
   activeEditTarget: SketchPointRef | null
   activeDrag: SketchGeometryDragState | null
@@ -404,6 +428,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     livePoint: null,
     toolPresentation: null,
     constraintAuthoring: null,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -441,6 +466,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     livePoint: null,
     toolPresentation: null,
     constraintAuthoring: null,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -679,6 +705,7 @@ export function moveSketchHistoryCursor(
     entities: definition.entities.flatMap((entity) =>
       mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
     ),
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -833,6 +860,7 @@ function activateSketchConstraintTool(
     validationMessage: null,
     toolPresentation: buildConstraintToolPresentation(authoring),
     constraintAuthoring: authoring,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -907,6 +935,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     validationMessage: activation.state.validationMessage,
     toolPresentation: activation.presentation,
     constraintAuthoring: null,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -928,6 +957,7 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     validationMessage: null,
     toolPresentation: null,
     constraintAuthoring: null,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -1003,6 +1033,7 @@ export function selectSketchEditTarget(
     ...session,
     activeEditTarget: target,
     activeDrag: null,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     validationMessage: null,
   }
@@ -1035,6 +1066,7 @@ export function beginSketchGeometryDrag(
     livePoint: null,
     toolPresentation: null,
     constraintAuthoring: null,
+    activeAnnotationEdit: null,
     entities: selected.entities.filter((entity) => entity.status === 'accepted'),
     activeDrag: {
       target,
@@ -1293,6 +1325,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     }),
     validationMessage: null,
     toolPresentation: result.presentation,
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -1309,6 +1342,10 @@ function getToolRuntimeState(session: SketchSessionState): import('@/domain/sket
 }
 
 export function getSketchSessionPreviewLabel(session: SketchSessionState): string {
+  if (session.activeAnnotationEdit) {
+    return session.toolPresentation?.prompts[0]?.text ?? 'Edit annotation value'
+  }
+
   if (session.constraintAuthoring) {
     const definition = getSketchConstraintDefinition(session.constraintAuthoring.toolId)
 
@@ -1360,6 +1397,10 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
 }
 
 export function getSketchToolPresentation(session: SketchSessionState): SketchToolPresentationSchema | null {
+  if (session.activeAnnotationEdit) {
+    return session.toolPresentation
+  }
+
   if (session.activeTool === null) {
     return null
   }
@@ -1441,6 +1482,7 @@ export function selectSketchConstraintTarget(
       hoverTarget: null,
       isPreviewPinned: false,
     },
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
   }
 
@@ -1480,6 +1522,10 @@ export function patchSketchConstraintValue(
 ): SketchSessionState {
   const authoring = session.constraintAuthoring
 
+  if (session.activeAnnotationEdit) {
+    return patchSketchAnnotationEditValue(session, patch)
+  }
+
   if (!authoring) {
     return session
   }
@@ -1508,6 +1554,289 @@ export function patchSketchConstraintValue(
   }
 
   return commitSketchConstraintAuthoring(session)
+}
+
+export function beginSketchAnnotationEdit(
+  session: SketchSessionState,
+  target: SketchConstraintRef | SketchDimensionRef,
+): SketchSessionState {
+  const editable = getEditableAnnotationValue(session, target)
+
+  if (!editable) {
+    return {
+      ...session,
+      status: 'idle',
+      toolPresentation: null,
+      activeAnnotationEdit: null,
+      selectedAnnotation: target,
+      activeEditTarget: null,
+      activeDrag: null,
+      validationMessage: null,
+    }
+  }
+
+  const edit: SketchAnnotationEditState = {
+    target,
+    pendingValue: editable.value,
+  }
+
+  return {
+    ...session,
+    activeTool: null,
+    status: 'awaitingValue',
+    pointerDownPoint: null,
+    livePoint: null,
+    toolPresentation: buildAnnotationEditPresentation(session, edit),
+    constraintAuthoring: null,
+    activeAnnotationEdit: edit,
+    selectedAnnotation: target,
+    activeEditTarget: null,
+    activeDrag: null,
+    validationMessage: null,
+  }
+}
+
+function patchSketchAnnotationEditValue(
+  session: SketchSessionState,
+  patch: Record<string, unknown>,
+): SketchSessionState {
+  const edit = session.activeAnnotationEdit
+
+  if (!edit) {
+    return session
+  }
+
+  const intent = patch.intent
+
+  if (intent === 'cancelAnnotationValue') {
+    return clearSketchAnnotationEdit(session)
+  }
+
+  if ('value' in patch) {
+    const nextEdit = {
+      ...edit,
+      pendingValue: normalizeConstraintValue(patch.value as number | null | undefined),
+    }
+
+    return {
+      ...session,
+      activeAnnotationEdit: nextEdit,
+      toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
+    }
+  }
+
+  if (intent !== 'commitAnnotationValue' || edit.pendingValue === null) {
+    return session
+  }
+
+  return commitSketchAnnotationEditValue(session, edit)
+}
+
+function clearSketchAnnotationEdit(session: SketchSessionState): SketchSessionState {
+  return {
+    ...session,
+    status: 'idle',
+    toolPresentation: null,
+    activeAnnotationEdit: null,
+    validationMessage: null,
+  }
+}
+
+function commitSketchAnnotationEditValue(
+  session: SketchSessionState,
+  edit: SketchAnnotationEditState,
+): SketchSessionState {
+  const nextFullDefinition = updateAnnotationValueInDefinition(
+    session.fullDefinition,
+    edit.target,
+    edit.pendingValue,
+  )
+
+  if (nextFullDefinition === session.fullDefinition) {
+    return session
+  }
+
+  const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+
+  return {
+    ...session,
+    fullDefinition: nextFullDefinition,
+    definition: nextDefinition,
+    entities: nextDefinition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, nextDefinition.points, entity),
+    ),
+    status: 'idle',
+    toolPresentation: null,
+    activeAnnotationEdit: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    validationMessage: null,
+    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+  }
+}
+
+function updateAnnotationValueInDefinition(
+  definition: SketchDefinition,
+  target: SketchConstraintRef | SketchDimensionRef,
+  value: number,
+): SketchDefinition {
+  if (target.kind === 'constraint') {
+    const constraints = definition.constraints.map((constraint) => {
+      if (constraint.constraintId !== target.constraintId || constraint.kind !== 'angle') {
+        return constraint
+      }
+
+      return {
+        ...constraint,
+        valueRadians: value * Math.PI / 180,
+      }
+    })
+    const edited = constraints.some((constraint, index) => constraint !== definition.constraints[index])
+
+    return edited
+      ? {
+          ...definition,
+          constraints,
+        }
+      : definition
+  }
+
+  const dimensions = definition.dimensions.map((dimension) => {
+    if (dimension.dimensionId !== target.dimensionId) {
+      return dimension
+    }
+
+    switch (dimension.kind) {
+      case 'distance':
+      case 'horizontalDistance':
+      case 'verticalDistance':
+      case 'circleRadius':
+        return {
+          ...dimension,
+          value,
+        }
+      case 'arcStartPointCoincident':
+      case 'arcEndPointCoincident':
+        return dimension
+    }
+  })
+  const edited = dimensions.some((dimension, index) => dimension !== definition.dimensions[index])
+
+  return edited
+    ? {
+        ...definition,
+        dimensions,
+      }
+    : definition
+}
+
+function buildAnnotationEditPresentation(
+  session: SketchSessionState,
+  edit: SketchAnnotationEditState,
+): SketchToolPresentationSchema {
+  const editable = getEditableAnnotationValue(session, edit.target)
+  const label = editable?.label ?? 'Value'
+
+  return {
+    prompts: [
+      {
+        id: 'annotation-edit-prompt',
+        text: `Edit ${label.toLowerCase()}`,
+      },
+    ],
+    floatingInput: {
+      id: `annotation-edit-${getTargetKey(edit.target)}`,
+      label,
+      value: edit.pendingValue,
+      unit: editable?.unit,
+      min: editable?.min,
+      confirmLabel: 'Save',
+      cancelLabel: 'Cancel',
+      anchor: editable?.anchor,
+      placement: 'target',
+      submitAction: { type: 'patch', patch: { intent: 'commitAnnotationValue' } },
+      cancelAction: { type: 'patch', patch: { intent: 'cancelAnnotationValue' } },
+    },
+  }
+}
+
+function getEditableAnnotationValue(
+  session: SketchSessionState,
+  target: SketchConstraintRef | SketchDimensionRef,
+): {
+  label: string
+  value: number
+  unit?: string
+  min?: number
+  anchor?: SketchToolAnchorDescriptor
+} | null {
+  const annotation = getSketchAnnotationDescriptors(session).find(
+    (entry) => getTargetKey(entry.target) === getTargetKey(target),
+  )
+
+  if (target.kind === 'constraint') {
+    const constraint = session.definition.constraints.find((entry) => entry.constraintId === target.constraintId)
+
+    if (constraint?.kind !== 'angle') {
+      return null
+    }
+
+    return {
+      label: 'Angle',
+      value: constraint.valueRadians * 180 / Math.PI,
+      unit: 'deg',
+      anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+    }
+  }
+
+  const dimension = session.definition.dimensions.find((entry) => entry.dimensionId === target.dimensionId)
+
+  if (!dimension) {
+    return null
+  }
+
+  switch (dimension.kind) {
+    case 'distance':
+      return {
+        label: dimension.axis === 'horizontal'
+          ? 'Horizontal distance'
+          : dimension.axis === 'vertical'
+            ? 'Vertical distance'
+            : 'Distance',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
+    case 'horizontalDistance':
+      return {
+        label: 'Horizontal distance',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
+    case 'verticalDistance':
+      return {
+        label: 'Vertical distance',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
+    case 'circleRadius':
+      return {
+        label: 'Radius',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return null
+  }
 }
 
 function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSessionState {
@@ -1540,6 +1869,7 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     sequence: session.sequence + 1,
     status: 'idle',
     constraintAuthoring: null,
+    activeAnnotationEdit: null,
     commitRequest: rebuildSessionCommitRequest(session, history.definition),
     selectedAnnotation: null,
     toolPresentation: null,
@@ -1556,6 +1886,7 @@ export function selectSketchAnnotation(
   return {
     ...session,
     selectedAnnotation: target,
+    activeAnnotationEdit: null,
     activeEditTarget: null,
     activeDrag: null,
   }
@@ -1600,6 +1931,7 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
     entities: nextDefinition.entities.flatMap((entity) =>
       mapDefinitionEntityToDraftEntity(sketchId, nextDefinition.points, entity),
     ),
+    activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
@@ -1617,6 +1949,9 @@ export function getSketchAnnotationDescriptors(
     ...session.definition.constraints.map((constraint) => ({
       id: constraint.constraintId,
       target: createSketchConstraintRef(sketchId, constraint.constraintId),
+      glyphKind: getConstraintGlyphKind(constraint),
+      anchor: createConstraintAnnotationAnchor(session.definition, constraint),
+      affectedGeometryRefs: getConstraintAffectedGeometryRefs(sketchId, constraint),
       label: constraint.label,
       detail: describeConstraint(constraint),
       status: 'constraint' as const,
@@ -1624,10 +1959,230 @@ export function getSketchAnnotationDescriptors(
     ...session.definition.dimensions.map((dimension) => ({
       id: dimension.dimensionId,
       target: createSketchDimensionRef(sketchId, dimension.dimensionId),
+      glyphKind: getDimensionGlyphKind(dimension),
+      anchor: createDimensionAnnotationAnchor(session.definition, dimension),
+      affectedGeometryRefs: getDimensionAffectedGeometryRefs(sketchId, dimension),
       label: dimension.label,
       detail: describeDimension(dimension),
       status: 'dimension' as const,
     })),
+  ]
+}
+
+function getConstraintGlyphKind(constraint: ConstraintDefinition): SketchAnnotationGlyphKind {
+  switch (constraint.kind) {
+    case 'coincident':
+      return 'constraintCoincident'
+    case 'parallel':
+      return 'constraintParallel'
+    case 'equalLength':
+      return 'constraintEqual'
+    case 'horizontal':
+      return 'constraintHorizontal'
+    case 'vertical':
+      return 'constraintVertical'
+    case 'fixPoint':
+      return 'constraintFixed'
+    case 'angle':
+      return 'constraintAngle'
+    case 'perpendicular':
+      return 'constraintPerpendicular'
+  }
+}
+
+function getDimensionGlyphKind(dimension: DimensionDefinition): SketchAnnotationGlyphKind {
+  switch (dimension.kind) {
+    case 'distance':
+      if (dimension.axis === 'horizontal') {
+        return 'dimensionHorizontal'
+      }
+
+      if (dimension.axis === 'vertical') {
+        return 'dimensionVertical'
+      }
+
+      return 'dimensionDistance'
+    case 'horizontalDistance':
+      return 'dimensionHorizontal'
+    case 'verticalDistance':
+      return 'dimensionVertical'
+    case 'circleRadius':
+      return 'dimensionRadius'
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return 'dimensionCoincident'
+  }
+}
+
+function getConstraintAffectedGeometryRefs(
+  sketchId: SketchId,
+  constraint: ConstraintDefinition,
+): readonly (SketchEntityRef | SketchPointRef)[] {
+  switch (constraint.kind) {
+    case 'coincident':
+    case 'angle':
+      return constraint.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId))
+    case 'fixPoint':
+      return [createSketchPointRef(sketchId, constraint.pointId)]
+    case 'horizontal':
+    case 'vertical':
+      return [createSketchEntityRef(sketchId, constraint.entityId)]
+    case 'parallel':
+    case 'perpendicular':
+    case 'equalLength':
+      return constraint.entityIds.map((entityId) => createSketchEntityRef(sketchId, entityId))
+  }
+}
+
+function getDimensionAffectedGeometryRefs(
+  sketchId: SketchId,
+  dimension: DimensionDefinition,
+): readonly (SketchEntityRef | SketchPointRef)[] {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance':
+      return dimension.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId))
+    case 'circleRadius':
+      return [createSketchEntityRef(sketchId, dimension.entityId)]
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return [
+        createSketchEntityRef(sketchId, dimension.entityId),
+        createSketchPointRef(sketchId, dimension.pointId),
+      ]
+  }
+}
+
+function createConstraintAnnotationAnchor(
+  definition: SketchDefinition,
+  constraint: ConstraintDefinition,
+): SketchToolAnchorDescriptor {
+  switch (constraint.kind) {
+    case 'coincident':
+    case 'angle':
+      return createOffsetAnnotationAnchor(getAveragePointPosition(definition, constraint.pointIds))
+    case 'fixPoint':
+      return createOffsetAnnotationAnchor(getPointPosition(definition, constraint.pointId))
+    case 'horizontal':
+    case 'vertical':
+      return createOffsetAnnotationAnchor(getEntityAnchor(definition, constraint.entityId))
+    case 'parallel':
+    case 'perpendicular':
+    case 'equalLength':
+      return createOffsetAnnotationAnchor(getAverageEntityAnchor(definition, constraint.entityIds))
+  }
+}
+
+function createDimensionAnnotationAnchor(
+  definition: SketchDefinition,
+  dimension: DimensionDefinition,
+): SketchToolAnchorDescriptor {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance':
+      return createOffsetAnnotationAnchor(getAveragePointPosition(definition, dimension.pointIds), { x: 0, y: -28 })
+    case 'circleRadius':
+      return createOffsetAnnotationAnchor(getEntityAnchor(definition, dimension.entityId), { x: 22, y: -22 })
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return createOffsetAnnotationAnchor(
+        getAveragePointPosition(definition, [
+          getEntityAnchorPointId(definition, dimension.entityId),
+          dimension.pointId,
+        ].filter((pointId): pointId is SketchPointId => Boolean(pointId))),
+      )
+  }
+}
+
+function createOffsetAnnotationAnchor(
+  point: SketchPoint | null,
+  offset = { x: 18, y: -18 },
+): SketchToolAnchorDescriptor {
+  return {
+    kind: 'sketchPoint',
+    point: point ?? [0, 0],
+    offset,
+  }
+}
+
+function getPointPosition(definition: SketchDefinition, pointId: SketchPointId): SketchPoint | null {
+  return definition.points.find((point) => point.pointId === pointId)?.position ?? null
+}
+
+function getAveragePointPosition(
+  definition: SketchDefinition,
+  pointIds: readonly SketchPointId[],
+): SketchPoint | null {
+  const points = pointIds.flatMap((pointId) => {
+    const position = getPointPosition(definition, pointId)
+    return position ? [position] : []
+  })
+
+  return getAverageSketchPoint(points)
+}
+
+function getAverageEntityAnchor(
+  definition: SketchDefinition,
+  entityIds: readonly SketchEntityId[],
+): SketchPoint | null {
+  const points = entityIds.flatMap((entityId) => {
+    const position = getEntityAnchor(definition, entityId)
+    return position ? [position] : []
+  })
+
+  return getAverageSketchPoint(points)
+}
+
+function getEntityAnchor(definition: SketchDefinition, entityId: SketchEntityId): SketchPoint | null {
+  const entity = definition.entities.find((entry) => entry.entityId === entityId)
+
+  if (!entity) {
+    return null
+  }
+
+  switch (entity.kind) {
+    case 'lineSegment':
+      return getAveragePointPosition(definition, [entity.startPointId, entity.endPointId])
+    case 'point':
+      return getPointPosition(definition, entity.pointId)
+    case 'circle':
+      return getPointPosition(definition, entity.centerPointId)
+    case 'arc':
+      return getPointPosition(definition, entity.centerPointId)
+  }
+}
+
+function getEntityAnchorPointId(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+): SketchPointId | null {
+  const entity = definition.entities.find((entry) => entry.entityId === entityId)
+
+  if (!entity) {
+    return null
+  }
+
+  switch (entity.kind) {
+    case 'lineSegment':
+      return entity.startPointId
+    case 'point':
+      return entity.pointId
+    case 'circle':
+    case 'arc':
+      return entity.centerPointId
+  }
+}
+
+function getAverageSketchPoint(points: readonly SketchPoint[]): SketchPoint | null {
+  if (points.length === 0) {
+    return null
+  }
+
+  return [
+    points.reduce((sum, point) => sum + point[0], 0) / points.length,
+    points.reduce((sum, point) => sum + point[1], 0) / points.length,
   ]
 }
 

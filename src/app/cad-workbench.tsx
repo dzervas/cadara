@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
-import { SketchConstraintAnnotations } from '@/components/cad/sketch-constraint-annotations'
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
 import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
@@ -683,9 +682,11 @@ export function CadWorkbench() {
             <ThreeCadViewport
               renderables={viewportRenderables.documentRenderables}
               sketchDisplayRenderables={viewportRenderables.sketchDisplayRenderables}
+              sketchAnnotations={sketchAnnotations}
               hoverTarget={visibleHoverTarget}
               onHover={handleViewportHover}
               onSelect={handleViewportSelect}
+              onAnnotationEdit={(target) => dispatch({ type: 'sketch.annotationEditRequested', target })}
               onClearHover={handleViewportHoverClear}
               onSketchMove={handleSketchMove}
               onSketchRelease={handleSketchRelease}
@@ -699,11 +700,6 @@ export function CadWorkbench() {
             <SketchToolPanel
               schema={sketchToolPresentation}
               onPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
-            />
-            <SketchConstraintAnnotations
-              annotations={sketchAnnotations}
-              selectedAnnotation={sketchSession?.selectedAnnotation ?? null}
-              onSelect={(target) => dispatch({ type: 'viewport.selectionRequested', target })}
             />
             {restoreMessage ? (
               <div

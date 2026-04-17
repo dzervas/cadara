@@ -35,8 +35,11 @@ import {
   beginSketchTool,
   createNewSketchSession,
   createSketchSessionFromSnapshot,
+  getSketchAnnotationDescriptors,
   getSketchSessionPreviewLabel,
   mapSketchPointToWorld,
+  patchSketchConstraintValue,
+  selectSketchConstraintTarget,
   startSketchDraw,
 } from '@/domain/editor/sketch-session'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
@@ -1597,6 +1600,175 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [10, 0])
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 5])
+    session = acceptSketchDraw(session, [10, 5])
+
+    const [firstLineId, secondLineId] = session.definition.entityIds
+    assert(firstLineId && secondLineId, 'Annotation deletion fixture should create two sketch lines.')
+
+    session = beginSketchTool(session, 'constraintParallel')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: firstLineId,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: secondLineId,
+    })
+
+    const annotation = getSketchAnnotationDescriptors(session)[0]
+    assert(annotation, 'Annotation deletion fixture should create a committed annotation descriptor.')
+
+    const selected = transitionEditorState({
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-annotation-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+    }, {
+      type: 'viewport.selectionRequested',
+      target: annotation.target,
+    })
+
+    assert(selected.state.kind === 'editingSketch', 'Selecting an annotation should stay in sketch editing.')
+    assert(
+      selected.state.session.selectedAnnotation
+        && primitiveRefEquals(selected.state.session.selectedAnnotation, annotation.target),
+      'Viewport annotation selection should select the durable annotation target.',
+    )
+    assert(
+      selected.state.session.definition.constraintIds.length === 1,
+      'Selecting an annotation should not select or delete affected geometry.',
+    )
+
+    const deleted = transitionEditorState(selected.state, { type: 'sketch.annotationDeleteRequested' })
+
+    assert(deleted.state.kind === 'editingSketch', 'Deleting an annotation should stay in sketch editing.')
+    assert(
+      deleted.state.session.definition.constraintIds.length === 0,
+      'Annotation deletion should remove the durable constraint record from sketch state.',
+    )
+    assert(
+      deleted.state.session.commitRequest?.definition.constraintIds.length === 0,
+      'Annotation deletion should update the durable sketch commit request.',
+    )
+  }
+
+  function testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [10, 0])
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 5])
+    session = acceptSketchDraw(session, [10, 5])
+
+    const [firstPointId, , , diagonalPointId] = session.definition.pointIds
+    assert(firstPointId && diagonalPointId, 'Annotation edit fixture should create selectable sketch points.')
+
+    session = beginSketchTool(session, 'dimensionDistance')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: firstPointId,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: diagonalPointId,
+    })
+    session = patchSketchConstraintValue(session, { value: 24 })
+    session = patchSketchConstraintValue(session, { intent: 'commitConstraintValue' })
+
+    const annotation = getSketchAnnotationDescriptors(session).find((entry) => entry.target.kind === 'dimension')
+    assert(annotation?.target.kind === 'dimension', 'Annotation edit fixture should create a committed dimension annotation.')
+
+    const baseState: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-annotation-edit-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+    }
+
+    const opened = transitionEditorState(baseState, {
+      type: 'sketch.annotationEditRequested',
+      target: annotation.target,
+    })
+
+    assert(opened.state.kind === 'editingSketch', 'Annotation edit request should stay in sketch editing.')
+    assert(
+      opened.state.session.activeAnnotationEdit?.target.kind === 'dimension',
+      'Annotation edit request should open a committed dimension edit session.',
+    )
+    assert(
+      opened.state.session.toolPresentation?.floatingInput?.value === 24,
+      'Committed dimension edit form should open with the durable dimension value.',
+    )
+
+    const changed = transitionEditorState(opened.state, {
+      type: 'sketch.toolPatched',
+      patch: { value: 33 },
+    })
+    const committed = transitionEditorState(changed.state, {
+      type: 'sketch.toolPatched',
+      patch: { intent: 'commitAnnotationValue' },
+    })
+
+    assert(committed.state.kind === 'editingSketch', 'Committed dimension edit should stay in sketch editing.')
+    assert(
+      committed.state.session.definition.dimensions[0]?.kind === 'distance'
+        && committed.state.session.definition.dimensions[0].value === 33,
+      'Committed dimension edit should update the existing durable dimension record.',
+    )
+  }
+
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
   testSketchActivationAcceptsPlanarFaces()
@@ -1613,6 +1785,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testSketchToolClearStaysInSketchEditing()
   testConstraintAuthoringReceivesViewportHoverAndSelection()
   testConstraintAuthoringIgnoresInvalidViewportSelection()
+  testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()
+  testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
   testReplayIsDeterministic()
   testSelectionKeyUsesDurableRefs()
   await testRuntimeLoopProcessesSketchOpen()

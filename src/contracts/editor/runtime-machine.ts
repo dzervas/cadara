@@ -43,6 +43,7 @@ const editorEventTypes = [
   'sketch.toolPatched',
   'sketch.activeToolCleared',
   'sketch.annotationDeleteRequested',
+  'sketch.annotationEditRequested',
   'form.featurePatched',
   'form.referencePickerActivated',
   'form.referencePickerCancelled',

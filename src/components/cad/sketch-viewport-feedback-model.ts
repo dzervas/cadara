@@ -10,6 +10,11 @@ export interface SketchViewportFeedbackProjection {
   y: number
 }
 
+export interface SketchViewportFeedbackLayoutProjection extends SketchViewportFeedbackProjection {
+  sourceX: number
+  sourceY: number
+}
+
 interface SketchViewportFeedbackAnchor {
   id: string
   anchor: SketchToolAnchorDescriptor
@@ -49,6 +54,79 @@ export function getOverlayGeometryProjectionId(id: string, point: string) {
 
 export function getFloatingInputProjectionId(id: string) {
   return `floating-input:${id}`
+}
+
+export function getAnnotationProjectionId(annotationId: string) {
+  return `annotation:${annotationId}`
+}
+
+export function layoutSketchAnnotationProjections(
+  projections: readonly SketchViewportFeedbackProjection[],
+): SketchViewportFeedbackLayoutProjection[] {
+  const placed: SketchViewportFeedbackLayoutProjection[] = []
+
+  for (const projection of projections) {
+    const candidate = findNonOverlappingAnnotationPosition(projection, placed, projections.length)
+    placed.push({
+      ...projection,
+      sourceX: projection.x,
+      sourceY: projection.y,
+      x: candidate.x,
+      y: candidate.y,
+    })
+  }
+
+  return placed
+}
+
+const ANNOTATION_LABEL_SIZE_PX = 32
+const ANNOTATION_LABEL_GAP_PX = 6
+const ANNOTATION_LABEL_STEP_PX = ANNOTATION_LABEL_SIZE_PX + ANNOTATION_LABEL_GAP_PX
+
+function findNonOverlappingAnnotationPosition(
+  projection: SketchViewportFeedbackProjection,
+  placed: readonly SketchViewportFeedbackLayoutProjection[],
+  totalProjectionCount: number,
+) {
+  const candidates = createAnnotationLayoutCandidates(totalProjectionCount)
+    .map((offset) => ({
+      x: projection.x + offset.x,
+      y: projection.y + offset.y,
+    }))
+
+  return candidates.find((candidate) => !placed.some((entry) => annotationLabelsOverlap(candidate, entry)))
+    ?? candidates[0]
+    ?? projection
+}
+
+function createAnnotationLayoutCandidates(totalProjectionCount: number) {
+  const candidates = [{ x: 0, y: 0 }]
+  const ringCount = Math.max(totalProjectionCount, 1)
+
+  for (let ring = 1; ring <= ringCount; ring += 1) {
+    const radius = ring * ANNOTATION_LABEL_STEP_PX
+
+    candidates.push(
+      { x: radius, y: 0 },
+      { x: 0, y: -radius },
+      { x: -radius, y: 0 },
+      { x: 0, y: radius },
+      { x: radius, y: -radius },
+      { x: -radius, y: -radius },
+      { x: -radius, y: radius },
+      { x: radius, y: radius },
+    )
+  }
+
+  return candidates
+}
+
+function annotationLabelsOverlap(
+  left: Pick<SketchViewportFeedbackProjection, 'x' | 'y'>,
+  right: Pick<SketchViewportFeedbackProjection, 'x' | 'y'>,
+) {
+  return Math.abs(left.x - right.x) < ANNOTATION_LABEL_STEP_PX
+    && Math.abs(left.y - right.y) < ANNOTATION_LABEL_STEP_PX
 }
 
 function getOverlayAnchor(overlay: SketchToolOverlayDescriptor): SketchToolAnchorDescriptor | null {

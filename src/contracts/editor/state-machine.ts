@@ -20,6 +20,7 @@ import {
 import { createFeatureEditorReferenceSelectionPatch } from '@/domain/feature-authoring/form-events'
 import {
   acceptSketchDraw,
+  beginSketchAnnotationEdit,
   beginSketchGeometryDrag,
   beginSketchTool,
   clearActiveSketchTool,
@@ -334,6 +335,13 @@ export interface SketchAnnotationDeleteRequestedEvent {
   type: 'sketch.annotationDeleteRequested'
 }
 
+/** Opens the editable value form for a committed sketch annotation, if supported. */
+export interface SketchAnnotationEditRequestedEvent {
+  type: 'sketch.annotationEditRequested'
+  /** Durable committed annotation target requested for editing. */
+  target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>
+}
+
 /** Applies a partial edit to the active feature draft parameters. */
 export interface FormFeaturePatchedEvent {
   type: 'form.featurePatched'
@@ -397,6 +405,7 @@ export type EditorEvent =
   | SketchActiveToolClearedEvent
   | SketchHistoryCursorRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
+  | SketchAnnotationEditRequestedEvent
   | FormFeaturePatchedEvent
   | FormReferencePickerActivatedEvent
   | FormReferencePickerCancelledEvent
@@ -1840,7 +1849,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
-      if (state.session.constraintAuthoring) {
+      if (state.session.constraintAuthoring || state.session.activeAnnotationEdit) {
         const session = patchSketchConstraintValue(state.session, event.patch)
 
         return {
@@ -1940,6 +1949,32 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           state: {
             ...state,
             selection: [],
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+    case 'sketch.annotationEditRequested':
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = beginSketchAnnotationEdit(state.session, event.target)
+
+        return {
+          state: {
+            ...state,
+            selection: [event.target],
+            hoverTarget: event.target,
             session,
             preview: {
               kind: 'sketch',

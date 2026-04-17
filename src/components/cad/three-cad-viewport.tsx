@@ -7,7 +7,11 @@ import {
   SketchViewportFeedbackLayer,
 } from '@/components/cad/sketch-viewport-feedback'
 import {
+  SketchConstraintAnnotations,
+} from '@/components/cad/sketch-constraint-annotations'
+import {
   collectSketchViewportFeedbackAnchors,
+  getAnnotationProjectionId,
   type SketchViewportFeedbackProjection,
 } from '@/components/cad/sketch-viewport-feedback-model'
 import {
@@ -15,7 +19,7 @@ import {
   primitiveRefEquals,
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
-import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
+import type { SketchAnnotationDescriptor, SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import {
   MARKER_SPHERE_GEOMETRY,
@@ -68,8 +72,10 @@ interface ThreeCadViewportProps {
   hoverTarget: PrimitiveRef | null
   renderables: ViewportRenderableRecord[]
   sketchDisplayRenderables: SketchSessionDisplayRenderable[]
+  sketchAnnotations: SketchAnnotationDescriptor[]
   onHover: (target: PrimitiveRef) => void
   onSelect: (target: PrimitiveRef) => void
+  onAnnotationEdit: (target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>) => void
   onClearHover: () => void
   onSketchMove: (point: readonly [number, number]) => void
   onSketchRelease: (point: readonly [number, number]) => void
@@ -106,8 +112,10 @@ export function ThreeCadViewport({
   hoverTarget,
   renderables,
   sketchDisplayRenderables,
+  sketchAnnotations,
   onHover,
   onSelect,
+  onAnnotationEdit,
   onClearHover,
   onSketchMove,
   onSketchRelease,
@@ -126,6 +134,7 @@ export function ThreeCadViewport({
   const controlsInitializedRef = useRef(false)
   const [canvasReadyVersion, setCanvasReadyVersion] = useState(0)
   const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
+  const [sketchAnnotationProjections, setSketchAnnotationProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const raycasterRef = useRef(new THREE.Raycaster())
   const pointerRef = useRef(new THREE.Vector2())
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
@@ -140,6 +149,7 @@ export function ThreeCadViewport({
   const partCameraFrameRef = useRef<ViewportCameraFrame | null>(null)
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
   const selectRef = useRef(onSelect)
+  const annotationEditRef = useRef(onAnnotationEdit)
   const clearHoverRef = useRef(onClearHover)
   const sketchMoveRef = useRef(onSketchMove)
   const sketchReleaseRef = useRef(onSketchRelease)
@@ -151,6 +161,10 @@ export function ThreeCadViewport({
     state: { selectionFilter, selectionCatalog, sketchSession },
   } = useEditorState()
   const selectionRef = useRef(selection)
+  const annotationHighlightTargets = useMemo(
+    () => getAnnotationHighlightTargets(sketchAnnotations, selection, hoverTarget),
+    [hoverTarget, selection, sketchAnnotations],
+  )
   const selectionFilterRef = useRef(selectionFilter)
   const selectionCatalogRef = useRef(selectionCatalog)
   const bvhSceneKey = useMemo(
@@ -169,6 +183,7 @@ export function ThreeCadViewport({
   useEffect(() => {
     hoverRef.current = onHover
     selectRef.current = onSelect
+    annotationEditRef.current = onAnnotationEdit
     clearHoverRef.current = onClearHover
     sketchMoveRef.current = onSketchMove
     sketchReleaseRef.current = onSketchRelease
@@ -183,6 +198,7 @@ export function ThreeCadViewport({
   }, [
     hoverTarget,
     onClearHover,
+    onAnnotationEdit,
     onHover,
     onSelect,
     onSketchGeometryDragEnd,
@@ -203,6 +219,7 @@ export function ThreeCadViewport({
 
     if (!camera || !canvasElement || !plane) {
       setSketchFeedbackProjections([])
+      setSketchAnnotationProjections([])
       return
     }
 
@@ -226,7 +243,31 @@ export function ThreeCadViewport({
     })
 
     setSketchFeedbackProjections(projections)
-  }, [sketchSession?.plane, sketchToolPresentation])
+    setSketchAnnotationProjections(
+      sketchAnnotations.flatMap((annotation) => {
+        const screenPoint = projectSketchFeedbackAnchor({
+          anchor: annotation.anchor,
+          plane,
+          viewport: {
+            width: rect.width,
+            height: rect.height,
+          },
+          projectWorldPoint: (point: Vec3) => {
+            const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
+            return { x: projected.x, y: projected.y, z: projected.z }
+          },
+        })
+
+        return screenPoint
+          ? [{
+              id: getAnnotationProjectionId(annotation.id),
+              x: screenPoint.x,
+              y: screenPoint.y,
+            }]
+          : []
+      }),
+    )
+  }, [sketchAnnotations, sketchSession?.plane, sketchToolPresentation])
 
   useEffect(() => {
     const cubeElement = viewCubeRef.current
@@ -329,9 +370,9 @@ export function ThreeCadViewport({
     const bindings = bindingsRef.current
 
     if (bindings) {
-      updateWorkspaceHighlight(bindings.targetToObjects, selectionRef.current, hoverTargetRef.current)
+      updateWorkspaceHighlight(bindings.targetToObjects, selection, hoverTarget, annotationHighlightTargets)
     }
-  }, [renderables, sketchDisplayRenderables])
+  }, [annotationHighlightTargets, hoverTarget, renderables, selection, sketchDisplayRenderables])
 
   useEffect(() => {
     const camera = cameraRef.current
@@ -393,9 +434,9 @@ export function ThreeCadViewport({
 
   useEffect(() => {
     if (bindingsRef.current) {
-      updateWorkspaceHighlight(bindingsRef.current.targetToObjects, selection, hoverTarget)
+      updateWorkspaceHighlight(bindingsRef.current.targetToObjects, selection, hoverTarget, annotationHighlightTargets)
     }
-  }, [hoverTarget, selection])
+  }, [annotationHighlightTargets, hoverTarget, selection])
 
   useEffect(() => {
     const viewportElement = viewportRef.current
@@ -763,6 +804,16 @@ export function ThreeCadViewport({
         schema={sketchToolPresentation}
         projections={sketchFeedbackProjections}
         onPatch={(patch) => sketchToolPatchRef.current(patch)}
+      />
+      <SketchConstraintAnnotations
+        annotations={sketchAnnotations}
+        projections={sketchAnnotationProjections}
+        hoveredAnnotation={isAnnotationTarget(hoverTarget) ? hoverTarget : null}
+        selectedAnnotation={isAnnotationTarget(selection[0] ?? null) ? selection[0] : null}
+        onHover={(target) => hoverRef.current(target)}
+        onClearHover={() => clearHoverRef.current()}
+        onSelect={(target) => selectRef.current(target)}
+        onEdit={(target) => annotationEditRef.current(target)}
       />
     </div>
   )
@@ -1697,6 +1748,27 @@ function getGeometryToken(
   }
 }
 
+function isAnnotationTarget(
+  target: PrimitiveRef | null,
+): target is Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }> {
+  return target?.kind === 'constraint' || target?.kind === 'dimension'
+}
+
+function getAnnotationHighlightTargets(
+  annotations: readonly SketchAnnotationDescriptor[],
+  selection: readonly PrimitiveRef[],
+  hoverTarget: PrimitiveRef | null,
+) {
+  const activeAnnotations = annotations.filter((annotation) => {
+    if (hoverTarget && primitiveRefEquals(annotation.target, hoverTarget)) {
+      return true
+    }
+
+    return selection.some((target) => primitiveRefEquals(annotation.target, target))
+  })
+
+  return activeAnnotations.flatMap((annotation) => annotation.affectedGeometryRefs)
+}
 
 function getSketchSessionCameraToken(
   session: NonNullable<ReturnType<typeof useEditorState>['state']['sketchSession']>,

@@ -131,6 +131,7 @@ export function updateWorkspaceHighlight(
   targetToObjects: Map<string, THREE.Object3D[]>,
   selection: PrimitiveRef[],
   hoverTarget: PrimitiveRef | null,
+  relatedActiveTargets: readonly PrimitiveRef[] = [],
 ) {
   for (const objects of targetToObjects.values()) {
     for (const object of objects) {
@@ -150,7 +151,8 @@ export function updateWorkspaceHighlight(
 
       const isSelected = selection.some((entry) => primitiveRefEquals(entry, target))
       const isHovered = hoverTarget !== null && primitiveRefEquals(hoverTarget, target)
-      applyRenderableState(material, semanticClass, origin, isSelected || isHovered, isSelected)
+      const isRelatedActive = relatedActiveTargets.some((entry) => primitiveRefEquals(entry, target))
+      applyRenderableState(material, semanticClass, origin, isSelected || isHovered || isRelatedActive, isSelected)
     }
   }
 }
