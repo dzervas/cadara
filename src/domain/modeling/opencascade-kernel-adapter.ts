@@ -1,4 +1,9 @@
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import type {
+  DocumentExportDiagnostic,
+  DocumentExportRequest,
+  DocumentExportResult,
+} from '@/contracts/modeling/export'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import type { SolverTolerancePolicy } from '@/contracts/solver/schema'
@@ -77,6 +82,7 @@ import {
   getOccDurableRefKey,
   resolveOccReference,
 } from '@/domain/modeling/occ/topology'
+import { exportOccGeometryDocument } from '@/domain/modeling/occ/geometry-export'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -270,6 +276,19 @@ function createAdvancedUnsupportedDiagnostic(
       },
     },
   )
+}
+
+function createOccExportDiagnostic(
+  code: string,
+  message: string,
+  target: DocumentExportDiagnostic['target'],
+): DocumentExportDiagnostic {
+  return {
+    code,
+    severity: 'error',
+    message,
+    target,
+  }
 }
 
 function mapSketchSolverDiagnostic(
@@ -2035,6 +2054,28 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       }
     }
+  }
+
+  async exportDocument(request: DocumentExportRequest): Promise<DocumentExportResult> {
+    assertSupportedModelingRequest(request, this.documentId)
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      return {
+        ok: false,
+        format: request.format,
+        diagnostics: [
+          createOccExportDiagnostic(
+            'occ-export-revision-conflict',
+            `Export request revision ${request.baseRevisionId} does not match current revision ${currentRevisionId}.`,
+            request.target,
+          ),
+        ],
+      }
+    }
+
+    return exportOccGeometryDocument(runtimeState.authoringState, request)
   }
 
   async resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse> {

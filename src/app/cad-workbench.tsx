@@ -8,10 +8,16 @@ import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
+import { DocumentExportModal } from '@/components/layout/document-export-modal'
 import { WorkbenchInspectorOverlay } from '@/components/layout/workbench-inspector-overlay'
 import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
 import { WorkbenchStateDebugger, type WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
+import {
+  createObjectDeletePlaceholderMessage,
+  createObjectExportModalState,
+  type ObjectExportModalState,
+} from '@/app/object-export-state'
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
@@ -41,6 +47,7 @@ import { useEditorState } from '@/hooks/use-editor-state'
 import { useFeatureEditing } from '@/hooks/use-feature-editing'
 import { useModelingService } from '@/hooks/use-modeling-service'
 import { useToolActionBus } from '@/hooks/use-tool-actions'
+import { downloadDocumentExportResult } from '@/lib/download-export'
 import {
   clampWorkbenchSidebarWidth,
   DEFAULT_LEFT_SIDEBAR_WIDTH,
@@ -75,6 +82,7 @@ export function CadWorkbench() {
   const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null)
   const [workbenchStatusMessage, setWorkbenchStatusMessage] = useState<string | null>(null)
+  const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const shellFrameRef = useRef<HTMLDivElement | null>(null)
 
@@ -284,11 +292,17 @@ export function CadWorkbench() {
   }
 
   const handleObjectDeletePlaceholder = (_target: PrimitiveRef, label: string) => {
-    showPlaceholderStatus(`Delete for ${label} is not implemented yet.`)
+    showPlaceholderStatus(createObjectDeletePlaceholderMessage(label))
   }
 
-  const handleObjectExportPlaceholder = (_target: PrimitiveRef, label: string) => {
-    showPlaceholderStatus(`Export for ${label} is not implemented yet.`)
+  const handleObjectExport = (target: PrimitiveRef, label: string) => {
+    const nextModalState = createObjectExportModalState(snapshot, target, label)
+    if (!nextModalState) {
+      return
+    }
+
+    setWorkbenchStatusMessage(null)
+    setObjectExportModal(nextModalState)
   }
 
   const handleDiagnosticInspectPlaceholder = (diagnostic: ModelingDiagnostic) => {
@@ -630,7 +644,7 @@ export function CadWorkbench() {
             onAddVariable={handleVariableAdd}
             onInspectDiagnostic={handleDiagnosticInspectPlaceholder}
             onObjectDelete={handleObjectDeletePlaceholder}
-            onObjectExport={handleObjectExportPlaceholder}
+            onObjectExport={handleObjectExport}
             onRenameTarget={handleTargetRename}
             onReopenTarget={handleNavigationReopen}
             onSelectTarget={handleShellSelect}
@@ -721,6 +735,13 @@ export function CadWorkbench() {
                 />
               </WorkbenchInspectorOverlay>
             ) : null}
+            <DocumentExportModal
+              opened={objectExportModal !== null}
+              target={objectExportModal}
+              exportDocument={(input) => modelingService.exportDocument(input)}
+              onDownload={downloadDocumentExportResult}
+              onClose={() => setObjectExportModal(null)}
+            />
           </main>
           <HistoryTimelineShell
             snapshot={snapshot}

@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { strFromU8, unzipSync } from 'fflate'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import type {
   DeriveSketchRegionsRequest,
@@ -59,6 +60,7 @@ import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-hi
 import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
+import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -866,6 +868,144 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     }
 
     throw new Error(`Expected body ${bodyId} to expose a previewable sweep path edge.`)
+  }
+
+  async function createExportableBodyFixture() {
+    const adapter = createAdapter()
+    const committed = await commitSeedSketch(adapter)
+
+    assert(committed.revisionState.kind === 'accepted', 'Seed sketch commit must succeed before export coverage.')
+
+    const committedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(committedSnapshot.snapshot)
+    const extrude = await createExtrudeBody(adapter, committedSnapshot.snapshot.revisionId, sketch, 10)
+
+    return {
+      adapter,
+      bodyId: extrude.bodyId,
+      revisionId: extrude.response.revisionId,
+      targetLabel: 'Export Body',
+    }
+  }
+
+  function assertExportPayloadMetadata(
+    result: Awaited<ReturnType<OpenCascadeKernelAdapter['exportDocument']>>,
+    format: 'stl' | 'step' | '3mf',
+  ): asserts result is Extract<typeof result, { ok: true }> {
+    assert(result.ok, `${format} export should succeed for a live body target.`)
+    assert(result.format === format, `${format} export should return the requested format.`)
+    assert(result.filename === `export-body.${format}`, `${format} export should use the selected row label for the filename.`)
+    assert(result.extension === format, `${format} export should report the expected file extension.`)
+    assert(result.mimeType === `model/${format}`, `${format} export should report the expected MIME type.`)
+  }
+
+  async function testOccGeometryExportsProduceRealPayloads() {
+    const fixture = await createExportableBodyFixture()
+
+    const stl = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'stl',
+      options: getDefaultDocumentExportOptions('stl'),
+    })
+
+    assertExportPayloadMetadata(stl, 'stl')
+    assert(stl.payload instanceof Uint8Array, 'Default STL export should return binary bytes.')
+    assert(stl.payload.length > 84, 'STL export should contain a binary header and triangle records.')
+    assert(new DataView(stl.payload.buffer, stl.payload.byteOffset, stl.payload.byteLength).getUint32(80, true) > 0, 'STL export should contain triangle records.')
+
+    const step = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+
+    assertExportPayloadMetadata(step, 'step')
+    assert(typeof step.payload === 'string', 'STEP export should return text payload.')
+    assert(step.payload.startsWith('ISO-10303-21;'), 'STEP export should contain a STEP file signature.')
+    assert(step.payload.includes('MANIFOLD_SOLID_BREP') || step.payload.includes('ADVANCED_BREP_SHAPE_REPRESENTATION'), 'STEP export should contain B-Rep geometry entities.')
+
+    const threeMf = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: '3mf',
+      options: getDefaultDocumentExportOptions('3mf'),
+    })
+
+    assertExportPayloadMetadata(threeMf, '3mf')
+    assert(threeMf.payload instanceof Uint8Array, '3MF export should return package bytes.')
+    assert(threeMf.payload[0] === 0x50 && threeMf.payload[1] === 0x4b, '3MF export should be a ZIP package.')
+
+    const packageParts = unzipSync(threeMf.payload)
+    const modelPart = packageParts['3D/3dmodel.model']
+
+    assert(packageParts['[Content_Types].xml'] !== undefined, '3MF package should include content types.')
+    assert(packageParts['_rels/.rels'] !== undefined, '3MF package should include root relationships.')
+    assert(modelPart !== undefined, '3MF package should include the model part.')
+
+    const modelXml = strFromU8(modelPart)
+    const vertexCount = modelXml.match(/<vertex /g)?.length ?? 0
+    const triangleCount = modelXml.match(/<triangle /g)?.length ?? 0
+
+    assert(modelXml.includes('<model unit="millimeter"'), '3MF model should declare millimeter units.')
+    assert(modelXml.includes('<triangle '), '3MF model should contain tessellated triangles.')
+    assert(vertexCount > 0 && triangleCount > 0, '3MF model should contain indexed mesh data.')
+    assert(vertexCount < triangleCount * 3, '3MF model should reuse coincident vertices instead of emitting disconnected triangles.')
+  }
+
+  async function testOccGeometryExportsRejectInvalidTargets() {
+    const fixture = await createExportableBodyFixture()
+    const stale = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_0001',
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+
+    assert(!stale.ok, 'OCC geometry export should reject stale revision requests.')
+    assert(stale.diagnostics.some((diagnostic) => diagnostic.code === 'occ-export-revision-conflict'), 'Stale geometry exports should report a revision conflict diagnostic.')
+
+    const missingBody = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: 'body_missing' as BodyId },
+      targetLabel: 'Missing Body',
+      format: 'stl',
+      options: getDefaultDocumentExportOptions('stl'),
+    })
+
+    assert(!missingBody.ok, 'OCC geometry export should reject missing body targets.')
+    assert(missingBody.diagnostics.some((diagnostic) => diagnostic.code === 'occ-export-missing-body'), 'Missing body exports should report a missing body diagnostic.')
+
+    const nonBody = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'sketch', sketchId: OCC_KERNEL_PRIMARY_SKETCH_ID },
+      targetLabel: 'Sketch',
+      format: '3mf',
+      options: getDefaultDocumentExportOptions('3mf'),
+    })
+
+    assert(!nonBody.ok, 'OCC geometry export should reject non-body targets.')
+    assert(nonBody.diagnostics.some((diagnostic) => diagnostic.code === 'occ-export-unexportable-target'), 'Non-body geometry exports should report an unexportable target diagnostic.')
   }
 
   async function testSnapshotFetchAndSketchCommit() {
@@ -3207,6 +3347,8 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions()
   await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
   await testDocumentVariableExpressionsValidateBeforeOccMutation()
+  await testOccGeometryExportsProduceRealPayloads()
+  await testOccGeometryExportsRejectInvalidTargets()
 
   console.log('OCC phase 8 adapter tests passed.')
 })

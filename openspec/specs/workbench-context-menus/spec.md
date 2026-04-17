@@ -1,7 +1,8 @@
 # workbench-context-menus Specification
 
 ## Purpose
-TBD - created by archiving change add-workbench-context-menus. Update Purpose after archive.
+Defines custom workbench context menus for navigation rows, including object actions, reference and diagnostic target actions, and feature history commands.
+
 ## Requirements
 ### Requirement: Workbench rows SHALL expose custom context menus
 The workbench SHALL render a custom right-click context menu for visible navigation rows in Parts & Objects, Snapshot References, Document Diagnostics, and the Feature Timeline/history.
@@ -16,11 +17,16 @@ The workbench SHALL render a custom right-click context menu for visible navigat
 - **THEN** the workbench opens the same context menu for that row
 
 ### Requirement: Parts and objects menu SHALL include delete and export actions
-The Parts & Objects context menu SHALL offer Delete and Export actions for each object row, with both actions treated as placeholders until backed by modeling/export behavior.
+The Parts & Objects context menu SHALL offer Delete and Export actions for each object row. Delete remains a placeholder until backed by modeling behavior, and Export SHALL open the document export modal for the selected object row.
 
-#### Scenario: Invoke object placeholder action
-- **WHEN** the user selects Delete or Export from a Parts & Objects row context menu
-- **THEN** the workbench shows an inline status message that the selected action is not implemented yet
+#### Scenario: Invoke object delete placeholder action
+- **WHEN** the user selects Delete from a Parts & Objects row context menu
+- **THEN** the workbench shows an inline status message that Delete is not implemented yet
+
+#### Scenario: Invoke object export action
+- **WHEN** the user selects Export from a Parts & Objects row context menu
+- **THEN** the workbench opens the export modal for the selected row
+- **AND** the workbench does not show the export placeholder status message
 
 ### Requirement: Body and part rename SHALL persist to the document
 The Parts & Objects context menu SHALL offer Rename for body/part rows and commit accepted body labels through the modeling document mutation path.
@@ -64,4 +70,3 @@ The Feature Timeline/history context menu SHALL offer Edit, Suppress, Roll curso
 #### Scenario: Suppress feature placeholder
 - **WHEN** the user selects Suppress from a feature history context menu
 - **THEN** the workbench shows an inline status message that feature suppression is not implemented yet
-

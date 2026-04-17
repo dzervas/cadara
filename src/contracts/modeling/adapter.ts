@@ -1,4 +1,8 @@
 import type {
+  DocumentExportRequest,
+  DocumentExportResult,
+} from '@/contracts/modeling/export'
+import type {
   CommitSketchRequest,
   CommitSketchResponse,
   AddDocumentVariableRequest,
@@ -54,6 +58,8 @@ export interface ModelingKernelAdapter {
   updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse>
   /** Evaluates a transient preview for a typed feature definition. */
   evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse>
+  /** Exports the requested document target as a download-ready payload. */
+  exportDocument(request: DocumentExportRequest): Promise<DocumentExportResult>
   /** Resolves one durable reference without silently remapping invalid targets. */
   resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse>
 }

@@ -1,5 +1,11 @@
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
+  DocumentExportDiagnostic,
+  DocumentExportFormat,
+  DocumentExportRequest,
+  DocumentExportResult,
+} from '@/contracts/modeling/export'
+import type {
   BodyId,
   ConstructionId,
   DocumentId,
@@ -79,6 +85,10 @@ import type {
   ShellFeatureParameters,
   AdvancedSolidFeatureParameters,
 } from '@/contracts/modeling/schema'
+import {
+  documentExportRequestSchema,
+  documentExportResultSchema,
+} from '@/contracts/modeling/export.runtime-schema'
 import type { RenderExport, RenderableEntityRecord } from '@/contracts/render/schema'
 import { renderExportSchema } from '@/contracts/render/runtime-schema'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, isAdvancedParticipantRole, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
@@ -168,6 +178,7 @@ export interface ModelingService {
   reorderFeature(input: ModelingReorderFeatureInput): Promise<ModelingReorderFeatureResult>
   setFeatureCursor(input: ModelingSetFeatureCursorInput): Promise<ModelingSetFeatureCursorResult>
   evaluatePreview(input: ModelingEvaluatePreviewInput): Promise<ModelingPreviewResult>
+  exportDocument(input: ModelingExportDocumentInput): Promise<ModelingExportDocumentResult>
   resolveReference(target: PrimitiveRef): Promise<ModelingResolvedReferenceResult>
 }
 
@@ -280,6 +291,8 @@ export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVer
 export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'>
 export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'>
 export type ModelingSetFeatureCursorInput = Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'>
+export type ModelingExportDocumentInput = Omit<DocumentExportRequest, 'contractVersion' | 'documentId'>
+export type ModelingExportDocumentResult = DocumentExportResult
 export interface ModelingCommitSketchCorrelation {
   requestId: RequestId
   projectionRequestId: RequestId
@@ -2761,6 +2774,12 @@ function mapPreviewResponse(
   }
 }
 
+function mapExportDocumentResponse(
+  response: DocumentExportResult,
+): ModelingExportDocumentResult {
+  return documentExportResultSchema.parse(response)
+}
+
 function mapReorderFeatureResponse(
   response: ReorderFeatureResponse,
   expectedDocumentId: DocumentId,
@@ -2959,6 +2978,90 @@ function normalizeResolveReferenceInput(
     documentId,
     target: assertDurableRef(target),
   }
+}
+
+function normalizeExportDocumentInput(
+  input: ModelingExportDocumentInput,
+  documentId: DocumentId,
+): DocumentExportRequest {
+  assertMutationBase(input)
+
+  return documentExportRequestSchema.parse({
+    ...input,
+    target: assertDurableRef(input.target),
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  })
+}
+
+function createExportDiagnostic(
+  code: string,
+  message: string,
+  target: PrimitiveRef | null,
+): DocumentExportDiagnostic {
+  return {
+    code,
+    severity: 'error',
+    message,
+    target,
+  }
+}
+
+function getDocumentExportExtension(format: DocumentExportFormat) {
+  switch (format) {
+    case 'stl':
+      return 'stl'
+    case 'step':
+      return 'step'
+    case '3mf':
+      return '3mf'
+    case 'cadara':
+      return 'cadara'
+  }
+}
+
+function getDocumentExportMimeType(format: DocumentExportFormat) {
+  switch (format) {
+    case 'stl':
+      return 'model/stl'
+    case 'step':
+      return 'model/step'
+    case '3mf':
+      return 'model/3mf'
+    case 'cadara':
+      return 'application/vnd.cadara+json'
+  }
+}
+
+function createExportFilename(targetLabel: string, format: DocumentExportFormat) {
+  const slug = targetLabel
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'document'
+
+  return `${slug}.${getDocumentExportExtension(format)}`
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableJsonValue(entry))
+  }
+
+  if (!isRecord(value)) {
+    return value
+  }
+
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableJsonValue(value[key])]),
+  )
+}
+
+function stringifyCadaraDocument(document: KernelDocumentSnapshot, pretty: boolean) {
+  return JSON.stringify(stableJsonValue(document), null, pretty ? 2 : 0)
 }
 
 function normalizeCurrentDocumentId(value: DocumentSnapshot['documentId']): DocumentId {
@@ -3443,6 +3546,43 @@ export function createModelingService(
       const response = await adapter.evaluatePreview(normalizePreviewInput(input, currentDocumentId))
 
       return mapPreviewResponse(response, currentDocumentId)
+    },
+    async exportDocument(input) {
+      await restorePromise
+      const request = normalizeExportDocumentInput(input, currentDocumentId)
+
+      if (request.format !== 'cadara') {
+        return mapExportDocumentResponse(await adapter.exportDocument(request))
+      }
+
+      const snapshot = await validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+        currentDocumentId,
+      )
+
+      if (request.baseRevisionId !== snapshot.document.revisionId) {
+        return {
+          ok: false,
+          format: request.format,
+          diagnostics: [
+            createExportDiagnostic(
+              'export-revision-conflict',
+              `Export request revision ${request.baseRevisionId} does not match current revision ${snapshot.document.revisionId}.`,
+              request.target,
+            ),
+          ],
+        }
+      }
+
+      return mapExportDocumentResponse({
+        ok: true,
+        format: request.format,
+        filename: createExportFilename(request.targetLabel, request.format),
+        extension: getDocumentExportExtension(request.format),
+        mimeType: getDocumentExportMimeType(request.format),
+        payload: stringifyCadaraDocument(snapshot.document, request.options.pretty),
+        diagnostics: [],
+      })
     },
     async resolveReference(target) {
       await restorePromise

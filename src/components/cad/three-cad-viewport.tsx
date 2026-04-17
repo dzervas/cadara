@@ -494,17 +494,9 @@ export function ThreeCadViewport({
       }
 
       const eventTarget = event.target instanceof Node ? event.target : null
-      const rect = viewportElement.getBoundingClientRect()
-      const withinViewport =
-        (eventTarget !== null && viewportElement.contains(eventTarget))
-        || (
-          event.clientX >= rect.left
-          && event.clientX <= rect.right
-          && event.clientY >= rect.top
-          && event.clientY <= rect.bottom
-        )
+      const isCanvasClick = eventTarget === canvasElement
 
-      if (!withinViewport || sketchSession?.activeTool != null) {
+      if (!isCanvasClick || sketchSession?.activeTool != null) {
         return
       }
 
