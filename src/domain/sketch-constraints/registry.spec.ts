@@ -6,11 +6,14 @@ import {
   getSketchAnnotationDescriptors,
   getSketchToolPresentation,
   patchSketchConstraintValue,
+  pinSketchConstraintPreview,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
   startSketchDraw,
   acceptSketchDraw,
+  updateSketchPointer,
 } from '@/domain/editor/sketch-session'
+import { selectPointToPointDimensionReference } from '@/domain/sketch-constraints/registry'
 import { getToolById } from '@/domain/tools/tool-registry'
 
 test('src/domain/sketch-constraints/registry.spec.ts', async () => {
@@ -77,7 +80,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
 
   function testDimensionalConstraintShowsFloatingInputAndSupportsDeletion() {
     let session = createSessionWithTwoLines()
-    const [firstPointId, secondPointId] = session.definition.pointIds
+    const [firstPointId, , , diagonalPointId] = session.definition.pointIds
 
     session = beginSketchTool(session, 'dimensionDistance')
     session = selectSketchConstraintTarget(session, {
@@ -88,7 +91,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     session = selectSketchConstraintTarget(session, {
       kind: 'sketchPoint',
       sketchId: 'sketch_draft',
-      pointId: secondPointId!,
+      pointId: diagonalPointId!,
     })
 
     const presentation = getSketchToolPresentation(session)
@@ -108,7 +111,126 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     assert(session.definition.dimensionIds.length === 0, 'Deleting the selected dimension should remove the durable dimension record.')
   }
 
+  function testDistancePreviewUsesPartialTargetAndPointer() {
+    let session = createSessionWithTwoLines()
+    const [firstPointId] = session.definition.pointIds
+
+    session = beginSketchTool(session, 'dimensionDistance')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: firstPointId!,
+    })
+    session = updateSketchPointer(session, [8, 3])
+
+    const dimensionPreview = getSketchToolPresentation(session)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    assert(
+      dimensionPreview?.kind === 'dimensionLine'
+        && dimensionPreview.referenceKind === 'aligned'
+        && dimensionPreview.end[0] === 8
+        && dimensionPreview.end[1] === 3,
+      'Distance authoring should emit a transient dimension line from one selected point to the active pointer.',
+    )
+  }
+
+  function testPointDistanceReferenceSelectionFollowsPointer() {
+    assert(
+      selectPointToPointDimensionReference({ first: [0, 0], second: [10, 4], pointer: [5, 2] }) === 'aligned',
+      'Pointer near the point-to-point segment should keep the aligned reference.',
+    )
+    assert(
+      selectPointToPointDimensionReference({ first: [0, 0], second: [10, 4], pointer: [5, 12] }) === 'horizontal',
+      'Pointer above the target span should select the horizontal distance reference.',
+    )
+    assert(
+      selectPointToPointDimensionReference({ first: [0, 0], second: [10, 4], pointer: [18, 2] }) === 'vertical',
+      'Pointer beside the target span should select the vertical distance reference.',
+    )
+  }
+
+  function testDistancePreviewUpdatesWhenPointerChangesReference() {
+    let session = createSessionWithTwoLines()
+    const [firstPointId, , , diagonalPointId] = session.definition.pointIds
+
+    session = beginSketchTool(session, 'dimensionDistance')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: firstPointId!,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: diagonalPointId!,
+    })
+    session = updateSketchPointer(session, [5, 12])
+
+    const horizontalPreview = getSketchToolPresentation(session)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    session = updateSketchPointer(session, [18, 2])
+
+    const verticalPreview = getSketchToolPresentation(session)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    assert(
+      horizontalPreview?.kind === 'dimensionLine' && horizontalPreview.referenceKind === 'horizontal',
+      'Distance preview should select a horizontal reference when the pointer is above the target span.',
+    )
+    assert(
+      verticalPreview?.kind === 'dimensionLine' && verticalPreview.referenceKind === 'vertical',
+      'Distance preview should update to a vertical reference as the pointer moves beside the target span.',
+    )
+  }
+
+  function testConstraintPreviewStopsMovingAfterPinClick() {
+    let session = createSessionWithTwoLines()
+    const [firstPointId, , , diagonalPointId] = session.definition.pointIds
+
+    session = beginSketchTool(session, 'dimensionDistance')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: firstPointId!,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: diagonalPointId!,
+    })
+    session = updateSketchPointer(session, [5, 12])
+    session = pinSketchConstraintPreview(session, [5, 12])
+
+    const pinnedPreview = getSketchToolPresentation(session)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    session = updateSketchPointer(session, [18, 2])
+
+    const afterMovePreview = getSketchToolPresentation(session)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    assert(
+      pinnedPreview?.kind === 'dimensionLine'
+        && afterMovePreview?.kind === 'dimensionLine'
+        && pinnedPreview.referenceKind === 'horizontal'
+        && afterMovePreview.referenceKind === 'horizontal'
+        && afterMovePreview.start[1] === pinnedPreview.start[1],
+      'Pinned constraint previews should not move while the pointer travels to the Commit button.',
+    )
+  }
+
   testToolbarDefinitionsExposeConstraintFamilies()
   testGeometricConstraintAuthoringCommitsDurableRecord()
   testDimensionalConstraintShowsFloatingInputAndSupportsDeletion()
+  testDistancePreviewUsesPartialTargetAndPointer()
+  testPointDistanceReferenceSelectionFollowsPointer()
+  testDistancePreviewUpdatesWhenPointerChangesReference()
+  testConstraintPreviewStopsMovingAfterPinClick()
 })

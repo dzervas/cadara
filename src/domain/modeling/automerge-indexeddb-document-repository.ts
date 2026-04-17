@@ -1,5 +1,6 @@
-import { Repo } from '@automerge/automerge-repo'
-import type { AutomergeUrl } from '@automerge/automerge-repo'
+import { initializeBase64Wasm, Repo } from '@automerge/automerge-repo/slim'
+import type { AutomergeUrl } from '@automerge/automerge-repo/slim'
+import { automergeWasmBase64 } from '@automerge/automerge/automerge.wasm.base64'
 import { BroadcastChannelNetworkAdapter } from '@automerge/automerge-repo-network-broadcastchannel'
 import { IndexedDBStorageAdapter } from '@automerge/automerge-repo-storage-indexeddb'
 
@@ -42,6 +43,16 @@ interface AutomergeRepositoryLike {
   find<T>(id: AutomergeUrl): Promise<AutomergeHandleLike<T>>
   delete(id: AutomergeUrl): void
   flush?(documents?: string[]): Promise<void>
+}
+
+let automergeWasmInitialization: Promise<void> | null = null
+
+function ensureAutomergeWasmInitialized() {
+  automergeWasmInitialization ??= initializeBase64Wasm(automergeWasmBase64).catch((error: unknown) => {
+    automergeWasmInitialization = null
+    throw error
+  })
+  return automergeWasmInitialization
 }
 
 export interface DocumentRepositoryUrlStore {
@@ -132,8 +143,10 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
   private readonly listeners = new Map<DocumentId, Set<(event: DocumentRepositoryChangeEvent) => void>>()
   private readonly localPeerId = `peer-${Math.random().toString(36).slice(2)}`
   private readonly localPeerDocumentChannel: BroadcastChannel | null
+  private readonly prepareAutomerge: () => Promise<void>
 
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
+    this.prepareAutomerge = options.repo ? async () => {} : ensureAutomergeWasmInitialized
     this.repo = options.repo ?? new Repo({
       storage: new IndexedDBStorageAdapter(options.databaseName ?? 'cad-authored-documents', options.storeName ?? 'documents'),
       network: createLocalPeerNetwork(options.localPeerSync),
@@ -147,6 +160,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
 
   async load(input: { documentId: DocumentId; seedDocument: AuthoredModelDocument }): Promise<DocumentRepositoryLoadResult> {
     try {
+      await this.prepareAutomerge()
       const url = this.urlStore.get(input.documentId)
       if (!url) {
         return await this.createSeedDocument(input.documentId, input.seedDocument)
@@ -178,6 +192,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     }
 
     try {
+      await this.prepareAutomerge()
       const handle = await this.getHandle(input.documentId, parsed.document)
       this.pendingLocalChanges.add(input.documentId)
       handle.change((doc) => {

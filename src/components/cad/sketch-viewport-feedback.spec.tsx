@@ -22,6 +22,44 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         unit: 'mm',
         anchor: { kind: 'sketchPoint', point: [2, 0] },
       },
+      {
+        id: 'distance-preview',
+        kind: 'dimensionLine',
+        label: 'Horizontal 12.00 mm',
+        referenceKind: 'horizontal',
+        start: [0, 2],
+        end: [4, 2],
+        value: 12,
+        unit: 'mm',
+        labelAnchor: { kind: 'sketchPoint', point: [2, 2] },
+        extensionLines: [
+          { id: 'distance-preview-extension-a', label: 'Extension', start: [0, 0], end: [0, 2] },
+          { id: 'distance-preview-extension-b', label: 'Extension', start: [4, 0], end: [4, 2] },
+        ],
+      },
+      {
+        id: 'parallel-angle-preview',
+        kind: 'angleArc',
+        label: 'Angle preview',
+        center: [0, 0],
+        start: [1, 0],
+        end: [0, 1],
+        radius: 1,
+        labelAnchor: { kind: 'sketchPoint', point: [0.5, 0.5] },
+      },
+      {
+        id: 'rectangle-start-anchor',
+        kind: 'anchor',
+        label: 'First corner',
+        point: [0, 0],
+      },
+      {
+        id: 'rectangle-completion-cue',
+        kind: 'completionCue',
+        label: 'Place corner',
+        point: [4, 3],
+        ready: true,
+      },
     ],
     floatingInput: {
       id: 'distance-value-input',
@@ -41,6 +79,19 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
       schema={schema}
       projections={[
         { id: 'overlay:rectangle-width-overlay', x: 120, y: 80 },
+        { id: 'overlay:distance-preview', x: 140, y: 70 },
+        { id: 'overlay-geometry:distance-preview:start', x: 100, y: 100 },
+        { id: 'overlay-geometry:distance-preview:end', x: 180, y: 100 },
+        { id: 'overlay-geometry:distance-preview-extension-a:start', x: 100, y: 140 },
+        { id: 'overlay-geometry:distance-preview-extension-a:end', x: 100, y: 100 },
+        { id: 'overlay-geometry:distance-preview-extension-b:start', x: 180, y: 140 },
+        { id: 'overlay-geometry:distance-preview-extension-b:end', x: 180, y: 100 },
+        { id: 'overlay:parallel-angle-preview', x: 160, y: 60 },
+        { id: 'overlay-geometry:parallel-angle-preview:center', x: 200, y: 120 },
+        { id: 'overlay-geometry:parallel-angle-preview:start', x: 240, y: 120 },
+        { id: 'overlay-geometry:parallel-angle-preview:end', x: 200, y: 80 },
+        { id: 'overlay:rectangle-start-anchor', x: 100, y: 140 },
+        { id: 'overlay:rectangle-completion-cue', x: 200, y: 60 },
         { id: 'floating-input:distance-value-input', x: 180, y: 90 },
       ]}
       onPatch={() => undefined}
@@ -61,4 +112,16 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
     'Viewport feedback should render floating numeric input from projected anchors.',
   )
   assert(markup.includes('Distance') && markup.includes('Commit'), 'Viewport feedback should preserve numeric input controls.')
+  assert(
+    markup.includes('data-sketch-viewport-geometry="dimensionLine"') && markup.includes('x1="100"'),
+    'Viewport feedback should render dimension preview line geometry from projected endpoints.',
+  )
+  assert(
+    markup.includes('data-sketch-viewport-geometry="angleArc"') && markup.includes('A 40 40'),
+    'Viewport feedback should render angle preview arcs from projected line references.',
+  )
+  assert(
+    !markup.includes('First corner') && !markup.includes('Place corner'),
+    'Viewport feedback should suppress non-dimensional anchor and completion tooltips.',
+  )
 })

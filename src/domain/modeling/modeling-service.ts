@@ -3638,10 +3638,9 @@ export function createModelingService(
 
     const historyLoadResult = operationHistoryStore?.load()
     if (historyLoadResult && !historyLoadResult.ok) {
-      await documentRepository!.reset(currentDocumentId)
-      canPersistOperationHistory = false
-      canPersistAuthoredDocument = false
-      historyRestoreState = createRestoreFailure(historyLoadResult.reasonCode, historyLoadResult.message, null, 0)
+      operationHistoryStore?.clear()
+      operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+      historyRestoreState = { kind: 'empty', entriesReplayed: 0, diagnostics: [] }
       return
     }
 

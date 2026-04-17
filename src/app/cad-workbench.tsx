@@ -47,6 +47,11 @@ import { useModelingService } from '@/hooks/use-modeling-service'
 import { useToolActionBus } from '@/hooks/use-tool-actions'
 import { downloadDocumentExportResult } from '@/lib/download-export'
 import {
+  WORKBENCH_STATUS_TOP_PX,
+  WORKBENCH_STATUS_TOP_WITH_RESTORE_PX,
+  getWorkbenchNotificationRightOffsetPx,
+} from '@/components/cad/viewport-overlay-layout'
+import {
   clampWorkbenchSidebarWidth,
   DEFAULT_LEFT_SIDEBAR_WIDTH,
   getWorkbenchSidebarWidthFromPointer,
@@ -83,6 +88,7 @@ export function CadWorkbench() {
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const shellFrameRef = useRef<HTMLDivElement | null>(null)
+  const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
 
@@ -700,7 +706,10 @@ export function CadWorkbench() {
               onSelect={(target) => dispatch({ type: 'viewport.selectionRequested', target })}
             />
             {restoreMessage ? (
-              <div className="absolute right-4 top-4 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]">
+              <div
+                className="absolute top-4 z-30 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
+                style={{ right: notificationRightOffset }}
+              >
                 <div className="font-medium">History restore failed</div>
                 <div className="mt-1 text-[var(--cad-muted-foreground)]">{restoreMessage}</div>
                 <button
@@ -718,8 +727,11 @@ export function CadWorkbench() {
             {workbenchStatusMessage ? (
               <div
                 role="status"
-                className="absolute right-4 z-20 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
-                style={{ top: restoreMessage ? 136 : 16 }}
+                className="absolute z-30 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
+                style={{
+                  right: notificationRightOffset,
+                  top: restoreMessage ? WORKBENCH_STATUS_TOP_WITH_RESTORE_PX : WORKBENCH_STATUS_TOP_PX,
+                }}
               >
                 <div className="font-medium">Workbench action</div>
                 <div className="mt-1 text-[var(--cad-muted-foreground)]">{workbenchStatusMessage}</div>

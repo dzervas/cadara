@@ -53,8 +53,8 @@ import { projectSketchFeedbackAnchor } from '@/domain/workspace/sketch-feedback-
 import type { Vec3 } from '@/domain/modeling/occ/math'
 import { mapWorldPointToSketch } from '@/domain/modeling/occ/planes'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 
-const VIEW_CUBE_SIZE = 120
 const VIEW_CUBE_EDGE_SIZE = 1.24
 const VIEW_CUBE_FACE_FILL_SIZE = 1.1
 const VIEW_CUBE_FACE_FILL_OFFSET = 0.58
@@ -239,7 +239,7 @@ export function ThreeCadViewport({
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setClearColor(0x000000, 0)
-    renderer.setSize(VIEW_CUBE_SIZE, VIEW_CUBE_SIZE, false)
+    renderer.setSize(VIEW_CUBE_SIZE_PX, VIEW_CUBE_SIZE_PX, false)
     cubeElement.appendChild(renderer.domElement)
 
     const pointer = new THREE.Vector2()
@@ -757,7 +757,7 @@ export function ThreeCadViewport({
         ref={viewCubeRef}
         data-testid="view-cube"
         className="pointer-events-auto absolute right-4 top-4 z-20"
-        style={{ width: VIEW_CUBE_SIZE, height: VIEW_CUBE_SIZE }}
+        style={{ width: VIEW_CUBE_SIZE_PX, height: VIEW_CUBE_SIZE_PX }}
       />
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}

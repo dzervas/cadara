@@ -28,6 +28,7 @@ import {
   getSketchSessionPreviewLabel,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
+  pinSketchConstraintPreview,
   selectSketchEditTarget,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
@@ -1808,7 +1809,9 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       {
         const point = deriveSketchPointFromWorld(state.session.plane, event.point)
         const session =
-          state.session.status === 'drawing'
+          state.session.constraintAuthoring
+            ? pinSketchConstraintPreview(state.session, point)
+            : state.session.status === 'drawing'
             ? acceptSketchDraw(state.session, point)
             : startSketchDraw(state.session, point)
 

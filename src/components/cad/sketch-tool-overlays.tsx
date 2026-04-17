@@ -21,6 +21,12 @@ export function SketchToolOverlays({ schema }: SketchToolOverlaysProps) {
               ? `${overlay.value.toFixed(2)} ${overlay.unit ?? ''}`
               : overlay.kind === 'constraintPreview'
                 ? overlay.detail
+                : overlay.kind === 'dimensionLine'
+                  ? overlay.referenceKind
+                : overlay.kind === 'angleArc'
+                  ? (overlay.referenceLabel ?? 'angle')
+                : overlay.kind === 'extensionLine' || overlay.kind === 'referenceLabel'
+                  ? overlay.label
                 : overlay.kind === 'completionCue'
                 ? overlay.ready ? 'ready' : 'waiting'
                 : `${overlay.point[0].toFixed(2)}, ${overlay.point[1].toFixed(2)}`}

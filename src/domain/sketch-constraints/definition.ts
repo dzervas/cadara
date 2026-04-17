@@ -8,7 +8,10 @@ import type {
 } from '@/contracts/sketch/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
-import type { SketchToolOverlayDescriptor } from '@/domain/sketch-tools/editor-schema'
+import type {
+  SketchToolDimensionReferenceKind,
+  SketchToolOverlayDescriptor,
+} from '@/domain/sketch-tools/editor-schema'
 
 export type SketchConstraintToolId =
   | 'constraintCoincident'
@@ -50,17 +53,28 @@ export interface SketchConstraintTargetRecord {
   anchor: SketchPoint2D
   point?: SketchPointDefinition
   entity?: SketchEntityDefinition
+  line?: {
+    start: SketchPoint2D
+    end: SketchPoint2D
+  }
+  circle?: {
+    center: SketchPoint2D
+    radius: number
+  }
 }
 
 export interface SketchConstraintPreviewInput {
   selectedTargets: readonly SketchConstraintTargetRecord[]
   hoverTarget: SketchConstraintTargetRecord | null
+  pointer: SketchPoint2D | null
   value: number | null
 }
 
 export interface SketchConstraintCommitInput {
   sequence: number
   selectedTargets: readonly SketchConstraintTargetRecord[]
+  pointer: SketchPoint2D | null
+  referenceKind?: SketchToolDimensionReferenceKind | null
   value: number | null
   createConstraintId(suffix: string): import('@/contracts/shared/ids').ConstraintId
   createDimensionId(suffix: string): import('@/contracts/shared/ids').DimensionId
@@ -131,6 +145,10 @@ export function resolveLineTarget(
     kind: 'line',
     anchor: midpointForLine(definition, entity),
     entity,
+    line: {
+      start: findPoint(definition, entity.startPointId)?.position ?? [0, 0],
+      end: findPoint(definition, entity.endPointId)?.position ?? [0, 0],
+    },
   }
 }
 
@@ -154,6 +172,10 @@ export function resolveCircleTarget(
     kind: 'circle',
     anchor: findPoint(definition, entity.centerPointId)?.position ?? [0, 0],
     entity,
+    circle: {
+      center: findPoint(definition, entity.centerPointId)?.position ?? [0, 0],
+      radius: entity.radius,
+    },
   }
 }
 

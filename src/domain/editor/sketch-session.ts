@@ -39,7 +39,9 @@ import {
   deriveStandardPlaneKeyFromConstructionId,
 } from '@/domain/modeling/opencascade-kernel-seed'
 import type {
+  SketchToolAnchorDescriptor,
   SketchToolFloatingInputDescriptor,
+  SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
   SketchToolSelectionGuideDescriptor,
 } from '@/domain/sketch-tools/editor-schema'
@@ -69,6 +71,8 @@ export interface SketchConstraintAuthoringState {
   toolId: SketchConstraintToolId
   selectedTargets: SketchConstraintTargetRecord[]
   hoverTarget: SketchConstraintTargetRecord | null
+  pointer: SketchPoint | null
+  isPreviewPinned: boolean
   pendingValue: number | null
 }
 
@@ -708,6 +712,12 @@ function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringSta
     authoring.selectedTargets,
     authoring.hoverTarget,
   )
+  const overlays = definition.buildPreview({
+    selectedTargets: authoring.selectedTargets,
+    hoverTarget: authoring.hoverTarget,
+    pointer: authoring.pointer,
+    value: authoring.pendingValue,
+  })
   const needsValue =
     Boolean(definition.valueSpec) && authoring.selectedTargets.length >= definition.steps.length
   const promptText = needsValue
@@ -723,13 +733,8 @@ function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringSta
         min: definition.valueSpec.min,
         confirmLabel: 'Commit',
         cancelLabel: 'Cancel',
-        anchor: authoring.selectedTargets[authoring.selectedTargets.length - 1]?.anchor
-          ? {
-              kind: 'sketchPoint',
-              point: authoring.selectedTargets[authoring.selectedTargets.length - 1]!.anchor,
-              offset: { x: 18, y: -18 },
-            }
-          : undefined,
+        anchor: getConstraintFloatingInputAnchor(authoring, overlays),
+        placement: 'previewReference',
         submitAction: { type: 'patch', patch: { intent: 'commitConstraintValue' } },
         cancelAction: { type: 'patch', patch: { intent: 'cancelConstraintValue' } },
       }
@@ -752,11 +757,7 @@ function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringSta
       icon: definition.metadata.group === 'dimensions' ? 'dimension' : 'constraint',
     },
     selectionGuide,
-    overlays: definition.buildPreview({
-      selectedTargets: authoring.selectedTargets,
-      hoverTarget: authoring.hoverTarget,
-      value: authoring.pendingValue,
-    }),
+    overlays,
     floatingInput,
     completionHints: [
       {
@@ -770,6 +771,44 @@ function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringSta
   }
 }
 
+function getConstraintFloatingInputAnchor(
+  authoring: SketchConstraintAuthoringState,
+  overlays: readonly SketchToolOverlayDescriptor[],
+): SketchToolAnchorDescriptor | undefined {
+  const previewAnchor = overlays.find((overlay) =>
+    overlay.kind === 'dimensionLine' || overlay.kind === 'angleArc',
+  )
+
+  if (previewAnchor?.kind === 'dimensionLine' || previewAnchor?.kind === 'angleArc') {
+    return addAnchorOffset(previewAnchor.labelAnchor, { x: 18, y: -12 })
+  }
+
+  if (authoring.pointer) {
+    return { kind: 'cursor', point: authoring.pointer, offset: { x: 18, y: -18 } }
+  }
+
+  const lastTarget = authoring.selectedTargets[authoring.selectedTargets.length - 1]
+
+  return lastTarget
+    ? { kind: 'sketchPoint', point: lastTarget.anchor, offset: { x: 18, y: -18 } }
+    : undefined
+}
+
+function addAnchorOffset(
+  anchor: SketchToolAnchorDescriptor,
+  offset: { x: number; y: number },
+): SketchToolAnchorDescriptor {
+  const currentOffset = anchor.offset ?? { x: 0, y: 0 }
+
+  return {
+    ...anchor,
+    offset: {
+      x: currentOffset.x + offset.x,
+      y: currentOffset.y + offset.y,
+    },
+  }
+}
+
 function activateSketchConstraintTool(
   session: SketchSessionState,
   toolId: SketchConstraintToolId,
@@ -779,6 +818,8 @@ function activateSketchConstraintTool(
     toolId,
     selectedTargets: [],
     hoverTarget: null,
+    pointer: null,
+    isPreviewPinned: false,
     pendingValue: definition.valueSpec?.defaultValue ?? null,
   }
 
@@ -897,7 +938,28 @@ export function updateSketchPointer(
   session: SketchSessionState,
   point: SketchPoint | null,
 ): SketchSessionState {
-  if (session.activeTool === null || isRegisteredSketchConstraintToolId(session.activeTool)) {
+  if (session.activeTool !== null && isRegisteredSketchConstraintToolId(session.activeTool)) {
+    if (!session.constraintAuthoring) {
+      return session
+    }
+
+    if (session.constraintAuthoring.isPreviewPinned) {
+      return session
+    }
+
+    const nextAuthoring: SketchConstraintAuthoringState = {
+      ...session.constraintAuthoring,
+      pointer: point,
+    }
+
+    return {
+      ...session,
+      toolPresentation: buildConstraintToolPresentation(nextAuthoring),
+      constraintAuthoring: nextAuthoring,
+    }
+  }
+
+  if (session.activeTool === null) {
     return session
   }
 
@@ -1371,11 +1433,13 @@ export function selectSketchConstraintTarget(
       ...authoring,
       selectedTargets: nextTargets,
       hoverTarget: null,
+      isPreviewPinned: false,
     }),
     constraintAuthoring: {
       ...authoring,
       selectedTargets: nextTargets,
       hoverTarget: null,
+      isPreviewPinned: false,
     },
     selectedAnnotation: null,
   }
@@ -1385,6 +1449,29 @@ export function selectSketchConstraintTarget(
   }
 
   return nextSession
+}
+
+export function pinSketchConstraintPreview(
+  session: SketchSessionState,
+  point: SketchPoint | null,
+): SketchSessionState {
+  const authoring = session.constraintAuthoring
+
+  if (!authoring || session.status !== 'awaitingValue' || authoring.isPreviewPinned) {
+    return session
+  }
+
+  const nextAuthoring: SketchConstraintAuthoringState = {
+    ...authoring,
+    pointer: point ?? authoring.pointer,
+    isPreviewPinned: true,
+  }
+
+  return {
+    ...session,
+    toolPresentation: buildConstraintToolPresentation(nextAuthoring),
+    constraintAuthoring: nextAuthoring,
+  }
 }
 
 export function patchSketchConstraintValue(
@@ -1434,6 +1521,7 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
   const contribution = definition.createCommitContribution({
     sequence: session.sequence + 1,
     selectedTargets: authoring.selectedTargets,
+    pointer: authoring.pointer,
     value: authoring.pendingValue,
     createConstraintId: (suffix) => createConstraintId(session.sequence + 1, suffix),
     createDimensionId: (suffix) => createDimensionId(session.sequence + 1, suffix),

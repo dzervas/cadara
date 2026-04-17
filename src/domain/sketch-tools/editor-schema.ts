@@ -86,6 +86,20 @@ export interface SketchToolMeasurementDescriptor {
   unit?: string
 }
 
+export type SketchToolDimensionReferenceKind =
+  | 'aligned'
+  | 'horizontal'
+  | 'vertical'
+  | 'radius'
+  | 'diameter'
+
+export interface SketchToolPreviewLineDescriptor {
+  id: string
+  label: string
+  start: SketchPoint
+  end: SketchPoint
+}
+
 export interface SketchToolCompletionHintDescriptor {
   id: string
   text: string
@@ -93,6 +107,42 @@ export interface SketchToolCompletionHintDescriptor {
 }
 
 export type SketchToolOverlayDescriptor =
+  | {
+      id: string
+      kind: 'dimensionLine'
+      label: string
+      referenceKind: SketchToolDimensionReferenceKind
+      start: SketchPoint
+      end: SketchPoint
+      labelAnchor: SketchToolAnchorDescriptor
+      value?: number | null
+      unit?: string
+      extensionLines?: readonly SketchToolPreviewLineDescriptor[]
+    }
+  | {
+      id: string
+      kind: 'extensionLine'
+      label: string
+      start: SketchPoint
+      end: SketchPoint
+    }
+  | {
+      id: string
+      kind: 'angleArc'
+      label: string
+      center: SketchPoint
+      start: SketchPoint
+      end: SketchPoint
+      radius: number
+      labelAnchor: SketchToolAnchorDescriptor
+      referenceLabel?: string
+    }
+  | {
+      id: string
+      kind: 'referenceLabel'
+      label: string
+      anchor: SketchToolAnchorDescriptor
+    }
   | {
       id: string
       kind: 'measurement'
@@ -137,6 +187,7 @@ export interface SketchToolFloatingInputDescriptor {
   cancelLabel: string
   min?: number
   anchor?: SketchToolAnchorDescriptor
+  placement?: 'cursor' | 'previewReference' | 'target'
   submitAction: SketchToolActionDescriptor
   cancelAction: SketchToolActionDescriptor
 }

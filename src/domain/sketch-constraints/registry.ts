@@ -1,5 +1,9 @@
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import type {
+  SketchToolDimensionReferenceKind,
+  SketchToolOverlayDescriptor,
+} from '@/domain/sketch-tools/editor-schema'
+import type {
   SketchConstraintDefinition,
   SketchConstraintPreviewInput,
   SketchConstraintTargetRecord,
@@ -15,6 +19,337 @@ function formatSelectedLabels(targets: readonly SketchConstraintTargetRecord[]) 
   return targets.map((target) => target.label).join(' / ')
 }
 
+function distanceBetween(left: readonly [number, number], right: readonly [number, number]) {
+  return Math.hypot(right[0] - left[0], right[1] - left[1])
+}
+
+function midpoint(left: readonly [number, number], right: readonly [number, number]): readonly [number, number] {
+  return [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2]
+}
+
+function normalize(vector: readonly [number, number]): readonly [number, number] {
+  const length = Math.hypot(vector[0], vector[1])
+
+  if (length <= 1e-6) {
+    return [1, 0]
+  }
+
+  return [vector[0] / length, vector[1] / length]
+}
+
+function pointLineDistance(
+  point: readonly [number, number],
+  start: readonly [number, number],
+  end: readonly [number, number],
+) {
+  const lengthSquared = (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
+
+  if (lengthSquared <= 1e-6) {
+    return distanceBetween(point, start)
+  }
+
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point[0] - start[0]) * (end[0] - start[0]) + (point[1] - start[1]) * (end[1] - start[1]))
+        / lengthSquared,
+    ),
+  )
+
+  return distanceBetween(point, [
+    start[0] + (end[0] - start[0]) * t,
+    start[1] + (end[1] - start[1]) * t,
+  ])
+}
+
+export function selectPointToPointDimensionReference(input: {
+  first: readonly [number, number]
+  second: readonly [number, number]
+  pointer: readonly [number, number] | null
+}): Extract<SketchToolDimensionReferenceKind, 'aligned' | 'horizontal' | 'vertical'> {
+  if (!input.pointer) {
+    return 'aligned'
+  }
+
+  const segmentLength = distanceBetween(input.first, input.second)
+
+  if (segmentLength <= 1e-6) {
+    return 'aligned'
+  }
+
+  const alignedDistance = pointLineDistance(input.pointer, input.first, input.second)
+
+  if (alignedDistance <= Math.max(segmentLength * 0.18, 0.5)) {
+    return 'aligned'
+  }
+
+  const center = midpoint(input.first, input.second)
+  const horizontalIntent = Math.abs(input.pointer[1] - center[1])
+  const verticalIntent = Math.abs(input.pointer[0] - center[0])
+
+  if (horizontalIntent >= verticalIntent && Math.abs(input.second[0] - input.first[0]) > 1e-6) {
+    return 'horizontal'
+  }
+
+  if (Math.abs(input.second[1] - input.first[1]) > 1e-6) {
+    return 'vertical'
+  }
+
+  return 'aligned'
+}
+
+function getPointDimensionReferenceKind(
+  input: SketchConstraintPreviewInput,
+  fixedReferenceKind?: Extract<SketchToolDimensionReferenceKind, 'horizontal' | 'vertical'>,
+) {
+  const [first, second] = input.selectedTargets
+
+  if (!first || !second) {
+    return fixedReferenceKind ?? 'aligned'
+  }
+
+  return fixedReferenceKind ?? selectPointToPointDimensionReference({
+    first: first.anchor,
+    second: second.anchor,
+    pointer: input.pointer,
+  })
+}
+
+function getDimensionLabel(
+  referenceKind: SketchToolDimensionReferenceKind,
+  value: number | null,
+  unit: string,
+) {
+  const prefix = {
+    aligned: 'Aligned',
+    horizontal: 'Horizontal',
+    vertical: 'Vertical',
+    radius: 'Radius',
+    diameter: 'Diameter',
+  }[referenceKind]
+
+  return value === null ? prefix : `${prefix} ${value.toFixed(2)} ${unit}`
+}
+
+function buildPointDimensionDescriptor(input: {
+  id: string
+  label: string
+  first: readonly [number, number]
+  second: readonly [number, number]
+  pointer: readonly [number, number] | null
+  referenceKind: Extract<SketchToolDimensionReferenceKind, 'aligned' | 'horizontal' | 'vertical'>
+  value: number | null
+  unit: string
+}): SketchToolOverlayDescriptor {
+  if (input.referenceKind === 'horizontal') {
+    const y = input.pointer?.[1] ?? input.first[1] - 1
+    const start: readonly [number, number] = [input.first[0], y]
+    const end: readonly [number, number] = [input.second[0], y]
+
+    return {
+      id: input.id,
+      kind: 'dimensionLine',
+      label: input.label,
+      referenceKind: 'horizontal',
+      start,
+      end,
+      value: input.value,
+      unit: input.unit,
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: midpoint(start, end),
+        offset: { x: 0, y: -18 },
+      },
+      extensionLines: [
+        { id: `${input.id}-extension-a`, label: 'Extension', start: input.first, end: start },
+        { id: `${input.id}-extension-b`, label: 'Extension', start: input.second, end },
+      ],
+    }
+  }
+
+  if (input.referenceKind === 'vertical') {
+    const x = input.pointer?.[0] ?? input.first[0] + 1
+    const start: readonly [number, number] = [x, input.first[1]]
+    const end: readonly [number, number] = [x, input.second[1]]
+
+    return {
+      id: input.id,
+      kind: 'dimensionLine',
+      label: input.label,
+      referenceKind: 'vertical',
+      start,
+      end,
+      value: input.value,
+      unit: input.unit,
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: midpoint(start, end),
+        offset: { x: 16, y: 0 },
+      },
+      extensionLines: [
+        { id: `${input.id}-extension-a`, label: 'Extension', start: input.first, end: start },
+        { id: `${input.id}-extension-b`, label: 'Extension', start: input.second, end },
+      ],
+    }
+  }
+
+  const axis = normalize([input.second[0] - input.first[0], input.second[1] - input.first[1]])
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  const pointerOffset = input.pointer
+    ? (input.pointer[0] - input.first[0]) * normal[0] + (input.pointer[1] - input.first[1]) * normal[1]
+    : 0
+  const offset: readonly [number, number] = [normal[0] * pointerOffset, normal[1] * pointerOffset]
+  const start: readonly [number, number] = [input.first[0] + offset[0], input.first[1] + offset[1]]
+  const end: readonly [number, number] = [input.second[0] + offset[0], input.second[1] + offset[1]]
+
+  return {
+    id: input.id,
+    kind: 'dimensionLine',
+    label: input.label,
+    referenceKind: 'aligned',
+    start,
+    end,
+    value: input.value,
+    unit: input.unit,
+    labelAnchor: {
+      kind: 'sketchPoint',
+      point: midpoint(start, end),
+      offset: { x: 0, y: -18 },
+    },
+    extensionLines: pointerOffset === 0
+      ? []
+      : [
+          { id: `${input.id}-extension-a`, label: 'Extension', start: input.first, end: start },
+          { id: `${input.id}-extension-b`, label: 'Extension', start: input.second, end },
+        ],
+  }
+}
+
+function buildPointDimensionPreview(
+  input: SketchConstraintPreviewInput,
+  options: {
+    id: string
+    unit: string
+    fixedReferenceKind?: Extract<SketchToolDimensionReferenceKind, 'horizontal' | 'vertical'>
+  },
+): readonly SketchToolOverlayDescriptor[] {
+  const first = input.selectedTargets[0]?.anchor
+  const second = input.selectedTargets[1]?.anchor ?? input.hoverTarget?.anchor ?? input.pointer
+
+  if (!first || !second) {
+    return buildSinglePreview(options.id, 'Dimension preview', 'Select two points', input)
+  }
+
+  const referenceKind = getPointDimensionReferenceKind(input, options.fixedReferenceKind)
+
+  return [
+    buildPointDimensionDescriptor({
+      id: options.id,
+      label: getDimensionLabel(referenceKind, input.value, options.unit),
+      first,
+      second,
+      pointer: input.pointer,
+      referenceKind,
+      value: input.value,
+      unit: options.unit,
+    }),
+  ]
+}
+
+function buildLineAnglePreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const first = input.selectedTargets[0]
+  const second = input.selectedTargets[1] ?? input.hoverTarget
+
+  if (!first?.line || !second?.line) {
+    return buildSinglePreview(
+      'parallel-preview',
+      'Parallel preview',
+      input.selectedTargets.length >= 2 ? formatSelectedLabels(input.selectedTargets) : 'Select two lines',
+      input,
+    )
+  }
+
+  const firstVector = normalize([
+    first.line.end[0] - first.line.start[0],
+    first.line.end[1] - first.line.start[1],
+  ])
+  const secondVector = normalize([
+    second.line.end[0] - second.line.start[0],
+    second.line.end[1] - second.line.start[1],
+  ])
+  const radius = Math.max(
+    0.75,
+    Math.min(distanceBetween(first.line.start, first.line.end), distanceBetween(second.line.start, second.line.end)) * 0.22,
+  )
+  const center = first.anchor
+  const start: readonly [number, number] = [
+    center[0] + firstVector[0] * radius,
+    center[1] + firstVector[1] * radius,
+  ]
+  const end: readonly [number, number] = [
+    center[0] + secondVector[0] * radius,
+    center[1] + secondVector[1] * radius,
+  ]
+  const labelDirection = normalize([firstVector[0] + secondVector[0], firstVector[1] + secondVector[1]])
+  const labelPoint: readonly [number, number] = [
+    center[0] + labelDirection[0] * radius,
+    center[1] + labelDirection[1] * radius,
+  ]
+
+  return [
+    {
+      id: 'parallel-angle-preview',
+      kind: 'angleArc',
+      label: 'Angle preview',
+      center,
+      start,
+      end,
+      radius,
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: labelPoint,
+        offset: { x: 12, y: -12 },
+      },
+      referenceLabel: formatSelectedLabels([first, second]),
+    },
+  ]
+}
+
+function buildRadiusPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const target = input.selectedTargets[0]
+
+  if (!target?.circle) {
+    return buildSinglePreview('radius-preview', 'Radius preview', 'Select one circle', input)
+  }
+
+  const direction = normalize(input.pointer
+    ? [input.pointer[0] - target.circle.center[0], input.pointer[1] - target.circle.center[1]]
+    : [1, 0])
+  const end: readonly [number, number] = [
+    target.circle.center[0] + direction[0] * target.circle.radius,
+    target.circle.center[1] + direction[1] * target.circle.radius,
+  ]
+
+  return [
+    {
+      id: 'radius-preview',
+      kind: 'dimensionLine',
+      label: getDimensionLabel('radius', input.value, 'mm'),
+      referenceKind: 'radius',
+      start: target.circle.center,
+      end,
+      value: input.value,
+      unit: 'mm',
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: end,
+        offset: { x: 16, y: -16 },
+      },
+    },
+  ]
+}
+
 function buildSinglePreview(
   id: string,
   label: string,
@@ -22,7 +357,8 @@ function buildSinglePreview(
   input: SketchConstraintPreviewInput,
 ) {
   const anchor =
-    input.hoverTarget?.anchor
+    input.pointer
+    ?? input.hoverTarget?.anchor
     ?? input.selectedTargets[input.selectedTargets.length - 1]?.anchor
     ?? [0, 0]
 
@@ -102,14 +438,7 @@ const sketchConstraintDefinitions = [
       return resolveLineTarget(definition, target)
     },
     buildPreview(input) {
-      return buildSinglePreview(
-        'parallel-preview',
-        'Parallel preview',
-        input.selectedTargets.length >= 2
-          ? formatSelectedLabels(input.selectedTargets)
-          : 'Select two lines',
-        input,
-      )
+      return buildLineAnglePreview(input)
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
@@ -198,14 +527,7 @@ const sketchConstraintDefinitions = [
       return resolvePointTarget(definition, target)
     },
     buildPreview(input) {
-      return buildSinglePreview(
-        'distance-preview',
-        'Distance preview',
-        input.selectedTargets.length < 2 || input.value === null
-          ? 'Select two points'
-          : `${formatSelectedLabels(input.selectedTargets)} = ${input.value.toFixed(2)} mm`,
-        input,
-      )
+      return buildPointDimensionPreview(input, { id: 'distance-preview', unit: 'mm' })
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
@@ -214,13 +536,21 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
+      const axis = input.referenceKind === 'horizontal' || input.referenceKind === 'vertical'
+        ? input.referenceKind
+        : selectPointToPointDimensionReference({
+            first: first.anchor,
+            second: second.anchor,
+            pointer: input.pointer,
+          })
+
       return {
         dimensions: [
           {
             dimensionId: input.createDimensionId('distance'),
             kind: 'distance',
             label: `Distance ${input.sequence}`,
-            axis: 'aligned',
+            axis,
             pointIds: [first.point.pointId, second.point.pointId],
             value: input.value,
           },
@@ -251,14 +581,11 @@ const sketchConstraintDefinitions = [
       return resolvePointTarget(definition, target)
     },
     buildPreview(input) {
-      return buildSinglePreview(
-        'horizontal-distance-preview',
-        'Horizontal dimension preview',
-        input.selectedTargets.length < 2 || input.value === null
-          ? 'Select two points'
-          : `${formatSelectedLabels(input.selectedTargets)} = ${input.value.toFixed(2)} mm`,
-        input,
-      )
+      return buildPointDimensionPreview(input, {
+        id: 'horizontal-distance-preview',
+        unit: 'mm',
+        fixedReferenceKind: 'horizontal',
+      })
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
@@ -303,14 +630,11 @@ const sketchConstraintDefinitions = [
       return resolvePointTarget(definition, target)
     },
     buildPreview(input) {
-      return buildSinglePreview(
-        'vertical-distance-preview',
-        'Vertical dimension preview',
-        input.selectedTargets.length < 2 || input.value === null
-          ? 'Select two points'
-          : `${formatSelectedLabels(input.selectedTargets)} = ${input.value.toFixed(2)} mm`,
-        input,
-      )
+      return buildPointDimensionPreview(input, {
+        id: 'vertical-distance-preview',
+        unit: 'mm',
+        fixedReferenceKind: 'vertical',
+      })
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
@@ -352,14 +676,7 @@ const sketchConstraintDefinitions = [
       return resolveCircleTarget(definition, target)
     },
     buildPreview(input) {
-      return buildSinglePreview(
-        'radius-preview',
-        'Radius preview',
-        input.selectedTargets.length < 1 || input.value === null
-          ? 'Select one circle'
-          : `${formatSelectedLabels(input.selectedTargets)} = ${input.value.toFixed(2)} mm`,
-        input,
-      )
+      return buildRadiusPreview(input)
     },
     createCommitContribution(input) {
       const [circle] = input.selectedTargets

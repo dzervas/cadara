@@ -51,6 +51,34 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     return createAuthoredModelDocumentFromSnapshot(snapshot)
   }
 
+  function createInvalidOperationHistoryStore() {
+    const historyStore = createMemoryOperationHistoryStore({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        ...Array.from({ length: 17 }, (_, index) => ({
+          kind: 'renameBody' as const,
+          payload: {
+            bodyId: 'body_part-1',
+            bodyLabel: `Stale History Body ${index + 1}`,
+          },
+        })),
+        {},
+      ] as never,
+    })
+    const clear = historyStore.clear.bind(historyStore)
+    let clearCount = 0
+
+    historyStore.clear = () => {
+      clearCount += 1
+      clear()
+    }
+
+    return {
+      historyStore,
+      getClearCount: () => clearCount,
+    }
+  }
+
   async function testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot() {
     const documentRepository = createMemoryDocumentRepository()
     const service = createModelingService(new MockKernelAdapter(), {
@@ -157,6 +185,61 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(
       restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Wins Body',
       'Repository restore should hydrate the authored document instead of replaying stale operation history.',
+    )
+  }
+
+  async function testSeededRepositoryClearsInvalidOperationHistory() {
+    const { historyStore, getClearCount } = createInvalidOperationHistoryStore()
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+    assert(restoreState.kind === 'empty', 'Invalid stale operation history should not fail a freshly seeded repository.')
+    assert(restoreState.entriesReplayed === 0, 'Recovered stale history should not replay entries.')
+    assert(getClearCount() === 1, 'Recovery should clear only the stale operation history store.')
+    assert(documentRepository.savedDocuments.length === 0, 'Recovery should keep the seeded repository document without migration writes.')
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const renamed = await service.renameBody({
+      baseRevisionId: snapshot.revisionId,
+      bodyId: 'body_part-1',
+      bodyLabel: 'Recovered Body',
+    })
+
+    assert(renamed.revisionState.kind === 'accepted', 'Recovered services should continue accepting mutations.')
+    assert(documentRepository.savedDocuments.length === 1, 'Recovered services should continue persisting authored documents.')
+    assert(historyStore.savedPayloads.length === 1, 'Recovered services should append fresh operation history after clearing stale data.')
+    assert(historyStore.savedPayloads[0]?.entries[0]?.kind === 'renameBody', 'Fresh operation history should start from the next accepted mutation.')
+  }
+
+  async function testRestoredRepositoryLeavesInvalidOperationHistoryAlone() {
+    const { historyStore, getClearCount } = createInvalidOperationHistoryStore()
+    const repositoryDocument = await createSeedAuthoredDocument()
+    repositoryDocument.bodyLabels = repositoryDocument.bodyLabels.map((label) =>
+      label.bodyId === 'body_part-1'
+        ? { ...label, label: 'Repository Existing Body' }
+        : label,
+    )
+    const documentRepository = createMemoryDocumentRepository([repositoryDocument])
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+    const restoredSnapshot = await service.getCurrentDocumentSnapshot()
+
+    assert(restoreState.kind === 'restored', 'Existing authored repository documents should still ignore invalid stale history.')
+    assert(getClearCount() === 0, 'Existing authored repository restore should not clear ignored operation history.')
+    assert(documentRepository.savedDocuments.length === 0, 'Existing authored repository restore should not rewrite the restored document.')
+    assert(
+      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Existing Body',
+      'Existing authored repository data should remain authoritative over invalid stale history.',
     )
   }
 
@@ -389,6 +472,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryRestoreHydratesFreshModelingService()
   await testRepositoryRestoreIgnoresStaleOperationHistory()
+  await testSeededRepositoryClearsInvalidOperationHistory()
+  await testRestoredRepositoryLeavesInvalidOperationHistoryAlone()
   await testOperationHistoryMigratesOnlyWhenRepositoryIsMissing()
   await testMigrationWriteFailureResetsSeededRepositoryForRetry()
   await testInvalidRepositoryDocumentBlocksFutureWrites()
