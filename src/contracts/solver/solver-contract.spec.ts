@@ -9,6 +9,7 @@ import {
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   DEFAULT_MOCK_SOLVER_TOLERANCES,
+  MockSketchSolverAdapter,
 } from '@/domain/solver/mock-sketch-solver-adapter'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
@@ -190,6 +191,14 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
 
     assert(projection.requestId === 'request_project_1', 'Projection must echo the originating request ID.')
     assert(projection.projectedReferences.length === sketchDefinition.references.length, 'Projection should return one record per authored external reference.')
+    assert(
+      projection.projectedReferences.every((reference) =>
+        reference.status === 'unsupportedSource'
+        && reference.geometry.length === 0
+        && reference.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-model-reference-source'),
+      ),
+      'Projection must report unresolved model sources as unsupported instead of fabricating geometry.',
+    )
 
     const validation = await adapter.validateSketch({
       ...createValidateRequest(),
@@ -203,12 +212,6 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       'Solve should return a machine-readable solved and constrained status.',
     )
     assert(solved.solvedSnapshot.solvedEntities.length === 4, 'Solve should return solved entity geometry.')
-    assert(
-      projection.projectedReferences.every((reference) =>
-        reference.geometry.every((geometry) => geometry.geometryId.startsWith('projected_geometry_')),
-      ),
-      'Projected geometry records must expose stable projected-geometry IDs.',
-    )
 
     const regions = await adapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
@@ -219,6 +222,7 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       sketchId: 'sketch_primary',
       definition: sketchDefinition,
       solvedSnapshot: solved.solvedSnapshot,
+      projectedReferences: projection.projectedReferences,
     })
 
     assert(regions.regions.length === 1, 'Region derivation should return an explicit derived region.')
@@ -240,17 +244,6 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
     assert('kind' in resolution.resolution.target && resolution.resolution.target.kind === 'region', 'Solver reference resolution should be explicit for derived regions.')
     assert(resolution.resolution.isValid, 'Derived regions returned by the solver should resolve as valid.')
 
-    const projectedGeometryTarget = projection.projectedReferences
-      .flatMap((reference) => reference.geometry.map((geometry) => ({
-        referenceId: reference.referenceId,
-        geometryId: geometry.geometryId,
-      })))
-      .at(0)
-
-    if (!projectedGeometryTarget) {
-      throw new Error('Projection must expose one projected-geometry target for resolution coverage.')
-    }
-
     const projectedResolution = await adapter.resolveSketchReference({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -258,7 +251,10 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       documentId: 'doc_workspace',
       revisionId: 'rev_0001',
       sketchId: 'sketch_primary',
-      target: projectedGeometryTarget,
+      target: {
+        referenceId: 'ref_model_edge_1',
+        geometryId: 'projected_geometry_ref_model_edge_1_0',
+      },
       definition: sketchDefinition,
       solvedSnapshot: solved.solvedSnapshot,
       regions: regions.regions,
@@ -270,7 +266,7 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
     )
     assert(
       projectedResolution.resolution.isValid,
-      'Projected geometry returned by the solver should resolve as valid.',
+      'Projected geometry targets should resolve when their authored reference still exists.',
     )
   }
 
@@ -289,6 +285,20 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
     }
 
     assert(didThrow, 'Stale revision validation must reject the request instead of returning authoritative output.')
+  }
+
+  async function testMockProjectionDoesNotFabricateExternalGeometry() {
+    const adapter = new MockSketchSolverAdapter()
+    const projection = await adapter.projectExternalReferences(createProjectRequest())
+
+    assert(
+      projection.projectedReferences.every((reference) =>
+        reference.status === 'unsupportedSource'
+        && reference.geometry.length === 0
+        && reference.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-model-reference-source'),
+      ),
+      'Mock projection must report unresolved external sources instead of returning placeholder geometry.',
+    )
   }
 
   async function testVersioningAndIdBijectionAreEnforced() {
@@ -324,5 +334,6 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
 
   await testProjectionAndSolveFlow()
   await testRevisionDiagnosticsAreExplicit()
+  await testMockProjectionDoesNotFabricateExternalGeometry()
   await testVersioningAndIdBijectionAreEnforced()
 })

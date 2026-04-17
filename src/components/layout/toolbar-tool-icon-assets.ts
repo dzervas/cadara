@@ -12,6 +12,8 @@ export const toolbarToolIconAssetMap: Record<ToolIconId, string> = {
   dimension: 'sketch-dimension.svg',
   constraintCoincident: 'sketch-coincident.svg',
   constraintParallel: 'sketch-parallel.svg',
+  constraintPerpendicular: 'sketch-perpendicular.svg',
+  constraintTangent: 'sketch-tangent.svg',
   constraintEqual: 'sketch-equal.svg',
   extrude: 'extrude.svg',
   revolve: 'revolve.svg',

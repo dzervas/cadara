@@ -10,6 +10,8 @@ import type {
   ViewportRenderableOrigin,
 } from '@/domain/workspace/viewport-renderables'
 
+type WorkspaceSemanticClass = RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
+
 export interface CollectedBindings {
   pickables: THREE.Object3D[]
   targetToObjects: Map<string, THREE.Object3D[]>
@@ -41,6 +43,7 @@ export const SURFACE_COLORS = {
   featureVertex: 0x86b6da,
   sketchCurve: 0x8db7d6,
   sketchPoint: 0x8db7d6,
+  sketchReference: 0xf0c56c,
   construction: 0xb6d6ff,
 } as const
 
@@ -159,7 +162,7 @@ export function updateWorkspaceHighlight(
 
 function applyRenderableState(
   material: THREE.Material | THREE.Material[] | THREE.LineBasicMaterial,
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   origin: ViewportRenderableOrigin,
   isActive: boolean,
   isSelected: boolean,
@@ -198,7 +201,7 @@ function applyRenderableState(
   }
 }
 
-function getRenderableBaseColor(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+function getRenderableBaseColor(semanticClass: WorkspaceSemanticClass) {
   switch (semanticClass) {
     case 'bodyFace':
       return SURFACE_COLORS.bodyFace
@@ -214,13 +217,15 @@ function getRenderableBaseColor(semanticClass: RenderableEntityRecord['binding']
       return SURFACE_COLORS.sketchCurve
     case 'sketchPoint':
       return SURFACE_COLORS.sketchPoint
+    case 'sketchReference':
+      return SURFACE_COLORS.sketchReference
     case 'construction':
       return SURFACE_COLORS.construction
   }
 }
 
 function getHighlightColor(
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   isActive: boolean,
   isSelected: boolean,
 ) {
@@ -252,24 +257,26 @@ export function isSeededDatumPlaneRenderable(renderable: RenderableEntityRecord)
     && SEEDED_DATUM_CONSTRUCTION_IDS.has(renderable.binding.target.constructionId)
 }
 
-function isWireSemanticClass(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+function isWireSemanticClass(semanticClass: WorkspaceSemanticClass) {
   return semanticClass === 'featureEdge'
     || semanticClass === 'featureVertex'
     || semanticClass === 'sketchCurve'
     || semanticClass === 'sketchPoint'
+    || semanticClass === 'sketchReference'
 }
 
-function isOccludingFaceSemanticClass(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+function isOccludingFaceSemanticClass(semanticClass: WorkspaceSemanticClass) {
   return semanticClass === 'bodyFace' || semanticClass === 'planarFace'
 }
 
-function getInteractionSortRank(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+function getInteractionSortRank(semanticClass: WorkspaceSemanticClass) {
   switch (semanticClass) {
     case 'featureVertex':
     case 'sketchPoint':
       return 0
     case 'featureEdge':
     case 'sketchCurve':
+    case 'sketchReference':
       return 1
     case 'region':
       return 2
@@ -287,7 +294,7 @@ function createUniqueHitFilter() {
   return (hit: {
     pickId: string | null
     target: PrimitiveRef
-    semanticClass: RenderableEntityRecord['binding']['semanticClass']
+    semanticClass: WorkspaceSemanticClass
     renderable: RenderableEntityRecord | null
   }) => {
     const key = hit.pickId
@@ -306,7 +313,7 @@ function createUniqueHitFilter() {
 function getHitStableKey(hit: {
   pickId: string | null
   target: PrimitiveRef
-  semanticClass: RenderableEntityRecord['binding']['semanticClass']
+  semanticClass: WorkspaceSemanticClass
   renderable: RenderableEntityRecord | null
 }) {
   return [
@@ -317,7 +324,7 @@ function getHitStableKey(hit: {
   ].join(':')
 }
 
-function getBaseMeshOpacity(semanticClass: RenderableEntityRecord['binding']['semanticClass']) {
+function getBaseMeshOpacity(semanticClass: WorkspaceSemanticClass) {
   return semanticClass === 'region' ? 0.22 : 1
 }
 
@@ -386,9 +393,13 @@ export function createRenderableMarkerMaterial(
 }
 
 function getRenderableMeshEmissive(
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   origin: ViewportRenderableOrigin,
 ) {
+  if (semanticClass === 'sketchReference') {
+    return origin === 'preview' ? 0x5a3d12 : 0x4a3511
+  }
+
   if (semanticClass === 'region') {
     return origin === 'preview' ? 0x173643 : 0x10252d
   }
@@ -397,9 +408,13 @@ function getRenderableMeshEmissive(
 }
 
 function getRenderableMeshEmissiveIntensity(
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   origin: ViewportRenderableOrigin,
 ) {
+  if (semanticClass === 'sketchReference') {
+    return origin === 'preview' ? 0.22 : 0.2
+  }
+
   if (semanticClass === 'region') {
     return origin === 'preview' ? 0.12 : 0.08
   }
@@ -408,11 +423,15 @@ function getRenderableMeshEmissiveIntensity(
 }
 
 function getRenderableMeshOpacity(
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   origin: ViewportRenderableOrigin,
   isActive: boolean,
   isSelected: boolean,
 ) {
+  if (semanticClass === 'sketchReference') {
+    return isSelected ? 1 : isActive ? 0.92 : 0.82
+  }
+
   if (semanticClass === 'construction') {
     if (origin === 'preview') {
       return isSelected ? 0.34 : isActive ? 0.26 : 0.18
@@ -437,11 +456,15 @@ function getRenderableMeshOpacity(
 }
 
 function getRenderableLineOpacity(
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   origin: ViewportRenderableOrigin,
   isActive: boolean,
   isSelected: boolean,
 ) {
+  if (semanticClass === 'sketchReference') {
+    return isSelected ? 1 : isActive ? 0.88 : 0.7
+  }
+
   if (semanticClass === 'construction') {
     if (origin === 'preview') {
       return isSelected ? 0.92 : isActive ? 0.74 : 0.56
@@ -469,7 +492,7 @@ export function bindRenderableObject(
   object: THREE.Object3D,
   pickId: string | null,
   target: PrimitiveRef,
-  semanticClass: RenderableEntityRecord['binding']['semanticClass'],
+  semanticClass: WorkspaceSemanticClass,
   origin: ViewportRenderableOrigin,
   renderable?: RenderableEntityRecord,
 ) {
@@ -503,7 +526,7 @@ export function getBoundRenderableRecord(object: THREE.Object3D) {
 }
 
 function getBoundSemanticClass(object: THREE.Object3D) {
-  return findBoundValue<RenderableEntityRecord['binding']['semanticClass']>(object, 'semanticClass')
+  return findBoundValue<WorkspaceSemanticClass>(object, 'semanticClass')
 }
 
 function getBoundRenderableOrigin(object: THREE.Object3D) {

@@ -34,7 +34,6 @@ import type {
   ConstraintId,
   DimensionId,
   DocumentId,
-  ProjectedGeometryId,
   ReferenceId,
   RequestId,
   RevisionId,
@@ -170,11 +169,33 @@ function entityRecordMap(definition: SketchDefinition) {
   return new Map(definition.entities.map((entity) => [entity.entityId, entity]))
 }
 
-function createProjectedGeometryId(
-  referenceId: ReferenceId,
-  ordinal: number,
-): ProjectedGeometryId {
-  return `projected_geometry_${referenceId}_${ordinal}` as ProjectedGeometryId
+function projectedKindForConstraintRef(kind: NonNullable<ProjectedSketchGeometryRef['kind']>) {
+  switch (kind) {
+    case 'projectedPoint':
+      return 'point'
+    case 'projectedLineSegment':
+      return 'lineSegment'
+    case 'projectedCircle':
+      return 'circle'
+    case 'projectedArc':
+      return 'arc'
+  }
+}
+
+function findProjectedGeometry(
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+): ProjectedSketchReferenceGeometry | null {
+  const projectedReference = projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
+
+  if (!projectedReference || projectedReference.status !== 'projected') {
+    return null
+  }
+
+  const expectedKind = projectedKindForConstraintRef(reference.kind)
+  return projectedReference.geometry.find((geometry) =>
+    geometry.geometryId === reference.geometryId && geometry.kind === expectedKind,
+  ) ?? null
 }
 
 function projectedGeometryForReference(reference: ProjectSketchExternalReferencesRequest['references'][number]) {
@@ -186,44 +207,32 @@ function projectedGeometryForReference(reference: ProjectSketchExternalReference
     }
   }
 
-  if (reference.reference.source.kind === 'vertex') {
+  if (reference.reference.kind === 'sketchReference') {
     return {
-      status: 'projected' as const,
-      geometry: [{
-        geometryId: createProjectedGeometryId(reference.referenceId, 0),
-        kind: 'point' as const,
-        position: [0, 0] as SketchPoint2D,
-      }],
-      diagnostics: [] as SketchSolveDiagnostic[],
-    }
-  }
-
-  if (reference.reference.source.kind === 'edge') {
-    return {
-      status: 'projected' as const,
-      geometry: [
-        {
-          geometryId: createProjectedGeometryId(reference.referenceId, 0),
-          kind: 'lineSegment' as const,
-          startPosition: [-2, 0] as SketchPoint2D,
-          endPosition: [2, 0] as SketchPoint2D,
-        },
+      status: 'unsupportedSource' as const,
+      geometry: [] as ProjectedSketchReferenceGeometry[],
+      diagnostics: [
+        makeDiagnostic(
+          'unsupported-sketch-reference-source',
+          'warning',
+          `Sketch reference ${reference.referenceId} does not expose projectable geometry in this solver.`,
+          null,
+        ),
       ],
-      diagnostics: [] as SketchSolveDiagnostic[],
     }
   }
 
   return {
-    status: 'projected' as const,
-    geometry: [
-      {
-        geometryId: createProjectedGeometryId(reference.referenceId, 0),
-        kind: 'circle' as const,
-        centerPosition: [0, 0] as SketchPoint2D,
-        radius: 1,
-      },
+    status: 'unsupportedSource' as const,
+    geometry: [] as ProjectedSketchReferenceGeometry[],
+    diagnostics: [
+      makeDiagnostic(
+        'unsupported-model-reference-source',
+        'warning',
+        `Model reference ${reference.referenceId} cannot be projected because this mock solver has no resolved source geometry.`,
+        null,
+      ),
     ],
-    diagnostics: [] as SketchSolveDiagnostic[],
   }
 }
 
@@ -361,6 +370,45 @@ function validateDefinition(
           diagnostics.push(makeDiagnostic('missing-constrained-entity', 'error', `Constraint ${constraint.constraintId} references a missing entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
+      case 'coincidentProjectedPoint':
+        if (!points.has(constraint.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-coincident-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (!referenceIds.has(constraint.projectedPoint.reference.referenceId) || !findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)) {
+          diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      case 'pointOnProjectedCurve':
+        if (!points.has(constraint.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-point-on-projected-curve-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (!referenceIds.has(constraint.projectedCurve.reference.referenceId) || !findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)) {
+          diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      case 'parallelProjectedLine':
+      case 'perpendicularProjectedLine': {
+        const entity = entities.get(constraint.line.entityId)
+        const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+        if (!entity || entity.kind !== 'lineSegment') {
+          diagnostics.push(makeDiagnostic('missing-projected-line-local-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported line entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (!referenceIds.has(constraint.projectedLine.reference.referenceId) || projected?.kind !== 'lineSegment') {
+          diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected line geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
+      case 'tangentProjectedCurve': {
+        const entity = entities.get(constraint.curve.entityId)
+        const projected = findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
+        if (!entity || (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc')) {
+          diagnostics.push(makeDiagnostic('missing-projected-tangent-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (!referenceIds.has(constraint.projectedCurve.reference.referenceId) || (projected?.kind !== 'circle' && projected?.kind !== 'arc')) {
+          diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected circle or arc geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
     }
   }
 
@@ -397,14 +445,21 @@ function validateDefinition(
     }
   }
 
-  const definitionReferenceMap = new Set(definition.references.map((reference) => reference.referenceId))
+  const definitionReferenceIds = new Set<ReferenceId>()
   for (const reference of definition.references) {
+    if (definitionReferenceIds.has(reference.referenceId)) {
+      diagnostics.push(makeDiagnostic('duplicate-reference-record', 'error', `Reference record ${reference.referenceId} appears more than once.`, null))
+      continue
+    }
+
+    definitionReferenceIds.add(reference.referenceId)
+
     if (!referenceIds.has(reference.referenceId)) {
       diagnostics.push(makeDiagnostic('reference-missing-from-order', 'error', `Reference ${reference.referenceId} is not listed in referenceIds.`, null))
     }
   }
   for (const referenceId of definition.referenceIds) {
-    if (!definitionReferenceMap.has(referenceId)) {
+    if (!definitionReferenceIds.has(referenceId)) {
       diagnostics.push(makeDiagnostic('reference-missing-from-records', 'error', `referenceIds references missing reference ${referenceId}.`, null))
     }
   }
@@ -492,6 +547,7 @@ function solvedGeometryForEntity(
 
 function solveDefinition(
   definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
   validationDiagnostics: SketchSolveDiagnostic[],
   partialSolvePolicy: SolveSketchRequest['partialSolvePolicy'],
 ) {
@@ -535,6 +591,28 @@ function solveDefinition(
           status: entity?.kind === 'lineSegment' ? 'satisfied' : 'conflicting',
         } as const
       }
+      case 'coincidentProjectedPoint': {
+        const point = points.get(constraint.point.pointId)
+        const projected = findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+        return {
+          constraintId: constraint.constraintId,
+          status: point && projected?.kind === 'point'
+            ? samePoint(point.position, projected.position, 1e-9) ? 'satisfied' : 'unsatisfied'
+            : 'conflicting',
+        } as const
+      }
+      case 'pointOnProjectedCurve':
+      case 'parallelProjectedLine':
+      case 'perpendicularProjectedLine':
+      case 'tangentProjectedCurve':
+        return {
+          constraintId: constraint.constraintId,
+          status: validationDiagnostics.some((diagnostic) =>
+            diagnostic.target?.kind === 'constraint' && diagnostic.target.constraintId === constraint.constraintId,
+          )
+            ? 'conflicting'
+            : 'satisfied',
+        } as const
       default:
         return {
           constraintId: constraint.constraintId,
@@ -612,6 +690,7 @@ function deriveRegions(
   sketchId: SketchId,
   solvedSnapshot: SolvedSketchSnapshot,
   definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ) {
   return deriveSketchRegionsCore({
     documentId,
@@ -619,6 +698,7 @@ function deriveRegions(
     sketchId,
     solvedSnapshot,
     definition,
+    projectedReferences,
   })
 }
 
@@ -671,13 +751,14 @@ export function evaluateMockSketchDefinition(
     projectedReferences,
     incrementalEdit: null,
   }
-  const solvedState = solveDefinition(context.definition, validationState.diagnostics, solveRequest.partialSolvePolicy)
+  const solvedState = solveDefinition(context.definition, projectedReferences, validationState.diagnostics, solveRequest.partialSolvePolicy)
   const derivedState = deriveRegions(
     context.documentId,
     context.revisionId,
     context.sketchId,
     solvedState.solvedSnapshot,
     context.definition,
+    projectedReferences,
   )
   const solve: SolveSketchResponse = {
     ...makeResponseBase(solveRequest),
@@ -741,7 +822,7 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
     assertSupportedRequest(request, this.options)
     const base = makeResponseBase(request)
     const validation = validateDefinition(request.definition, request.projectedReferences, request.tolerances)
-    const solved = solveDefinition(request.definition, validation.diagnostics, request.partialSolvePolicy)
+    const solved = solveDefinition(request.definition, request.projectedReferences, validation.diagnostics, request.partialSolvePolicy)
     const derived = deriveRegions(
       request.documentId,
       request.revisionId,
@@ -769,6 +850,7 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       request.sketchId,
       request.solvedSnapshot,
       request.definition,
+      request.projectedReferences,
     )
     return {
       ...base,

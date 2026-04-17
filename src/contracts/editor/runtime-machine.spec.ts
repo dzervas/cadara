@@ -78,7 +78,7 @@ test('src/contracts/editor/runtime-machine.spec.ts', async () => {
 
     actor.send({ type: 'tool.activated', toolId: 'line' })
     actor.send({ type: 'sketch.pointerReleased', point: [0, 0] })
-    actor.send({ type: 'sketch.pointerReleased', point: [1, 0] })
+    actor.send({ type: 'sketch.pointerReleased', point: [1, 0.3] })
 
     const beforeDrag = getEditorRuntimeState(actor)
     assert(beforeDrag.kind === 'editingSketch', 'Expected active sketch session before drag.')

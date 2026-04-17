@@ -114,3 +114,14 @@ The viewport SHALL expose hover and selection bindings for visible construction 
 - **WHEN** the user clicks a visible construction vertex in an active sketch editing session
 - **THEN** the viewport dispatches that vertex as the selected sketch target for the active interaction context
 
+### Requirement: Viewport feedback SHALL show active snap candidates
+The viewport SHALL render transient snap indicators for the active sketch snap candidate without storing those indicators as durable sketch data.
+
+#### Scenario: Midpoint snap is active
+- **WHEN** the active snap candidate is a midpoint
+- **THEN** the viewport shows a midpoint snap indicator at the snapped sketch-space point
+
+#### Scenario: Snap candidate changes
+- **WHEN** pointer movement changes the active snap candidate
+- **THEN** the viewport updates the transient snap indicator and removes stale snap feedback
+

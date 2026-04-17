@@ -1,10 +1,12 @@
 import type {
   ConstraintDefinition,
   DimensionDefinition,
+  ProjectedSketchGeometryRef,
   RegionRecord,
   SketchDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
+  SketchReferenceDefinition,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
@@ -22,10 +24,12 @@ import type {
   ConstraintId,
   DimensionId,
   RenderableId,
+  ReferenceId,
   SketchEntityId,
   SketchId,
   SketchPointId,
 } from '@/contracts/shared/ids'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type {
   CommitSketchRequest,
   SketchPlaneKey,
@@ -61,12 +65,22 @@ import type {
   SketchToolId,
 } from '@/domain/sketch-tools/definition'
 import { getSketchToolDefinition } from '@/domain/sketch-tools/registry'
+import type { SketchSnapCandidate, SketchSnapSourceRef } from '@/domain/sketch-snapping/snap-candidates'
+import {
+  collectSketchSnapGeometries,
+  resolveSketchSnap,
+} from '@/domain/sketch-snapping/snap-candidates'
 
 export type { SketchDraftEntity, SketchToolId } from '@/domain/sketch-tools/definition'
 export type { SketchConstraintToolId } from '@/domain/sketch-constraints/definition'
 
 export type SketchConstructionToolId = 'construction'
-export type SketchAuthoringToolId = SketchToolId | SketchConstraintToolId | SketchConstructionToolId
+export type SketchReferenceToolId = 'projectReference'
+export type SketchAuthoringToolId =
+  | SketchToolId
+  | SketchConstraintToolId
+  | SketchConstructionToolId
+  | SketchReferenceToolId
 export type SketchSessionStatus = 'idle' | 'drawing' | 'collectingTargets' | 'awaitingValue'
 
 export interface SketchConstraintAuthoringState {
@@ -88,7 +102,7 @@ export interface SketchAnnotationDescriptor {
   target: SketchConstraintRef | SketchDimensionRef
   glyphKind: SketchAnnotationGlyphKind
   anchor: SketchToolAnchorDescriptor
-  affectedGeometryRefs: readonly (SketchEntityRef | SketchPointRef)[]
+  affectedGeometryRefs: readonly PrimitiveRef[]
   label: string
   detail: string
   status: 'constraint' | 'dimension'
@@ -103,6 +117,7 @@ export type SketchAnnotationGlyphKind =
   | 'constraintFixed'
   | 'constraintAngle'
   | 'constraintPerpendicular'
+  | 'constraintTangent'
   | 'dimensionDistance'
   | 'dimensionHorizontal'
   | 'dimensionVertical'
@@ -130,6 +145,7 @@ export interface SketchSessionState {
   activeTool: SketchAuthoringToolId | null
   status: SketchSessionStatus
   constructionTargetPicking: boolean
+  referenceTargetPicking: boolean
   constructionModifierActive: boolean
   pointerDownPoint: SketchPoint | null
   livePoint: SketchPoint | null
@@ -139,8 +155,12 @@ export interface SketchSessionState {
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null
   activeEditTarget: SketchPointRef | null
   activeDrag: SketchGeometryDragState | null
+  activeSnap: SketchSnapCandidate | null
+  drawStartSnap: SketchSnapCandidate | null
   sequence: number
   solvedRegions: RegionRecord[]
+  projectedReferences: ProjectedSketchReferenceRecord[]
+  projectionDiagnostics: ProjectedSketchReferenceRecord['diagnostics']
   commitRequest: Omit<CommitSketchRequest, 'contractVersion' | 'documentId' | 'baseRevisionId'> | null
   validationMessage: string | null
 }
@@ -160,6 +180,7 @@ export interface SketchSessionDisplayRenderable {
   geometry: RenderableEntityRecord['geometry']
   target: PrimitiveRef | null
   linePattern: 'solid' | 'dashed'
+  role: 'local' | 'reference'
 }
 
 export type SketchHistoryCursor =
@@ -352,7 +373,17 @@ export function getPreviousSketchHistoryCursor(session: SketchSessionState): Ske
     return null
   }
 
-  return cursorIndex > -1 ? getSketchHistoryCursorForIndex(items, cursorIndex - 1) : null
+  if (cursorIndex <= -1) {
+    return null
+  }
+
+  const currentSequence = getHistorySequence(items[cursorIndex]?.id ?? '')
+  let previousIndex = cursorIndex - 1
+  while (previousIndex >= 0 && getHistorySequence(items[previousIndex]?.id ?? '') === currentSequence) {
+    previousIndex -= 1
+  }
+
+  return getSketchHistoryCursorForIndex(items, previousIndex)
 }
 
 export function getNextSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
@@ -364,7 +395,20 @@ export function getNextSketchHistoryCursor(session: SketchSessionState): SketchH
   }
 
   const nextIndex = cursorIndex + 1
-  return nextIndex < items.length ? getSketchHistoryCursorForIndex(items, nextIndex) : null
+  if (nextIndex >= items.length) {
+    return null
+  }
+
+  const nextSequence = getHistorySequence(items[nextIndex]?.id ?? '')
+  let sequenceTailIndex = nextIndex
+  while (
+    sequenceTailIndex + 1 < items.length
+    && getHistorySequence(items[sequenceTailIndex + 1]?.id ?? '') === nextSequence
+  ) {
+    sequenceTailIndex += 1
+  }
+
+  return getSketchHistoryCursorForIndex(items, sequenceTailIndex)
 }
 
 function getEntityPointIds(entity: SketchEntityDefinition) {
@@ -454,6 +498,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -463,8 +508,12 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
     sequence: getNextDefinitionSequence(sketch.sketch.definition),
     solvedRegions: [...sketch.sketch.regions],
+    projectedReferences: [],
+    projectionDiagnostics: [],
     commitRequest: buildCommitRequest({
       sketchId: sketch.sketchId,
       sketchLabel: sketch.label,
@@ -494,6 +543,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -503,8 +553,12 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
     sequence: 0,
     solvedRegions: [],
+    projectedReferences: [],
+    projectionDiagnostics: [],
     commitRequest: null,
     validationMessage: null,
   }
@@ -895,6 +949,7 @@ function activateSketchConstraintTool(
     activeTool: toolId,
     status: 'collectingTargets',
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -906,6 +961,8 @@ function activateSketchConstraintTool(
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
   }
 }
 
@@ -956,6 +1013,10 @@ function getTargetKey(target: PrimitiveRef) {
       return target.constructionId
     case 'region':
       return `${target.sketchId}:${target.regionId}`
+    case 'projectedReferenceGeometry':
+      return `${target.referenceId}:${target.geometryId}`
+    case 'sketchExternalReference':
+      return target.referenceId
   }
 }
 
@@ -986,6 +1047,40 @@ function buildConstructionTargetPresentation(): SketchToolPresentationSchema {
   }
 }
 
+function buildReferenceTargetPresentation(validationMessage: string | null = null): SketchToolPresentationSchema {
+  return {
+    prompts: [
+      {
+        id: 'reference-prompt',
+        text: 'Select model or existing sketch geometry to reference',
+      },
+    ],
+    steps: [{ id: 'reference-target', label: 'Reference geometry' }],
+    selectionGuide: {
+      id: 'reference-selection-guide',
+      label: 'Select reference geometry',
+      acceptedKinds: ['point', 'line', 'circle', 'arc'],
+      selectedCount: 0,
+      requiredCount: 1,
+      hoverLabel: null,
+    },
+    validation: validationMessage
+      ? [{
+          id: 'reference-validation',
+          message: validationMessage,
+          severity: 'warning',
+        }]
+      : [],
+    completionHints: [
+      {
+        id: 'reference-completion',
+        text: 'Accepted references stay derived and read-only',
+        ready: false,
+      },
+    ],
+  }
+}
+
 function withConstructionFlag(
   entities: readonly SketchDraftEntity[],
   isConstruction: boolean,
@@ -996,11 +1091,18 @@ function withConstructionFlag(
 }
 
 function isDrawingSketchTool(toolId: SketchAuthoringToolId | null): toolId is SketchToolId {
-  return toolId !== null && !isRegisteredSketchConstraintToolId(toolId) && toolId !== 'construction'
+  return toolId !== null
+    && !isRegisteredSketchConstraintToolId(toolId)
+    && toolId !== 'construction'
+    && toolId !== 'projectReference'
 }
 
 export function isSketchConstructionSelected(session: SketchSessionState) {
   return session.constructionTargetPicking || session.constructionModifierActive
+}
+
+export function isSketchReferenceToolSelected(session: SketchSessionState) {
+  return session.referenceTargetPicking
 }
 
 function beginSketchConstructionTool(session: SketchSessionState): SketchSessionState {
@@ -1010,6 +1112,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
       activeTool: null,
       status: 'idle',
       constructionTargetPicking: false,
+      referenceTargetPicking: false,
       constructionModifierActive: false,
       pointerDownPoint: null,
       livePoint: null,
@@ -1021,6 +1124,8 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
       selectedAnnotation: null,
       activeEditTarget: null,
       activeDrag: null,
+      activeSnap: null,
+      drawStartSnap: null,
     }
   }
 
@@ -1029,6 +1134,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
     activeTool: 'construction',
     status: 'collectingTargets',
     constructionTargetPicking: true,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -1040,6 +1146,35 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
+  }
+}
+
+function beginSketchReferenceTool(session: SketchSessionState): SketchSessionState {
+  if (session.referenceTargetPicking) {
+    return clearActiveSketchTool(session)
+  }
+
+  return {
+    ...session,
+    activeTool: 'projectReference',
+    status: 'collectingTargets',
+    constructionTargetPicking: false,
+    referenceTargetPicking: true,
+    constructionModifierActive: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    validationMessage: null,
+    toolPresentation: buildReferenceTargetPresentation(),
+    constraintAuthoring: null,
+    activeAnnotationEdit: null,
+    selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
   }
 }
 
@@ -1048,10 +1183,15 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     return beginSketchConstructionTool(session)
   }
 
+  if (toolId === 'projectReference') {
+    return beginSketchReferenceTool(session)
+  }
+
   if (isRegisteredSketchConstraintToolId(toolId)) {
     return {
       ...activateSketchConstraintTool(session, toolId),
       constructionTargetPicking: false,
+      referenceTargetPicking: false,
     }
   }
 
@@ -1065,6 +1205,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     activeTool: toolId,
     status: activation.state.status,
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive,
     pointerDownPoint: activation.state.pointerDownPoint,
     livePoint: activation.state.livePoint,
@@ -1076,11 +1217,13 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
   }
 }
 
 export function clearActiveSketchTool(session: SketchSessionState): SketchSessionState {
-  if (session.activeTool === null && !isSketchConstructionSelected(session)) {
+  if (session.activeTool === null && !isSketchConstructionSelected(session) && !session.referenceTargetPicking) {
     return session
   }
 
@@ -1089,6 +1232,7 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -1100,6 +1244,8 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
   }
 }
 
@@ -1125,17 +1271,21 @@ export function updateSketchPointer(
       ...session,
       toolPresentation: buildConstraintToolPresentation(nextAuthoring),
       constraintAuthoring: nextAuthoring,
+      activeSnap: null,
     }
   }
 
   if (!isDrawingSketchTool(session.activeTool)) {
-    return session
+    return session.activeSnap || session.drawStartSnap
+      ? { ...session, activeSnap: null, drawStartSnap: null }
+      : session
   }
 
   const toolDefinition = getSketchToolDefinition(session.activeTool)
+  const snap = resolveSessionSnap(session, point)
   const result = toolDefinition.pointerMove({
     state: getToolRuntimeState(session),
-    point,
+    point: snap.point,
   })
 
   return {
@@ -1148,7 +1298,8 @@ export function updateSketchPointer(
       ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     ],
     validationMessage: result.state.validationMessage,
-    toolPresentation: result.presentation,
+    toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
+    activeSnap: snap.candidate,
   }
 }
 
@@ -1202,6 +1353,7 @@ export function beginSketchGeometryDrag(
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -1258,7 +1410,7 @@ function applySketchGeometryDrag(
     return session
   }
 
-  const edit = solveDraggedPointEdit(session.definition, drag.target.pointId, point)
+  const edit = solveDraggedPointEdit(session.definition, session.projectedReferences, drag.target.pointId, point)
 
   if (edit.kind === 'blocked') {
     return {
@@ -1301,6 +1453,7 @@ function applySketchGeometryDrag(
 
 function solveDraggedPointEdit(
   definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
   pointId: SketchPointId,
   position: SketchPoint,
 ): { kind: 'accepted'; definition: SketchDefinition } | { kind: 'blocked'; message: string } {
@@ -1317,6 +1470,7 @@ function solveDraggedPointEdit(
 
   const solved = solveSketchDefinitionWithDraggedPointTarget({
     definition,
+    projectedReferences,
     dragTarget: {
       kind: 'sketchPoint',
       pointId,
@@ -1388,6 +1542,7 @@ export function toggleSketchConstructionTarget(
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
+    referenceTargetPicking: false,
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
@@ -1402,6 +1557,176 @@ export function toggleSketchConstructionTarget(
     entities: definition.entities.flatMap((entity) =>
       mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
     ),
+    commitRequest: rebuildSessionCommitRequest(session, definition),
+    validationMessage: null,
+  }
+}
+
+function createReferenceId(sequence: number, target: PrimitiveRef): ReferenceId {
+  return `ref_${sequence}_${getTargetKey(target).replaceAll(/[^a-zA-Z0-9_-]/g, '-')}` as ReferenceId
+}
+
+function sourceMatchesTarget(reference: SketchReferenceDefinition, target: PrimitiveRef) {
+  if (reference.kind === 'modelReference') {
+    return getTargetKey(reference.source) === getTargetKey(target)
+  }
+
+  if (reference.kind === 'sketchReference') {
+    return getTargetKey(reference.source) === getTargetKey(target)
+  }
+
+  if (reference.kind === 'constructionPlane') {
+    return getTargetKey(reference.source) === getTargetKey(target)
+  }
+
+  return false
+}
+
+function createReferenceDefinition(
+  sequence: number,
+  target: PrimitiveRef,
+): SketchReferenceDefinition | { kind: 'unsupported'; message: string } {
+  switch (target.kind) {
+    case 'face':
+    case 'edge':
+    case 'vertex':
+      return {
+        referenceId: createReferenceId(sequence, target),
+        kind: 'modelReference',
+        label: `Reference ${target.kind}`,
+        source: target,
+        projectionMode: target.kind === 'face' ? 'useExistingCoplanarGeometry' : 'projectAlongPlaneNormal',
+      }
+    case 'sketch':
+    case 'sketchEntity':
+    case 'sketchPoint':
+      return {
+        referenceId: createReferenceId(sequence, target),
+        kind: 'sketchReference',
+        label: `Reference ${target.kind}`,
+        source: target,
+        projectionMode: 'useExistingCoplanarGeometry',
+      }
+    case 'construction':
+      return {
+        referenceId: createReferenceId(sequence, target),
+        kind: 'constructionPlane',
+        label: 'Reference construction plane',
+        source: target,
+        projectionMode: 'coplanar',
+      }
+    default:
+      return {
+        kind: 'unsupported',
+        message: `${target.kind} cannot be referenced from a sketch.`,
+      }
+  }
+}
+
+function appendReferenceDefinition(
+  definition: SketchDefinition,
+  reference: SketchReferenceDefinition,
+): SketchDefinition {
+  return {
+    ...definition,
+    referenceIds: [...definition.referenceIds, reference.referenceId],
+    references: [...definition.references, reference],
+  }
+}
+
+export function selectSketchReferenceTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
+  if (!session.referenceTargetPicking) {
+    return session
+  }
+
+  if (
+    (target.kind === 'sketch' || target.kind === 'sketchEntity' || target.kind === 'sketchPoint')
+    && target.sketchId === getSessionSketchId(session)
+  ) {
+    const message = 'Reference geometry must come from model topology or another existing sketch.'
+    return {
+      ...session,
+      validationMessage: message,
+      toolPresentation: buildReferenceTargetPresentation(message),
+    }
+  }
+
+  if (session.fullDefinition.references.some((reference) => sourceMatchesTarget(reference, target))) {
+    const message = 'That reference is already authored in this sketch.'
+    return {
+      ...session,
+      validationMessage: message,
+      toolPresentation: buildReferenceTargetPresentation(message),
+    }
+  }
+
+  const nextSequence = session.sequence + 1
+  const reference = createReferenceDefinition(nextSequence, target)
+
+  if (reference.kind === 'unsupported') {
+    return {
+      ...session,
+      validationMessage: reference.message,
+      toolPresentation: buildReferenceTargetPresentation(reference.message),
+    }
+  }
+
+  const fullDefinition = appendReferenceDefinition(session.fullDefinition, reference)
+  const definition = appendReferenceDefinition(session.definition, reference)
+
+  return {
+    ...session,
+    activeTool: null,
+    status: 'idle',
+    constructionTargetPicking: false,
+    referenceTargetPicking: false,
+    constructionModifierActive: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    toolPresentation: null,
+    constraintAuthoring: null,
+    activeAnnotationEdit: null,
+    selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    sequence: nextSequence,
+    definition,
+    fullDefinition,
+    commitRequest: rebuildSessionCommitRequest(session, definition),
+    validationMessage: null,
+  }
+}
+
+export function deleteSketchReferenceTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
+  if (target.kind !== 'projectedReferenceGeometry' && target.kind !== 'sketchExternalReference') {
+    return session
+  }
+
+  const removeFromDefinition = (definition: SketchDefinition): SketchDefinition => ({
+    ...definition,
+    referenceIds: definition.referenceIds.filter((referenceId) => referenceId !== target.referenceId),
+    references: definition.references.filter((reference) => reference.referenceId !== target.referenceId),
+  })
+  const fullDefinition = removeFromDefinition(session.fullDefinition)
+
+  if (fullDefinition === session.fullDefinition) {
+    return session
+  }
+
+  const definition = removeFromDefinition(session.definition)
+
+  return {
+    ...session,
+    fullDefinition,
+    definition,
+    projectedReferences: session.projectedReferences.filter((reference) => reference.referenceId !== target.referenceId),
+    projectionDiagnostics: session.projectionDiagnostics,
     commitRequest: rebuildSessionCommitRequest(session, definition),
     validationMessage: null,
   }
@@ -1464,11 +1789,455 @@ function getSessionSketchId(session: SketchSessionState): SketchId {
   return session.sketchId ?? ('sketch_draft' as SketchId)
 }
 
+const SNAP_INFERENCE_EPSILON = 1e-6
+
+function pointsAlmostEqual(left: SketchPoint, right: SketchPoint) {
+  return Math.hypot(left[0] - right[0], left[1] - right[1]) <= SNAP_INFERENCE_EPSILON
+}
+
+function projectedKindForSource(source: Extract<SketchSnapSourceRef, { kind: 'projectedGeometry' }>): NonNullable<ProjectedSketchGeometryRef['kind']> {
+  switch (source.geometryKind) {
+    case 'point':
+      return 'projectedPoint'
+    case 'lineSegment':
+      return 'projectedLineSegment'
+    case 'circle':
+      return 'projectedCircle'
+    case 'arc':
+      return 'projectedArc'
+  }
+}
+
+function projectedOperandFromSource(
+  source: Extract<SketchSnapSourceRef, { kind: 'projectedGeometry' }>,
+): Extract<ConstraintDefinition, { kind: 'pointOnProjectedCurve' }>['projectedCurve'] {
+  return {
+    kind: 'projectedGeometry',
+    reference: {
+      kind: projectedKindForSource(source),
+      referenceId: source.referenceId,
+      geometryId: source.geometryId,
+    },
+  }
+}
+
+function localPointOperand(pointId: SketchPointId): Extract<ConstraintDefinition, { kind: 'midpoint' }>['point'] {
+  return { kind: 'localPoint', pointId }
+}
+
+function localEntityOperand(entityId: SketchEntityId): Extract<ConstraintDefinition, { kind: 'midpoint' }>['line'] {
+  return { kind: 'localEntity', entityId }
+}
+
+function getEntityEndpointAtPoint(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  point: SketchPoint,
+): SketchPointId | null {
+  const entity = definition.entities.find((entry) => entry.entityId === entityId)
+
+  if (!entity) {
+    return null
+  }
+
+  const candidatePointIds =
+    entity.kind === 'lineSegment'
+      ? [entity.startPointId, entity.endPointId]
+      : entity.kind === 'arc'
+        ? [entity.startPointId, entity.endPointId]
+        : entity.kind === 'point'
+          ? [entity.pointId]
+          : []
+
+  for (const pointId of candidatePointIds) {
+    const candidate = definition.points.find((entry) => entry.pointId === pointId)
+    if (candidate && pointsAlmostEqual(candidate.position, point)) {
+      return pointId
+    }
+  }
+
+  return null
+}
+
+function getEntityCenterPointId(definition: SketchDefinition, entityId: SketchEntityId): SketchPointId | null {
+  const entity = definition.entities.find((entry) => entry.entityId === entityId)
+
+  return entity?.kind === 'circle' || entity?.kind === 'arc'
+    ? entity.centerPointId
+    : null
+}
+
+function getPatchPointIdsAtPosition(
+  patch: SketchToolCommitContribution,
+  point: SketchPoint,
+): SketchPointId[] {
+  return patch.points
+    .filter((candidate) => pointsAlmostEqual(candidate.position, point))
+    .map((candidate) => candidate.pointId)
+}
+
+function getPatchLineEntityId(patch: SketchToolCommitContribution): SketchEntityId | null {
+  return patch.entities.find((entity) => entity.kind === 'lineSegment')?.entityId ?? null
+}
+
+function getPatchCircleLikeEntityAtCenter(
+  patch: SketchToolCommitContribution,
+  pointId: SketchPointId,
+): SketchEntityId | null {
+  return patch.entities.find((entity) =>
+    (entity.kind === 'circle' || entity.kind === 'arc') && entity.centerPointId === pointId,
+  )?.entityId ?? null
+}
+
+function addConstraint(
+  constraints: ConstraintDefinition[],
+  constraint: ConstraintDefinition | null,
+) {
+  if (constraint) {
+    constraints.push(constraint)
+  }
+}
+
+function inferPointSnapConstraints(input: {
+  previousDefinition: SketchDefinition
+  patch: SketchToolCommitContribution
+  candidate: SketchSnapCandidate
+  snapRole: 'start' | 'end'
+  pointId: SketchPointId
+  sequence: number
+  createConstraintId: (suffix: string) => ConstraintId
+}): ConstraintDefinition[] {
+  const constraints: ConstraintDefinition[] = []
+  const localPoint = localPointOperand(input.pointId)
+  const createId = (suffix: string) =>
+    input.createConstraintId(`${input.snapRole}-${input.pointId}-${suffix}`)
+  const localCircleLikeEntityId = getPatchCircleLikeEntityAtCenter(input.patch, input.pointId)
+
+  const addPointOnSource = (source: SketchSnapSourceRef, index: number) => {
+    if (source.kind === 'localEntity') {
+      addConstraint(constraints, {
+        constraintId: createId(`inferred-point-on-${index}`),
+        kind: 'pointOnCurve',
+        label: `Inferred point on curve ${input.sequence}`,
+        point: localPoint,
+        curve: localEntityOperand(source.entityId),
+      })
+      return
+    }
+
+    if (source.kind === 'projectedGeometry') {
+      addConstraint(constraints, {
+        constraintId: createId(`inferred-point-on-projected-${index}`),
+        kind: 'pointOnProjectedCurve',
+        label: `Inferred point on projected curve ${input.sequence}`,
+        point: localPoint,
+        projectedCurve: projectedOperandFromSource(source),
+      })
+    }
+  }
+
+  input.candidate.sources.forEach((source, index) => {
+    if (source.kind === 'transientAnchor') {
+      return
+    }
+
+    if (input.candidate.kind === 'endpoint') {
+      if (source.kind === 'localPoint') {
+        addConstraint(constraints, {
+          constraintId: createId(`inferred-coincident-${index}`),
+          kind: 'coincident',
+          label: `Inferred coincident ${input.sequence}`,
+          pointIds: [input.pointId, source.pointId],
+        })
+        return
+      }
+
+      if (source.kind === 'localEntity') {
+        const endpointId = getEntityEndpointAtPoint(input.previousDefinition, source.entityId, input.candidate.point)
+        if (endpointId) {
+          addConstraint(constraints, {
+            constraintId: createId(`inferred-coincident-endpoint-${index}`),
+            kind: 'coincident',
+            label: `Inferred coincident ${input.sequence}`,
+            pointIds: [input.pointId, endpointId],
+          })
+        }
+        return
+      }
+
+      if (source.kind === 'projectedGeometry' && source.geometryKind === 'point') {
+        addConstraint(constraints, {
+          constraintId: createId(`inferred-coincident-projected-${index}`),
+          kind: 'coincidentProjectedPoint',
+          label: `Inferred coincident projected point ${input.sequence}`,
+          point: localPoint,
+          projectedPoint: projectedOperandFromSource(source),
+        })
+      }
+      return
+    }
+
+    if (input.candidate.kind === 'center') {
+      if (source.kind === 'localEntity') {
+        if (localCircleLikeEntityId && (source.geometryKind === 'circle' || source.geometryKind === 'arc')) {
+          addConstraint(constraints, {
+            constraintId: createId(`inferred-concentric-${index}`),
+            kind: 'concentric',
+            label: `Inferred concentric ${input.sequence}`,
+            entityIds: [localCircleLikeEntityId, source.entityId],
+          })
+          return
+        }
+
+        const centerPointId = getEntityCenterPointId(input.previousDefinition, source.entityId)
+        if (centerPointId) {
+          addConstraint(constraints, {
+            constraintId: createId(`inferred-coincident-center-${index}`),
+            kind: 'coincident',
+            label: `Inferred center coincident ${input.sequence}`,
+            pointIds: [input.pointId, centerPointId],
+          })
+        }
+        return
+      }
+
+      if (
+        source.kind === 'projectedGeometry'
+        && localCircleLikeEntityId
+        && (source.geometryKind === 'circle' || source.geometryKind === 'arc')
+      ) {
+        addConstraint(constraints, {
+          constraintId: createId(`inferred-concentric-projected-${index}`),
+          kind: 'concentricProjectedCurve',
+          label: `Inferred concentric projected curve ${input.sequence}`,
+          curve: localEntityOperand(localCircleLikeEntityId),
+          projectedCurve: projectedOperandFromSource(source),
+        })
+      }
+      return
+    }
+
+    if (input.candidate.kind === 'midpoint') {
+      if (source.kind === 'localEntity' && source.geometryKind === 'lineSegment') {
+        addConstraint(constraints, {
+          constraintId: createId(`inferred-midpoint-${index}`),
+          kind: 'midpoint',
+          label: `Inferred midpoint ${input.sequence}`,
+          point: localPoint,
+          line: localEntityOperand(source.entityId),
+        })
+        return
+      }
+
+      if (source.kind === 'projectedGeometry' && source.geometryKind === 'lineSegment') {
+        addConstraint(constraints, {
+          constraintId: createId(`inferred-midpoint-projected-${index}`),
+          kind: 'midpointProjectedLine',
+          label: `Inferred projected midpoint ${input.sequence}`,
+          point: localPoint,
+          projectedLine: projectedOperandFromSource(source),
+        })
+      }
+      return
+    }
+
+    if (
+      input.candidate.kind === 'nearestOnLine'
+      || input.candidate.kind === 'nearestOnCircle'
+      || input.candidate.kind === 'nearestOnArc'
+      || input.candidate.kind === 'intersection'
+    ) {
+      addPointOnSource(source, index)
+    }
+  })
+
+  return constraints
+}
+
+function inferLineSnapConstraints(input: {
+  patch: SketchToolCommitContribution
+  candidate: SketchSnapCandidate | null
+  endPointId: SketchPointId | null
+  sequence: number
+  createConstraintId: (suffix: string) => ConstraintId
+}): ConstraintDefinition[] {
+  const candidate = input.candidate
+  const lineEntityId = getPatchLineEntityId(input.patch)
+  if (!candidate || !lineEntityId || !input.endPointId) {
+    return []
+  }
+
+  const constraints: ConstraintDefinition[] = []
+  const localLine = localEntityOperand(lineEntityId)
+  const localEndPoint = localPointOperand(input.endPointId)
+
+  if (candidate.kind === 'horizontalAlignment') {
+    addConstraint(constraints, {
+      constraintId: input.createConstraintId('inferred-horizontal'),
+      kind: 'horizontal',
+      label: `Inferred horizontal ${input.sequence}`,
+      entityId: lineEntityId,
+    })
+  }
+
+  if (candidate.kind === 'verticalAlignment') {
+    addConstraint(constraints, {
+      constraintId: input.createConstraintId('inferred-vertical'),
+      kind: 'vertical',
+      label: `Inferred vertical ${input.sequence}`,
+      entityId: lineEntityId,
+    })
+  }
+
+  candidate.sources.forEach((source, index) => {
+    if (source.kind === 'transientAnchor') {
+      return
+    }
+
+    if (
+      candidate.kind === 'perpendicularFoot'
+      && (source.kind === 'localEntity' || source.kind === 'projectedGeometry')
+      && source.geometryKind === 'lineSegment'
+    ) {
+      if (source.kind === 'localEntity') {
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-perpendicular-${index}`),
+          kind: 'perpendicular',
+          label: `Inferred perpendicular ${input.sequence}`,
+          entityIds: [lineEntityId, source.entityId],
+        })
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-foot-on-line-${index}`),
+          kind: 'pointOnCurve',
+          label: `Inferred perpendicular foot ${input.sequence}`,
+          point: localEndPoint,
+          curve: localEntityOperand(source.entityId),
+        })
+        return
+      }
+
+      if (source.kind === 'projectedGeometry') {
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-perpendicular-projected-${index}`),
+          kind: 'perpendicularProjectedLine',
+          label: `Inferred perpendicular projected line ${input.sequence}`,
+          line: localLine,
+          projectedLine: projectedOperandFromSource(source),
+        })
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-foot-on-projected-${index}`),
+          kind: 'pointOnProjectedCurve',
+          label: `Inferred perpendicular foot projected ${input.sequence}`,
+          point: localEndPoint,
+          projectedCurve: projectedOperandFromSource(source),
+        })
+      }
+      return
+    }
+
+    if (
+      candidate.kind === 'tangent'
+      && (source.kind === 'localEntity' || source.kind === 'projectedGeometry')
+      && (source.geometryKind === 'circle' || source.geometryKind === 'arc')
+    ) {
+      if (source.kind === 'localEntity') {
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-tangent-${index}`),
+          kind: 'tangent',
+          label: `Inferred tangent ${input.sequence}`,
+          entityIds: [lineEntityId, source.entityId],
+          relation: 'external',
+        })
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-tangent-point-on-${index}`),
+          kind: 'pointOnCurve',
+          label: `Inferred tangent point ${input.sequence}`,
+          point: localEndPoint,
+          curve: localEntityOperand(source.entityId),
+        })
+        return
+      }
+
+      if (source.kind === 'projectedGeometry') {
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-tangent-projected-${index}`),
+          kind: 'tangentProjectedCurve',
+          label: `Inferred tangent projected curve ${input.sequence}`,
+          curve: localLine,
+          projectedCurve: projectedOperandFromSource(source),
+          relation: 'external',
+        })
+        addConstraint(constraints, {
+          constraintId: input.createConstraintId(`inferred-tangent-point-projected-${index}`),
+          kind: 'pointOnProjectedCurve',
+          label: `Inferred tangent point projected ${input.sequence}`,
+          point: localEndPoint,
+          projectedCurve: projectedOperandFromSource(source),
+        })
+      }
+    }
+  })
+
+  return constraints
+}
+
+function appendInferredSnapConstraints(input: {
+  previousDefinition: SketchDefinition
+  patch: SketchToolCommitContribution
+  activeTool: SketchToolId
+  startSnap: SketchSnapCandidate | null
+  endSnap: SketchSnapCandidate | null
+  sequence: number
+  createConstraintId: (suffix: string) => ConstraintId
+}): SketchToolCommitContribution {
+  const constraints = [...(input.patch.constraints ?? [])]
+
+  for (const [snapRole, snap] of [
+    ['start', input.startSnap],
+    ['end', input.endSnap],
+  ] as const) {
+    if (!snap) {
+      continue
+    }
+
+    for (const pointId of getPatchPointIdsAtPosition(input.patch, snap.point)) {
+      constraints.push(...inferPointSnapConstraints({
+        previousDefinition: input.previousDefinition,
+        patch: input.patch,
+        candidate: snap,
+        snapRole,
+        pointId,
+        sequence: input.sequence,
+        createConstraintId: input.createConstraintId,
+      }))
+    }
+  }
+
+  if (input.activeTool === 'line') {
+    const endPointId = input.patch.entities.find((entity) => entity.kind === 'lineSegment')?.endPointId ?? null
+    constraints.push(...inferLineSnapConstraints({
+      patch: input.patch,
+      candidate: input.endSnap,
+      endPointId,
+      sequence: input.sequence,
+      createConstraintId: input.createConstraintId,
+    }))
+  }
+
+  return constraints.length === (input.patch.constraints ?? []).length
+    ? input.patch
+    : {
+        ...input.patch,
+        constraints,
+      }
+}
+
 export function startSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {
   if (!isDrawingSketchTool(session.activeTool)) {
     return session
   }
   const toolDefinition = getSketchToolDefinition(session.activeTool)
+  const snap = resolveSessionSnap(session, point)
   const result = toolDefinition.pointerRelease({
     state: {
       status: 'idle',
@@ -1476,7 +2245,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
       livePoint: null,
       validationMessage: null,
     } satisfies import('@/domain/sketch-tools/definition').SketchToolRuntimeState,
-    point,
+    point: snap.point,
   })
 
   return {
@@ -1489,7 +2258,9 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
       ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     ],
     validationMessage: result.state.validationMessage,
-    toolPresentation: result.presentation,
+    toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
+    activeSnap: snap.candidate,
+    drawStartSnap: snap.candidate,
   }
 }
 
@@ -1502,9 +2273,10 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
   }
 
   const toolDefinition = getSketchToolDefinition(session.activeTool)
+  const snap = resolveSessionSnap(session, point)
   const result = toolDefinition.pointerRelease({
     state: getToolRuntimeState(session),
-    point,
+    point: snap.point,
   })
 
   if (result.state.validationMessage) {
@@ -1515,17 +2287,22 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
       validationMessage: result.state.validationMessage,
-      toolPresentation: result.presentation,
+      toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
+      activeSnap: snap.candidate,
     }
   }
 
   const nextSequence = session.sequence + 1
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
-  const definitionPatch = toolDefinition.createCommitContribution({
+  const baseDefinitionPatch = toolDefinition.createCommitContribution({
     sequence: nextSequence,
     start: session.pointerDownPoint,
-    end: point,
+    end: snap.point,
     isConstruction: session.constructionModifierActive,
+    acceptedSnaps: {
+      start: session.drawStartSnap,
+      end: snap.candidate,
+    },
     factories: {
       createPointId: (suffix) => createPointId(nextSequence, suffix),
       createEntityId: (suffix) => createEntityId(nextSequence, suffix),
@@ -1538,6 +2315,15 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       createCircleEntity: (label, entityId, centerPointId, radius) =>
         createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, session.constructionModifierActive),
     },
+  })
+  const definitionPatch = appendInferredSnapConstraints({
+    previousDefinition: session.definition,
+    patch: baseDefinitionPatch,
+    activeTool: session.activeTool,
+    startSnap: session.drawStartSnap,
+    endSnap: snap.candidate,
+    sequence: nextSequence,
+    createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   })
   const history = applySketchHistoryContribution(session, definitionPatch)
   const acceptedEntities = history.definition.entities.flatMap((entity) =>
@@ -1568,6 +2354,99 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
+  }
+}
+
+function resolveSessionSnap(
+  session: SketchSessionState,
+  point: SketchPoint | null,
+): { point: SketchPoint | null; candidate: SketchSnapCandidate | null } {
+  if (!point || !isDrawingSketchTool(session.activeTool)) {
+    return { point, candidate: null }
+  }
+
+  const snap = resolveSketchSnap({
+    pointer: point,
+    geometries: collectSketchSnapGeometries({
+      definition: session.definition,
+      projectedReferences: session.projectedReferences,
+    }),
+    activeTool: session.activeTool,
+    activeAnchor: session.status === 'drawing' ? session.pointerDownPoint : null,
+    activeCandidateKey: session.activeSnap?.key ?? null,
+  })
+
+  return {
+    point: snap.snappedPoint,
+    candidate: snap.activeCandidate,
+  }
+}
+
+function withSnapPresentation(
+  presentation: SketchToolPresentationSchema,
+  candidate: SketchSnapCandidate | null,
+): SketchToolPresentationSchema {
+  if (!candidate) {
+    return presentation
+  }
+
+  return {
+    ...presentation,
+    overlays: [
+      ...(presentation.overlays ?? []),
+      ...getSnapConstraintPreviewOverlays(candidate),
+      {
+        id: 'active-snap',
+        kind: 'snapIndicator',
+        label: candidate.preview.label,
+        point: candidate.point,
+        candidateKind: candidate.kind,
+        glyphKind: candidate.preview.glyph,
+      },
+    ],
+  }
+}
+
+function getSnapConstraintPreviewOverlays(candidate: SketchSnapCandidate): SketchToolOverlayDescriptor[] {
+  const detail = getSnapConstraintPreviewDetail(candidate)
+
+  return detail
+    ? [{
+        id: 'active-snap-inferred-constraint',
+        kind: 'constraintPreview',
+        label: 'Inferred constraint',
+        detail,
+        anchor: { kind: 'sketchPoint', point: candidate.point, offset: { x: 18, y: 18 } },
+      }]
+    : []
+}
+
+function getSnapConstraintPreviewDetail(candidate: SketchSnapCandidate) {
+  switch (candidate.kind) {
+    case 'endpoint':
+      return 'Coincident'
+    case 'center':
+      return 'Concentric or coincident center'
+    case 'midpoint':
+      return 'Midpoint'
+    case 'nearestOnLine':
+      return 'Point on line'
+    case 'nearestOnCircle':
+      return 'Point on circle'
+    case 'nearestOnArc':
+      return 'Point on arc'
+    case 'intersection':
+      return 'Point on intersecting curves'
+    case 'horizontalAlignment':
+      return 'Horizontal'
+    case 'verticalAlignment':
+      return 'Vertical'
+    case 'perpendicularFoot':
+      return 'Perpendicular'
+    case 'tangent':
+      return 'Tangent'
   }
 }
 
@@ -1612,6 +2491,10 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
 
   if (session.validationMessage) {
     return session.validationMessage
+  }
+
+  if (session.projectionDiagnostics.length > 0) {
+    return session.projectionDiagnostics[0]?.message ?? 'Sketch reference projection has diagnostics'
   }
 
   if (session.activeDrag?.status === 'dragging') {
@@ -1673,7 +2556,7 @@ export function updateSketchConstraintHover(
   const hoverTarget =
     target === null
       ? null
-      : resolveSketchConstraintTarget(authoring.toolId, session.definition, target)
+      : resolveSketchConstraintTarget(authoring.toolId, session.definition, target, session.projectedReferences)
 
   return {
     ...session,
@@ -1698,7 +2581,7 @@ export function selectSketchConstraintTarget(
     return session
   }
 
-  const resolved = resolveSketchConstraintTarget(authoring.toolId, session.definition, target)
+  const resolved = resolveSketchConstraintTarget(authoring.toolId, session.definition, target, session.projectedReferences)
 
   if (!resolved) {
     return session
@@ -1913,7 +2796,7 @@ function commitSketchAnnotationEditValue(
     return session
   }
 
-  const solved = solveEditedAnnotationDefinition(updatedFullDefinition)
+  const solved = solveEditedAnnotationDefinition(updatedFullDefinition, session.projectedReferences)
 
   if (solved.kind === 'blocked') {
     return {
@@ -1944,9 +2827,13 @@ function commitSketchAnnotationEditValue(
   }
 }
 
-function solveEditedAnnotationDefinition(definition: SketchDefinition) {
+function solveEditedAnnotationDefinition(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+) {
   const solved = solveSketchDefinitionCore({
     definition,
+    projectedReferences,
     tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
     partialSolvePolicy: 'failOnConflict',
   })
@@ -2270,7 +3157,7 @@ export function getSketchAnnotationDescriptors(
       id: constraint.constraintId,
       target: createSketchConstraintRef(sketchId, constraint.constraintId),
       glyphKind: getConstraintGlyphKind(constraint),
-      anchor: createConstraintAnnotationAnchor(session.definition, constraint),
+      anchor: createConstraintAnnotationAnchor(session, constraint),
       affectedGeometryRefs: getConstraintAffectedGeometryRefs(sketchId, constraint),
       label: constraint.label,
       detail: describeConstraint(constraint),
@@ -2306,7 +3193,23 @@ function getConstraintGlyphKind(constraint: ConstraintDefinition): SketchAnnotat
     case 'angle':
       return 'constraintAngle'
     case 'perpendicular':
+    case 'perpendicularProjectedLine':
       return 'constraintPerpendicular'
+    case 'tangentProjectedCurve':
+    case 'tangent':
+      return 'constraintTangent'
+    case 'midpoint':
+    case 'midpointProjectedLine':
+      return 'constraintCoincident'
+    case 'coincidentProjectedPoint':
+    case 'pointOnProjectedCurve':
+    case 'pointOnCurve':
+      return 'constraintCoincident'
+    case 'parallelProjectedLine':
+      return 'constraintParallel'
+    case 'concentric':
+    case 'concentricProjectedCurve':
+      return 'constraintCoincident'
   }
 }
 
@@ -2337,7 +3240,7 @@ function getDimensionGlyphKind(dimension: DimensionDefinition): SketchAnnotation
 function getConstraintAffectedGeometryRefs(
   sketchId: SketchId,
   constraint: ConstraintDefinition,
-): readonly (SketchEntityRef | SketchPointRef)[] {
+): readonly PrimitiveRef[] {
   switch (constraint.kind) {
     case 'coincident':
     case 'angle':
@@ -2350,7 +3253,50 @@ function getConstraintAffectedGeometryRefs(
     case 'parallel':
     case 'perpendicular':
     case 'equalLength':
+    case 'tangent':
+    case 'concentric':
       return constraint.entityIds.map((entityId) => createSketchEntityRef(sketchId, entityId))
+    case 'midpoint':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createSketchEntityRef(sketchId, constraint.line.entityId),
+      ]
+    case 'midpointProjectedLine':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createProjectedPrimitiveRef(constraint.projectedLine.reference),
+      ]
+    case 'pointOnCurve':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createSketchEntityRef(sketchId, constraint.curve.entityId),
+      ]
+    case 'coincidentProjectedPoint':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createProjectedPrimitiveRef(constraint.projectedPoint.reference),
+      ]
+    case 'pointOnProjectedCurve':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+      ]
+    case 'parallelProjectedLine':
+    case 'perpendicularProjectedLine':
+      return [
+        createSketchEntityRef(sketchId, constraint.line.entityId),
+        createProjectedPrimitiveRef(constraint.projectedLine.reference),
+      ]
+    case 'tangentProjectedCurve':
+      return [
+        createSketchEntityRef(sketchId, constraint.curve.entityId),
+        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+      ]
+    case 'concentricProjectedCurve':
+      return [
+        createSketchEntityRef(sketchId, constraint.curve.entityId),
+        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+      ]
   }
 }
 
@@ -2375,9 +3321,10 @@ function getDimensionAffectedGeometryRefs(
 }
 
 function createConstraintAnnotationAnchor(
-  definition: SketchDefinition,
+  session: SketchSessionState,
   constraint: ConstraintDefinition,
 ): SketchToolAnchorDescriptor {
+  const definition = session.definition
   switch (constraint.kind) {
     case 'coincident':
     case 'angle':
@@ -2390,7 +3337,50 @@ function createConstraintAnnotationAnchor(
     case 'parallel':
     case 'perpendicular':
     case 'equalLength':
+    case 'tangent':
+    case 'concentric':
       return createOffsetAnnotationAnchor(getAverageEntityAnchor(definition, constraint.entityIds))
+    case 'midpoint':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getEntityAnchor(definition, constraint.line.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'midpointProjectedLine':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getProjectedGeometryAnchor(session, constraint.projectedLine.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'pointOnCurve':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getEntityAnchor(definition, constraint.curve.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'coincidentProjectedPoint':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getProjectedGeometryAnchor(session, constraint.projectedPoint.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'pointOnProjectedCurve':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'parallelProjectedLine':
+    case 'perpendicularProjectedLine':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getEntityAnchor(definition, constraint.line.entityId),
+        getProjectedGeometryAnchor(session, constraint.projectedLine.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'tangentProjectedCurve':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getEntityAnchor(definition, constraint.curve.entityId),
+        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'concentricProjectedCurve':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getEntityAnchor(definition, constraint.curve.entityId),
+        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
   }
 }
 
@@ -2424,6 +3414,53 @@ function createOffsetAnnotationAnchor(
     kind: 'sketchPoint',
     point: point ?? [0, 0],
     offset,
+  }
+}
+
+function createProjectedPrimitiveRef(
+  reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+): PrimitiveRef {
+  return {
+    kind: 'projectedReferenceGeometry',
+    referenceId: reference.referenceId,
+    geometryId: reference.geometryId,
+    geometryKind: reference.kind === 'projectedPoint'
+      ? 'point'
+      : reference.kind === 'projectedLineSegment'
+        ? 'lineSegment'
+        : reference.kind === 'projectedCircle'
+          ? 'circle'
+          : 'arc',
+  }
+}
+
+function getProjectedGeometryAnchor(
+  session: SketchSessionState,
+  reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+): SketchPoint | null {
+  const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
+
+  if (!projectedReference || projectedReference.status !== 'projected') {
+    return null
+  }
+
+  const geometry = projectedReference.geometry.find((entry) => entry.geometryId === reference.geometryId)
+
+  if (!geometry) {
+    return null
+  }
+
+  switch (geometry.kind) {
+    case 'point':
+      return geometry.position
+    case 'lineSegment':
+      return [
+        (geometry.startPosition[0] + geometry.endPosition[0]) / 2,
+        (geometry.startPosition[1] + geometry.endPosition[1]) / 2,
+      ]
+    case 'circle':
+    case 'arc':
+      return geometry.centerPosition
   }
 }
 
@@ -2520,8 +3557,22 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
         displayRadius: 0.16,
       },
       linePattern: 'solid' as const,
+      role: 'local' as const,
     })),
     ...session.entities.map((entity, index) => createDisplayRenderableForEntity(session, entity, index)),
+    ...session.definition.references.flatMap((reference, index) => {
+      const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
+      if (projectedReference && projectedReference.status === 'projected' && projectedReference.geometry.length > 0) {
+        return []
+      }
+
+      return [createDisplayRenderableForReferenceRecord(session, reference.referenceId, index)]
+    }),
+    ...session.projectedReferences.flatMap((reference) =>
+      reference.geometry.map((geometry, index) =>
+        createDisplayRenderableForProjectedGeometry(session, reference.referenceId, geometry, index),
+      ),
+    ),
   ]
 }
 
@@ -2546,6 +3597,7 @@ function createDisplayRenderableForEntity(
         isClosed: false,
       },
       linePattern: entity.isConstruction ? 'dashed' : 'solid',
+      role: 'local',
     }
   }
 
@@ -2570,6 +3622,180 @@ function createDisplayRenderableForEntity(
       isClosed: true,
     },
     linePattern: entity.isConstruction ? 'dashed' : 'solid',
+    role: 'local',
+  }
+}
+
+function createReferenceRecordTarget(referenceId: ReferenceId): PrimitiveRef {
+  return {
+    kind: 'sketchExternalReference',
+    referenceId,
+  }
+}
+
+function createDisplayRenderableForReferenceRecord(
+  session: SketchSessionState,
+  referenceId: ReferenceId,
+  index: number,
+): SketchSessionDisplayRenderable {
+  const column = index % 6
+  const row = Math.floor(index / 6)
+
+  return {
+    id: `renderable_reference_marker_${referenceId}` as RenderableId,
+    label: `Reference ${referenceId}`,
+    target: createReferenceRecordTarget(referenceId),
+    geometry: {
+      kind: 'marker',
+      position: mapSketchPointToWorld(session.plane, [
+        -0.72 + column * 0.24,
+        -0.72 - row * 0.24,
+      ]),
+      displayRadius: 0.12,
+    },
+    linePattern: 'solid',
+    role: 'reference',
+  }
+}
+
+function createProjectedGeometryTarget(
+  referenceId: ReferenceId,
+  geometry: ProjectedSketchReferenceRecord['geometry'][number],
+): PrimitiveRef {
+  return {
+    kind: 'projectedReferenceGeometry',
+    referenceId,
+    geometryId: geometry.geometryId,
+    geometryKind: geometry.kind,
+  }
+}
+
+function createDisplayRenderableForProjectedGeometry(
+  session: SketchSessionState,
+  referenceId: ReferenceId,
+  geometry: ProjectedSketchReferenceRecord['geometry'][number],
+  index: number,
+): SketchSessionDisplayRenderable {
+  const target = createProjectedGeometryTarget(referenceId, geometry)
+
+  if (geometry.kind === 'point') {
+    return {
+      id: `renderable_projected_${referenceId}_${geometry.geometryId}_${index}` as RenderableId,
+      label: `Projected ${geometry.geometryId}`,
+      target,
+      geometry: {
+        kind: 'marker',
+        position: mapSketchPointToWorld(session.plane, geometry.position),
+        displayRadius: 0.14,
+      },
+      linePattern: 'dashed',
+      role: 'reference',
+    }
+  }
+
+  if (geometry.kind === 'lineSegment') {
+    return {
+      id: `renderable_projected_${referenceId}_${geometry.geometryId}_${index}` as RenderableId,
+      label: `Projected ${geometry.geometryId}`,
+      target,
+      geometry: {
+        kind: 'polyline',
+        points: [
+          mapSketchPointToWorld(session.plane, geometry.startPosition),
+          mapSketchPointToWorld(session.plane, geometry.endPosition),
+        ],
+        isClosed: false,
+      },
+      linePattern: 'dashed',
+      role: 'reference',
+    }
+  }
+
+  if (geometry.kind === 'circle') {
+    const pointCount = 48
+    return {
+      id: `renderable_projected_${referenceId}_${geometry.geometryId}_${index}` as RenderableId,
+      label: `Projected ${geometry.geometryId}`,
+      target,
+      geometry: {
+        kind: 'polyline',
+        points: Array.from({ length: pointCount + 1 }, (_, pointIndex) => {
+          const angle = (Math.PI * 2 * pointIndex) / pointCount
+          return mapSketchPointToWorld(session.plane, [
+            geometry.centerPosition[0] + Math.cos(angle) * geometry.radius,
+            geometry.centerPosition[1] + Math.sin(angle) * geometry.radius,
+          ])
+        }),
+        isClosed: true,
+      },
+      linePattern: 'dashed',
+      role: 'reference',
+    }
+  }
+
+  const startAngle = Math.atan2(
+    geometry.startPosition[1] - geometry.centerPosition[1],
+    geometry.startPosition[0] - geometry.centerPosition[0],
+  )
+  const endAngle = Math.atan2(
+    geometry.endPosition[1] - geometry.centerPosition[1],
+    geometry.endPosition[0] - geometry.centerPosition[0],
+  )
+  const radius = Math.hypot(
+    geometry.startPosition[0] - geometry.centerPosition[0],
+    geometry.startPosition[1] - geometry.centerPosition[1],
+  )
+  const normalizedEnd = geometry.sweepDirection === 'counterClockwise' && endAngle < startAngle
+    ? endAngle + Math.PI * 2
+    : geometry.sweepDirection === 'clockwise' && endAngle > startAngle
+      ? endAngle - Math.PI * 2
+      : endAngle
+  const pointCount = 32
+
+  return {
+    id: `renderable_projected_${referenceId}_${geometry.geometryId}_${index}` as RenderableId,
+    label: `Projected ${geometry.geometryId}`,
+    target,
+    geometry: {
+      kind: 'polyline',
+      points: Array.from({ length: pointCount + 1 }, (_, pointIndex) => {
+        const angle = startAngle + (normalizedEnd - startAngle) * pointIndex / pointCount
+        return mapSketchPointToWorld(session.plane, [
+          geometry.centerPosition[0] + Math.cos(angle) * radius,
+          geometry.centerPosition[1] + Math.sin(angle) * radius,
+        ])
+      }),
+      isClosed: false,
+    },
+    linePattern: 'dashed',
+    role: 'reference',
+  }
+}
+
+export function updateSketchReferenceProjection(
+  session: SketchSessionState,
+  projectedReferences: ProjectedSketchReferenceRecord[],
+  diagnostics: ProjectedSketchReferenceRecord['diagnostics'],
+): SketchSessionState {
+  const referenceDiagnostics = projectedReferences.flatMap((reference) => [
+    ...reference.diagnostics,
+    ...(reference.status === 'projected'
+      ? []
+      : [{
+          code: `external-reference-${reference.status}`,
+          severity: 'warning' as const,
+          message: `Reference ${reference.referenceId} projection status: ${reference.status}.`,
+          target: null,
+        }]),
+  ])
+  const projectionDiagnostics = [...diagnostics, ...referenceDiagnostics]
+  const validationMessage = projectionDiagnostics.find((diagnostic) => diagnostic.severity !== 'info')?.message ?? null
+
+  return {
+    ...session,
+    projectedReferences,
+    projectionDiagnostics,
+    validationMessage,
   }
 }
 
@@ -2591,6 +3817,28 @@ function describeConstraint(constraint: ConstraintDefinition) {
       return `${(constraint.valueRadians * 180 / Math.PI).toFixed(1)} deg`
     case 'perpendicular':
       return 'Perpendicular lines'
+    case 'midpoint':
+      return 'Point at midpoint'
+    case 'midpointProjectedLine':
+      return 'Point at projected midpoint'
+    case 'pointOnCurve':
+      return 'Point on curve'
+    case 'coincidentProjectedPoint':
+      return 'Coincident projected point'
+    case 'pointOnProjectedCurve':
+      return 'Point on projected curve'
+    case 'parallelProjectedLine':
+      return 'Parallel to projected line'
+    case 'perpendicularProjectedLine':
+      return 'Perpendicular to projected line'
+    case 'tangentProjectedCurve':
+      return 'Tangent to projected curve'
+    case 'tangent':
+      return 'Tangent curves'
+    case 'concentric':
+      return 'Concentric curves'
+    case 'concentricProjectedCurve':
+      return 'Concentric with projected curve'
   }
 }
 

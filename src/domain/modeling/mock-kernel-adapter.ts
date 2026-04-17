@@ -2706,6 +2706,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
       definition: request.definition,
+      projectedReferences: projection.projectedReferences,
     })
 
     const commitDiagnostics = [
@@ -2748,6 +2749,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         planeSupport: request.plane.support,
         definition: request.definition,
         solvedSnapshot: solved.solvedSnapshot,
+        projectedReferences: structuredClone(projection.projectedReferences),
         regions: regions.regions.map((region) => ({ ...region, ownerRevisionId: nextRevisionId })),
       }
 

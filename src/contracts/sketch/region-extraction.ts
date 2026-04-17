@@ -1,5 +1,10 @@
 import type {
+  ProjectedSketchReferenceGeometry,
+  ProjectedSketchReferenceRecord,
+} from '@/contracts/solver/schema'
+import type {
   RegionLoopRecord,
+  RegionBoundarySegmentRecord,
   RegionRecord,
   SketchDefinition,
   SketchPoint2D,
@@ -13,6 +18,7 @@ import type {
   RegionId,
   RegionLoopId,
   RevisionId,
+  ReferenceId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -24,6 +30,7 @@ export interface SketchRegionExtractionInput {
   sketchId: SketchId
   solvedSnapshot: SolvedSketchSnapshot
   definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
 }
 
 export interface SketchRegionExtractionResult {
@@ -33,6 +40,7 @@ export interface SketchRegionExtractionResult {
 
 export interface SketchRingCandidate {
   kind: 'segments'
+  boundarySegments: RingBoundarySegment[]
   boundaryEntityIds: SketchEntityId[]
   boundaryPointIds: SketchPointId[]
   points: SketchPoint2D[]
@@ -40,16 +48,66 @@ export interface SketchRingCandidate {
 }
 
 type SegmentRecord = {
-  entityId: SketchEntityId
+  source: RegionBoundarySegmentRecord['source']
+  sourceKey: string
   startPointId: SketchPointId | null
   endPointId: SketchPointId | null
   start: SketchPoint2D
   end: SketchPoint2D
   startAngle: number
   endAngle: number
+  traversalDirection: 'forward' | 'reverse'
+}
+
+type RingBoundarySegment = {
+  source: RegionBoundarySegmentRecord['source']
+  startPointId: SketchPointId | null
+  endPointId: SketchPointId | null
+  traversalDirection: 'forward' | 'reverse'
 }
 
 const CIRCLE_REGION_SAMPLE_COUNT = 64
+
+function projectedKindForGeometry(geometry: ProjectedSketchReferenceGeometry): NonNullable<RegionBoundarySegmentRecord['source'] extends infer Source
+  ? Source extends { kind: 'projectedGeometry'; reference: infer Reference }
+    ? Reference extends { kind?: infer Kind }
+      ? Kind
+      : never
+    : never
+  : never> {
+  switch (geometry.kind) {
+    case 'point':
+      return 'projectedPoint'
+    case 'lineSegment':
+      return 'projectedLineSegment'
+    case 'circle':
+      return 'projectedCircle'
+    case 'arc':
+      return 'projectedArc'
+  }
+}
+
+function getProjectedGeometrySource(
+  reference: ProjectedSketchReferenceRecord,
+  geometry: ProjectedSketchReferenceGeometry,
+): Extract<RegionBoundarySegmentRecord['source'], { kind: 'projectedGeometry' }> {
+  return {
+    kind: 'projectedGeometry',
+    reference: {
+      kind: projectedKindForGeometry(geometry),
+      referenceId: reference.referenceId,
+      geometryId: geometry.geometryId,
+    },
+  }
+}
+
+function getSegmentSourceKey(source: RegionBoundarySegmentRecord['source']) {
+  if (source.kind === 'entity') {
+    return `entity:${source.entityId}`
+  }
+
+  return `projected:${source.reference.referenceId}:${source.reference.geometryId}`
+}
 
 function makeDiagnostic(
   code: string,
@@ -58,6 +116,24 @@ function makeDiagnostic(
   target: SketchSolveDiagnostic['target'],
 ): SketchSolveDiagnostic {
   return { code, severity, message, target }
+}
+
+function getAuthoredReferenceIds(definition: SketchDefinition): Set<ReferenceId> {
+  const recordedReferenceIds = new Set(definition.references.map((reference) => reference.referenceId))
+
+  return new Set(definition.referenceIds.filter((referenceId) => recordedReferenceIds.has(referenceId)))
+}
+
+function isAuthoredReference(definition: SketchDefinition, referenceId: ReferenceId) {
+  return getAuthoredReferenceIds(definition).has(referenceId)
+}
+
+function filterAuthoredProjectedReferences(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+) {
+  const authoredReferenceIds = getAuthoredReferenceIds(definition)
+  return projectedReferences.filter((reference) => authoredReferenceIds.has(reference.referenceId))
 }
 
 function pointKey(point: SketchPoint2D) {
@@ -133,19 +209,21 @@ function centroid(points: SketchPoint2D[]): SketchPoint2D {
 
 function reverseSegment(segment: SegmentRecord): SegmentRecord {
   return {
-    entityId: segment.entityId,
+    source: segment.source,
+    sourceKey: segment.sourceKey,
     startPointId: segment.endPointId,
     endPointId: segment.startPointId,
     start: segment.end,
     end: segment.start,
     startAngle: (segment.endAngle + Math.PI) % (Math.PI * 2),
     endAngle: (segment.startAngle + Math.PI) % (Math.PI * 2),
+    traversalDirection: segment.traversalDirection === 'forward' ? 'reverse' : 'forward',
   }
 }
 
 function equalsOrReverseEquals(left: SegmentRecord, right: SegmentRecord) {
   return (
-    left.entityId === right.entityId
+    left.sourceKey === right.sourceKey
     && ((equalsPoint(left.start, right.start) && equalsPoint(left.end, right.end))
       || (equalsPoint(left.start, right.end) && equalsPoint(left.end, right.start)))
   )
@@ -166,6 +244,7 @@ function cross(
 function buildSegments(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ) {
   const solvedLineMap = new Map(
     solvedSnapshot.solvedEntities
@@ -189,7 +268,8 @@ function buildSegments(
         return []
       }
       return [{
-        entityId: entity.entityId,
+        source: { kind: 'entity', entityId: entity.entityId },
+        sourceKey: getSegmentSourceKey({ kind: 'entity', entityId: entity.entityId }),
         startPointId: entity.startPointId,
         endPointId: entity.endPointId,
         start: solved.startPosition,
@@ -202,6 +282,7 @@ function buildSegments(
           solved.endPosition[1] - solved.startPosition[1],
           solved.endPosition[0] - solved.startPosition[0],
         ),
+        traversalDirection: 'forward' as const,
       } satisfies SegmentRecord]
     }
 
@@ -212,7 +293,8 @@ function buildSegments(
       }
 
       return [{
-        entityId: entity.entityId,
+        source: { kind: 'entity', entityId: entity.entityId },
+        sourceKey: getSegmentSourceKey({ kind: 'entity', entityId: entity.entityId }),
         startPointId: entity.startPointId,
         endPointId: entity.endPointId,
         start: solved.startPosition,
@@ -225,24 +307,82 @@ function buildSegments(
           solved.endPosition[1] - solved.centerPosition[1],
           solved.endPosition[0] - solved.centerPosition[0],
         ),
+        traversalDirection: 'forward' as const,
       } satisfies SegmentRecord]
     }
 
     return []
+  }).concat(buildProjectedSegments(projectedReferences))
+}
+
+function buildProjectedSegments(
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): SegmentRecord[] {
+  return projectedReferences.flatMap((reference) => {
+    if (reference.status !== 'projected') {
+      return []
+    }
+
+    return reference.geometry.flatMap((geometry): SegmentRecord[] => {
+      const source = getProjectedGeometrySource(reference, geometry)
+      const sourceKey = getSegmentSourceKey(source)
+
+      if (geometry.kind === 'lineSegment') {
+        return [{
+          source,
+          sourceKey,
+          startPointId: null,
+          endPointId: null,
+          start: geometry.startPosition,
+          end: geometry.endPosition,
+          startAngle: Math.atan2(
+            geometry.endPosition[1] - geometry.startPosition[1],
+            geometry.endPosition[0] - geometry.startPosition[0],
+          ),
+          endAngle: Math.atan2(
+            geometry.endPosition[1] - geometry.startPosition[1],
+            geometry.endPosition[0] - geometry.startPosition[0],
+          ),
+          traversalDirection: 'forward',
+        }]
+      }
+
+      if (geometry.kind === 'arc') {
+        return [{
+          source,
+          sourceKey,
+          startPointId: null,
+          endPointId: null,
+          start: geometry.startPosition,
+          end: geometry.endPosition,
+          startAngle: Math.atan2(
+            geometry.startPosition[1] - geometry.centerPosition[1],
+            geometry.startPosition[0] - geometry.centerPosition[0],
+          ),
+          endAngle: Math.atan2(
+            geometry.endPosition[1] - geometry.centerPosition[1],
+            geometry.endPosition[0] - geometry.centerPosition[0],
+          ),
+          traversalDirection: 'forward',
+        }]
+      }
+
+      return []
+    })
   })
 }
 
 function buildCircleRings(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ) {
   const solvedCircleMap = new Map(
     solvedSnapshot.solvedEntities
       .filter((entity): entity is Extract<SolvedSketchEntityGeometryRecord, { kind: 'circle' }> => entity.kind === 'circle')
       .map((entity) => [entity.entityId, entity]),
   )
-
-  return definition.entities.flatMap((entity) => {
+  const localCircleRings = definition.entities.flatMap((entity) => {
     if (entity.kind !== 'circle' || entity.isConstruction) {
       return []
     }
@@ -262,12 +402,54 @@ function buildCircleRings(
 
     return [{
       kind: 'segments' as const,
+      boundarySegments: [{
+        source: { kind: 'entity', entityId: entity.entityId },
+        startPointId: null,
+        endPointId: null,
+        traversalDirection: 'forward',
+      }],
       boundaryEntityIds: [entity.entityId],
       boundaryPointIds: [],
       points,
       signedArea: signedArea(points),
     } satisfies SketchRingCandidate]
   })
+
+  const projectedCircleRings = projectedReferences.flatMap((reference) => {
+    if (reference.status !== 'projected') {
+      return []
+    }
+
+    return reference.geometry.flatMap((geometry) => {
+      if (geometry.kind !== 'circle') {
+        return []
+      }
+
+      const points = Array.from({ length: CIRCLE_REGION_SAMPLE_COUNT }, (_, index) => {
+        const angle = (Math.PI * 2 * index) / CIRCLE_REGION_SAMPLE_COUNT
+        return [
+          geometry.centerPosition[0] + Math.cos(angle) * geometry.radius,
+          geometry.centerPosition[1] + Math.sin(angle) * geometry.radius,
+        ] satisfies SketchPoint2D
+      })
+
+      return [{
+        kind: 'segments' as const,
+        boundarySegments: [{
+          source: getProjectedGeometrySource(reference, geometry),
+          startPointId: null,
+          endPointId: null,
+          traversalDirection: 'forward',
+        }],
+        boundaryEntityIds: [],
+        boundaryPointIds: [],
+        points,
+        signedArea: signedArea(points),
+      } satisfies SketchRingCandidate]
+    })
+  })
+
+  return [...localCircleRings, ...projectedCircleRings]
 }
 
 function findNextSegment(
@@ -300,12 +482,14 @@ function findNextSegment(
 export function findSketchRings(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): { rings: SketchRingCandidate[]; unusedSegments: SegmentRecord[] } {
-  const initialSegments = buildSegments(definition, solvedSnapshot)
+  const authoredProjectedReferences = filterAuthoredProjectedReferences(definition, projectedReferences)
+  const initialSegments = buildSegments(definition, solvedSnapshot, authoredProjectedReferences)
   const allSegments = [...initialSegments, ...initialSegments.map(reverseSegment)]
 
   const used = new Set<number>()
-  const rings: SketchRingCandidate[] = buildCircleRings(definition, solvedSnapshot)
+  const rings: SketchRingCandidate[] = buildCircleRings(definition, solvedSnapshot, authoredProjectedReferences)
 
   for (const [segmentIndex, segment] of allSegments.entries()) {
     if (used.has(segmentIndex)) {
@@ -328,7 +512,13 @@ export function findSketchRings(
         if (area > 0) {
           rings.push({
             kind: 'segments',
-            boundaryEntityIds: ringSegments.map((entry) => entry.entityId),
+            boundarySegments: ringSegments.map((entry) => ({
+              source: entry.source,
+              startPointId: entry.startPointId,
+              endPointId: entry.endPointId,
+              traversalDirection: entry.traversalDirection,
+            })),
+            boundaryEntityIds: ringSegments.flatMap((entry) => entry.source.kind === 'entity' ? [entry.source.entityId] : []),
             boundaryPointIds: ringSegments.flatMap((entry) => entry.startPointId ? [entry.startPointId] : []),
             points,
             signedArea: area,
@@ -361,7 +551,7 @@ function compareRingsByAreaThenKey(left: SketchRingCandidate, right: SketchRingC
 }
 
 function getRingStableKey(ring: SketchRingCandidate) {
-  return ring.boundaryEntityIds.join('|')
+  return ring.boundarySegments.map((segment) => getSegmentSourceKey(segment.source)).join('|')
 }
 
 function usedForRing(used: Set<number>, ringIndices: Array<[number, SegmentRecord]>) {
@@ -408,7 +598,9 @@ export function deriveSketchRegionsCore(
     }
   }
 
-  const { rings } = findSketchRings(input.definition, input.solvedSnapshot)
+  const projectedReferences = input.projectedReferences ?? []
+  const authoredProjectedReferences = filterAuthoredProjectedReferences(input.definition, projectedReferences)
+  const { rings } = findSketchRings(input.definition, input.solvedSnapshot, authoredProjectedReferences)
   const sorted = [...rings].sort(compareRingsByAreaThenKey)
   const childrenByParent = new Map<number, number[]>()
   const parentByRing = new Map<number, number | null>()
@@ -464,8 +656,56 @@ export function deriveSketchRegionsCore(
 
   return {
     regions,
-    diagnostics: [],
+    diagnostics: createProjectedReferenceRegionDiagnostics(input.definition, projectedReferences),
   }
+}
+
+function createProjectedReferenceRegionDiagnostics(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): SketchSolveDiagnostic[] {
+  const projectedById = new Map(projectedReferences.map((reference) => [reference.referenceId, reference]))
+  const diagnostics: SketchSolveDiagnostic[] = projectedReferences
+    .filter((projected) => !isAuthoredReference(definition, projected.referenceId))
+    .map((projected) => makeDiagnostic(
+      'projected-region-reference-unauthored',
+      'warning',
+      `Projected reference ${projected.referenceId} cannot participate in live-derived region extraction because it is not backed by the current authored sketch references.`,
+      null,
+    ))
+
+  return diagnostics.concat(definition.referenceIds.flatMap((referenceId) => {
+    if (!isAuthoredReference(definition, referenceId)) {
+      return [makeDiagnostic(
+        'projected-region-reference-unauthored',
+        'warning',
+        `Reference ${referenceId} cannot participate in live-derived projected region extraction because it is not backed by both referenceIds and references.`,
+        null,
+      )]
+    }
+
+    const projected = projectedById.get(referenceId)
+
+    if (!projected) {
+      return [makeDiagnostic(
+        'projected-region-reference-unresolved',
+        'warning',
+        `Reference ${referenceId} is unavailable for live-derived projected region extraction.`,
+        null,
+      )]
+    }
+
+    if (projected.status !== 'projected') {
+      return [makeDiagnostic(
+        'projected-region-reference-invalid',
+        'warning',
+        `Reference ${referenceId} cannot participate in live-derived projected region extraction because projection status is ${projected.status}.`,
+        null,
+      )]
+    }
+
+    return []
+  }))
 }
 
 function createLoopRecord(
@@ -480,19 +720,15 @@ function createLoopRecord(
       loopId: createRegionLoopId(regionId, ordinal),
       role,
       orientation: ring.signedArea >= 0 ? 'counterClockwise' : 'clockwise',
-      segments: ring.boundaryEntityIds.map((entityId, segmentIndex) => ({
-        source: { kind: 'entity', entityId },
-        startPointId: ring.boundaryPointIds[segmentIndex] ?? null,
-        endPointId: getNextBoundaryPointId(ring.boundaryPointIds, segmentIndex),
-      })),
+      segments: ring.boundarySegments.map((segment) => toRegionSegmentRecord(segment)),
       boundaryPointIds: ring.boundaryPointIds,
       isClosed: true,
     }
   }
 
-  const lastIndex = ring.boundaryEntityIds.length - 1
+  const lastIndex = ring.boundarySegments.length - 1
   const reversedPointIds = ring.boundaryPointIds.length > 0
-    ? ring.boundaryEntityIds.map((_, index) => {
+    ? ring.boundarySegments.map((_, index) => {
         const originalIndex = lastIndex - index
         return ring.boundaryPointIds[(originalIndex + 1) % ring.boundaryPointIds.length]!
       })
@@ -502,16 +738,26 @@ function createLoopRecord(
     loopId: createRegionLoopId(regionId, ordinal),
     role,
     orientation: ring.signedArea >= 0 ? 'clockwise' : 'counterClockwise',
-    segments: [...ring.boundaryEntityIds].reverse().map((entityId, segmentIndex) => ({
-      source: { kind: 'entity', entityId },
-      startPointId: reversedPointIds[segmentIndex] ?? null,
-      endPointId: getNextBoundaryPointId(reversedPointIds, segmentIndex),
-    })),
+    segments: [...ring.boundarySegments].reverse().map((segment) => toRegionSegmentRecord(reverseRingBoundarySegment(segment))),
     boundaryPointIds: reversedPointIds,
     isClosed: true,
   }
 }
 
-function getNextBoundaryPointId(pointIds: SketchPointId[], index: number) {
-  return pointIds.length > 0 ? pointIds[(index + 1) % pointIds.length]! : null
+function toRegionSegmentRecord(segment: RingBoundarySegment): RegionBoundarySegmentRecord {
+  return {
+    source: segment.source,
+    startPointId: segment.startPointId,
+    endPointId: segment.endPointId,
+    ...(segment.traversalDirection === 'reverse' ? { traversalDirection: 'reverse' as const } : {}),
+  }
+}
+
+function reverseRingBoundarySegment(segment: RingBoundarySegment): RingBoundarySegment {
+  return {
+    source: segment.source,
+    startPointId: segment.endPointId,
+    endPointId: segment.startPointId,
+    traversalDirection: segment.traversalDirection === 'forward' ? 'reverse' : 'forward',
+  }
 }

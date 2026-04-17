@@ -8,6 +8,7 @@ import type { SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPoint } from '@/contracts/modeling/schema'
 import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 
 export type SketchToolId = 'line' | 'rectangle' | 'circle'
 
@@ -96,6 +97,10 @@ export interface SketchToolCommitInput {
   start: SketchPoint
   end: SketchPoint
   isConstruction: boolean
+  acceptedSnaps?: {
+    start: SketchSnapCandidate | null
+    end: SketchSnapCandidate | null
+  }
   factories: SketchToolCommitFactories
 }
 

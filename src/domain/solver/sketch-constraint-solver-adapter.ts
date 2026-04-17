@@ -21,19 +21,14 @@ import {
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
   type ProjectedSketchGeometryRef,
-  type SketchPoint2D,
+  type SketchSolveDiagnostic,
 } from '@/contracts/sketch'
-import type {
-  DocumentId,
-  ProjectedGeometryId,
-  ReferenceId,
-  RevisionId,
-} from '@/contracts/shared/ids'
+import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 
 export interface SketchConstraintSolverAdapterOptions {
   documentId: DocumentId
-  revisionId: RevisionId
+  revisionId: RevisionId | null
 }
 
 const DEFAULT_OPTIONS: SketchConstraintSolverAdapterOptions = {
@@ -59,8 +54,17 @@ function makeResponseBase(
   }
 }
 
-function createProjectedGeometryId(referenceId: ReferenceId, ordinal: number): ProjectedGeometryId {
-  return `projected_geometry_${referenceId}_${ordinal}` as ProjectedGeometryId
+function makeProjectionDiagnostic(
+  code: string,
+  severity: SketchSolveDiagnostic['severity'],
+  message: string,
+): SketchSolveDiagnostic {
+  return {
+    code,
+    severity,
+    message,
+    target: null,
+  }
 }
 
 function projectReference(
@@ -74,40 +78,29 @@ function projectReference(
     }
   }
 
-  if (reference.reference.source.kind === 'vertex') {
+  if (reference.reference.kind === 'sketchReference') {
     return {
-      status: 'projected',
-      geometry: [{
-        geometryId: createProjectedGeometryId(reference.referenceId, 0),
-        kind: 'point',
-        position: [0, 0] as SketchPoint2D,
+      status: 'unsupportedSource',
+      geometry: [],
+      diagnostics: [{
+        code: 'unsupported-sketch-reference-source',
+        severity: 'warning',
+        message: `Sketch reference ${reference.referenceId} does not expose projectable geometry in this solver.`,
+        target: null,
       }],
-      diagnostics: [],
-    }
-  }
-
-  if (reference.reference.source.kind === 'edge') {
-    return {
-      status: 'projected',
-      geometry: [{
-        geometryId: createProjectedGeometryId(reference.referenceId, 0),
-        kind: 'lineSegment',
-        startPosition: [-2, 0] as SketchPoint2D,
-        endPosition: [2, 0] as SketchPoint2D,
-      }],
-      diagnostics: [],
     }
   }
 
   return {
-    status: 'projected',
-    geometry: [{
-      geometryId: createProjectedGeometryId(reference.referenceId, 0),
-      kind: 'circle',
-      centerPosition: [0, 0] as SketchPoint2D,
-      radius: 1,
-    }],
-    diagnostics: [],
+    status: 'unsupportedSource',
+    geometry: [],
+    diagnostics: [
+      makeProjectionDiagnostic(
+        'unsupported-model-reference-source',
+        'warning',
+        `Model reference ${reference.referenceId} cannot be projected because this solver adapter has no resolved source geometry.`,
+      ),
+    ],
   }
 }
 
@@ -125,7 +118,7 @@ function assertSupportedRequest(
     throw new Error(parsed.error.issues[0]?.message ?? 'Invalid sketch solver request envelope.')
   }
 
-  if (request.documentId !== options.documentId || request.revisionId !== options.revisionId) {
+  if (request.documentId !== options.documentId || (options.revisionId !== null && request.revisionId !== options.revisionId)) {
     throw new Error(
       `Solver request targeted ${request.documentId}@${request.revisionId}, but the runtime is configured for ${options.documentId}@${options.revisionId}.`,
     )
@@ -157,6 +150,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
     assertSupportedRequest(request, this.options)
     const validation = validateSketchDefinitionCore({
       definition: request.definition,
+      projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
     })
     return {
@@ -172,6 +166,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       ? (() => {
           const result = solveSketchDefinitionWithDraggedPointTarget({
             definition: request.definition,
+            projectedReferences: request.projectedReferences,
             dragTarget: request.dragTarget,
             tolerances: request.tolerances,
             partialSolvePolicy: request.partialSolvePolicy,
@@ -184,6 +179,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
             },
             solvedSnapshot: result.solvedSnapshot ?? solveSketchDefinitionCore({
               definition: request.definition,
+              projectedReferences: request.projectedReferences,
               tolerances: request.tolerances,
               partialSolvePolicy: 'failOnConflict',
             }).solvedSnapshot,
@@ -192,6 +188,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
         })()
       : solveSketchDefinitionCore({
           definition: request.definition,
+          projectedReferences: request.projectedReferences,
           tolerances: request.tolerances,
           partialSolvePolicy: request.partialSolvePolicy,
         })
@@ -201,6 +198,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       sketchId: request.sketchId,
       solvedSnapshot: solved.solvedSnapshot,
       definition: request.definition,
+      projectedReferences: request.projectedReferences,
     })
 
     return {
@@ -222,6 +220,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       sketchId: request.sketchId,
       solvedSnapshot: request.solvedSnapshot,
       definition: request.definition,
+      projectedReferences: request.projectedReferences,
     })
     return {
       ...makeResponseBase(request),

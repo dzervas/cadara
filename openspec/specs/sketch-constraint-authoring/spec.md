@@ -112,3 +112,27 @@ The system SHALL render value-entry input for dimensional or angular constraints
 #### Scenario: Dimension value is requested
 - **WHEN** a dimensional constraint has selected its required targets and needs an authored value
 - **THEN** the numeric input appears near the active preview reference rather than in a detached feature-editor-style panel
+
+### Requirement: Constraint authoring SHALL collect projected reference targets
+The system SHALL allow explicit constraint tools to collect projected reference geometry targets when the active operation supports the projected geometry kind.
+
+#### Scenario: Constraint tool accepts projected line
+- **WHEN** a line relationship constraint tool is active and the user selects projected line geometry
+- **THEN** the constraint authoring state records the projected line as a valid target for that operation
+
+#### Scenario: Constraint tool rejects unsupported projected geometry
+- **WHEN** the active constraint operation does not support the hovered projected geometry kind
+- **THEN** the editor rejects the target using the existing selection feedback path
+- **AND** no durable constraint is committed
+
+### Requirement: Constraint authoring SHALL include automatic snap-derived constraints
+The system SHALL allow sketch tools to author constraints derived from accepted snap intent in addition to constraints created through explicit constraint tools.
+
+#### Scenario: Horizontal snap is accepted while drawing a line
+- **WHEN** a line drawing operation is accepted with active horizontal snap intent
+- **THEN** the committed sketch contribution includes a horizontal constraint for the new line
+
+#### Scenario: Snap intent is cancelled
+- **WHEN** the user cancels a drawing operation with active snap intent
+- **THEN** no inferred constraint is appended to the durable sketch definition
+

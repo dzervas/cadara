@@ -121,6 +121,8 @@ function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphK
       return '/icons/drawing-angular-dim-line-to-line.svg'
     case 'constraintPerpendicular':
       return '/icons/sketch-perpendicular.svg'
+    case 'constraintTangent':
+      return '/icons/sketch-tangent.svg'
     case 'dimensionDistance':
       return getToolbarToolIconSrc('dimension')
     case 'dimensionHorizontal':

@@ -134,6 +134,31 @@ export type SketchEntityDefinition =
       sweepDirection: 'clockwise' | 'counterClockwise'
     }
 
+export type LocalSketchPointConstraintOperand = {
+  kind: 'localPoint'
+  pointId: SketchPointId
+}
+
+export type LocalSketchEntityConstraintOperand = {
+  kind: 'localEntity'
+  entityId: SketchEntityId
+}
+
+export type ProjectedSketchGeometryConstraintOperand = {
+  kind: 'projectedGeometry'
+  reference: ProjectedSketchGeometryRef & {
+    kind: NonNullable<ProjectedSketchGeometryRef['kind']>
+  }
+}
+
+export type SketchPointConstraintOperand =
+  | LocalSketchPointConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand
+
+export type SketchCurveConstraintOperand =
+  | LocalSketchEntityConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand
+
 /**
  * Durable authored geometric constraint definition.
  * The editor may author these; the solver owns their satisfaction status.
@@ -154,6 +179,116 @@ export type ConstraintDefinition =
       label: string
       /** Constrained line entity. Must exist in `SketchDefinition.entityIds`. */
       entityId: SketchEntityId
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'coincidentProjectedPoint'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point participating in the coincident relationship. */
+      point: LocalSketchPointConstraintOperand
+      /** Read-only projected point target. */
+      projectedPoint: ProjectedSketchGeometryConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'pointOnProjectedCurve'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point constrained onto the projected curve. */
+      point: LocalSketchPointConstraintOperand
+      /** Read-only projected line, circle, or arc target. */
+      projectedCurve: ProjectedSketchGeometryConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'midpoint'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point constrained to the midpoint. */
+      point: LocalSketchPointConstraintOperand
+      /** Local editable line whose solved midpoint is targeted. */
+      line: LocalSketchEntityConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'midpointProjectedLine'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point constrained to the projected midpoint. */
+      point: LocalSketchPointConstraintOperand
+      /** Read-only projected line whose derived midpoint is targeted. */
+      projectedLine: ProjectedSketchGeometryConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'pointOnCurve'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point constrained onto the local curve. */
+      point: LocalSketchPointConstraintOperand
+      /** Local editable line, circle, or arc target. */
+      curve: LocalSketchEntityConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'parallelProjectedLine'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable line entity. */
+      line: LocalSketchEntityConstraintOperand
+      /** Read-only projected line target. */
+      projectedLine: ProjectedSketchGeometryConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'perpendicularProjectedLine'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable line entity. */
+      line: LocalSketchEntityConstraintOperand
+      /** Read-only projected line target. */
+      projectedLine: ProjectedSketchGeometryConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'tangentProjectedCurve'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable curve entity. */
+      curve: LocalSketchEntityConstraintOperand
+      /** Read-only projected circle or arc target. */
+      projectedCurve: ProjectedSketchGeometryConstraintOperand
+      /** Tangency side for closed-curve relationships. */
+      relation: 'external' | 'internal'
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'tangent'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Two local editable curve entities that must solve tangent. */
+      entityIds: readonly [SketchEntityId, SketchEntityId]
+      /** Tangency side for closed-curve relationships. */
+      relation: 'external' | 'internal'
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'concentric'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Two local editable circle or arc entities whose centers must coincide. */
+      entityIds: readonly [SketchEntityId, SketchEntityId]
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'concentricProjectedCurve'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable circle or arc entity. */
+      curve: LocalSketchEntityConstraintOperand
+      /** Read-only projected circle or arc target. */
+      projectedCurve: ProjectedSketchGeometryConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -302,6 +437,17 @@ export type SketchReferenceDefinition =
       source: FaceRef | EdgeRef | VertexRef
       /** Declared projection mode into sketch-space coordinates. */
       projectionMode: 'projectAlongPlaneNormal' | 'useExistingCoplanarGeometry'
+    }
+  | {
+      /** Durable authored reference identity within the containing sketch definition. */
+      referenceId: ReferenceId
+      kind: 'sketchReference'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** External sketch-owned geometry projected into this sketch space. */
+      source: SketchEntityRef | SketchPointRef | SketchRef
+      /** Declared projection mode into sketch-space coordinates. */
+      projectionMode: 'useExistingCoplanarGeometry'
     }
 
 /**
@@ -484,6 +630,8 @@ export interface SketchSolveDiagnostic {
  * Stable projected-geometry reference owned by one external sketch reference.
  */
 export interface ProjectedSketchGeometryRef {
+  /** Optional selection/runtime discriminant for editor-facing projected targets. */
+  kind?: 'projectedPoint' | 'projectedLineSegment' | 'projectedCircle' | 'projectedArc'
   /** Authored external reference that produced the projected geometry. */
   referenceId: ReferenceId
   /** Stable projected geometry identity scoped to `referenceId`. */
@@ -502,6 +650,8 @@ export interface RegionBoundarySegmentRecord {
   startPointId: SketchPointId | null
   /** Boundary end point when the segment ends at an authored point. */
   endPointId: SketchPointId | null
+  /** Traversal direction relative to the source geometry's live-derived orientation. */
+  traversalDirection?: 'forward' | 'reverse'
 }
 
 /**
@@ -577,6 +727,8 @@ export interface SketchRecord extends OwnershipRecord {
   definition: SketchDefinition
   /** Solver-owned solved state corresponding to `definition` at the current revision. */
   solvedSnapshot: SolvedSketchSnapshot
+  /** Solver-owned live projection data for the current revision; never authored sketch geometry. */
+  projectedReferences?: import('@/contracts/solver/schema').ProjectedSketchReferenceRecord[]
   /** Derived regions owned by the solver/kernel layer for the current solved sketch state. */
   regions: RegionRecord[]
 }

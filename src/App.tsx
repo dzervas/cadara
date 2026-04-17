@@ -20,30 +20,37 @@ import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 
 function App() {
   const actionBus = useMemo(() => createToolActionBus(), [])
-  const sketchSolver = useMemo(
+  const kernelSketchSolver = useMemo(
     () => new SketchConstraintSolverAdapter({
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
     }),
     [],
   )
+  const editorSketchSolver = useMemo(
+    () => new SketchConstraintSolverAdapter({
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+      revisionId: null,
+    }),
+    [],
+  )
   const kernelAdapter = useMemo(
     () =>
       new OpenCascadeKernelAdapter({
-        solverAdapter: sketchSolver,
+        solverAdapter: kernelSketchSolver,
         solverAdapterFactory: (revisionId) =>
           new SketchConstraintSolverAdapter({
             documentId: OCC_KERNEL_DOCUMENT_ID,
             revisionId,
           }),
       }),
-    [sketchSolver],
+    [kernelSketchSolver],
   )
   const modelingService = useMemo(
     () =>
       createModelingService(kernelAdapter, {
         currentDocumentId: OCC_KERNEL_DOCUMENT_ID,
-        sketchSolver,
+        sketchSolver: editorSketchSolver,
         operationHistoryStore:
           typeof window === 'undefined'
             ? null
@@ -57,7 +64,7 @@ function App() {
                 databaseName: getDevRepositoryDatabaseName(),
               }),
       }),
-    [kernelAdapter, sketchSolver],
+    [kernelAdapter, editorSketchSolver],
   )
 
   return (

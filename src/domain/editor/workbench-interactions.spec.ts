@@ -126,8 +126,8 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       'Viewport sketch geometry drags should start when no sketch tool is active.',
     )
     assert(
-      shouldViewportStartSketchGeometryDrag('line', 'idle'),
-      'Viewport sketch geometry drags should take priority over idle drawing tools.',
+      !shouldViewportStartSketchGeometryDrag('line', 'idle'),
+      'Idle drawing tools should start new geometry from picked vertices instead of dragging them.',
     )
     assert(
       !shouldViewportStartSketchGeometryDrag('line', 'drawing'),

@@ -1,9 +1,11 @@
 import type {
   ConstraintStatusRecord,
   DimensionStatusRecord,
+  ProjectedSketchGeometryRef,
   SketchDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
+  SketchReferenceDefinition,
   SketchSolveDiagnostic,
   SolvedSketchEntityGeometryRecord,
   SolvedSketchSnapshot,
@@ -12,10 +14,15 @@ import type {
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
 } from '@/contracts/sketch/schema'
-import type { SolverPartialSolvePolicy } from '@/contracts/solver/schema'
+import type {
+  ProjectedSketchReferenceGeometry,
+  ProjectedSketchReferenceRecord,
+  SolverPartialSolvePolicy,
+} from '@/contracts/solver/schema'
 import type {
   ConstraintId,
   DimensionId,
+  ReferenceId,
   SketchEntityId,
   SketchPointId,
 } from '@/contracts/shared/ids'
@@ -118,6 +125,7 @@ type BuildSystemResult = {
 
 interface BuildSystemOptions {
   dragTarget?: SketchDraggedPointTarget | null
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
 }
 
 const WOLFE_C1 = 1e-4
@@ -202,6 +210,313 @@ function addPointGradient(
   gradient[point.baseIndex + 1] += y
 }
 
+function projectedKindForConstraintRef(kind: NonNullable<ProjectedSketchGeometryRef['kind']>) {
+  switch (kind) {
+    case 'projectedPoint':
+      return 'point'
+    case 'projectedLineSegment':
+      return 'lineSegment'
+    case 'projectedCircle':
+      return 'circle'
+    case 'projectedArc':
+      return 'arc'
+  }
+}
+
+function findProjectedGeometry(
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+): ProjectedSketchReferenceGeometry | null {
+  const projectedReference = projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
+
+  if (!projectedReference || projectedReference.status !== 'projected') {
+    return null
+  }
+
+  const expectedKind = projectedKindForConstraintRef(reference.kind)
+  return projectedReference.geometry.find((geometry) =>
+    geometry.geometryId === reference.geometryId && geometry.kind === expectedKind,
+  ) ?? null
+}
+
+function projectedCircleLikeGeometry(
+  geometry: ProjectedSketchReferenceGeometry,
+): { center: SketchPoint2D; radius: number } | null {
+  if (geometry.kind === 'circle') {
+    return { center: geometry.centerPosition, radius: geometry.radius }
+  }
+
+  if (geometry.kind === 'arc') {
+    return {
+      center: geometry.centerPosition,
+      radius: length(subtract(geometry.startPosition, geometry.centerPosition)),
+    }
+  }
+
+  return null
+}
+
+function normalizeAngleRadians(angle: number) {
+  const fullTurn = Math.PI * 2
+  return ((angle % fullTurn) + fullTurn) % fullTurn
+}
+
+function arcSweepOffset(
+  angle: number,
+  startAngle: number,
+  direction: Extract<ProjectedSketchReferenceGeometry, { kind: 'arc' }>['sweepDirection'],
+) {
+  return direction === 'counterClockwise'
+    ? normalizeAngleRadians(angle - startAngle)
+    : normalizeAngleRadians(startAngle - angle)
+}
+
+function projectedArcData(geometry: Extract<ProjectedSketchReferenceGeometry, { kind: 'arc' }>) {
+  const startOffset = subtract(geometry.startPosition, geometry.centerPosition)
+  const endOffset = subtract(geometry.endPosition, geometry.centerPosition)
+  const radius = length(startOffset)
+  const startAngle = Math.atan2(startOffset[1], startOffset[0])
+  const endAngle = Math.atan2(endOffset[1], endOffset[0])
+  const sweep = arcSweepOffset(endAngle, startAngle, geometry.sweepDirection)
+
+  return {
+    center: geometry.centerPosition,
+    radius,
+    startAngle,
+    endAngle,
+    sweep,
+    sweepDirection: geometry.sweepDirection,
+    startPosition: geometry.startPosition,
+    endPosition: geometry.endPosition,
+  }
+}
+
+function isAngleOnProjectedArc(
+  angle: number,
+  arc: ReturnType<typeof projectedArcData>,
+) {
+  return arcSweepOffset(angle, arc.startAngle, arc.sweepDirection) <= arc.sweep + 1e-9
+}
+
+function nearestPointOnProjectedArcSweep(
+  point: SketchPoint2D,
+  arc: ReturnType<typeof projectedArcData>,
+): SketchPoint2D {
+  const offset = subtract(point, arc.center)
+  const offsetLength = length(offset)
+  const angle = offsetLength > DEGENERATE_NORM_EPSILON
+    ? Math.atan2(offset[1], offset[0])
+    : arc.startAngle
+
+  if (isAngleOnProjectedArc(angle, arc)) {
+    return [
+      arc.center[0] + Math.cos(angle) * arc.radius,
+      arc.center[1] + Math.sin(angle) * arc.radius,
+    ]
+  }
+
+  return length(subtract(point, arc.startPosition)) <= length(subtract(point, arc.endPosition))
+    ? arc.startPosition
+    : arc.endPosition
+}
+
+function pointProjectedArcDistance(point: SketchPoint2D, geometry: Extract<ProjectedSketchReferenceGeometry, { kind: 'arc' }>) {
+  const arc = projectedArcData(geometry)
+  return length(subtract(point, nearestPointOnProjectedArcSweep(point, arc)))
+}
+
+function projectedArcSweepViolation(point: SketchPoint2D, geometry: Extract<ProjectedSketchReferenceGeometry, { kind: 'arc' }>) {
+  const arc = projectedArcData(geometry)
+  const offset = subtract(point, arc.center)
+  const offsetLength = length(offset)
+  const angle = offsetLength > DEGENERATE_NORM_EPSILON
+    ? Math.atan2(offset[1], offset[0])
+    : arc.startAngle
+
+  if (isAngleOnProjectedArc(angle, arc)) {
+    return 0
+  }
+
+  const circlePoint: SketchPoint2D = [
+    arc.center[0] + Math.cos(angle) * arc.radius,
+    arc.center[1] + Math.sin(angle) * arc.radius,
+  ]
+  return Math.min(
+    length(subtract(circlePoint, arc.startPosition)),
+    length(subtract(circlePoint, arc.endPosition)),
+  )
+}
+
+function unitVector(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D | null {
+  const delta = subtract(end, start)
+  const norm = length(delta)
+
+  return norm < DEGENERATE_NORM_EPSILON
+    ? null
+    : [delta[0] / norm, delta[1] / norm]
+}
+
+function pointLineSignedDistance(
+  point: SketchPoint2D,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+) {
+  const unit = unitVector(start, end)
+
+  if (!unit) {
+    return 0
+  }
+
+  const delta = subtract(point, start)
+  return delta[0] * unit[1] - delta[1] * unit[0]
+}
+
+function midpoint(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {
+  return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
+}
+
+function localArcData(input: {
+  center: SketchPoint2D
+  radius: number
+  startAngle: number
+  endAngle: number
+  sweepDirection: Extract<SketchEntityDefinition, { kind: 'arc' }>['sweepDirection']
+}) {
+  const sweep = arcSweepOffset(input.endAngle, input.startAngle, input.sweepDirection)
+  const startPosition: SketchPoint2D = [
+    input.center[0] + Math.cos(input.startAngle) * input.radius,
+    input.center[1] + Math.sin(input.startAngle) * input.radius,
+  ]
+  const endPosition: SketchPoint2D = [
+    input.center[0] + Math.cos(input.endAngle) * input.radius,
+    input.center[1] + Math.sin(input.endAngle) * input.radius,
+  ]
+
+  return {
+    center: input.center,
+    radius: input.radius,
+    startAngle: input.startAngle,
+    endAngle: input.endAngle,
+    sweep,
+    sweepDirection: input.sweepDirection,
+    startPosition,
+    endPosition,
+  }
+}
+
+function isAngleOnLocalArc(angle: number, arc: ReturnType<typeof localArcData>) {
+  return arcSweepOffset(angle, arc.startAngle, arc.sweepDirection) <= arc.sweep + 1e-9
+}
+
+function nearestPointOnLocalArcSweep(
+  point: SketchPoint2D,
+  arc: ReturnType<typeof localArcData>,
+): SketchPoint2D {
+  const offset = subtract(point, arc.center)
+  const offsetLength = length(offset)
+  const angle = offsetLength > DEGENERATE_NORM_EPSILON
+    ? Math.atan2(offset[1], offset[0])
+    : arc.startAngle
+
+  if (isAngleOnLocalArc(angle, arc)) {
+    return [
+      arc.center[0] + Math.cos(angle) * arc.radius,
+      arc.center[1] + Math.sin(angle) * arc.radius,
+    ]
+  }
+
+  return length(subtract(point, arc.startPosition)) <= length(subtract(point, arc.endPosition))
+    ? arc.startPosition
+    : arc.endPosition
+}
+
+function localArcSweepViolation(point: SketchPoint2D, arc: ReturnType<typeof localArcData>) {
+  const offset = subtract(point, arc.center)
+  const offsetLength = length(offset)
+  const angle = offsetLength > DEGENERATE_NORM_EPSILON
+    ? Math.atan2(offset[1], offset[0])
+    : arc.startAngle
+
+  if (isAngleOnLocalArc(angle, arc)) {
+    return 0
+  }
+
+  const circlePoint: SketchPoint2D = [
+    arc.center[0] + Math.cos(angle) * arc.radius,
+    arc.center[1] + Math.sin(angle) * arc.radius,
+  ]
+  return Math.min(
+    length(subtract(circlePoint, arc.startPosition)),
+    length(subtract(circlePoint, arc.endPosition)),
+  )
+}
+
+function localCircleTangencyContacts(
+  first: { center: SketchPoint2D; radius: number },
+  second: { center: SketchPoint2D; radius: number },
+  relation: 'external' | 'internal',
+): [SketchPoint2D, SketchPoint2D] {
+  const centerDelta = subtract(second.center, first.center)
+  const centerDistance = length(centerDelta)
+  const direction: SketchPoint2D = centerDistance > DEGENERATE_NORM_EPSILON
+    ? [centerDelta[0] / centerDistance, centerDelta[1] / centerDistance]
+    : [1, 0]
+
+  if (relation === 'external') {
+    return [
+      [
+        first.center[0] + direction[0] * first.radius,
+        first.center[1] + direction[1] * first.radius,
+      ],
+      [
+        second.center[0] - direction[0] * second.radius,
+        second.center[1] - direction[1] * second.radius,
+      ],
+    ]
+  }
+
+  const contactSign = first.radius >= second.radius ? 1 : -1
+  return [
+    [
+      first.center[0] + direction[0] * first.radius * contactSign,
+      first.center[1] + direction[1] * first.radius * contactSign,
+    ],
+    [
+      second.center[0] + direction[0] * second.radius * contactSign,
+      second.center[1] + direction[1] * second.radius * contactSign,
+    ],
+  ]
+}
+
+function createNumericalScalarConstraint(input: {
+  id: ConstraintId | DimensionId
+  targetKind: 'constraint' | 'dimension'
+  parameterCount: number
+  evaluateResidual(values: Float64Array): number
+}): ScalarConstraintRecord {
+  return {
+    id: input.id,
+    targetKind: input.targetKind,
+    evaluate(values) {
+      const residualValue = input.evaluateResidual(values)
+      const gradient = zeroVector(input.parameterCount)
+      const step = 1e-6
+
+      for (let index = 0; index < values.length; index += 1) {
+        const next = cloneValues(values)
+        const previous = cloneValues(values)
+        next[index] += step
+        previous[index] -= step
+        const nextLoss = 0.5 * input.evaluateResidual(next) ** 2
+        const previousLoss = 0.5 * input.evaluateResidual(previous) ** 2
+        gradient[index] = (nextLoss - previousLoss) / (2 * step)
+      }
+
+      return { residual: 0.5 * residualValue * residualValue, gradient }
+    },
+  }
+}
+
 function buildSystem(definition: SketchDefinition, options: BuildSystemOptions = {}): BuildSystemResult {
   const pointRecords = new Map<SketchPointId, SolverPointRecord>()
   const entityStates = new Map<SketchEntityId, SolverEntityState>()
@@ -277,6 +592,63 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       .filter((entity): entity is Extract<SketchEntityDefinition, { kind: 'arc' }> => entity.kind === 'arc')
       .map((entity) => [entity.entityId, entity]),
   )
+
+  const getLocalCircleLike = (
+    values: Float64Array,
+    entity: SketchEntityDefinition,
+  ): { center: SketchPoint2D; radius: number; arc?: ReturnType<typeof localArcData> } | null => {
+    if (entity.kind === 'circle') {
+      const center = pointRecords.get(entity.centerPointId)
+      return center ? { center: getPoint(values, center), radius: entity.radius } : null
+    }
+
+    if (entity.kind === 'arc') {
+      const center = pointRecords.get(entity.centerPointId)
+      const arcState = entityStates.get(entity.entityId)
+      if (!center || !arcState || arcState.kind !== 'arc') {
+        return null
+      }
+
+      const { radius, startAngle, endAngle } = getArcParameters(values, arcState)
+      const arc = localArcData({
+        center: getPoint(values, center),
+        radius,
+        startAngle,
+        endAngle,
+        sweepDirection: entity.sweepDirection,
+      })
+      return { center: arc.center, radius: arc.radius, arc }
+    }
+
+    return null
+  }
+
+  const pointOnLocalCurveResidual = (
+    values: Float64Array,
+    point: SolverPointRecord,
+    entity: SketchEntityDefinition,
+  ) => {
+    const position = getPoint(values, point)
+
+    if (entity.kind === 'lineSegment') {
+      const start = pointRecords.get(entity.startPointId)
+      const end = pointRecords.get(entity.endPointId)
+      return start && end
+        ? pointLineSignedDistance(position, getPoint(values, start), getPoint(values, end))
+        : 0
+    }
+
+    const circleLike = getLocalCircleLike(values, entity)
+    if (!circleLike) {
+      return 0
+    }
+
+    if (circleLike.arc) {
+      return length(subtract(position, nearestPointOnLocalArcSweep(position, circleLike.arc)))
+    }
+
+    return length(subtract(position, circleLike.center)) - circleLike.radius
+  }
 
   for (const constraint of definition.constraints) {
     if (constraint.kind === 'coincident') {
@@ -500,6 +872,431 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         },
       })
     }
+
+    if (constraint.kind === 'coincidentProjectedPoint') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const projected = findProjectedGeometry(
+        options.projectedReferences ?? [],
+        constraint.projectedPoint.reference,
+      )
+
+      if (!point || !projected || projected.kind !== 'point') {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          return length(subtract(getPoint(values, point), projected.position))
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'pointOnProjectedCurve') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const projected = findProjectedGeometry(
+        options.projectedReferences ?? [],
+        constraint.projectedCurve.reference,
+      )
+
+      if (!point || !projected) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          const position = getPoint(values, point)
+          if (projected.kind === 'lineSegment') {
+            return pointLineSignedDistance(position, projected.startPosition, projected.endPosition)
+          }
+
+          if (projected.kind === 'arc') {
+            return pointProjectedArcDistance(position, projected)
+          }
+
+          const circleLike = projectedCircleLikeGeometry(projected)
+          return circleLike
+            ? length(subtract(position, circleLike.center)) - circleLike.radius
+            : 0
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'midpoint') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const line = lineEntityMap.get(constraint.line.entityId)
+      const start = line ? pointRecords.get(line.startPointId) : null
+      const end = line ? pointRecords.get(line.endPointId) : null
+
+      if (!point || !line || !start || !end) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          const target = midpoint(getPoint(values, start), getPoint(values, end))
+          return length(subtract(getPoint(values, point), target))
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'midpointProjectedLine') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const projected = findProjectedGeometry(
+        options.projectedReferences ?? [],
+        constraint.projectedLine.reference,
+      )
+
+      if (!point || !projected || projected.kind !== 'lineSegment') {
+        continue
+      }
+
+      const target = midpoint(projected.startPosition, projected.endPosition)
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          return length(subtract(getPoint(values, point), target))
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'pointOnCurve') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const curve = definition.entities.find((entity) => entity.entityId === constraint.curve.entityId)
+
+      if (!point || !curve || (curve.kind !== 'lineSegment' && curve.kind !== 'circle' && curve.kind !== 'arc')) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          return pointOnLocalCurveResidual(values, point, curve)
+        },
+      }))
+      continue
+    }
+
+    if (
+      constraint.kind === 'parallelProjectedLine'
+      || constraint.kind === 'perpendicularProjectedLine'
+    ) {
+      const line = lineEntityMap.get(constraint.line.entityId)
+      const projected = findProjectedGeometry(
+        options.projectedReferences ?? [],
+        constraint.projectedLine.reference,
+      )
+      if (!line || !projected || projected.kind !== 'lineSegment') {
+        continue
+      }
+
+      const start = pointRecords.get(line.startPointId)
+      const end = pointRecords.get(line.endPointId)
+      const projectedUnit = unitVector(projected.startPosition, projected.endPosition)
+      if (!start || !end || !projectedUnit) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          const startPoint = getPoint(values, start)
+          const endPoint = getPoint(values, end)
+          const localUnit = unitVector(startPoint, endPoint)
+
+          if (!localUnit) {
+            return 0
+          }
+
+          return constraint.kind === 'parallelProjectedLine'
+            ? localUnit[0] * projectedUnit[1] - localUnit[1] * projectedUnit[0]
+            : localUnit[0] * projectedUnit[0] + localUnit[1] * projectedUnit[1]
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'tangentProjectedCurve') {
+      const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+      const projected = findProjectedGeometry(
+        options.projectedReferences ?? [],
+        constraint.projectedCurve.reference,
+      )
+      const projectedCircle = projected ? projectedCircleLikeGeometry(projected) : null
+      if (!entity || !projectedCircle) {
+        continue
+      }
+
+      const createTangentResidual = (
+        tangentResidual: number,
+        projectedContactPoint: SketchPoint2D,
+      ) => {
+        if (projected?.kind !== 'arc') {
+          return tangentResidual
+        }
+
+        const arcViolation = projectedArcSweepViolation(projectedContactPoint, projected)
+        return Math.sqrt(tangentResidual * tangentResidual + arcViolation * arcViolation)
+      }
+
+      if (entity.kind === 'lineSegment') {
+        const start = pointRecords.get(entity.startPointId)
+        const end = pointRecords.get(entity.endPointId)
+        if (!start || !end) {
+          continue
+        }
+
+        scalarConstraints.push(createNumericalScalarConstraint({
+          id: constraint.constraintId,
+          targetKind: 'constraint',
+          parameterCount,
+          evaluateResidual(values) {
+            const startPoint = getPoint(values, start)
+            const endPoint = getPoint(values, end)
+            const unit = unitVector(startPoint, endPoint)
+            if (!unit) {
+              return 0
+            }
+
+            const signedDistance = pointLineSignedDistance(projectedCircle.center, startPoint, endPoint)
+            const lineNormal: SketchPoint2D = [unit[1], -unit[0]]
+            const contactPoint: SketchPoint2D = [
+              projectedCircle.center[0] - signedDistance * lineNormal[0],
+              projectedCircle.center[1] - signedDistance * lineNormal[1],
+            ]
+            return createTangentResidual(Math.abs(signedDistance) - projectedCircle.radius, contactPoint)
+          },
+        }))
+        continue
+      }
+
+      if (entity.kind === 'circle') {
+        const center = pointRecords.get(entity.centerPointId)
+        if (!center) {
+          continue
+        }
+
+        scalarConstraints.push(createNumericalScalarConstraint({
+          id: constraint.constraintId,
+          targetKind: 'constraint',
+          parameterCount,
+          evaluateResidual(values) {
+            const localCenter = getPoint(values, center)
+            const centerOffset = subtract(localCenter, projectedCircle.center)
+            const centerDistance = length(centerOffset)
+            const direction: SketchPoint2D = centerDistance > DEGENERATE_NORM_EPSILON
+              ? [centerOffset[0] / centerDistance, centerOffset[1] / centerDistance]
+              : [1, 0]
+            const targetDistance = constraint.relation === 'external'
+              ? entity.radius + projectedCircle.radius
+              : Math.abs(entity.radius - projectedCircle.radius)
+            const contactDirection = constraint.relation === 'external'
+              ? direction
+              : [-direction[0], -direction[1]] as const
+            const contactPoint: SketchPoint2D = [
+              projectedCircle.center[0] + contactDirection[0] * projectedCircle.radius,
+              projectedCircle.center[1] + contactDirection[1] * projectedCircle.radius,
+            ]
+            return createTangentResidual(centerDistance - targetDistance, contactPoint)
+          },
+        }))
+        continue
+      }
+
+      if (entity.kind === 'arc') {
+        const center = pointRecords.get(entity.centerPointId)
+        const arcState = entityStates.get(entity.entityId)
+        if (!center || !arcState || arcState.kind !== 'arc') {
+          continue
+        }
+
+        scalarConstraints.push(createNumericalScalarConstraint({
+          id: constraint.constraintId,
+          targetKind: 'constraint',
+          parameterCount,
+          evaluateResidual(values) {
+            const { radius } = getArcParameters(values, arcState)
+            const localCenter = getPoint(values, center)
+            const centerOffset = subtract(localCenter, projectedCircle.center)
+            const centerDistance = length(centerOffset)
+            const direction: SketchPoint2D = centerDistance > DEGENERATE_NORM_EPSILON
+              ? [centerOffset[0] / centerDistance, centerOffset[1] / centerDistance]
+              : [1, 0]
+            const targetDistance = constraint.relation === 'external'
+              ? radius + projectedCircle.radius
+              : Math.abs(radius - projectedCircle.radius)
+            const contactDirection = constraint.relation === 'external'
+              ? direction
+              : [-direction[0], -direction[1]] as const
+            const contactPoint: SketchPoint2D = [
+              projectedCircle.center[0] + contactDirection[0] * projectedCircle.radius,
+              projectedCircle.center[1] + contactDirection[1] * projectedCircle.radius,
+            ]
+            return createTangentResidual(centerDistance - targetDistance, contactPoint)
+          },
+        }))
+      }
+    }
+
+    if (constraint.kind === 'tangent') {
+      const first = definition.entities.find((entity) => entity.entityId === constraint.entityIds[0])
+      const second = definition.entities.find((entity) => entity.entityId === constraint.entityIds[1])
+      if (!first || !second) {
+        continue
+      }
+
+      const line = first.kind === 'lineSegment'
+        ? first
+        : second.kind === 'lineSegment'
+          ? second
+          : null
+      const curve = first === line ? second : first
+
+      if (line && (curve.kind === 'circle' || curve.kind === 'arc')) {
+        const start = pointRecords.get(line.startPointId)
+        const end = pointRecords.get(line.endPointId)
+        if (!start || !end) {
+          continue
+        }
+
+        scalarConstraints.push(createNumericalScalarConstraint({
+          id: constraint.constraintId,
+          targetKind: 'constraint',
+          parameterCount,
+          evaluateResidual(values) {
+            const circleLike = getLocalCircleLike(values, curve)
+            if (!circleLike) {
+              return 0
+            }
+
+            const startPoint = getPoint(values, start)
+            const endPoint = getPoint(values, end)
+            const unit = unitVector(startPoint, endPoint)
+            if (!unit) {
+              return 0
+            }
+
+            const signedDistance = pointLineSignedDistance(circleLike.center, startPoint, endPoint)
+            const lineNormal: SketchPoint2D = [unit[1], -unit[0]]
+            const contactPoint: SketchPoint2D = [
+              circleLike.center[0] - signedDistance * lineNormal[0],
+              circleLike.center[1] - signedDistance * lineNormal[1],
+            ]
+            const tangentResidual = Math.abs(signedDistance) - circleLike.radius
+            const arcViolation = circleLike.arc ? localArcSweepViolation(contactPoint, circleLike.arc) : 0
+            return Math.sqrt(tangentResidual * tangentResidual + arcViolation * arcViolation)
+          },
+        }))
+        continue
+      }
+
+      if (
+        (first.kind === 'circle' || first.kind === 'arc')
+        && (second.kind === 'circle' || second.kind === 'arc')
+      ) {
+        scalarConstraints.push(createNumericalScalarConstraint({
+          id: constraint.constraintId,
+          targetKind: 'constraint',
+          parameterCount,
+          evaluateResidual(values) {
+            const firstCircle = getLocalCircleLike(values, first)
+            const secondCircle = getLocalCircleLike(values, second)
+            if (!firstCircle || !secondCircle) {
+              return 0
+            }
+
+            const centerDistance = length(subtract(firstCircle.center, secondCircle.center))
+            const targetDistance = constraint.relation === 'external'
+              ? firstCircle.radius + secondCircle.radius
+              : Math.abs(firstCircle.radius - secondCircle.radius)
+            const tangentResidual = centerDistance - targetDistance
+            const [firstContact, secondContact] = localCircleTangencyContacts(
+              firstCircle,
+              secondCircle,
+              constraint.relation,
+            )
+            const firstArcViolation = firstCircle.arc ? localArcSweepViolation(firstContact, firstCircle.arc) : 0
+            const secondArcViolation = secondCircle.arc ? localArcSweepViolation(secondContact, secondCircle.arc) : 0
+            return Math.sqrt(
+              tangentResidual * tangentResidual
+              + firstArcViolation * firstArcViolation
+              + secondArcViolation * secondArcViolation,
+            )
+          },
+        }))
+        continue
+      }
+    }
+
+    if (constraint.kind === 'concentric') {
+      const first = definition.entities.find((entity) => entity.entityId === constraint.entityIds[0])
+      const second = definition.entities.find((entity) => entity.entityId === constraint.entityIds[1])
+      if (
+        !first ||
+        !second ||
+        (first.kind !== 'circle' && first.kind !== 'arc') ||
+        (second.kind !== 'circle' && second.kind !== 'arc')
+      ) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          const firstCircle = getLocalCircleLike(values, first)
+          const secondCircle = getLocalCircleLike(values, second)
+          return firstCircle && secondCircle
+            ? length(subtract(firstCircle.center, secondCircle.center))
+            : 0
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'concentricProjectedCurve') {
+      const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+      const projected = findProjectedGeometry(
+        options.projectedReferences ?? [],
+        constraint.projectedCurve.reference,
+      )
+      const projectedCircle = projected ? projectedCircleLikeGeometry(projected) : null
+      if (!entity || !projectedCircle || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          const localCircle = getLocalCircleLike(values, entity)
+          return localCircle
+            ? length(subtract(localCircle.center, projectedCircle.center))
+            : 0
+        },
+      }))
+      continue
+    }
   }
 
   for (const dimension of definition.dimensions) {
@@ -661,15 +1458,53 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
 function validateDefinition(
   definition: SketchDefinition,
   tolerances: SketchSolveTolerancePolicy,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchCoreValidationResult {
   const diagnostics: SketchSolveDiagnostic[] = []
   const pointIds = new Set<SketchPointId>()
   const entityIds = new Set<SketchEntityId>()
   const constraintIds = new Set<ConstraintId>()
   const dimensionIds = new Set<DimensionId>()
+  const referenceIds = new Set<ReferenceId>()
   const pointMap = new Map(definition.points.map((point) => [point.pointId, point]))
   const entityMap = new Map(definition.entities.map((entity) => [entity.entityId, entity]))
-  const referenceIds = new Set(definition.referenceIds)
+  const projectedTargetExists = (
+    reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+  ) => findProjectedGeometry(projectedReferences, reference) !== null
+  const validateProjectedTarget = (
+    constraintId: ConstraintId,
+    reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+    expectedKinds: readonly NonNullable<ProjectedSketchGeometryRef['kind']>[],
+  ) => {
+    if (!referenceIds.has(reference.referenceId)) {
+      diagnostics.push(makeDiagnostic(
+        'missing-projected-constraint-reference',
+        'error',
+        `Constraint ${constraintId} targets missing reference ${reference.referenceId}.`,
+        { kind: 'constraint', constraintId },
+      ))
+      return
+    }
+
+    if (!expectedKinds.includes(reference.kind)) {
+      diagnostics.push(makeDiagnostic(
+        'invalid-projected-constraint-target-kind',
+        'error',
+        `Constraint ${constraintId} targets ${reference.kind}, which is not valid for this relationship.`,
+        { kind: 'constraint', constraintId },
+      ))
+      return
+    }
+
+    if (!projectedTargetExists(reference)) {
+      diagnostics.push(makeDiagnostic(
+        'missing-projected-constraint-target',
+        'error',
+        `Constraint ${constraintId} targets projected geometry ${reference.referenceId}.${reference.geometryId}, but no valid projected geometry was provided.`,
+        { kind: 'constraint', constraintId },
+      ))
+    }
+  }
 
   for (const pointId of definition.pointIds) {
     if (pointIds.has(pointId)) {
@@ -697,6 +1532,13 @@ function validateDefinition(
       diagnostics.push(makeDiagnostic('duplicate-dimension-id', 'error', `Dimension ${dimensionId} appears more than once.`, { kind: 'dimension', dimensionId }))
     }
     dimensionIds.add(dimensionId)
+  }
+
+  for (const referenceId of definition.referenceIds) {
+    if (referenceIds.has(referenceId)) {
+      diagnostics.push(makeDiagnostic('duplicate-reference-id', 'error', `Reference ${referenceId} appears more than once.`, null))
+    }
+    referenceIds.add(referenceId)
   }
 
   for (const entity of definition.entities) {
@@ -772,6 +1614,87 @@ function validateDefinition(
           diagnostics.push(makeDiagnostic('missing-two-line-entity', 'error', `Constraint ${constraint.constraintId} references a missing entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
+      case 'coincidentProjectedPoint':
+        if (!pointMap.has(constraint.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-coincident-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        validateProjectedTarget(constraint.constraintId, constraint.projectedPoint.reference, ['projectedPoint'])
+        break
+      case 'midpoint': {
+        const entity = entityMap.get(constraint.line.entityId)
+        if (!pointMap.has(constraint.point.pointId) || !entity || entity.kind !== 'lineSegment') {
+          diagnostics.push(makeDiagnostic('missing-midpoint-target', 'error', `Constraint ${constraint.constraintId} references a missing point or line.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
+      case 'midpointProjectedLine':
+        if (!pointMap.has(constraint.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-projected-midpoint-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        break
+      case 'pointOnCurve': {
+        const entity = entityMap.get(constraint.curve.entityId)
+        if (!pointMap.has(constraint.point.pointId) || !entity || (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc')) {
+          diagnostics.push(makeDiagnostic('missing-point-on-curve-target', 'error', `Constraint ${constraint.constraintId} references a missing point or curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
+      case 'pointOnProjectedCurve':
+        if (!pointMap.has(constraint.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-point-on-projected-curve-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
+          'projectedLineSegment',
+          'projectedCircle',
+          'projectedArc',
+        ])
+        break
+      case 'parallelProjectedLine':
+      case 'perpendicularProjectedLine': {
+        const entity = entityMap.get(constraint.line.entityId)
+        if (!entity || entity.kind !== 'lineSegment') {
+          diagnostics.push(makeDiagnostic('missing-projected-line-local-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported line entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        break
+      }
+      case 'tangentProjectedCurve': {
+        const entity = entityMap.get(constraint.curve.entityId)
+        if (!entity || (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc')) {
+          diagnostics.push(makeDiagnostic('missing-projected-tangent-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
+          'projectedCircle',
+          'projectedArc',
+        ])
+        break
+      }
+      case 'tangent': {
+        const entities = constraint.entityIds.map((entityId) => entityMap.get(entityId))
+        if (!entities.every((entity) => entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc'))) {
+          diagnostics.push(makeDiagnostic('missing-tangent-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
+      case 'concentric': {
+        const entities = constraint.entityIds.map((entityId) => entityMap.get(entityId))
+        if (!entities.every((entity) => entity && (entity.kind === 'circle' || entity.kind === 'arc'))) {
+          diagnostics.push(makeDiagnostic('missing-concentric-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported circle/arc.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
+      case 'concentricProjectedCurve': {
+        const entity = entityMap.get(constraint.curve.entityId)
+        if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
+          diagnostics.push(makeDiagnostic('missing-projected-concentric-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local circle/arc.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
+          'projectedCircle',
+          'projectedArc',
+        ])
+        break
+      }
     }
   }
 
@@ -815,13 +1738,20 @@ function validateDefinition(
     }
   }
 
+  const referenceMap = new Map<ReferenceId, SketchReferenceDefinition>()
   for (const reference of definition.references) {
+    if (referenceMap.has(reference.referenceId)) {
+      diagnostics.push(makeDiagnostic('duplicate-reference-record', 'error', `Reference record ${reference.referenceId} appears more than once.`, null))
+      continue
+    }
+
+    referenceMap.set(reference.referenceId, reference)
+
     if (!referenceIds.has(reference.referenceId)) {
       diagnostics.push(makeDiagnostic('reference-missing-from-order', 'error', `Reference ${reference.referenceId} is not listed in referenceIds.`, null))
     }
   }
 
-  const referenceMap = new Map(definition.references.map((reference) => [reference.referenceId, reference]))
   for (const referenceId of definition.referenceIds) {
     if (!referenceMap.has(referenceId)) {
       diagnostics.push(makeDiagnostic('reference-missing-from-records', 'error', `referenceIds references missing reference ${referenceId}.`, null))
@@ -1256,6 +2186,7 @@ function buildConstraintStatuses(
   values: Float64Array,
   tolerance: SketchSolveTolerancePolicy,
   perConstraint: Map<string, number>,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): ConstraintStatusRecord[] {
   const lineEntityMap = new Map(
     definition.entities
@@ -1282,6 +2213,72 @@ function buildConstraintStatuses(
           status = axisError <= tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         }
       }
+    } else if (constraint.kind === 'midpoint') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const line = lineEntityMap.get(constraint.line.entityId)
+      status = point && line ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied' : 'conflicting'
+    } else if (constraint.kind === 'midpointProjectedLine') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+      status = point && projected?.kind === 'lineSegment'
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'pointOnCurve') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+      status = point && entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc')
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'coincidentProjectedPoint') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const projected = findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+      status = point && projected?.kind === 'point'
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'pointOnProjectedCurve') {
+      const point = pointRecords.get(constraint.point.pointId)
+      const projected = findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
+      status = point && projected !== null
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'parallelProjectedLine' || constraint.kind === 'perpendicularProjectedLine') {
+      const line = lineEntityMap.get(constraint.line.entityId)
+      const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+      status = line && projected?.kind === 'lineSegment'
+        ? residual <= tolerance.angleRadians * tolerance.angleRadians ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'tangentProjectedCurve') {
+      const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+      const projected = findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
+      status = entity
+        && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc')
+        && projected
+        && projectedCircleLikeGeometry(projected) !== null
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'tangent') {
+      const entities = constraint.entityIds.map((entityId) =>
+        definition.entities.find((candidate) => candidate.entityId === entityId),
+      )
+      status = entities.every((entity) => entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc'))
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'concentric') {
+      const entities = constraint.entityIds.map((entityId) =>
+        definition.entities.find((candidate) => candidate.entityId === entityId),
+      )
+      status = entities.every((entity) => entity && (entity.kind === 'circle' || entity.kind === 'arc'))
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'concentricProjectedCurve') {
+      const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+      const projected = findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
+      status = entity
+        && (entity.kind === 'circle' || entity.kind === 'arc')
+        && projected
+        && projectedCircleLikeGeometry(projected) !== null
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
     } else if (residual > tolerance.coincidence * tolerance.coincidence) {
       status = 'unsatisfied'
     }
@@ -1418,6 +2415,52 @@ function collectTranslationComponent(
           constraint.entityIds.flatMap((entityId) => getLineEntityPoints(definition, entityId)),
         )
         break
+      case 'coincidentProjectedPoint':
+      case 'pointOnProjectedCurve':
+      case 'midpointProjectedLine':
+        connectPoints(graph, [constraint.point.pointId])
+        break
+      case 'midpoint':
+        connectPoints(graph, [
+          constraint.point.pointId,
+          ...getLineEntityPoints(definition, constraint.line.entityId),
+        ])
+        break
+      case 'pointOnCurve':
+        {
+          const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+          connectPoints(graph, [
+            constraint.point.pointId,
+            ...(entity ? getEntityPoints(entity) : []),
+          ])
+        }
+        break
+      case 'parallelProjectedLine':
+      case 'perpendicularProjectedLine':
+        connectPoints(graph, getLineEntityPoints(definition, constraint.line.entityId))
+        break
+      case 'tangentProjectedCurve':
+        {
+          const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+          connectPoints(graph, entity ? getEntityPoints(entity) : [])
+        }
+        break
+      case 'tangent':
+      case 'concentric':
+        connectPoints(
+          graph,
+          constraint.entityIds.flatMap((entityId) => {
+            const entity = definition.entities.find((candidate) => candidate.entityId === entityId)
+            return entity ? getEntityPoints(entity) : []
+          }),
+        )
+        break
+      case 'concentricProjectedCurve':
+        {
+          const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+          connectPoints(graph, entity ? getEntityPoints(entity) : [])
+        }
+        break
       case 'fixPoint':
         break
     }
@@ -1465,6 +2508,7 @@ function collectTranslationComponent(
 
 function trySolveDraggedPointAsComponentTranslation(input: {
   definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
   dragTarget: SketchDraggedPointTarget
   tolerances: SketchSolveTolerancePolicy
   partialSolvePolicy: SolverPartialSolvePolicy
@@ -1487,6 +2531,31 @@ function trySolveDraggedPointAsComponentTranslation(input: {
     return null
   }
 
+  if (
+    input.definition.constraints.some((constraint) => {
+      if (
+        constraint.kind === 'coincidentProjectedPoint'
+        || constraint.kind === 'pointOnProjectedCurve'
+        || constraint.kind === 'midpointProjectedLine'
+      ) {
+        return component.has(constraint.point.pointId)
+      }
+
+      if (constraint.kind === 'parallelProjectedLine' || constraint.kind === 'perpendicularProjectedLine') {
+        return getLineEntityPoints(input.definition, constraint.line.entityId).some((pointId) => component.has(pointId))
+      }
+
+      if (constraint.kind === 'tangentProjectedCurve' || constraint.kind === 'concentricProjectedCurve') {
+        const entity = input.definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
+        return entity ? getEntityPoints(entity).some((pointId) => component.has(pointId)) : false
+      }
+
+      return false
+    })
+  ) {
+    return null
+  }
+
   const delta = subtract(input.dragTarget.position, draggedPoint.position)
   const translatedDefinition: SketchDefinition = {
     ...input.definition,
@@ -1498,6 +2567,7 @@ function trySolveDraggedPointAsComponentTranslation(input: {
   }
   const solved = solveSketchDefinitionCore({
     definition: translatedDefinition,
+    projectedReferences: input.projectedReferences,
     tolerances: input.tolerances,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy: input.strategy,
@@ -1527,12 +2597,14 @@ function trySolveDraggedPointAsComponentTranslation(input: {
 
 export function solveSketchDefinitionCore(input: {
   definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
   tolerances: SketchSolveTolerancePolicy
   partialSolvePolicy: SolverPartialSolvePolicy
   strategy?: SketchSolveStrategy
 }): SketchCoreSolveResult {
-  const validation = validateDefinition(input.definition, input.tolerances)
-  const system = buildSystem(input.definition, { dragTarget: null })
+  const projectedReferences = input.projectedReferences ?? []
+  const validation = validateDefinition(input.definition, input.tolerances, projectedReferences)
+  const system = buildSystem(input.definition, { dragTarget: null, projectedReferences })
   const strategy = input.strategy ?? 'bfgs'
   const solved =
     strategy === 'gradientDescent'
@@ -1615,6 +2687,7 @@ export function solveSketchDefinitionCore(input: {
       solved.values,
       input.tolerances,
       solved.perConstraint,
+      projectedReferences,
     ),
     dimensionStatuses: buildDimensionStatuses(
       input.definition,
@@ -1635,6 +2708,7 @@ export function solveSketchDefinitionCore(input: {
 
 export function solveSketchDefinitionWithDraggedPointTarget(input: {
   definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
   dragTarget: SketchDraggedPointTarget
   tolerances: SketchSolveTolerancePolicy
   partialSolvePolicy: SolverPartialSolvePolicy
@@ -1657,8 +2731,9 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
     }
   }
 
-  const validation = validateDefinition(input.definition, input.tolerances)
-  const system = buildSystem(input.definition, { dragTarget: input.dragTarget })
+  const projectedReferences = input.projectedReferences ?? []
+  const validation = validateDefinition(input.definition, input.tolerances, projectedReferences)
+  const system = buildSystem(input.definition, { dragTarget: input.dragTarget, projectedReferences })
   const strategy = input.strategy ?? 'bfgs'
   const solved =
     strategy === 'gradientDescent'
@@ -1716,6 +2791,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
       solved.values,
       input.tolerances,
       solved.perConstraint,
+      projectedReferences,
     ),
     dimensionStatuses: buildDimensionStatuses(
       input.definition,
@@ -1750,6 +2826,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
 
   const translated = trySolveDraggedPointAsComponentTranslation({
     definition: input.definition,
+    projectedReferences,
     dragTarget: input.dragTarget,
     tolerances: input.tolerances,
     partialSolvePolicy: input.partialSolvePolicy,
@@ -1780,9 +2857,10 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
 
 export function validateSketchDefinitionCore(input: {
   definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
   tolerances: SketchSolveTolerancePolicy
 }): SketchCoreValidationResult {
-  return validateDefinition(input.definition, input.tolerances)
+  return validateDefinition(input.definition, input.tolerances, input.projectedReferences ?? [])
 }
 
 export function getSketchSolveInitialValuesForTest(definition: SketchDefinition) {
@@ -1791,10 +2869,11 @@ export function getSketchSolveInitialValuesForTest(definition: SketchDefinition)
 
 export function evaluateSketchScalarConstraintForTest(input: {
   definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
   constraintId: ConstraintId | DimensionId
   values: Float64Array
 }): SketchScalarConstraintEvaluationForTest {
-  const system = buildSystem(input.definition)
+  const system = buildSystem(input.definition, { projectedReferences: input.projectedReferences ?? [] })
   const constraint = system.scalarConstraints.find((candidate) => candidate.id === input.constraintId)
   if (!constraint) {
     throw new Error(`Unknown scalar constraint ${input.constraintId}.`)

@@ -1,5 +1,6 @@
 import type { SketchPoint } from '@/contracts/modeling/schema'
 import type { Vec3 } from '@/domain/modeling/occ/math'
+import type { SketchSnapCandidateKind, SketchSnapGlyphKind } from '@/domain/sketch-snapping/snap-candidates'
 
 export type SketchToolControlValue = string | number | boolean | null
 
@@ -169,6 +170,14 @@ export type SketchToolOverlayDescriptor =
       kind: 'helperMarker'
       label: string
       point: SketchPoint
+    }
+  | {
+      id: string
+      kind: 'snapIndicator'
+      label: string
+      point: SketchPoint
+      candidateKind: SketchSnapCandidateKind
+      glyphKind: SketchSnapGlyphKind
     }
   | {
       id: string

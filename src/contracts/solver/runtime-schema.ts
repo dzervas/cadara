@@ -48,6 +48,7 @@ export const solveSketchRequestSchema = sketchSolverEnvelopeSchema.extend({
 export const deriveSketchRegionsRequestSchema = sketchSolverEnvelopeSchema.extend({
   definition: sketchDefinitionSchema,
   solvedSnapshot: solvedSketchSnapshotSchema,
+  projectedReferences: z.array(z.unknown()),
 }).transform((value) => value as unknown as DeriveSketchRegionsRequest)
 
 export const resolveSketchReferenceRequestSchema = sketchSolverEnvelopeSchema.extend({

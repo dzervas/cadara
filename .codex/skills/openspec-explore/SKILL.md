@@ -56,10 +56,10 @@ Depending on what the user brings, you might:
 │     Use ASCII diagrams liberally        │
 ├─────────────────────────────────────────┤
 │                                         │
-│   ┌────────┐         ┌────────┐        │
-│   │ State  │────────▶│ State  │        │
-│   │   A    │         │   B    │        │
-│   └────────┘         └────────┘        │
+│   ┌────────┐         ┌────────┐         │
+│   │ State  │────────▶│ State  │         │
+│   │   A    │         │   B    │         │
+│   └────────┘         └────────┘         │
 │                                         │
 │   System diagrams, state machines,      │
 │   data flows, architecture sketches,    │
@@ -184,9 +184,9 @@ You: [reads codebase]
      │ Google  │  │  GitHub │  │  Email  │
      │  OAuth  │  │  OAuth  │  │  Magic  │
      └────┬────┘  └────┬────┘  └────┬────┘
-          │             │             │
-          └─────────────┼─────────────┘
-                        ▼
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
                   ┌───────────┐
                   │  Session  │
                   └─────┬─────┘

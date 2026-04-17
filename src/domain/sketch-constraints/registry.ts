@@ -1,4 +1,5 @@
 import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { ProjectedSketchGeometryRef } from '@/contracts/sketch/schema'
 import type {
   SketchToolDimensionReferenceKind,
   SketchToolOverlayDescriptor,
@@ -35,6 +36,62 @@ function normalize(vector: readonly [number, number]): readonly [number, number]
   }
 
   return [vector[0] / length, vector[1] / length]
+}
+
+function projectedGeometryKind(kind: NonNullable<SketchConstraintTargetRecord['projected']>['geometry']['kind']): NonNullable<ProjectedSketchGeometryRef['kind']> {
+  switch (kind) {
+    case 'point':
+      return 'projectedPoint'
+    case 'lineSegment':
+      return 'projectedLineSegment'
+    case 'circle':
+      return 'projectedCircle'
+    case 'arc':
+      return 'projectedArc'
+  }
+}
+
+function projectedOperand(projected: NonNullable<SketchConstraintTargetRecord['projected']>) {
+  return {
+    kind: 'projectedGeometry' as const,
+    reference: {
+      kind: projectedGeometryKind(projected.geometry.kind),
+      referenceId: projected.reference.referenceId,
+      geometryId: projected.reference.geometryId,
+    },
+  }
+}
+
+function localPointOperand(target: SketchConstraintTargetRecord) {
+  return target.point
+    ? {
+        kind: 'localPoint' as const,
+        pointId: target.point.pointId,
+      }
+    : null
+}
+
+function localEntityOperand(target: SketchConstraintTargetRecord) {
+  return target.entity
+    ? {
+        kind: 'localEntity' as const,
+        entityId: target.entity.entityId,
+      }
+    : null
+}
+
+function resolveCoincidentTarget(
+  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
+  target: PrimitiveRef,
+  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
+) {
+  if (target.kind !== 'projectedReferenceGeometry') {
+    return resolvePointTarget(definition, target, projectedReferences)
+  }
+
+  return resolvePointTarget(definition, target, projectedReferences)
+    ?? resolveLineTarget(definition, target, projectedReferences)
+    ?? resolveCircleTarget(definition, target, projectedReferences)
 }
 
 function pointLineDistance(
@@ -384,11 +441,11 @@ const sketchConstraintDefinitions = [
       modes: ['sketch'],
     },
     steps: [
-      { id: 'point-a', label: 'Select first point', acceptedKinds: ['point'] },
-      { id: 'point-b', label: 'Select second point', acceptedKinds: ['point'] },
+      { id: 'point-a', label: 'Select first coincident target', acceptedKinds: ['point', 'line', 'circle'] },
+      { id: 'point-b', label: 'Select second coincident target', acceptedKinds: ['point', 'line', 'circle'] },
     ],
-    resolveTarget(definition, target) {
-      return resolvePointTarget(definition, target)
+    resolveTarget(definition, target, projectedReferences) {
+      return resolveCoincidentTarget(definition, target, projectedReferences)
     },
     buildPreview(input) {
       return buildSinglePreview(
@@ -398,24 +455,64 @@ const sketchConstraintDefinitions = [
           ? formatSelectedLabels(input.selectedTargets)
           : input.hoverTarget
             ? `Hover ${input.hoverTarget.label}`
-            : 'Select two points',
+            : 'Select a local point and coincident target',
         input,
       )
     },
     createCommitContribution(input) {
       const [left, right] = input.selectedTargets
 
-      if (!left?.point || !right?.point) {
+      if (!left || !right) {
         return {}
+      }
+
+      if (left.point && right.point) {
+        return {
+          constraints: [
+            {
+              constraintId: input.createConstraintId('coincident'),
+              kind: 'coincident',
+              label: `Coincident ${input.sequence}`,
+              pointIds: [left.point.pointId, right.point.pointId],
+            },
+          ],
+        }
+      }
+
+      const local = left.point ? left : right.point ? right : null
+      const projected = left.projected
+        ? left.projected
+        : right.projected
+          ? right.projected
+          : null
+      const point = local ? localPointOperand(local) : null
+
+      if (!point || !projected) {
+        return {}
+      }
+
+      if (projected.geometry.kind === 'lineSegment' || projected.geometry.kind === 'circle' || projected.geometry.kind === 'arc') {
+        return {
+          constraints: [
+            {
+              constraintId: input.createConstraintId('point-on-projected-curve'),
+              kind: 'pointOnProjectedCurve',
+              label: `Coincident ${input.sequence}`,
+              point,
+              projectedCurve: projectedOperand(projected),
+            },
+          ],
+        }
       }
 
       return {
         constraints: [
           {
-            constraintId: input.createConstraintId('coincident'),
-            kind: 'coincident',
+            constraintId: input.createConstraintId('coincident-projected-point'),
+            kind: 'coincidentProjectedPoint',
             label: `Coincident ${input.sequence}`,
-            pointIds: [left.point.pointId, right.point.pointId],
+            point,
+            projectedPoint: projectedOperand(projected),
           },
         ],
       }
@@ -434,8 +531,8 @@ const sketchConstraintDefinitions = [
       { id: 'line-a', label: 'Select first line', acceptedKinds: ['line'] },
       { id: 'line-b', label: 'Select second line', acceptedKinds: ['line'] },
     ],
-    resolveTarget(definition, target) {
-      return resolveLineTarget(definition, target)
+    resolveTarget(definition, target, projectedReferences) {
+      return resolveLineTarget(definition, target, projectedReferences)
     },
     buildPreview(input) {
       return buildLineAnglePreview(input)
@@ -443,17 +540,167 @@ const sketchConstraintDefinitions = [
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
 
-      if (!first?.entity || !second?.entity) {
+      if (!first || !second) {
+        return {}
+      }
+
+      if (first.entity && second.entity) {
+        return {
+          constraints: [
+            {
+              constraintId: input.createConstraintId('parallel'),
+              kind: 'parallel',
+              label: `Parallel ${input.sequence}`,
+              entityIds: [first.entity.entityId, second.entity.entityId],
+            },
+          ],
+        }
+      }
+
+      const local = first.entity ? first : second.entity ? second : null
+      const projected = first.projected?.geometry.kind === 'lineSegment'
+        ? first.projected
+        : second.projected?.geometry.kind === 'lineSegment'
+          ? second.projected
+          : null
+      const line = local ? localEntityOperand(local) : null
+
+      if (!line || !projected) {
         return {}
       }
 
       return {
         constraints: [
           {
-            constraintId: input.createConstraintId('parallel'),
-            kind: 'parallel',
+            constraintId: input.createConstraintId('parallel-projected-line'),
+            kind: 'parallelProjectedLine',
             label: `Parallel ${input.sequence}`,
-            entityIds: [first.entity.entityId, second.entity.entityId],
+            line,
+            projectedLine: projectedOperand(projected),
+          },
+        ],
+      }
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintPerpendicular',
+      name: 'Perpendicular',
+      tooltip: 'Constrain two lines to remain perpendicular.',
+      icon: 'constraintPerpendicular',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'line-a', label: 'Select first line', acceptedKinds: ['line'] },
+      { id: 'line-b', label: 'Select second line', acceptedKinds: ['line'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolveLineTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildLineAnglePreview(input)
+    },
+    createCommitContribution(input) {
+      const [first, second] = input.selectedTargets
+
+      if (!first || !second) {
+        return {}
+      }
+
+      if (first.entity && second.entity) {
+        return {
+          constraints: [
+            {
+              constraintId: input.createConstraintId('perpendicular'),
+              kind: 'perpendicular',
+              label: `Perpendicular ${input.sequence}`,
+              entityIds: [first.entity.entityId, second.entity.entityId],
+            },
+          ],
+        }
+      }
+
+      const local = first.entity ? first : second.entity ? second : null
+      const projected = first.projected?.geometry.kind === 'lineSegment'
+        ? first.projected
+        : second.projected?.geometry.kind === 'lineSegment'
+          ? second.projected
+          : null
+      const line = local ? localEntityOperand(local) : null
+
+      if (!line || !projected) {
+        return {}
+      }
+
+      return {
+        constraints: [
+          {
+            constraintId: input.createConstraintId('perpendicular-projected-line'),
+            kind: 'perpendicularProjectedLine',
+            label: `Perpendicular ${input.sequence}`,
+            line,
+            projectedLine: projectedOperand(projected),
+          },
+        ],
+      }
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintTangent',
+      name: 'Tangent',
+      tooltip: 'Constrain local curves tangent to projected circles or arcs.',
+      icon: 'constraintTangent',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'curve-a', label: 'Select local curve', acceptedKinds: ['line', 'circle'] },
+      { id: 'curve-b', label: 'Select projected circle or arc', acceptedKinds: ['circle'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolveCircleTarget(definition, target, projectedReferences)
+        ?? resolveLineTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildSinglePreview(
+        'tangent-preview',
+        'Tangent preview',
+        input.selectedTargets.length >= 2
+          ? formatSelectedLabels(input.selectedTargets)
+          : 'Select a local curve and projected circle',
+        input,
+      )
+    },
+    createCommitContribution(input) {
+      const [first, second] = input.selectedTargets
+
+      if (!first || !second) {
+        return {}
+      }
+
+      const local = first.entity ? first : second.entity ? second : null
+      const projected = first.projected && (first.projected.geometry.kind === 'circle' || first.projected.geometry.kind === 'arc')
+        ? first.projected
+        : second.projected && (second.projected.geometry.kind === 'circle' || second.projected.geometry.kind === 'arc')
+          ? second.projected
+          : null
+      const curve = local ? localEntityOperand(local) : null
+
+      if (!curve || !projected) {
+        return {}
+      }
+
+      return {
+        constraints: [
+          {
+            constraintId: input.createConstraintId('tangent-projected-curve'),
+            kind: 'tangentProjectedCurve',
+            label: `Tangent ${input.sequence}`,
+            curve,
+            projectedCurve: projectedOperand(projected),
+            relation: 'external',
           },
         ],
       }
@@ -726,6 +973,7 @@ export function resolveSketchConstraintTarget(
   toolId: SketchConstraintToolId,
   definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
   target: PrimitiveRef,
+  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
 ) {
-  return getSketchConstraintDefinition(toolId).resolveTarget(definition, target)
+  return getSketchConstraintDefinition(toolId).resolveTarget(definition, target, projectedReferences)
 }

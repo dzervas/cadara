@@ -74,7 +74,10 @@ export function getEscapeEvent(
 export function shouldViewportClickRequestSelection(
   activeSketchTool: SketchAuthoringToolId | null | undefined,
 ) {
-  return activeSketchTool == null || activeSketchTool === 'construction' || isRegisteredSketchConstraintToolId(activeSketchTool)
+  return activeSketchTool == null
+    || activeSketchTool === 'construction'
+    || activeSketchTool === 'projectReference'
+    || isRegisteredSketchConstraintToolId(activeSketchTool)
 }
 
 export function shouldViewportStartSketchGeometryDrag(
@@ -85,5 +88,5 @@ export function shouldViewportStartSketchGeometryDrag(
     return false
   }
 
-  return activeSketchTool == null || (activeSketchTool !== 'construction' && !isRegisteredSketchConstraintToolId(activeSketchTool))
+  return activeSketchTool == null
 }

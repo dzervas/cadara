@@ -12,10 +12,12 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
   acceptSketchDraw,
+  updateSketchReferenceProjection,
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
 import { selectPointToPointDimensionReference } from '@/domain/sketch-constraints/registry'
 import { getToolById } from '@/domain/tools/tool-registry'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 
 test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -32,13 +34,36 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
 
     session = beginSketchTool(session, 'line')
     session = startSketchDraw(session, [0, 0])
-    session = acceptSketchDraw(session, [10, 0])
+    session = acceptSketchDraw(session, [10, 1])
 
     session = beginSketchTool(session, 'line')
     session = startSketchDraw(session, [0, 5])
-    session = acceptSketchDraw(session, [10, 5])
+    session = acceptSketchDraw(session, [10, 6])
 
     return session
+  }
+
+  function addProjectedReference(
+    session: ReturnType<typeof createSessionWithTwoLines>,
+    projectedReference: ProjectedSketchReferenceRecord,
+  ) {
+    const definitionWithReference = {
+      ...session.definition,
+      referenceIds: [projectedReference.referenceId],
+      references: [{
+        referenceId: projectedReference.referenceId,
+        kind: 'modelReference',
+        label: 'Projected reference',
+        source: { kind: 'edge', bodyId: 'body_1', edgeId: 'edge_1' },
+        projectionMode: 'projectAlongPlaneNormal',
+      }],
+    } as typeof session.definition
+
+    return {
+      ...updateSketchReferenceProjection(session, [projectedReference], []),
+      definition: definitionWithReference,
+      fullDefinition: definitionWithReference,
+    }
   }
 
   function testToolbarDefinitionsExposeConstraintFamilies() {
@@ -87,6 +112,205 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     session = deleteSelectedSketchAnnotation(session)
 
     assert(session.definition.constraintIds.length === 0, 'Deleting the selected constraint should remove the durable constraint record.')
+  }
+
+  function testProjectedCoincidentAuthoringCommitsTypedOperand() {
+    let session = createSessionWithTwoLines()
+    const [firstPointId] = session.definition.pointIds
+    session = addProjectedReference(session, {
+      referenceId: 'ref_point',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_point',
+        kind: 'point',
+        position: [3, 3],
+      }],
+      diagnostics: [],
+    })
+
+    session = beginSketchTool(session, 'constraintCoincident')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: firstPointId!,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_point',
+      geometryId: 'projected_geometry_point',
+      geometryKind: 'point',
+    })
+
+    const constraint = session.definition.constraints[0]
+    assert(
+      constraint?.kind === 'coincidentProjectedPoint',
+      'Coincident authoring should commit a projected-point constraint through normal target selection.',
+    )
+    assert(
+      constraint.projectedPoint.reference.referenceId === 'ref_point'
+        && constraint.projectedPoint.reference.geometryId === 'projected_geometry_point',
+      'Projected-point coincident authoring should store the selected reference geometry operand.',
+    )
+  }
+
+  function testProjectedParallelAuthoringCommitsTypedOperand() {
+    let session = createSessionWithTwoLines()
+    const [firstLineId] = session.definition.entityIds
+    session = addProjectedReference(session, {
+      referenceId: 'ref_line',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_line',
+        kind: 'lineSegment',
+        startPosition: [0, 0],
+        endPosition: [10, 0],
+      }],
+      diagnostics: [],
+    })
+
+    session = beginSketchTool(session, 'constraintParallel')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: firstLineId!,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_line',
+      geometryId: 'projected_geometry_line',
+      geometryKind: 'lineSegment',
+    })
+
+    const constraint = session.definition.constraints[0]
+    assert(
+      constraint?.kind === 'parallelProjectedLine',
+      'Parallel authoring should commit a projected-line constraint through normal target selection.',
+    )
+    assert(
+      constraint.projectedLine.reference.referenceId === 'ref_line'
+        && constraint.projectedLine.reference.geometryId === 'projected_geometry_line',
+      'Projected parallel authoring should store the selected reference geometry operand.',
+    )
+  }
+
+  function testPointOnProjectedCurveAuthoringCommitsTypedOperand() {
+    const cases = [
+      {
+        geometry: {
+          geometryId: 'projected_geometry_line',
+          kind: 'lineSegment' as const,
+          startPosition: [0, 0] as const,
+          endPosition: [10, 0] as const,
+        },
+        geometryKind: 'lineSegment' as const,
+      },
+      {
+        geometry: {
+          geometryId: 'projected_geometry_circle',
+          kind: 'circle' as const,
+          centerPosition: [0, 0] as const,
+          radius: 5,
+        },
+        geometryKind: 'circle' as const,
+      },
+      {
+        geometry: {
+          geometryId: 'projected_geometry_arc',
+          kind: 'arc' as const,
+          centerPosition: [0, 0] as const,
+          startPosition: [5, 0] as const,
+          endPosition: [0, 5] as const,
+          sweepDirection: 'counterClockwise' as const,
+        },
+        geometryKind: 'arc' as const,
+      },
+    ]
+
+    for (const testCase of cases) {
+      let session = createSessionWithTwoLines()
+      const [firstPointId] = session.definition.pointIds
+      session = addProjectedReference(session, {
+        referenceId: 'ref_curve',
+        status: 'projected',
+        geometry: [testCase.geometry],
+        diagnostics: [],
+      })
+
+      session = beginSketchTool(session, 'constraintCoincident')
+      session = selectSketchConstraintTarget(session, {
+        kind: 'sketchPoint',
+        sketchId: 'sketch_draft',
+        pointId: firstPointId!,
+      })
+      session = selectSketchConstraintTarget(session, {
+        kind: 'projectedReferenceGeometry',
+        referenceId: 'ref_curve',
+        geometryId: testCase.geometry.geometryId,
+        geometryKind: testCase.geometryKind,
+      })
+
+      const constraint = session.definition.constraints[0]
+      assert(
+        constraint?.kind === 'pointOnProjectedCurve',
+        `Coincident authoring should commit a point-on-projected-${testCase.geometryKind} constraint.`,
+      )
+      assert(
+        constraint.projectedCurve.reference.geometryId === testCase.geometry.geometryId,
+        'Point-on-projected-curve authoring should store the selected reference geometry operand.',
+      )
+    }
+  }
+
+  function testReferenceTargetedConstraintAuthoringCommitsTypedOperands() {
+    let session = createSessionWithTwoLines()
+    const [firstLineId] = session.definition.entityIds
+    const projectedReference: ProjectedSketchReferenceRecord = {
+      referenceId: 'ref_edge',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_line',
+        kind: 'lineSegment',
+        startPosition: [0, 0],
+        endPosition: [10, 0],
+      }],
+      diagnostics: [],
+    }
+
+    session = addProjectedReference(session, projectedReference)
+    session = beginSketchTool(session, 'constraintPerpendicular')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: firstLineId!,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_edge',
+      geometryId: 'projected_geometry_line',
+      geometryKind: 'lineSegment',
+    })
+
+    const constraint = session.definition.constraints[0]
+    assert(
+      constraint?.kind === 'perpendicularProjectedLine',
+      'Perpendicular authoring should commit a durable projected-line constraint when the second target is projected.',
+    )
+    assert(
+      constraint.projectedLine.reference.referenceId === 'ref_edge'
+        && constraint.projectedLine.reference.geometryId === 'projected_geometry_line',
+      'Projected-line constraint should store typed reference and geometry IDs.',
+    )
+    assert(
+      session.commitRequest?.definition.constraints[0]?.kind === 'perpendicularProjectedLine',
+      'Reference-targeted constraint should be present in the modeling-boundary commit payload.',
+    )
+
+    const annotation = getSketchAnnotationDescriptors(session).find((entry) => entry.target.kind === 'constraint')
+    assert(annotation?.glyphKind === 'constraintPerpendicular', 'Reference-targeted line constraint should render a perpendicular annotation.')
+    assert(
+      annotation.affectedGeometryRefs.some((target) => target.kind === 'projectedReferenceGeometry'),
+      'Reference-targeted annotation should highlight the projected target.',
+    )
   }
 
   function testDimensionalConstraintShowsFloatingInputAndSupportsDeletion() {
@@ -356,6 +580,10 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
 
   testToolbarDefinitionsExposeConstraintFamilies()
   testGeometricConstraintAuthoringCommitsDurableRecord()
+  testProjectedCoincidentAuthoringCommitsTypedOperand()
+  testProjectedParallelAuthoringCommitsTypedOperand()
+  testPointOnProjectedCurveAuthoringCommitsTypedOperand()
+  testReferenceTargetedConstraintAuthoringCommitsTypedOperands()
   testDimensionalConstraintShowsFloatingInputAndSupportsDeletion()
   testCommittedDimensionAnnotationReopensValueInputAndEditsDurableRecord()
   testCommittedRectangleWidthEditSolvesDraftGeometry()

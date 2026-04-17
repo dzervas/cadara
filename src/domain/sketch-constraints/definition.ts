@@ -6,6 +6,7 @@ import type {
   SketchPoint2D,
   SketchPointDefinition,
 } from '@/contracts/sketch/schema'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
 import type {
@@ -16,6 +17,8 @@ import type {
 export type SketchConstraintToolId =
   | 'constraintCoincident'
   | 'constraintParallel'
+  | 'constraintPerpendicular'
+  | 'constraintTangent'
   | 'constraintEqual'
   | 'dimensionDistance'
   | 'dimensionHorizontal'
@@ -53,6 +56,10 @@ export interface SketchConstraintTargetRecord {
   anchor: SketchPoint2D
   point?: SketchPointDefinition
   entity?: SketchEntityDefinition
+  projected?: {
+    reference: NonNullable<Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>>
+    geometry: ProjectedSketchReferenceRecord['geometry'][number]
+  }
   line?: {
     start: SketchPoint2D
     end: SketchPoint2D
@@ -89,7 +96,11 @@ export interface SketchConstraintDefinition<TToolId extends SketchConstraintTool
   metadata: SketchConstraintMetadata<TToolId>
   steps: readonly SketchConstraintSelectionStep[]
   valueSpec?: SketchConstraintValueSpec
-  resolveTarget(definition: SketchDefinition, target: PrimitiveRef): SketchConstraintTargetRecord | null
+  resolveTarget(
+    definition: SketchDefinition,
+    target: PrimitiveRef,
+    projectedReferences?: readonly ProjectedSketchReferenceRecord[],
+  ): SketchConstraintTargetRecord | null
   buildPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[]
   createCommitContribution(input: SketchConstraintCommitInput): SketchConstraintCommitContribution
 }
@@ -105,7 +116,18 @@ export function findEntity(definition: SketchDefinition, entityId: SketchEntityD
 export function resolvePointTarget(
   definition: SketchDefinition,
   target: PrimitiveRef,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchConstraintTargetRecord | null {
+  if (target.kind === 'projectedReferenceGeometry') {
+    const projected = resolveProjectedGeometryTarget(target, projectedReferences)
+
+    if (!projected || projected.projected?.geometry.kind !== 'point') {
+      return null
+    }
+
+    return projected
+  }
+
   if (target.kind !== 'sketchPoint') {
     return null
   }
@@ -128,7 +150,18 @@ export function resolvePointTarget(
 export function resolveLineTarget(
   definition: SketchDefinition,
   target: PrimitiveRef,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchConstraintTargetRecord | null {
+  if (target.kind === 'projectedReferenceGeometry') {
+    const projected = resolveProjectedGeometryTarget(target, projectedReferences)
+
+    if (!projected || projected.projected?.geometry.kind !== 'lineSegment') {
+      return null
+    }
+
+    return projected
+  }
+
   if (target.kind !== 'sketchEntity') {
     return null
   }
@@ -155,7 +188,18 @@ export function resolveLineTarget(
 export function resolveCircleTarget(
   definition: SketchDefinition,
   target: PrimitiveRef,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchConstraintTargetRecord | null {
+  if (target.kind === 'projectedReferenceGeometry') {
+    const projected = resolveProjectedGeometryTarget(target, projectedReferences)
+
+    if (!projected || (projected.projected?.geometry.kind !== 'circle' && projected.projected?.geometry.kind !== 'arc')) {
+      return null
+    }
+
+    return projected
+  }
+
   if (target.kind !== 'sketchEntity') {
     return null
   }
@@ -183,4 +227,64 @@ function midpointForLine(definition: SketchDefinition, entity: Extract<SketchEnt
   const start = findPoint(definition, entity.startPointId)?.position ?? [0, 0]
   const end = findPoint(definition, entity.endPointId)?.position ?? [0, 0]
   return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
+}
+
+function resolveProjectedGeometryTarget(
+  target: Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): SketchConstraintTargetRecord | null {
+  const reference = projectedReferences.find((entry) => entry.referenceId === target.referenceId)
+  const geometry = reference?.geometry.find((entry) =>
+    entry.geometryId === target.geometryId && entry.kind === target.geometryKind,
+  )
+
+  if (!reference || reference.status !== 'projected' || !geometry) {
+    return null
+  }
+
+  if (geometry.kind === 'point') {
+    return {
+      target,
+      label: `Projected ${geometry.geometryId}`,
+      kind: 'point',
+      anchor: geometry.position,
+      projected: { reference: target, geometry },
+    }
+  }
+
+  if (geometry.kind === 'lineSegment') {
+    return {
+      target,
+      label: `Projected ${geometry.geometryId}`,
+      kind: 'line',
+      anchor: [
+        (geometry.startPosition[0] + geometry.endPosition[0]) / 2,
+        (geometry.startPosition[1] + geometry.endPosition[1]) / 2,
+      ],
+      projected: { reference: target, geometry },
+      line: {
+        start: geometry.startPosition,
+        end: geometry.endPosition,
+      },
+    }
+  }
+
+  const radius = geometry.kind === 'circle'
+    ? geometry.radius
+    : Math.hypot(
+        geometry.startPosition[0] - geometry.centerPosition[0],
+        geometry.startPosition[1] - geometry.centerPosition[1],
+      )
+
+  return {
+    target,
+    label: `Projected ${geometry.geometryId}`,
+    kind: 'circle',
+    anchor: geometry.centerPosition,
+    projected: { reference: target, geometry },
+    circle: {
+      center: geometry.centerPosition,
+      radius,
+    },
+  }
 }

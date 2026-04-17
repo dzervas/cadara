@@ -9,12 +9,15 @@ import {
 } from '@/contracts/sketch/schema'
 import type {
   ConstructionId,
+  ProjectedGeometryId,
+  ReferenceId,
   RegionLoopId,
   RegionId,
   SketchEntityId,
   SketchId,
   SketchPointId,
 } from '@/contracts/shared/ids'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import { buildRegionProfileFace } from '@/domain/modeling/occ/sketch-profile'
 import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
@@ -92,11 +95,29 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
     }
   }
 
+  function withAuthoredReference(definition: SketchDefinition, referenceId: ReferenceId): SketchDefinition {
+    return {
+      ...definition,
+      referenceIds: [...definition.referenceIds, referenceId],
+      references: [
+        ...definition.references,
+        {
+          referenceId,
+          kind: 'modelReference',
+          label: 'Projected profile',
+          source: { kind: 'edge', bodyId: 'body_projected', edgeId: 'edge_profile' },
+          projectionMode: 'projectAlongPlaneNormal',
+        },
+      ],
+    }
+  }
+
   function createSketchRecord(
     sketchId: SketchId,
     definition: SketchDefinition,
     solvedEntities: SketchRecord['solvedSnapshot']['solvedEntities'],
     solvedPoints: SketchRecord['solvedSnapshot']['solvedPoints'] = [],
+    projectedReferences: ProjectedSketchReferenceRecord[] = [],
   ): SketchRecord {
     return {
       ownerDocumentId: 'doc_workspace',
@@ -123,6 +144,7 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      projectedReferences,
       regions: [],
     }
   }
@@ -608,6 +630,205 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
     assertClose(await faceArea(innerProfile.face), Math.PI, 1e-5, 'Inner circle cell should build as an independent profile')
   }
 
+  async function testProjectedLineProfileBuildsFromLiveProjection() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createSketchPlane()
+    const sketchId = 'sketch_projected_profile_line' as SketchId
+    const referenceId = 'ref_projected_profile' as ReferenceId
+    const geometryId = 'projected_geometry_left' as ProjectedGeometryId
+    const points = [
+      { id: pointId('bottom_left'), position: [0, 0] as const },
+      { id: pointId('bottom_right'), position: [4, 0] as const },
+      { id: pointId('top_right'), position: [4, 3] as const },
+      { id: pointId('top_left'), position: [0, 3] as const },
+    ]
+    const definition = withAuthoredReference(createSketchDefinition(sketchId, points, [
+      {
+        kind: 'lineSegment',
+        entityId: entityId('bottom'),
+        label: 'bottom',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('bottom') },
+        isConstruction: false,
+        startPointId: pointId('bottom_left'),
+        endPointId: pointId('bottom_right'),
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId('right'),
+        label: 'right',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('right') },
+        isConstruction: false,
+        startPointId: pointId('bottom_right'),
+        endPointId: pointId('top_right'),
+      },
+      {
+        kind: 'lineSegment',
+        entityId: entityId('top'),
+        label: 'top',
+        target: { kind: 'sketchEntity', sketchId, entityId: entityId('top') },
+        isConstruction: false,
+        startPointId: pointId('top_right'),
+        endPointId: pointId('top_left'),
+      },
+    ]), referenceId)
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [{
+      referenceId,
+      status: 'projected',
+      geometry: [{
+        geometryId,
+        kind: 'lineSegment',
+        startPosition: [0, 3],
+        endPosition: [0, 0],
+      }],
+      diagnostics: [],
+    }]
+    const sketch = createSketchRecord(sketchId, definition, [
+      { kind: 'lineSegment', entityId: entityId('bottom'), startPosition: [0, 0], endPosition: [4, 0] },
+      { kind: 'lineSegment', entityId: entityId('right'), startPosition: [4, 0], endPosition: [4, 3] },
+      { kind: 'lineSegment', entityId: entityId('top'), startPosition: [4, 3], endPosition: [0, 3] },
+    ], [], projectedReferences)
+    const region = createRegion(sketchId, 'projected_rectangle', [
+      {
+        loopId: loopId('projected_rectangle_outer'),
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [
+          { source: { kind: 'entity', entityId: entityId('bottom') }, startPointId: pointId('bottom_left'), endPointId: pointId('bottom_right') },
+          { source: { kind: 'entity', entityId: entityId('right') }, startPointId: pointId('bottom_right'), endPointId: pointId('top_right') },
+          { source: { kind: 'entity', entityId: entityId('top') }, startPointId: pointId('top_right'), endPointId: pointId('top_left') },
+          {
+            source: { kind: 'projectedGeometry', reference: { kind: 'projectedLineSegment', referenceId, geometryId } },
+            startPointId: null,
+            endPointId: null,
+          },
+        ],
+        boundaryPointIds: [pointId('bottom_left'), pointId('bottom_right'), pointId('top_right'), pointId('top_left')],
+        isClosed: true,
+      },
+    ])
+
+    const profile = buildRegionProfileFace(oc, { plane, sketch }, region)
+    assertClose(await faceArea(profile.face), 12, 1e-5, 'Projected line boundary should build from live projection data')
+    assert(sketch.definition.entities.length === 3, 'Projected profile reconstruction must not create copied sketch entities.')
+  }
+
+  async function testProjectedCircleProfileBuildsFromLiveProjection() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createSketchPlane()
+    const sketchId = 'sketch_projected_profile_circle' as SketchId
+    const referenceId = 'ref_projected_profile' as ReferenceId
+    const geometryId = 'projected_geometry_circle' as ProjectedGeometryId
+    const definition = withAuthoredReference(createSketchDefinition(sketchId, [], []), referenceId)
+    const sketch = createSketchRecord(sketchId, definition, [], [], [{
+      referenceId,
+      status: 'projected',
+      geometry: [{
+        geometryId,
+        kind: 'circle',
+        centerPosition: [0, 0],
+        radius: 2,
+      }],
+      diagnostics: [],
+    }])
+    const region = createRegion(sketchId, 'projected_circle', [
+      {
+        loopId: loopId('projected_circle_outer'),
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [{
+          source: { kind: 'projectedGeometry', reference: { kind: 'projectedCircle', referenceId, geometryId } },
+          startPointId: null,
+          endPointId: null,
+        }],
+        boundaryPointIds: [],
+        isClosed: true,
+      },
+    ])
+
+    const profile = buildRegionProfileFace(oc, { plane, sketch }, region)
+    assertClose(await faceArea(profile.face), Math.PI * 4, 1e-5, 'Projected circle profile should build from live projection data')
+    assert(sketch.definition.points.length === 0 && sketch.definition.entities.length === 0, 'Projected circle profiles must not create sketch-owned geometry.')
+  }
+
+  async function testProjectedBoundaryInvalidationReportsStructuredCode() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createSketchPlane()
+    const sketchId = 'sketch_projected_profile_invalid' as SketchId
+    const referenceId = 'ref_projected_profile' as ReferenceId
+    const geometryId = 'projected_geometry_missing' as ProjectedGeometryId
+    const definition = withAuthoredReference(createSketchDefinition(sketchId, [], []), referenceId)
+    const sketch = createSketchRecord(sketchId, definition, [])
+    const region = createRegion(sketchId, 'projected_invalid', [
+      {
+        loopId: loopId('projected_invalid_outer'),
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [{
+          source: { kind: 'projectedGeometry', reference: { kind: 'projectedCircle', referenceId, geometryId } },
+          startPointId: null,
+          endPointId: null,
+        }],
+        boundaryPointIds: [],
+        isClosed: true,
+      },
+    ])
+
+    let thrown: (Error & { code?: string }) | null = null
+    try {
+      buildRegionProfileFace(oc, { plane, sketch }, region)
+    } catch (error) {
+      thrown = error as Error & { code?: string }
+    }
+
+    assert(thrown?.code === 'occ-contract-gap-projected-region-loop', 'Missing live projection should report a machine-readable code.')
+    assert(thrown.message.includes('cannot be resolved from live projection data'), 'Missing live projection should report explicit invalidation.')
+  }
+
+  async function testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createSketchPlane()
+    const sketchId = 'sketch_projected_profile_stale' as SketchId
+    const referenceId = 'ref_stale_projection' as ReferenceId
+    const geometryId = 'projected_geometry_stale' as ProjectedGeometryId
+    const definition = createSketchDefinition(sketchId, [], [])
+    const sketch = createSketchRecord(sketchId, definition, [], [], [{
+      referenceId,
+      status: 'projected',
+      geometry: [{
+        geometryId,
+        kind: 'circle',
+        centerPosition: [0, 0],
+        radius: 2,
+      }],
+      diagnostics: [],
+    }])
+    const region = createRegion(sketchId, 'projected_stale', [
+      {
+        loopId: loopId('projected_stale_outer'),
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [{
+          source: { kind: 'projectedGeometry', reference: { kind: 'projectedCircle', referenceId, geometryId } },
+          startPointId: null,
+          endPointId: null,
+        }],
+        boundaryPointIds: [],
+        isClosed: true,
+      },
+    ])
+
+    let thrown: (Error & { code?: string }) | null = null
+    try {
+      buildRegionProfileFace(oc, { plane, sketch }, region)
+    } catch (error) {
+      thrown = error as Error & { code?: string }
+    }
+
+    assert(thrown?.code === 'occ-contract-gap-projected-region-loop', 'Unauthored projected boundaries should report a machine-readable invalidation code.')
+    assert(thrown.message.includes('not backed by the current authored sketch references'), 'Stale projection data must not be treated as live authored geometry.')
+    assert(definition.points.length === 0 && definition.entities.length === 0, 'Rejected stale projection data must not be copied into sketch geometry.')
+  }
+
   async function testRejectsMultipleOuterLoops() {
     const oc = await getDefaultOpenCascadeInstance()
     const plane = createSketchPlane()
@@ -643,6 +864,10 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
   await testArcProfileRespectsReversedLoopTraversal()
   await testInnerLoopHoleReducesFaceArea()
   await testCircleNestedInRectangleBuildsBothCells()
+  await testProjectedLineProfileBuildsFromLiveProjection()
+  await testProjectedCircleProfileBuildsFromLiveProjection()
+  await testProjectedBoundaryInvalidationReportsStructuredCode()
+  await testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData()
   await testRejectsMultipleOuterLoops()
 
   console.log('OCC phase 3 sketch profile tests passed.')

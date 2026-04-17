@@ -14,6 +14,8 @@ export type ToolIconId =
   | 'dimension'
   | 'constraintCoincident'
   | 'constraintParallel'
+  | 'constraintPerpendicular'
+  | 'constraintTangent'
   | 'constraintEqual'
   | 'extrude'
   | 'revolve'

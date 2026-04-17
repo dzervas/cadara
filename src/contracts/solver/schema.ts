@@ -364,6 +364,8 @@ export interface DeriveSketchRegionsRequest extends SketchSolverRequestBase {
   solvedSnapshot: SolvedSketchSnapshot
   /** Authored sketch definition corresponding to `solvedSnapshot`. */
   definition: SketchDefinition
+  /** Explicit projected external references available to region derivation. */
+  projectedReferences: ProjectedSketchReferenceRecord[]
 }
 
 /**

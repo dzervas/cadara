@@ -72,3 +72,36 @@ The repository SHALL include a simple benchmark that measures sketch solve elaps
 - **WHEN** the solver benchmark is executed
 - **THEN** it reports solve timing for 10-constraint, 50-constraint, and 150-constraint sketch fixtures
 
+### Requirement: Sketch solver SHALL evaluate supported constraints against projected references
+The sketch solver SHALL consume projected external reference geometry as read-only input when evaluating supported reference-targeted constraints.
+
+#### Scenario: Reference-targeted constraint is satisfiable
+- **WHEN** the authored sketch contains a supported constraint between local geometry and valid projected reference geometry
+- **THEN** the solver returns solved local geometry that satisfies the relationship within tolerance
+
+#### Scenario: Reference-targeted constraint is invalidated
+- **WHEN** the projected reference geometry required by a constraint is missing from the solve request
+- **THEN** the solver reports an unsatisfied or invalid diagnostic for the authored constraint without inventing fallback geometry
+
+### Requirement: Sketch solver SHALL evaluate inferred constraint kinds
+The sketch solver SHALL evaluate durable constraint kinds required by supported snap-derived relationships, including midpoint, point-on-curve, tangent, and concentric constraints.
+
+#### Scenario: Midpoint constraint solves
+- **WHEN** a sketch contains a midpoint constraint between a point and a line
+- **THEN** the solver positions the point at the solved midpoint of the line when the system is satisfiable
+
+#### Scenario: Tangent constraint solves
+- **WHEN** a sketch contains a supported tangent constraint between two supported curve entities
+- **THEN** the solver satisfies the tangency relationship within tolerance or reports an unsatisfied diagnostic
+
+### Requirement: Region extraction SHALL emit projected geometry segments for live-derived reference profiles
+The sketch region extraction subsystem SHALL include projected geometry segment sources when valid projected reference geometry participates in a closed loop.
+
+#### Scenario: Mixed loop contains projected segment
+- **WHEN** solved local sketch geometry and projected reference geometry form a valid closed loop
+- **THEN** derived region loop segments identify local entity sources and projected geometry sources in traversal order
+
+#### Scenario: Projected segment cannot be resolved
+- **WHEN** projected geometry required for loop extraction is unavailable or invalid
+- **THEN** region extraction reports diagnostics and does not invent copied local geometry
+

@@ -35,16 +35,16 @@ test('src/domain/editor/sketch-session-history.spec.ts', () => {
   session = addLine(session, [0, 1], [1, 1])
 
   const fullItems = getSketchHistoryItems(session.fullDefinition)
-  assert(fullItems.length === 2, 'Sketch history should include ordered authored entities.')
-  assert(getSketchHistoryCursorIndex(fullItems, session.historyCursor) === 1, 'Sketch cursor should advance to the newest item.')
+  assert(fullItems.length === 4, 'Sketch history should include ordered authored entities and inferred constraints.')
+  assert(getSketchHistoryCursorIndex(fullItems, session.historyCursor) === 3, 'Sketch cursor should advance to the newest item.')
   assert(
     getPreviousSketchHistoryCursor(session)?.kind === 'item' &&
-      getPreviousSketchHistoryCursor(session)?.itemId === fullItems[0]?.id,
-    'Previous sketch cursor should step back one authored item.',
+      getPreviousSketchHistoryCursor(session)?.itemId === fullItems[1]?.id,
+    'Previous sketch cursor should step back one authored sequence.',
   )
   assert(getNextSketchHistoryCursor(session) === null, 'Next sketch cursor should be unavailable at the tail.')
 
-  const rolledBack = moveSketchHistoryCursor(session, getSketchHistoryCursorForIndex(fullItems, 0))
+  const rolledBack = moveSketchHistoryCursor(session, getSketchHistoryCursorForIndex(fullItems, 1))
   assert(rolledBack.definition.entityIds.length === 1, 'Rolling back should filter displayed sketch entities after the cursor.')
   assert(session.fullDefinition.entityIds.length === 2, 'Rolling back must not mutate the prior full draft definition.')
   assert(
@@ -53,7 +53,7 @@ test('src/domain/editor/sketch-session-history.spec.ts', () => {
   )
   assert(
     getNextSketchHistoryCursor(rolledBack)?.kind === 'item' &&
-      getNextSketchHistoryCursor(rolledBack)?.itemId === fullItems[1]?.id,
+      getNextSketchHistoryCursor(rolledBack)?.itemId === fullItems[3]?.id,
     'Next sketch cursor should step toward after-cursor authored items.',
   )
 
@@ -61,7 +61,7 @@ test('src/domain/editor/sketch-session-history.spec.ts', () => {
   assert(getPreviousSketchHistoryCursor(beforeFirst) === null, 'Undo should be unavailable before the first sketch item.')
   assert(
     getNextSketchHistoryCursor(beforeFirst)?.kind === 'item' &&
-      getNextSketchHistoryCursor(beforeFirst)?.itemId === fullItems[0]?.id,
+      getNextSketchHistoryCursor(beforeFirst)?.itemId === fullItems[1]?.id,
     'Redo should be available from the before-first sketch cursor position.',
   )
 

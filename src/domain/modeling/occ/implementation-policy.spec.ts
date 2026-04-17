@@ -61,7 +61,7 @@ test('src/domain/modeling/occ/implementation-policy.spec.ts', async () => {
     )
   }
 
-  function testProjectedRegionLoopsAreOnlySupportedForEntitySegments() {
+  function testProjectedRegionLoopsRequireLiveProjectionData() {
     const entitySource: RegionBoundarySegmentRecord['source'] = {
       kind: 'entity',
       entityId: 'sketch_entity_profile',
@@ -79,12 +79,12 @@ test('src/domain/modeling/occ/implementation-policy.spec.ts', async () => {
       'Phase 0 policy must continue to allow entity-backed region loops.',
     )
     assert(
-      !isProjectedRegionSegmentSourceSupported(projectedSource),
-      'Phase 0 policy must reject projected-geometry region loops until committed sketch payloads carry reconstructible geometry.',
+      isProjectedRegionSegmentSourceSupported(projectedSource),
+      'Projected-geometry region loop sources are supported when backed by live projection data.',
     )
     assert(
-      getProjectedRegionLoopRejectionReason().includes('committed SketchRecord payloads do not persist the projected geometry curves'),
-      'Projected-geometry rejection reason must explain the missing committed geometry payload.',
+      getProjectedRegionLoopRejectionReason().includes('active solver-owned projection data'),
+      'Projected-geometry rejection reason must explain that live projection data is required.',
     )
     assert(
       getProjectedRegionLoopRejectionMessage(projectedSource).includes('projected_geometry_edge'),
@@ -95,7 +95,7 @@ test('src/domain/modeling/occ/implementation-policy.spec.ts', async () => {
       'Projected-region rejection payloads must reuse the stable contract-gap code.',
     )
     assert(
-      createProjectedRegionLoopRejection(projectedSource).reasonCode === 'missingProjectedGeometryInCommittedSketch',
+      createProjectedRegionLoopRejection(projectedSource).reasonCode === 'missingLiveProjectedGeometry',
       'Projected-region rejection payloads must expose a stable machine-readable reason code.',
     )
     assert(
@@ -212,8 +212,14 @@ test('src/domain/modeling/occ/implementation-policy.spec.ts', async () => {
   function createEmptySketchDefinition(): SketchDefinition {
     return {
       schemaVersion: SKETCH_SCHEMA_VERSION,
-      referenceIds: [],
-      references: [],
+      referenceIds: ['ref_model_edge'],
+      references: [{
+        referenceId: 'ref_model_edge',
+        kind: 'modelReference',
+        label: 'Model edge',
+        source: { kind: 'edge', bodyId: 'body_model', edgeId: 'edge_model' },
+        projectionMode: 'projectAlongPlaneNormal',
+      }],
       pointIds: [],
       points: [],
       entityIds: [],
@@ -320,7 +326,7 @@ test('src/domain/modeling/occ/implementation-policy.spec.ts', async () => {
     } as unknown as OpenCascadeInstance
   }
 
-  function testSketchProfileBuildRejectsProjectedGeometryAtIntegrationPoint() {
+  function testSketchProfileBuildRejectsUnresolvedProjectedGeometryAtIntegrationPoint() {
     const projectedSource = createProjectedRegionLoopSegment()
     const region = createProjectedGeometryRegion()
     const sketch = createMinimalSketchRecord()
@@ -337,13 +343,13 @@ test('src/domain/modeling/occ/implementation-policy.spec.ts', async () => {
 
     assert(
       thrownMessage === createProjectedRegionLoopRejection(projectedSource).message,
-      'The actual OCC profile-building path must reject projected-geometry loops with the shared Phase 0 message.',
+      'The actual OCC profile-building path must reject unresolved projected-geometry loops with the shared message.',
     )
   }
 
   testConstructionBackedRevolveAxesAreExplicitlyRejected()
-  testProjectedRegionLoopsAreOnlySupportedForEntitySegments()
+  testProjectedRegionLoopsRequireLiveProjectionData()
   testMultiBodyBooleanPolicyIsWrittenAndOperationSpecific()
   testImplementationNotesCapturePhase0RedLines()
-  testSketchProfileBuildRejectsProjectedGeometryAtIntegrationPoint()
+  testSketchProfileBuildRejectsUnresolvedProjectedGeometryAtIntegrationPoint()
 })

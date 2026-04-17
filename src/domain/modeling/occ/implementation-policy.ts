@@ -14,7 +14,7 @@ export const OCC_PHASE0_IMPLEMENTATION_NOTES = {
     constructionRevolveAxis:
       "RevolveAxisRef allows { kind: 'construction' }, but the public construction contract currently exposes only planes, not durable axis or line constructions. The OCC adapter must reject this variant explicitly instead of inventing hidden axis semantics.",
     projectedGeometryRegionLoops:
-      "RegionBoundarySegmentRecord can point at projected geometry, but committed SketchRecord payloads do not persist the projected geometry curves required to rebuild an OCC profile from that loop later. The OCC adapter must reject those loops explicitly until the public contract carries reconstructible geometry.",
+      'RegionBoundarySegmentRecord can point at projected geometry. The OCC adapter may consume those segments only when active solver-owned projection data for the current revision resolves the referenced geometry; unresolved segments must report invalidation instead of using copied or stale curves.',
     multiBodyBooleanScope:
       "FeatureBooleanScope.kind === 'targetBodies' is ordered, but the modeling contract does not define how join, cut, and intersect should apply across more than one body. The OCC adapter therefore freezes one explicit policy instead of inheriting OCC defaults silently.",
   },
@@ -30,7 +30,7 @@ export const OCC_CONTRACT_GAP_CODES = {
 
 export interface OccProjectedRegionLoopRejection {
   code: typeof OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable
-  reasonCode: 'missingProjectedGeometryInCommittedSketch'
+  reasonCode: 'missingLiveProjectedGeometry'
   reason: string
   message: string
 }
@@ -82,7 +82,7 @@ export function getConstructionBackedRevolveAxisRejectionReason() {
 export function isProjectedRegionSegmentSourceSupported(
   source: RegionBoundarySegmentRecord['source'],
 ) {
-  return source.kind === 'entity'
+  return source.kind === 'entity' || source.kind === 'projectedGeometry'
 }
 
 export function getProjectedRegionLoopRejectionReason() {
@@ -90,7 +90,7 @@ export function getProjectedRegionLoopRejectionReason() {
 }
 
 function formatProjectedRegionLoopRejectionMessage(geometryId: ProjectedGeometryId) {
-  return `Projected region geometry ${geometryId} is not persisted on committed sketch records, so OCC profile rebuilding cannot resolve it from the current contract.`
+  return `Projected region geometry ${geometryId} cannot be resolved from live projection data for this revision.`
 }
 
 export function createProjectedRegionLoopRejection(
@@ -98,7 +98,7 @@ export function createProjectedRegionLoopRejection(
 ): OccProjectedRegionLoopRejection {
   return {
     code: OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable,
-    reasonCode: 'missingProjectedGeometryInCommittedSketch',
+    reasonCode: 'missingLiveProjectedGeometry',
     reason: getProjectedRegionLoopRejectionReason(),
     message: formatProjectedRegionLoopRejectionMessage(source.reference.geometryId),
   }

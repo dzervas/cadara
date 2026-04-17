@@ -84,6 +84,10 @@ function getOverlayClassName(overlay: SketchToolOverlayDescriptor) {
     return `${baseClassName} border-[var(--cad-accent)] bg-[var(--cad-surface-overlay)] font-mono text-[var(--cad-foreground)]`
   }
 
+  if (overlay.kind === 'snapIndicator') {
+    return `${baseClassName} border-[var(--cad-accent)] bg-[var(--cad-surface-overlay)] font-mono text-[var(--cad-foreground)]`
+  }
+
   return `${baseClassName} border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] text-[var(--cad-foreground)]`
 }
 
@@ -127,6 +131,8 @@ function getOverlayContent(overlay: SketchToolOverlayDescriptor) {
           <span className="ml-2 text-[var(--cad-muted-foreground)]">{overlay.detail}</span>
         </>
       )
+    case 'snapIndicator':
+      return overlay.label
     case 'completionCue':
       return overlay.ready ? overlay.label : 'waiting'
     case 'extensionLine':
@@ -143,6 +149,7 @@ function shouldRenderOverlayLabel(overlay: SketchToolOverlayDescriptor) {
     || overlay.kind === 'dimensionLine'
     || overlay.kind === 'angleArc'
     || overlay.kind === 'referenceLabel'
+    || overlay.kind === 'snapIndicator'
   )
 }
 
@@ -194,9 +201,56 @@ function renderOverlayGeometry(
       })
     case 'angleArc':
       return renderProjectedArc(overlay.id, projectionById)
+    case 'snapIndicator':
+      return renderSnapIndicator(overlay, projectionById.get(getOverlayProjectionId(overlay.id)))
     default:
       return null
   }
+}
+
+function renderSnapIndicator(
+  overlay: Extract<SketchToolOverlayDescriptor, { kind: 'snapIndicator' }>,
+  projection: SketchViewportFeedbackProjection | undefined,
+) {
+  if (!projection) {
+    return null
+  }
+
+  const size = overlay.glyphKind === 'midpoint' ? 5 : 4
+
+  return (
+    <g key={overlay.id} data-sketch-viewport-geometry="snapIndicator" data-sketch-snap-kind={overlay.candidateKind}>
+      {overlay.glyphKind === 'midpoint' ? (
+        <path
+          d={`M ${projection.x} ${projection.y - size} L ${projection.x + size} ${projection.y + size} L ${projection.x - size} ${projection.y + size} Z`}
+          fill="none"
+          stroke="var(--cad-accent)"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : overlay.glyphKind === 'horizontal' || overlay.glyphKind === 'vertical' ? (
+        <line
+          x1={projection.x - (overlay.glyphKind === 'horizontal' ? 7 : 0)}
+          y1={projection.y - (overlay.glyphKind === 'vertical' ? 7 : 0)}
+          x2={projection.x + (overlay.glyphKind === 'horizontal' ? 7 : 0)}
+          y2={projection.y + (overlay.glyphKind === 'vertical' ? 7 : 0)}
+          stroke="var(--cad-accent)"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : (
+        <circle
+          cx={projection.x}
+          cy={projection.y}
+          r={size}
+          fill="none"
+          stroke="var(--cad-accent)"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+    </g>
+  )
 }
 
 function renderProjectedLine({

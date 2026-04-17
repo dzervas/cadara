@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 import { MockKernelAdapter } from './mock-kernel-adapter'
 import { createModelingService, modelingRuntimeValidators } from './modeling-service'
+import { MockSketchSolverAdapter } from '@/domain/solver/mock-sketch-solver-adapter'
 import { bindRenderableObject, resolvePickTarget } from '@/domain/workspace/render-picking'
 import * as THREE from 'three'
 import {
@@ -404,6 +405,91 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
         (component, index) => component === sourceSketch.plane.frame.normal[index],
       ),
       'Committed sketch snapshots must preserve the authored plane orientation.',
+    )
+  }
+
+  async function testAcceptedSketchCommitPersistsActiveProjectionData() {
+    class ProjectingSolverAdapter extends MockSketchSolverAdapter {
+      override async projectExternalReferences(request: Parameters<MockSketchSolverAdapter['projectExternalReferences']>[0]) {
+        const response = await super.projectExternalReferences(request)
+        return {
+          ...response,
+          projectedReferences: request.references.map((reference) => ({
+            referenceId: reference.referenceId,
+            status: 'projected' as const,
+            geometry: [{
+              geometryId: `projected_geometry_${reference.referenceId}` as const,
+              kind: 'point' as const,
+              position: [1, 1] as const,
+            }],
+            diagnostics: [],
+          })),
+        }
+      }
+    }
+
+    const adapter = new MockKernelAdapter({ solverAdapter: new ProjectingSolverAdapter() })
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const sourceSketch = before.snapshot.sketches[0]
+
+    if (!sourceSketch) {
+      throw new Error('Seed sketch must exist for projected sketch commit coverage.')
+    }
+
+    const referenceId = 'ref_mock_projection' as const
+    const definition = {
+      ...sourceSketch.sketch.definition,
+      referenceIds: [...sourceSketch.sketch.definition.referenceIds, referenceId],
+      references: [
+        ...sourceSketch.sketch.definition.references,
+        {
+          referenceId,
+          kind: 'modelReference' as const,
+          label: 'Mock projected vertex',
+          source: { kind: 'vertex' as const, bodyId: 'body_mock', vertexId: 'vertex_mock' },
+          projectionMode: 'projectAlongPlaneNormal' as const,
+        },
+      ],
+    }
+
+    const committed = await adapter.commitSketch({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: before.snapshot.revisionId,
+      solverCorrelation: {
+        requestId: 'request_commit_projection',
+        projectionRequestId: 'request_commit_projection:project',
+        validationRequestId: 'request_commit_projection:validate',
+        solveRequestId: 'request_commit_projection:solve',
+        regionRequestId: 'request_commit_projection:regions',
+      },
+      sketchId: 'sketch_projected_snapshot',
+      sketchLabel: 'Projected Snapshot Sketch',
+      plane: sourceSketch.plane,
+      planeTarget: sourceSketch.planeTarget,
+      planeKey: sourceSketch.planeKey,
+      definition,
+    })
+
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const reopenedSketch = after.snapshot.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
+
+    assert(committed.revisionState.kind === 'accepted', 'Projected sketch commits should be accepted.')
+    const persistedProjection = reopenedSketch?.sketch.projectedReferences?.find((reference) => reference.referenceId === referenceId)
+    assert(persistedProjection, 'Mock committed sketch snapshots must preserve active projection data.')
+    assert(
+      persistedProjection.referenceId === referenceId,
+      'Persisted projection data must retain the authored reference identity.',
+    )
+    assert(
+      reopenedSketch.sketch.definition.points.every((point) => point.pointId !== 'projected_geometry_ref_mock_projection'),
+      'Persisted projection data must not be copied into sketch-owned points.',
     )
   }
 
@@ -1560,6 +1646,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testAcceptedCreateMutatesCommittedSnapshot()
   await testRollbackCursorPreservesAndInsertsFeatureAfterCursor()
   await testAcceptedSketchCommitMutatesCommittedSnapshot()
+  await testAcceptedSketchCommitPersistsActiveProjectionData()
   await testMissingMutationTargetsAreRejected()
   await testPreviewStalenessReportsObservedRevision()
   await testResolveReferenceReportsMissingTargetsExplicitly()

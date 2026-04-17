@@ -94,3 +94,12 @@ The sketch tool presentation schema SHALL support descriptors for transient cons
 #### Scenario: Constraint tool emits an angle preview
 - **WHEN** an active constraint tool has enough target information to preview an angle
 - **THEN** the schema can describe the angle arc and label anchor without requiring viewport code to infer the constraint type
+
+### Requirement: Sketch tool previews SHALL consume snap-adjusted pointer input
+The sketch tool editor schema SHALL allow active tool previews to receive snap-adjusted pointer coordinates and snap metadata from the editor layer.
+
+#### Scenario: Drawing preview uses snapped point
+- **WHEN** an active sketch drawing tool receives a snapped pointer coordinate
+- **THEN** the preview geometry is rendered from the snapped coordinate
+- **AND** the tool can still access raw pointer metadata for labels or disambiguation
+

@@ -6,7 +6,7 @@ import type {
 } from '@/contracts/modeling/export'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
-import type { SolverTolerancePolicy } from '@/contracts/solver/schema'
+import type { ProjectedSketchReferenceRecord, SolverTolerancePolicy } from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import type {
   CommitSketchRequest,
@@ -361,6 +361,7 @@ function buildSketchSnapshotRecord(
   definition: SketchDefinition,
   regions: readonly RegionRecord[],
   solvedSnapshot: SketchRecord['solvedSnapshot'],
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ): SketchSnapshotRecord {
   const sketch: SketchRecord = {
     ownerDocumentId: request.documentId,
@@ -373,6 +374,7 @@ function buildSketchSnapshotRecord(
     planeSupport: request.plane.support,
     definition,
     solvedSnapshot,
+    projectedReferences: structuredClone(projectedReferences),
     regions: [...regions],
   }
 
@@ -822,6 +824,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
       definition,
+      projectedReferences: projection.projectedReferences,
     })
 
     if (!validation.isValid || solved.status.solveState !== 'solved') {
@@ -846,6 +849,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       definition,
       normalizeDerivedRegionsForSketchId(regions.regions, sketchId, document.revisionId),
       solved.solvedSnapshot,
+      projection.projectedReferences,
     )
   }
 
@@ -1358,6 +1362,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
       definition: normalizedDefinition,
+      projectedReferences: projection.projectedReferences,
     })
 
     const solverDiagnostics = [
@@ -1393,6 +1398,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       normalizedDefinition,
       normalizedRegions,
       solved.solvedSnapshot,
+      projection.projectedReferences,
     )
     const nextSketches = runtimeState.authoringState.sketches.some((entry) => entry.sketchId === sketchId)
       ? runtimeState.authoringState.sketches.map((entry) => (entry.sketchId === sketchId ? snapshotRecord : entry))

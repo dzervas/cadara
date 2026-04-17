@@ -1604,10 +1604,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
     session = beginSketchTool(session, 'line')
     session = startSketchDraw(session, [0, 0])
-    session = acceptSketchDraw(session, [10, 0])
+    session = acceptSketchDraw(session, [10, 1])
     session = beginSketchTool(session, 'line')
     session = startSketchDraw(session, [0, 5])
-    session = acceptSketchDraw(session, [10, 5])
+    session = acceptSketchDraw(session, [10, 6])
 
     const [firstLineId, secondLineId] = session.definition.entityIds
     assert(firstLineId && secondLineId, 'Annotation deletion fixture should create two sketch lines.')

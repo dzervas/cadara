@@ -1,6 +1,7 @@
 import type { ToolId } from '@/domain/tools/tool-registry'
 import type { ToolbarMode } from '@/domain/tools/schema'
 import type { DurableRef } from '@/contracts/shared/references'
+import type { ProjectedGeometryId, ReferenceId } from '@/contracts/shared/ids'
 
 export type {
   BodyId,
@@ -32,7 +33,19 @@ export type {
   VertexId,
 } from '@/contracts/shared/ids'
 
-export type PrimitiveRef = DurableRef
+export interface ProjectedReferenceGeometryRef {
+  kind: 'projectedReferenceGeometry'
+  referenceId: ReferenceId
+  geometryId: ProjectedGeometryId
+  geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc'
+}
+
+export interface SketchExternalReferenceRef {
+  kind: 'sketchExternalReference'
+  referenceId: ReferenceId
+}
+
+export type PrimitiveRef = DurableRef | ProjectedReferenceGeometryRef | SketchExternalReferenceRef
 
 export type SelectionTarget = PrimitiveRef
 
@@ -48,6 +61,8 @@ export type SelectionSemantic =
   | 'sketchPoint'
   | 'constraintAnnotation'
   | 'dimensionAnnotation'
+  | 'projectedReferenceGeometry'
+  | 'sketchExternalReference'
   | 'planarFace'
   | 'planarReference'
 
@@ -140,7 +155,7 @@ export const defaultSelectionFilter: SelectionFilter = {
 
 export const sketchSelectionFilter: SelectionFilter = {
   kind: 'sketchSession',
-  allowedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension'],
+  allowedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference'],
   label: 'Sketch references',
   requirements: [
     {
@@ -152,8 +167,30 @@ export const sketchSelectionFilter: SelectionFilter = {
           id: 'sketch-reference',
           label: 'Sketch reference',
           description: 'Select the sketch plane, sketch, or sketch primitive.',
-          acceptedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension'],
-          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation'],
+          acceptedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference'],
+          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchExternalReference'],
+        },
+      ],
+    },
+  ],
+}
+
+export const sketchReferenceSelectionFilter: SelectionFilter = {
+  kind: 'sketchSession',
+  allowedKinds: ['face', 'edge', 'vertex', 'sketch', 'sketchEntity', 'sketchPoint'],
+  label: 'Reference geometry',
+  requirements: [
+    {
+      id: 'sketch-external-reference',
+      label: 'Reference geometry',
+      description: 'Select model topology or existing sketch geometry to reference in the active sketch.',
+      slots: [
+        {
+          id: 'sketch-external-reference-target',
+          label: 'Reference target',
+          description: 'Select one model face, edge, vertex, existing sketch, sketch entity, or sketch point.',
+          acceptedKinds: ['face', 'edge', 'vertex', 'sketch', 'sketchEntity', 'sketchPoint'],
+          acceptedSemantics: ['face', 'edge', 'vertex', 'existingSketch', 'sketchEntity', 'sketchPoint'],
         },
       ],
     },
@@ -713,6 +750,10 @@ export function getPrimitiveRefLabel(target: PrimitiveRef) {
       return target.constructionId
     case 'region':
       return `${target.sketchId}.${target.regionId}`
+    case 'projectedReferenceGeometry':
+      return `${target.referenceId}.${target.geometryId}`
+    case 'sketchExternalReference':
+      return target.referenceId
   }
 }
 
@@ -744,6 +785,10 @@ export function getPrimitiveRefKey(target: PrimitiveRef) {
       return `construction:${target.constructionId}`
     case 'region':
       return `region:${target.sketchId}:${target.regionId}`
+    case 'projectedReferenceGeometry':
+      return `projectedReferenceGeometry:${target.referenceId}:${target.geometryId}`
+    case 'sketchExternalReference':
+      return `sketchExternalReference:${target.referenceId}`
   }
 }
 
@@ -785,6 +830,8 @@ export function getSelectionFilterForCommand(
   switch (toolId) {
     case 'sketch':
       return sketchStartSelectionFilter
+    case 'projectReference':
+      return sketchReferenceSelectionFilter
     default:
       return getDefaultSelectionFilterForMode(mode)
   }
@@ -807,7 +854,12 @@ function getTargetSemantics(
   const targetKey = getPrimitiveRefKey(target)
 
   const allowSessionOwnedTarget =
-    target.kind === 'sketchEntity' || target.kind === 'sketchPoint' || target.kind === 'constraint' || target.kind === 'dimension'
+    target.kind === 'sketchEntity'
+    || target.kind === 'sketchPoint'
+    || target.kind === 'constraint'
+    || target.kind === 'dimension'
+    || target.kind === 'projectedReferenceGeometry'
+    || target.kind === 'sketchExternalReference'
 
   if (
     catalog?.selectableTargetKeys
@@ -845,6 +897,12 @@ function getTargetSemantics(
       break
     case 'region':
       semantics.push('regionProfile')
+      break
+    case 'projectedReferenceGeometry':
+      semantics.push('projectedReferenceGeometry')
+      break
+    case 'sketchExternalReference':
+      semantics.push('sketchExternalReference')
       break
     case 'sketchEntity':
       semantics.push('sketchEntity')

@@ -1,0 +1,372 @@
+import { test } from 'bun:test'
+
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
+import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
+import {
+  acceptSketchDraw,
+  beginSketchTool,
+  createNewSketchSessionFromSupport,
+  startSketchDraw,
+  updateSketchPointer,
+} from '@/domain/editor/sketch-session'
+
+test('src/domain/editor/sketch-snapping.spec.ts', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  function assertClosePoint(
+    actual: readonly [number, number] | null | undefined,
+    expected: readonly [number, number],
+    message: string,
+  ) {
+    assert(actual, `${message} Missing point.`)
+    const distance = Math.hypot(actual[0] - expected[0], actual[1] - expected[1])
+    assert(distance < 1e-6, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
+  }
+
+  function createSketchLineSession() {
+    let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [2, 0])
+
+    return session
+  }
+
+  function addProjectedLineReference(
+    session: ReturnType<typeof createNewSketchSessionFromSupport>,
+    projectedReferences: ProjectedSketchReferenceRecord[],
+  ) {
+    const referenceRecord = {
+      referenceId: projectedReferences[0]!.referenceId,
+      kind: 'modelReference' as const,
+      label: 'Projected reference',
+      source: { kind: 'edge' as const, bodyId: 'body_1', edgeId: 'edge_1' },
+      projectionMode: 'projectAlongPlaneNormal' as const,
+    }
+
+    return {
+      ...session,
+      definition: {
+        ...session.definition,
+        referenceIds: [referenceRecord.referenceId],
+        references: [referenceRecord],
+      },
+      fullDefinition: {
+        ...session.fullDefinition,
+        referenceIds: [referenceRecord.referenceId],
+        references: [referenceRecord],
+      },
+      projectedReferences,
+    }
+  }
+
+  function testLocalSnapPreviewAndCommit() {
+    let session = createSketchLineSession()
+
+    session = startSketchDraw(session, [1, 0.04])
+    assert(session.activeSnap?.kind === 'midpoint', 'Starting a new line near an existing line midpoint should activate midpoint snap.')
+    assertClosePoint(session.pointerDownPoint, [1, 0], 'Line start should use the snapped midpoint coordinate.')
+    assert(
+      session.toolPresentation?.overlays?.some((overlay) => overlay.kind === 'snapIndicator' && overlay.label === 'Midpoint'),
+      'Active snap should be exposed as transient viewport feedback.',
+    )
+
+    session = updateSketchPointer(session, [3, 0.04])
+    assert(session.activeSnap?.kind === 'horizontalAlignment', 'Line preview should snap horizontally from the snapped start.')
+    assertClosePoint(session.livePoint, [3, 0], 'Line preview should use the snap-adjusted endpoint.')
+
+    const preview = session.entities.find((entity) => entity.status === 'preview')
+    assert(preview?.kind === 'line', 'Expected a transient preview line.')
+    assertClosePoint(preview.start, [1, 0], 'Preview line should start at the snapped midpoint.')
+    assertClosePoint(preview.end, [3, 0], 'Preview line should end at the snapped horizontal point.')
+
+    session = acceptSketchDraw(session, [3, 0.04])
+    const committed = session.definition.entities.at(-1)
+    assert(committed?.kind === 'lineSegment', 'Snapped commit should author the normal line entity.')
+    const start = session.definition.points.find((point) => point.pointId === committed.startPointId)
+    const end = session.definition.points.find((point) => point.pointId === committed.endPointId)
+    assertClosePoint(start?.position, [1, 0], 'Committed line start should use the snapped midpoint.')
+    assertClosePoint(end?.position, [3, 0], 'Committed line end should use the snapped horizontal point.')
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'midpoint'),
+      'Accepted midpoint snap should append a durable midpoint constraint.',
+    )
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'horizontal'),
+      'Accepted horizontal snap should append a durable horizontal constraint.',
+    )
+    assert(session.activeSnap === null, 'Accepted draw commits should clear transient snap state.')
+  }
+
+  function testProjectedSnapPreviewWithoutCopyingReferenceGeometry() {
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_edge',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_edge',
+            kind: 'lineSegment',
+            startPosition: [1, -1],
+            endPosition: [1, 1],
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    session = {
+      ...session,
+      projectedReferences,
+    }
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [1.08, 0.3])
+
+    assert(session.activeSnap?.kind === 'nearestOnLine', 'Projected reference geometry should feed snap candidates.')
+    assertClosePoint(session.pointerDownPoint, [1, 0.3], 'Line start should snap onto projected reference geometry.')
+    assert(
+      session.activeSnap.sources.some((source) => source.kind === 'projectedGeometry'),
+      'Projected snap metadata should identify the derived reference geometry source.',
+    )
+    assert(session.definition.references.length === 0, 'Snapping to projected geometry should not author or copy reference records.')
+    assert(session.definition.entities.length === 0, 'Starting from a projected snap should not copy projected geometry into entities.')
+  }
+
+  function testProjectedSnapCommitsReferenceConstraintWithoutCopyingGeometry() {
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_edge',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_edge',
+            kind: 'lineSegment',
+            startPosition: [1, -1],
+            endPosition: [1, 1],
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    const referenceRecord = {
+      referenceId: 'ref_projected_edge',
+      kind: 'modelReference' as const,
+      label: 'Projected edge',
+      source: { kind: 'edge' as const, bodyId: 'body_1', edgeId: 'edge_1' },
+      projectionMode: 'projectAlongPlaneNormal' as const,
+    }
+    let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        referenceIds: ['ref_projected_edge'],
+        references: [referenceRecord],
+      },
+      fullDefinition: {
+        ...session.fullDefinition,
+        referenceIds: ['ref_projected_edge'],
+        references: [referenceRecord],
+      },
+      projectedReferences,
+    }
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [1.08, 0.3])
+    session = updateSketchPointer(session, [2, 0.3])
+    session = acceptSketchDraw(session, [2, 0.3])
+
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'pointOnProjectedCurve'),
+      'Accepted projected line snap should append a durable point-on-projected-curve constraint.',
+    )
+    assert(
+      session.definition.entities.length === 1,
+      'Snapping to projected geometry should only author the requested local line entity.',
+    )
+  }
+
+  function testBothEndpointsSnappedToSameLineUseUniqueConstraintIds() {
+    let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [2, 1])
+
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0.54, 0.23])
+    assert(session.activeSnap?.kind === 'nearestOnLine', 'Line start should snap onto the existing line.')
+    session = updateSketchPointer(session, [1.48, 0.76])
+    assert(session.activeSnap?.kind === 'nearestOnLine', 'Line end should snap onto the same existing line.')
+    session = acceptSketchDraw(session, [1.48, 0.76])
+
+    const constraintIds = session.definition.constraints.map((constraint) => constraint.constraintId)
+    assert(
+      new Set(constraintIds).size === constraintIds.length,
+      'Accepted start/end snaps against the same source should create unique durable constraint IDs.',
+    )
+
+    const solved = solveSketchDefinitionCore({
+      definition: session.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    assert(
+      !solved.diagnostics.some((diagnostic) => diagnostic.code === 'duplicate-constraint-id'),
+      'Solved snapped sketch should not report duplicate inferred constraint IDs.',
+    )
+  }
+
+  function testProjectedMidpointSnapCommitsDerivedReferenceConstraint() {
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_midpoint_edge',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_midpoint_edge',
+            kind: 'lineSegment',
+            startPosition: [0, 0],
+            endPosition: [2, 0],
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    let session = addProjectedLineReference(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      projectedReferences,
+    )
+
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [1, 0.04])
+    session = updateSketchPointer(session, [2, 1])
+    session = acceptSketchDraw(session, [2, 1])
+
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'midpointProjectedLine'),
+      'Accepted projected midpoint snap should append a durable midpoint-to-projected-line constraint.',
+    )
+    assert(session.definition.entities.length === 1, 'Projected midpoint snapping should not copy reference geometry.')
+  }
+
+  function testProjectedConcentricSnapCommitsDerivedReferenceConstraint() {
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_circle',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_circle',
+            kind: 'circle',
+            centerPosition: [2, 2],
+            radius: 1,
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    let session = addProjectedLineReference(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      projectedReferences,
+    )
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [2.03, 2.02])
+    session = updateSketchPointer(session, [3, 2])
+    session = acceptSketchDraw(session, [3, 2])
+
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'concentricProjectedCurve'),
+      'Accepted projected center snap while drawing a circle should append a durable concentric projected constraint.',
+    )
+    assert(session.definition.entities.length === 1, 'Projected concentric snapping should only author the requested local circle.')
+  }
+
+  function testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints() {
+    const projectedLineReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_perpendicular_edge',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_perpendicular_edge',
+            kind: 'lineSegment',
+            startPosition: [1, -1],
+            endPosition: [1, 2],
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    let perpendicularSession = addProjectedLineReference(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      projectedLineReferences,
+    )
+
+    perpendicularSession = beginSketchTool(perpendicularSession, 'line')
+    perpendicularSession = startSketchDraw(perpendicularSession, [0, 0])
+    perpendicularSession = updateSketchPointer(perpendicularSession, [1, 0])
+    assert(perpendicularSession.activeSnap?.kind === 'perpendicularFoot', 'Projected line should provide a perpendicular-foot snap.')
+    perpendicularSession = acceptSketchDraw(perpendicularSession, [1, 0])
+
+    assert(
+      perpendicularSession.definition.constraints.some((constraint) => constraint.kind === 'perpendicularProjectedLine'),
+      'Accepted projected perpendicular snap should append a durable perpendicular projected constraint.',
+    )
+    assert(
+      perpendicularSession.definition.constraints.some((constraint) => constraint.kind === 'pointOnProjectedCurve'),
+      'Accepted projected perpendicular snap should keep the foot point on the projected line.',
+    )
+
+    const projectedCircleReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_tangent_circle',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_tangent_circle',
+            kind: 'circle',
+            centerPosition: [0, 0],
+            radius: 1,
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    let tangentSession = addProjectedLineReference(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      projectedCircleReferences,
+    )
+
+    tangentSession = beginSketchTool(tangentSession, 'line')
+    tangentSession = startSketchDraw(tangentSession, [0, 3])
+    tangentSession = updateSketchPointer(tangentSession, [0.9428090415820634, 0.33333333333333337])
+    assert(tangentSession.activeSnap?.kind === 'tangent', 'Projected circle should provide a tangent snap.')
+    tangentSession = acceptSketchDraw(tangentSession, [0.9428090415820634, 0.33333333333333337])
+
+    assert(
+      tangentSession.definition.constraints.some((constraint) => constraint.kind === 'tangentProjectedCurve'),
+      'Accepted projected tangent snap should append a durable tangent projected constraint.',
+    )
+    assert(
+      tangentSession.definition.constraints.some((constraint) => constraint.kind === 'pointOnProjectedCurve'),
+      'Accepted projected tangent snap should keep the tangent endpoint on the projected curve.',
+    )
+    assert(tangentSession.definition.entities.length === 1, 'Projected tangent snapping should only author the requested local line.')
+  }
+
+  testLocalSnapPreviewAndCommit()
+  testProjectedSnapPreviewWithoutCopyingReferenceGeometry()
+  testProjectedSnapCommitsReferenceConstraintWithoutCopyingGeometry()
+  testBothEndpointsSnappedToSameLineUseUniqueConstraintIds()
+  testProjectedMidpointSnapCommitsDerivedReferenceConstraint()
+  testProjectedConcentricSnapCommitsDerivedReferenceConstraint()
+  testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints()
+})

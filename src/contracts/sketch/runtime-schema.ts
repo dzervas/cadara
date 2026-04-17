@@ -13,7 +13,12 @@ import type {
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
 import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
-import { durableRefSchema, sketchEntityRefSchema, sketchPointRefSchema } from '@/contracts/shared/references.runtime-schema'
+import {
+  durableRefSchema,
+  sketchEntityRefSchema,
+  sketchPointRefSchema,
+  sketchRefSchema,
+} from '@/contracts/shared/references.runtime-schema'
 import {
   constraintIdSchema,
   dimensionIdSchema,
@@ -37,7 +42,7 @@ const projectedSketchGeometryRefSchema = z.object({
     z.literal('projectedLineSegment'),
     z.literal('projectedCircle'),
     z.literal('projectedArc'),
-  ]),
+  ]).optional(),
   referenceId: referenceIdSchema,
   geometryId: projectedGeometryIdSchema,
 }).transform((value) => value as ProjectedSketchGeometryRef)
@@ -66,6 +71,13 @@ const sketchReferenceDefinitionSchema = z.discriminatedUnion('kind', [
       z.literal('projectAlongPlaneNormal'),
       z.literal('useExistingCoplanarGeometry'),
     ]),
+  }),
+  z.object({
+    referenceId: referenceIdSchema,
+    kind: z.literal('sketchReference'),
+    label: z.string(),
+    source: z.union([sketchEntityRefSchema, sketchPointRefSchema, sketchRefSchema]),
+    projectionMode: z.literal('useExistingCoplanarGeometry'),
   }),
 ]).transform((value) => value as SketchReferenceDefinition)
 
@@ -117,6 +129,21 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
   }),
 ]).transform((value) => value as SketchEntityDefinition)
 
+const localSketchPointConstraintOperandSchema = z.object({
+  kind: z.literal('localPoint'),
+  pointId: sketchPointIdSchema,
+})
+
+const localSketchEntityConstraintOperandSchema = z.object({
+  kind: z.literal('localEntity'),
+  entityId: sketchEntityIdSchema,
+})
+
+const projectedSketchGeometryConstraintOperandSchema = z.object({
+  kind: z.literal('projectedGeometry'),
+  reference: projectedSketchGeometryRefSchema,
+})
+
 const constraintDefinitionSchema = z.discriminatedUnion('kind', [
   z.object({
     constraintId: constraintIdSchema,
@@ -167,6 +194,83 @@ const constraintDefinitionSchema = z.discriminatedUnion('kind', [
     kind: z.literal('vertical'),
     label: z.string(),
     entityId: sketchEntityIdSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('coincidentProjectedPoint'),
+    label: z.string(),
+    point: localSketchPointConstraintOperandSchema,
+    projectedPoint: projectedSketchGeometryConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('pointOnProjectedCurve'),
+    label: z.string(),
+    point: localSketchPointConstraintOperandSchema,
+    projectedCurve: projectedSketchGeometryConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('midpoint'),
+    label: z.string(),
+    point: localSketchPointConstraintOperandSchema,
+    line: localSketchEntityConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('midpointProjectedLine'),
+    label: z.string(),
+    point: localSketchPointConstraintOperandSchema,
+    projectedLine: projectedSketchGeometryConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('pointOnCurve'),
+    label: z.string(),
+    point: localSketchPointConstraintOperandSchema,
+    curve: localSketchEntityConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('parallelProjectedLine'),
+    label: z.string(),
+    line: localSketchEntityConstraintOperandSchema,
+    projectedLine: projectedSketchGeometryConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('perpendicularProjectedLine'),
+    label: z.string(),
+    line: localSketchEntityConstraintOperandSchema,
+    projectedLine: projectedSketchGeometryConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('tangentProjectedCurve'),
+    label: z.string(),
+    curve: localSketchEntityConstraintOperandSchema,
+    projectedCurve: projectedSketchGeometryConstraintOperandSchema,
+    relation: z.union([z.literal('external'), z.literal('internal')]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('tangent'),
+    label: z.string(),
+    entityIds: z.tuple([sketchEntityIdSchema, sketchEntityIdSchema]),
+    relation: z.union([z.literal('external'), z.literal('internal')]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('concentric'),
+    label: z.string(),
+    entityIds: z.tuple([sketchEntityIdSchema, sketchEntityIdSchema]),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('concentricProjectedCurve'),
+    label: z.string(),
+    curve: localSketchEntityConstraintOperandSchema,
+    projectedCurve: projectedSketchGeometryConstraintOperandSchema,
   }),
 ]).transform((value) => value as ConstraintDefinition)
 

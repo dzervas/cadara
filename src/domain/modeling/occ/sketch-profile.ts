@@ -4,7 +4,11 @@ import type {
   SolvedSketchEntityGeometryRecord,
   SketchRecord,
 } from '@/contracts/sketch/schema'
-import type { FaceId } from '@/contracts/shared/ids'
+import type {
+  ProjectedSketchReferenceGeometry,
+  ProjectedSketchReferenceRecord,
+} from '@/contracts/solver/schema'
+import type { FaceId, ReferenceId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import { buildConstructionPlaneFromPlanarFace as buildConstructionPlaneFromPlanarFaceFromPlaneUtility } from '@/domain/modeling/occ/planes'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
@@ -35,14 +39,14 @@ const PROFILE_LOOP_TOLERANCE = 1e-6
 
 interface OpenBoundarySegmentGeometry {
   kind: 'open'
-  entityId: string
+  segmentId: string
   start: Vec3
   end: Vec3
 }
 
 interface ClosedBoundarySegmentGeometry {
   kind: 'closed'
-  entityId: string
+  segmentId: string
 }
 
 type BoundarySegmentGeometry = OpenBoundarySegmentGeometry | ClosedBoundarySegmentGeometry
@@ -121,21 +125,21 @@ function toBoundarySegmentGeometry(
     case 'lineSegment':
       return {
         kind: 'open',
-        entityId: geometry.entityId,
+        segmentId: geometry.entityId,
         start: mapSketchPointToWorld(plane, geometry.startPosition),
         end: mapSketchPointToWorld(plane, geometry.endPosition),
       }
     case 'arc':
       return {
         kind: 'open',
-        entityId: geometry.entityId,
+        segmentId: geometry.entityId,
         start: mapSketchPointToWorld(plane, geometry.startPosition),
         end: mapSketchPointToWorld(plane, geometry.endPosition),
       }
     case 'circle':
       return {
         kind: 'closed',
-        entityId: geometry.entityId,
+        segmentId: geometry.entityId,
       }
     case 'point':
       throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
@@ -168,7 +172,7 @@ function assertLoopGeometryIsClosed(
 
   for (const segment of segments) {
     if (segment.kind === 'closed') {
-      throw new Error(`Closed curve entity ${segment.entityId} cannot participate in multi-segment loop ${loop.loopId}.`)
+      throw new Error(`Closed curve segment ${segment.segmentId} cannot participate in multi-segment loop ${loop.loopId}.`)
     }
   }
 
@@ -181,7 +185,7 @@ function assertLoopGeometryIsClosed(
     }
 
     if (!arePointsCoincident(current.end, next.start)) {
-      throw new Error(`Region loop ${loop.loopId} is not geometrically closed between entities ${current.entityId} and ${next.entityId}.`)
+      throw new Error(`Region loop ${loop.loopId} is not geometrically closed between segments ${current.segmentId} and ${next.segmentId}.`)
     }
   }
 }
@@ -202,8 +206,20 @@ function buildLineEdge(
   plane: SketchPlaneDefinition,
   geometry: Extract<SolvedSketchEntityGeometryRecord, { kind: 'lineSegment' }>,
 ) {
-  const start = toGpPnt(oc, mapSketchPointToWorld(plane, geometry.startPosition))
-  const end = toGpPnt(oc, mapSketchPointToWorld(plane, geometry.endPosition))
+  return buildLineEdgeFromWorld(
+    oc,
+    mapSketchPointToWorld(plane, geometry.startPosition),
+    mapSketchPointToWorld(plane, geometry.endPosition),
+  )
+}
+
+function buildLineEdgeFromWorld(
+  oc: OpenCascadeInstance,
+  startPosition: Vec3,
+  endPosition: Vec3,
+) {
+  const start = toGpPnt(oc, startPosition)
+  const end = toGpPnt(oc, endPosition)
   const builder = new oc.BRepBuilderAPI_MakeEdge_3(start, end)
   return builder.Edge()
 }
@@ -213,13 +229,22 @@ function buildCircleEdge(
   plane: SketchPlaneDefinition,
   geometry: Extract<SolvedSketchEntityGeometryRecord, { kind: 'circle' }>,
 ) {
-  const center = mapSketchPointToWorld(plane, geometry.centerPosition)
+  return buildCircleEdgeFromSketchGeometry(oc, plane, geometry.centerPosition, geometry.solvedRadius)
+}
+
+function buildCircleEdgeFromSketchGeometry(
+  oc: OpenCascadeInstance,
+  plane: SketchPlaneDefinition,
+  centerPosition: readonly [number, number],
+  radius: number,
+) {
+  const center = mapSketchPointToWorld(plane, centerPosition)
   const axis = new oc.gp_Ax2_2(
     toGpPnt(oc, center),
     toGpDir(oc, plane.frame.normal),
     toGpDir(oc, plane.frame.xAxis),
   )
-  const circle = new oc.gp_Circ_2(axis, geometry.solvedRadius)
+  const circle = new oc.gp_Circ_2(axis, radius)
   const builder = new oc.BRepBuilderAPI_MakeEdge_8(circle)
   return builder.Edge()
 }
@@ -229,14 +254,34 @@ function buildArcEdge(
   plane: SketchPlaneDefinition,
   geometry: Extract<SolvedSketchEntityGeometryRecord, { kind: 'arc' }>,
 ) {
-  const start = mapSketchPointToWorld(plane, geometry.startPosition)
-  const end = mapSketchPointToWorld(plane, geometry.endPosition)
+  return buildArcEdgeFromSketchGeometry(
+    oc,
+    plane,
+    geometry.startPosition,
+    geometry.endPosition,
+    geometry.centerPosition,
+    geometry.sweepDirection,
+    `sketch entity ${geometry.entityId}`,
+  )
+}
+
+function buildArcEdgeFromSketchGeometry(
+  oc: OpenCascadeInstance,
+  plane: SketchPlaneDefinition,
+  startPosition: readonly [number, number],
+  endPosition: readonly [number, number],
+  centerPosition: readonly [number, number],
+  sweepDirection: 'clockwise' | 'counterClockwise',
+  label: string,
+) {
+  const start = mapSketchPointToWorld(plane, startPosition)
+  const end = mapSketchPointToWorld(plane, endPosition)
   const midpoint = midpointOnArc(
     start,
     end,
-    mapSketchPointToWorld(plane, geometry.centerPosition),
+    mapSketchPointToWorld(plane, centerPosition),
     plane.frame.normal,
-    geometry.sweepDirection,
+    sweepDirection,
   )
   const arc = new oc.GC_MakeArcOfCircle_4(
     toGpPnt(oc, start),
@@ -245,12 +290,118 @@ function buildArcEdge(
   )
 
   if (!arc.IsDone()) {
-    throw new Error(`Failed to build OCC arc for sketch entity ${geometry.entityId}.`)
+    throw new Error(`Failed to build OCC arc for ${label}.`)
   }
 
   const curveHandle = new oc.Handle_Geom_Curve_2(arc.Value().get())
   const builder = new oc.BRepBuilderAPI_MakeEdge_24(curveHandle)
   return builder.Edge()
+}
+
+function getProjectedSegmentId(source: Extract<RegionBoundarySegmentRecord['source'], { kind: 'projectedGeometry' }>) {
+  return `${source.reference.referenceId}/${source.reference.geometryId}`
+}
+
+function projectedGeometryKindForRef(geometry: ProjectedSketchReferenceGeometry) {
+  switch (geometry.kind) {
+    case 'point':
+      return 'projectedPoint'
+    case 'lineSegment':
+      return 'projectedLineSegment'
+    case 'circle':
+      return 'projectedCircle'
+    case 'arc':
+      return 'projectedArc'
+  }
+}
+
+function isAuthoredProjectedReference(sketch: SketchRecord, referenceId: ReferenceId) {
+  const isOrdered = sketch.definition.referenceIds.includes(referenceId)
+  const hasRecord = sketch.definition.references.some((reference) => reference.referenceId === referenceId)
+  return isOrdered && hasRecord
+}
+
+function resolveProjectedBoundaryGeometry(
+  sketch: SketchRecord,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  source: Extract<RegionBoundarySegmentRecord['source'], { kind: 'projectedGeometry' }>,
+) {
+  if (!isAuthoredProjectedReference(sketch, source.reference.referenceId)) {
+    const rejection = createProjectedRegionLoopRejection(source)
+    const error = new Error(`${rejection.message} The referenced projection is not backed by the current authored sketch references.`) as Error & {
+      code?: string
+    }
+    error.code = rejection.code
+    throw error
+  }
+
+  const projectedReference = projectedReferences.find((entry) => entry.referenceId === source.reference.referenceId)
+  const geometry = projectedReference?.geometry.find((entry) => entry.geometryId === source.reference.geometryId) ?? null
+
+  if (!projectedReference || projectedReference.status !== 'projected' || !geometry) {
+    const rejection = createProjectedRegionLoopRejection(source)
+    const error = new Error(getProjectedRegionLoopRejectionMessage(source)) as Error & { code?: string }
+    error.code = rejection.code
+    throw error
+  }
+
+  if (source.reference.kind && projectedGeometryKindForRef(geometry) !== source.reference.kind) {
+    const rejection = createProjectedRegionLoopRejection(source)
+    const error = new Error(`${rejection.message} Expected ${source.reference.kind}, received ${geometry.kind}.`) as Error & {
+      code?: string
+    }
+    error.code = rejection.code
+    throw error
+  }
+
+  return geometry
+}
+
+function toProjectedBoundarySegmentGeometry(
+  plane: SketchPlaneDefinition,
+  source: Extract<RegionBoundarySegmentRecord['source'], { kind: 'projectedGeometry' }>,
+  geometry: ProjectedSketchReferenceGeometry,
+  traversalDirection: RegionBoundarySegmentRecord['traversalDirection'],
+): BoundarySegmentGeometry {
+  const segmentId = getProjectedSegmentId(source)
+
+  if (geometry.kind === 'lineSegment') {
+    const base = {
+      kind: 'open' as const,
+      segmentId,
+      start: mapSketchPointToWorld(plane, geometry.startPosition),
+      end: mapSketchPointToWorld(plane, geometry.endPosition),
+    }
+    return traversalDirection === 'reverse'
+      ? { ...base, start: base.end, end: base.start }
+      : base
+  }
+
+  if (geometry.kind === 'arc') {
+    const base = {
+      kind: 'open' as const,
+      segmentId,
+      start: mapSketchPointToWorld(plane, geometry.startPosition),
+      end: mapSketchPointToWorld(plane, geometry.endPosition),
+    }
+    return traversalDirection === 'reverse'
+      ? { ...base, start: base.end, end: base.start }
+      : base
+  }
+
+  if (geometry.kind === 'circle') {
+    return {
+      kind: 'closed',
+      segmentId,
+    }
+  }
+
+  const rejection = createProjectedRegionLoopRejection(source)
+  const error = new Error(`Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`) as Error & {
+    code?: string
+  }
+  error.code = rejection.code
+  throw error
 }
 
 function getLoopSegmentTraversal(
@@ -279,7 +430,7 @@ function getLoopSegmentTraversal(
   if (arePointsCoincident(baseGeometry.start, endPoint) && arePointsCoincident(baseGeometry.end, startPoint)) {
     return {
       kind: 'open',
-      entityId: baseGeometry.entityId,
+      segmentId: baseGeometry.segmentId,
       start: baseGeometry.end,
       end: baseGeometry.start,
     }
@@ -332,7 +483,47 @@ function orientEdgeForLoop(
     return oc.TopoDS.Edge_1(edge.Reversed())
   }
 
-  throw new Error(`Built OCC edge for entity ${loopGeometry.entityId} does not match loop traversal geometry.`)
+  throw new Error(`Built OCC edge for segment ${loopGeometry.segmentId} does not match loop traversal geometry.`)
+}
+
+function buildProjectedBoundaryEdge(
+  oc: OpenCascadeInstance,
+  plane: SketchPlaneDefinition,
+  source: Extract<RegionBoundarySegmentRecord['source'], { kind: 'projectedGeometry' }>,
+  geometry: ProjectedSketchReferenceGeometry,
+  loopGeometry: BoundarySegmentGeometry,
+  loopRole: RegionRecord['loops'][number]['role'],
+  traversalDirection: RegionBoundarySegmentRecord['traversalDirection'],
+) {
+  switch (geometry.kind) {
+    case 'lineSegment':
+      if (loopGeometry.kind !== 'open') {
+        throw new Error(`Projected line ${source.reference.geometryId} did not resolve to open loop geometry.`)
+      }
+      return buildLineEdgeFromWorld(oc, loopGeometry.start, loopGeometry.end)
+    case 'circle': {
+      const edge = buildCircleEdgeFromSketchGeometry(oc, plane, geometry.centerPosition, geometry.radius)
+      return loopRole === 'inner'
+        ? oc.TopoDS.Edge_1(edge.Reversed())
+        : edge
+    }
+    case 'arc': {
+      const edge = buildArcEdgeFromSketchGeometry(
+        oc,
+        plane,
+        geometry.startPosition,
+        geometry.endPosition,
+        geometry.centerPosition,
+        geometry.sweepDirection,
+        `projected geometry ${source.reference.geometryId}`,
+      )
+      return traversalDirection === 'reverse'
+        ? oc.TopoDS.Edge_1(edge.Reversed())
+        : edge
+    }
+    case 'point':
+      throw new Error(`Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`)
+  }
 }
 
 function buildLoopWire(
@@ -340,49 +531,63 @@ function buildLoopWire(
   plane: SketchPlaneDefinition,
   sketch: SketchRecord,
   loop: RegionRecord['loops'][number],
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ) {
   const loopGeometry: BoundarySegmentGeometry[] = []
   const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1()
 
   for (const segment of loop.segments) {
-    // Phase 0 red line: committed sketch payloads do not preserve enough
-    // projected-geometry data to rebuild OCC profile wires faithfully.
     if (!isProjectedRegionSegmentSourceSupported(segment.source)) {
-      const rejection = createProjectedRegionLoopRejection(segment.source)
-      const error = new Error(getProjectedRegionLoopRejectionMessage(segment.source)) as Error & {
-        code?: string
-      }
-      error.code = rejection.code
-      throw error
+      throw new Error('Unsupported region segment source.')
     }
 
-    const geometry = getSolvedEntityGeometry(sketch, segment.source.entityId)
-    assertLoopSegmentOwnership(sketch, geometry)
-    const segmentGeometry = getLoopSegmentTraversal(plane, sketch, segment, geometry)
-    loopGeometry.push(segmentGeometry)
+    if (segment.source.kind === 'projectedGeometry') {
+      const projectedGeometry = resolveProjectedBoundaryGeometry(sketch, projectedReferences, segment.source)
+      const segmentGeometry = toProjectedBoundarySegmentGeometry(
+        plane,
+        segment.source,
+        projectedGeometry,
+        segment.traversalDirection,
+      )
+      loopGeometry.push(segmentGeometry)
+      wireBuilder.Add_1(buildProjectedBoundaryEdge(
+        oc,
+        plane,
+        segment.source,
+        projectedGeometry,
+        segmentGeometry,
+        loop.role,
+        segment.traversalDirection,
+      ))
+    } else {
+      const geometry = getSolvedEntityGeometry(sketch, segment.source.entityId)
+      assertLoopSegmentOwnership(sketch, geometry)
+      const segmentGeometry = getLoopSegmentTraversal(plane, sketch, segment, geometry)
+      loopGeometry.push(segmentGeometry)
 
-    switch (geometry.kind) {
-      case 'lineSegment': {
-        const edge = orientEdgeForLoop(oc, buildLineEdge(oc, plane, geometry), segmentGeometry, segment)
-        wireBuilder.Add_1(edge)
-        break
+      switch (geometry.kind) {
+        case 'lineSegment': {
+          const edge = orientEdgeForLoop(oc, buildLineEdge(oc, plane, geometry), segmentGeometry, segment)
+          wireBuilder.Add_1(edge)
+          break
+        }
+        case 'circle': {
+          const edge = buildCircleEdge(oc, plane, geometry)
+          wireBuilder.Add_1(
+            loop.role === 'inner'
+              ? oc.TopoDS.Edge_1(edge.Reversed())
+              : edge,
+          )
+          break
+        }
+        case 'arc': {
+          const edge = orientEdgeForLoop(oc, buildArcEdge(oc, plane, geometry), segmentGeometry, segment)
+          wireBuilder.Add_1(edge)
+          break
+        }
+        case 'point':
+          throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
       }
-      case 'circle': {
-        const edge = buildCircleEdge(oc, plane, geometry)
-        wireBuilder.Add_1(
-          loop.role === 'inner'
-            ? oc.TopoDS.Edge_1(edge.Reversed())
-            : edge,
-        )
-        break
-      }
-      case 'arc': {
-        const edge = orientEdgeForLoop(oc, buildArcEdge(oc, plane, geometry), segmentGeometry, segment)
-        wireBuilder.Add_1(edge)
-        break
-      }
-      case 'point':
-        throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
     }
   }
 
@@ -397,7 +602,7 @@ function buildLoopWire(
 
 export function buildRegionProfileFace(
   oc: OpenCascadeInstance,
-  snapshotSketch: { plane: SketchPlaneDefinition; sketch: SketchRecord },
+  snapshotSketch: { plane: SketchPlaneDefinition; sketch: SketchRecord; projectedReferences?: readonly ProjectedSketchReferenceRecord[] },
   region: RegionRecord,
 ): BuiltSketchProfileFace {
   assertRegionBelongsToSketch(snapshotSketch.sketch, region)
@@ -413,13 +618,14 @@ export function buildRegionProfileFace(
   assertLoopCanBuildProfile(snapshotSketch.sketch, region, outerLoop)
 
   const plane = snapshotSketch.plane
+  const projectedReferences = snapshotSketch.projectedReferences ?? snapshotSketch.sketch.projectedReferences ?? []
   const planeShape = toGpPlane(oc, plane)
-  const outerWire = buildLoopWire(oc, plane, snapshotSketch.sketch, outerLoop)
+  const outerWire = buildLoopWire(oc, plane, snapshotSketch.sketch, outerLoop, projectedReferences)
   const faceBuilder = new oc.BRepBuilderAPI_MakeFace_16(planeShape, outerWire, true)
 
   for (const innerLoop of region.loops.filter((loop) => loop.role === 'inner')) {
     assertLoopCanBuildProfile(snapshotSketch.sketch, region, innerLoop)
-    faceBuilder.Add(buildLoopWire(oc, plane, snapshotSketch.sketch, innerLoop))
+    faceBuilder.Add(buildLoopWire(oc, plane, snapshotSketch.sketch, innerLoop, projectedReferences))
   }
 
   if (!faceBuilder.IsDone()) {

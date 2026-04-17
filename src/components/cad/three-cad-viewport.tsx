@@ -1,4 +1,4 @@
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
@@ -137,6 +137,7 @@ export function ThreeCadViewport({
   const controlsRef = useRef<ViewportCameraControls | null>(null)
   const controlsInitializedRef = useRef(false)
   const [canvasReadyVersion, setCanvasReadyVersion] = useState(0)
+  const [controlsReadyVersion, setControlsReadyVersion] = useState(0)
   const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const [sketchAnnotationProjections, setSketchAnnotationProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const raycasterRef = useRef(new THREE.Raycaster())
@@ -165,6 +166,29 @@ export function ThreeCadViewport({
     state: { selectionFilter, selectionCatalog, sketchSession },
   } = useEditorState()
   const selectionRef = useRef(selection)
+  const handleControlsRef = useCallback((controls: unknown) => {
+    const nextControls = controls as ViewportCameraControls | null
+
+    if (controlsRef.current !== nextControls) {
+      controlsRef.current = nextControls
+      setControlsReadyVersion((current) => current + 1)
+    }
+
+    if (!nextControls || !cameraRef.current) {
+      return
+    }
+
+    if (controlsInitializedRef.current) {
+      return
+    }
+
+    cameraRef.current.position.set(14, -16, 28)
+    cameraRef.current.up.set(0, 0, 1)
+    nextControls.target.set(0, 0, 4)
+    cameraRef.current.lookAt(nextControls.target)
+    nextControls.update()
+    controlsInitializedRef.current = true
+  }, [])
   const annotationHighlightTargets = useMemo(
     () => getAnnotationHighlightTargets(sketchAnnotations, selection, hoverTarget),
     [hoverTarget, selection, sketchAnnotations],
@@ -434,7 +458,7 @@ export function ThreeCadViewport({
       controls?.removeEventListener('change', requestProjectionUpdate)
       window.removeEventListener('resize', requestProjectionUpdate)
     }
-  }, [canvasReadyVersion, updateSketchFeedbackProjections])
+  }, [canvasReadyVersion, controlsReadyVersion, updateSketchFeedbackProjections])
 
   useEffect(() => {
     if (bindingsRef.current) {
@@ -758,6 +782,10 @@ export function ThreeCadViewport({
         <directionalLight args={[0x91b4d8, 0.52]} position={[-12, 14, 18]} />
         <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
         <WorkspaceSceneScaffold />
+        <SketchProjectionFrameWatcher
+          enabled={Boolean(sketchSession)}
+          onCameraChanged={updateSketchFeedbackProjections}
+        />
         <Bvh key={bvhSceneKey} enabled>
           <group ref={pickRootRef}>
             {renderables.map((entry) => (
@@ -769,23 +797,7 @@ export function ThreeCadViewport({
           </group>
         </Bvh>
         <OrbitControls
-          ref={(controls) => {
-            controlsRef.current = controls as unknown as ViewportCameraControls | null
-            if (!controls || !cameraRef.current) {
-              return
-            }
-
-            if (controlsInitializedRef.current) {
-              return
-            }
-
-            cameraRef.current.position.set(14, -16, 28)
-            cameraRef.current.up.set(0, 0, 1)
-            controls.target.set(0, 0, 4)
-            cameraRef.current.lookAt(controls.target)
-            controls.update()
-            controlsInitializedRef.current = true
-          }}
+          ref={handleControlsRef}
           makeDefault
           target={[0, 0, 4]}
           enableDamping
@@ -823,6 +835,40 @@ export function ThreeCadViewport({
       />
     </div>
   )
+}
+
+function SketchProjectionFrameWatcher({
+  enabled,
+  onCameraChanged,
+}: {
+  enabled: boolean
+  onCameraChanged: () => void
+}) {
+  const lastCameraTokenRef = useRef<string | null>(null)
+
+  useFrame(({ camera }) => {
+    if (!enabled) {
+      lastCameraTokenRef.current = null
+      return
+    }
+
+    camera.updateMatrixWorld()
+    const token = [
+      ...camera.matrixWorld.elements,
+      ...camera.projectionMatrix.elements,
+    ]
+      .map((value) => value.toFixed(6))
+      .join(',')
+
+    if (lastCameraTokenRef.current === token) {
+      return
+    }
+
+    lastCameraTokenRef.current = token
+    onCameraChanged()
+  })
+
+  return null
 }
 
 function createViewCubeScene(): ViewCubeSceneState {
@@ -1407,15 +1453,15 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
     return nextGeometry
   }, [geometryData])
   const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: SURFACE_COLORS.sketchCurve,
+    color: renderable.role === 'reference' ? SURFACE_COLORS.sketchReference : SURFACE_COLORS.sketchCurve,
     transparent: true,
     opacity: 0.24,
     side: THREE.DoubleSide,
     metalness: 0.08,
     roughness: 0.58,
-    emissive: 0x214566,
-    emissiveIntensity: 0.18,
-  }), [])
+    emissive: renderable.role === 'reference' ? 0x4a3511 : 0x214566,
+    emissiveIntensity: renderable.role === 'reference' ? 0.2 : 0.18,
+  }), [renderable.role])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
@@ -1423,7 +1469,13 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
     <mesh
       ref={(value) => {
         if (value && renderable.target) {
-          bindRenderableObject(value, null, renderable.target, 'sketchCurve', 'document')
+          bindRenderableObject(
+            value,
+            null,
+            renderable.target,
+            renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve',
+            'document',
+          )
         }
       }}
       geometry={geometry}
@@ -1454,16 +1506,16 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
       ),
       renderable.linePattern === 'dashed'
         ? new THREE.LineDashedMaterial({
-            color: SURFACE_COLORS.sketchCurve,
+            color: renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchCurve,
             transparent: true,
-            opacity: 0.88,
+            opacity: renderable.role === 'reference' ? 0.7 : 0.88,
             depthTest: true,
             depthWrite: false,
             dashSize: 0.24,
             gapSize: 0.14,
           })
         : new THREE.LineBasicMaterial({
-            color: SURFACE_COLORS.sketchCurve,
+            color: renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchCurve,
             transparent: true,
             opacity: 0.95,
             depthTest: true,
@@ -1476,7 +1528,13 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
     nextLine.renderOrder = 3
 
     if (renderable.target) {
-      bindRenderableObject(nextLine, null, renderable.target, 'sketchCurve', 'document')
+      bindRenderableObject(
+        nextLine,
+        null,
+        renderable.target,
+        renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve',
+        'document',
+      )
     }
 
     return nextLine
@@ -1499,14 +1557,14 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
 function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
   const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
   const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: SURFACE_COLORS.sketchPoint,
+    color: renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchPoint,
     metalness: 0.08,
     roughness: 0.34,
-    emissive: 0x1c3245,
-    emissiveIntensity: 0.16,
+    emissive: renderable.role === 'reference' ? 0x4a3511 : 0x1c3245,
+    emissiveIntensity: renderable.role === 'reference' ? 0.2 : 0.16,
     depthTest: true,
     depthWrite: false,
-  }), [])
+  }), [renderable.role])
   const pickProxy = useMemo(() => {
     if (!geometryData) {
       throw new Error('Display renderable is missing marker geometry.')
@@ -1530,7 +1588,13 @@ function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisp
     <group
       ref={(value) => {
         if (value && renderable.target) {
-          bindRenderableObject(value, null, renderable.target, 'sketchPoint', 'document')
+          bindRenderableObject(
+            value,
+            null,
+            renderable.target,
+            renderable.role === 'reference' ? 'sketchReference' : 'sketchPoint',
+            'document',
+          )
         }
       }}
     >

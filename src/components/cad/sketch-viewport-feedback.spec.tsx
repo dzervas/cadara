@@ -60,6 +60,14 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         point: [4, 3],
         ready: true,
       },
+      {
+        id: 'active-snap',
+        kind: 'snapIndicator',
+        label: 'Midpoint',
+        point: [2, 0],
+        candidateKind: 'midpoint',
+        glyphKind: 'midpoint',
+      },
     ],
     floatingInput: {
       id: 'distance-value-input',
@@ -92,6 +100,7 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         { id: 'overlay-geometry:parallel-angle-preview:end', x: 200, y: 80 },
         { id: 'overlay:rectangle-start-anchor', x: 100, y: 140 },
         { id: 'overlay:rectangle-completion-cue', x: 200, y: 60 },
+        { id: 'overlay:active-snap', x: 140, y: 100 },
         { id: 'floating-input:distance-value-input', x: 180, y: 90 },
       ]}
       onPatch={() => undefined}
@@ -123,5 +132,11 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
   assert(
     !markup.includes('First corner') && !markup.includes('Place corner'),
     'Viewport feedback should suppress non-dimensional anchor and completion tooltips.',
+  )
+  assert(
+    markup.includes('data-sketch-viewport-geometry="snapIndicator"')
+      && markup.includes('data-sketch-snap-kind="midpoint"')
+      && markup.includes('Midpoint'),
+    'Viewport feedback should render transient snap indicators and labels.',
   )
 })

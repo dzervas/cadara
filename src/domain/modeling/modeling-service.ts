@@ -131,6 +131,7 @@ import type {
   DimensionStatusRecord,
   DimensionDefinition,
   RegionRecord,
+  SketchPoint2D,
   SketchReferenceDefinition,
   SketchSolveDiagnostic,
   SketchDefinition,
@@ -141,6 +142,8 @@ import type {
 } from '@/contracts/sketch/schema'
 import type {
   DeriveSketchRegionsRequest,
+  ProjectedSketchReferenceGeometry,
+  ProjectedSketchReferenceRecord,
   ProjectSketchExternalReferencesRequest,
   ResolveSketchReferenceRequest,
   SolveSketchRequest,
@@ -1707,8 +1710,96 @@ function normalizeSketchRecord(value: unknown): SketchRecord {
     planeSupport: assertSketchPlaneSupportRef(value.planeSupport),
     definition: normalizeSketchDefinition(value.definition),
     solvedSnapshot: normalizeSolvedSketchSnapshot(value.solvedSnapshot),
+    projectedReferences: normalizeProjectedSketchReferences(value.projectedReferences ?? []),
     regions: normalizeRegionRecords(value.regions),
   }
+}
+
+function normalizeProjectedSketchReferences(value: unknown): ProjectedSketchReferenceRecord[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid projected sketch reference payload.')
+  }
+
+  return value.map((reference) => {
+    if (!isRecord(reference) || !isString(reference.referenceId) || !isString(reference.status) || !Array.isArray(reference.geometry) || !Array.isArray(reference.diagnostics)) {
+      throw new Error('Invalid projected sketch reference record.')
+    }
+
+    return {
+      referenceId: reference.referenceId as import('@/contracts/shared/ids').ReferenceId,
+      status:
+        reference.status === 'projected'
+        || reference.status === 'unsupportedSource'
+        || reference.status === 'missingSource'
+        || reference.status === 'outOfPlane'
+        || reference.status === 'ambiguous'
+          ? reference.status
+          : (() => { throw new Error('Invalid projected sketch reference status payload.') })(),
+      geometry: reference.geometry.map((geometry) => normalizeProjectedSketchReferenceGeometry(geometry)),
+      diagnostics: reference.diagnostics.map((diagnostic) => normalizeSketchSolveDiagnostic(diagnostic)),
+    }
+  })
+}
+
+function normalizeProjectedSketchReferenceGeometry(value: unknown): ProjectedSketchReferenceGeometry {
+  if (!isRecord(value) || !isString(value.geometryId) || !isString(value.kind)) {
+    throw new Error('Invalid projected sketch geometry payload.')
+  }
+
+  const geometryId = value.geometryId as import('@/contracts/shared/ids').ProjectedGeometryId
+
+  if (value.kind === 'point') {
+    return {
+      geometryId,
+      kind: 'point',
+      position: normalizePoint2D(value.position, 'Invalid projected point payload.'),
+    }
+  }
+
+  if (value.kind === 'lineSegment') {
+    return {
+      geometryId,
+      kind: 'lineSegment',
+      startPosition: normalizePoint2D(value.startPosition, 'Invalid projected line start payload.'),
+      endPosition: normalizePoint2D(value.endPosition, 'Invalid projected line end payload.'),
+    }
+  }
+
+  if (value.kind === 'circle') {
+    if (typeof value.radius !== 'number') {
+      throw new Error('Invalid projected circle radius payload.')
+    }
+    return {
+      geometryId,
+      kind: 'circle',
+      centerPosition: normalizePoint2D(value.centerPosition, 'Invalid projected circle center payload.'),
+      radius: value.radius,
+    }
+  }
+
+  if (value.kind === 'arc') {
+    if (value.sweepDirection !== 'clockwise' && value.sweepDirection !== 'counterClockwise') {
+      throw new Error('Invalid projected arc sweep payload.')
+    }
+    return {
+      geometryId,
+      kind: 'arc',
+      centerPosition: normalizePoint2D(value.centerPosition, 'Invalid projected arc center payload.'),
+      startPosition: normalizePoint2D(value.startPosition, 'Invalid projected arc start payload.'),
+      endPosition: normalizePoint2D(value.endPosition, 'Invalid projected arc end payload.'),
+      sweepDirection: value.sweepDirection,
+    }
+  }
+
+  throw new Error('Invalid projected sketch geometry kind payload.')
+}
+
+function normalizePoint2D(value: unknown, errorMessage: string): SketchPoint2D {
+  if (!Array.isArray(value) || value.length !== 2 || value.some((component) => typeof component !== 'number')) {
+    throw new Error(errorMessage)
+  }
+
+  return value as unknown as SketchPoint2D
 }
 
 function normalizeSketchDefinition(value: unknown): SketchDefinition {
@@ -2002,12 +2093,14 @@ function normalizeConstraintDefinition(value: unknown): ConstraintDefinition {
     value.kind === 'parallel'
     || value.kind === 'perpendicular'
     || value.kind === 'equalLength'
+    || value.kind === 'tangent'
+    || value.kind === 'concentric'
   ) {
     if (!Array.isArray(value.entityIds) || value.entityIds.length !== 2) {
       throw new Error('Invalid two-line constraint payload.')
     }
 
-    return {
+    const base = {
       constraintId: assertConstraintId(value.constraintId),
       kind: value.kind,
       label: value.label,
@@ -2016,9 +2109,198 @@ function normalizeConstraintDefinition(value: unknown): ConstraintDefinition {
         assertSketchEntityId(value.entityIds[1]),
       ],
     }
+
+    if (value.kind === 'tangent') {
+      if (value.relation !== 'external' && value.relation !== 'internal') {
+        throw new Error('Invalid tangent constraint payload.')
+      }
+
+      return {
+        ...base,
+        kind: 'tangent',
+        relation: value.relation,
+      }
+    }
+
+    return base
+  }
+
+  if (value.kind === 'coincidentProjectedPoint') {
+    if (!isRecord(value.point) || !isRecord(value.projectedPoint)) {
+      throw new Error('Invalid projected coincident constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'coincidentProjectedPoint',
+      label: value.label,
+      point: normalizeLocalPointConstraintOperand(value.point),
+      projectedPoint: normalizeProjectedGeometryConstraintOperand(value.projectedPoint),
+    }
+  }
+
+  if (value.kind === 'pointOnProjectedCurve') {
+    if (!isRecord(value.point) || !isRecord(value.projectedCurve)) {
+      throw new Error('Invalid point-on-projected-curve constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'pointOnProjectedCurve',
+      label: value.label,
+      point: normalizeLocalPointConstraintOperand(value.point),
+      projectedCurve: normalizeProjectedGeometryConstraintOperand(value.projectedCurve),
+    }
+  }
+
+  if (value.kind === 'midpoint') {
+    if (!isRecord(value.point) || !isRecord(value.line)) {
+      throw new Error('Invalid midpoint constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'midpoint',
+      label: value.label,
+      point: normalizeLocalPointConstraintOperand(value.point),
+      line: normalizeLocalEntityConstraintOperand(value.line),
+    }
+  }
+
+  if (value.kind === 'midpointProjectedLine') {
+    if (!isRecord(value.point) || !isRecord(value.projectedLine)) {
+      throw new Error('Invalid projected midpoint constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'midpointProjectedLine',
+      label: value.label,
+      point: normalizeLocalPointConstraintOperand(value.point),
+      projectedLine: normalizeProjectedGeometryConstraintOperand(value.projectedLine),
+    }
+  }
+
+  if (value.kind === 'pointOnCurve') {
+    if (!isRecord(value.point) || !isRecord(value.curve)) {
+      throw new Error('Invalid point-on-curve constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'pointOnCurve',
+      label: value.label,
+      point: normalizeLocalPointConstraintOperand(value.point),
+      curve: normalizeLocalEntityConstraintOperand(value.curve),
+    }
+  }
+
+  if (value.kind === 'parallelProjectedLine' || value.kind === 'perpendicularProjectedLine') {
+    if (!isRecord(value.line) || !isRecord(value.projectedLine)) {
+      throw new Error('Invalid projected line relationship constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: value.kind,
+      label: value.label,
+      line: normalizeLocalEntityConstraintOperand(value.line),
+      projectedLine: normalizeProjectedGeometryConstraintOperand(value.projectedLine),
+    }
+  }
+
+  if (value.kind === 'tangentProjectedCurve') {
+    if (
+      !isRecord(value.curve) ||
+      !isRecord(value.projectedCurve) ||
+      (value.relation !== 'external' && value.relation !== 'internal')
+    ) {
+      throw new Error('Invalid projected tangent constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'tangentProjectedCurve',
+      label: value.label,
+      curve: normalizeLocalEntityConstraintOperand(value.curve),
+      projectedCurve: normalizeProjectedGeometryConstraintOperand(value.projectedCurve),
+      relation: value.relation,
+    }
+  }
+
+  if (value.kind === 'concentricProjectedCurve') {
+    if (!isRecord(value.curve) || !isRecord(value.projectedCurve)) {
+      throw new Error('Invalid projected concentric constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'concentricProjectedCurve',
+      label: value.label,
+      curve: normalizeLocalEntityConstraintOperand(value.curve),
+      projectedCurve: normalizeProjectedGeometryConstraintOperand(value.projectedCurve),
+    }
   }
 
   throw new Error('Invalid constraint definition kind.')
+}
+
+function normalizeLocalPointConstraintOperand(
+  value: Record<string, unknown>,
+): Extract<ConstraintDefinition, { kind: 'coincidentProjectedPoint' }>['point'] {
+  if (value.kind !== 'localPoint' || !isString(value.pointId)) {
+    throw new Error('Invalid local point constraint operand payload.')
+  }
+
+  return {
+    kind: 'localPoint',
+    pointId: assertSketchPointId(value.pointId),
+  }
+}
+
+function normalizeLocalEntityConstraintOperand(
+  value: Record<string, unknown>,
+): Extract<ConstraintDefinition, { kind: 'parallelProjectedLine' }>['line'] {
+  if (value.kind !== 'localEntity' || !isString(value.entityId)) {
+    throw new Error('Invalid local entity constraint operand payload.')
+  }
+
+  return {
+    kind: 'localEntity',
+    entityId: assertSketchEntityId(value.entityId),
+  }
+}
+
+function normalizeProjectedGeometryConstraintOperand(
+  value: Record<string, unknown>,
+): Extract<ConstraintDefinition, { kind: 'coincidentProjectedPoint' }>['projectedPoint'] {
+  if (!isRecord(value.reference) || value.kind !== 'projectedGeometry') {
+    throw new Error('Invalid projected geometry constraint operand payload.')
+  }
+
+  const reference = value.reference
+  if (
+    !isString(reference.kind) ||
+    (
+      reference.kind !== 'projectedPoint' &&
+      reference.kind !== 'projectedLineSegment' &&
+      reference.kind !== 'projectedCircle' &&
+      reference.kind !== 'projectedArc'
+    ) ||
+    !isString(reference.referenceId) ||
+    !isString(reference.geometryId)
+  ) {
+    throw new Error('Invalid projected geometry reference constraint operand payload.')
+  }
+
+  return {
+    kind: 'projectedGeometry',
+    reference: {
+      kind: reference.kind,
+      referenceId: reference.referenceId as import('@/contracts/shared/ids').ReferenceId,
+      geometryId: reference.geometryId as import('@/contracts/shared/ids').ProjectedGeometryId,
+    },
+  }
 }
 
 function normalizeDimensionDefinition(value: unknown): DimensionDefinition {
@@ -2387,6 +2669,15 @@ function normalizeRegionRecords(value: unknown): RegionRecord[] {
                     ? {
                         kind: 'projectedGeometry' as const,
                         reference: {
+                          kind:
+                            isRecord(segment.source.reference) && (
+                              segment.source.reference.kind === 'projectedPoint'
+                              || segment.source.reference.kind === 'projectedLineSegment'
+                              || segment.source.reference.kind === 'projectedCircle'
+                              || segment.source.reference.kind === 'projectedArc'
+                            )
+                              ? segment.source.reference.kind
+                              : undefined,
                           referenceId:
                             isRecord(segment.source.reference) && isString(segment.source.reference.referenceId)
                               ? segment.source.reference.referenceId as import('@/contracts/shared/ids').ReferenceId
@@ -2400,6 +2691,10 @@ function normalizeRegionRecords(value: unknown): RegionRecord[] {
                     : (() => { throw new Error('Invalid region boundary source payload.') })(),
               startPointId: segment.startPointId === null ? null : assertSketchPointId(segment.startPointId),
               endPointId: segment.endPointId === null ? null : assertSketchPointId(segment.endPointId),
+              traversalDirection:
+                segment.traversalDirection === 'reverse'
+                  ? 'reverse' as const
+                  : undefined,
             }
           }),
           boundaryPointIds: loop.boundaryPointIds.map((pointId) => assertSketchPointId(pointId)),

@@ -7,6 +7,8 @@ import type {
   SketchDefinition,
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
+import type { ReferenceId } from '@/contracts/shared/ids'
 
 test('src/contracts/sketch/region-extraction.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -46,6 +48,28 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       isConstruction: false,
       centerPointId: centerPointId as `sketch_point_${string}`,
       radius,
+    }
+  }
+
+  function makeAuthoredReference(referenceId: ReferenceId = 'ref_projected_profile') {
+    return {
+      referenceId,
+      kind: 'modelReference' as const,
+      label: 'Projected profile',
+      source: { kind: 'edge' as const, bodyId: 'body_projected', edgeId: 'edge_profile' },
+      projectionMode: 'projectAlongPlaneNormal' as const,
+    }
+  }
+
+  function makeProjectedReference(
+    geometry: ProjectedSketchReferenceRecord['geometry'],
+    referenceId: ReferenceId = 'ref_projected_profile',
+  ): ProjectedSketchReferenceRecord {
+    return {
+      referenceId,
+      status: 'projected',
+      geometry,
+      diagnostics: [],
     }
   }
 
@@ -269,6 +293,206 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     assert(derived.regions[1]?.loops[0]?.role === 'outer', 'Inner selectable region should expose its boundary as an outer loop.')
   }
 
+  async function testMixedLocalAndProjectedLoopPreservesProjectedIdentity() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: ['ref_projected_profile'],
+      references: [makeAuthoredReference()],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 4, 0),
+        makePoint('sketch_point_c', 'C', 4, 3),
+        makePoint('sketch_point_d', 'D', 0, 3),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_bc', 'sketch_entity_cd'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+    const projectedReferences = [
+      makeProjectedReference([{
+        geometryId: 'projected_geometry_left',
+        kind: 'lineSegment',
+        startPosition: [0, 3],
+        endPosition: [0, 0],
+      }]),
+    ]
+
+    const solvedSnapshot = makeSolvedSnapshot(definition)
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot,
+      projectedReferences,
+    })
+
+    assert(derived.regions.length === 1, 'Mixed local/projected edges should close one region.')
+    const loop = derived.regions[0]!.loops[0]!
+    const projectedSegment = loop.segments.find((segment) => segment.source.kind === 'projectedGeometry')
+    assert(projectedSegment?.source.kind === 'projectedGeometry', 'Loop should include projected boundary identity.')
+    assert(projectedSegment.source.reference.referenceId === 'ref_projected_profile', 'Projected segment must preserve authored reference ID.')
+    assert(projectedSegment.source.reference.geometryId === 'projected_geometry_left', 'Projected segment must preserve projected geometry ID.')
+    assert(definition.entityIds.length === 3, 'Projected boundaries must not be copied into sketch-owned entity IDs.')
+  }
+
+  async function testProjectedOnlyCircleLoopPreservesProjectedIdentity() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: ['ref_projected_profile'],
+      references: [makeAuthoredReference()],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+    const projectedReferences = [
+      makeProjectedReference([{
+        geometryId: 'projected_geometry_circle',
+        kind: 'circle',
+        centerPosition: [2, 2],
+        radius: 1,
+      }]),
+    ]
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+      projectedReferences,
+    })
+
+    assert(derived.regions.length === 1, 'Projected-only circles should derive profile regions.')
+    const segment = derived.regions[0]!.loops[0]!.segments[0]
+    assert(segment?.source.kind === 'projectedGeometry', 'Projected-only loop should stay projected-sourced.')
+    assert(segment.source.reference.geometryId === 'projected_geometry_circle', 'Projected circle identity should survive region derivation.')
+    assert(definition.points.length === 0 && definition.entities.length === 0, 'Projected-only regions must not author copied sketch geometry.')
+  }
+
+  async function testMissingProjectedReferencesReportDiagnosticsWithoutInventingGeometry() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: ['ref_projected_profile'],
+      references: [makeAuthoredReference()],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+      projectedReferences: [],
+    })
+
+    assert(derived.regions.length === 0, 'Missing projected data must not invent profile regions.')
+    assert(
+      derived.diagnostics.some((diagnostic) => diagnostic.code === 'projected-region-reference-unresolved'),
+      'Missing projected data should report a machine-readable diagnostic.',
+    )
+  }
+
+  async function testUnauthoredProjectedReferencesReportDiagnosticsWithoutInventingGeometry() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+    const projectedReferences = [
+      makeProjectedReference([{
+        geometryId: 'projected_geometry_stale_circle',
+        kind: 'circle',
+        centerPosition: [2, 2],
+        radius: 1,
+      }], 'ref_stale_projection'),
+    ]
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+      projectedReferences,
+    })
+
+    assert(derived.regions.length === 0, 'Unauthored projected data must not create profile regions.')
+    assert(
+      derived.diagnostics.some((diagnostic) => diagnostic.code === 'projected-region-reference-unauthored'),
+      'Unauthored projected data should report a machine-readable diagnostic.',
+    )
+    assert(definition.points.length === 0 && definition.entities.length === 0, 'Rejected projected regions must not copy geometry into the sketch.')
+  }
+
+  async function testProjectedReferenceMissingAuthoredRecordIsRejected() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: ['ref_projected_profile'],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+    const projectedReferences = [
+      makeProjectedReference([{
+        geometryId: 'projected_geometry_recordless_circle',
+        kind: 'circle',
+        centerPosition: [2, 2],
+        radius: 1,
+      }]),
+    ]
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+      projectedReferences,
+    })
+
+    assert(derived.regions.length === 0, 'Projection data without an authored reference record must not create profile regions.')
+    assert(
+      derived.diagnostics.some((diagnostic) => diagnostic.code === 'projected-region-reference-unauthored'),
+      'Missing authored reference records should report a machine-readable diagnostic.',
+    )
+  }
+
   async function testFindCircleRegion() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -477,7 +701,12 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
   async function run() {
     await testFindRingsNone()
     await testFindRingsOne()
-    await testFindRingsMultipleAndDeriveRegions()
+  await testFindRingsMultipleAndDeriveRegions()
+  await testMixedLocalAndProjectedLoopPreservesProjectedIdentity()
+  await testProjectedOnlyCircleLoopPreservesProjectedIdentity()
+  await testMissingProjectedReferencesReportDiagnosticsWithoutInventingGeometry()
+  await testUnauthoredProjectedReferencesReportDiagnosticsWithoutInventingGeometry()
+  await testProjectedReferenceMissingAuthoredRecordIsRejected()
     await testFindCircleRegion()
     await testSquareWithInnerCircleDerivesAllBoundedCells()
     await testConstructionGeometryDoesNotSplitNormalProfile()

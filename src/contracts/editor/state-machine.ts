@@ -25,6 +25,7 @@ import {
   beginSketchTool,
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
+  deleteSketchReferenceTarget,
   finishSketchGeometryDrag,
   getNextSketchHistoryCursor,
   getPreviousSketchHistoryCursor,
@@ -35,10 +36,12 @@ import {
   selectSketchEditTarget,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
+  selectSketchReferenceTarget,
   startSketchDraw,
   toggleSketchConstructionTarget,
   updateSketchGeometryDrag,
   updateSketchConstraintHover,
+  updateSketchReferenceProjection,
   updateSketchPointer,
   type SketchSessionState,
   type SketchHistoryCursor,
@@ -55,6 +58,7 @@ import {
   resolveSelectionCandidate,
   selectionFilterAllowsTarget,
   sketchStartSelectionFilter,
+  sketchReferenceSelectionFilter,
   type CommandPreview,
   type PrimitiveRef,
   type SelectionFilter,
@@ -75,6 +79,8 @@ import type {
   RequestId,
   RevisionId,
 } from '@/contracts/shared/ids'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
+import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 
 /**
  * Visible command metadata derived from the active machine state.
@@ -173,6 +179,8 @@ export interface SketchEditorState extends EditorStateBase {
   session: SketchSessionState
   /** Explicit correlation ID for an in-flight sketch commit request. */
   pendingCommitRequestId: RequestId | null
+  /** Explicit correlation ID for an in-flight sketch reference projection request. */
+  pendingProjectionRequestId: RequestId | null
 }
 
 /**
@@ -580,6 +588,23 @@ export type EditorEvent =
       message: string
     }
   | {
+      type: 'effect.sketchReferencesProjected'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      projectedReferences: ProjectedSketchReferenceRecord[]
+      diagnostics: ProjectedSketchReferenceRecord['diagnostics']
+    }
+  | {
+      type: 'effect.sketchReferenceProjectionFailed'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      message: string
+    }
+  | {
       type: 'effect.documentCursorMoved'
       /** Effect request being completed by this document history cursor mutation. */
       requestId: RequestId
@@ -690,6 +715,14 @@ export type EditorEffect =
       session: SketchSessionState
     }
   | {
+      type: 'sketch.projectReferences'
+      requestId: RequestId
+      commandSessionId: CommandSessionId
+      documentId: DocumentId
+      baseRevisionId: RevisionId
+      session: SketchSessionState
+    }
+  | {
       type: 'document.moveHistoryCursor'
       /** Editor-owned correlation ID for this document history cursor mutation. */
       requestId: RequestId
@@ -718,6 +751,12 @@ function nextCommandSessionId(state: EditorState, toolId: ToolId) {
 function nextRequestId(state: EditorState, scope: string) {
   return `request_${scope}-${state.nextRequestSequence}` as RequestId
 }
+
+const EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES = {
+  coincidence: 1e-6,
+  angleRadians: 1e-6,
+  minimumSegmentLength: 1e-6,
+} as const
 
 function createInitialState(): EditorState {
   return {
@@ -765,6 +804,16 @@ export interface EditorEffectRuntime {
     diagnostics: ModelingDiagnostic[]
     actualRevisionId?: RevisionId
   } | null>
+  /** Projects authored external sketch references for active sketch display. */
+  projectSketchReferences(input: {
+    requestId: RequestId
+    documentId: DocumentId
+    baseRevisionId: RevisionId
+    session: SketchSessionState
+  }): Promise<{
+    projectedReferences: ProjectedSketchReferenceRecord[]
+    diagnostics: ProjectedSketchReferenceRecord['diagnostics']
+  }>
   /** Evaluates a feature preview against a base revision. */
   evaluatePreview(input: {
     baseRevisionId: RevisionId
@@ -1242,6 +1291,44 @@ function emitSketchCommit(state: SketchEditorState): EditorTransitionResult {
   }
 }
 
+function emitSketchReferenceProjection(state: SketchEditorState, session: SketchSessionState): EditorTransitionResult {
+  if (
+    session.definition.references.length === 0
+    || state.document.documentId === null
+    || state.document.revisionId === null
+  ) {
+    return {
+      state: {
+        ...state,
+        session: updateSketchReferenceProjection(session, [], []),
+        pendingProjectionRequestId: null,
+      },
+      effects: [],
+    }
+  }
+
+  const requestId = nextRequestId(state, 'sketch-reference-projection')
+
+  return {
+    state: {
+      ...state,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      session,
+      pendingProjectionRequestId: requestId,
+    },
+    effects: [
+      {
+        type: 'sketch.projectReferences',
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: state.document.revisionId,
+        session,
+      },
+    ],
+  }
+}
+
 function deriveSketchPointFromWorld(
   _plane: SketchSessionState['plane'],
   point: readonly [number, number],
@@ -1338,7 +1425,12 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (
         state.kind === 'editingSketch' &&
-        (isRegisteredSketchToolId(event.toolId) || isRegisteredSketchConstraintToolId(event.toolId) || event.toolId === 'construction')
+        (
+          isRegisteredSketchToolId(event.toolId)
+          || isRegisteredSketchConstraintToolId(event.toolId)
+          || event.toolId === 'construction'
+          || event.toolId === 'projectReference'
+        )
       ) {
         const session = beginSketchTool(state.session, event.toolId)
 
@@ -1346,6 +1438,9 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           state: {
             ...state,
             mode: 'sketch',
+            selectionFilter: event.toolId === 'projectReference'
+              ? sketchReferenceSelectionFilter
+              : getDefaultSelectionFilterForMode('sketch'),
             command: {
               ...state.command,
               toolId: event.toolId,
@@ -1420,6 +1515,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           || event.toolId === 'rectangle'
           || event.toolId === 'circle'
           || event.toolId === 'construction'
+          || event.toolId === 'projectReference'
           || isRegisteredSketchConstraintToolId(event.toolId)
           ? 'sketch'
           : state.mode
@@ -1713,6 +1809,31 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           },
           effects: [],
         }
+      }
+
+      if (state.kind === 'editingSketch' && state.session.referenceTargetPicking) {
+        const session = selectSketchReferenceTarget(state.session, event.target)
+        const nextState: SketchEditorState = {
+          ...state,
+          selection: [event.target],
+          hoverTarget: event.target,
+          selectionFilter: session.referenceTargetPicking
+            ? sketchReferenceSelectionFilter
+            : getDefaultSelectionFilterForMode('sketch'),
+          session,
+          command: {
+            ...state.command,
+            toolId: session.activeTool ?? 'sketch',
+            phase: 'editing',
+          },
+          preview: {
+            kind: 'sketch',
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          },
+        }
+
+        return emitSketchReferenceProjection(nextState, session)
       }
 
       if (
@@ -2127,21 +2248,28 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
 
       {
-        const session = deleteSelectedSketchAnnotation(state.session)
-
-        return {
-          state: {
-            ...state,
-            selection: [],
-            session,
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
+        const selected = state.selection[0] ?? null
+        const referenceTarget = selected
+          && (selected.kind === 'projectedReferenceGeometry' || selected.kind === 'sketchExternalReference')
+          ? selected
+          : null
+        const session = referenceTarget
+          ? deleteSketchReferenceTarget(state.session, referenceTarget)
+          : deleteSelectedSketchAnnotation(state.session)
+        const nextState: SketchEditorState = {
+          ...state,
+          selection: [],
+          session,
+          preview: {
+            kind: 'sketch',
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
           },
-          effects: [],
         }
+
+        return referenceTarget
+          ? emitSketchReferenceProjection(nextState, session)
+          : { state: nextState, effects: [] }
       }
     case 'sketch.annotationEditRequested':
       if (state.kind !== 'editingSketch') {
@@ -2369,8 +2497,8 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
-      return {
-        state: {
+      {
+        const nextState: SketchEditorState = {
           kind: 'editingSketch',
           mode: 'sketch',
           document: state.document,
@@ -2398,8 +2526,10 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           },
           session: event.session,
           pendingCommitRequestId: null,
-        },
-        effects: [],
+          pendingProjectionRequestId: null,
+        }
+
+        return emitSketchReferenceProjection(nextState, event.session)
       }
     case 'effect.sketchSessionOpenFailed':
       if (
@@ -2745,6 +2875,69 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         },
         effects: [],
       }
+    case 'effect.sketchReferencesProjected':
+      if (
+        state.kind !== 'editingSketch' ||
+        state.pendingProjectionRequestId !== event.requestId ||
+        state.command.commandSessionId !== event.commandSessionId ||
+        !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = updateSketchReferenceProjection(
+          state.session,
+          event.projectedReferences,
+          event.diagnostics,
+        )
+
+        return {
+          state: {
+            ...state,
+            pendingProjectionRequestId: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+    case 'effect.sketchReferenceProjectionFailed':
+      if (
+        state.kind !== 'editingSketch' ||
+        state.pendingProjectionRequestId !== event.requestId ||
+        state.command.commandSessionId !== event.commandSessionId ||
+        !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          pendingProjectionRequestId: null,
+          preview: {
+            kind: 'sketch',
+            label: event.message,
+            target: state.session.planeTarget,
+          },
+          session: {
+            ...state.session,
+            validationMessage: event.message,
+          },
+        },
+        effects: [],
+      }
     default:
       return {
         state,
@@ -2959,6 +3152,35 @@ export async function runEditorEffect(
         }
       }
     }
+    case 'sketch.projectReferences': {
+      try {
+        const result = await runtime.projectSketchReferences({
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          baseRevisionId: effect.baseRevisionId,
+          session: effect.session,
+        })
+
+        return {
+          type: 'effect.sketchReferencesProjected',
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          projectedReferences: result.projectedReferences,
+          diagnostics: result.diagnostics,
+        }
+      } catch (error: unknown) {
+        return {
+          type: 'effect.sketchReferenceProjectionFailed',
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          message: error instanceof Error ? error.message : 'Sketch reference projection failed.',
+        }
+      }
+    }
     case 'document.moveHistoryCursor': {
       try {
         if (!runtime.setDocumentCursor) {
@@ -3016,6 +3238,22 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       solveRequestId: RequestId
       regionRequestId: RequestId
     }
+    projectExternalReferences(input: {
+      solverSchemaVersion: typeof SOLVER_SCHEMA_VERSION
+      requestId: RequestId
+      documentId: DocumentId
+      revisionId: RevisionId
+      sketchId: NonNullable<SketchSessionState['sketchId']>
+      plane: SketchPlaneDefinition['frame']
+      tolerances: typeof EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES
+      references: {
+        referenceId: SketchSessionState['definition']['referenceIds'][number]
+        reference: SketchSessionState['definition']['references'][number]
+      }[]
+    }): Promise<{
+      projectedReferences: ProjectedSketchReferenceRecord[]
+      diagnostics: ProjectedSketchReferenceRecord['diagnostics']
+    }>
   } | null
   commitSketch: (input: {
     requestId: RequestId
@@ -3126,6 +3364,30 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         actualRevisionId:
           result.revisionState.kind === 'conflict' ? result.revisionState.actualRevisionId : undefined,
       }
+    },
+    async projectSketchReferences(input) {
+      if (!modelingService.sketchSolver) {
+        return {
+          projectedReferences: [],
+          diagnostics: [],
+        }
+      }
+
+      const sketchId = input.session.sketchId ?? ('sketch_draft' as NonNullable<SketchSessionState['sketchId']>)
+
+      return modelingService.sketchSolver.projectExternalReferences({
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: input.requestId,
+        documentId: input.documentId,
+        revisionId: input.baseRevisionId,
+        sketchId,
+        plane: input.session.plane.frame,
+        tolerances: EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
+        references: input.session.definition.references.map((reference) => ({
+          referenceId: reference.referenceId,
+          reference,
+        })),
+      })
     },
     async evaluatePreview(input) {
       const definition = buildFeatureDefinition(input.featureSession)

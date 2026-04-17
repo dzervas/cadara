@@ -36,3 +36,16 @@ An OpenCascade-backed kernel adapter SHALL reject public-contract cases that are
 - **WHEN** feature execution requires projected sketch geometry that is not reconstructible from the committed public contract
 - **THEN** the adapter rejects the operation explicitly and reports the contract limitation to the caller
 
+### Requirement: OCC profile building SHALL consume live-derived projected boundaries
+The OCC adapter SHALL build profile wires containing projected geometry boundary segments from live projection data for the active revision.
+
+#### Scenario: Projected segment is resolvable
+- **WHEN** the OCC adapter receives a region loop containing a projected geometry segment with live projected geometry available
+- **THEN** it reconstructs the corresponding wire segment from the projected geometry
+- **AND** it does not reject the loop because of projected geometry
+
+#### Scenario: Projected segment is not resolvable
+- **WHEN** the OCC adapter cannot resolve live projected geometry for a projected region segment
+- **THEN** it rejects the rebuild with an explicit machine-readable diagnostic
+- **AND** it does not copy, cache-as-authoritative, or silently remap the referenced geometry
+

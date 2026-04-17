@@ -143,6 +143,7 @@ function getOverlayAnchor(overlay: SketchToolOverlayDescriptor): SketchToolAncho
       return null
     case 'anchor':
     case 'helperMarker':
+    case 'snapIndicator':
       return { kind: 'sketchPoint', point: overlay.point }
     case 'completionCue':
       return {
