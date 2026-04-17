@@ -7,6 +7,9 @@ import type {
   SketchPointDefinition,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
+import {
+  solveSketchDefinitionWithDraggedPointTarget,
+} from '@/contracts/sketch/solver-core'
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
@@ -77,6 +80,14 @@ export interface SketchAnnotationDescriptor {
   status: 'constraint' | 'dimension'
 }
 
+export interface SketchGeometryDragState {
+  target: SketchPointRef
+  startPoint: SketchPoint
+  currentPoint: SketchPoint
+  status: 'dragging' | 'blocked'
+  message: string | null
+}
+
 export interface SketchSessionState {
   sketchId: SketchId | null
   sketchLabel: string
@@ -94,11 +105,21 @@ export interface SketchSessionState {
   toolPresentation: SketchToolPresentationSchema | null
   constraintAuthoring: SketchConstraintAuthoringState | null
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null
+  activeEditTarget: SketchPointRef | null
+  activeDrag: SketchGeometryDragState | null
   sequence: number
   solvedRegions: RegionRecord[]
   commitRequest: Omit<CommitSketchRequest, 'contractVersion' | 'documentId' | 'baseRevisionId'> | null
   validationMessage: string | null
 }
+
+const SKETCH_DIRECT_EDIT_TOLERANCES = {
+  coincidence: 1e-6,
+  angleRadians: 1e-6,
+  minimumSegmentLength: 1e-6,
+} as const
+
+const CONSTRAINED_DRAG_BLOCKED_MESSAGE = 'Geometry is constrained and cannot move to that position.'
 
 export interface SketchSessionDisplayRenderable {
   id: RenderableId
@@ -380,6 +401,8 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     toolPresentation: null,
     constraintAuthoring: null,
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
     sequence: getNextDefinitionSequence(sketch.sketch.definition),
     solvedRegions: [...sketch.sketch.regions],
     commitRequest: buildCommitRequest({
@@ -415,6 +438,8 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     toolPresentation: null,
     constraintAuthoring: null,
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
     sequence: 0,
     solvedRegions: [],
     commitRequest: null,
@@ -651,6 +676,9 @@ export function moveSketchHistoryCursor(
       mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
     ),
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, definition),
   }
 }
@@ -765,6 +793,8 @@ function activateSketchConstraintTool(
     toolPresentation: buildConstraintToolPresentation(authoring),
     constraintAuthoring: authoring,
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 
@@ -837,6 +867,8 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     toolPresentation: activation.presentation,
     constraintAuthoring: null,
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 
@@ -856,6 +888,8 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     toolPresentation: null,
     constraintAuthoring: null,
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 
@@ -885,6 +919,216 @@ export function updateSketchPointer(
     validationMessage: result.state.validationMessage,
     toolPresentation: result.presentation,
   }
+}
+
+export function selectSketchEditTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
+  if (target.kind !== 'sketchPoint') {
+    return session
+  }
+
+  if (target.sketchId !== getSessionSketchId(session)) {
+    return session
+  }
+
+  if (!session.definition.points.some((point) => point.pointId === target.pointId)) {
+    return session
+  }
+
+  return {
+    ...session,
+    activeEditTarget: target,
+    activeDrag: null,
+    selectedAnnotation: null,
+    validationMessage: null,
+  }
+}
+
+export function beginSketchGeometryDrag(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+  point: SketchPoint,
+): SketchSessionState {
+  if (
+    target.kind !== 'sketchPoint'
+    || session.status === 'drawing'
+    || (session.activeTool !== null && isRegisteredSketchConstraintToolId(session.activeTool))
+  ) {
+    return session
+  }
+
+  const selected = selectSketchEditTarget(session, target)
+
+  if (!selected.activeEditTarget || selected.activeEditTarget.pointId !== target.pointId) {
+    return session
+  }
+
+  return {
+    ...selected,
+    activeTool: null,
+    status: 'idle',
+    pointerDownPoint: null,
+    livePoint: null,
+    toolPresentation: null,
+    constraintAuthoring: null,
+    entities: selected.entities.filter((entity) => entity.status === 'accepted'),
+    activeDrag: {
+      target,
+      startPoint: point,
+      currentPoint: point,
+      status: 'dragging',
+      message: null,
+    },
+    validationMessage: null,
+  }
+}
+
+export function updateSketchGeometryDrag(
+  session: SketchSessionState,
+  point: SketchPoint,
+): SketchSessionState {
+  if (!session.activeDrag) {
+    return session
+  }
+
+  return applySketchGeometryDrag(session, point, false)
+}
+
+export function finishSketchGeometryDrag(
+  session: SketchSessionState,
+  point: SketchPoint,
+): SketchSessionState {
+  if (!session.activeDrag) {
+    return session
+  }
+
+  const updated = applySketchGeometryDrag(session, point, true)
+
+  return {
+    ...updated,
+    activeDrag: null,
+  }
+}
+
+function applySketchGeometryDrag(
+  session: SketchSessionState,
+  point: SketchPoint,
+  complete: boolean,
+): SketchSessionState {
+  const drag = session.activeDrag
+
+  if (!drag) {
+    return session
+  }
+
+  const edit = solveDraggedPointEdit(session.definition, drag.target.pointId, point)
+
+  if (edit.kind === 'blocked') {
+    return {
+      ...session,
+      activeDrag: complete
+        ? null
+        : {
+            ...drag,
+            currentPoint: point,
+            status: 'blocked',
+            message: edit.message,
+          },
+      validationMessage: edit.message,
+    }
+  }
+
+  const definition = edit.definition
+  const fullDefinition = applyPointPositionsToDefinition(session.fullDefinition, definition.points)
+  const sketchId = getSessionSketchId(session)
+
+  return {
+    ...session,
+    definition,
+    fullDefinition,
+    entities: definition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
+    ),
+    activeDrag: complete
+      ? null
+      : {
+          ...drag,
+          currentPoint: point,
+          status: 'dragging',
+          message: null,
+        },
+    commitRequest: rebuildSessionCommitRequest(session, definition),
+    validationMessage: null,
+  }
+}
+
+function solveDraggedPointEdit(
+  definition: SketchDefinition,
+  pointId: SketchPointId,
+  position: SketchPoint,
+): { kind: 'accepted'; definition: SketchDefinition } | { kind: 'blocked'; message: string } {
+  if (!definition.points.some((point) => point.pointId === pointId)) {
+    return { kind: 'blocked', message: 'Sketch point is no longer editable.' }
+  }
+
+  if (definition.constraints.length === 0 && definition.dimensions.length === 0) {
+    return {
+      kind: 'accepted',
+      definition: applyPointPositionsToDefinition(definition, [{ pointId, position }]),
+    }
+  }
+
+  const solved = solveSketchDefinitionWithDraggedPointTarget({
+    definition,
+    dragTarget: {
+      kind: 'sketchPoint',
+      pointId,
+      position,
+    },
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'failOnConflict',
+    targetTolerance: 1e-4,
+  })
+
+  if (solved.kind !== 'solved') {
+    return { kind: 'blocked', message: CONSTRAINED_DRAG_BLOCKED_MESSAGE }
+  }
+
+  return {
+    kind: 'accepted',
+    definition: applyPointPositionsToDefinition(
+      definition,
+      solved.solvedSnapshot.solvedPoints.map((point) => ({
+        pointId: point.pointId,
+        position: point.solvedPosition,
+      })),
+    ),
+  }
+}
+
+function applyPointPositionsToDefinition(
+  definition: SketchDefinition,
+  positions: readonly Pick<SketchPointDefinition, 'pointId' | 'position'>[],
+): SketchDefinition {
+  const positionMap = new Map(positions.map((point) => [point.pointId, point.position]))
+
+  if (positionMap.size === 0) {
+    return definition
+  }
+
+  return {
+    ...definition,
+    points: definition.points.map((point) => {
+      const position = positionMap.get(point.pointId)
+      return position ? { ...point, position } : point
+    }),
+  }
+}
+
+function getSessionSketchId(session: SketchSessionState): SketchId {
+  return session.sketchId ?? ('sketch_draft' as SketchId)
 }
 
 export function startSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {
@@ -988,6 +1232,8 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     validationMessage: null,
     toolPresentation: result.presentation,
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 
@@ -1024,6 +1270,18 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
 
   if (primaryPrompt) {
     return primaryPrompt
+  }
+
+  if (session.validationMessage) {
+    return session.validationMessage
+  }
+
+  if (session.activeDrag?.status === 'dragging') {
+    return 'Dragging sketch point'
+  }
+
+  if (session.activeEditTarget) {
+    return 'Sketch point selected'
   }
 
   if (session.activeTool === null) {
@@ -1198,6 +1456,8 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     selectedAnnotation: null,
     toolPresentation: null,
     activeTool: null,
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 
@@ -1208,6 +1468,8 @@ export function selectSketchAnnotation(
   return {
     ...session,
     selectedAnnotation: target,
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 
@@ -1251,6 +1513,9 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
       mapDefinitionEntityToDraftEntity(sketchId, nextDefinition.points, entity),
     ),
     selectedAnnotation: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
   }
 }

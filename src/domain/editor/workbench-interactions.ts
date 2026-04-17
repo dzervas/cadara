@@ -6,7 +6,7 @@ import type {
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
-import type { SketchAuthoringToolId } from '@/domain/editor/sketch-session'
+import type { SketchAuthoringToolId, SketchSessionStatus } from '@/domain/editor/sketch-session'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 
 export function getNavigationReopenRequest(
@@ -71,4 +71,15 @@ export function shouldViewportClickRequestSelection(
   activeSketchTool: SketchAuthoringToolId | null | undefined,
 ) {
   return activeSketchTool == null || isRegisteredSketchConstraintToolId(activeSketchTool)
+}
+
+export function shouldViewportStartSketchGeometryDrag(
+  activeSketchTool: SketchAuthoringToolId | null | undefined,
+  sketchStatus: SketchSessionStatus | null | undefined,
+) {
+  if (sketchStatus === 'drawing') {
+    return false
+  }
+
+  return activeSketchTool == null || !isRegisteredSketchConstraintToolId(activeSketchTool)
 }

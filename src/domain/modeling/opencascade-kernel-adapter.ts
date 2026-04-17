@@ -853,11 +853,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     document: AuthoredModelDocument,
     features: readonly OccAuthoringFeatureRecord[],
   ) {
-    if (document.cursor.kind === 'empty' || document.cursor.kind === 'sketch') {
+    const cursor = document.cursor
+
+    if (cursor.kind !== 'feature') {
       return []
     }
 
-    const cursorIndex = features.findIndex((feature) => feature.featureId === document.cursor.featureId)
+    const cursorIndex = features.findIndex((feature) => feature.featureId === cursor.featureId)
     return cursorIndex < 0 ? [] : features.slice(0, cursorIndex + 1)
   }
 

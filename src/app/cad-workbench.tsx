@@ -577,6 +577,18 @@ export function CadWorkbench() {
     dispatch({ type: 'sketch.pointerReleased', point })
   }
 
+  const handleSketchGeometryDragStart = (target: PrimitiveRef, point: readonly [number, number]) => {
+    dispatch({ type: 'sketch.geometryDragStarted', target, point })
+  }
+
+  const handleSketchGeometryDragMove = (point: readonly [number, number]) => {
+    dispatch({ type: 'sketch.geometryDragMoved', point })
+  }
+
+  const handleSketchGeometryDragEnd = (point: readonly [number, number]) => {
+    dispatch({ type: 'sketch.geometryDragEnded', point })
+  }
+
   const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     const container = shellFrameRef.current
     if (!container) {
@@ -671,6 +683,9 @@ export function CadWorkbench() {
               onClearHover={handleViewportHoverClear}
               onSketchMove={handleSketchMove}
               onSketchRelease={handleSketchRelease}
+              onSketchGeometryDragStart={handleSketchGeometryDragStart}
+              onSketchGeometryDragMove={handleSketchGeometryDragMove}
+              onSketchGeometryDragEnd={handleSketchGeometryDragEnd}
               onSketchToolPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
               selection={visibleSelection}
               sketchToolPresentation={sketchToolPresentation}
@@ -715,6 +730,14 @@ export function CadWorkbench() {
                 >
                   Dismiss
                 </button>
+              </div>
+            ) : null}
+            {sketchSession?.validationMessage ? (
+              <div
+                role="status"
+                className="absolute left-4 top-4 z-20 max-w-sm rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
+              >
+                {sketchSession.validationMessage}
               </div>
             ) : null}
             <WorkbenchStateDebugger state={debuggerState} />

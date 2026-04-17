@@ -17,6 +17,7 @@ import {
 import { sketchSolverEnvelopeSchema } from '@/contracts/solver/runtime-schema'
 import {
   deriveSketchRegionsCore,
+  solveSketchDefinitionWithDraggedPointTarget,
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
   type ProjectedSketchGeometryRef,
@@ -167,11 +168,33 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
 
   async solveSketch(request: SolveSketchRequest): Promise<SolveSketchResponse> {
     assertSupportedRequest(request, this.options)
-    const solved = solveSketchDefinitionCore({
-      definition: request.definition,
-      tolerances: request.tolerances,
-      partialSolvePolicy: request.partialSolvePolicy,
-    })
+    const solved = request.dragTarget
+      ? (() => {
+          const result = solveSketchDefinitionWithDraggedPointTarget({
+            definition: request.definition,
+            dragTarget: request.dragTarget,
+            tolerances: request.tolerances,
+            partialSolvePolicy: request.partialSolvePolicy,
+          })
+
+          return {
+            status: result.solvedSnapshot?.status ?? {
+              solveState: 'failed' as const,
+              constraintState: 'inconsistent' as const,
+            },
+            solvedSnapshot: result.solvedSnapshot ?? solveSketchDefinitionCore({
+              definition: request.definition,
+              tolerances: request.tolerances,
+              partialSolvePolicy: 'failOnConflict',
+            }).solvedSnapshot,
+            diagnostics: result.diagnostics,
+          }
+        })()
+      : solveSketchDefinitionCore({
+          definition: request.definition,
+          tolerances: request.tolerances,
+          partialSolvePolicy: request.partialSolvePolicy,
+        })
     const derived = deriveSketchRegionsCore({
       documentId: request.documentId,
       revisionId: request.revisionId,

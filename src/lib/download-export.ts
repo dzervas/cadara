@@ -30,16 +30,24 @@ function getBrowserDownloadEnvironment(): BrowserDownloadEnvironment {
   }
 
   return {
-    document: globalThis.document,
+    document: globalThis.document as unknown as DownloadDocument,
     URL: globalThis.URL,
   }
+}
+
+function createExportBlobPart(payload: DocumentExportSuccessResult['payload']): BlobPart {
+  if (typeof payload === 'string') {
+    return payload
+  }
+
+  return payload.slice().buffer as ArrayBuffer
 }
 
 export function downloadDocumentExportResult(
   result: DocumentExportSuccessResult,
   environment: BrowserDownloadEnvironment = getBrowserDownloadEnvironment(),
 ) {
-  const blob = new Blob([result.payload], { type: result.mimeType })
+  const blob = new Blob([createExportBlobPart(result.payload)], { type: result.mimeType })
   const url = environment.URL.createObjectURL(blob)
   const anchor = environment.document.createElement('a')
 

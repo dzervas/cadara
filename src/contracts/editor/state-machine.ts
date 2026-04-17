@@ -20,15 +20,19 @@ import {
 import { createFeatureEditorReferenceSelectionPatch } from '@/domain/feature-authoring/form-events'
 import {
   acceptSketchDraw,
+  beginSketchGeometryDrag,
   beginSketchTool,
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
+  finishSketchGeometryDrag,
   getSketchSessionPreviewLabel,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
+  selectSketchEditTarget,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
   startSketchDraw,
+  updateSketchGeometryDrag,
   updateSketchConstraintHover,
   updateSketchPointer,
   type SketchSessionState,
@@ -282,6 +286,29 @@ export interface SketchPointerReleasedEvent {
   point: readonly [number, number]
 }
 
+/** Starts direct editing of a selectable sketch geometry handle. */
+export interface SketchGeometryDragStartedEvent {
+  type: 'sketch.geometryDragStarted'
+  /** Sketch geometry handle selected for direct editing. */
+  target: PrimitiveRef
+  /** Pointer location in the active sketch plane coordinate frame. */
+  point: readonly [number, number]
+}
+
+/** Updates the temporary direct sketch edit target while dragging. */
+export interface SketchGeometryDragMovedEvent {
+  type: 'sketch.geometryDragMoved'
+  /** Pointer location in the active sketch plane coordinate frame. */
+  point: readonly [number, number]
+}
+
+/** Completes direct sketch geometry editing for the active drag target. */
+export interface SketchGeometryDragEndedEvent {
+  type: 'sketch.geometryDragEnded'
+  /** Release location in the active sketch plane coordinate frame. */
+  point: readonly [number, number]
+}
+
 /** Applies a generic active sketch-tool draft patch emitted by declarative controls. */
 export interface SketchToolPatchedEvent {
   type: 'sketch.toolPatched'
@@ -362,6 +389,9 @@ export type EditorEvent =
   | AuthoringReopenRequestedEvent
   | SketchPointerMovedEvent
   | SketchPointerReleasedEvent
+  | SketchGeometryDragStartedEvent
+  | SketchGeometryDragMovedEvent
+  | SketchGeometryDragEndedEvent
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
   | SketchHistoryCursorRequestedEvent
@@ -1536,6 +1566,25 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (state.kind === 'editingSketch' && event.target.kind === 'sketchPoint') {
+        const session = selectSketchEditTarget(state.session, event.target)
+
+        return {
+          state: {
+            ...state,
+            selection: [event.target],
+            hoverTarget: event.target,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
       const candidate = resolveSelectionCandidate(
         state.selectionFilter,
         state.selection,
@@ -1624,6 +1673,99 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         event.target.featureId,
       )
     }
+    case 'sketch.geometryDragStarted':
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const point = deriveSketchPointFromWorld(state.session.plane, event.point)
+        const session = beginSketchGeometryDrag(state.session, event.target, point)
+
+        return {
+          state: {
+            ...state,
+            selection: event.target.kind === 'sketchPoint' ? [event.target] : state.selection,
+            hoverTarget: event.target.kind === 'sketchPoint' ? event.target : state.hoverTarget,
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+    case 'sketch.geometryDragMoved':
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = updateSketchGeometryDrag(
+          state.session,
+          deriveSketchPointFromWorld(state.session.plane, event.point),
+        )
+
+        return {
+          state: {
+            ...state,
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+    case 'sketch.geometryDragEnded':
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = finishSketchGeometryDrag(
+          state.session,
+          deriveSketchPointFromWorld(state.session.plane, event.point),
+        )
+
+        return {
+          state: {
+            ...state,
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
     case 'sketch.pointerMoved':
       if (state.kind !== 'editingSketch') {
         return {

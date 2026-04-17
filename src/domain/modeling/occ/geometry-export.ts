@@ -223,11 +223,12 @@ function exportStep(
   const outputPath = createTempExportPath('step')
   const writer = new state.oc.STEPControl_Writer_1()
   const progress = new state.oc.Message_ProgressRange_1()
+  const transferMode = state.oc.STEPControl_StepModelType.STEPControl_AsIs as unknown as OpenCascadeInstance['STEPControl_StepModelType']
 
   try {
     const transferStatus = writer.Transfer(
       body.shape,
-      state.oc.STEPControl_StepModelType.STEPControl_AsIs,
+      transferMode,
       true,
       progress,
     )

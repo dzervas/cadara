@@ -38,6 +38,25 @@ export type SketchSolveStrategy =
   | 'gaussNewton'
   | 'levenbergMarquardt'
 
+export interface SketchDraggedPointTarget {
+  kind: 'sketchPoint'
+  pointId: SketchPointId
+  position: SketchPoint2D
+}
+
+export type SketchDraggedPointSolveResult =
+  | {
+      kind: 'solved'
+      solvedSnapshot: SolvedSketchSnapshot
+      diagnostics: SketchSolveDiagnostic[]
+    }
+  | {
+      kind: 'blocked'
+      reason: 'missingPoint' | 'unsatisfied' | 'nonConvergent'
+      solvedSnapshot: SolvedSketchSnapshot | null
+      diagnostics: SketchSolveDiagnostic[]
+    }
+
 export interface SketchCoreValidationResult {
   isValid: boolean
   diagnostics: SketchSolveDiagnostic[]
@@ -95,6 +114,10 @@ type BuildSystemResult = {
   pointRecords: Map<SketchPointId, SolverPointRecord>
   entityStates: Map<SketchEntityId, SolverEntityState>
   scalarConstraints: ScalarConstraintRecord[]
+}
+
+interface BuildSystemOptions {
+  dragTarget?: SketchDraggedPointTarget | null
 }
 
 const WOLFE_C1 = 1e-4
@@ -179,7 +202,7 @@ function addPointGradient(
   gradient[point.baseIndex + 1] += y
 }
 
-function buildSystem(definition: SketchDefinition): BuildSystemResult {
+function buildSystem(definition: SketchDefinition, options: BuildSystemOptions = {}): BuildSystemResult {
   const pointRecords = new Map<SketchPointId, SolverPointRecord>()
   const entityStates = new Map<SketchEntityId, SolverEntityState>()
   const scalarConstraints: ScalarConstraintRecord[] = []
@@ -602,6 +625,24 @@ function buildSystem(definition: SketchDefinition): BuildSystemResult {
           const angleGradient =
             gx * (-radius * Math.sin(angle)) + gy * (radius * Math.cos(angle))
           gradient[arcState.baseIndex + (dimension.kind === 'arcStartPointCoincident' ? 1 : 2)] += angleGradient
+          return { residual: 0.5 * (delta[0] * delta[0] + delta[1] * delta[1]), gradient }
+        },
+      })
+    }
+  }
+
+  if (options.dragTarget) {
+    const point = pointRecords.get(options.dragTarget.pointId)
+
+    if (point) {
+      scalarConstraints.push({
+        id: `constraint_drag_target_${options.dragTarget.pointId}` as ConstraintId,
+        targetKind: 'constraint',
+        evaluate(values) {
+          const gradient = zeroVector(parameterCount)
+          const actual = getPoint(values, point)
+          const delta = subtract(actual, options.dragTarget!.position)
+          addPointGradient(gradient, point, delta[0], delta[1])
           return { residual: 0.5 * (delta[0] * delta[0] + delta[1] * delta[1]), gradient }
         },
       })
@@ -1301,6 +1342,189 @@ function buildDimensionStatuses(
   })
 }
 
+function getLineEntityPoints(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+): readonly SketchPointId[] {
+  const entity = definition.entities.find((candidate) => candidate.entityId === entityId)
+
+  return entity?.kind === 'lineSegment'
+    ? [entity.startPointId, entity.endPointId]
+    : []
+}
+
+function getEntityPoints(entity: SketchEntityDefinition): readonly SketchPointId[] {
+  switch (entity.kind) {
+    case 'point':
+      return [entity.pointId]
+    case 'lineSegment':
+      return [entity.startPointId, entity.endPointId]
+    case 'circle':
+      return [entity.centerPointId]
+    case 'arc':
+      return [entity.centerPointId, entity.startPointId, entity.endPointId]
+  }
+}
+
+function connectPoints(
+  graph: Map<SketchPointId, Set<SketchPointId>>,
+  pointIds: readonly SketchPointId[],
+) {
+  for (const pointId of pointIds) {
+    if (!graph.has(pointId)) {
+      graph.set(pointId, new Set())
+    }
+  }
+
+  for (const left of pointIds) {
+    const leftNeighbors = graph.get(left)!
+    for (const right of pointIds) {
+      if (left !== right) {
+        leftNeighbors.add(right)
+      }
+    }
+  }
+}
+
+function collectTranslationComponent(
+  definition: SketchDefinition,
+  pointId: SketchPointId,
+) {
+  const graph = new Map<SketchPointId, Set<SketchPointId>>()
+
+  for (const point of definition.points) {
+    graph.set(point.pointId, new Set())
+  }
+
+  for (const entity of definition.entities) {
+    connectPoints(graph, getEntityPoints(entity))
+  }
+
+  for (const constraint of definition.constraints) {
+    switch (constraint.kind) {
+      case 'coincident':
+      case 'angle':
+        connectPoints(graph, constraint.pointIds)
+        break
+      case 'horizontal':
+      case 'vertical':
+        connectPoints(graph, getLineEntityPoints(definition, constraint.entityId))
+        break
+      case 'parallel':
+      case 'perpendicular':
+      case 'equalLength':
+        connectPoints(
+          graph,
+          constraint.entityIds.flatMap((entityId) => getLineEntityPoints(definition, entityId)),
+        )
+        break
+      case 'fixPoint':
+        break
+    }
+  }
+
+  for (const dimension of definition.dimensions) {
+    switch (dimension.kind) {
+      case 'distance':
+      case 'horizontalDistance':
+      case 'verticalDistance':
+        connectPoints(graph, dimension.pointIds)
+        break
+      case 'arcStartPointCoincident':
+      case 'arcEndPointCoincident': {
+        const arc = definition.entities.find((entity) => entity.entityId === dimension.entityId)
+        connectPoints(graph, [
+          dimension.pointId,
+          ...(arc ? getEntityPoints(arc) : []),
+        ])
+        break
+      }
+      case 'circleRadius':
+        break
+    }
+  }
+
+  const visited = new Set<SketchPointId>()
+  const stack = [pointId]
+
+  while (stack.length > 0) {
+    const current = stack.pop()!
+
+    if (visited.has(current)) {
+      continue
+    }
+
+    visited.add(current)
+    for (const next of graph.get(current) ?? []) {
+      stack.push(next)
+    }
+  }
+
+  return visited
+}
+
+function trySolveDraggedPointAsComponentTranslation(input: {
+  definition: SketchDefinition
+  dragTarget: SketchDraggedPointTarget
+  tolerances: SketchSolveTolerancePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy
+  strategy?: SketchSolveStrategy
+  targetTolerance: number
+}): SketchDraggedPointSolveResult | null {
+  const draggedPoint = input.definition.points.find((point) => point.pointId === input.dragTarget.pointId)
+
+  if (!draggedPoint) {
+    return null
+  }
+
+  const component = collectTranslationComponent(input.definition, input.dragTarget.pointId)
+
+  if (
+    input.definition.constraints.some((constraint) =>
+      constraint.kind === 'fixPoint' && component.has(constraint.pointId),
+    )
+  ) {
+    return null
+  }
+
+  const delta = subtract(input.dragTarget.position, draggedPoint.position)
+  const translatedDefinition: SketchDefinition = {
+    ...input.definition,
+    points: input.definition.points.map((point) =>
+      component.has(point.pointId)
+        ? { ...point, position: add(point.position, delta) }
+        : point,
+    ),
+  }
+  const solved = solveSketchDefinitionCore({
+    definition: translatedDefinition,
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy,
+    strategy: input.strategy,
+  })
+  const solvedPoint = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === input.dragTarget.pointId)
+  const targetDistance = solvedPoint
+    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
+  const dimensionsSatisfied = solved.solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
+
+  if (
+    solved.status.solveState === 'solved'
+    && targetDistance <= input.targetTolerance
+    && constraintsSatisfied
+    && dimensionsSatisfied
+  ) {
+    return {
+      kind: 'solved',
+      solvedSnapshot: solved.solvedSnapshot,
+      diagnostics: solved.diagnostics,
+    }
+  }
+
+  return null
+}
+
 export function solveSketchDefinitionCore(input: {
   definition: SketchDefinition
   tolerances: SketchSolveTolerancePolicy
@@ -1308,7 +1532,7 @@ export function solveSketchDefinitionCore(input: {
   strategy?: SketchSolveStrategy
 }): SketchCoreSolveResult {
   const validation = validateDefinition(input.definition, input.tolerances)
-  const system = buildSystem(input.definition)
+  const system = buildSystem(input.definition, { dragTarget: null })
   const strategy = input.strategy ?? 'bfgs'
   const solved =
     strategy === 'gradientDescent'
@@ -1406,6 +1630,151 @@ export function solveSketchDefinitionCore(input: {
     status,
     solvedSnapshot,
     diagnostics,
+  }
+}
+
+export function solveSketchDefinitionWithDraggedPointTarget(input: {
+  definition: SketchDefinition
+  dragTarget: SketchDraggedPointTarget
+  tolerances: SketchSolveTolerancePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy
+  strategy?: SketchSolveStrategy
+  targetTolerance?: number
+}): SketchDraggedPointSolveResult {
+  if (!input.definition.points.some((point) => point.pointId === input.dragTarget.pointId)) {
+    return {
+      kind: 'blocked',
+      reason: 'missingPoint',
+      solvedSnapshot: null,
+      diagnostics: [
+        makeDiagnostic(
+          'drag-target-missing-point',
+          'error',
+          `Dragged point ${input.dragTarget.pointId} does not exist in the sketch definition.`,
+          { kind: 'point', pointId: input.dragTarget.pointId },
+        ),
+      ],
+    }
+  }
+
+  const validation = validateDefinition(input.definition, input.tolerances)
+  const system = buildSystem(input.definition, { dragTarget: input.dragTarget })
+  const strategy = input.strategy ?? 'bfgs'
+  const solved =
+    strategy === 'gradientDescent'
+      ? solveGradientDescent(system.initialValues, system.scalarConstraints)
+      : strategy === 'gaussNewton'
+        ? solveGaussNewtonLike(system.initialValues, system.scalarConstraints, {
+            maxIterations: 500,
+            minLoss: 1e-8,
+            stepSize: 1,
+            damping: 0,
+            pseudoInverseEpsilon: 1e-6,
+          })
+        : strategy === 'levenbergMarquardt'
+          ? solveGaussNewtonLike(system.initialValues, system.scalarConstraints, {
+              maxIterations: 1000,
+              minLoss: 1e-10,
+              stepSize: 0.1,
+              damping: 1e-5,
+              pseudoInverseEpsilon: 1e-6,
+            })
+          : solveBfgs(system.initialValues, system.scalarConstraints)
+
+  const diagnostics = [...validation.diagnostics]
+  const solvedSnapshot: SolvedSketchSnapshot = {
+    schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+    status:
+      validation.isValid && solved.loss < 1e-8
+        ? {
+            solveState: 'solved',
+            constraintState: 'wellConstrained',
+          }
+        : {
+            solveState: input.partialSolvePolicy === 'bestEffort' ? 'partiallySolved' : 'failed',
+            constraintState: validation.isValid ? 'underConstrained' : 'inconsistent',
+          },
+    solvedEntities: buildSolvedEntities(
+      input.definition,
+      system.pointRecords,
+      system.entityStates,
+      solved.values,
+    ),
+    solvedPoints: input.definition.points.flatMap((point) => {
+      const record = system.pointRecords.get(point.pointId)
+      return record
+        ? [{
+            pointId: point.pointId,
+            target: point.target,
+            solvedPosition: getPoint(solved.values, record),
+          }]
+        : []
+    }),
+    constraintStatuses: buildConstraintStatuses(
+      input.definition,
+      system.pointRecords,
+      solved.values,
+      input.tolerances,
+      solved.perConstraint,
+    ),
+    dimensionStatuses: buildDimensionStatuses(
+      input.definition,
+      system.pointRecords,
+      system.entityStates,
+      solved.values,
+      solved.perConstraint,
+    ),
+    diagnostics,
+  }
+  const solvedPoint = solvedSnapshot.solvedPoints.find((point) => point.pointId === input.dragTarget.pointId)
+  const targetDistance = solvedPoint
+    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const targetTolerance = input.targetTolerance ?? input.tolerances.coincidence
+  const constraintsSatisfied = solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
+  const dimensionsSatisfied = solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
+
+  if (
+    validation.isValid
+    && solved.loss < 1e-8
+    && targetDistance <= targetTolerance
+    && constraintsSatisfied
+    && dimensionsSatisfied
+  ) {
+    return {
+      kind: 'solved',
+      solvedSnapshot,
+      diagnostics,
+    }
+  }
+
+  const translated = trySolveDraggedPointAsComponentTranslation({
+    definition: input.definition,
+    dragTarget: input.dragTarget,
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy,
+    strategy: input.strategy,
+    targetTolerance,
+  })
+
+  if (translated) {
+    return translated
+  }
+
+  const reason = solved.loss < 1e-8 ? 'unsatisfied' : 'nonConvergent'
+  return {
+    kind: 'blocked',
+    reason,
+    solvedSnapshot,
+    diagnostics: [
+      ...diagnostics,
+      makeDiagnostic(
+        'drag-target-unsatisfied',
+        'warning',
+        'Dragged point target could not be satisfied without violating sketch constraints.',
+        { kind: 'point', pointId: input.dragTarget.pointId },
+      ),
+    ],
   }
 }
 

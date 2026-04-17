@@ -42,6 +42,7 @@ export const solveSketchRequestSchema = sketchSolverEnvelopeSchema.extend({
   tolerances: z.unknown(),
   partialSolvePolicy: z.union([z.literal('bestEffort'), z.literal('failOnConflict')]),
   incrementalEdit: z.unknown().optional(),
+  dragTarget: z.unknown().optional(),
 }).transform((value) => value as unknown as SolveSketchRequest)
 
 export const deriveSketchRegionsRequestSchema = sketchSolverEnvelopeSchema.extend({

@@ -189,7 +189,7 @@ function primitiveRefExists(
   }
 }
 
-function isPrimitiveRef(value: Record<string, unknown>): value is PrimitiveRef {
+function isPrimitiveRef(value: Record<string, unknown>): value is Record<string, unknown> & PrimitiveRef {
   return typeof value.kind === 'string'
     && (
       ('featureId' in value && typeof value.featureId === 'string')

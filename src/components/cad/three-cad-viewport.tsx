@@ -35,7 +35,10 @@ import {
   updateWorkspaceHighlight,
 } from '@/domain/workspace/render-picking'
 import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
-import { shouldViewportClickRequestSelection } from '@/domain/editor/workbench-interactions'
+import {
+  shouldViewportClickRequestSelection,
+  shouldViewportStartSketchGeometryDrag,
+} from '@/domain/editor/workbench-interactions'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import {
@@ -70,6 +73,9 @@ interface ThreeCadViewportProps {
   onClearHover: () => void
   onSketchMove: (point: readonly [number, number]) => void
   onSketchRelease: (point: readonly [number, number]) => void
+  onSketchGeometryDragStart: (target: PrimitiveRef, point: readonly [number, number]) => void
+  onSketchGeometryDragMove: (point: readonly [number, number]) => void
+  onSketchGeometryDragEnd: (point: readonly [number, number]) => void
   onSketchToolPatch: (patch: Record<string, unknown>) => void
   selection: PrimitiveRef[]
   sketchToolPresentation: SketchToolPresentationSchema | null
@@ -105,6 +111,9 @@ export function ThreeCadViewport({
   onClearHover,
   onSketchMove,
   onSketchRelease,
+  onSketchGeometryDragStart,
+  onSketchGeometryDragMove,
+  onSketchGeometryDragEnd,
   onSketchToolPatch,
   selection,
   sketchToolPresentation,
@@ -122,6 +131,7 @@ export function ThreeCadViewport({
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
   const sketchHitPointRef = useRef(new THREE.Vector3())
   const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
+  const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null)
   const pickRootRef = useRef<THREE.Group | null>(null)
   const bindingsRef = useRef<CollectedBindings | null>(null)
   const hoverRef = useRef(onHover)
@@ -133,6 +143,9 @@ export function ThreeCadViewport({
   const clearHoverRef = useRef(onClearHover)
   const sketchMoveRef = useRef(onSketchMove)
   const sketchReleaseRef = useRef(onSketchRelease)
+  const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart)
+  const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove)
+  const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
   const sketchToolPatchRef = useRef(onSketchToolPatch)
   const {
     state: { selectionFilter, selectionCatalog, sketchSession },
@@ -159,6 +172,9 @@ export function ThreeCadViewport({
     clearHoverRef.current = onClearHover
     sketchMoveRef.current = onSketchMove
     sketchReleaseRef.current = onSketchRelease
+    sketchGeometryDragStartRef.current = onSketchGeometryDragStart
+    sketchGeometryDragMoveRef.current = onSketchGeometryDragMove
+    sketchGeometryDragEndRef.current = onSketchGeometryDragEnd
     sketchToolPatchRef.current = onSketchToolPatch
     hoverTargetRef.current = hoverTarget
     selectionRef.current = selection
@@ -169,6 +185,9 @@ export function ThreeCadViewport({
     onClearHover,
     onHover,
     onSelect,
+    onSketchGeometryDragEnd,
+    onSketchGeometryDragMove,
+    onSketchGeometryDragStart,
     onSketchMove,
     onSketchRelease,
     onSketchToolPatch,
@@ -424,6 +443,19 @@ export function ThreeCadViewport({
         acceptsTarget,
       )
 
+      const sketchPointTarget = resolveProjectedSketchDisplayPointTarget({
+        clientX,
+        clientY,
+        camera,
+        viewportElement: canvasElement,
+        sketchDisplayRenderables,
+        acceptsTarget,
+      })
+
+      if (sketchPointTarget) {
+        return sketchPointTarget
+      }
+
       if (workspaceTarget) {
         return workspaceTarget
       }
@@ -478,6 +510,16 @@ export function ThreeCadViewport({
     }
 
     const handlePointerMove = (event: PointerEvent) => {
+      if (sketchGeometryDragRef.current) {
+        const point = projectSketchPoint(event.clientX, event.clientY)
+
+        if (point) {
+          sketchGeometryDragMoveRef.current(point)
+        }
+
+        return
+      }
+
       if (pointerWithinViewCube(event.clientX, event.clientY)) {
         clearHover()
         return
@@ -523,10 +565,48 @@ export function ThreeCadViewport({
         x: event.clientX,
         y: event.clientY,
       }
+
+      if (
+        !sketchSession
+        || !shouldViewportStartSketchGeometryDrag(sketchSession.activeTool, sketchSession.status)
+      ) {
+        return
+      }
+
+      const point = projectSketchPoint(event.clientX, event.clientY)
+      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY)?.target
+      const dragTarget = resolvedTarget?.kind === 'sketchPoint'
+        ? resolvedTarget
+        : lastPickedTargetRef.current?.kind === 'sketchPoint'
+          ? lastPickedTargetRef.current
+          : hoverTargetRef.current?.kind === 'sketchPoint'
+            ? hoverTargetRef.current
+            : null
+
+      if (point && dragTarget) {
+        event.preventDefault()
+        event.stopPropagation()
+        sketchGeometryDragRef.current = { target: dragTarget }
+        sketchGeometryDragStartRef.current(dragTarget, point)
+      }
     }
 
     const handlePointerUp = (event: PointerEvent) => {
       if (event.button !== 0) {
+        primaryPointerDownRef.current = null
+        sketchGeometryDragRef.current = null
+        return
+      }
+
+      const activeSketchDrag = sketchGeometryDragRef.current
+      if (activeSketchDrag) {
+        const point = projectSketchPoint(event.clientX, event.clientY)
+
+        if (point) {
+          sketchGeometryDragEndRef.current(point)
+        }
+
+        sketchGeometryDragRef.current = null
         primaryPointerDownRef.current = null
         return
       }
@@ -555,7 +635,9 @@ export function ThreeCadViewport({
     }
 
     const handlePointerLeave = () => {
-      primaryPointerDownRef.current = null
+      if (!sketchGeometryDragRef.current) {
+        primaryPointerDownRef.current = null
+      }
       clearHover()
     }
 
@@ -603,7 +685,7 @@ export function ThreeCadViewport({
       window.removeEventListener('pointerup', handlePointerUp, true)
       window.removeEventListener('click', handleClick, true)
     }
-  }, [canvasReadyVersion, renderables, selection, sketchSession])
+  }, [canvasReadyVersion, renderables, selection, sketchDisplayRenderables, sketchSession])
 
   return (
     <div ref={viewportRef} data-testid="cad-viewport" className="relative h-full w-full">
@@ -1495,6 +1577,86 @@ function resolveProjectedVertexTarget({
     pickId: candidate.renderable.binding.pickId,
     target: candidate.renderable.binding.target,
     renderable: candidate.renderable,
+  }
+}
+
+function resolveProjectedSketchDisplayPointTarget({
+  clientX,
+  clientY,
+  camera,
+  viewportElement,
+  sketchDisplayRenderables,
+  acceptsTarget,
+}: {
+  clientX: number
+  clientY: number
+  camera: THREE.PerspectiveCamera
+  viewportElement: HTMLElement
+  sketchDisplayRenderables: SketchSessionDisplayRenderable[]
+  acceptsTarget: (target: PrimitiveRef) => boolean
+}) {
+  const rect = viewportElement.getBoundingClientRect()
+  const pointerX = clientX - rect.left
+  const pointerY = clientY - rect.top
+  const projectedPoint = new THREE.Vector3()
+  const candidate = sketchDisplayRenderables
+    .flatMap((renderable) => {
+      const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+
+      if (!geometryData || !renderable.target || renderable.target.kind !== 'sketchPoint' || !acceptsTarget(renderable.target)) {
+        return []
+      }
+
+      projectedPoint.set(
+        geometryData.position[0],
+        geometryData.position[1],
+        geometryData.position[2],
+      )
+      projectedPoint.project(camera)
+
+      if (
+        !Number.isFinite(projectedPoint.x)
+        || !Number.isFinite(projectedPoint.y)
+        || !Number.isFinite(projectedPoint.z)
+        || projectedPoint.z < -1
+        || projectedPoint.z > 1
+        || projectedPoint.x < -1
+        || projectedPoint.x > 1
+        || projectedPoint.y < -1
+        || projectedPoint.y > 1
+      ) {
+        return []
+      }
+
+      const screenX = ((projectedPoint.x + 1) / 2) * rect.width
+      const screenY = ((-projectedPoint.y + 1) / 2) * rect.height
+      const distance = Math.hypot(screenX - pointerX, screenY - pointerY)
+
+      return [{
+        distance,
+        depth: projectedPoint.z,
+        renderable,
+      }]
+    })
+    .filter((entry) => entry.distance <= PROJECTED_VERTEX_PICK_RADIUS_PX)
+    .sort((left, right) => {
+      const distanceDelta = left.distance - right.distance
+
+      if (distanceDelta !== 0) {
+        return distanceDelta
+      }
+
+      return left.depth - right.depth
+    })[0]
+
+  if (!candidate?.renderable.target) {
+    return null
+  }
+
+  return {
+    pickId: null,
+    target: candidate.renderable.target,
+    renderable: null,
   }
 }
 

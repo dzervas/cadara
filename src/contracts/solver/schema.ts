@@ -89,6 +89,19 @@ export type SketchIncrementalEdit =
     }
 
 /**
+ * Temporary interactive drag target supplied by an editor preview.
+ * This is solver input only and must not be persisted as an authored constraint.
+ */
+export interface SolverDraggedSketchPointTarget {
+  /** Temporary target discriminant. */
+  kind: 'sketchPoint'
+  /** Authored point the user is dragging. */
+  pointId: SketchPointId
+  /** Requested sketch-plane point position for this solve. */
+  position: SketchPoint2D
+}
+
+/**
  * Projection-ready record for an authored external sketch reference.
  * The solver consumes these definitions and returns explicit 2D geometry.
  */
@@ -323,6 +336,8 @@ export interface SolveSketchRequest extends SketchSolverRequestBase {
   projectedReferences: ProjectedSketchReferenceRecord[]
   /** Optional incremental edit hint from the caller for warm-start capable solvers. */
   incrementalEdit: SketchIncrementalEdit | null
+  /** Optional temporary drag target used for interactive preview solves. */
+  dragTarget?: SolverDraggedSketchPointTarget | null
 }
 
 /**

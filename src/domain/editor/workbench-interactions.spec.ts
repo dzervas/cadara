@@ -8,6 +8,7 @@ import {
   getEscapeEvent,
   getNavigationReopenRequest,
   shouldViewportClickRequestSelection,
+  shouldViewportStartSketchGeometryDrag,
 } from './workbench-interactions'
 
 test('src/domain/editor/workbench-interactions.spec.ts', async () => {
@@ -115,10 +116,30 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     )
   }
 
+  function testViewportSketchGeometryDragCanInterruptIdleDrawingTools() {
+    assert(
+      shouldViewportStartSketchGeometryDrag(null, 'idle'),
+      'Viewport sketch geometry drags should start when no sketch tool is active.',
+    )
+    assert(
+      shouldViewportStartSketchGeometryDrag('line', 'idle'),
+      'Viewport sketch geometry drags should take priority over idle drawing tools.',
+    )
+    assert(
+      !shouldViewportStartSketchGeometryDrag('line', 'drawing'),
+      'Viewport sketch geometry drags should not interrupt an in-progress drawing gesture.',
+    )
+    assert(
+      !shouldViewportStartSketchGeometryDrag('constraintCoincident', 'collectingTargets'),
+      'Viewport sketch geometry drags should not interrupt constraint target collection.',
+    )
+  }
+
   testFeatureReopenIntentUsesCommittedFeatureKind()
   testSketchReopenIntentUsesSketchFlow()
   testEscapePrefersReferencePickerCancellation()
   testEscapeClearsActiveSketchToolBeforeExitingSketch()
   testEscapeExitsSketchWhenNoToolIsActive()
   testViewportClickSelectionRoutingAllowsConstraintsOnly()
+  testViewportSketchGeometryDragCanInterruptIdleDrawingTools()
 })

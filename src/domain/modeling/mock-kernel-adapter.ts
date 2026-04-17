@@ -3704,9 +3704,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }
     }
 
+    const exportTarget = request.target
+
     if (
-      request.target.kind !== 'body'
-      || !snapshot.document.bodies.some((body) => body.bodyId === request.target.bodyId)
+      exportTarget.kind !== 'body'
+      || !snapshot.document.bodies.some((body) => body.bodyId === exportTarget.bodyId)
     ) {
       return {
         ok: false,
