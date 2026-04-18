@@ -72,6 +72,11 @@ export type SketchEntityId = `sketch_entity_${string}`
 export type SketchPointId = `sketch_point_${string}`
 
 /**
+ * Durable sketch style identifier.
+ */
+export type SketchStyleId = `sketch_style_${string}`
+
+/**
  * Durable geometric constraint identifier.
  */
 export type ConstraintId = `constraint_${string}`

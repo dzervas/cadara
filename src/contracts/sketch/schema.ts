@@ -8,6 +8,7 @@ import type {
   SketchEntityId,
   SketchId,
   SketchPointId,
+  SketchStyleId,
 } from '@/contracts/shared/ids'
 import type { OwnershipRecord } from '@/contracts/shared/diagnostics'
 import type {
@@ -158,6 +159,58 @@ export type SketchPointConstraintOperand =
 export type SketchCurveConstraintOperand =
   | LocalSketchEntityConstraintOperand
   | ProjectedSketchGeometryConstraintOperand
+
+/**
+ * Authorable fill payload for sketch styles.
+ */
+export type SketchStyleFill =
+  | { kind: 'none' }
+  | {
+      kind: 'solid'
+      color: string
+      opacity: number
+    }
+  | {
+      kind: 'gradient'
+      gradient: {
+        kind: 'linear'
+        angleRadians: number
+        startColor: string
+        startOpacity: number
+        endColor: string
+        endOpacity: number
+      }
+    }
+
+/**
+ * Authorable stroke payload for sketch styles.
+ */
+export interface SketchStyleStroke {
+  color: string
+  opacity: number
+  width: number
+  lineCap: 'butt' | 'round' | 'square'
+  lineJoin: 'miter' | 'round' | 'bevel'
+  miterLimit: number
+}
+
+/**
+ * Durable authored style record scoped to sketch-local entities and optional derived regions.
+ */
+export interface SketchStyleRecord {
+  /** Durable authored style identity within the containing sketch definition. */
+  styleId: SketchStyleId
+  /** Human-readable label owned by the producer of the sketch definition. */
+  label: string
+  /** Stable style target in the containing sketch payload. */
+  target:
+    | { kind: 'entity'; entityId: SketchEntityId }
+    | { kind: 'region'; regionId: RegionId }
+  /** Authored fill model for the style target. */
+  fill: SketchStyleFill
+  /** Authored stroke model for the style target. */
+  stroke: SketchStyleStroke
+}
 
 /**
  * Durable authored geometric constraint definition.
@@ -477,6 +530,10 @@ export interface SketchDefinition {
   dimensionIds: DimensionId[]
   /** Authored dimensions owned by the containing sketch definition. */
   dimensions: DimensionDefinition[]
+  /** Canonical authored style order. Each ID must be unique and appear exactly once in `styles`. */
+  styleIds?: SketchStyleId[]
+  /** Authored visual styles scoped to sketch entities and optional derived regions. */
+  styles?: SketchStyleRecord[]
 }
 
 /**
