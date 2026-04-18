@@ -1,5 +1,4 @@
-import { CircleDot, History, MousePointer2, PencilRuler, Ruler, SlidersHorizontal } from 'lucide-react'
-
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import {
@@ -98,11 +97,11 @@ interface SketchHistoryTimelineBarProps {
 function getSketchHistoryIcon(kind: ReturnType<typeof getSketchHistoryItems>[number]['kind']) {
   switch (kind) {
     case 'entity':
-      return <PencilRuler className="h-4 w-4" />
+      return <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
     case 'constraint':
-      return <SlidersHorizontal className="h-4 w-4" />
+      return <WorkbenchIcon name="slider" className="h-4 w-4" />
     case 'dimension':
-      return <Ruler className="h-4 w-4" />
+      return <WorkbenchIcon name="ruler" className="h-4 w-4" />
   }
 }
 
@@ -136,7 +135,7 @@ function SketchHistoryTimelineBar({
         aria-current={cursorIndex < 0 ? 'step' : undefined}
         onClick={() => onCursorRequested?.({ kind: 'empty' })}
       >
-        <CircleDot className="h-3.5 w-3.5" />
+        <WorkbenchIcon name="target" className="h-3.5 w-3.5" />
       </button>
       <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         <div className="flex min-h-10 min-w-max items-center gap-1 pr-6">
@@ -164,7 +163,7 @@ function SketchHistoryTimelineBar({
                 id: 'select',
                 label: 'Select',
                 commandId: 'context.selectTarget',
-                icon: <MousePointer2 className="h-3.5 w-3.5" />,
+                icon: <WorkbenchIcon name="mousePointer" className="h-3.5 w-3.5" />,
                 disabled: !isAllowed,
                 onSelect: () => onSelectTarget(item.target),
               },
@@ -173,7 +172,7 @@ function SketchHistoryTimelineBar({
                 id: 'move-cursor-here',
                 label: 'Move cursor here',
                 commandId: 'context.rollCursorHere',
-                icon: <History className="h-3.5 w-3.5" />,
+                icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
                 onSelect: () => onCursorRequested?.(getSketchHistoryCursorForIndex(items, index)),
               },
             ]

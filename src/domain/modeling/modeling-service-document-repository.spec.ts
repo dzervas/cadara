@@ -7,6 +7,7 @@ import {
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import type { CreateFeatureRequest, CreateFeatureResponse, FeatureDefinition } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import type { AppResultAsync } from '@/contracts/errors'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import { createModelingService, type ModelingService } from '@/domain/modeling/modeling-service'
@@ -20,6 +21,18 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   }
 
   type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
+
+  async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
+    const resolved = await result
+    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    return resolved.value
+  }
+
+  async function expectModelingError<T>(result: AppResultAsync<T>) {
+    const resolved = await result
+    assert(resolved.isErr(), 'Modeling result should be an error.')
+    return resolved.error
+  }
 
   async function getSeedExtrudeDefinition(service: ModelingService): Promise<ExtrudeFeatureDefinition> {
     const snapshot = await service.getCurrentDocumentSnapshot()
@@ -95,7 +108,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     assert(documentRepository.savedDocuments.length === 0, 'Preview evaluations should not persist authored documents.')
 
-    const rejected = await service.createFeature({
+    const rejected = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition: {
         kind: 'plane',
@@ -107,14 +120,14 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
           },
         },
       },
-    })
-    assert(rejected.revisionState.kind === 'rejected', 'Invalid feature creation should be rejected.')
+    }))
+    assert(rejected.code === 'modeling/diagnostic', 'Invalid feature creation should be rejected.')
     assert(documentRepository.savedDocuments.length === 0, 'Rejected mutations should not persist authored documents.')
 
-    const accepted = await service.createFeature({
+    const accepted = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition,
-    })
+    }))
     assert(accepted.revisionState.kind === 'accepted', 'Accepted feature creation should commit.')
     assert(documentRepository.savedDocuments.length === 1, 'Accepted mutations should persist authored documents.')
     assert(
@@ -130,11 +143,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const renamed = await service.renameBody({
+    const renamed = await unwrapModelingResult(service.renameBody({
       baseRevisionId: snapshot.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Repository Restored Body',
-    })
+    }))
     assert(renamed.revisionState.kind === 'accepted', 'Body rename should be accepted.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
@@ -157,11 +170,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       operationHistoryStore: historyStore,
     })
     const historySnapshot = await historyService.getCurrentDocumentSnapshot()
-    const historyRename = await historyService.renameBody({
+    const historyRename = await unwrapModelingResult(historyService.renameBody({
       baseRevisionId: historySnapshot.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Stale History Body',
-    })
+    }))
     assert(historyRename.revisionState.kind === 'accepted', 'History setup mutation should be accepted.')
 
     const repositoryDocument = await createSeedAuthoredDocument()
@@ -204,11 +217,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(documentRepository.savedDocuments.length === 0, 'Recovery should keep the seeded repository document without migration writes.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const renamed = await service.renameBody({
+    const renamed = await unwrapModelingResult(service.renameBody({
       baseRevisionId: snapshot.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Recovered Body',
-    })
+    }))
 
     assert(renamed.revisionState.kind === 'accepted', 'Recovered services should continue accepting mutations.')
     assert(documentRepository.savedDocuments.length === 1, 'Recovered services should continue persisting authored documents.')
@@ -251,11 +264,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       operationHistoryStore: historyStore,
     })
     const firstSnapshot = await firstService.getCurrentDocumentSnapshot()
-    const renamed = await firstService.renameBody({
+    const renamed = await unwrapModelingResult(firstService.renameBody({
       baseRevisionId: firstSnapshot.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Migrated Body',
-    })
+    }))
     assert(renamed.revisionState.kind === 'accepted', 'History seed mutation should be accepted.')
 
     const migratingService = createModelingService(new MockKernelAdapter(), {
@@ -286,11 +299,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       operationHistoryStore: historyStore,
     })
     const snapshot = await historyService.getCurrentDocumentSnapshot()
-    const renamed = await historyService.renameBody({
+    const renamed = await unwrapModelingResult(historyService.renameBody({
       baseRevisionId: snapshot.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Retry Migrated Body',
-    })
+    }))
     assert(renamed.revisionState.kind === 'accepted', 'History mutation should prepare a migration payload.')
 
     const documentRepository = createMemoryDocumentRepository()
@@ -361,11 +374,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
 
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const renamed = await service.renameBody({
+    const renamed = await unwrapModelingResult(service.renameBody({
       baseRevisionId: snapshot.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Must Not Overwrite Unsupported Document',
-    })
+    }))
     assert(renamed.revisionState.kind === 'accepted', 'The active seed adapter may still accept local mutations.')
     assert(documentRepository.savedDocuments.length === 0, 'Restore failures should block later repository writes from the seed adapter.')
     assert(
@@ -399,13 +412,17 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const peerResult = documentRepository.receivePeerDocument(peerDocument)
     assert(peerResult.ok, 'Test peer document should be accepted by the repository.')
 
-    const staleMutation = await service.createFeature({
+    const staleMutation = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition,
-    })
-    assert(staleMutation.revisionState.kind === 'conflict', 'Mutations against a peer-superseded snapshot should conflict.')
+    }))
+    assert(staleMutation.code === 'modeling/diagnostic', 'Mutations against a peer-superseded snapshot should conflict.')
     assert(
-      staleMutation.diagnostics.some((diagnostic) => diagnostic.code === 'repository-head-conflict'),
+      staleMutation.context.some((entry) =>
+        entry.key === 'diagnosticCodes'
+        && typeof entry.value === 'string'
+        && entry.value.includes('repository-head-conflict'),
+      ),
       'Stale repository heads should be reported with a stable diagnostic code.',
     )
 
@@ -450,13 +467,17 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       assert(peerResult.ok, 'In-flight peer document should be accepted by the repository.')
     }
 
-    const result = await service.createFeature({
+    const result = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition,
-    })
-    assert(result.revisionState.kind === 'conflict', 'In-flight repository head changes should convert accepted mutations to conflicts.')
+    }))
+    assert(result.code === 'modeling/diagnostic', 'In-flight repository head changes should convert accepted mutations to conflicts.')
     assert(
-      result.diagnostics.some((diagnostic) => diagnostic.code === 'repository-head-conflict'),
+      result.context.some((entry) =>
+        entry.key === 'diagnosticCodes'
+        && typeof entry.value === 'string'
+        && entry.value.includes('repository-head-conflict'),
+      ),
       'In-flight repository head conflicts should retain a stable diagnostic.',
     )
     assert(documentRepository.savedDocuments.length === 0, 'Repository head conflicts should not persist stale authored documents.')

@@ -3,12 +3,15 @@ import * as math from 'mathjs'
 import type { DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import {
   createExpressionAuthoredValue,
-  ensureLiteralAuthoredValue,
   isAuthoredValue,
   isExpressionAuthoredValue,
   validateFeatureValueKind,
   type FeatureValueKindDescriptor,
 } from '@/contracts/modeling/authored-values'
+import {
+  getFeatureValueExpressionFields,
+  type FeatureValueExpressionFieldDescriptor,
+} from '@/contracts/modeling/feature-authored-values'
 import { createDocumentVariableExpressionDiagnostics, evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 
 type MutableRecord = Record<string, unknown>
@@ -23,12 +26,6 @@ export type FeatureValueExpressionDiagnosticCode =
   | 'feature-value-expression-invalid-enum-value'
   | 'feature-value-expression-evaluation-failed'
 
-export interface FeatureValueExpressionFieldDescriptor {
-  path: readonly (string | number)[]
-  label: string
-  valueKind: FeatureValueKindDescriptor
-}
-
 export type FeatureValueExpressionResolution =
   | { ok: true; definition: FeatureDefinition }
   | { ok: false; diagnostics: ModelingDiagnostic[] }
@@ -38,8 +35,6 @@ export type FeatureValueExpressionPreview =
   | { ok: false; diagnostic: ModelingDiagnostic }
 
 const MATH_GLOBAL_SYMBOLS = new Set(['Infinity', 'NaN'])
-const BOOLEAN_OPERATION_OPTIONS = ['newBody', 'join', 'cut', 'intersect'] as const
-const ADVANCED_OPERATION_INTENT_OPTIONS = ['create', 'add', 'subtract', 'intersect'] as const
 
 export function resolveFeatureDefinitionValues(input: {
   definition: FeatureDefinition
@@ -76,19 +71,6 @@ export function resolveFeatureDefinitionValues(input: {
   return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true, definition: resolved }
 }
 
-export function normalizeFeatureDefinitionAuthoredValues(definition: FeatureDefinition): FeatureDefinition {
-  const normalized = structuredClone(definition) as FeatureDefinition
-
-  for (const field of getFeatureValueExpressionFields(normalized)) {
-    const value = getPathValue(normalized as unknown as MutableRecord, field.path)
-    if (value !== undefined) {
-      setPathValue(normalized as unknown as MutableRecord, field.path, ensureLiteralAuthoredValue(value))
-    }
-  }
-
-  return normalized
-}
-
 export function previewFeatureValueExpression(input: {
   expressionText: string
   label: string
@@ -115,64 +97,6 @@ export function previewFeatureValueExpression(input: {
     },
     variablesByName: variableEvaluation.valuesByName,
   })
-}
-
-export function getFeatureValueExpressionFields(definition: FeatureDefinition): FeatureValueExpressionFieldDescriptor[] {
-  switch (definition.kind) {
-    case 'extrude':
-      return [
-        { path: ['parameters', 'endExtent', 'distance'], label: 'Extrude depth', valueKind: { kind: 'positiveNumber' } },
-        { path: ['parameters', 'operation'], label: 'Extrude operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },
-      ]
-    case 'fillet':
-      return [
-        { path: ['parameters', 'radius'], label: 'Fillet radius', valueKind: { kind: 'positiveNumber' } },
-      ]
-    case 'revolve':
-      return [
-        { path: ['parameters', 'startAngle'], label: 'Revolve start angle', valueKind: { kind: 'angle' } },
-        { path: ['parameters', 'extent', 'radians'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
-        { path: ['parameters', 'angle'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
-        { path: ['parameters', 'operation'], label: 'Revolve operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },
-      ]
-    case 'shell':
-      return [
-        { path: ['parameters', 'thickness'], label: 'Shell thickness', valueKind: { kind: 'positiveNumber' } },
-        { path: ['parameters', 'operation'], label: 'Shell operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },
-      ]
-    case 'chamfer':
-      return [
-        { path: ['parameters', 'options', 'distance'], label: 'Chamfer distance', valueKind: { kind: 'positiveNumber' } },
-      ]
-    case 'thicken':
-      return [
-        { path: ['parameters', 'operationIntent'], label: 'Thicken operation intent', valueKind: { kind: 'enumString', options: ADVANCED_OPERATION_INTENT_OPTIONS } },
-        { path: ['parameters', 'options', 'thickness'], label: 'Thicken thickness', valueKind: { kind: 'positiveNumber' } },
-        { path: ['parameters', 'options', 'side'], label: 'Thicken side', valueKind: { kind: 'enumString', options: ['oneSide', 'symmetric'] } },
-      ]
-    case 'mirror':
-      return [
-        { path: ['parameters', 'options', 'copy'], label: 'Mirror copy', valueKind: { kind: 'boolean' } },
-      ]
-    case 'transform':
-      return [
-        { path: ['parameters', 'options', 'distance'], label: 'Transform distance', valueKind: { kind: 'positiveNumber' } },
-      ]
-    case 'sweep':
-      return [
-        { path: ['parameters', 'operationIntent'], label: 'Sweep operation intent', valueKind: { kind: 'enumString', options: ADVANCED_OPERATION_INTENT_OPTIONS } },
-      ]
-    case 'loft':
-      return [
-        { path: ['parameters', 'operationIntent'], label: 'Loft operation intent', valueKind: { kind: 'enumString', options: ADVANCED_OPERATION_INTENT_OPTIONS } },
-      ]
-    case 'plane':
-    case 'split':
-    case 'deleteSolid':
-      return []
-    default:
-      return []
-  }
 }
 
 function resolveAuthoredFeatureValue(input: {

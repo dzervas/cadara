@@ -15,8 +15,10 @@ import {
   RENDER_EXPORT_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
+import type { AppResultAsync } from '@/contracts/errors'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import type { ModelingCommitSketchResult } from '@/domain/modeling/modeling-service'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 
 test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', async () => {
@@ -24,6 +26,12 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     if (!condition) {
       throw new Error(message)
     }
+  }
+
+  async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
+    const resolved = await result
+    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    return resolved.value
   }
 
   function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
@@ -578,7 +586,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       operationHistoryStore: store,
     })
 
-    const result = await service.commitSketch({
+    const result: ModelingCommitSketchResult = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: 'rev_0001',
       solverCorrelation: {
         requestId: 'request_commit_history',
@@ -604,7 +612,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
       planeKey: 'xy',
       definition: createDraftSketchDefinition('sketch_draft'),
-    })
+    }))
 
     assert(result.revisionState.kind === 'accepted', 'Sketch commit should be accepted.')
 

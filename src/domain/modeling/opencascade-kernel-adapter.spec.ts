@@ -70,12 +70,19 @@ import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/opera
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
 import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
+import type { AppResultAsync } from '@/contracts/errors'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
     }
+  }
+
+  async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
+    const resolved = await result
+    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    return resolved.value
   }
 
   function createProjectedGeometryId(referenceId: string, ordinal: number): ProjectedGeometryId {
@@ -2877,10 +2884,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       previewId: 'preview_multi_profile_extrude',
       definition: multiProfileDefinition,
     })
-    const createdMulti = await service.createFeature({
+    const createdMulti = await unwrapModelingResult(service.createFeature({
       baseRevisionId: offsetSketchCommit.revisionId,
       definition: multiProfileDefinition,
-    })
+    }))
 
     assertNoErrorDiagnostics(multi.diagnostics, 'Multi-profile extrude previews should be supported by the OCC adapter.')
     assert(multi.render.records.length > 0, 'Multi-profile extrude previews should return transient renderables.')
@@ -2918,7 +2925,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       sketchLabel: 'YZ Profile A',
       plane: yzPlane,
     })
-    const first = await service.commitSketch({
+    const first = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: firstRequest.baseRevisionId,
       solverCorrelation: firstRequest.solverCorrelation,
       sketchId: firstRequest.sketchId,
@@ -2927,7 +2934,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       planeTarget: firstRequest.planeTarget,
       planeKey: firstRequest.planeKey,
       definition: firstRequest.definition,
-    })
+    }))
     assert(first.revisionState.kind === 'accepted', 'First YZ sketch should commit before restore coverage.')
 
     const secondRequest = createSketchCommitRequest(first.revisionId, {
@@ -2935,7 +2942,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       plane: yzPlane,
       definition: translateSeedDefinition(14, 0),
     })
-    const second = await service.commitSketch({
+    const second = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: secondRequest.baseRevisionId,
       solverCorrelation: secondRequest.solverCorrelation,
       sketchId: secondRequest.sketchId,
@@ -2944,7 +2951,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       planeTarget: secondRequest.planeTarget,
       planeKey: secondRequest.planeKey,
       definition: secondRequest.definition,
-    })
+    }))
     assert(second.revisionState.kind === 'accepted', 'Second YZ sketch should commit before restore coverage.')
 
     const beforeExtrude = await service.getCurrentDocumentSnapshot()
@@ -2955,7 +2962,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(firstSketch && firstRegion, 'First YZ sketch should expose a selectable region.')
     assert(secondSketch && secondRegion, 'Second YZ sketch should expose a selectable region.')
 
-    const created = await service.createFeature({
+    const created = await unwrapModelingResult(service.createFeature({
       baseRevisionId: beforeExtrude.revisionId,
       definition: {
         kind: 'extrude',
@@ -2971,7 +2978,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
           booleanScope: { kind: 'standalone' },
         },
       },
-    })
+    }))
     assert(created.revisionState.kind === 'accepted', 'YZ multi-profile extrude should commit before restore coverage.')
 
     const preRefresh = await service.getCurrentDocumentSnapshot()
@@ -3268,7 +3275,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       'Every restored overlapping rectangle/circle region should remain selectable after reload.',
     )
 
-    const created = await service.createFeature({
+    const created = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition: {
         kind: 'extrude',
@@ -3285,7 +3292,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
           booleanScope: { kind: 'standalone' },
         },
       },
-    })
+    }))
     assert(created.revisionState.kind === 'accepted', 'New-body extrude of every restored overlapping profile should commit.')
 
     const afterExtrude = await service.getCurrentDocumentSnapshot()

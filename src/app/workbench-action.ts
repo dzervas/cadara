@@ -39,19 +39,50 @@ export function requireAcceptedModelingResult<T extends WorkbenchModelingMutatio
   }))
 }
 
+function isAppResult<T>(value: T | AppResult<T>): value is AppResult<T> {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'isOk' in value
+    && typeof (value as { isOk?: unknown }).isOk === 'function'
+    && 'isErr' in value
+    && typeof (value as { isErr?: unknown }).isErr === 'function'
+  )
+}
+
+export function runWorkbenchAction<TOutput, TSuccess>(input: {
+  operation: string
+  context?: readonly AppErrorContextEntry[]
+  reporter: ErrorReporter
+  metadata?: Omit<ErrorReportMetadata, 'source'>
+  action: () => PromiseLike<AppResult<TOutput>>
+  mapSuccess: (output: TOutput) => AppResult<TSuccess>
+  onError: (error: AppError) => void
+}): Promise<AppResult<TSuccess>>
+export function runWorkbenchAction<TOutput, TSuccess>(input: {
+  operation: string
+  context?: readonly AppErrorContextEntry[]
+  reporter: ErrorReporter
+  metadata?: Omit<ErrorReportMetadata, 'source'>
+  action: () => PromiseLike<TOutput>
+  mapSuccess: (output: TOutput) => AppResult<TSuccess>
+  onError: (error: AppError) => void
+}): Promise<AppResult<TSuccess>>
 export async function runWorkbenchAction<TOutput, TSuccess>(input: {
   operation: string
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter
   metadata?: Omit<ErrorReportMetadata, 'source'>
-  action: () => Promise<TOutput>
+  action: () => PromiseLike<TOutput> | PromiseLike<AppResult<TOutput>>
   mapSuccess: (output: TOutput) => AppResult<TSuccess>
   onError: (error: AppError) => void
 }): Promise<AppResult<TSuccess>> {
   let mapped: AppResult<TSuccess>
 
   try {
-    mapped = input.mapSuccess(await input.action())
+    const actionOutput = await input.action()
+    const actionResult = isAppResult(actionOutput) ? actionOutput : ok(actionOutput)
+    mapped = actionResult.andThen(input.mapSuccess)
   } catch (error: unknown) {
     mapped = err(normalizeUnknownError(error, {
       code: 'workbench/action-failed',

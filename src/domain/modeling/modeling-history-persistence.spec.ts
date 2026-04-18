@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import type { FeatureDefinition } from '@/contracts/modeling/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import type { AppResultAsync } from '@/contracts/errors'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import {
   createModelingService,
@@ -18,6 +19,18 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
   }
 
   type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
+
+  async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
+    const resolved = await result
+    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    return resolved.value
+  }
+
+  async function expectModelingError<T>(result: AppResultAsync<T>) {
+    const resolved = await result
+    assert(resolved.isErr(), 'Modeling result should be an error.')
+    return resolved.error
+  }
 
   async function getSeedExtrudeDefinition(service: ModelingService): Promise<ExtrudeFeatureDefinition> {
     const snapshot = await service.getCurrentDocumentSnapshot()
@@ -63,7 +76,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       definition,
     })
 
-    const rejected = await service.createFeature({
+    const rejected = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition: {
         kind: 'plane',
@@ -75,13 +88,13 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
           },
         },
       },
-    })
-    assert(rejected.revisionState.kind === 'rejected', 'Unsupported mock plane create should be rejected.')
+    }))
+    assert(rejected.code === 'modeling/diagnostic', 'Unsupported mock plane create should be rejected.')
 
-    const accepted = await service.createFeature({
+    const accepted = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition,
-    })
+    }))
 
     assert(accepted.revisionState.kind === 'accepted', 'Valid feature create should commit.')
     assert(store.savedPayloads.length === 1, 'Only accepted mutations should write operation history.')
@@ -95,7 +108,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const seedSketch = before.sketches[0]
     assert(seedSketch, 'Seed sketch must exist.')
 
-    const sketch = await service.commitSketch({
+    const sketch = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: before.revisionId,
       solverCorrelation: {
         requestId: 'request_history_commit',
@@ -110,10 +123,10 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       planeTarget: seedSketch.planeTarget,
       planeKey: seedSketch.planeKey,
       definition: seedSketch.sketch.definition,
-    })
+    }))
     assert(sketch.revisionState.kind === 'accepted', 'Sketch commit should be stored for replay.')
 
-    const renamedSketch = await service.commitSketch({
+    const renamedSketch = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: sketch.revisionId,
       solverCorrelation: {
         requestId: 'request_history_rename_sketch',
@@ -128,17 +141,17 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       planeTarget: seedSketch.planeTarget,
       planeKey: seedSketch.planeKey,
       definition: seedSketch.sketch.definition,
-    })
+    }))
     assert(renamedSketch.revisionState.kind === 'accepted', 'Sketch rename should be stored for replay.')
 
     const definition = await getSeedExtrudeDefinition(service)
-    const created = await service.createFeature({
+    const created = await unwrapModelingResult(service.createFeature({
       baseRevisionId: renamedSketch.revisionId,
       definition,
-    })
+    }))
     assert(created.revisionState.kind === 'accepted', 'Feature create should be stored for replay.')
 
-    const updated = await service.updateFeature({
+    const updated = await unwrapModelingResult(service.updateFeature({
       baseRevisionId: created.revisionId,
       featureId: created.featureId,
       featureLabel: 'Renamed Extrude',
@@ -149,27 +162,27 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
           endExtent: { kind: 'blind', direction: 'positive', distance: 12 },
         },
       },
-    })
+    }))
     assert(updated.revisionState.kind === 'accepted', 'Feature update should be stored for replay.')
 
-    const reordered = await service.reorderFeature({
+    const reordered = await unwrapModelingResult(service.reorderFeature({
       baseRevisionId: updated.revisionId,
       featureId: created.featureId,
       beforeFeatureId: 'feature_extrude-1',
-    })
+    }))
     assert(reordered.revisionState.kind === 'accepted', 'Feature reorder should be stored for replay.')
 
-    const cursor = await service.setFeatureCursor({
+    const cursor = await unwrapModelingResult(service.setFeatureCursor({
       baseRevisionId: reordered.revisionId,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
-    })
+    }))
     assert(cursor.revisionState.kind === 'accepted', 'Feature cursor rollback should be stored for replay.')
 
-    const renamedBody = await service.renameBody({
+    const renamedBody = await unwrapModelingResult(service.renameBody({
       baseRevisionId: cursor.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Renamed Part',
-    })
+    }))
     assert(renamedBody.revisionState.kind === 'accepted', 'Body rename should be stored for replay.')
 
     const originalSnapshot = await service.getCurrentDocumentSnapshot()
@@ -228,16 +241,16 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const { service, store } = await createServiceWithStore()
     const snapshot = await service.getCurrentDocumentSnapshot()
     const definition = await getSeedExtrudeDefinition(service)
-    const created = await service.createFeature({
+    const created = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition,
-    })
+    }))
     assert(created.revisionState.kind === 'accepted', 'Feature create should commit before delete.')
 
-    const deleted = await service.deleteFeature({
+    const deleted = await unwrapModelingResult(service.deleteFeature({
       baseRevisionId: created.revisionId,
       featureId: created.featureId,
-    })
+    }))
     assert(deleted.revisionState.kind === 'accepted', 'Feature delete should commit.')
 
     const finalHistory = store.savedPayloads.at(-1)
@@ -258,28 +271,28 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
   async function testPersistedHistoryReplaysDocumentVariables() {
     const { service, store } = await createServiceWithStore()
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const added = await service.addDocumentVariable({
+    const added = await unwrapModelingResult(service.addDocumentVariable({
       baseRevisionId: snapshot.revisionId,
       variableId: 'variable_width',
       name: 'width',
       valueText: '12',
-    })
+    }))
     assert(added.revisionState.kind === 'accepted', 'Variable add should be stored for replay.')
 
-    const updated = await service.updateDocumentVariable({
+    const updated = await unwrapModelingResult(service.updateDocumentVariable({
       baseRevisionId: added.revisionId,
       variableId: added.variableId,
       name: 'width',
       valueText: '18',
-    })
+    }))
     assert(updated.revisionState.kind === 'accepted', 'Variable update should be stored for replay.')
 
-    const dependent = await service.addDocumentVariable({
+    const dependent = await unwrapModelingResult(service.addDocumentVariable({
       baseRevisionId: updated.revisionId,
       variableId: 'variable_depth',
       name: 'depth',
       valueText: 'width + 50',
-    })
+    }))
     assert(dependent.revisionState.kind === 'accepted', 'Dependent variable add should be stored for replay.')
 
     const finalHistory = store.savedPayloads.at(-1)
@@ -356,10 +369,10 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const { service, store } = await createServiceWithStore()
     const snapshot = await service.getCurrentDocumentSnapshot()
     const definition = await getSeedExtrudeDefinition(service)
-    const created = await service.createFeature({
+    const created = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.revisionId,
       definition,
-    })
+    }))
     assert(created.revisionState.kind === 'accepted', 'Feature create should produce startup replay history.')
 
     const finalHistory = store.savedPayloads.at(-1)

@@ -54,7 +54,7 @@ import {
   createOffsetContribution,
   trimLineSegmentAtIntersections,
 } from '@/domain/sketch-editing/operations'
-import { mapSketchPointToWorld as mapSketchPointToWorldFromPlane } from '@/domain/modeling/occ/planes'
+import { mapSketchPointToWorkspaceWorld } from '@/domain/workspace/sketch-plane-mapping'
 import {
   createStandardPlaneDefinition,
   deriveStandardPlaneKeyFromConstructionId,
@@ -5071,5 +5071,5 @@ export function mapSketchPointToWorld(
   plane: SketchPlaneDefinition,
   point: SketchPoint,
 ): readonly [number, number, number] {
-  return mapSketchPointToWorldFromPlane(plane, point)
+  return mapSketchPointToWorkspaceWorld(plane, point)
 }

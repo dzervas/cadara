@@ -3,7 +3,11 @@ import { test } from 'bun:test'
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
-import { IndexedDbAutomergeDocumentRepository, type DocumentRepositoryUrlStore } from '@/domain/modeling/automerge-indexeddb-document-repository'
+import {
+  createLocalStorageDocumentRepositoryUrlStore,
+  IndexedDbAutomergeDocumentRepository,
+  type DocumentRepositoryUrlStore,
+} from '@/domain/modeling/automerge-indexeddb-document-repository'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
@@ -136,9 +140,55 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     assert(urlStore.get(seed.documentId) === null, 'Reset should remove the stored Automerge URL mapping.')
   }
 
+  function testLocalStorageUrlStoreValidatesPersistedPayloads() {
+    const storage = createMemoryStorage()
+    const urlStore = createLocalStorageDocumentRepositoryUrlStore(storage)
+    const validUrl = 'automerge:4NMNnkMhL8jXrdJ9jamS58PAVdXu' as Parameters<DocumentRepositoryUrlStore['set']>[1]
+
+    urlStore.set('doc_workspace', validUrl)
+    assert(urlStore.get('doc_workspace') === validUrl, 'Valid Automerge URLs should round-trip through localStorage.')
+
+    storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify({
+      doc_workspace: 'https://not-automerge',
+    }))
+    assert(urlStore.get('doc_workspace') === null, 'Malformed persisted URLs should be rejected by runtime validation.')
+
+    storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify({
+      doc_workspace: 'automerge:invalidid',
+    }))
+    assert(urlStore.get('doc_workspace') === null, 'Semantically invalid Automerge URLs should be rejected.')
+
+    storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify({
+      doc_workspace: 42,
+    }))
+    assert(urlStore.get('doc_workspace') === null, 'Non-string persisted URLs should be rejected by runtime validation.')
+
+    storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify(null))
+    assert(urlStore.get('doc_workspace') === null, 'Null persisted payloads should be rejected by runtime validation.')
+
+    storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify([validUrl]))
+    assert(urlStore.get('doc_workspace') === null, 'Array persisted payloads should be rejected by runtime validation.')
+  }
+
   await testMemoryRepositoryLoadsMutatesSubscribesAndResets()
   await testIndexedDbRepositoryUsesInternalHandleAndReportsFailures()
+  testLocalStorageUrlStoreValidatesPersistedPayloads()
 })
+
+function createMemoryStorage() {
+  const values = new Map<string, string>()
+  return {
+    getItem(key: string) {
+      return values.get(key) ?? null
+    },
+    setItem(key: string, value: string) {
+      values.set(key, value)
+    },
+    removeItem(key: string) {
+      values.delete(key)
+    },
+  }
+}
 
 function createMemoryUrlStore(): DocumentRepositoryUrlStore {
   const urls = new Map<string, string>()

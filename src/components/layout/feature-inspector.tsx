@@ -1,8 +1,8 @@
 import { ActionIcon, Button, Paper, Text, ThemeIcon } from '@mantine/core'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, CircleSlash, Layers3, X } from 'lucide-react'
 import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { Input } from '@/components/ui/input'
 import type { DocumentVariableRecord, FeatureSnapshotRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { getPrimitiveRefLabel, primitiveRefEquals, type PrimitiveRef } from '@/domain/editor/schema'
@@ -234,7 +234,7 @@ export function FeatureExpressionEditorControl(props: {
           },
         }}
       >
-        <X className="h-4 w-4" />
+        <WorkbenchIcon name="close" className="h-4 w-4" />
       </ActionIcon>
     </div>
   )
@@ -506,7 +506,7 @@ function ReferenceCard(props: {
                 },
               }}
             >
-              <X className="h-3.5 w-3.5" />
+              <WorkbenchIcon name="close" className="h-3.5 w-3.5" />
             </ActionIcon>
           ) : null}
         </div>
@@ -538,7 +538,7 @@ function ReferenceCard(props: {
               },
             }}
           >
-            <X className="h-3.5 w-3.5" />
+            <WorkbenchIcon name="close" className="h-3.5 w-3.5" />
           </ActionIcon>
         ) : null}
       </div>
@@ -616,7 +616,7 @@ function ReferenceCollectionCard(props: {
                   },
                 }}
               >
-                <X className="h-3.5 w-3.5" />
+                <WorkbenchIcon name="close" className="h-3.5 w-3.5" />
               </ActionIcon>
             </div>
             {hasSelection ? (
@@ -650,7 +650,7 @@ function ReferenceCollectionCard(props: {
                                 },
                               }}
                             >
-                              <Check className="h-3 w-3 rotate-180" />
+                              <WorkbenchIcon name="check" className="h-3 w-3 rotate-180" />
                             </ActionIcon>
                             <ActionIcon
                               component="button"
@@ -669,7 +669,7 @@ function ReferenceCollectionCard(props: {
                                 },
                               }}
                             >
-                              <Check className="h-3 w-3" />
+                              <WorkbenchIcon name="check" className="h-3 w-3" />
                             </ActionIcon>
                           </>
                         ) : null}
@@ -691,7 +691,7 @@ function ReferenceCollectionCard(props: {
                             },
                           }}
                         >
-                          <X className="h-3 w-3" />
+                          <WorkbenchIcon name="close" className="h-3 w-3" />
                         </ActionIcon>
                       </div>
                     ) : null}
@@ -841,7 +841,7 @@ export function FeatureInspector({
       <header className="px-4 py-4" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
         <div className="flex items-center gap-2">
           <ThemeIcon variant="light" color="workbench" size={20}>
-            <Layers3 className="h-4 w-4" />
+            <WorkbenchIcon name="layers" className="h-4 w-4" />
           </ThemeIcon>
           <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
             Feature Session
@@ -876,7 +876,7 @@ export function FeatureInspector({
           type="button"
           onClick={onCancel}
           variant="default"
-          leftSection={<CircleSlash className="h-4 w-4" />}
+          leftSection={<WorkbenchIcon name="ban" className="h-4 w-4" />}
           styles={{
             root: {
               backgroundColor: 'var(--workbench-shell-surface)',
@@ -892,7 +892,7 @@ export function FeatureInspector({
           onClick={onCommit}
           variant="light"
           color="workbench"
-          leftSection={<Check className="h-4 w-4" />}
+          leftSection={<WorkbenchIcon name="check" className="h-4 w-4" />}
           styles={{
             root: {
               backgroundColor: 'var(--workbench-shell-accent-surface)',

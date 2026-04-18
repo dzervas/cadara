@@ -155,6 +155,16 @@ import type { DurableRef } from '@/contracts/shared/references'
 import type { ConstraintId, DimensionId, RegionId, RequestId, SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
 import {
+  appErrorFromModelingResult,
+  normalizeUnknownError,
+  ok,
+  err,
+  ResultAsync,
+  type AppErrorContextEntry,
+  type AppResult,
+  type AppResultAsync,
+} from '@/contracts/errors'
+import {
   loadOrCreateOperationHistory,
   type OperationHistoryStore,
 } from '@/domain/modeling/modeling-history-persistence'
@@ -181,18 +191,18 @@ export interface ModelingService {
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
-  commitSketch(input: ModelingCommitSketchInput): Promise<ModelingCommitSketchResult>
+  commitSketch(input: ModelingCommitSketchInput): AppResultAsync<ModelingCommitSketchResult>
   projectSketchExternalReferences(
     input: ModelingProjectSketchExternalReferencesInput,
   ): Promise<ProjectSketchExternalReferencesResponse>
-  addDocumentVariable(input: ModelingAddDocumentVariableInput): Promise<ModelingDocumentVariableMutationResult>
-  updateDocumentVariable(input: ModelingUpdateDocumentVariableInput): Promise<ModelingDocumentVariableMutationResult>
-  createFeature(input: ModelingCreateFeatureInput): Promise<ModelingFeatureMutationResult>
-  updateFeature(input: ModelingUpdateFeatureInput): Promise<ModelingFeatureMutationResult>
-  deleteFeature(input: ModelingDeleteFeatureInput): Promise<ModelingDeleteFeatureResult>
-  renameBody(input: ModelingRenameBodyInput): Promise<ModelingRenameBodyResult>
-  reorderFeature(input: ModelingReorderFeatureInput): Promise<ModelingReorderFeatureResult>
-  setFeatureCursor(input: ModelingSetFeatureCursorInput): Promise<ModelingSetFeatureCursorResult>
+  addDocumentVariable(input: ModelingAddDocumentVariableInput): AppResultAsync<ModelingDocumentVariableMutationResult>
+  updateDocumentVariable(input: ModelingUpdateDocumentVariableInput): AppResultAsync<ModelingDocumentVariableMutationResult>
+  createFeature(input: ModelingCreateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
+  updateFeature(input: ModelingUpdateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
+  deleteFeature(input: ModelingDeleteFeatureInput): AppResultAsync<ModelingDeleteFeatureResult>
+  renameBody(input: ModelingRenameBodyInput): AppResultAsync<ModelingRenameBodyResult>
+  reorderFeature(input: ModelingReorderFeatureInput): AppResultAsync<ModelingReorderFeatureResult>
+  setFeatureCursor(input: ModelingSetFeatureCursorInput): AppResultAsync<ModelingSetFeatureCursorResult>
   evaluatePreview(input: ModelingEvaluatePreviewInput): Promise<ModelingPreviewResult>
   exportDocument(input: ModelingExportDocumentInput): Promise<ModelingExportDocumentResult>
   resolveReference(target: PrimitiveRef): Promise<ModelingResolvedReferenceResult>
@@ -3009,12 +3019,68 @@ function validateSnapshotResponse(
   return normalizeWorkspaceSnapshot(parsed.snapshot)
 }
 
+interface SafeParseIssue {
+  path: readonly (string | number | symbol)[]
+  message: string
+}
+
+interface SafeParser<T> {
+  safeParse(value: unknown):
+    | { success: true; data: T }
+    | { success: false; error: { issues: readonly SafeParseIssue[] } }
+}
+
+function formatSafeParseIssues(issues: readonly SafeParseIssue[]) {
+  if (issues.length === 0) {
+    return 'no issue details reported'
+  }
+
+  return issues
+    .slice(0, 3)
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.map(String).join('.') : '<root>'
+      return `${path}: ${issue.message}`
+    })
+    .join('; ')
+}
+
+function parseResponseWithFallback<TPrimary, TFallback>(input: {
+  operation: string
+  response: unknown
+  primarySchemaName: string
+  primarySchema: SafeParser<TPrimary>
+  fallbackSchemaName: string
+  fallbackSchema: SafeParser<TFallback>
+}): TPrimary | TFallback {
+  const primary = input.primarySchema.safeParse(input.response)
+  if (primary.success) {
+    return primary.data
+  }
+
+  const fallback = input.fallbackSchema.safeParse(input.response)
+  if (fallback.success) {
+    return fallback.data
+  }
+
+  throw new Error(
+    `${input.operation} response failed runtime validation for both ${input.primarySchemaName} and ${input.fallbackSchemaName}. `
+    + `${input.primarySchemaName}: ${formatSafeParseIssues(primary.error.issues)}. `
+    + `${input.fallbackSchemaName}: ${formatSafeParseIssues(fallback.error.issues)}.`,
+  )
+}
+
 function mapFeatureMutationResponse(
   response: CreateFeatureResponse | UpdateFeatureResponse,
   expectedDocumentId: DocumentId,
 ): ModelingFeatureMutationResult {
-  const parsed = createFeatureResponseSchema.safeParse(response)
-  const normalized = parsed.success ? parsed.data : updateFeatureResponseSchema.parse(response)
+  const normalized = parseResponseWithFallback({
+    operation: 'Feature mutation',
+    response,
+    primarySchemaName: 'CreateFeatureResponse',
+    primarySchema: createFeatureResponseSchema,
+    fallbackSchemaName: 'UpdateFeatureResponse',
+    fallbackSchema: updateFeatureResponseSchema,
+  })
   assertKernelContractVersion(normalized.contractVersion)
   assertKernelDocumentIdMatches(normalized.documentId, expectedDocumentId, 'Feature mutation')
   return {
@@ -3065,8 +3131,14 @@ function mapDocumentVariableResponse(
   response: AddDocumentVariableResponse | UpdateDocumentVariableResponse,
   expectedDocumentId: DocumentId,
 ): ModelingDocumentVariableMutationResult {
-  const parsed = addDocumentVariableResponseSchema.safeParse(response)
-  const normalized = parsed.success ? parsed.data : updateDocumentVariableResponseSchema.parse(response)
+  const normalized = parseResponseWithFallback({
+    operation: 'Document variable mutation',
+    response,
+    primarySchemaName: 'AddDocumentVariableResponse',
+    primarySchema: addDocumentVariableResponseSchema,
+    fallbackSchemaName: 'UpdateDocumentVariableResponse',
+    fallbackSchema: updateDocumentVariableResponseSchema,
+  })
   assertKernelContractVersion(normalized.contractVersion)
   assertKernelDocumentIdMatches(normalized.documentId, expectedDocumentId, 'Document variable mutation')
   return {
@@ -3454,6 +3526,55 @@ function createDocumentRepositoryDiagnostic(status: Extract<DocumentRepositoryRe
 
 function isAcceptedMutation(response: ModelingOperationResult) {
   return response.revisionState.kind === 'accepted'
+}
+
+type ModelingMutationBoundaryResult = {
+  revisionState: MutationRevisionState
+  diagnostics: ModelingDiagnostic[]
+}
+
+function modelingMutationResultToAppResult<T extends ModelingMutationBoundaryResult>(
+  result: T,
+  input: {
+    operation: string
+    fallbackMessage: string
+    requestId?: RequestId
+    context?: readonly AppErrorContextEntry[]
+  },
+): AppResult<T> {
+  if (result.revisionState.kind === 'accepted') {
+    return ok(result)
+  }
+
+  return err(appErrorFromModelingResult({
+    operation: input.operation,
+    fallbackMessage: input.fallbackMessage,
+    diagnostics: result.diagnostics,
+    revisionState: result.revisionState,
+    requestId: input.requestId,
+    context: input.context,
+  }))
+}
+
+function runModelingMutationBoundary<T extends ModelingMutationBoundaryResult>(input: {
+  operation: string
+  fallbackMessage: string
+  requestId?: RequestId
+  context?: readonly AppErrorContextEntry[]
+  action: () => Promise<T>
+}): AppResultAsync<T> {
+  return ResultAsync.fromPromise(
+    input.action(),
+    (error) => normalizeUnknownError(error, {
+      code: 'app/operation-failed',
+      fallbackMessage: input.fallbackMessage,
+      requestId: input.requestId,
+      context: [
+        { key: 'operation', value: input.operation },
+        ...(input.context ?? []),
+      ],
+    }),
+  ).andThen((result) => modelingMutationResultToAppResult(result, input))
 }
 
 interface HistoryReplayCursor {
@@ -4117,16 +4238,24 @@ export function createModelingService(
       const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId))
       return attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId))
     },
-    async commitSketch(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeCommitSketchInput(input, currentDocumentId)
-      const response = await adapter.commitSketch(request)
-      return finalizeMutationResult(
-        response,
-        mapCommitSketchResponse(response, currentDocumentId),
-        () => createCommitSketchHistoryEntry(request, response.sketchId),
-      )
+    commitSketch(input) {
+      return runModelingMutationBoundary({
+        operation: 'Commit sketch',
+        fallbackMessage: 'Commit sketch failed.',
+        requestId: input.solverCorrelation?.requestId,
+        context: [{ key: 'baseRevisionId', value: input.baseRevisionId }],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeCommitSketchInput(input, currentDocumentId)
+          const response = await adapter.commitSketch(request)
+          return finalizeMutationResult(
+            response,
+            mapCommitSketchResponse(response, currentDocumentId),
+            () => createCommitSketchHistoryEntry(request, response.sketchId),
+          )
+        },
+      })
     },
     async projectSketchExternalReferences(input) {
       await restorePromise
@@ -4138,93 +4267,164 @@ export function createModelingService(
         }),
       )
     },
-    async addDocumentVariable(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeAddDocumentVariableInput(input, currentDocumentId)
-      const response = await adapter.addDocumentVariable(request)
-      return finalizeMutationResult(
-        response,
-        mapDocumentVariableResponse(response, currentDocumentId),
-        () => createAddDocumentVariableHistoryEntry(request, response.variableId),
-      )
+    addDocumentVariable(input) {
+      return runModelingMutationBoundary({
+        operation: 'Add document variable',
+        fallbackMessage: 'Add document variable failed.',
+        context: [{ key: 'baseRevisionId', value: input.baseRevisionId }],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeAddDocumentVariableInput(input, currentDocumentId)
+          const response = await adapter.addDocumentVariable(request)
+          return finalizeMutationResult(
+            response,
+            mapDocumentVariableResponse(response, currentDocumentId),
+            () => createAddDocumentVariableHistoryEntry(request, response.variableId),
+          )
+        },
+      })
     },
-    async updateDocumentVariable(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeUpdateDocumentVariableInput(input, currentDocumentId)
-      const response = await adapter.updateDocumentVariable(request)
-      return finalizeMutationResult(
-        response,
-        mapDocumentVariableResponse(response, currentDocumentId),
-        () => createUpdateDocumentVariableHistoryEntry(request),
-      )
+    updateDocumentVariable(input) {
+      return runModelingMutationBoundary({
+        operation: 'Update document variable',
+        fallbackMessage: 'Update document variable failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'variableId', value: input.variableId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeUpdateDocumentVariableInput(input, currentDocumentId)
+          const response = await adapter.updateDocumentVariable(request)
+          return finalizeMutationResult(
+            response,
+            mapDocumentVariableResponse(response, currentDocumentId),
+            () => createUpdateDocumentVariableHistoryEntry(request),
+          )
+        },
+      })
     },
-    async createFeature(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeCreateFeatureInput(input, currentDocumentId)
-      const response = await adapter.createFeature(request)
-      return finalizeMutationResult(
-        response,
-        mapFeatureMutationResponse(response, currentDocumentId),
-        () => createCreateFeatureHistoryEntry(request),
-      )
+    createFeature(input) {
+      return runModelingMutationBoundary({
+        operation: 'Create feature',
+        fallbackMessage: 'Create feature failed.',
+        context: [{ key: 'baseRevisionId', value: input.baseRevisionId }],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeCreateFeatureInput(input, currentDocumentId)
+          const response = await adapter.createFeature(request)
+          return finalizeMutationResult(
+            response,
+            mapFeatureMutationResponse(response, currentDocumentId),
+            () => createCreateFeatureHistoryEntry(request),
+          )
+        },
+      })
     },
-    async updateFeature(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeUpdateFeatureInput(input, currentDocumentId)
-      const response = await adapter.updateFeature(request)
-      return finalizeMutationResult(
-        response,
-        mapFeatureMutationResponse(response, currentDocumentId),
-        () => createUpdateFeatureHistoryEntry(request),
-      )
+    updateFeature(input) {
+      return runModelingMutationBoundary({
+        operation: 'Update feature',
+        fallbackMessage: 'Update feature failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'featureId', value: input.featureId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeUpdateFeatureInput(input, currentDocumentId)
+          const response = await adapter.updateFeature(request)
+          return finalizeMutationResult(
+            response,
+            mapFeatureMutationResponse(response, currentDocumentId),
+            () => createUpdateFeatureHistoryEntry(request),
+          )
+        },
+      })
     },
-    async deleteFeature(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeDeleteFeatureInput(input, currentDocumentId)
-      const response = await adapter.deleteFeature(request)
-      return finalizeMutationResult(
-        response,
-        mapDeleteFeatureResponse(response, currentDocumentId),
-        () => createDeleteFeatureHistoryEntry(request),
-      )
+    deleteFeature(input) {
+      return runModelingMutationBoundary({
+        operation: 'Delete feature',
+        fallbackMessage: 'Delete feature failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'featureId', value: input.featureId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeDeleteFeatureInput(input, currentDocumentId)
+          const response = await adapter.deleteFeature(request)
+          return finalizeMutationResult(
+            response,
+            mapDeleteFeatureResponse(response, currentDocumentId),
+            () => createDeleteFeatureHistoryEntry(request),
+          )
+        },
+      })
     },
-    async renameBody(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeRenameBodyInput(input, currentDocumentId)
-      const response = await adapter.renameBody(request)
-      return finalizeMutationResult(
-        response,
-        mapRenameBodyResponse(response, currentDocumentId),
-        () => createRenameBodyHistoryEntry(request),
-      )
+    renameBody(input) {
+      return runModelingMutationBoundary({
+        operation: 'Rename body',
+        fallbackMessage: 'Rename body failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'bodyId', value: input.bodyId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeRenameBodyInput(input, currentDocumentId)
+          const response = await adapter.renameBody(request)
+          return finalizeMutationResult(
+            response,
+            mapRenameBodyResponse(response, currentDocumentId),
+            () => createRenameBodyHistoryEntry(request),
+          )
+        },
+      })
     },
-    async reorderFeature(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeReorderFeatureInput(input, currentDocumentId)
-      const response = await adapter.reorderFeature(request)
-      return finalizeMutationResult(
-        response,
-        mapReorderFeatureResponse(response, currentDocumentId),
-        () => createReorderFeatureHistoryEntry(request),
-      )
+    reorderFeature(input) {
+      return runModelingMutationBoundary({
+        operation: 'Reorder feature',
+        fallbackMessage: 'Reorder feature failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'featureId', value: input.featureId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeReorderFeatureInput(input, currentDocumentId)
+          const response = await adapter.reorderFeature(request)
+          return finalizeMutationResult(
+            response,
+            mapReorderFeatureResponse(response, currentDocumentId),
+            () => createReorderFeatureHistoryEntry(request),
+          )
+        },
+      })
     },
-    async setFeatureCursor(input) {
-      await restorePromise
-      await repositoryChangePromise
-      const request = normalizeSetFeatureCursorInput(input, currentDocumentId)
-      const response = await adapter.setFeatureCursor(request)
-      return finalizeMutationResult(
-        response,
-        mapSetFeatureCursorResponse(response, currentDocumentId),
-        () => createSetFeatureCursorHistoryEntry(request),
-      )
+    setFeatureCursor(input) {
+      return runModelingMutationBoundary({
+        operation: 'Set feature cursor',
+        fallbackMessage: 'Set feature cursor failed.',
+        context: [{ key: 'baseRevisionId', value: input.baseRevisionId }],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeSetFeatureCursorInput(input, currentDocumentId)
+          const response = await adapter.setFeatureCursor(request)
+          return finalizeMutationResult(
+            response,
+            mapSetFeatureCursorResponse(response, currentDocumentId),
+            () => createSetFeatureCursorHistoryEntry(request),
+          )
+        },
+      })
     },
     async evaluatePreview(input) {
       await restorePromise

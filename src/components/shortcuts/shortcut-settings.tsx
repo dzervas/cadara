@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ActionIcon, Button, Group, Modal, ScrollArea, Table, Text } from '@mantine/core'
-import { Keyboard } from 'lucide-react'
 
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { getRecordedShortcutStep } from '@/components/shortcuts/shortcut-recording'
 import {
   appendShortcutRecordingStep,
@@ -29,7 +29,7 @@ export function ShortcutSettingsButton() {
         aria-label="Keyboard shortcuts"
         onClick={() => setOpened(true)}
       >
-        <Keyboard className="h-4 w-4" />
+        <WorkbenchIcon name="keyboard" className="h-4 w-4" />
       </ActionIcon>
       <Modal
         opened={opened}

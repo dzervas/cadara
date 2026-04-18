@@ -17,7 +17,7 @@ import {
   type OperationHistorySchemaVersion,
 } from '@/contracts/shared/versioning'
 import { parseOperationHistoryPayload } from '@/contracts/modeling/operation-history.runtime-schema'
-import { normalizeFeatureDefinitionAuthoredValues } from '@/domain/modeling/feature-value-expressions'
+import { normalizeFeatureDefinitionAuthoredValues } from '@/contracts/modeling/feature-authored-values'
 
 export type PersistedCommitSketchPayload = Omit<
   CommitSketchRequest,

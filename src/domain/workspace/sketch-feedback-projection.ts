@@ -1,7 +1,9 @@
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchToolAnchorDescriptor } from '@/domain/sketch-tools/editor-schema'
-import { mapSketchPointToWorld } from '@/domain/modeling/occ/planes'
-import type { Vec3 } from '@/domain/modeling/occ/math'
+import {
+  mapSketchPointToWorkspaceWorld,
+  type WorkspaceVec3,
+} from '@/domain/workspace/sketch-plane-mapping'
 
 export interface ViewportSize {
   width: number
@@ -22,19 +24,19 @@ export interface SketchFeedbackScreenPoint {
 export function resolveSketchFeedbackAnchorWorldPoint(
   anchor: SketchToolAnchorDescriptor,
   plane: SketchPlaneDefinition,
-): Vec3 {
+): WorkspaceVec3 {
   if (anchor.kind === 'worldPoint') {
     return anchor.point
   }
 
-  return mapSketchPointToWorld(plane, anchor.point)
+  return mapSketchPointToWorkspaceWorld(plane, anchor.point)
 }
 
 export function projectSketchFeedbackAnchor(input: {
   anchor: SketchToolAnchorDescriptor
   plane: SketchPlaneDefinition
   viewport: ViewportSize
-  projectWorldPoint: (point: Vec3) => ProjectedViewportPoint
+  projectWorldPoint: (point: WorkspaceVec3) => ProjectedViewportPoint
 }): SketchFeedbackScreenPoint | null {
   if (input.viewport.width <= 0 || input.viewport.height <= 0) {
     return null

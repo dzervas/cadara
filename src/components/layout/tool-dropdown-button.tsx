@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Menu, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
-import { ChevronDown } from 'lucide-react'
 
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
@@ -60,7 +60,8 @@ export function ToolDropdownButton({
               }}
             >
               <ToolbarToolIcon icon={tool.icon} />
-              <ChevronDown
+              <WorkbenchIcon
+                name="chevronDown"
                 className="h-3.5 w-3.5"
                 style={{ color: 'var(--workbench-shell-text-muted)' }}
               />

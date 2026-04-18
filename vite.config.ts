@@ -37,10 +37,6 @@ export default defineConfig({
             return 'three'
           }
 
-          if (id.includes('/lucide-react/')) {
-            return 'icons'
-          }
-
           if (id.includes('/@radix-ui/')) {
             return 'radix'
           }

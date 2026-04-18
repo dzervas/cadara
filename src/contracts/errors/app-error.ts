@@ -197,7 +197,10 @@ export function appErrorFromModelingResult(
     context?: readonly AppErrorContextEntry[]
   },
 ): AppError {
-  const primaryDiagnostic = input.diagnostics[0]
+  const primaryDiagnostic =
+    input.diagnostics.find((diagnostic) => diagnostic.code === 'repository-head-conflict')
+    ?? input.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
+    ?? input.diagnostics[0]
 
   if (primaryDiagnostic) {
     return appErrorFromModelingDiagnostic(primaryDiagnostic, {
@@ -208,6 +211,7 @@ export function appErrorFromModelingResult(
         ...errorContext('reasonCode', input.revisionState?.reasonCode),
         ...errorContext('actualRevisionId', input.revisionState?.actualRevisionId),
         { key: 'diagnosticCount', value: input.diagnostics.length },
+        { key: 'diagnosticCodes', value: input.diagnostics.map((diagnostic) => diagnostic.code).join(',') },
         ...(input.context ?? []),
       ],
     })

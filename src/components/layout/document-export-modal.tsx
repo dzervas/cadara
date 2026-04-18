@@ -11,8 +11,8 @@ import {
   Stack,
   Text,
 } from '@mantine/core'
-import { Download, X } from 'lucide-react'
 
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import type {
   DocumentExportFormat,
   DocumentExportSuccessResult,
@@ -315,10 +315,10 @@ function DocumentExportModalContent({
         ) : null}
 
         <Group justify="flex-end" gap="xs">
-          <Button variant="subtle" leftSection={<X size={14} />} onClick={onClose} disabled={pending}>
+          <Button variant="subtle" leftSection={<WorkbenchIcon name="close" size={14} />} onClick={onClose} disabled={pending}>
             Cancel
           </Button>
-          <Button leftSection={<Download size={14} />} onClick={handleSubmit} loading={pending} disabled={!target}>
+          <Button leftSection={<WorkbenchIcon name="download" size={14} />} onClick={handleSubmit} loading={pending} disabled={!target}>
             Export
           </Button>
         </Group>

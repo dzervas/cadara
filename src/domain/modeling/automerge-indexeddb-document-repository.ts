@@ -1,10 +1,11 @@
-import { initializeBase64Wasm, Repo } from '@automerge/automerge-repo/slim'
+import { initializeBase64Wasm, isValidAutomergeUrl, Repo } from '@automerge/automerge-repo/slim'
 import type { AutomergeUrl } from '@automerge/automerge-repo/slim'
 import { automergeWasmBase64 } from '@automerge/automerge/automerge.wasm.base64'
 import { BroadcastChannelNetworkAdapter } from '@automerge/automerge-repo-network-broadcastchannel'
 import { IndexedDBStorageAdapter } from '@automerge/automerge-repo-storage-indexeddb'
 
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
+import { parseAutomergeDocumentUrlStorePayload } from '@/contracts/modeling/document-repository.runtime-schema'
 import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/contracts/modeling/authored-document'
 import type { DocumentId } from '@/contracts/shared/ids'
 import type {
@@ -100,9 +101,8 @@ export function createLocalStorageDocumentRepositoryUrlStore(
 
     try {
       const parsed = JSON.parse(serialized) as unknown
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        ? parsed as Record<string, string>
-        : {}
+      const validated = parseAutomergeDocumentUrlStorePayload(parsed, isValidAutomergeUrl)
+      return validated.ok ? validated.urls : {}
     } catch {
       return {}
     }

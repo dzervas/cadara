@@ -63,8 +63,10 @@ import {
   VIEW_CUBE_FACE_TARGETS,
 } from '@/domain/workspace/view-cube-navigation'
 import { projectSketchFeedbackAnchor } from '@/domain/workspace/sketch-feedback-projection'
-import type { Vec3 } from '@/domain/modeling/occ/math'
-import { mapWorldPointToSketch } from '@/domain/modeling/occ/planes'
+import {
+  mapWorldPointToWorkspaceSketch,
+  type WorkspaceVec3,
+} from '@/domain/workspace/sketch-plane-mapping'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 
@@ -276,7 +278,7 @@ export function ThreeCadViewport({
           width: rect.width,
           height: rect.height,
         },
-        projectWorldPoint: (point: Vec3) => {
+        projectWorldPoint: (point: WorkspaceVec3) => {
           const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
           return { x: projected.x, y: projected.y, z: projected.z }
         },
@@ -295,7 +297,7 @@ export function ThreeCadViewport({
             width: rect.width,
             height: rect.height,
           },
-          projectWorldPoint: (point: Vec3) => {
+          projectWorldPoint: (point: WorkspaceVec3) => {
             const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
             return { x: projected.x, y: projected.y, z: projected.z }
           },
@@ -578,7 +580,7 @@ export function ThreeCadViewport({
         return null
       }
 
-      return mapWorldPointToSketch(sketchSession.plane, [
+      return mapWorldPointToWorkspaceSketch(sketchSession.plane, [
         sketchHitPointRef.current.x,
         sketchHitPointRef.current.y,
         sketchHitPointRef.current.z,

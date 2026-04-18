@@ -9,6 +9,7 @@ import {
   type SketchEditorState,
   transitionEditorState,
   type EditorEvent,
+  createModelingServiceEditorEffectRuntime,
 } from './state-machine'
 import { createEditorRuntimeActor } from './runtime-machine'
 import {
@@ -49,6 +50,7 @@ import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
+import { createAppError, ResultAsync, type AppError } from '@/contracts/errors'
 
 test('src/contracts/editor/state-machine.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -2140,6 +2142,61 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  async function testModelingServiceRuntimePreservesResultRejections() {
+    const appError = createAppError({
+      code: 'modeling/diagnostic',
+      message: 'The authored document changed after the current snapshot was loaded.',
+      context: [
+        { key: 'diagnosticCode', value: 'repository-head-conflict' },
+        { key: 'reasonCode', value: 'repositoryChanged' },
+        { key: 'diagnosticCount', value: 2 },
+        { key: 'diagnosticCodes', value: 'feature-warning,repository-head-conflict' },
+        { key: 'actualRevisionId', value: 'rev_2' },
+      ],
+    })
+    const runtime = createModelingServiceEditorEffectRuntime({
+      async getCurrentDocumentSnapshot() {
+        return createSnapshot()
+      },
+      async projectSketchExternalReferences() {
+        return { projectedReferences: [], diagnostics: [] }
+      },
+      sketchSolver: null,
+      commitSketch() {
+        throw new Error('Sketch commit is not used by this test.')
+      },
+      evaluatePreview() {
+        throw new Error('Feature preview is not used by this test.')
+      },
+      createFeature() {
+        throw new Error('Feature create is not used by this test.')
+      },
+      updateFeature() {
+        throw new Error('Feature update is not used by this test.')
+      },
+      setFeatureCursor() {
+        return ResultAsync.fromPromise(Promise.reject(appError), (error) => error as AppError)
+      },
+    })
+
+    assert(runtime.setDocumentCursor, 'Modeling service runtime should expose document cursor mutation.')
+    const rejected = await runtime.setDocumentCursor({
+      baseRevisionId: 'rev_1',
+      cursor: { kind: 'feature', featureId: 'feature_a' },
+    })
+
+    assert(!rejected.accepted, 'Modeling service Result Errs should become typed rejected mutation results.')
+    assert(rejected.revisionId === 'rev_2', 'Rejected mutation results should retain actual revision ids.')
+    assert(
+      rejected.diagnostics[0]?.code === 'repository-head-conflict',
+      'Rejected mutation diagnostics should retain the modeling diagnostic code.',
+    )
+    assert(
+      rejected.errorContext?.some((entry) => entry.key === 'diagnosticCodes' && entry.value === 'feature-warning,repository-head-conflict'),
+      'Rejected mutation results should retain structured modeling error context.',
+    )
+  }
+
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
   testSketchActivationAcceptsPlanarFaces()
@@ -2163,6 +2220,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
   testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest()
   testRejectedSketchCommitShowsValidationMessage()
+  await testModelingServiceRuntimePreservesResultRejections()
   testReplayIsDeterministic()
   testSelectionKeyUsesDurableRefs()
   await testRuntimeLoopProcessesSketchOpen()

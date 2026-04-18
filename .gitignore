@@ -31,3 +31,4 @@ playwright-report/
 test-results/
 !.codex/skills/
 .tmp-*
+tmp-*

@@ -1,6 +1,6 @@
-import { Ban, History, Layers3, Pencil, PencilRuler, Trash2, Type } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import type { DocumentFeatureCursor, DocumentHistoryItemRecord, DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
@@ -241,7 +241,7 @@ export function FeatureTimelineBar({
                       id: 'edit',
                       label: 'Edit',
                       commandId: 'context.edit' as const,
-                      icon: <Pencil className="h-3.5 w-3.5" />,
+                      icon: <WorkbenchIcon name="edit" className="h-3.5 w-3.5" />,
                       onSelect: () => onReopenTarget(item.target),
                     },
                     {
@@ -249,7 +249,7 @@ export function FeatureTimelineBar({
                       id: 'rename',
                       label: 'Rename',
                       commandId: 'context.rename' as const,
-                      icon: <Type className="h-3.5 w-3.5" />,
+                      icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
                       onSelect: () => onRenameItem(item),
                     },
                     ...(item.kind === 'feature' ? [
@@ -258,7 +258,7 @@ export function FeatureTimelineBar({
                         id: 'suppress',
                         label: 'Suppress',
                         commandId: 'context.suppress' as const,
-                        icon: <Ban className="h-3.5 w-3.5" />,
+                        icon: <WorkbenchIcon name="ban" className="h-3.5 w-3.5" />,
                         onSelect: () => onSuppressFeature(item),
                       },
                     ] : []),
@@ -267,7 +267,7 @@ export function FeatureTimelineBar({
                       id: 'roll-cursor-here',
                       label: 'Roll cursor here',
                       commandId: 'context.rollCursorHere' as const,
-                      icon: <History className="h-3.5 w-3.5" />,
+                      icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
                       onSelect: () => onCursorRequested?.(getPositionCursor(anchorIndex)),
                     },
                     ...(item.kind === 'feature' ? [
@@ -280,7 +280,7 @@ export function FeatureTimelineBar({
                         id: 'delete',
                         label: 'Delete',
                         commandId: 'context.delete' as const,
-                        icon: <Trash2 className="h-3.5 w-3.5" />,
+                        icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
                         danger: true,
                         onSelect: () => onDeleteFeature(item),
                       },
@@ -330,9 +330,9 @@ export function FeatureTimelineBar({
                             title={`${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
                           >
                             {item.kind === 'sketch' ? (
-                              <PencilRuler className="h-4 w-4" />
+                              <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
                             ) : (
-                              <Layers3 className="h-4 w-4" />
+                              <WorkbenchIcon name="layers" className="h-4 w-4" />
                             )}
                           </button>
                         </WorkbenchContextMenu>

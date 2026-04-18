@@ -1,5 +1,6 @@
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
+
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 
 export interface WorkbenchStateDebuggerRequirement {
   id: string
@@ -70,7 +71,7 @@ export function WorkbenchStateDebugger({ state, defaultExpanded = false }: Workb
           onClick={() => setIsExpanded((current) => !current)}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-[var(--cad-border-strong)] hover:text-[var(--cad-foreground)]"
         >
-          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <WorkbenchIcon name={isExpanded ? 'chevronDown' : 'chevronRight'} className="h-4 w-4" />
         </button>
       </div>
 

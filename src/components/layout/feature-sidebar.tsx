@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionIcon, Paper, Text, Tooltip } from '@mantine/core'
-import { Box, Component, Download, Eye, EyeOff, Info, MousePointer2, PencilRuler, Plus, Trash2, Type } from 'lucide-react'
 
+import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { PrimitiveRef } from '@/domain/editor/schema'
@@ -257,7 +257,7 @@ export function FeatureSidebar({
                     id: 'rename',
                     label: 'Rename',
                     commandId: 'context.rename',
-                    icon: <Type className="h-3.5 w-3.5" />,
+                    icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
                     onSelect: () => onRenameTarget(target, itemLabel),
                   },
                   {
@@ -265,7 +265,7 @@ export function FeatureSidebar({
                     id: 'delete',
                     label: 'Delete',
                     commandId: 'context.delete',
-                    icon: <Trash2 className="h-3.5 w-3.5" />,
+                    icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
                     danger: true,
                     onSelect: () => onObjectDelete(target, itemLabel),
                   },
@@ -274,7 +274,7 @@ export function FeatureSidebar({
                     id: 'export',
                     label: 'Export',
                     commandId: 'context.export',
-                    icon: <Download className="h-3.5 w-3.5" />,
+                    icon: <WorkbenchIcon name="download" className="h-3.5 w-3.5" />,
                     onSelect: () => onObjectExport(target, itemLabel),
                   },
                 ]
@@ -319,11 +319,11 @@ export function FeatureSidebar({
                             style={{ color: 'var(--mantine-color-workbench-4)' }}
                           >
                             {item.kind === 'body' ? (
-                              <Box className="h-3.5 w-3.5" />
+                              <WorkbenchIcon name="box" className="h-3.5 w-3.5" />
                             ) : item.kind === 'sketch' ? (
-                              <PencilRuler className="h-3.5 w-3.5" />
+                              <WorkbenchIcon name="pencilRuler" className="h-3.5 w-3.5" />
                             ) : (
-                              <Component className="h-3.5 w-3.5" />
+                              <WorkbenchIcon name="component" className="h-3.5 w-3.5" />
                             )}
                           </span>
                           <div className="min-w-0">
@@ -342,7 +342,7 @@ export function FeatureSidebar({
                         aria-label={isHidden ? `Show ${itemLabel}` : `Hide ${itemLabel}`}
                         title={isHidden ? 'Show in viewport' : 'Hide from viewport'}
                       >
-                        {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        <WorkbenchIcon name={isHidden ? 'eyeClosed' : 'eyeOpen'} className="h-3.5 w-3.5" />
                       </ActionIcon>
                     </div>
                   </WorkbenchContextMenu>
@@ -366,7 +366,7 @@ export function FeatureSidebar({
                 aria-label="Add variable"
                 onClick={onAddVariable}
               >
-                <Plus className="h-3.5 w-3.5" />
+                <WorkbenchIcon name="plus" className="h-3.5 w-3.5" />
               </ActionIcon>
             </Tooltip>
           </header>
@@ -541,7 +541,7 @@ export function FeatureSidebar({
                     id: 'select-target',
                     label: 'Select target',
                     commandId: 'context.selectTarget',
-                    icon: <MousePointer2 className="h-3.5 w-3.5" />,
+                    icon: <WorkbenchIcon name="mousePointer" className="h-3.5 w-3.5" />,
                     disabled: !diagnostic.target || !isAllowed,
                     onSelect: () => {
                       if (diagnostic.target) {
@@ -554,7 +554,7 @@ export function FeatureSidebar({
                     id: 'inspect-diagnostic',
                     label: 'Inspect diagnostic',
                     commandId: 'context.inspectDiagnostic',
-                    icon: <Info className="h-3.5 w-3.5" />,
+                    icon: <WorkbenchIcon name="info" className="h-3.5 w-3.5" />,
                     onSelect: () => onInspectDiagnostic(diagnostic),
                   },
                 ]

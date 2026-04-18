@@ -1,5 +1,5 @@
 import type { SketchPoint } from '@/contracts/modeling/schema'
-import type { Vec3 } from '@/domain/modeling/occ/math'
+import type { WorkspaceVec3 } from '@/domain/workspace/sketch-plane-mapping'
 import type { SketchSnapCandidateKind, SketchSnapGlyphKind } from '@/domain/sketch-snapping/snap-candidates'
 
 export type SketchToolControlValue = string | number | boolean | null
@@ -22,7 +22,7 @@ export type SketchToolAnchorDescriptor =
     }
   | {
       kind: 'worldPoint'
-      point: Vec3
+      point: WorkspaceVec3
       offset?: SketchToolAnchorOffset
     }
 

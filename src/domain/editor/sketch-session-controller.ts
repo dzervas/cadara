@@ -14,6 +14,7 @@ import type {
   ModelingCommitSketchResult,
   ModelingService,
 } from '@/domain/modeling/modeling-service'
+import type { AppResult } from '@/contracts/errors'
 import { getPrimitiveRefKey } from '@/domain/editor/schema'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 
@@ -206,7 +207,7 @@ export async function commitActiveSketchSession(input: {
   modelingService: ModelingService
   session: SketchSessionState
   baseRevisionId: RevisionId
-}): Promise<ModelingCommitSketchResult | null> {
+}): Promise<AppResult<ModelingCommitSketchResult> | null> {
   if (!input.session.commitRequest) {
     return null
   }
@@ -216,10 +217,6 @@ export async function commitActiveSketchSession(input: {
     ...input.session.commitRequest,
     solverCorrelation: null,
   })
-
-  if (result.revisionState.kind === 'conflict') {
-    return result
-  }
 
   return result
 }

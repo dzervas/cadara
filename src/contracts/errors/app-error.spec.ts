@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import {
   appErrorFromModelingDiagnostic,
+  appErrorFromModelingResult,
   appErrorFromZodError,
   appErrorToModelingDiagnostic,
   createAppError,
@@ -66,6 +67,39 @@ test('src/contracts/errors/app-error.spec.ts', () => {
   assert(
     diagnosticError.context.some((entry) => entry.key === 'diagnosticCode'),
     'Diagnostic codes should be preserved as structured context.',
+  )
+
+  const conflictError = appErrorFromModelingResult({
+    operation: 'Create feature',
+    fallbackMessage: 'Feature rejected.',
+    diagnostics: [
+      {
+        code: 'feature-warning',
+        severity: 'warning',
+        message: 'Feature warning.',
+        target: null,
+        detail: null,
+      },
+      {
+        code: 'repository-head-conflict',
+        severity: 'error',
+        message: 'Refresh before retrying this mutation.',
+        target: null,
+        detail: null,
+      },
+    ],
+    revisionState: {
+      kind: 'conflict',
+      actualRevisionId: 'rev_2',
+    },
+  })
+  assert(
+    conflictError.message === 'Refresh before retrying this mutation.',
+    'Repository head conflicts should be the primary modeling boundary error.',
+  )
+  assert(
+    conflictError.context.some((entry) => entry.key === 'actualRevisionId' && entry.value === 'rev_2'),
+    'Modeling boundary errors should retain revision conflict context.',
   )
 
   const modelingDiagnostic = appErrorToModelingDiagnostic(createAppError({

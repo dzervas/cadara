@@ -91,8 +91,11 @@ import type {
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import {
+  appErrorToModelingDiagnostic,
   normalizeUnknownError,
+  type AppError,
   type AppErrorContextEntry,
+  type AppResultAsync,
 } from '@/contracts/errors'
 
 /**
@@ -560,6 +563,8 @@ export type EditorEvent =
       diagnostics: ModelingDiagnostic[]
       /** Actual revision encountered when `accepted` is false due to conflict. */
       actualRevisionId?: RevisionId
+      /** Structured error context preserved when `accepted` is false. */
+      errorContext?: AppErrorContextEntry[]
     }
   | {
       type: 'effect.featureCommitFailed'
@@ -592,6 +597,8 @@ export type EditorEvent =
       diagnostics: ModelingDiagnostic[]
       /** Actual revision encountered when `accepted` is false due to conflict. */
       actualRevisionId?: RevisionId
+      /** Structured error context preserved when `accepted` is false. */
+      errorContext?: AppErrorContextEntry[]
     }
   | {
       type: 'effect.sketchCommitFailed'
@@ -639,6 +646,8 @@ export type EditorEvent =
       diagnostics: ModelingDiagnostic[]
       /** Actual revision encountered when `accepted` is false due to conflict. */
       actualRevisionId?: RevisionId
+      /** Structured error context preserved when `accepted` is false. */
+      errorContext?: AppErrorContextEntry[]
     }
   | {
       type: 'effect.documentCursorMoveFailed'
@@ -930,6 +939,33 @@ export function createEditorEffectFailureEvent(
   }
 }
 
+function getAppErrorContextValue(appError: AppError, key: string) {
+  return appError.context.find((entry) => entry.key === key)?.value
+}
+
+function getAppErrorRevisionId(appError: AppError, key: string): RevisionId | undefined {
+  const value = getAppErrorContextValue(appError, key)
+
+  return typeof value === 'string' && value.startsWith('rev_') ? value as RevisionId : undefined
+}
+
+function getAppErrorDiagnosticCode(appError: AppError) {
+  const value = getAppErrorContextValue(appError, 'diagnosticCode')
+
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function isModelingMutationError(appError: AppError) {
+  return appError.code === 'modeling/diagnostic' || appError.code === 'modeling/revision-rejected'
+}
+
+function modelingMutationErrorToDiagnostic(appError: AppError, target?: DurableRef | null): ModelingDiagnostic {
+  return appErrorToModelingDiagnostic(appError, {
+    target,
+    code: getAppErrorDiagnosticCode(appError),
+  })
+}
+
 /**
  * Minimal runtime services required to execute Phase 1 editor effects.
  * Implementations must preserve request ordering semantics and must feed
@@ -948,6 +984,7 @@ export interface EditorEffectRuntime {
     accepted: boolean
     diagnostics: ModelingDiagnostic[]
     actualRevisionId?: RevisionId
+    errorContext?: AppErrorContextEntry[]
   } | null>
   /** Projects authored external sketch references for active sketch display. */
   projectSketchReferences(input: {
@@ -979,6 +1016,7 @@ export interface EditorEffectRuntime {
     accepted: boolean
     diagnostics: ModelingDiagnostic[]
     actualRevisionId?: RevisionId
+    errorContext?: AppErrorContextEntry[]
   }>
   /** Moves the committed document history cursor against a base revision. */
   setDocumentCursor?(input: {
@@ -989,6 +1027,7 @@ export interface EditorEffectRuntime {
     accepted: boolean
     diagnostics: ModelingDiagnostic[]
     actualRevisionId?: RevisionId
+    errorContext?: AppErrorContextEntry[]
   }>
 }
 
@@ -3447,6 +3486,7 @@ export async function runEditorEffect(
           accepted: result.accepted,
           diagnostics: result.diagnostics,
           actualRevisionId: result.actualRevisionId,
+          errorContext: result.errorContext,
         }
       } catch (error: unknown) {
         return createEditorEffectFailureEvent(effect, error, 'Feature commit failed.')
@@ -3483,6 +3523,7 @@ export async function runEditorEffect(
           accepted: result.accepted,
           diagnostics: result.diagnostics,
           actualRevisionId: result.actualRevisionId,
+          errorContext: result.errorContext,
         }
       } catch (error: unknown) {
         return createEditorEffectFailureEvent(effect, error, 'Sketch commit failed.')
@@ -3530,6 +3571,7 @@ export async function runEditorEffect(
           accepted: result.accepted,
           diagnostics: result.diagnostics,
           actualRevisionId: result.actualRevisionId,
+          errorContext: result.errorContext,
         }
       } catch (error: unknown) {
         return createEditorEffectFailureEvent(effect, error, 'Document history cursor move failed.')
@@ -3619,7 +3661,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       solveRequestId: RequestId
       regionRequestId: RequestId
     } | null
-  }) => Promise<{
+  }) => AppResultAsync<{
     revisionId: RevisionId
     revisionState:
       | { kind: 'accepted' }
@@ -3640,7 +3682,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   createFeature: (input: {
     baseRevisionId: RevisionId
     definition: NonNullable<ReturnType<typeof buildFeatureDefinition>>
-  }) => Promise<{
+  }) => AppResultAsync<{
     revisionId: RevisionId
     featureId: FeatureId
     revisionState:
@@ -3653,7 +3695,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     baseRevisionId: RevisionId
     definition: NonNullable<ReturnType<typeof buildFeatureDefinition>>
     featureId: FeatureId
-  }) => Promise<{
+  }) => AppResultAsync<{
     revisionId: RevisionId
     featureId: FeatureId
     revisionState:
@@ -3665,7 +3707,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   setFeatureCursor: (input: {
     baseRevisionId: RevisionId
     cursor: DocumentFeatureCursor
-  }) => Promise<{
+  }) => AppResultAsync<{
     revisionId: RevisionId
     revisionState:
       | { kind: 'accepted' }
@@ -3691,16 +3733,26 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           : null,
       })
 
-      if (!result) {
-        return null
+      if (result.isErr()) {
+        if (!isModelingMutationError(result.error)) {
+          throw result.error
+        }
+
+        const actualRevisionId = getAppErrorRevisionId(result.error, 'actualRevisionId')
+
+        return {
+          revisionId: actualRevisionId ?? input.baseRevisionId,
+          accepted: false,
+          diagnostics: [modelingMutationErrorToDiagnostic(result.error, getDurableDiagnosticTarget(input.session.planeTarget))],
+          actualRevisionId,
+          errorContext: result.error.context,
+        }
       }
 
       return {
-        revisionId: result.revisionId,
-        accepted: result.revisionState.kind === 'accepted',
-        diagnostics: result.diagnostics,
-        actualRevisionId:
-          result.revisionState.kind === 'conflict' ? result.revisionState.actualRevisionId : undefined,
+        revisionId: result.value.revisionId,
+        accepted: true,
+        diagnostics: result.value.diagnostics,
       }
     },
     async projectSketchReferences(input) {
@@ -3761,24 +3813,58 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
               ...baseInput,
             })
 
+      if (result.isErr()) {
+        if (!isModelingMutationError(result.error)) {
+          throw result.error
+        }
+
+        const actualRevisionId = getAppErrorRevisionId(result.error, 'actualRevisionId')
+
+        return {
+          revisionId: actualRevisionId ?? input.baseRevisionId,
+          featureId: input.featureSession.featureId ?? ('feature_rejected' as FeatureId),
+          accepted: false,
+          diagnostics: [
+            modelingMutationErrorToDiagnostic(
+              result.error,
+              getDurableDiagnosticTarget(getFeaturePrimarySelectionTarget(input.featureSession)),
+            ),
+          ],
+          actualRevisionId,
+          errorContext: result.error.context,
+        }
+      }
+
       return {
-        revisionId: result.revisionId,
-        featureId: result.featureId,
-        accepted: result.revisionState.kind === 'accepted',
-        diagnostics: result.diagnostics,
-        actualRevisionId:
-          result.revisionState.kind === 'conflict' ? result.revisionState.actualRevisionId : undefined,
+        revisionId: result.value.revisionId,
+        featureId: result.value.featureId,
+        accepted: true,
+        diagnostics: result.value.diagnostics,
       }
     },
     async setDocumentCursor(input) {
       const result = await modelingService.setFeatureCursor(input)
 
+      if (result.isErr()) {
+        if (!isModelingMutationError(result.error)) {
+          throw result.error
+        }
+
+        const actualRevisionId = getAppErrorRevisionId(result.error, 'actualRevisionId')
+
+        return {
+          revisionId: actualRevisionId ?? input.baseRevisionId,
+          accepted: false,
+          diagnostics: [modelingMutationErrorToDiagnostic(result.error)],
+          actualRevisionId,
+          errorContext: result.error.context,
+        }
+      }
+
       return {
-        revisionId: result.revisionId,
-        accepted: result.revisionState.kind === 'accepted',
-        diagnostics: result.diagnostics,
-        actualRevisionId:
-          result.revisionState.kind === 'conflict' ? result.revisionState.actualRevisionId : undefined,
+        revisionId: result.value.revisionId,
+        accepted: true,
+        diagnostics: result.value.diagnostics,
       }
     },
   }

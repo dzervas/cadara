@@ -22,7 +22,7 @@ import {
   thickenAdvancedFeatureExample,
   transformAdvancedFeatureExample,
 } from '@/contracts/modeling/advanced-solid'
-import { getAuthoredLiteralValue } from '@/contracts/modeling/authored-values'
+import { createExpressionAuthoredValue, getAuthoredLiteralValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 
 test('src/contracts/modeling/operation-history.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -401,6 +401,35 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     const result = validateOperationHistoryPayload(multiProfilePayload)
 
     assert(result.ok, 'One-profile and multi-profile extrude history payloads should validate.')
+  }
+
+  function testPreservesFeatureExpressionAuthoredValues() {
+    const entry = createCreateFeatureHistoryEntry({
+      ...createFeatureRequest,
+      definition: {
+        ...createExtrudeDefinition,
+        parameters: {
+          ...createExtrudeDefinition.parameters,
+          endExtent: {
+            ...createExtrudeDefinition.parameters.endExtent,
+            distance: createExpressionAuthoredValue('depth + 3'),
+          },
+        },
+      },
+    })
+
+    const result = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [entry],
+    })
+
+    assert(result.ok, 'Feature expression-authored history payloads should validate.')
+    assert(result.payload.entries[0]?.kind === 'createFeature', 'Feature expression history entry kind should be preserved.')
+    const definition = result.payload.entries[0].payload.definition
+    assert(definition.kind === 'extrude', 'Feature expression history entry should preserve the extrude definition.')
+    const distance = definition.parameters.endExtent.distance
+    assert(isExpressionAuthoredValue(distance), 'Feature expression history should preserve authored expression text.')
+    assert(distance.valueText === 'depth + 3', 'Feature expression history should not persist resolved runtime values.')
   }
 
   function testRejectsLegacyAndInvalidProfileCollections() {
@@ -876,6 +905,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   testRejectsTransportMetadataLeak()
   testRejectsInconsistentCommitSketchTargets()
   testValidatesProfileCollectionFeaturePayloads()
+  testPreservesFeatureExpressionAuthoredValues()
   testRejectsLegacyAndInvalidProfileCollections()
   testPreservesAdvancedParticipantsAndOperationIntent()
   testPreservesChamferParticipantsAndDistanceOptions()
