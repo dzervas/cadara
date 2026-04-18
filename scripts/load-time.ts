@@ -31,6 +31,7 @@ function startPreviewServer() {
 
 async function waitForServer(url: string, timeoutMs: number) {
   const startedAt = performance.now()
+  let lastError: unknown = null
 
   while (performance.now() - startedAt < timeoutMs) {
     try {
@@ -39,14 +40,14 @@ async function waitForServer(url: string, timeoutMs: number) {
       if (response.ok) {
         return
       }
-    } catch {
-      // Retry until the preview server is reachable.
+    } catch (error: unknown) {
+      lastError = error
     }
 
     await delay(250)
   }
 
-  throw new Error(`Timed out waiting for preview server at ${url}.`)
+  throw new Error(`Timed out waiting for preview server at ${url}.`, { cause: lastError })
 }
 
 async function stopServer(server: ChildProcessWithoutNullStreams) {

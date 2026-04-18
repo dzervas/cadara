@@ -12,7 +12,8 @@
     "load-time": "bun ./scripts/load-time.ts",
     "benchmark:sketch-solver": "bun ./scripts/sketch-solver-benchmark.ts",
     "test": "bun test src",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:all": "bun run lint && bun run build && bun run test && bun run test:e2e"
   },
   "dependencies": {
     "@automerge/automerge-repo": "^2.5.5",
@@ -27,6 +28,7 @@
     "fflate": "^0.8.2",
     "lucide-react": "^1.7.0",
     "mathjs": "^15.2.0",
+    "neverthrow": "^8.2.0",
     "opencascade.js": "^2.0.0-beta.b5ff984",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

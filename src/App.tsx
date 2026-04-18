@@ -14,9 +14,11 @@ import {
 } from '@/domain/modeling/opencascade-kernel-seed'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
 import { EditorProvider } from '@/hooks/editor-provider'
+import { ErrorReporterProvider } from '@/hooks/error-reporter-provider'
 import { ModelingServiceProvider } from '@/hooks/modeling-service-provider'
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import { createToolActionBus } from '@/domain/tools/tool-action-bus'
+import { ReportedErrorBoundary } from '@/components/layout/reported-error-boundary'
 
 function App() {
   const actionBus = useMemo(() => createToolActionBus(), [])
@@ -68,13 +70,17 @@ function App() {
   )
 
   return (
-    <ModelingServiceProvider modelingService={modelingService}>
-      <EditorProvider modelingService={modelingService}>
-        <ToolActionProvider actionBus={actionBus}>
-          <CadWorkbench />
-        </ToolActionProvider>
-      </EditorProvider>
-    </ModelingServiceProvider>
+    <ErrorReporterProvider>
+      <ReportedErrorBoundary>
+        <ModelingServiceProvider modelingService={modelingService}>
+          <EditorProvider modelingService={modelingService}>
+            <ToolActionProvider actionBus={actionBus}>
+              <CadWorkbench />
+            </ToolActionProvider>
+          </EditorProvider>
+        </ModelingServiceProvider>
+      </ReportedErrorBoundary>
+    </ErrorReporterProvider>
   )
 }
 

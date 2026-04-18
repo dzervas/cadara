@@ -13,12 +13,14 @@ import {
 } from '@/contracts/editor/runtime-machine'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { EditorContext } from '@/hooks/editor-context'
+import { useErrorReporter } from '@/hooks/use-error-reporter'
 
 interface EditorProviderProps extends PropsWithChildren {
   modelingService: ModelingService
 }
 
 export function EditorProvider({ modelingService, children }: EditorProviderProps) {
+  const errorReporter = useErrorReporter()
   const runtime = useMemo(
     () => createModelingServiceEditorEffectRuntime(modelingService),
     [modelingService],
@@ -27,7 +29,7 @@ export function EditorProvider({ modelingService, children }: EditorProviderProp
   const [machineState, setMachineState] = useState(() => initialEditorState)
 
   useEffect(() => {
-    const actor = createEditorRuntimeActor(runtime)
+    const actor = createEditorRuntimeActor(runtime, errorReporter)
     actorRef.current = actor
 
     const subscription = actor.subscribe((snapshot) => {
@@ -49,7 +51,7 @@ export function EditorProvider({ modelingService, children }: EditorProviderProp
       }
       actor.stop()
     }
-  }, [modelingService, runtime])
+  }, [errorReporter, modelingService, runtime])
 
   const dispatch = useCallback((event: EditorEvent) => {
     actorRef.current?.send(event)

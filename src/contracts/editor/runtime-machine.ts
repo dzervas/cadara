@@ -1,6 +1,7 @@
 import { assign, createActor, fromPromise, raise, setup, type ActorRefFrom } from 'xstate'
 
 import {
+  createEditorEffectFailureEvent,
   getEditorViewState,
   initialEditorState,
   runEditorEffect,
@@ -11,6 +12,11 @@ import {
   type EditorState,
   type EditorViewState,
 } from '@/contracts/editor/state-machine'
+import {
+  createConsoleErrorReporter,
+  normalizeUnknownError,
+  type ErrorReporter,
+} from '@/contracts/errors'
 
 type WorkflowKind = EditorState['kind']
 
@@ -19,10 +25,14 @@ interface EditorRuntimeContext {
   activeEffect: EditorEffect | null
   effectQueue: EditorEffect[]
   runtime: EditorEffectRuntime
+  errorReporter: ErrorReporter
+  runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
 }
 
 interface EditorRuntimeInput {
   runtime: EditorEffectRuntime
+  errorReporter: ErrorReporter
+  runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
 }
 
 const editorEventTypes = [
@@ -62,6 +72,8 @@ const editorEventTypes = [
   'effect.featureCommitFailed',
   'effect.sketchCommitted',
   'effect.sketchCommitFailed',
+  'effect.sketchReferencesProjected',
+  'effect.sketchReferenceProjectionFailed',
   'effect.documentCursorMoved',
   'effect.documentCursorMoveFailed',
 ] as const satisfies readonly EditorEvent['type'][]
@@ -154,10 +166,14 @@ type WorkflowStateConfig = {
         input: ({ context }: { context: EditorRuntimeContext }) => {
           effect: EditorEffect
           runtime: EditorEffectRuntime
+          runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
         }
         onDone: {
           actions: 'applyCompletedEffect'
-        }
+        },
+        onError: {
+          actions: 'handleEscapedEffectError',
+        },
       }
       always: Array<
         | WorkflowRedirect
@@ -208,13 +224,17 @@ function createWorkflowState(kind: WorkflowKind): WorkflowStateConfig {
               throw new Error('Editor runtime attempted to execute without an active effect.')
             }
 
-            return {
-              effect: context.activeEffect,
-              runtime: context.runtime,
-            }
-          },
+              return {
+                effect: context.activeEffect,
+                runtime: context.runtime,
+                runEffect: context.runEffect,
+              }
+            },
           onDone: {
             actions: 'applyCompletedEffect',
+          },
+          onError: {
+            actions: 'handleEscapedEffectError',
           },
         },
         always: [
@@ -237,8 +257,13 @@ const editorRuntimeMachine = setup({
   },
   actors: {
     runEffect: fromPromise(
-      async ({ input }: { input: { effect: EditorEffect; runtime: EditorEffectRuntime } }) =>
-        runEditorEffect(input.effect, input.runtime),
+      async ({ input }: {
+        input: {
+          effect: EditorEffect
+          runtime: EditorEffectRuntime
+          runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
+        }
+      }) => input.runEffect(input.effect, input.runtime),
     ),
   },
   actions: {
@@ -267,6 +292,47 @@ const editorRuntimeMachine = setup({
         effectQueue: [...context.effectQueue, ...result.effects],
       }
     }),
+    handleEscapedEffectError: assign(({ context, event }) => {
+      const error = ((event as unknown) as { error?: unknown }).error
+      const appError = normalizeUnknownError(error, {
+        code: 'editor/invocation-failed',
+        fallbackMessage: 'Editor runtime invocation failed.',
+        context: [
+          { key: 'operation', value: context.activeEffect?.type ?? 'editor.invoke' },
+          { key: 'requestId', value: context.activeEffect?.requestId ?? null },
+        ],
+        requestId: context.activeEffect?.requestId,
+      })
+
+      context.errorReporter.report(appError, {
+        source: 'editor-runtime',
+        visibility: 'user',
+        dedupeKey: `${context.activeEffect?.type ?? 'editor.invoke'}:${appError.requestId ?? appError.message}`,
+      })
+
+      if (!context.activeEffect) {
+        return {
+          ...context,
+          activeEffect: null,
+        }
+      }
+
+      const failureEvent = createEditorEffectFailureEvent(
+        context.activeEffect,
+        appError,
+        'Editor runtime invocation failed.',
+      )
+      const result = transitionEditorState(context.machineState, failureEvent)
+
+      return {
+        machineState: result.state,
+        activeEffect: null,
+        effectQueue: [...context.effectQueue, ...result.effects],
+        runtime: context.runtime,
+        errorReporter: context.errorReporter,
+        runEffect: context.runEffect,
+      }
+    }),
     promoteQueuedEffect: assign(({ context }) => {
       const nextEffect = context.effectQueue[0] ?? null
 
@@ -292,6 +358,8 @@ const editorRuntimeMachine = setup({
     activeEffect: null,
     effectQueue: [],
     runtime: input.runtime,
+    errorReporter: input.errorReporter,
+    runEffect: input.runEffect,
   }),
   entry: raise({ type: 'session.started' }),
   on: sharedEventHandlers,
@@ -306,10 +374,16 @@ const editorRuntimeMachine = setup({
 
 export type EditorRuntimeActor = ActorRefFrom<typeof editorRuntimeMachine>
 
-export function createEditorRuntimeActor(runtime: EditorEffectRuntime) {
+export function createEditorRuntimeActor(
+  runtime: EditorEffectRuntime,
+  errorReporter: ErrorReporter = createConsoleErrorReporter(),
+  runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent> = runEditorEffect,
+) {
   return createActor(editorRuntimeMachine, {
     input: {
       runtime,
+      errorReporter,
+      runEffect,
     },
   })
 }

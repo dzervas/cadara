@@ -15,12 +15,17 @@ import {
   createObjectExportModalState,
   type ObjectExportModalState,
 } from '@/app/object-export-state'
+import {
+  requireAcceptedModelingResult,
+  runWorkbenchAction,
+} from '@/app/workbench-action'
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
+import { type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
   getSketchAnnotationDescriptors,
@@ -41,6 +46,7 @@ import {
 } from '@/domain/modeling/document-snapshot-view'
 import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { useErrorReporter } from '@/hooks/use-error-reporter'
 import { useFeatureEditing } from '@/hooks/use-feature-editing'
 import { useModelingService } from '@/hooks/use-modeling-service'
 import { ShortcutProvider } from '@/hooks/shortcut-provider'
@@ -77,6 +83,7 @@ export function CadWorkbench() {
   const actionBus = useToolActionBus()
   const { triggerTool } = useToolActions()
   const modelingService = useModelingService()
+  const errorReporter = useErrorReporter()
   const {
     machineState,
     state: {
@@ -293,6 +300,17 @@ export function CadWorkbench() {
     setWorkbenchStatusMessage(message)
   }
 
+  const setVariableFailure = (
+    variableId: DocumentVariableRecord['variableId'],
+    error: AppError,
+  ) => {
+    setInvalidVariableValueMessages((current) => ({
+      ...current,
+      [variableId]: error.message,
+    }))
+    setWorkbenchStatusMessage(error.message)
+  }
+
   const handleObjectDeletePlaceholder = (_target: PrimitiveRef, label: string) => {
     showPlaceholderStatus(createObjectDeletePlaceholderMessage(label))
   }
@@ -320,19 +338,25 @@ export function CadWorkbench() {
       return
     }
 
-    void modelingService.addDocumentVariable({
-      baseRevisionId: snapshot.document.revisionId,
-      name: `var${snapshot.document.variables.length + 1}`,
-      valueText: '0',
+    void runWorkbenchAction({
+      operation: 'Add variable',
+      reporter: errorReporter,
+      context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
+      action: () => modelingService.addDocumentVariable({
+        baseRevisionId: snapshot.document.revisionId,
+        name: `var${snapshot.document.variables.length + 1}`,
+        valueText: '0',
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: 'Add variable',
+        fallbackMessage: 'Add variable failed.',
+        context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
+      }),
+      onError: (error) => setWorkbenchStatusMessage(error.message),
     }).then((result) => {
-      if (result.revisionState.kind !== 'accepted') {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Add variable failed.')
-        return
+      if (result.isOk()) {
+        dispatch({ type: 'document.refreshRequested' })
       }
-
-      dispatch({ type: 'document.refreshRequested' })
-    }).catch((error: unknown) => {
-      setWorkbenchStatusMessage(error instanceof Error ? error.message : 'Add variable failed.')
     })
   }
 
@@ -346,24 +370,31 @@ export function CadWorkbench() {
       return false
     }
 
-    try {
-      const result = await modelingService.updateDocumentVariable({
+    const result = await runWorkbenchAction({
+      operation: failureLabel,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: currentSnapshot.document.revisionId },
+        { key: 'variableId', value: variableId },
+      ],
+      action: () => modelingService.updateDocumentVariable({
         baseRevisionId: currentSnapshot.document.revisionId,
         variableId,
         name: next.name,
         valueText: next.valueText,
-      })
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: failureLabel,
+        fallbackMessage: `${failureLabel} failed.`,
+        context: [
+          { key: 'baseRevisionId', value: currentSnapshot.document.revisionId },
+          { key: 'variableId', value: variableId },
+        ],
+      }),
+      onError: (error) => setVariableFailure(variableId, error),
+    })
 
-      if (result.revisionState.kind !== 'accepted') {
-        const message = result.diagnostics[0]?.message ?? `${failureLabel} failed.`
-        setInvalidVariableValueMessages((current) => ({
-          ...current,
-          [variableId]: message,
-        }))
-        setWorkbenchStatusMessage(message)
-        return false
-      }
-
+    if (result.isOk()) {
       setInvalidVariableValueMessages((current) => {
         const nextMessages = { ...current }
         delete nextMessages[variableId]
@@ -371,15 +402,9 @@ export function CadWorkbench() {
       })
       dispatch({ type: 'document.refreshRequested' })
       return true
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : `${failureLabel} failed.`
-      setInvalidVariableValueMessages((current) => ({
-        ...current,
-        [variableId]: message,
-      }))
-      setWorkbenchStatusMessage(message)
-      return false
     }
+
+    return false
   }
 
   const applyUndoEntry = (entry: WorkbenchUndoEntry, direction: 'undo' | 'redo') => {
@@ -453,19 +478,31 @@ export function CadWorkbench() {
       return
     }
 
-    void modelingService.updateDocumentVariable({
-      baseRevisionId: snapshot.document.revisionId,
-      variableId: variable.variableId,
-      name: next.name,
-      valueText: next.valueText,
+    const operation = `Update ${variable.name || variable.variableId}`
+    void runWorkbenchAction({
+      operation,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: snapshot.document.revisionId },
+        { key: 'variableId', value: variable.variableId },
+      ],
+      action: () => modelingService.updateDocumentVariable({
+        baseRevisionId: snapshot.document.revisionId,
+        variableId: variable.variableId,
+        name: next.name,
+        valueText: next.valueText,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation,
+        fallbackMessage: `${operation} failed.`,
+        context: [
+          { key: 'baseRevisionId', value: snapshot.document.revisionId },
+          { key: 'variableId', value: variable.variableId },
+        ],
+      }),
+      onError: (error) => setVariableFailure(variable.variableId, error),
     }).then((result) => {
-      if (result.revisionState.kind !== 'accepted') {
-        const message = result.diagnostics[0]?.message ?? `Update ${variable.name || variable.variableId} failed.`
-        setInvalidVariableValueMessages((current) => ({
-          ...current,
-          [variable.variableId]: message,
-        }))
-        setWorkbenchStatusMessage(message)
+      if (result.isErr()) {
         return
       }
 
@@ -489,13 +526,6 @@ export function CadWorkbench() {
       ])
       setRedoStack([])
       dispatch({ type: 'document.refreshRequested' })
-    }).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : `Update ${variable.name || variable.variableId} failed.`
-      setInvalidVariableValueMessages((current) => ({
-        ...current,
-        [variable.variableId]: message,
-      }))
-      setWorkbenchStatusMessage(message)
     })
   }
 
@@ -504,19 +534,33 @@ export function CadWorkbench() {
       return
     }
 
-    void modelingService.deleteFeature({
-      baseRevisionId: snapshot.document.revisionId,
-      featureId: item.featureId,
+    void runWorkbenchAction({
+      operation: `Delete ${item.label}`,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: snapshot.document.revisionId },
+        { key: 'featureId', value: item.featureId },
+      ],
+      action: () => modelingService.deleteFeature({
+        baseRevisionId: snapshot.document.revisionId,
+        featureId: item.featureId,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: `Delete ${item.label}`,
+        fallbackMessage: `Delete ${item.label} failed.`,
+        context: [
+          { key: 'baseRevisionId', value: snapshot.document.revisionId },
+          { key: 'featureId', value: item.featureId },
+        ],
+      }),
+      onError: (error) => setWorkbenchStatusMessage(error.message),
     }).then((result) => {
-      if (result.revisionState.kind !== 'accepted') {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Delete ${item.label} failed.`)
+      if (result.isErr()) {
         return
       }
 
       setWorkbenchStatusMessage(`Deleted ${item.label}.`)
       dispatch({ type: 'document.refreshRequested' })
-    }).catch((error: unknown) => {
-      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Delete ${item.label} failed.`)
     })
   }
 
@@ -555,25 +599,39 @@ export function CadWorkbench() {
       return
     }
 
-    void modelingService.commitSketch({
-      baseRevisionId: snapshot.document.revisionId,
-      solverCorrelation: null,
-      sketchId: sketch.sketchId,
-      sketchLabel: nextLabel,
-      plane: sketch.plane,
-      planeTarget: sketch.planeTarget,
-      planeKey: sketch.planeKey,
-      definition: sketch.sketch.definition,
+    void runWorkbenchAction({
+      operation: `Rename ${item.label}`,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: snapshot.document.revisionId },
+        { key: 'sketchId', value: sketch.sketchId },
+      ],
+      action: () => modelingService.commitSketch({
+        baseRevisionId: snapshot.document.revisionId,
+        solverCorrelation: null,
+        sketchId: sketch.sketchId,
+        sketchLabel: nextLabel,
+        plane: sketch.plane,
+        planeTarget: sketch.planeTarget,
+        planeKey: sketch.planeKey,
+        definition: sketch.sketch.definition,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: `Rename ${item.label}`,
+        fallbackMessage: `Rename ${item.label} failed.`,
+        context: [
+          { key: 'baseRevisionId', value: snapshot.document.revisionId },
+          { key: 'sketchId', value: sketch.sketchId },
+        ],
+      }),
+      onError: (error) => setWorkbenchStatusMessage(error.message),
     }).then((result) => {
-      if (result.revisionState.kind !== 'accepted') {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Rename ${item.label} failed.`)
+      if (result.isErr()) {
         return
       }
 
       setWorkbenchStatusMessage(`Renamed ${item.label} to ${nextLabel}.`)
       dispatch({ type: 'document.refreshRequested' })
-    }).catch((error: unknown) => {
-      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Rename ${item.label} failed.`)
     })
   }
 
@@ -593,21 +651,35 @@ export function CadWorkbench() {
       return
     }
 
-    void modelingService.updateFeature({
-      baseRevisionId: snapshot.document.revisionId,
-      featureId: feature.featureId,
-      featureLabel: nextLabel,
-      definition: feature.definition,
+    void runWorkbenchAction({
+      operation: `Rename ${item.label}`,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: snapshot.document.revisionId },
+        { key: 'featureId', value: feature.featureId },
+      ],
+      action: () => modelingService.updateFeature({
+        baseRevisionId: snapshot.document.revisionId,
+        featureId: feature.featureId,
+        featureLabel: nextLabel,
+        definition: feature.definition,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: `Rename ${item.label}`,
+        fallbackMessage: `Rename ${item.label} failed.`,
+        context: [
+          { key: 'baseRevisionId', value: snapshot.document.revisionId },
+          { key: 'featureId', value: feature.featureId },
+        ],
+      }),
+      onError: (error) => setWorkbenchStatusMessage(error.message),
     }).then((result) => {
-      if (result.revisionState.kind !== 'accepted') {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Rename ${item.label} failed.`)
+      if (result.isErr()) {
         return
       }
 
       setWorkbenchStatusMessage(`Renamed ${item.label} to ${nextLabel}.`)
       dispatch({ type: 'document.refreshRequested' })
-    }).catch((error: unknown) => {
-      setWorkbenchStatusMessage(error instanceof Error ? error.message : `Rename ${item.label} failed.`)
     })
   }
 
@@ -641,13 +713,29 @@ export function CadWorkbench() {
         return
       }
 
-      void modelingService.renameBody({
-        baseRevisionId: snapshot.document.revisionId,
-        bodyId: target.bodyId,
-        bodyLabel: nextLabel,
+      void runWorkbenchAction({
+        operation: `Rename ${label}`,
+        reporter: errorReporter,
+        context: [
+          { key: 'baseRevisionId', value: snapshot.document.revisionId },
+          { key: 'bodyId', value: target.bodyId },
+        ],
+        action: () => modelingService.renameBody({
+          baseRevisionId: snapshot.document.revisionId,
+          bodyId: target.bodyId,
+          bodyLabel: nextLabel,
+        }),
+        mapSuccess: (result) => requireAcceptedModelingResult(result, {
+          operation: `Rename ${label}`,
+          fallbackMessage: `Rename ${label} failed.`,
+          context: [
+            { key: 'baseRevisionId', value: snapshot.document.revisionId },
+            { key: 'bodyId', value: target.bodyId },
+          ],
+        }),
+        onError: (error) => setWorkbenchStatusMessage(error.message),
       }).then((result) => {
-        if (result.revisionState.kind !== 'accepted') {
-          setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? `Rename ${label} failed.`)
+        if (result.isErr()) {
           return
         }
 
@@ -658,8 +746,6 @@ export function CadWorkbench() {
         })
         setWorkbenchStatusMessage(`Renamed ${label} to ${nextLabel}.`)
         dispatch({ type: 'document.refreshRequested' })
-      }).catch((error: unknown) => {
-        setWorkbenchStatusMessage(error instanceof Error ? error.message : `Rename ${label} failed.`)
       })
       return
     }
@@ -681,18 +767,24 @@ export function CadWorkbench() {
       return
     }
 
-    void modelingService.setFeatureCursor({
-      baseRevisionId: snapshot.document.revisionId,
-      cursor,
+    void runWorkbenchAction({
+      operation: 'Move feature cursor',
+      reporter: errorReporter,
+      context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
+      action: () => modelingService.setFeatureCursor({
+        baseRevisionId: snapshot.document.revisionId,
+        cursor,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: 'Move feature cursor',
+        fallbackMessage: 'Feature cursor rollback failed.',
+        context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
+      }),
+      onError: (error) => setWorkbenchStatusMessage(error.message),
     }).then((result) => {
-      if (result.revisionState.kind !== 'accepted') {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Feature cursor rollback failed.')
-        return
+      if (result.isOk()) {
+        dispatch({ type: 'document.refreshRequested' })
       }
-
-      dispatch({ type: 'document.refreshRequested' })
-    }).catch((error: unknown) => {
-      setWorkbenchStatusMessage(error instanceof Error ? error.message : 'Feature cursor rollback failed.')
     })
   }
 
@@ -924,6 +1016,7 @@ export function CadWorkbench() {
               opened={objectExportModal !== null}
               target={objectExportModal}
               exportDocument={(input) => modelingService.exportDocument(input)}
+              errorReporter={errorReporter}
               onDownload={downloadDocumentExportResult}
               onClose={() => setObjectExportModal(null)}
             />

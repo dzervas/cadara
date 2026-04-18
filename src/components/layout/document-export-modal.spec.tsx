@@ -7,6 +7,7 @@ import {
 } from '@/components/layout/document-export-modal'
 import { buildDocumentExportModalInput } from '@/components/layout/document-export-modal-input'
 import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
+import { createTestErrorReporter } from '@/contracts/errors'
 import type { ObjectExportModalState } from '@/app/object-export-state'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
@@ -22,6 +23,7 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
     label: 'Part 1',
     baseRevisionId: 'rev_0001',
   }
+  const errorReporter = createTestErrorReporter()
 
   const stlMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -29,6 +31,7 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
         opened
         target={target}
         withinPortal={false}
+        errorReporter={errorReporter}
         exportDocument={async () => ({ ok: false, format: 'stl', diagnostics: [] })}
         onClose={() => undefined}
         onDownload={() => undefined}
@@ -52,6 +55,7 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
         initialFormat="step"
         target={target}
         withinPortal={false}
+        errorReporter={errorReporter}
         exportDocument={async () => ({ ok: false, format: 'step', diagnostics: [] })}
         onClose={() => undefined}
         onDownload={() => undefined}
@@ -69,6 +73,7 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
         initialFormat="cadara"
         target={target}
         withinPortal={false}
+        errorReporter={errorReporter}
         exportDocument={async () => ({ ok: false, format: 'cadara', diagnostics: [] })}
         onClose={() => undefined}
         onDownload={() => undefined}

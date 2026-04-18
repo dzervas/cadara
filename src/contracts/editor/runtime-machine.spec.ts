@@ -6,6 +6,7 @@ import {
   getEditorRuntimeState,
   type EditorRuntimeActor,
 } from '@/contracts/editor/runtime-machine'
+import { createTestErrorReporter } from '@/contracts/errors'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/contracts/editor/runtime-machine.spec.ts', async () => {
@@ -96,6 +97,79 @@ test('src/contracts/editor/runtime-machine.spec.ts', async () => {
     assert(movedPoint, 'Expected dragged point to remain in the sketch definition.')
     assert(movedPoint.position[0] === 2, 'Runtime should forward geometry drag move events to the editor reducer.')
     assert(movedPoint.position[1] === 3, 'Runtime should forward geometry drag end events to the editor reducer.')
+  } finally {
+    actor.stop()
+  }
+})
+
+test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invocation failures', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  function waitForState(
+    actor: EditorRuntimeActor,
+    predicate: (state: EditorState) => boolean,
+  ): Promise<EditorState> {
+    const current = getEditorRuntimeState(actor)
+
+    if (predicate(current)) {
+      return Promise.resolve(current)
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timed out waiting for editor runtime state.'))
+      }, 2_000)
+      const subscription = actor.subscribe(() => {
+        const state = getEditorRuntimeState(actor)
+
+        if (!predicate(state)) {
+          return
+        }
+
+        clearTimeout(timeoutId)
+        subscription.unsubscribe()
+        resolve(state)
+      })
+    })
+  }
+
+  const runtime: EditorEffectRuntime = {
+    async getCurrentDocumentSnapshot() {
+      throw new Error('Snapshot fetch should be replaced by the rejected effect runner.')
+    },
+    async commitSketch() {
+      return null
+    },
+    async evaluatePreview() {
+      throw new Error('Feature preview is not used by this test.')
+    },
+    async commitFeature() {
+      throw new Error('Feature commit is not used by this test.')
+    },
+  }
+  const reporter = createTestErrorReporter()
+  const actor = createEditorRuntimeActor(
+    runtime,
+    reporter,
+    async () => {
+      throw new Error('Actor invocation escaped.')
+    },
+  )
+
+  actor.start()
+
+  try {
+    const state = await waitForState(actor, (candidate) => candidate.pendingSnapshotRequestId === null)
+
+    assert(reporter.reports.length === 1, 'Escaped invocation failures should be reported.')
+    assert(reporter.reports[0]?.error.code === 'editor/invocation-failed', 'Escaped failures should use invocation failure codes.')
+    assert(reporter.reports[0]?.metadata.source === 'editor-runtime', 'Escaped failures should identify the runtime source.')
+    assert(state.preview?.kind === 'selection', 'Escaped failures should become UI-visible editor failure state.')
   } finally {
     actor.stop()
   }

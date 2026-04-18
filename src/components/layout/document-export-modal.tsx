@@ -18,6 +18,12 @@ import type {
   DocumentExportSuccessResult,
 } from '@/contracts/modeling/export'
 import {
+  appErrorFromModelingResult,
+  err,
+  ok,
+  type ErrorReporter,
+} from '@/contracts/errors'
+import {
   getDefaultCadaraExportOptions,
   getDefaultStlExportOptions,
   getDefaultStepExportOptions,
@@ -28,10 +34,12 @@ import type {
   ModelingExportDocumentResult,
 } from '@/domain/modeling/modeling-service'
 import type { ObjectExportModalState } from '@/app/object-export-state'
+import { runWorkbenchAction } from '@/app/workbench-action'
 import { buildDocumentExportModalInput } from '@/components/layout/document-export-modal-input'
 
 interface DocumentExportModalProps {
   exportDocument: (input: ModelingExportDocumentInput) => Promise<ModelingExportDocumentResult>
+  errorReporter: ErrorReporter
   initialFormat?: DocumentExportFormat
   onClose: () => void
   onDownload: (result: DocumentExportSuccessResult) => void
@@ -46,6 +54,7 @@ function toNumber(value: string | number, fallback: number) {
 
 export function DocumentExportModal({
   exportDocument,
+  errorReporter,
   initialFormat = 'stl',
   onClose,
   onDownload,
@@ -65,6 +74,7 @@ export function DocumentExportModal({
         <DocumentExportModalContent
           key={`${target.baseRevisionId}:${target.label}:${initialFormat}`}
           exportDocument={exportDocument}
+          errorReporter={errorReporter}
           initialFormat={initialFormat}
           onClose={onClose}
           onDownload={onDownload}
@@ -77,6 +87,7 @@ export function DocumentExportModal({
 
 interface DocumentExportModalContentProps {
   exportDocument: DocumentExportModalProps['exportDocument']
+  errorReporter: DocumentExportModalProps['errorReporter']
   initialFormat: DocumentExportFormat
   onClose: DocumentExportModalProps['onClose']
   onDownload: DocumentExportModalProps['onDownload']
@@ -89,6 +100,7 @@ function formatExportFailure(result: ModelingExportDocumentResult) {
 
 function DocumentExportModalContent({
   exportDocument,
+  errorReporter,
   initialFormat,
   onClose,
   onDownload,
@@ -118,18 +130,45 @@ function DocumentExportModalContent({
 
     setPending(true)
     setFailureMessage(null)
-    void exportDocument(input)
-      .then((result) => {
-        if (!result.ok) {
-          setFailureMessage(formatExportFailure(result))
-          return
+    void runWorkbenchAction({
+      operation: `Export ${target.label}`,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: target.baseRevisionId },
+        { key: 'format', value: input.format },
+      ],
+      action: async () => {
+        const result = await exportDocument(input)
+        if (result.ok) {
+          onDownload(result)
+        }
+        return result
+      },
+      mapSuccess: (result) => {
+        if (result.ok) {
+          return ok(result)
         }
 
-        onDownload(result)
+        return err(appErrorFromModelingResult({
+          operation: `Export ${target.label}`,
+          fallbackMessage: formatExportFailure(result),
+          diagnostics: result.diagnostics.map((diagnostic) => ({
+            ...diagnostic,
+            detail: null,
+          })),
+          context: [
+            { key: 'baseRevisionId', value: target.baseRevisionId },
+            { key: 'format', value: input.format },
+          ],
+        }))
+      },
+      onError: (error) => setFailureMessage(error.message),
+    })
+      .then((result) => {
+        if (result.isErr()) {
+          return
+        }
         onClose()
-      })
-      .catch((error: unknown) => {
-        setFailureMessage(error instanceof Error ? error.message : 'Export failed.')
       })
       .finally(() => setPending(false))
   }

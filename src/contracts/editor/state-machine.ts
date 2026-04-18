@@ -82,6 +82,10 @@ import type {
 } from '@/contracts/shared/ids'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
+import {
+  normalizeUnknownError,
+  type AppErrorContextEntry,
+} from '@/contracts/errors'
 
 /**
  * Visible command metadata derived from the active machine state.
@@ -785,6 +789,132 @@ function createInitialState(): EditorState {
  * Initial Phase 1 editor machine state.
  */
 export const initialEditorState = createInitialState()
+
+function getEditorEffectContext(effect: EditorEffect): AppErrorContextEntry[] {
+  const context: AppErrorContextEntry[] = [
+    { key: 'operation', value: effect.type },
+    { key: 'requestId', value: effect.requestId },
+  ]
+
+  if ('documentId' in effect) {
+    context.push({ key: 'documentId', value: effect.documentId })
+  }
+
+  if ('revisionId' in effect) {
+    context.push({ key: 'revisionId', value: effect.revisionId })
+  }
+
+  if ('baseRevisionId' in effect) {
+    context.push({ key: 'baseRevisionId', value: effect.baseRevisionId })
+  }
+
+  if ('commandSessionId' in effect) {
+    context.push({ key: 'commandSessionId', value: effect.commandSessionId })
+  }
+
+  if (effect.type === 'feature.hydrateFromSelection') {
+    context.push({ key: 'featureId', value: effect.selectedFeatureId })
+  }
+
+  if (effect.type === 'feature.evaluatePreview' || effect.type === 'feature.commit') {
+    context.push({ key: 'previewId', value: effect.featureSession.previewId })
+    if (effect.featureSession.featureId) {
+      context.push({ key: 'featureId', value: effect.featureSession.featureId })
+    }
+  }
+
+  if (effect.type === 'sketch.commit' || effect.type === 'sketch.projectReferences') {
+    context.push({ key: 'sketchId', value: effect.session.sketchId })
+  }
+
+  return context
+}
+
+export function createEditorEffectFailureEvent(
+  effect: EditorEffect,
+  error: unknown,
+  fallbackMessage: string,
+): EditorEvent {
+  const appError = normalizeUnknownError(error, {
+    code: 'editor/effect-failed',
+    fallbackMessage,
+    requestId: effect.requestId,
+    context: getEditorEffectContext(effect),
+  })
+
+  switch (effect.type) {
+    case 'document.fetchSnapshot':
+      return {
+        type: 'effect.snapshotFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        revisionId: effect.revisionId,
+        error: appError.message,
+      }
+    case 'sketch.openSession':
+      return {
+        type: 'effect.sketchSessionOpenFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        revisionId: effect.revisionId,
+        commandSessionId: effect.commandSessionId,
+        message: appError.message,
+      }
+    case 'feature.hydrateFromSelection':
+      return {
+        type: 'effect.featureSessionHydrationFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        revisionId: effect.revisionId,
+        commandSessionId: effect.commandSessionId,
+        message: appError.message,
+      }
+    case 'feature.evaluatePreview':
+      return {
+        type: 'effect.featurePreviewFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+    case 'feature.commit':
+      return {
+        type: 'effect.featureCommitFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+    case 'sketch.commit':
+      return {
+        type: 'effect.sketchCommitFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+    case 'sketch.projectReferences':
+      return {
+        type: 'effect.sketchReferenceProjectionFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+    case 'document.moveHistoryCursor':
+      return {
+        type: 'effect.documentCursorMoveFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+  }
+}
 
 /**
  * Minimal runtime services required to execute Phase 1 editor effects.
@@ -2980,13 +3110,7 @@ export async function runEditorEffect(
           },
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.snapshotFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          revisionId: effect.revisionId,
-          error: error instanceof Error ? error.message : 'Snapshot refresh failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Snapshot refresh failed.')
       }
     }
     case 'sketch.openSession': {
@@ -3014,14 +3138,7 @@ export async function runEditorEffect(
           session,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.sketchSessionOpenFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          revisionId: effect.revisionId,
-          commandSessionId: effect.commandSessionId,
-          message: error instanceof Error ? error.message : 'Sketch session could not be opened.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Sketch session could not be opened.')
       }
     }
     case 'feature.hydrateFromSelection': {
@@ -3049,14 +3166,7 @@ export async function runEditorEffect(
           session,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.featureSessionHydrationFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          revisionId: effect.revisionId,
-          commandSessionId: effect.commandSessionId,
-          message: error instanceof Error ? error.message : 'Feature session hydration failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Feature session hydration failed.')
       }
     }
     case 'feature.evaluatePreview': {
@@ -3078,14 +3188,7 @@ export async function runEditorEffect(
           renderables: result.renderables,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.featurePreviewFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          message: error instanceof Error ? error.message : 'Feature preview failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Feature preview failed.')
       }
     }
     case 'feature.commit': {
@@ -3108,14 +3211,7 @@ export async function runEditorEffect(
           actualRevisionId: result.actualRevisionId,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.featureCommitFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          message: error instanceof Error ? error.message : 'Feature commit failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Feature commit failed.')
       }
     }
     case 'sketch.commit': {
@@ -3151,14 +3247,7 @@ export async function runEditorEffect(
           actualRevisionId: result.actualRevisionId,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.sketchCommitFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          message: error instanceof Error ? error.message : 'Sketch commit failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Sketch commit failed.')
       }
     }
     case 'sketch.projectReferences': {
@@ -3180,14 +3269,7 @@ export async function runEditorEffect(
           diagnostics: result.diagnostics,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.sketchReferenceProjectionFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          message: error instanceof Error ? error.message : 'Sketch reference projection failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Sketch reference projection failed.')
       }
     }
     case 'document.moveHistoryCursor': {
@@ -3212,13 +3294,7 @@ export async function runEditorEffect(
           actualRevisionId: result.actualRevisionId,
         }
       } catch (error: unknown) {
-        return {
-          type: 'effect.documentCursorMoveFailed',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          baseRevisionId: effect.baseRevisionId,
-          message: error instanceof Error ? error.message : 'Document history cursor move failed.',
-        }
+        return createEditorEffectFailureEvent(effect, error, 'Document history cursor move failed.')
       }
     }
     default:

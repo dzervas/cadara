@@ -75,7 +75,7 @@ test('committed distance annotation input keeps Backspace local and saves durabl
       }>
     }
 
-    return payload.entries?.find((entry) => entry.kind === 'commitSketch')?.payload?.definition?.dimensions
+    return payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)?.payload?.definition?.dimensions
       ?.map((dimension) => dimension.value ?? null) ?? []
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
 
@@ -130,7 +130,7 @@ test('edited rectangle width annotation solves and still finishes the sketch', a
       }>
     }
 
-    return payload.entries?.find((entry) => entry.kind === 'commitSketch')?.payload?.definition?.dimensions
+    return payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)?.payload?.definition?.dimensions
       ?.filter((dimension) => dimension.kind === 'distance' && dimension.axis === 'horizontal')
       .map((dimension) => dimension.value ?? null) ?? []
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
@@ -186,7 +186,7 @@ test('edited rectangle height annotation solves and still finishes the sketch', 
       }>
     }
 
-    return payload.entries?.find((entry) => entry.kind === 'commitSketch')?.payload?.definition?.dimensions
+    return payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)?.payload?.definition?.dimensions
       ?.filter((dimension) => dimension.kind === 'distance' && dimension.axis === 'vertical')
       .map((dimension) => dimension.value ?? null) ?? []
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
@@ -243,7 +243,7 @@ test('edited circle radius annotation solves and still finishes the sketch', asy
       }>
     }
 
-    const definition = payload.entries?.find((entry) => entry.kind === 'commitSketch')?.payload?.definition
+    const definition = payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)?.payload?.definition
     return {
       dimensionValues: definition?.dimensions
         ?.filter((dimension) => dimension.kind === 'circleRadius')

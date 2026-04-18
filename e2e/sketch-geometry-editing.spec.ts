@@ -49,7 +49,7 @@ test('dragging an active sketch vertex updates the committed sketch definition',
       }>
     }
 
-    return payload.entries?.find((entry) => entry.kind === 'commitSketch')?.payload?.definition?.points
+    return payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)?.payload?.definition?.points
       ?.map((point) => point.position) ?? []
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
 

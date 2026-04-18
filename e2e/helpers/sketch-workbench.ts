@@ -37,6 +37,7 @@ export class SketchWorkbenchHarness {
     await this.page.goto('/')
     await this.ensureStateDebuggerExpanded()
     await expect(this.page.getByText('Machine:')).toBeVisible()
+    await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
   }
 
   async reloadPreservingStorage() {
@@ -192,6 +193,11 @@ export class SketchWorkbenchHarness {
 
   async expectMachine(kind: string) {
     await expect(this.page.getByText('Machine:')).toContainText(kind)
+  }
+
+  private async revisionLabel() {
+    const bodyText = await this.page.locator('body').textContent()
+    return bodyText?.match(/Revision:\s*([^\s]+)/)?.[1] ?? 'loading'
   }
 
   private async ensureStateDebuggerExpanded() {
