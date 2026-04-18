@@ -181,6 +181,21 @@ export interface SketchSessionDisplayRenderable {
   target: PrimitiveRef | null
   linePattern: 'solid' | 'dashed'
   role: 'local' | 'reference'
+  paintStyle?: SketchDisplayPaintStyle
+  strokeStyle?: SketchDisplayStrokeStyle
+}
+
+export interface SketchDisplayPaintStyle {
+  color: number
+  opacity: number
+}
+
+export interface SketchDisplayStrokeStyle {
+  color: number
+  opacity: number
+  width?: number
+  dashSize?: number
+  gapSize?: number
 }
 
 export type SketchHistoryCursor =
@@ -287,6 +302,7 @@ function createEmptyDefinition(): SketchDefinition {
 
 function cloneDefinition(definition: SketchDefinition): SketchDefinition {
   return {
+    ...definition,
     schemaVersion: definition.schemaVersion,
     referenceIds: [...definition.referenceIds],
     references: [...definition.references],
@@ -3547,6 +3563,7 @@ function getAverageSketchPoint(points: readonly SketchPoint[]): SketchPoint | nu
 
 export function getSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const localStyleLookup = createSketchEntityStyleLookup(session)
 
   return [
     ...session.definition.points.map((point) => ({
@@ -3561,7 +3578,14 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       linePattern: 'solid' as const,
       role: 'local' as const,
     })),
-    ...session.entities.map((entity, index) => createDisplayRenderableForEntity(session, entity, index)),
+    ...session.entities.map((entity, index) =>
+      createDisplayRenderableForEntity(
+        session,
+        entity,
+        index,
+        entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
+      ),
+    ),
     ...session.definition.references.flatMap((reference, index) => {
       const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
       if (projectedReference && projectedReference.status === 'projected' && projectedReference.geometry.length > 0) {
@@ -3582,6 +3606,7 @@ function createDisplayRenderableForEntity(
   session: SketchSessionState,
   entity: SketchDraftEntity,
   index: number,
+  style: SketchEntityDisplayStyle | undefined,
 ): SketchSessionDisplayRenderable {
   if (entity.kind === 'line') {
     return {
@@ -3600,6 +3625,8 @@ function createDisplayRenderableForEntity(
       },
       linePattern: entity.isConstruction ? 'dashed' : 'solid',
       role: 'local',
+      paintStyle: style?.paintStyle,
+      strokeStyle: style?.strokeStyle,
     }
   }
 
@@ -3625,7 +3652,164 @@ function createDisplayRenderableForEntity(
     },
     linePattern: entity.isConstruction ? 'dashed' : 'solid',
     role: 'local',
+    paintStyle: style?.paintStyle,
+    strokeStyle: style?.strokeStyle,
   }
+}
+
+interface SketchEntityDisplayStyle {
+  paintStyle?: SketchDisplayPaintStyle
+  strokeStyle?: SketchDisplayStrokeStyle
+}
+
+function createSketchEntityStyleLookup(session: SketchSessionState): Map<SketchEntityId, SketchEntityDisplayStyle> {
+  const styleRecords = getPersistedSketchStyleRecords(session.fullDefinition)
+  if (styleRecords.size === 0) {
+    return new Map()
+  }
+
+  const entityStyleById = new Map<SketchEntityId, SketchEntityDisplayStyle>()
+  for (const entity of session.fullDefinition.entities) {
+    const styleId = getEntityStyleId(entity)
+    if (!styleId) {
+      continue
+    }
+
+    const style = styleRecords.get(styleId)
+    if (!style) {
+      continue
+    }
+
+    entityStyleById.set(entity.entityId, style)
+  }
+
+  return entityStyleById
+}
+
+function getPersistedSketchStyleRecords(definition: SketchDefinition): Map<string, SketchEntityDisplayStyle> {
+  const rawDefinition = definition as SketchDefinition & {
+    styles?: unknown
+    styleDefinitions?: unknown
+  }
+  const styleEntries = Array.isArray(rawDefinition.styles)
+    ? rawDefinition.styles
+    : Array.isArray(rawDefinition.styleDefinitions)
+      ? rawDefinition.styleDefinitions
+      : []
+  const records = new Map<string, SketchEntityDisplayStyle>()
+
+  for (const entry of styleEntries) {
+    if (!entry || typeof entry !== 'object') {
+      continue
+    }
+
+    const styleId = getRecordStringValue(entry, 'styleId')
+    if (!styleId) {
+      continue
+    }
+
+    const paintStyle = parsePaintStyle(getRecordObjectValue(entry, 'paint') ?? getRecordObjectValue(entry, 'fill'))
+    const strokeStyle = parseStrokeStyle(getRecordObjectValue(entry, 'stroke'))
+    if (!paintStyle && !strokeStyle) {
+      continue
+    }
+
+    records.set(styleId, { paintStyle, strokeStyle })
+  }
+
+  return records
+}
+
+function getEntityStyleId(entity: SketchEntityDefinition): string | null {
+  const rawEntity = entity as SketchEntityDefinition & {
+    styleId?: unknown
+    style?: unknown
+    displayStyleId?: unknown
+  }
+  const styleId = getOptionalString(rawEntity.styleId) ?? getOptionalString(rawEntity.displayStyleId)
+  if (styleId) {
+    return styleId
+  }
+
+  const styleRecord = getRecordObjectValue(rawEntity, 'style')
+  if (!styleRecord) {
+    return null
+  }
+
+  return getRecordStringValue(styleRecord, 'styleId')
+}
+
+function parsePaintStyle(value: Record<string, unknown> | null): SketchDisplayPaintStyle | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const color = parseColorValue(value.color)
+  if (color === null) {
+    return undefined
+  }
+
+  return {
+    color,
+    opacity: getOptionalNumber(value.opacity) ?? 1,
+  }
+}
+
+function parseStrokeStyle(value: Record<string, unknown> | null): SketchDisplayStrokeStyle | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const color = parseColorValue(value.color)
+  if (color === null) {
+    return undefined
+  }
+
+  return {
+    color,
+    opacity: getOptionalNumber(value.opacity) ?? 1,
+    width: getOptionalNumber(value.width) ?? getOptionalNumber(value.thickness),
+    dashSize: getOptionalNumber(value.dashSize),
+    gapSize: getOptionalNumber(value.gapSize),
+  }
+}
+
+function parseColorValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  const hex = normalized.startsWith('#') ? normalized.slice(1) : normalized
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return null
+  }
+
+  return Number.parseInt(hex, 16)
+}
+
+function getRecordObjectValue(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record[key]
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function getRecordStringValue(record: Record<string, unknown>, key: string): string | null {
+  return getOptionalString(record[key])
+}
+
+function getOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function getOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function createReferenceRecordTarget(referenceId: ReferenceId): PrimitiveRef {
