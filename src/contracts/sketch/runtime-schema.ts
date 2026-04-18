@@ -10,6 +10,7 @@ import type {
   SketchPointDefinition,
   SketchRecord,
   SketchReferenceDefinition,
+  SketchStyleRecord,
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
 import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
@@ -31,6 +32,7 @@ import {
   sketchEntityIdSchema,
   sketchIdSchema,
   sketchPointIdSchema,
+  sketchStyleIdSchema,
 } from '@/contracts/shared/runtime-schema'
 
 export const sketchSchemaVersionSchema = z.literal('sketch-definition/v1alpha1')
@@ -320,6 +322,54 @@ const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
   }),
 ]).transform((value) => value as DimensionDefinition)
 
+const sketchStyleFillSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('none'),
+  }),
+  z.object({
+    kind: z.literal('solid'),
+    color: z.string(),
+    opacity: z.number().min(0).max(1),
+  }),
+  z.object({
+    kind: z.literal('gradient'),
+    gradient: z.object({
+      kind: z.literal('linear'),
+      angleRadians: z.number(),
+      startColor: z.string(),
+      startOpacity: z.number().min(0).max(1),
+      endColor: z.string(),
+      endOpacity: z.number().min(0).max(1),
+    }),
+  }),
+])
+
+const sketchStyleStrokeSchema = z.object({
+  color: z.string(),
+  opacity: z.number().min(0).max(1),
+  width: z.number().min(0),
+  lineCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]),
+  lineJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]),
+  miterLimit: z.number().min(0),
+})
+
+const sketchStyleRecordSchema = z.object({
+  styleId: sketchStyleIdSchema,
+  label: z.string(),
+  target: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('entity'),
+      entityId: sketchEntityIdSchema,
+    }),
+    z.object({
+      kind: z.literal('region'),
+      regionId: regionIdSchema,
+    }),
+  ]),
+  fill: sketchStyleFillSchema,
+  stroke: sketchStyleStrokeSchema,
+}).transform((value) => value as SketchStyleRecord)
+
 export const sketchDefinitionSchema = z.object({
   schemaVersion: sketchSchemaVersionSchema,
   referenceIds: z.array(referenceIdSchema),
@@ -332,6 +382,8 @@ export const sketchDefinitionSchema = z.object({
   constraints: z.array(constraintDefinitionSchema),
   dimensionIds: z.array(dimensionIdSchema),
   dimensions: z.array(dimensionDefinitionSchema),
+  styleIds: z.array(sketchStyleIdSchema).default([]),
+  styles: z.array(sketchStyleRecordSchema).default([]),
 }).transform((value) => value as SketchDefinition)
 
 const regionRecordSchema = z.object({

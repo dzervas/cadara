@@ -40,6 +40,52 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   assert(!('preview' in authoredDocument), 'Authored document should exclude preview state.')
   assert(!('runtimeState' in authoredDocument), 'Authored document should exclude runtime state.')
 
+  authoredSketch.definition.styleIds = ['sketch_style_seed']
+  authoredSketch.definition.styles = [
+    {
+      styleId: 'sketch_style_seed',
+      label: 'Seed style',
+      target: { kind: 'entity', entityId: authoredSketch.definition.entityIds[0]! },
+      fill: {
+        kind: 'solid',
+        color: '#60a5fa',
+        opacity: 0.4,
+      },
+      stroke: {
+        color: '#dbeafe',
+        opacity: 1,
+        width: 1.25,
+        lineCap: 'round',
+        lineJoin: 'round',
+        miterLimit: 4,
+      },
+    },
+  ]
+  const withStyles = parseAuthoredModelDocument(authoredDocument)
+  assert(withStyles.ok, 'Authored documents should persist sketch style records.')
+  assert(withStyles.document.sketches[0]?.definition.styles?.length === 1, 'Parsed authored documents should preserve style records.')
+
+  const withoutStylesField = parseAuthoredModelDocument({
+    ...authoredDocument,
+    sketches: authoredDocument.sketches.map((sketch) => ({
+      ...sketch,
+      definition: {
+        ...sketch.definition,
+        styleIds: undefined,
+        styles: undefined,
+      },
+    })),
+  })
+  assert(withoutStylesField.ok, 'Authored document migration should accept older sketches without style fields.')
+  assert(
+    withoutStylesField.document.sketches.every((sketch) => sketch.definition.styleIds?.length === 0),
+    'Older sketches should migrate with an empty styleIds list.',
+  )
+  assert(
+    withoutStylesField.document.sketches.every((sketch) => sketch.definition.styles?.length === 0),
+    'Older sketches should migrate with an empty styles list.',
+  )
+
   const withDerivedField = {
     ...authoredDocument,
     render: snapshot.document.render,
