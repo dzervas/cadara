@@ -8,6 +8,7 @@ import {
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   finishSketchGeometryDrag,
+  patchSketchStyleValue,
   startSketchDraw,
   acceptSketchDraw,
 } from '@/domain/editor/sketch-session'
@@ -246,8 +247,46 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
   }
 
+  function testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets() {
+    let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [3, 0])
+
+    const entityTarget = session.definition.entities[0]?.target
+    assert(entityTarget, 'Style patch fixture should create a local sketch entity target.')
+    const before = session.commitRequest?.definition.entities[0]
+
+    session = patchSketchStyleValue(
+      session,
+      [{ kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' }],
+      { intent: 'patchSketchStyle', field: 'fillColor', value: '#00ffff' },
+    )
+
+    assert(
+      session.commitRequest?.definition.entities[0] === before,
+      'Style patch should ignore non-local targets such as external model geometry refs.',
+    )
+
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'strokeWidth', value: 2.5 },
+    )
+
+    assert(
+      session.definition.entities[0]?.style?.strokeWidth === 2.5,
+      'Local style patch should update the selected sketch entity style in session definition.',
+    )
+    assert(
+      session.commitRequest?.definition.entities[0]?.style?.strokeWidth === 2.5,
+      'Local style patch should rebuild commit request using the updated sketch definition.',
+    )
+  }
+
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
   testRectangleToolDragTranslatesWholeRectangle()
   testImmovableConstrainedDragBlocksWithoutChangingDraft()
+  testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets()
 })

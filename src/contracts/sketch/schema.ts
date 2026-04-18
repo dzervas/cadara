@@ -49,6 +49,22 @@ export const SKETCH_SCHEMA_VERSION: SketchSchemaVersion = 'sketch-definition/v1a
  */
 export const SOLVED_SKETCH_SCHEMA_VERSION: SolvedSketchSchemaVersion = 'solved-sketch/v1alpha1'
 
+export type SketchFillMode = 'none' | 'solid' | 'gradient'
+export type SketchStrokeCap = 'butt' | 'round' | 'square'
+export type SketchStrokeJoin = 'miter' | 'round' | 'bevel'
+
+export interface SketchStyleDefinition {
+  fillMode?: SketchFillMode
+  fillColor?: string
+  gradientStartColor?: string
+  gradientEndColor?: string
+  strokeEnabled?: boolean
+  strokeColor?: string
+  strokeWidth?: number
+  strokeCap?: SketchStrokeCap
+  strokeJoin?: SketchStrokeJoin
+}
+
 /**
  * Durable authored sketch point definition.
  * The point record is part of the authored sketch graph and can be referenced by
@@ -65,6 +81,8 @@ export interface SketchPointDefinition {
   position: SketchPoint2D
   /** True when the point is construction-only and should not participate in profile/region extraction. */
   isConstruction: boolean
+  /** Optional local style authored directly in the sketch session. */
+  style?: SketchStyleDefinition
 }
 
 /**
@@ -86,6 +104,8 @@ export type SketchEntityDefinition =
       startPointId: SketchPointId
       /** End endpoint reference. Must exist in `SketchDefinition.pointIds`. */
       endPointId: SketchPointId
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
     }
   | {
       kind: 'point'
@@ -99,6 +119,8 @@ export type SketchEntityDefinition =
       isConstruction: boolean
       /** Referenced point record represented by this point entity. */
       pointId: SketchPointId
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
     }
   | {
       kind: 'circle'
@@ -114,6 +136,8 @@ export type SketchEntityDefinition =
       centerPointId: SketchPointId
       /** Authored radius in sketch-plane units. Must be greater than zero. */
       radius: number
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
     }
   | {
       kind: 'arc'
@@ -133,6 +157,8 @@ export type SketchEntityDefinition =
       endPointId: SketchPointId
       /** Sweep direction from start to end around `centerPointId`. */
       sweepDirection: 'clockwise' | 'counterClockwise'
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
     }
 
 export type LocalSketchPointConstraintOperand = {
