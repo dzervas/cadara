@@ -33,7 +33,6 @@ import {
   type PrimitiveRef,
 } from '@/domain/editor/schema'
 import {
-  getEscapeEvent,
   getNavigationReopenRequest,
 } from '@/domain/editor/workbench-interactions'
 import {
@@ -44,8 +43,13 @@ import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useFeatureEditing } from '@/hooks/use-feature-editing'
 import { useModelingService } from '@/hooks/use-modeling-service'
-import { useToolActionBus } from '@/hooks/use-tool-actions'
+import { ShortcutProvider } from '@/hooks/shortcut-provider'
+import { useToolActionBus, useToolActions } from '@/hooks/use-tool-actions'
 import { downloadDocumentExportResult } from '@/lib/download-export'
+import {
+  createWorkbenchShortcutCommandHandlers,
+  getWorkbenchShortcutActiveScopes,
+} from '@/app/workbench-shortcuts'
 import {
   WORKBENCH_STATUS_TOP_PX,
   WORKBENCH_STATUS_TOP_WITH_RESTORE_PX,
@@ -69,15 +73,9 @@ type WorkbenchUndoEntry =
       label: string
     }
 
-function isTextEditingTarget(target: EventTarget | null) {
-  return target instanceof HTMLInputElement
-    || target instanceof HTMLTextAreaElement
-    || target instanceof HTMLSelectElement
-    || (target instanceof HTMLElement && target.isContentEditable)
-}
-
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
+  const { triggerTool } = useToolActions()
   const modelingService = useModelingService()
   const {
     machineState,
@@ -151,56 +149,6 @@ export function CadWorkbench() {
       disposed = true
     }
   }, [modelingService])
-
-  useEffect(() => {
-    const escapeEvent = getEscapeEvent({
-      activeCommand,
-      activeReferencePickerFieldId,
-      sketchSession,
-    })
-
-    if (!escapeEvent) {
-      return
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
-        return
-      }
-
-      event.preventDefault()
-      dispatch(escapeEvent)
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeCommand, activeReferencePickerFieldId, dispatch, sketchSession])
-
-  useEffect(() => {
-    if (!sketchSession) {
-      return
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Delete' && event.key !== 'Backspace') {
-        return
-      }
-
-      if (isTextEditingTarget(event.target)) {
-        return
-      }
-
-      if (selection[0]?.kind !== 'constraint' && selection[0]?.kind !== 'dimension') {
-        return
-      }
-
-      event.preventDefault()
-      dispatch({ type: 'sketch.annotationDeleteRequested' })
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [dispatch, selection, sketchSession])
 
   const visibleHiddenTargetKeys = useMemo(() => {
     if (!snapshot) {
@@ -820,7 +768,44 @@ export function CadWorkbench() {
     return () => resizeObserver.disconnect()
   }, [])
 
+  const shortcutActiveScopes = useMemo(
+    () => getWorkbenchShortcutActiveScopes(mode),
+    [mode],
+  )
+  const shortcutCommandHandlers = createWorkbenchShortcutCommandHandlers({
+    activeCommand,
+    activeReferencePickerFieldId,
+    dispatch,
+    mode,
+    selection,
+    sketchSession,
+    triggerTool,
+  })
+  shortcutCommandHandlers['editor.undo'] = {
+    execute: () => {
+      if (sketchSessionRef.current) {
+        dispatch({ type: 'history.undoRequested' })
+        return
+      }
+
+      void performWorkbenchUndo()
+    },
+    isEnabled: () => toolbarHistoryAvailability.canUndo,
+  }
+  shortcutCommandHandlers['editor.redo'] = {
+    execute: () => {
+      if (sketchSessionRef.current) {
+        dispatch({ type: 'history.redoRequested' })
+        return
+      }
+
+      void performWorkbenchRedo()
+    },
+    isEnabled: () => toolbarHistoryAvailability.canRedo,
+  }
+
   return (
+    <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
       <WorkspaceToolbar historyAvailability={toolbarHistoryAvailability} />
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
@@ -958,5 +943,6 @@ export function CadWorkbench() {
         </div>
       </div>
     </div>
+    </ShortcutProvider>
   )
 }

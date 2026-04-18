@@ -80,7 +80,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     assert(event?.type === 'sketch.activeToolCleared', 'Escape should clear the active sketch tool before exiting sketch mode.')
   }
 
-  function testEscapeExitsSketchWhenNoToolIsActive() {
+  function testEscapeDoesNothingWhenSketchIsIdle() {
     const event = getEscapeEvent({
       activeCommand: {
         commandSessionId: 'command_sketch-1',
@@ -94,11 +94,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       },
     })
 
-    assert(event?.type === 'command.cancelled', 'Escape should exit sketch mode once no sketch tool remains active.')
-    assert(
-      event.commandSessionId === 'command_sketch-1',
-      'Sketch exit should preserve the active sketch command session id.',
-    )
+    assert(event === null, 'Escape should not finish an idle sketch session.')
   }
 
   function testViewportClickSelectionRoutingAllowsConstraintsOnly() {
@@ -147,7 +143,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
   testSketchReopenIntentUsesSketchFlow()
   testEscapePrefersReferencePickerCancellation()
   testEscapeClearsActiveSketchToolBeforeExitingSketch()
-  testEscapeExitsSketchWhenNoToolIsActive()
+  testEscapeDoesNothingWhenSketchIsIdle()
   testViewportClickSelectionRoutingAllowsConstraintsOnly()
   testViewportSketchGeometryDragCanInterruptIdleDrawingTools()
 })

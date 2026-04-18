@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { Menu, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
 import { ChevronDown } from 'lucide-react'
 
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
+import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
+import { getToolbarToolCommandId } from '@/domain/shortcuts/commands'
 import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
 import { useToolActions } from '@/hooks/use-tool-actions'
 
@@ -18,11 +21,16 @@ export function ToolDropdownButton({
   active = false,
 }: ToolDropdownButtonProps) {
   const { triggerTool } = useToolActions()
+  const [opened, setOpened] = useState(false)
+  const commandId = getToolbarToolCommandId(tool.id)
 
   return (
-    <Menu width={224}>
+    <Menu width={224} opened={opened} onChange={setOpened}>
       <Menu.Target>
-        <Tooltip label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} />}>
+        <Tooltip
+          disabled={opened}
+          label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} commandId={commandId} />}
+        >
           <UnstyledButton
             type="button"
             aria-label={tool.name}
@@ -76,10 +84,13 @@ export function ToolDropdownButton({
               data-tool-tooltip={variant.tooltip}
               leftSection={<ToolbarToolIcon icon={variant.icon} />}
             >
-              <div className="flex flex-col">
-                <Text size="sm" style={{ color: 'var(--workbench-shell-text)' }}>
-                  {variant.name}
-                </Text>
+              <div className="flex min-w-0 flex-col">
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <Text size="sm" style={{ color: 'var(--workbench-shell-text)' }}>
+                    {variant.name}
+                  </Text>
+                  <ShortcutHint commandId={getToolbarToolCommandId(variant.id)} />
+                </div>
                 <Text size="xs" style={{ color: 'var(--workbench-shell-text-muted)' }}>
                   {variant.tooltip}
                 </Text>

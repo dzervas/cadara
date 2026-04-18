@@ -1,6 +1,7 @@
 import type {
   ToolDefinition,
   ToolGroupDefinition,
+  ToolSource,
   ToolbarSection,
 } from '@/domain/tools/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
@@ -335,7 +336,7 @@ export type ToolGroupEventMap = {
     groupId: TGroupId
     toolId: ToolIdsByGroup<TGroupId>
     mode: ToolDefinitionById<ToolIdsByGroup<TGroupId>>['modes'][number]
-    source: 'toolbar' | 'dropdown' | 'search'
+    source: ToolSource
     timestamp: number
   }
 }
@@ -345,7 +346,7 @@ export type ToolEventMap = {
     toolId: TToolId
     groupId: ToolDefinitionById<TToolId>['group']
     mode: ToolDefinitionById<TToolId>['modes'][number]
-    source: 'toolbar' | 'dropdown' | 'search'
+    source: ToolSource
     timestamp: number
     definition: ToolDefinitionById<TToolId>
   }

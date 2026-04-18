@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Divider, Paper, ScrollArea, Text, TextInput } from '@mantine/core'
 import { Search } from 'lucide-react'
 
+import { ShortcutSettingsButton } from '@/components/shortcuts/shortcut-settings'
 import { ToolButton } from '@/components/layout/tool-button'
 import { ToolDropdownButton } from '@/components/layout/tool-dropdown-button'
 import {
@@ -101,6 +102,7 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="Search tools"
             leftSection={<Search className="h-4 w-4" />}
+            data-workbench-command="editor.focusSearch"
             styles={{
               input: {
                 height: 40,
@@ -142,6 +144,7 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
             </Paper>
           )}
         </div>
+        <ShortcutSettingsButton />
       </div>
     </Paper>
   )

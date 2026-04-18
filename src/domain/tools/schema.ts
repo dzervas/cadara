@@ -1,6 +1,6 @@
 export type ToolbarMode = 'part' | 'sketch'
 
-export type ToolSource = 'toolbar' | 'dropdown' | 'search'
+export type ToolSource = 'toolbar' | 'dropdown' | 'search' | 'shortcut'
 
 export type ToolIconId =
   | 'undo'

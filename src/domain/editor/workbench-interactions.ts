@@ -61,7 +61,7 @@ export function getEscapeEvent(
     return { type: 'sketch.activeToolCleared' }
   }
 
-  if (state.sketchSession && state.activeCommand) {
+  if (!state.sketchSession && state.activeCommand) {
     return {
       type: 'command.cancelled',
       commandSessionId: state.activeCommand.commandSessionId,

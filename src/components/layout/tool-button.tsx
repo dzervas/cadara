@@ -2,6 +2,8 @@ import { ActionIcon, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
 
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
+import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
+import { getToolbarToolCommandId } from '@/domain/shortcuts/commands'
 import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
 import { useToolActions } from '@/hooks/use-tool-actions'
 
@@ -21,6 +23,7 @@ export function ToolButton({
   disabled = false,
 }: ToolButtonProps) {
   const { triggerTool } = useToolActions()
+  const commandId = getToolbarToolCommandId(tool.id)
   const isSuccessAction = tool.id === 'finishSketch'
   const emphasisBackground = isSuccessAction
     ? 'var(--workbench-shell-success-surface)'
@@ -81,9 +84,12 @@ export function ToolButton({
             <ToolbarToolIcon icon={tool.icon} />
           </Paper>
           <div className="min-w-0 flex-1">
-            <Text size="sm" fw={500} truncate="end" style={{ color: emphasisColor }}>
-              {tool.name}
-            </Text>
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <Text size="sm" fw={500} truncate="end" style={{ color: emphasisColor }}>
+                {tool.name}
+              </Text>
+              <ShortcutHint commandId={commandId} />
+            </div>
             <Text
               size="xs"
               truncate="end"
@@ -129,7 +135,7 @@ export function ToolButton({
   }
 
   return (
-    <Tooltip label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} />}>
+    <Tooltip label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} commandId={commandId} />}>
       {content}
     </Tooltip>
   )

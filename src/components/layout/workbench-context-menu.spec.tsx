@@ -3,6 +3,10 @@ import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
+import { createShortcutCommandRegistry } from '@/domain/shortcuts/commands'
+import type { ShortcutCommandDefinition } from '@/domain/shortcuts/commands'
+import { createEffectiveKeymap } from '@/domain/shortcuts/keymap'
+import { ShortcutContext } from '@/hooks/shortcut-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
 test('src/components/layout/workbench-context-menu.spec.tsx', () => {
@@ -17,6 +21,7 @@ test('src/components/layout/workbench-context-menu.spec.tsx', () => {
       kind: 'item',
       id: 'rename',
       label: 'Rename',
+      commandId: 'editor.undo',
       onSelect: () => undefined,
     },
     {
@@ -39,16 +44,44 @@ test('src/components/layout/workbench-context-menu.spec.tsx', () => {
     },
   ]
 
+  const commands = [
+    {
+      id: 'editor.undo',
+      label: 'Undo',
+      category: 'History',
+      scope: 'global',
+      defaultShortcuts: ['mod+z'],
+      customizable: true,
+    },
+  ] as const satisfies readonly ShortcutCommandDefinition[]
+  const registry = createShortcutCommandRegistry(commands)
+  const effectiveKeymap = createEffectiveKeymap(registry)
   const markup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <WorkbenchContextMenu
-        defaultOpened
-        items={items}
-        label="Body actions"
-        withinPortal={false}
+      <ShortcutContext.Provider
+        value={{
+          activeScopes: ['global'],
+          commands,
+          effectiveKeymap,
+          getPrimaryShortcut: (commandId) => effectiveKeymap.get(commandId)?.[0] ?? null,
+          registry,
+          overrides: {},
+          setCommandShortcuts: () => [],
+          disableCommandShortcuts: () => undefined,
+          resetCommandShortcuts: () => [],
+          resetAllShortcuts: () => undefined,
+          getConflictsForOverrides: () => [],
+        }}
       >
-        <button type="button">Part 1</button>
-      </WorkbenchContextMenu>
+        <WorkbenchContextMenu
+          defaultOpened
+          items={items}
+          label="Body actions"
+          withinPortal={false}
+        >
+          <button type="button">Part 1</button>
+        </WorkbenchContextMenu>
+      </ShortcutContext.Provider>
     </MantineProvider>,
   )
 
@@ -57,5 +90,6 @@ test('src/components/layout/workbench-context-menu.spec.tsx', () => {
   assert(markup.includes('Rename'), 'Menu should render rename item labels.')
   assert(markup.includes('Delete'), 'Menu should render regular or danger item labels.')
   assert(markup.includes('Export'), 'Menu should render disabled item labels.')
+  assert(markup.includes('Ctrl+Z'), 'Menu should render right-aligned shortcut hints for command entries.')
   assert(markup.includes('disabled'), 'Disabled menu items should render as disabled controls.')
 })

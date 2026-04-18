@@ -10,11 +10,15 @@ import {
   type ReactNode,
 } from 'react'
 
+import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
+import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
+
 export type WorkbenchContextMenuEntry =
   | {
       kind: 'item'
       id: string
       label: string
+      commandId?: ShortcutCommandId
       icon?: ReactNode
       disabled?: boolean
       danger?: boolean
@@ -168,7 +172,10 @@ export function WorkbenchContextMenu({
                   item.onSelect()
                 }}
               >
-                {item.label}
+                <span className="flex min-w-0 items-center justify-between gap-4">
+                  <span className="truncate">{item.label}</span>
+                  {item.commandId ? <ShortcutHint commandId={item.commandId} /> : null}
+                </span>
               </Menu.Item>
             )
           })}
