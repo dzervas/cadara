@@ -36,6 +36,7 @@ export function createWorkbenchShortcutCommandHandlers({
         const escapeEvent = getEscapeEvent({
           activeCommand,
           activeReferencePickerFieldId,
+          selection,
           sketchSession,
         })
 
@@ -46,6 +47,7 @@ export function createWorkbenchShortcutCommandHandlers({
       isEnabled: () => getEscapeEvent({
         activeCommand,
         activeReferencePickerFieldId,
+        selection,
         sketchSession,
       }) !== null,
     },

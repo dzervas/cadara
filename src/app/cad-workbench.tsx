@@ -256,6 +256,10 @@ export function CadWorkbench() {
     dispatch({ type: 'viewport.selectionRequested', target })
   }
 
+  const handleViewportDeselect = () => {
+    dispatch({ type: 'selection.cleared' })
+  }
+
   const handleShellSelect = (target: PrimitiveRef) => {
     dispatch({ type: 'viewport.selectionRequested', target })
     dispatch({ type: 'viewport.hoverCleared' })
@@ -937,6 +941,7 @@ export function CadWorkbench() {
               hoverTarget={visibleHoverTarget}
               onHover={handleViewportHover}
               onSelect={handleViewportSelect}
+              onDeselect={handleViewportDeselect}
               onAnnotationEdit={(target) => dispatch({ type: 'sketch.annotationEditRequested', target })}
               onClearHover={handleViewportHoverClear}
               onSketchMove={handleSketchMove}

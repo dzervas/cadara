@@ -174,3 +174,79 @@ test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invoca
     actor.stop()
   }
 })
+
+test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear events', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  function waitForState(
+    actor: EditorRuntimeActor,
+    predicate: (state: EditorState) => boolean,
+  ): Promise<EditorState> {
+    const current = getEditorRuntimeState(actor)
+
+    if (predicate(current)) {
+      return Promise.resolve(current)
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timed out waiting for editor runtime state.'))
+      }, 2_000)
+      const subscription = actor.subscribe(() => {
+        const state = getEditorRuntimeState(actor)
+
+        if (!predicate(state)) {
+          return
+        }
+
+        clearTimeout(timeoutId)
+        subscription.unsubscribe()
+        resolve(state)
+      })
+    })
+  }
+
+  const adapter = new MockKernelAdapter()
+  const runtime: EditorEffectRuntime = {
+    async getCurrentDocumentSnapshot() {
+      return (await adapter.getDocumentSnapshot({
+        contractVersion: 'modeling-contract/v1alpha1',
+        documentId: 'doc_workspace',
+      })).snapshot
+    },
+    async commitSketch() {
+      return null
+    },
+    async evaluatePreview() {
+      throw new Error('Feature preview is not used by this test.')
+    },
+    async commitFeature() {
+      throw new Error('Feature commit is not used by this test.')
+    },
+  }
+  const actor = createEditorRuntimeActor(runtime)
+
+  actor.start()
+
+  try {
+    await waitForState(actor, (state) => state.document.revisionId !== null)
+
+    actor.send({
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+    })
+    await waitForState(actor, (state) => state.selection.length === 1)
+
+    actor.send({ type: 'selection.cleared' })
+    const cleared = await waitForState(actor, (state) => state.selection.length === 0)
+
+    assert(cleared.hoverTarget === null, 'Runtime should forward selection clear events to the editor reducer.')
+  } finally {
+    actor.stop()
+  }
+})

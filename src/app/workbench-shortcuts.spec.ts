@@ -65,6 +65,18 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
     'Escape should dispatch the sketch active-tool clear event when a sketch tool is active.',
   )
 
+  const escapeSelectionFixture = createFixture({
+    mode: 'part',
+    selection: [{ kind: 'body', bodyId: 'body_a' } as PrimitiveRef],
+  })
+
+  const escapeSelectionResult = escapeSelectionFixture.press({ key: 'Escape' })
+  assert(escapeSelectionResult.commandId === 'editor.cancel', 'Escape should resolve to cancel for selection clearing.')
+  assert(
+    escapeSelectionFixture.dispatchedEvents.at(-1)?.type === 'selection.cleared',
+    'Escape should dispatch selection clearing when no higher-priority interaction handles it.',
+  )
+
   const finishSketchFixture = createFixture({
     mode: 'sketch',
     sketchSession: createSketchSession(),

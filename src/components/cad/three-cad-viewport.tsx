@@ -49,7 +49,7 @@ import {
 } from '@/domain/workspace/render-picking'
 import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
 import {
-  shouldViewportClickRequestSelection,
+  getViewportCanvasClickIntent,
   shouldViewportStartSketchGeometryDrag,
 } from '@/domain/editor/workbench-interactions'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
@@ -84,6 +84,7 @@ interface ThreeCadViewportProps {
   sketchAnnotations: SketchAnnotationDescriptor[]
   onHover: (target: PrimitiveRef) => void
   onSelect: (target: PrimitiveRef) => void
+  onDeselect: () => void
   onAnnotationEdit: (target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>) => void
   onClearHover: () => void
   onSketchMove: (point: readonly [number, number]) => void
@@ -124,6 +125,7 @@ export function ThreeCadViewport({
   sketchAnnotations,
   onHover,
   onSelect,
+  onDeselect,
   onAnnotationEdit,
   onClearHover,
   onSketchMove,
@@ -163,6 +165,7 @@ export function ThreeCadViewport({
   const partCameraFrameRef = useRef<ViewportCameraFrame | null>(null)
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
   const selectRef = useRef(onSelect)
+  const deselectRef = useRef(onDeselect)
   const annotationEditRef = useRef(onAnnotationEdit)
   const clearHoverRef = useRef(onClearHover)
   const sketchMoveRef = useRef(onSketchMove)
@@ -221,6 +224,7 @@ export function ThreeCadViewport({
   useEffect(() => {
     hoverRef.current = onHover
     selectRef.current = onSelect
+    deselectRef.current = onDeselect
     annotationEditRef.current = onAnnotationEdit
     clearHoverRef.current = onClearHover
     sketchMoveRef.current = onSketchMove
@@ -236,6 +240,7 @@ export function ThreeCadViewport({
   }, [
     hoverTarget,
     onClearHover,
+    onDeselect,
     onAnnotationEdit,
     onHover,
     onSelect,
@@ -770,18 +775,26 @@ export function ThreeCadViewport({
       const eventTarget = event.target instanceof Node ? event.target : null
       const isCanvasClick = eventTarget === canvasElement
 
-      if (!isCanvasClick || !shouldViewportClickRequestSelection(sketchSession?.activeTool)) {
+      if (!isCanvasClick) {
         return
       }
 
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY)
-        ?? (lastPickedTargetRef.current
-          ? { target: lastPickedTargetRef.current }
-          : hoverTargetRef.current
-            ? { target: hoverTargetRef.current }
-            : null)
+      const intent = getViewportCanvasClickIntent({
+        activeSketchTool: sketchSession?.activeTool,
+        hasResolvedTarget: resolvedTarget !== null,
+        isBackgroundDatumTarget: resolvedTarget?.renderable
+          ? isSeededDatumPlaneRenderable(resolvedTarget.renderable)
+          : false,
+        selectionFilterKind: selectionFilterRef.current?.kind ?? null,
+      })
 
-      if (!resolvedTarget) {
+      if (intent === 'clearSelection') {
+        deselectRef.current()
+        return
+      }
+
+      if (intent === 'ignore' || !resolvedTarget) {
         return
       }
 

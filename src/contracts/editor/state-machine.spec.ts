@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import {
+  getEditorViewState,
   getEditorSelectionKey,
   type EditorEffectRuntime,
   initialEditorState,
@@ -16,6 +17,7 @@ import {
   type PrimitiveRef,
   type SelectionTargetCatalog,
 } from '@/domain/editor/schema'
+import type { ToolId } from '@/domain/tools/tool-registry'
 import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
@@ -938,6 +940,76 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testSelectionClearEventClearsSelectionAndPreservesActiveState() {
+    const selectedTarget = { kind: 'body', bodyId: 'body_a' } as PrimitiveRef
+    const hoverTarget = { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } as PrimitiveRef
+    const selectedState = {
+      ...initialEditorState,
+      document: {
+        documentId: 'doc_workspace' as const,
+        revisionId: 'rev_1' as const,
+      },
+      snapshot: createSnapshot(),
+      selection: [selectedTarget],
+      hoverTarget,
+      selectionCatalog: createSelectionCatalog(),
+    }
+
+    const idleCleared = transitionEditorState(selectedState, { type: 'selection.cleared' })
+
+    assert(idleCleared.state.kind === 'idle', 'Selection clearing should keep idle state idle.')
+    assert(idleCleared.state.selection.length === 0, 'Selection clearing should remove idle selection.')
+    assert(idleCleared.state.hoverTarget === null, 'Selection clearing should remove idle hover.')
+
+    const commandStarted = transitionEditorState(selectedState, {
+      type: 'tool.activated',
+      toolId: 'sketch',
+    })
+
+    assert(commandStarted.state.kind === 'selectionCommand', 'Sketch activation should create a selection command.')
+
+    const commandCleared = transitionEditorState(commandStarted.state, { type: 'selection.cleared' })
+
+    assert(commandCleared.state.kind === 'selectionCommand', 'Selection clearing should preserve active command state.')
+    assert(
+      commandCleared.state.command.commandSessionId === commandStarted.state.command.commandSessionId,
+      'Selection clearing should preserve the active command session.',
+    )
+    assert(commandCleared.state.selection.length === 0, 'Selection clearing should remove active-command selection.')
+    assert(commandCleared.state.hoverTarget === null, 'Selection clearing should remove active-command hover.')
+
+    const sketchSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    const sketchState: SketchEditorState = {
+      ...selectedState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(sketchSession),
+        target: sketchSession.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      session: sketchSession,
+      pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+    }
+
+    const sketchCleared = transitionEditorState(sketchState, { type: 'selection.cleared' })
+
+    assert(sketchCleared.state.kind === 'editingSketch', 'Selection clearing should preserve sketch editing state.')
+    assert(
+      sketchCleared.state.command.commandSessionId === sketchState.command.commandSessionId,
+      'Selection clearing should preserve the sketch command session.',
+    )
+    assert(sketchCleared.state.selection.length === 0, 'Selection clearing should remove sketch selection.')
+    assert(sketchCleared.state.hoverTarget === null, 'Selection clearing should remove sketch hover.')
+  }
+
   function testReplayIsDeterministic() {
     const snapshot = createSnapshot()
     const payload = {
@@ -1508,6 +1580,81 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(cleared.state.command.toolId === 'sketch', 'Clearing an active sketch tool should restore sketch-session command identity.')
   }
 
+  function testPassiveSketchToolsDoNotDropSketchSession() {
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sketch',
+      },
+    )
+
+    const openRequested = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+    })
+    const openEffect = openRequested.effects[0]
+
+    assert(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
+
+    const opened = transitionEditorState(openRequested.state, {
+      type: 'effect.sketchSessionOpened',
+      requestId: openEffect.requestId,
+      documentId: 'doc_workspace',
+      revisionId: 'rev_1',
+      commandSessionId: openEffect.commandSessionId,
+      session: createNewSketchSession(createStandardPlaneDefinition('xy')),
+    })
+    const withTool = transitionEditorState(opened.state, {
+      type: 'tool.activated',
+      toolId: 'line',
+    })
+
+    assert(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
+
+    const passiveSketchToolIds = [
+      'spline',
+      'dimension',
+      'trim',
+      'offset',
+      'fill',
+      'stroke',
+      'fillType',
+      'fillSolid',
+      'fillGradient',
+      'strokeOptions',
+      'strokeWidth',
+      'strokeCap',
+      'strokeJoin',
+      'strokeMiter',
+      'strokeDash',
+    ] as const satisfies readonly ToolId[]
+
+    for (const toolId of passiveSketchToolIds) {
+      const result = transitionEditorState(withTool.state, {
+        type: 'tool.activated',
+        toolId,
+      })
+      const viewState = getEditorViewState(result.state)
+
+      assert(result.effects.length === 0, `${toolId} should not emit effects while editing a sketch.`)
+      assert(result.state.kind === 'editingSketch', `${toolId} should keep the editor in sketch editing.`)
+      assert(result.state.mode === 'sketch', `${toolId} should keep sketch toolbar mode.`)
+      assert(viewState.sketchSession !== null, `${toolId} should keep the sketch session visible to the UI.`)
+      assert(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
+      assert(result.state.command.toolId === 'line', `${toolId} should not replace the active sketch command.`)
+      assert(result.state.session.activeTool === 'line', `${toolId} should not clear the active sketch tool.`)
+    }
+  }
+
   function createConstraintAuthoringEditorState(): {
     state: SketchEditorState
     pointTarget: PrimitiveRef
@@ -1888,7 +2035,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testMirrorAndTransformActivationStartFeatureSessions()
   testActiveReferencePickerRoutesSingleAndMultiSelections()
   testReferencePickerCancellationAndSessionCleanup()
+  testSelectionClearEventClearsSelectionAndPreservesActiveState()
   testSketchToolClearStaysInSketchEditing()
+  testPassiveSketchToolsDoNotDropSketchSession()
   testConstraintAuthoringReceivesViewportHoverAndSelection()
   testConstraintAuthoringIgnoresInvalidViewportSelection()
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()

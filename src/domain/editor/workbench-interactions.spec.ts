@@ -7,6 +7,7 @@ import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-ker
 import {
   getEscapeEvent,
   getNavigationReopenRequest,
+  getViewportCanvasClickIntent,
   shouldViewportClickRequestSelection,
   shouldViewportStartSketchGeometryDrag,
 } from './workbench-interactions'
@@ -54,6 +55,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
         phase: 'editing',
       },
       activeReferencePickerFieldId: 'shell-faces',
+      selection: [{ kind: 'body', bodyId: 'body_a' }],
       sketchSession: {
         ...createNewSketchSession(createStandardPlaneDefinition('xy')),
         activeTool: 'line',
@@ -71,6 +73,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
         phase: 'editing',
       },
       activeReferencePickerFieldId: null,
+      selection: [{ kind: 'body', bodyId: 'body_a' }],
       sketchSession: {
         ...createNewSketchSession(createStandardPlaneDefinition('xy')),
         activeTool: 'line',
@@ -88,6 +91,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
         phase: 'editing',
       },
       activeReferencePickerFieldId: null,
+      selection: [],
       sketchSession: {
         ...createNewSketchSession(createStandardPlaneDefinition('xy')),
         activeTool: null,
@@ -95,6 +99,17 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     })
 
     assert(event === null, 'Escape should not finish an idle sketch session.')
+  }
+
+  function testEscapeClearsSelectionWhenNoInteractionHandlesIt() {
+    const event = getEscapeEvent({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      selection: [{ kind: 'body', bodyId: 'body_a' }],
+      sketchSession: null,
+    })
+
+    assert(event?.type === 'selection.cleared', 'Escape should clear selection when no active interaction handles it.')
   }
 
   function testViewportClickSelectionRoutingAllowsConstraintsOnly() {
@@ -113,6 +128,43 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     assert(
       !shouldViewportClickRequestSelection('line'),
       'Viewport clicks should keep drawing tools on the pointer construction path.',
+    )
+  }
+
+  function testViewportCanvasClickIntentClearsOnlyEmptyClicks() {
+    assert(
+      getViewportCanvasClickIntent({ activeSketchTool: null, hasResolvedTarget: false }) === 'clearSelection',
+      'Empty viewport clicks should clear selection when no sketch tool is active.',
+    )
+    assert(
+      getViewportCanvasClickIntent({ activeSketchTool: 'line', hasResolvedTarget: false }) === 'clearSelection',
+      'Empty viewport clicks should clear selection even while a drawing tool is active.',
+    )
+    assert(
+      getViewportCanvasClickIntent({
+        activeSketchTool: 'line',
+        hasResolvedTarget: true,
+        isBackgroundDatumTarget: true,
+        selectionFilterKind: 'sketchSession',
+      }) === 'clearSelection',
+      'Background datum plane hits should behave like empty clicks while drawing tools are active.',
+    )
+    assert(
+      getViewportCanvasClickIntent({ activeSketchTool: null, hasResolvedTarget: true }) === 'selectTarget',
+      'Target clicks should continue through normal selection routing when selection clicks are allowed.',
+    )
+    assert(
+      getViewportCanvasClickIntent({
+        activeSketchTool: null,
+        hasResolvedTarget: true,
+        isBackgroundDatumTarget: true,
+        selectionFilterKind: 'sketchStart',
+      }) === 'selectTarget',
+      'Sketch-start selection should still allow selecting background datum planes.',
+    )
+    assert(
+      getViewportCanvasClickIntent({ activeSketchTool: 'line', hasResolvedTarget: true }) === 'ignore',
+      'Target clicks should preserve drawing-tool routing when selection clicks are not allowed.',
     )
   }
 
@@ -144,6 +196,8 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
   testEscapePrefersReferencePickerCancellation()
   testEscapeClearsActiveSketchToolBeforeExitingSketch()
   testEscapeDoesNothingWhenSketchIsIdle()
+  testEscapeClearsSelectionWhenNoInteractionHandlesIt()
   testViewportClickSelectionRoutingAllowsConstraintsOnly()
+  testViewportCanvasClickIntentClearsOnlyEmptyClicks()
   testViewportSketchGeometryDragCanInterruptIdleDrawingTools()
 })

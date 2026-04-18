@@ -1,8 +1,6 @@
 ## Purpose
 Define how workbench keyboard shortcuts execute editor actions and tool activation through the shared command layer.
-
 ## Requirements
-
 ### Requirement: Workbench SHALL execute core shortcuts through commands
 The workbench SHALL install the shortcut resolver and execute core editor shortcuts through command handlers rather than unrelated component-level keydown handlers.
 
@@ -27,7 +25,7 @@ Keyboard shortcuts for tools SHALL activate tools through the same action path a
 - **THEN** the part-mode feature command does not execute
 
 ### Requirement: Escape SHALL cancel or close active interactions
-The Escape shortcut SHALL cancel or close the current cancelable workbench interaction and SHALL NOT finish the active sketch.
+The Escape shortcut SHALL cancel or close the current cancelable workbench interaction, SHALL clear the current selection when no higher-priority interaction handles Escape, and SHALL NOT finish the active sketch.
 
 #### Scenario: Escape with cancelable sketch interaction
 - **WHEN** a sketch interaction exposes a cancel event and the user presses Escape
@@ -36,6 +34,10 @@ The Escape shortcut SHALL cancel or close the current cancelable workbench inter
 #### Scenario: Escape while sketch session is idle
 - **WHEN** the user is in sketch mode with no cancelable interaction and presses Escape
 - **THEN** the workbench does not finish the sketch
+
+#### Scenario: Escape with selection and no active tool
+- **WHEN** the user has a workbench selection and no active tool or cancelable interaction handles Escape
+- **THEN** the workbench clears the current selection
 
 ### Requirement: Finish Sketch SHALL require an explicit shortcut
 The workbench SHALL expose Finish Sketch through an explicit shortcut command separate from Escape.
@@ -58,3 +60,4 @@ Delete and Backspace shortcuts SHALL execute delete behavior only for eligible w
 #### Scenario: Backspace in input
 - **WHEN** focus is in an input and the user presses Backspace
 - **THEN** the shortcut system does not request workbench deletion
+

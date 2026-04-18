@@ -285,6 +285,11 @@ export interface ViewportSelectionRequestedEvent {
   target: PrimitiveRef
 }
 
+/** Clears the current editor-owned selection and hover target. */
+export interface SelectionClearedEvent {
+  type: 'selection.cleared'
+}
+
 /** Reopens committed feature or sketch authoring directly from a navigation surface. */
 export interface AuthoringReopenRequestedEvent {
   type: 'authoring.reopenRequested'
@@ -425,6 +430,7 @@ export type EditorEvent =
   | ViewportHoveredEvent
   | ViewportHoverClearedEvent
   | ViewportSelectionRequestedEvent
+  | SelectionClearedEvent
   | AuthoringReopenRequestedEvent
   | SketchPointerMovedEvent
   | SketchPointerReleasedEvent
@@ -1542,6 +1548,24 @@ function isFeatureTool(toolId: ToolId): toolId is Extract<ToolId, 'extrude' | 'r
     || toolId === 'transform'
 }
 
+function isPassiveSketchTool(toolId: ToolId): toolId is Extract<ToolId, 'spline' | 'dimension' | 'trim' | 'offset' | 'fill' | 'stroke' | 'fillType' | 'fillSolid' | 'fillGradient' | 'strokeOptions' | 'strokeWidth' | 'strokeCap' | 'strokeJoin' | 'strokeMiter' | 'strokeDash'> {
+  return toolId === 'spline'
+    || toolId === 'dimension'
+    || toolId === 'trim'
+    || toolId === 'offset'
+    || toolId === 'fill'
+    || toolId === 'stroke'
+    || toolId === 'fillType'
+    || toolId === 'fillSolid'
+    || toolId === 'fillGradient'
+    || toolId === 'strokeOptions'
+    || toolId === 'strokeWidth'
+    || toolId === 'strokeCap'
+    || toolId === 'strokeJoin'
+    || toolId === 'strokeMiter'
+    || toolId === 'strokeDash'
+}
+
 /**
  * Pure editor transition function for Phase 1.
  * The reducer never performs async work directly and emits only typed effect requests.
@@ -1593,6 +1617,13 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
               target: session.planeTarget,
             },
           },
+          effects: [],
+        }
+      }
+
+      if (state.kind === 'editingSketch' && isPassiveSketchTool(event.toolId)) {
+        return {
+          state,
           effects: [],
         }
       }
@@ -1869,6 +1900,50 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         ),
         effects: [],
       }
+    case 'selection.cleared': {
+      if (state.kind === 'editingSketch' && state.session.constraintAuthoring) {
+        const session = updateSketchConstraintHover(state.session, null)
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      const clearedState = {
+        ...state,
+        selection: [],
+        hoverTarget: null,
+      }
+
+      return {
+        state: withPreview(
+          clearedState,
+          state.kind === 'editingSketch'
+            ? {
+                kind: 'sketch',
+                label: getSketchSessionPreviewLabel(state.session),
+                target: state.session.planeTarget,
+              }
+            : state.kind === 'selectionCommand'
+              ? createSelectionPreview(clearedState, state.selectionFilter)
+              : state.kind === 'editingFeature'
+                ? createFeatureSelectionPreview(state.session)
+                : state.preview,
+        ),
+        effects: [],
+      }
+    }
     case 'viewport.selectionRequested': {
       if (
         !selectionFilterAllowsTarget(

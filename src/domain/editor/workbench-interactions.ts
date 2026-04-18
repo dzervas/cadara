@@ -4,7 +4,7 @@ import type {
   EditorViewState,
 } from '@/contracts/editor/state-machine'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef, SelectionFilter } from '@/domain/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
 import {
   isSketchConstructionSelected,
@@ -52,7 +52,7 @@ export function getNavigationReopenRequest(
 }
 
 export function getEscapeEvent(
-  state: Pick<EditorViewState, 'activeCommand' | 'activeReferencePickerFieldId' | 'sketchSession'>,
+  state: Pick<EditorViewState, 'activeCommand' | 'activeReferencePickerFieldId' | 'selection' | 'sketchSession'>,
 ): EditorEvent | null {
   if (state.activeReferencePickerFieldId) {
     return { type: 'form.referencePickerCancelled' }
@@ -67,6 +67,10 @@ export function getEscapeEvent(
       type: 'command.cancelled',
       commandSessionId: state.activeCommand.commandSessionId,
     }
+  }
+
+  if (state.selection.length > 0) {
+    return { type: 'selection.cleared' }
   }
 
   return null
@@ -90,4 +94,38 @@ export function shouldViewportStartSketchGeometryDrag(
   }
 
   return activeSketchTool == null || isRegisteredSketchToolId(activeSketchTool)
+}
+
+export type ViewportCanvasClickIntent = 'clearSelection' | 'ignore' | 'selectTarget'
+
+export function getViewportCanvasClickIntent({
+  activeSketchTool,
+  hasResolvedTarget,
+  isBackgroundDatumTarget = false,
+  selectionFilterKind = null,
+}: {
+  activeSketchTool: SketchAuthoringToolId | null | undefined
+  hasResolvedTarget: boolean
+  isBackgroundDatumTarget?: boolean
+  selectionFilterKind?: SelectionFilter['kind'] | null
+}): ViewportCanvasClickIntent {
+  if (
+    !hasResolvedTarget
+    || (isBackgroundDatumTarget && shouldTreatBackgroundDatumClickAsEmpty(activeSketchTool, selectionFilterKind))
+  ) {
+    return 'clearSelection'
+  }
+
+  return shouldViewportClickRequestSelection(activeSketchTool) ? 'selectTarget' : 'ignore'
+}
+
+function shouldTreatBackgroundDatumClickAsEmpty(
+  activeSketchTool: SketchAuthoringToolId | null | undefined,
+  selectionFilterKind: SelectionFilter['kind'] | null,
+) {
+  if (selectionFilterKind === 'sketchStart' || selectionFilterKind === 'planeReferences') {
+    return false
+  }
+
+  return activeSketchTool !== 'construction'
 }
