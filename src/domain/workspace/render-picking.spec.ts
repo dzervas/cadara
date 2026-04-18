@@ -6,12 +6,16 @@ import type { PrimitiveRef } from '@/domain/editor/schema'
 import {
   MARKER_SPHERE_GEOMETRY,
   DEFAULT_LINE_PICK_THRESHOLD,
+  collectRaycastPickCandidates,
   bindRenderableObject,
   collectBindings,
   createInvisiblePickMaterial,
   createMarkerPickProxy,
+  createProjectedPickCandidate,
   getVisibleMarkerRadius,
+  resolveAllCandidates,
   resolvePickTarget,
+  shouldIncludeProjectedPickCandidate,
   updateWorkspaceHighlight,
 } from '@/domain/workspace/render-picking'
 
@@ -215,8 +219,10 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     const faceMesh = createBoundMesh(faceRenderable)
     const edgeLine = createBoundLine(edgeRenderable)
 
+    // This is intentionally beyond the inclusive face/wire occlusion tolerance;
+    // wires inside that tolerance are treated as pickable at the face boundary.
     const resolved = resolvePickTarget([
-      createIntersection(edgeLine, 0.805),
+      createIntersection(edgeLine, 0.811),
       createIntersection(faceMesh, 0.8),
     ])
 
@@ -595,6 +601,256 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
 
   {
     assertEqual(DEFAULT_LINE_PICK_THRESHOLD, 0.75, 'Line picking must use the stable default threshold.')
+  }
+
+  {
+    const faceMesh = createBoundMesh(faceRenderable)
+    const projectedVertex = createProjectedPickCandidate({
+      pickId: vertexRenderable.binding.pickId,
+      target: vertexRenderable.binding.target,
+      renderable: vertexRenderable,
+      semanticClass: 'featureVertex',
+      priority: vertexRenderable.binding.pickPriority,
+      screenDistance: 40,
+      depth: 0.4,
+    })
+
+    const resolved = resolveAllCandidates([
+      ...collectRaycastPickCandidates([createIntersection(faceMesh, 0.5)]),
+      projectedVertex,
+    ])
+
+    assertDeepEqual(
+      resolved?.target,
+      vertexRenderable.binding.target,
+      'Unified picking must prefer an in-radius projected vertex over a raycast face.',
+    )
+  }
+
+  {
+    const edgeLine = createBoundLine(edgeRenderable)
+    const projectedEdge = createProjectedPickCandidate({
+      pickId: 'projected_edge',
+      target: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_projected' },
+      semanticClass: 'featureEdge',
+      screenDistance: 1,
+      depth: 0,
+      stableKey: 'projected:edge',
+    })
+
+    const resolved = resolveAllCandidates([
+      projectedEdge,
+      ...collectRaycastPickCandidates([createIntersection(edgeLine, 0.5)]),
+    ])
+
+    assertDeepEqual(
+      resolved?.target,
+      edgeRenderable.binding.target,
+      'Projected non-point candidates must not displace same-rank raycast hits.',
+    )
+  }
+
+  {
+    const currentHover = vertexRenderable.binding.target
+
+    assertEqual(
+      shouldIncludeProjectedPickCandidate({
+        target: currentHover,
+        currentHoverTarget: currentHover,
+        screenDistance: 50,
+      }),
+      true,
+      'Current hover must remain active inside the projected-point exit radius.',
+    )
+    assertDeepEqual(
+      resolveAllCandidates([
+        createProjectedPickCandidate({
+          pickId: vertexRenderable.binding.pickId,
+          target: currentHover,
+          renderable: vertexRenderable,
+          semanticClass: 'featureVertex',
+          screenDistance: 50,
+          depth: 0,
+        }),
+      ])?.target,
+      currentHover,
+      'A hysteresis-retained projected candidate must still resolve to the current target.',
+    )
+    assertEqual(
+      shouldIncludeProjectedPickCandidate({
+        target: currentHover,
+        currentHoverTarget: currentHover,
+        screenDistance: 60,
+      }),
+      false,
+      'Current hover must clear beyond the projected-point exit radius.',
+    )
+  }
+
+  {
+    const faceMesh = createBoundMesh(faceRenderable)
+    const edgeLine = createBoundLine(edgeRenderable)
+
+    const atBoundary = resolvePickTarget([
+      createIntersection(faceMesh, 1),
+      createIntersection(edgeLine, 1.01),
+    ])
+    assertDeepEqual(
+      atBoundary?.target,
+      edgeRenderable.binding.target,
+      'Wires exactly at the occlusion tolerance behind a face must remain pickable.',
+    )
+
+    const beyondBoundary = resolvePickTarget([
+      createIntersection(faceMesh, 1),
+      createIntersection(edgeLine, 1.011),
+    ])
+    assertDeepEqual(
+      beyondBoundary?.target,
+      faceRenderable.binding.target,
+      'Wires beyond the occlusion tolerance must be occluded by the face.',
+    )
+  }
+
+  {
+    const constructionRenderable: RenderableEntityRecord = {
+      id: 'renderable_construction_boundary',
+      label: 'XY Plane',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_construction_boundary',
+        pickPriority: 5,
+        target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        topology: null,
+        semanticClass: 'construction',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const regionRenderable: RenderableEntityRecord = {
+      id: 'renderable_region_same_layer_boundary',
+      label: 'Region',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_region_same_layer_boundary',
+        pickPriority: 8,
+        target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_boundary' },
+        topology: null,
+        semanticClass: 'region',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const construction = createBoundObject(constructionRenderable)
+    const region = createBoundObject(regionRenderable)
+
+    assertDeepEqual(
+      resolvePickTarget([
+        createIntersection(construction, 1),
+        createIntersection(region, 1.003),
+      ])?.target,
+      regionRenderable.binding.target,
+      'Same-layer tolerance must prefer the higher-ranked candidate at 0.003.',
+    )
+    assertDeepEqual(
+      resolvePickTarget([
+        createIntersection(construction, 1),
+        createIntersection(region, 1.004),
+      ])?.target,
+      regionRenderable.binding.target,
+      'Same-layer tolerance must be inclusive at exactly 0.004.',
+    )
+    assertDeepEqual(
+      resolvePickTarget([
+        createIntersection(construction, 1),
+        createIntersection(region, 1.005),
+      ])?.target,
+      constructionRenderable.binding.target,
+      'Same-layer tolerance must switch to depth ordering beyond 0.004.',
+    )
+  }
+
+  {
+    const nearRenderable: RenderableEntityRecord = {
+      ...vertexRenderable,
+      id: 'renderable_duplicate_near',
+      binding: {
+        ...vertexRenderable.binding,
+        pickId: 'pick_duplicate_vertex',
+        target: { kind: 'vertex', bodyId: 'body_a', vertexId: 'vertex_duplicate_near' },
+      },
+    }
+    const farRenderable: RenderableEntityRecord = {
+      ...vertexRenderable,
+      id: 'renderable_duplicate_far',
+      binding: {
+        ...vertexRenderable.binding,
+        pickId: 'pick_duplicate_vertex',
+        target: { kind: 'vertex', bodyId: 'body_a', vertexId: 'vertex_duplicate_far' },
+      },
+    }
+    const near = createBoundObject(nearRenderable)
+    const far = createBoundObject(farRenderable)
+
+    const forward = resolvePickTarget([
+      createIntersection(far, 2),
+      createIntersection(near, 1),
+    ])
+    const reverse = resolvePickTarget([
+      createIntersection(near, 1),
+      createIntersection(far, 2),
+    ])
+
+    assertDeepEqual(
+      forward?.target,
+      nearRenderable.binding.target,
+      'Duplicate pickIds must keep the nearest sorted candidate, not the first input candidate.',
+    )
+    assertDeepEqual(
+      reverse?.target,
+      nearRenderable.binding.target,
+      'Duplicate pickId filtering must be stable regardless of input order.',
+    )
+  }
+
+  {
+    const rejected = createProjectedPickCandidate({
+      pickId: vertexRenderable.binding.pickId,
+      target: vertexRenderable.binding.target,
+      renderable: vertexRenderable,
+      semanticClass: 'featureVertex',
+      screenDistance: 4,
+      depth: 0,
+    })
+    const accepted = createProjectedPickCandidate({
+      pickId: edgeRenderable.binding.pickId,
+      target: edgeRenderable.binding.target,
+      renderable: edgeRenderable,
+      semanticClass: 'featureEdge',
+      screenDistance: 6,
+      depth: 0,
+    })
+
+    const resolved = resolveAllCandidates(
+      [rejected, accepted],
+      (target) => target.kind === 'edge',
+    )
+
+    assertDeepEqual(
+      resolved?.target,
+      edgeRenderable.binding.target,
+      'Rejected high-priority candidates must not prevent the next acceptable candidate from resolving.',
+    )
   }
 
   console.log('All render-picking tests passed.')

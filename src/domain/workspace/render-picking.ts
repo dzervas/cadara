@@ -10,11 +10,27 @@ import type {
   ViewportRenderableOrigin,
 } from '@/domain/workspace/viewport-renderables'
 
-type WorkspaceSemanticClass = RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
+export type WorkspaceSemanticClass = RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
 
 export interface CollectedBindings {
   pickables: THREE.Object3D[]
   targetToObjects: Map<string, THREE.Object3D[]>
+}
+
+export interface PickResult {
+  pickId: string | null
+  target: PrimitiveRef
+  renderable: RenderableEntityRecord | null
+}
+
+export interface PickCandidate extends PickResult {
+  source: 'raycast' | 'projected'
+  semanticClass: WorkspaceSemanticClass
+  priority: number
+  rayDistance: number | null
+  screenDistance: number | null
+  depth: number
+  stableKey: string
 }
 
 interface PickResolutionOptions {
@@ -37,8 +53,11 @@ const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
 const VISIBLE_MARKER_SCALE_FACTOR = 0.44
 const MARKER_PICK_SCALE_FACTOR = 1.45
 export const DEFAULT_LINE_PICK_THRESHOLD = 0.75
+export const DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX = 48
+export const DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX = 56
 const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01
 const DEFAULT_SAME_LAYER_TOLERANCE = 0.004
+const PICK_DISTANCE_EPSILON = 1e-9
 
 export const SURFACE_COLORS = {
   bodyFace: 0xf1eee4,
@@ -57,66 +76,136 @@ export function resolvePickTarget(
   acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
   options: PickResolutionOptions = {},
 ) {
+  return resolveAllCandidates(
+    collectRaycastPickCandidates(intersections),
+    acceptsTarget,
+    options,
+  )
+}
+
+export function collectRaycastPickCandidates(
+  intersections: THREE.Intersection<THREE.Object3D>[],
+): PickCandidate[] {
+  return intersections.flatMap((intersection) => {
+    const target = getBoundTarget(intersection.object)
+    const semanticClass = getBoundSemanticClass(intersection.object)
+    const origin = getBoundRenderableOrigin(intersection.object)
+
+    if (!target || !semanticClass || !origin) {
+      return []
+    }
+
+    const pickId = getBoundPickId(intersection.object) ?? null
+    const renderable = getBoundRenderableRecord(intersection.object) ?? null
+
+    return [{
+      source: 'raycast',
+      pickId,
+      target,
+      priority: getBoundPickPriority(intersection.object) ?? Number.POSITIVE_INFINITY,
+      semanticClass,
+      renderable,
+      rayDistance: intersection.distance,
+      screenDistance: null,
+      depth: Number.isFinite(intersection.distance) ? intersection.distance : Number.POSITIVE_INFINITY,
+      stableKey: getStablePickKey({
+        pickId,
+        target,
+        semanticClass,
+        renderable,
+      }),
+    }]
+  })
+}
+
+export function createProjectedPickCandidate({
+  pickId,
+  target,
+  renderable = null,
+  semanticClass,
+  priority = Number.POSITIVE_INFINITY,
+  screenDistance,
+  depth,
+  stableKey,
+}: {
+  pickId: string | null
+  target: PrimitiveRef
+  renderable?: RenderableEntityRecord | null
+  semanticClass: WorkspaceSemanticClass
+  priority?: number
+  screenDistance: number
+  depth: number
+  stableKey?: string
+}): PickCandidate {
+  return {
+    source: 'projected',
+    pickId,
+    target,
+    renderable,
+    semanticClass,
+    priority,
+    rayDistance: null,
+    screenDistance,
+    depth,
+    stableKey: stableKey ?? getStablePickKey({
+      pickId,
+      target,
+      semanticClass,
+      renderable,
+    }),
+  }
+}
+
+export function shouldIncludeProjectedPickCandidate({
+  target,
+  currentHoverTarget,
+  screenDistance,
+  enterRadius = DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
+  exitRadius = DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
+}: {
+  target: PrimitiveRef
+  currentHoverTarget: PrimitiveRef | null
+  screenDistance: number
+  enterRadius?: number
+  exitRadius?: number
+}) {
+  const radius = currentHoverTarget && primitiveRefEquals(currentHoverTarget, target)
+    ? exitRadius
+    : enterRadius
+
+  return screenDistance <= radius
+}
+
+export function resolveAllCandidates(
+  candidates: PickCandidate[],
+  acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
+  options: PickResolutionOptions = {},
+): PickResult | null {
   const wireOcclusionTolerance = options.wireOcclusionTolerance ?? DEFAULT_WIRE_OCCLUSION_TOLERANCE
   const sameLayerTolerance = options.sameLayerTolerance ?? DEFAULT_SAME_LAYER_TOLERANCE
-  const resolvedHits = intersections
-    .map((intersection) => {
-      const target = getBoundTarget(intersection.object)
-      const semanticClass = getBoundSemanticClass(intersection.object)
-      const origin = getBoundRenderableOrigin(intersection.object)
-
-      if (!target || !semanticClass || !origin) {
-        return null
-      }
-
-      return {
-        intersection,
-        pickId: getBoundPickId(intersection.object) ?? null,
-        target,
-        priority: getBoundPickPriority(intersection.object) ?? Number.POSITIVE_INFINITY,
-        semanticClass,
-        renderable: getBoundRenderableRecord(intersection.object) ?? null,
-      }
-    })
-    .filter((hit): hit is NonNullable<typeof hit> => hit !== null)
+  const resolvedHits = [...candidates]
+    .sort((left, right) => comparePickCandidates(left, right, {
+      sameLayerTolerance,
+      wireOcclusionTolerance,
+    }))
     .filter(createUniqueHitFilter())
-    .sort((left, right) => {
-      const distanceDelta = left.intersection.distance - right.intersection.distance
-
-      if (Math.abs(distanceDelta) > sameLayerTolerance) {
-        return distanceDelta
-      }
-
-      const rankDelta = getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
-
-      if (rankDelta !== 0) {
-        return rankDelta
-      }
-
-      const priorityDelta = left.priority - right.priority
-
-      if (priorityDelta !== 0) {
-        return priorityDelta
-      }
-
-      return getHitStableKey(left).localeCompare(getHitStableKey(right))
-    })
 
   const nearestOccludingFaceDistance = resolvedHits.reduce<number | null>((nearest, hit) => {
-    if (!isOccludingFaceSemanticClass(hit.semanticClass)) {
+    if (!isOccludingFaceSemanticClass(hit.semanticClass) || hit.rayDistance === null) {
       return nearest
     }
 
     return nearest === null
-      ? hit.intersection.distance
-      : Math.min(nearest, hit.intersection.distance)
+      ? hit.rayDistance
+      : Math.min(nearest, hit.rayDistance)
   }, null)
 
   for (const hit of resolvedHits) {
     if (
       nearestOccludingFaceDistance !== null
       && isWireSemanticClass(hit.semanticClass)
-      && hit.intersection.distance - nearestOccludingFaceDistance > wireOcclusionTolerance
+      && hit.rayDistance !== null
+      && hit.rayDistance - nearestOccludingFaceDistance > wireOcclusionTolerance + PICK_DISTANCE_EPSILON
     ) {
       continue
     }
@@ -317,12 +406,7 @@ function getInteractionSortRank(semanticClass: WorkspaceSemanticClass) {
 function createUniqueHitFilter() {
   const seen = new Set<string>()
 
-  return (hit: {
-    pickId: string | null
-    target: PrimitiveRef
-    semanticClass: WorkspaceSemanticClass
-    renderable: RenderableEntityRecord | null
-  }) => {
+  return (hit: PickCandidate) => {
     const key = hit.pickId
       ?? hit.renderable?.id
       ?? `${hit.semanticClass}:${getPrimitiveRefKey(hit.target)}`
@@ -336,7 +420,109 @@ function createUniqueHitFilter() {
   }
 }
 
-function getHitStableKey(hit: {
+function comparePickCandidates(
+  left: PickCandidate,
+  right: PickCandidate,
+  options: {
+    sameLayerTolerance: number
+    wireOcclusionTolerance: number
+  },
+) {
+  if (left.source !== right.source) {
+    const rankDelta = getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
+
+    if (rankDelta !== 0) {
+      return rankDelta
+    }
+
+    if (!isProjectedPointCandidate(left) && !isProjectedPointCandidate(right)) {
+      return left.source === 'raycast' ? -1 : 1
+    }
+  }
+
+  if (left.source === 'projected' || right.source === 'projected') {
+    const rankDelta = getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
+
+    if (rankDelta !== 0) {
+      return rankDelta
+    }
+
+    const screenDistanceDelta = getSortableScreenDistance(left) - getSortableScreenDistance(right)
+
+    if (screenDistanceDelta !== 0) {
+      return screenDistanceDelta
+    }
+
+    const depthDelta = left.depth - right.depth
+
+    if (depthDelta !== 0) {
+      return depthDelta
+    }
+
+    const priorityDelta = left.priority - right.priority
+
+    if (priorityDelta !== 0) {
+      return priorityDelta
+    }
+
+    return left.stableKey.localeCompare(right.stableKey)
+  }
+
+  const leftDistance = left.rayDistance ?? Number.POSITIVE_INFINITY
+  const rightDistance = right.rayDistance ?? Number.POSITIVE_INFINITY
+  const distanceDelta = leftDistance - rightDistance
+  const layerTolerance = getRayLayerTolerance(left, right, options)
+
+  if (Math.abs(distanceDelta) > layerTolerance + PICK_DISTANCE_EPSILON) {
+    return distanceDelta
+  }
+
+  const rankDelta = getInteractionSortRank(left.semanticClass) - getInteractionSortRank(right.semanticClass)
+
+  if (rankDelta !== 0) {
+    return rankDelta
+  }
+
+  const priorityDelta = left.priority - right.priority
+
+  if (priorityDelta !== 0) {
+    return priorityDelta
+  }
+
+  return left.stableKey.localeCompare(right.stableKey)
+}
+
+function isProjectedPointCandidate(candidate: PickCandidate) {
+  return candidate.source === 'projected'
+    && (candidate.semanticClass === 'featureVertex' || candidate.semanticClass === 'sketchPoint')
+}
+
+function getRayLayerTolerance(
+  left: PickCandidate,
+  right: PickCandidate,
+  options: {
+    sameLayerTolerance: number
+    wireOcclusionTolerance: number
+  },
+) {
+  const isFaceWirePair = (
+    isOccludingFaceSemanticClass(left.semanticClass)
+    && isWireSemanticClass(right.semanticClass)
+  ) || (
+    isWireSemanticClass(left.semanticClass)
+    && isOccludingFaceSemanticClass(right.semanticClass)
+  )
+
+  return isFaceWirePair
+    ? Math.max(options.sameLayerTolerance, options.wireOcclusionTolerance)
+    : options.sameLayerTolerance
+}
+
+function getSortableScreenDistance(candidate: PickCandidate) {
+  return candidate.screenDistance ?? Number.POSITIVE_INFINITY
+}
+
+function getStablePickKey(hit: {
   pickId: string | null
   target: PrimitiveRef
   semanticClass: WorkspaceSemanticClass
