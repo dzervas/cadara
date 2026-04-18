@@ -42,6 +42,11 @@ export type ToolIconId =
   | 'plane'
   | 'combine'
   | 'history'
+  | 'svgFill'
+  | 'svgStroke'
+  | 'svgStrokeCap'
+  | 'svgStrokeJoin'
+  | 'svgGradient'
 
 export interface ToolGroupDefinition<TId extends string = string> {
   id: TId
