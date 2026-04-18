@@ -32,6 +32,7 @@ import {
   getSketchSessionPreviewLabel,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
+  patchSketchStyleValue,
   pinSketchConstraintPreview,
   selectSketchEditTarget,
   selectSketchAnnotation,
@@ -2310,16 +2311,21 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
-      return {
-        state: {
-          ...state,
-          preview: {
-            kind: 'sketch',
-            label: getSketchSessionPreviewLabel(state.session),
-            target: state.session.planeTarget,
+      {
+        const session = patchSketchStyleValue(state.session, state.selection, event.patch)
+
+        return {
+          state: {
+            ...state,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
           },
-        },
-        effects: [],
+          effects: [],
+        }
       }
     case 'sketch.activeToolCleared':
       if (state.kind !== 'editingSketch') {

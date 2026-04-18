@@ -7,6 +7,7 @@ import type {
   SketchEntityDefinition,
   SketchPointDefinition,
   SketchReferenceDefinition,
+  SketchStyleDefinition,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
@@ -38,6 +39,12 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
+import {
+  buildSketchStyleControls,
+  isSketchStyleTarget,
+  parseSketchStylePatch,
+  type SketchStylePatch,
+} from '@/domain/sketch-styles/definition'
 import { mapSketchPointToWorld as mapSketchPointToWorldFromPlane } from '@/domain/modeling/occ/planes'
 import {
   createStandardPlaneDefinition,
@@ -2538,7 +2545,16 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
   }
 
   if (!isDrawingSketchTool(session.activeTool)) {
-    return null
+    if (!session.activeEditTarget) {
+      return null
+    }
+
+    const styledPoint = session.definition.points.find((point) => point.pointId === session.activeEditTarget?.pointId)
+
+    return {
+      prompts: [{ id: 'sketch-style-prompt', text: 'Edit local sketch style' }],
+      controls: buildSketchStyleControls(styledPoint?.style),
+    }
   }
 
   return session.toolPresentation
@@ -2688,6 +2704,40 @@ export function patchSketchConstraintValue(
   return commitSketchConstraintAuthoring(session)
 }
 
+export function patchSketchStyleValue(
+  session: SketchSessionState,
+  selectedTargets: readonly PrimitiveRef[],
+  patch: Record<string, unknown>,
+): SketchSessionState {
+  const parsedPatch = parseSketchStylePatch(patch)
+
+  if (!parsedPatch) {
+    return session
+  }
+
+  const sketchId = getSessionSketchId(session)
+  const localTargets = selectedTargets.filter((target) => isSketchStyleTarget(target, sketchId))
+
+  if (localTargets.length === 0) {
+    return session
+  }
+
+  const nextFullDefinition = applyStylePatchToDefinition(session.fullDefinition, localTargets, parsedPatch)
+
+  if (nextFullDefinition === session.fullDefinition) {
+    return session
+  }
+
+  const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
+
+  return {
+    ...session,
+    fullDefinition: nextFullDefinition,
+    definition: nextDefinition,
+    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+  }
+}
+
 export function beginSketchAnnotationEdit(
   session: SketchSessionState,
   target: SketchConstraintRef | SketchDimensionRef,
@@ -2772,6 +2822,129 @@ function patchSketchAnnotationEditValue(
     ...edit,
     pendingValue: edit.pendingValue,
   })
+}
+
+function applyStylePatchToDefinition(
+  definition: SketchDefinition,
+  targets: readonly Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }>[],
+  patch: SketchStylePatch,
+): SketchDefinition {
+  const pointIds = new Set(
+    targets
+      .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchPoint' }> => target.kind === 'sketchPoint')
+      .map((target) => target.pointId),
+  )
+  const entityIds = new Set(
+    targets
+      .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => target.kind === 'sketchEntity')
+      .map((target) => target.entityId),
+  )
+
+  let didChange = false
+
+  const points = definition.points.map((point) => {
+    if (!pointIds.has(point.pointId)) {
+      return point
+    }
+
+    const nextStyle = applySketchStyleDefinitionPatch(point.style, patch)
+    if (nextStyle === point.style) {
+      return point
+    }
+
+    didChange = true
+    return { ...point, style: nextStyle }
+  })
+
+  const entities = definition.entities.map((entity) => {
+    if (!entityIds.has(entity.entityId)) {
+      return entity
+    }
+
+    const nextStyle = applySketchStyleDefinitionPatch(entity.style, patch)
+    if (nextStyle === entity.style) {
+      return entity
+    }
+
+    didChange = true
+    return { ...entity, style: nextStyle }
+  })
+
+  if (!didChange) {
+    return definition
+  }
+
+  return {
+    ...definition,
+    points,
+    entities,
+  }
+}
+
+function applySketchStyleDefinitionPatch(
+  style: SketchStyleDefinition | undefined,
+  patch: SketchStylePatch,
+): SketchStyleDefinition {
+  const next = { ...(style ?? {}) }
+
+  switch (patch.field) {
+    case 'fillMode':
+      if (next.fillMode === patch.value) {
+        return style ?? next
+      }
+      next.fillMode = patch.value
+      break
+    case 'fillColor':
+      if (next.fillColor === patch.value) {
+        return style ?? next
+      }
+      next.fillColor = patch.value
+      break
+    case 'gradientStartColor':
+      if (next.gradientStartColor === patch.value) {
+        return style ?? next
+      }
+      next.gradientStartColor = patch.value
+      break
+    case 'gradientEndColor':
+      if (next.gradientEndColor === patch.value) {
+        return style ?? next
+      }
+      next.gradientEndColor = patch.value
+      break
+    case 'strokeEnabled':
+      if (next.strokeEnabled === patch.value) {
+        return style ?? next
+      }
+      next.strokeEnabled = patch.value
+      break
+    case 'strokeColor':
+      if (next.strokeColor === patch.value) {
+        return style ?? next
+      }
+      next.strokeColor = patch.value
+      break
+    case 'strokeWidth':
+      if (next.strokeWidth === patch.value) {
+        return style ?? next
+      }
+      next.strokeWidth = patch.value
+      break
+    case 'strokeCap':
+      if (next.strokeCap === patch.value) {
+        return style ?? next
+      }
+      next.strokeCap = patch.value
+      break
+    case 'strokeJoin':
+      if (next.strokeJoin === patch.value) {
+        return style ?? next
+      }
+      next.strokeJoin = patch.value
+      break
+  }
+
+  return next
 }
 
 function clearSketchAnnotationEdit(session: SketchSessionState): SketchSessionState {

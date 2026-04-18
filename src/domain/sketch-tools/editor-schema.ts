@@ -69,6 +69,22 @@ export type SketchToolControlDescriptor =
     }
   | {
       id: string
+      kind: 'toggle'
+      label: string
+      value: boolean
+      disabled?: boolean
+      action: SketchToolActionDescriptor
+    }
+  | {
+      id: string
+      kind: 'color'
+      label: string
+      value: string
+      disabled?: boolean
+      action: SketchToolActionDescriptor
+    }
+  | {
+      id: string
       kind: 'option'
       label: string
       value: string | null

@@ -1769,6 +1769,58 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [8, 0])
+
+    const target = session.definition.entities[0]?.target
+    assert(target, 'Style patch routing fixture should create a selectable local sketch entity.')
+
+    const baseState: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [target],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-style-patch-1',
+        toolId: 'line',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+    }
+
+    const patched = transitionEditorState(baseState, {
+      type: 'sketch.toolPatched',
+      patch: { intent: 'patchSketchStyle', field: 'strokeColor', value: '#ff00ff' },
+    })
+
+    assert(patched.state.kind === 'editingSketch', 'Sketch style patch event should remain in sketch editing.')
+    assert(
+      patched.state.session.definition.entities[0]?.style?.strokeColor === '#ff00ff',
+      'Sketch style patch should update the selected local entity style via sketch.toolPatched routing.',
+    )
+    assert(
+      patched.state.session.commitRequest?.definition.entities[0]?.style?.strokeColor === '#ff00ff',
+      'Sketch style patch should rebuild the durable commit request payload.',
+    )
+  }
+
   function testRejectedSketchCommitShowsValidationMessage() {
     const session = createNewSketchSession(createStandardPlaneDefinition('xy'))
     const diagnostic: ModelingDiagnostic = {
@@ -1841,6 +1893,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testConstraintAuthoringIgnoresInvalidViewportSelection()
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
+  testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest()
   testRejectedSketchCommitShowsValidationMessage()
   testReplayIsDeterministic()
   testSelectionKeyUsesDurableRefs()

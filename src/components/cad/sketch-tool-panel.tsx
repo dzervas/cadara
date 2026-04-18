@@ -82,7 +82,7 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
                       })
                     }}
                   />
-                ) : (
+                ) : control.kind === 'option' ? (
                   <select
                     className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
                     disabled={control.disabled}
@@ -100,6 +100,32 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
                       </option>
                     ))}
                   </select>
+                ) : control.kind === 'toggle' ? (
+                  <input
+                    className="h-4 w-4 rounded border border-[var(--cad-border)] bg-[var(--cad-surface)] text-[var(--cad-foreground)] outline-none"
+                    disabled={control.disabled}
+                    type="checkbox"
+                    checked={control.value}
+                    onChange={(event) => {
+                      onPatch({
+                        ...control.action.patch,
+                        value: event.currentTarget.checked,
+                      })
+                    }}
+                  />
+                ) : (
+                  <input
+                    className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
+                    disabled={control.disabled}
+                    type="color"
+                    value={control.value}
+                    onChange={(event) => {
+                      onPatch({
+                        ...control.action.patch,
+                        value: event.currentTarget.value,
+                      })
+                    }}
+                  />
                 )}
               </label>
             ))}

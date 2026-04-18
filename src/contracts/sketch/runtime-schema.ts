@@ -87,6 +87,17 @@ const sketchPointDefinitionSchema = z.object({
   target: sketchPointRefSchema,
   position: point2dSchema,
   isConstruction: z.boolean(),
+  style: z.object({
+    fillMode: z.union([z.literal('none'), z.literal('solid'), z.literal('gradient')]).optional(),
+    fillColor: z.string().optional(),
+    gradientStartColor: z.string().optional(),
+    gradientEndColor: z.string().optional(),
+    strokeEnabled: z.boolean().optional(),
+    strokeColor: z.string().optional(),
+    strokeWidth: z.number().min(0).optional(),
+    strokeCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]).optional(),
+    strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
+  }).optional(),
 }).transform((value) => value as SketchPointDefinition)
 
 const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
@@ -98,6 +109,17 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     isConstruction: z.boolean(),
     startPointId: sketchPointIdSchema,
     endPointId: sketchPointIdSchema,
+    style: z.object({
+      fillMode: z.union([z.literal('none'), z.literal('solid'), z.literal('gradient')]).optional(),
+      fillColor: z.string().optional(),
+      gradientStartColor: z.string().optional(),
+      gradientEndColor: z.string().optional(),
+      strokeEnabled: z.boolean().optional(),
+      strokeColor: z.string().optional(),
+      strokeWidth: z.number().min(0).optional(),
+      strokeCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]).optional(),
+      strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
+    }).optional(),
   }),
   z.object({
     kind: z.literal('point'),
@@ -106,6 +128,17 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     target: sketchEntityRefSchema,
     isConstruction: z.boolean(),
     pointId: sketchPointIdSchema,
+    style: z.object({
+      fillMode: z.union([z.literal('none'), z.literal('solid'), z.literal('gradient')]).optional(),
+      fillColor: z.string().optional(),
+      gradientStartColor: z.string().optional(),
+      gradientEndColor: z.string().optional(),
+      strokeEnabled: z.boolean().optional(),
+      strokeColor: z.string().optional(),
+      strokeWidth: z.number().min(0).optional(),
+      strokeCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]).optional(),
+      strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
+    }).optional(),
   }),
   z.object({
     kind: z.literal('circle'),
@@ -115,6 +148,17 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     isConstruction: z.boolean(),
     centerPointId: sketchPointIdSchema,
     radius: positiveNumberSchema('Circle radius must be positive.'),
+    style: z.object({
+      fillMode: z.union([z.literal('none'), z.literal('solid'), z.literal('gradient')]).optional(),
+      fillColor: z.string().optional(),
+      gradientStartColor: z.string().optional(),
+      gradientEndColor: z.string().optional(),
+      strokeEnabled: z.boolean().optional(),
+      strokeColor: z.string().optional(),
+      strokeWidth: z.number().min(0).optional(),
+      strokeCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]).optional(),
+      strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
+    }).optional(),
   }),
   z.object({
     kind: z.literal('arc'),
@@ -126,6 +170,17 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     startPointId: sketchPointIdSchema,
     endPointId: sketchPointIdSchema,
     sweepDirection: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
+    style: z.object({
+      fillMode: z.union([z.literal('none'), z.literal('solid'), z.literal('gradient')]).optional(),
+      fillColor: z.string().optional(),
+      gradientStartColor: z.string().optional(),
+      gradientEndColor: z.string().optional(),
+      strokeEnabled: z.boolean().optional(),
+      strokeColor: z.string().optional(),
+      strokeWidth: z.number().min(0).optional(),
+      strokeCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]).optional(),
+      strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
+    }).optional(),
   }),
 ]).transform((value) => value as SketchEntityDefinition)
 
