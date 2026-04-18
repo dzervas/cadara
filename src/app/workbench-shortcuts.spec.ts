@@ -65,6 +65,19 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
     'Escape should dispatch the sketch active-tool clear event when a sketch tool is active.',
   )
 
+  const escapeStyleFocusFixture = createFixture({
+    mode: 'sketch',
+    selection: [{ kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_1' } as PrimitiveRef],
+    sketchSession: createSketchSession(null, 'stroke'),
+  })
+
+  const escapeStyleFocusResult = escapeStyleFocusFixture.press({ key: 'Escape' })
+  assert(escapeStyleFocusResult.commandId === 'editor.cancel', 'Escape should resolve to cancel while a sketch style tool is focused.')
+  assert(
+    escapeStyleFocusFixture.dispatchedEvents.at(-1)?.type === 'sketch.activeToolCleared',
+    'Escape should dispatch sketch active-tool clear before clearing selection while a style tool is focused.',
+  )
+
   const escapeSelectionFixture = createFixture({
     mode: 'part',
     selection: [{ kind: 'body', bodyId: 'body_a' } as PrimitiveRef],
@@ -195,8 +208,21 @@ function createFixture({
 
 function createSketchSession(
   activeTool: NonNullable<EditorViewState['sketchSession']>['activeTool'] = null,
+  styleToolId: 'stroke' | null = null,
 ) {
-  return { activeTool } as EditorViewState['sketchSession']
+  return {
+    activeTool,
+    activeStyleFocus: styleToolId
+      ? {
+          toolId: styleToolId,
+          target: {
+            kind: 'sketchEntity',
+            sketchId: 'sketch_draft',
+            entityId: 'sketch_entity_1',
+          },
+        }
+      : null,
+  } as EditorViewState['sketchSession']
 }
 
 function createTextTarget(target: { isContentEditable?: true; tagName?: string }) {

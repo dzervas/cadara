@@ -39,6 +39,7 @@ import {
   createSketchSessionFromSnapshot,
   getSketchAnnotationDescriptors,
   getSketchSessionPreviewLabel,
+  getSketchToolPresentation,
   mapSketchPointToWorld,
   patchSketchConstraintValue,
   selectSketchConstraintTarget,
@@ -1712,6 +1713,63 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       assert(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
       assert(result.state.command.toolId === 'line', `${toolId} should not replace the active sketch command.`)
       assert(result.state.session.activeTool === 'line', `${toolId} should not clear the active sketch tool.`)
+      assert(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should open style focus state.`)
+      assert(result.state.session.activeStyleFocus.target === null, `${toolId} should show target guidance without a selection.`)
+      assert(
+        getSketchToolPresentation(result.state.session)?.selectionGuide?.requiredCount === 1,
+        `${toolId} should expose style target guidance.`,
+      )
+    }
+
+    let styledSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    styledSession = beginSketchTool(styledSession, 'line')
+    styledSession = startSketchDraw(styledSession, [0, 0])
+    styledSession = acceptSketchDraw(styledSession, [8, 0])
+
+    const target = styledSession.definition.entities[0]?.target
+    assert(target, 'Style focus fixture should create a selectable local sketch entity.')
+
+    const styledBaseState: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [target],
+      hoverTarget: target,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(styledSession),
+        target: styledSession.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-style-1',
+        toolId: 'line',
+        phase: 'editing',
+      },
+      session: styledSession,
+      pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+    }
+
+    for (const toolId of passiveSketchToolIds) {
+      const result = transitionEditorState(styledBaseState, {
+        type: 'tool.activated',
+        toolId,
+      })
+
+      assert(result.state.kind === 'editingSketch', `${toolId} with a target should keep sketch editing.`)
+      assert(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should become the active style focus.`)
+      assert(result.state.session.activeStyleFocus.target?.kind === 'sketchEntity', `${toolId} should bind the selected style target.`)
+      assert(
+        (getSketchToolPresentation(result.state.session)?.controlGroups?.[0]?.controls.length ?? 0) > 0,
+        `${toolId} should expose focused style controls for the selected target.`,
+      )
     }
   }
 

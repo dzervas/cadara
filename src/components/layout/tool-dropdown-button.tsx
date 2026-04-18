@@ -14,12 +14,14 @@ interface ToolDropdownButtonProps {
   tool: RegisteredToolDefinition
   variantTools: RegisteredToolDefinition[]
   active?: boolean
+  disabled?: boolean
 }
 
 export function ToolDropdownButton({
   tool,
   variantTools,
   active = false,
+  disabled = false,
 }: ToolDropdownButtonProps) {
   const { triggerTool } = useToolActions()
   const [opened, setOpened] = useState(false)
@@ -36,8 +38,10 @@ export function ToolDropdownButton({
             type="button"
             aria-label={tool.name}
             aria-pressed={active}
+            disabled={disabled}
             data-tool-id={tool.id}
             data-tool-tooltip={tool.tooltip}
+            data-disabled={disabled || undefined}
           >
             <Paper
               radius="md"
@@ -77,13 +81,19 @@ export function ToolDropdownButton({
             <Menu.Item
               key={variant.id}
               onClick={() => {
+                if (disabled) {
+                  return
+                }
+
                 flushSync(() => setOpened(false))
                 triggerTool(variant.id, {
                   source: 'dropdown',
                 })
               }}
+              disabled={disabled}
               data-tool-id={variant.id}
               data-tool-tooltip={variant.tooltip}
+              data-disabled={disabled || undefined}
               leftSection={<ToolbarToolIcon icon={variant.icon} />}
             >
               <div className="flex min-w-0 flex-col">

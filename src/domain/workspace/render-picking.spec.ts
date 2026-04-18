@@ -497,6 +497,42 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
   }
 
   {
+    const sketchTarget: PrimitiveRef = { kind: 'sketchEntity', sketchId: 'sketch_a', entityId: 'sketch_entity_styled' }
+    const material = new THREE.LineBasicMaterial({
+      color: 0x33ffaa,
+      transparent: true,
+      opacity: 0.5,
+    })
+    const sketchLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 0, 0)]),
+      material,
+    )
+    const root = new THREE.Group()
+    root.add(sketchLine)
+    bindRenderableObject(sketchLine, null, sketchTarget, 'sketchCurve', 'document')
+
+    const bindings = collectBindings(root)
+    assert(bindings !== null)
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [], sketchTarget)
+    assertEqual(material.color.getHex(), 0xf0a14a, 'Hovered styled sketch lines should still receive hover highlight.')
+    assertEqual(material.opacity, 0.98, 'Hovered styled sketch lines should still receive hover opacity.')
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [], null)
+    assertEqual(material.color.getHex(), 0x33ffaa, 'Inactive styled sketch lines should restore authored color after hover.')
+    assertEqual(material.opacity, 0.5, 'Inactive styled sketch lines should restore authored opacity after hover.')
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [sketchTarget], null)
+    assertEqual(material.color.getHex(), 0xf4fbff, 'Selected styled sketch lines should still receive selected highlight.')
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [], null)
+    assertEqual(material.color.getHex(), 0x33ffaa, 'Inactive styled sketch lines should restore authored color after selection.')
+
+    sketchLine.geometry.dispose()
+    material.dispose()
+  }
+
+  {
     const marker = createBoundMarker(vertexRenderable)
     const root = new THREE.Group()
     root.add(marker.group)

@@ -1,5 +1,7 @@
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 
+type SketchToolControl = NonNullable<SketchToolPresentationSchema['controls']>[number]
+
 interface SketchToolPanelProps {
   schema: SketchToolPresentationSchema | null
   onPatch: (patch: Record<string, unknown>) => void
@@ -16,6 +18,11 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
 
   const validation = schema.validation ?? []
   const controls = schema.controls ?? []
+  const controlGroups = schema.controlGroups?.length
+    ? schema.controlGroups
+    : controls.length > 0
+      ? [{ id: 'sketch-tool-controls', label: 'Controls', controls }]
+      : []
   const measurements = schema.measurements ?? []
   const hints = schema.completionHints ?? []
   const hasViewportDrawingFeedback = !schema.selectionGuide && (schema.overlays ?? []).some(
@@ -63,71 +70,15 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
             {message.message}
           </div>
         ))}
-        {controls.length > 0 ? (
-          <div className="grid gap-2 border-t border-[var(--cad-border)] pt-2">
-            {controls.map((control) => (
-              <label key={control.id} className="grid gap-1">
-                <span>{control.label}</span>
-                {control.kind === 'numeric' ? (
-                  <input
-                    className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
-                    disabled={control.disabled}
-                    type="number"
-                    value={control.value ?? ''}
-                    onChange={(event) => {
-                      const nextValue = Number(event.currentTarget.value)
-                      onPatch({
-                        ...control.action.patch,
-                        value: Number.isNaN(nextValue) ? null : nextValue,
-                      })
-                    }}
-                  />
-                ) : control.kind === 'option' ? (
-                  <select
-                    className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
-                    disabled={control.disabled}
-                    value={control.value ?? ''}
-                    onChange={(event) => {
-                      onPatch({
-                        ...control.action.patch,
-                        value: event.currentTarget.value,
-                      })
-                    }}
-                  >
-                    {control.options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : control.kind === 'toggle' ? (
-                  <input
-                    className="h-4 w-4 rounded border border-[var(--cad-border)] bg-[var(--cad-surface)] text-[var(--cad-foreground)] outline-none"
-                    disabled={control.disabled}
-                    type="checkbox"
-                    checked={control.value}
-                    onChange={(event) => {
-                      onPatch({
-                        ...control.action.patch,
-                        value: event.currentTarget.checked,
-                      })
-                    }}
-                  />
-                ) : (
-                  <input
-                    className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
-                    disabled={control.disabled}
-                    type="color"
-                    value={control.value}
-                    onChange={(event) => {
-                      onPatch({
-                        ...control.action.patch,
-                        value: event.currentTarget.value,
-                      })
-                    }}
-                  />
-                )}
-              </label>
+        {controlGroups.length > 0 ? (
+          <div className="grid gap-3 border-t border-[var(--cad-border)] pt-2">
+            {controlGroups.map((group) => (
+              <div key={group.id} className="grid gap-2">
+                <div className="text-[var(--cad-foreground)]">{group.label}</div>
+                {group.controls.map((control) => (
+                  <SketchToolControlField key={control.id} control={control} onPatch={onPatch} />
+                ))}
+              </div>
             ))}
           </div>
         ) : null}
@@ -153,5 +104,78 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
         ))}
       </div>
     </div>
+  )
+}
+
+function SketchToolControlField({
+  control,
+  onPatch,
+}: {
+  control: SketchToolControl
+  onPatch: (patch: Record<string, unknown>) => void
+}) {
+  return (
+    <label className="grid gap-1">
+      <span>{control.label}</span>
+      {control.kind === 'numeric' ? (
+        <input
+          className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
+          disabled={control.disabled}
+          type="number"
+          value={control.value ?? ''}
+          onChange={(event) => {
+            const nextValue = Number(event.currentTarget.value)
+            onPatch({
+              ...control.action.patch,
+              value: Number.isNaN(nextValue) ? null : nextValue,
+            })
+          }}
+        />
+      ) : control.kind === 'option' ? (
+        <select
+          className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
+          disabled={control.disabled}
+          value={control.value ?? ''}
+          onChange={(event) => {
+            onPatch({
+              ...control.action.patch,
+              value: event.currentTarget.value,
+            })
+          }}
+        >
+          {control.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : control.kind === 'toggle' ? (
+        <input
+          className="h-4 w-4 rounded border border-[var(--cad-border)] bg-[var(--cad-surface)] text-[var(--cad-foreground)] outline-none"
+          disabled={control.disabled}
+          type="checkbox"
+          checked={control.value}
+          onChange={(event) => {
+            onPatch({
+              ...control.action.patch,
+              value: event.currentTarget.checked,
+            })
+          }}
+        />
+      ) : (
+        <input
+          className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
+          disabled={control.disabled}
+          type="color"
+          value={control.value}
+          onChange={(event) => {
+            onPatch({
+              ...control.action.patch,
+              value: event.currentTarget.value,
+            })
+          }}
+        />
+      )}
+    </label>
   )
 }

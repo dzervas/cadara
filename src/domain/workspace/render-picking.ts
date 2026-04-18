@@ -22,6 +22,11 @@ interface PickResolutionOptions {
   sameLayerTolerance?: number
 }
 
+interface HighlightMaterialBaseline {
+  color: number
+  opacity: number
+}
+
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
 const PICK_PROXY_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 16, 16)
 const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
@@ -178,8 +183,9 @@ function applyRenderableState(
     }
 
     const color = getHighlightColor(semanticClass, isActive, isSelected)
+    const baseline = getHighlightMaterialBaseline(entry)
 
-    entry.color.setHex(color)
+    entry.color.setHex(isActive || isSelected ? color : baseline.color)
 
     if (entry instanceof THREE.MeshStandardMaterial) {
       entry.emissive.setHex(
@@ -194,11 +200,31 @@ function applyRenderableState(
         : isActive
           ? 0.24
           : getRenderableMeshEmissiveIntensity(semanticClass, origin)
-      entry.opacity = getRenderableMeshOpacity(semanticClass, origin, isActive, isSelected)
+      entry.opacity = isActive || isSelected
+        ? getRenderableMeshOpacity(semanticClass, origin, isActive, isSelected)
+        : baseline.opacity
     } else {
-      entry.opacity = getRenderableLineOpacity(semanticClass, origin, isActive, isSelected)
+      entry.opacity = isActive || isSelected
+        ? getRenderableLineOpacity(semanticClass, origin, isActive, isSelected)
+        : baseline.opacity
     }
   }
+}
+
+function getHighlightMaterialBaseline(
+  material: THREE.MeshStandardMaterial | THREE.LineBasicMaterial,
+): HighlightMaterialBaseline {
+  const existing = material.userData.highlightBaseline as HighlightMaterialBaseline | undefined
+  if (existing) {
+    return existing
+  }
+
+  const baseline = {
+    color: material.color.getHex(),
+    opacity: material.opacity,
+  }
+  material.userData.highlightBaseline = baseline
+  return baseline
 }
 
 function getRenderableBaseColor(semanticClass: WorkspaceSemanticClass) {

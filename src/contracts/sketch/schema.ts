@@ -63,6 +63,9 @@ export interface SketchStyleDefinition {
   strokeWidth?: number
   strokeCap?: SketchStrokeCap
   strokeJoin?: SketchStrokeJoin
+  strokeMiterLimit?: number
+  strokeDashSize?: number
+  strokeGapSize?: number
 }
 
 /**
@@ -235,6 +238,8 @@ export interface SketchStyleStroke {
   lineCap: 'butt' | 'round' | 'square'
   lineJoin: 'miter' | 'round' | 'bevel'
   miterLimit: number
+  dashSize?: number
+  gapSize?: number
 }
 
 /**

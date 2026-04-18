@@ -12,7 +12,12 @@ import {
   type RegisteredToolDefinition,
   searchToolDefinitions,
 } from '@/domain/tools/tool-registry'
-import { isSketchConstructionSelected } from '@/domain/editor/sketch-session'
+import {
+  getActiveSketchStyleToolId,
+  hasSketchStyleTarget,
+  isSketchConstructionSelected,
+} from '@/domain/editor/sketch-session'
+import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 
@@ -23,15 +28,20 @@ interface WorkspaceToolbarProps {
 export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
-    state: { activeCommand, history, mode, sketchSession },
+    state: { activeCommand, history, mode, selection, sketchSession },
   } = useEditorState()
   const visibleHistory = historyAvailability ?? history
   const visibleSections = useMemo(() => getToolbarSectionsForMode(mode), [mode])
   const searchResults = useMemo(() => searchToolDefinitions(searchQuery), [searchQuery])
   const hasActiveSketchSession = sketchSession !== null
 
+  const activeSketchStyleToolId = sketchSession ? getActiveSketchStyleToolId(sketchSession) : null
+  const hasStyleTarget = sketchSession ? hasSketchStyleTarget(sketchSession, selection) : false
+
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
-    (tool.id === 'undo' && !visibleHistory.canUndo) || (tool.id === 'redo' && !visibleHistory.canRedo)
+    (tool.id === 'undo' && !visibleHistory.canUndo)
+    || (tool.id === 'redo' && !visibleHistory.canRedo)
+    || (isSketchStyleToolId(tool.id) && !hasStyleTarget)
 
   const renderTool = (tool: RegisteredToolDefinition) => {
     if (tool.id === 'sketch' && hasActiveSketchSession) {
@@ -44,9 +54,12 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
 
     const isActive =
       (tool.id === 'construction' && sketchSession !== null && isSketchConstructionSelected(sketchSession)) ||
+      activeSketchStyleToolId === tool.id ||
       activeCommand?.toolId === tool.id ||
       (isDropdownTool(tool) &&
-        tool.dropdown.variantIds.some((variantId) => variantId === activeCommand?.toolId))
+        tool.dropdown.variantIds.some((variantId) =>
+          variantId === activeCommand?.toolId || variantId === activeSketchStyleToolId,
+        ))
 
     const disabled = isToolDisabled(tool)
 
@@ -58,6 +71,7 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
           tool={tool}
           variantTools={variantTools}
           active={isActive}
+          disabled={disabled}
         />
       )
     }
@@ -70,7 +84,7 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
       component="header"
       radius={0}
       px="md"
-      py={6}
+      // py={4}
       style={{
         backgroundColor: 'var(--workbench-shell-surface-strong)',
         borderBottom: '1px solid var(--workbench-shell-border)',
@@ -89,7 +103,7 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
               {index < visibleSections.length - 1 ? (
                 <Divider
                   orientation="vertical"
-                  style={{ borderColor: 'var(--workbench-shell-border-strong)', height: 32 }}
+                  style={{ borderColor: 'var(--workbench-shell-border-strong)', height: 'auto' }}
                 />
               ) : null}
             </div>
@@ -105,7 +119,7 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
             data-workbench-command="editor.focusSearch"
             styles={{
               input: {
-                height: 40,
+                height: 30,
               },
             }}
           />

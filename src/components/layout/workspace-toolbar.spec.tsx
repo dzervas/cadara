@@ -7,7 +7,13 @@ import {
   getEditorViewState,
   initialEditorState,
 } from '@/contracts/editor/state-machine'
-import { createNewSketchSession } from '@/domain/editor/sketch-session'
+import {
+  acceptSketchDraw,
+  beginSketchTool,
+  createNewSketchSession,
+  focusSketchStyleTool,
+  startSketchDraw,
+} from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 import { EditorContext } from '@/hooks/editor-context'
@@ -116,9 +122,54 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     'Sketch toolbar should include the dedicated SVG style subsection tools.',
   )
   assert(
+    getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"') &&
+      getToolMarkup(sketchToolbarMarkup, 'strokeOptions').includes('data-disabled="true"'),
+    'SVG style toolbar controls should render disabled until a local sketch style target is selected.',
+  )
+  assert(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)') &&
       sketchToolbarMarkup.includes('var(--workbench-shell-success-border)'),
     'Finish Sketch should use the semantic success treatment from the shared workbench theme.',
+  )
+
+  let styledSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+  styledSession = beginSketchTool(styledSession, 'line')
+  styledSession = startSketchDraw(styledSession, [0, 0])
+  styledSession = acceptSketchDraw(styledSession, [4, 0])
+  const styleTarget = styledSession.definition.entities[0]?.target
+  assert(styleTarget, 'Toolbar style availability fixture should create a local sketch entity.')
+  styledSession = focusSketchStyleTool(styledSession, [styleTarget], 'strokeDash')
+
+  const styleTargetToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: {
+            ...getEditorViewState(initialEditorState),
+            mode: 'sketch',
+            selection: [styleTarget],
+            activeCommand: {
+              commandSessionId: 'command_sketch-1',
+              toolId: 'line',
+              phase: 'editing',
+            },
+            sketchSession: styledSession,
+          },
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    !getToolMarkup(styleTargetToolbarMarkup, 'fill').includes('data-disabled="true"') &&
+      getToolMarkup(styleTargetToolbarMarkup, 'strokeOptions').includes('aria-pressed="true"'),
+    'SVG style toolbar controls should become available and active when a focused style target exists.',
   )
 
   const constructionSession = {

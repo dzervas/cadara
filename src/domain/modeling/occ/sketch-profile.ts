@@ -143,6 +143,8 @@ function toBoundarySegmentGeometry(
       }
     case 'point':
       throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
+    case 'spline':
+      throw new Error(`Spline entity ${geometry.entityId} cannot define a profile boundary.`)
   }
 }
 

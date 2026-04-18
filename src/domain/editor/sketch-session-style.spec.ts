@@ -116,4 +116,179 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
   assert(lineRenderable.strokeStyle?.width === 2.5, 'Stroke style width should resolve from persisted style records.')
   assert(lineRenderable.strokeStyle?.dashSize === 0.8, 'Stroke dash size should resolve from persisted style records.')
   assert(lineRenderable.strokeStyle?.gapSize === 0.3, 'Stroke gap size should resolve from persisted style records.')
+
+  const localDefinition = {
+    ...definition,
+    entities: [
+      {
+        ...definition.entities[0]!,
+        styleId: undefined,
+        style: {
+          fillMode: 'gradient',
+          fillColor: '#111111',
+          gradientStartColor: '#2266ff',
+          strokeEnabled: true,
+          strokeColor: '#33ffaa',
+          strokeWidth: 3,
+          strokeCap: 'square',
+          strokeJoin: 'miter',
+          strokeMiterLimit: 7,
+          strokeDashSize: 0.45,
+          strokeGapSize: 0.15,
+        },
+      },
+    ],
+    styleIds: [],
+    styles: [],
+  } as SketchDefinition & {
+    styles: []
+  }
+  const localSolved = solveSketchDefinitionCore({
+    definition: localDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    partialSolvePolicy: 'bestEffort',
+  })
+  const localSession = createSketchSessionFromSnapshot({
+    ownerDocumentId: 'doc_workspace',
+    ownerRevisionId: 'rev_0001',
+    ownerFeatureId: null,
+    ownerSketchId: 'sketch_primary',
+    ownerBodyId: null,
+    sketchId: 'sketch_primary',
+    label: 'Sketch',
+    plane,
+    planeTarget: plane.support,
+    planeKey: 'xy',
+    sketch: {
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: null,
+      ownerSketchId: 'sketch_primary',
+      ownerBodyId: null,
+      sketchId: 'sketch_primary',
+      label: 'Sketch',
+      planeSupport: plane.support,
+      definition: localDefinition,
+      solvedSnapshot: localSolved.solvedSnapshot,
+      regions: [],
+    },
+  } satisfies SketchSnapshotRecord)
+
+  const localLineRenderable = getSketchSessionDisplayRenderables(localSession).find((entry) => entry.id.includes('line'))
+  assert(localLineRenderable?.paintStyle?.color === 0x111111, 'Local gradient fill should render with the documented fill-color fallback.')
+  assert(localLineRenderable.strokeStyle?.color === 0x33ffaa, 'Local stroke color should render from inline style metadata.')
+  assert(localLineRenderable.strokeStyle?.lineCap === 'square', 'Local stroke cap should remain available to display helpers.')
+  assert(localLineRenderable.strokeStyle?.lineJoin === 'miter', 'Local stroke join should remain available to display helpers.')
+  assert(localLineRenderable.strokeStyle?.miterLimit === 7, 'Local stroke miter limit should remain available to display helpers.')
+  assert(localLineRenderable.strokeStyle?.dashSize === 0.45, 'Local stroke dash size should render from inline style metadata.')
+  assert(localLineRenderable.strokeStyle?.gapSize === 0.15, 'Local stroke gap size should render from inline style metadata.')
+
+  const disabledStrokeDefinition = {
+    ...localDefinition,
+    entities: [
+      {
+        ...localDefinition.entities[0]!,
+        style: {
+          strokeColor: '#ff00ff',
+          strokeWidth: 6,
+        },
+      },
+    ],
+  } as SketchDefinition
+  const disabledStrokeSolved = solveSketchDefinitionCore({
+    definition: disabledStrokeDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    partialSolvePolicy: 'bestEffort',
+  })
+  const disabledStrokeSession = createSketchSessionFromSnapshot({
+    ownerDocumentId: 'doc_workspace',
+    ownerRevisionId: 'rev_0001',
+    ownerFeatureId: null,
+    ownerSketchId: 'sketch_primary',
+    ownerBodyId: null,
+    sketchId: 'sketch_primary',
+    label: 'Sketch',
+    plane,
+    planeTarget: plane.support,
+    planeKey: 'xy',
+    sketch: {
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: null,
+      ownerSketchId: 'sketch_primary',
+      ownerBodyId: null,
+      sketchId: 'sketch_primary',
+      label: 'Sketch',
+      planeSupport: plane.support,
+      definition: disabledStrokeDefinition,
+      solvedSnapshot: disabledStrokeSolved.solvedSnapshot,
+      regions: [],
+    },
+  } satisfies SketchSnapshotRecord)
+  const disabledStrokeLineRenderable = getSketchSessionDisplayRenderables(disabledStrokeSession).find((entry) => entry.id.includes('line'))
+  assert(
+    disabledStrokeLineRenderable?.strokeStyle === undefined,
+    'Local stroke fields should not render unless stroke styling is explicitly enabled.',
+  )
+
+  const pointStyledDefinition = {
+    ...localDefinition,
+    points: [
+      {
+        ...localDefinition.points[0]!,
+        style: {
+          strokeEnabled: true,
+          strokeColor: '#dd44aa',
+          strokeWidth: 2,
+        },
+      },
+      localDefinition.points[1]!,
+    ],
+  } as SketchDefinition
+  const pointStyledSolved = solveSketchDefinitionCore({
+    definition: pointStyledDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    partialSolvePolicy: 'bestEffort',
+  })
+  const pointStyledSession = createSketchSessionFromSnapshot({
+    ownerDocumentId: 'doc_workspace',
+    ownerRevisionId: 'rev_0001',
+    ownerFeatureId: null,
+    ownerSketchId: 'sketch_primary',
+    ownerBodyId: null,
+    sketchId: 'sketch_primary',
+    label: 'Sketch',
+    plane,
+    planeTarget: plane.support,
+    planeKey: 'xy',
+    sketch: {
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: null,
+      ownerSketchId: 'sketch_primary',
+      ownerBodyId: null,
+      sketchId: 'sketch_primary',
+      label: 'Sketch',
+      planeSupport: plane.support,
+      definition: pointStyledDefinition,
+      solvedSnapshot: pointStyledSolved.solvedSnapshot,
+      regions: [],
+    },
+  } satisfies SketchSnapshotRecord)
+  const pointRenderable = getSketchSessionDisplayRenderables(pointStyledSession).find((entry) =>
+    entry.target?.kind === 'sketchPoint' && entry.target.pointId === 'sketch_point_a',
+  )
+  assert(pointRenderable?.strokeStyle?.color === 0xdd44aa, 'Point marker renderables should resolve enabled local stroke style.')
 })

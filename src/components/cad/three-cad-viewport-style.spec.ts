@@ -31,6 +31,11 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
       color: 0x33ffaa,
       opacity: 0.5,
       width: 3,
+      lineCap: 'square',
+      lineJoin: 'miter',
+      miterLimit: 7,
+      dashSize: 0.5,
+      gapSize: 0.2,
     },
   } as const
 
@@ -69,6 +74,11 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
   assert(styledLineConfig.color === 0x33ffaa, 'Sketch mode should apply stroke color from renderable style metadata.')
   assert(styledLineConfig.opacity === 0.5, 'Sketch mode should apply stroke opacity from renderable style metadata.')
   assert(styledLineConfig.lineWidth === 3, 'Sketch mode should apply stroke width from renderable style metadata.')
+  assert(styledLineConfig.linePattern === 'dashed', 'Sketch mode should use dashed materials for authored dash patterns.')
+  assert(styledLineConfig.dashSize === 0.5, 'Sketch mode should apply authored dash size.')
+  assert(styledLineConfig.gapSize === 0.2, 'Sketch mode should apply authored gap size.')
+  assert(styledLineConfig.lineJoin === 'miter', 'Sketch mode should preserve authored line join in material config.')
+  assert(styledLineConfig.miterLimit === 7, 'Sketch mode should preserve authored miter limit in material config.')
 
   const partModeLineConfig = getSketchDisplayPolylineMaterialConfig(styledPolylineRenderable, false)
   assert(

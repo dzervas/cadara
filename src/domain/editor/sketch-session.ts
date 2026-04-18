@@ -42,9 +42,12 @@ import type { PrimitiveRef } from '@/domain/editor/schema'
 import { primitiveRefEquals } from '@/domain/editor/schema'
 import {
   buildSketchStyleControls,
+  buildSketchStylePresentation,
   isSketchStyleTarget,
   parseSketchStylePatch,
+  type SketchStyleFocus,
   type SketchStylePatch,
+  type SketchStyleToolId,
 } from '@/domain/sketch-styles/definition'
 import type { OffsetSide } from '@/domain/sketch-editing/operations'
 import {
@@ -181,6 +184,7 @@ export interface SketchSessionState {
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null
   activeEditTool: SketchEditToolState | null
   activeEditTarget: SketchPointRef | null
+  activeStyleFocus: SketchStyleFocus | null
   activeDrag: SketchGeometryDragState | null
   activeSnap: SketchSnapCandidate | null
   drawStartSnap: SketchSnapCandidate | null
@@ -221,6 +225,9 @@ export interface SketchDisplayStrokeStyle {
   color: number
   opacity: number
   width?: number
+  lineCap?: 'butt' | 'round' | 'square'
+  lineJoin?: 'miter' | 'round' | 'bevel'
+  miterLimit?: number
   dashSize?: number
   gapSize?: number
 }
@@ -554,6 +561,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -601,6 +609,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1075,6 +1084,7 @@ function activateSketchConstraintTool(
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1240,6 +1250,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
       selectedAnnotation: null,
       activeEditTool: null,
       activeEditTarget: null,
+      activeStyleFocus: null,
       activeDrag: null,
       activeSnap: null,
       drawStartSnap: null,
@@ -1263,6 +1274,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1291,6 +1303,7 @@ function beginSketchReferenceTool(session: SketchSessionState): SketchSessionSta
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1432,6 +1445,7 @@ function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditTool
     activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1482,6 +1496,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1489,7 +1504,12 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
 }
 
 export function clearActiveSketchTool(session: SketchSessionState): SketchSessionState {
-  if (session.activeTool === null && !isSketchConstructionSelected(session) && !session.referenceTargetPicking) {
+  if (
+    session.activeTool === null
+    && !isSketchConstructionSelected(session)
+    && !session.referenceTargetPicking
+    && !session.activeStyleFocus
+  ) {
     return session
   }
 
@@ -1510,6 +1530,7 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
+    activeStyleFocus: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1595,6 +1616,97 @@ export function selectSketchEditTarget(
     selectedAnnotation: null,
     validationMessage: null,
   }
+}
+
+export function focusSketchStyleTool(
+  session: SketchSessionState,
+  selectedTargets: readonly PrimitiveRef[],
+  toolId: SketchStyleToolId,
+): SketchSessionState {
+  const target = getFirstSketchStyleTarget(session, selectedTargets)
+
+  return {
+    ...session,
+    activeStyleFocus: { toolId, target },
+    status: 'idle',
+    constructionTargetPicking: false,
+    referenceTargetPicking: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    validationMessage: null,
+    toolPresentation: null,
+    constraintAuthoring: null,
+    activeAnnotationEdit: null,
+    selectedAnnotation: null,
+    activeEditTool: null,
+    activeEditTarget: target?.kind === 'sketchPoint' ? target : null,
+    activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
+  }
+}
+
+export function updateSketchStyleFocusTarget(
+  session: SketchSessionState,
+  selectedTargets: readonly PrimitiveRef[],
+): SketchSessionState {
+  if (!session.activeStyleFocus) {
+    return session
+  }
+
+  const target = getFirstSketchStyleTarget(session, selectedTargets)
+
+  if (
+    (target === null && session.activeStyleFocus.target === null)
+    || (target !== null && session.activeStyleFocus.target !== null && primitiveRefEquals(target, session.activeStyleFocus.target))
+  ) {
+    return session
+  }
+
+  return {
+    ...session,
+    activeStyleFocus: {
+      ...session.activeStyleFocus,
+      target,
+    },
+    activeEditTarget: target?.kind === 'sketchPoint' ? target : null,
+    validationMessage: null,
+  }
+}
+
+export function getActiveSketchStyleToolId(session: SketchSessionState): SketchStyleToolId | null {
+  return session.activeStyleFocus?.toolId ?? null
+}
+
+export function hasSketchStyleTarget(
+  session: SketchSessionState,
+  selectedTargets: readonly PrimitiveRef[],
+): boolean {
+  return getFirstSketchStyleTarget(session, selectedTargets) !== null
+}
+
+function getFirstSketchStyleTarget(
+  session: SketchSessionState,
+  selectedTargets: readonly PrimitiveRef[],
+): Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }> | null {
+  const sketchId = getSessionSketchId(session)
+  return selectedTargets.find((target) => isSketchStyleTarget(target, sketchId)) ?? null
+}
+
+function getSketchStyleTargetDefinition(
+  session: SketchSessionState,
+  target: Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }> | null,
+): { style?: SketchStyleDefinition } | null {
+  if (!target) {
+    return null
+  }
+
+  if (target.kind === 'sketchPoint') {
+    return session.definition.points.find((point) => point.pointId === target.pointId) ?? null
+  }
+
+  return session.definition.entities.find((entity) => entity.entityId === target.entityId) ?? null
 }
 
 function createSessionCommitFactories(
@@ -3055,6 +3167,12 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
     return 'Sketch point selected'
   }
 
+  if (session.activeStyleFocus) {
+    return session.activeStyleFocus.target
+      ? 'Sketch style controls active'
+      : 'Select sketch geometry to edit style'
+  }
+
   if (session.constructionTargetPicking) {
     return 'Select sketch geometry to toggle construction'
   }
@@ -3089,16 +3207,25 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
     return session.toolPresentation
   }
 
+  if (session.activeStyleFocus) {
+    return buildSketchStylePresentation(
+      session.activeStyleFocus,
+      getSketchStyleTargetDefinition(session, session.activeStyleFocus.target)?.style,
+    )
+  }
+
   if (!isDrawingSketchTool(session.activeTool)) {
     if (!session.activeEditTarget) {
       return null
     }
 
     const styledPoint = session.definition.points.find((point) => point.pointId === session.activeEditTarget?.pointId)
+    const controls = buildSketchStyleControls(styledPoint?.style)
 
     return {
       prompts: [{ id: 'sketch-style-prompt', text: 'Edit local sketch style' }],
-      controls: buildSketchStyleControls(styledPoint?.style),
+      controls,
+      controlGroups: [{ id: 'sketch-style-controls', label: 'Style', controls }],
     }
   }
 
@@ -3487,6 +3614,24 @@ function applySketchStyleDefinitionPatch(
         return style ?? next
       }
       next.strokeJoin = patch.value
+      break
+    case 'strokeMiterLimit':
+      if (next.strokeMiterLimit === patch.value) {
+        return style ?? next
+      }
+      next.strokeMiterLimit = patch.value
+      break
+    case 'strokeDashSize':
+      if (next.strokeDashSize === patch.value) {
+        return style ?? next
+      }
+      next.strokeDashSize = patch.value
+      break
+    case 'strokeGapSize':
+      if (next.strokeGapSize === patch.value) {
+        return style ?? next
+      }
+      next.strokeGapSize = patch.value
       break
   }
 
@@ -4229,6 +4374,8 @@ function getEntityAnchor(definition: SketchDefinition, entityId: SketchEntityId)
       return getPointPosition(definition, entity.centerPointId)
     case 'arc':
       return getPointPosition(definition, entity.centerPointId)
+    case 'spline':
+      return getAveragePointPosition(definition, entity.fitPointIds)
   }
 }
 
@@ -4250,6 +4397,8 @@ function getEntityAnchorPointId(
     case 'circle':
     case 'arc':
       return entity.centerPointId
+    case 'spline':
+      return entity.fitPointIds[0] ?? null
   }
 }
 
@@ -4283,20 +4432,27 @@ function sampleSplinePoints(points: readonly SketchPoint[]): SketchPoint[] {
 export function getSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const localStyleLookup = createSketchEntityStyleLookup(session)
+  const pointStyleLookup = createSketchPointStyleLookup(session)
 
   return [
-    ...session.definition.points.map((point) => ({
-      id: `renderable_sketch_point_${point.pointId}` as RenderableId,
-      label: point.label,
-      target: createSketchPointRef(sketchId, point.pointId),
-      geometry: {
-        kind: 'marker' as const,
-        position: mapSketchPointToWorld(session.plane, point.position),
-        displayRadius: 0.16,
-      },
-      linePattern: 'solid' as const,
-      role: 'local' as const,
-    })),
+    ...session.definition.points.map((point) => {
+      const style = pointStyleLookup.get(point.pointId)
+
+      return {
+        id: `renderable_sketch_point_${point.pointId}` as RenderableId,
+        label: point.label,
+        target: createSketchPointRef(sketchId, point.pointId),
+        geometry: {
+          kind: 'marker' as const,
+          position: mapSketchPointToWorld(session.plane, point.position),
+          displayRadius: 0.16,
+        },
+        linePattern: 'solid' as const,
+        role: 'local' as const,
+        paintStyle: style?.paintStyle,
+        strokeStyle: style?.strokeStyle,
+      }
+    }),
     ...session.entities.map((entity, index) =>
       createDisplayRenderableForEntity(
         session,
@@ -4402,18 +4558,12 @@ interface SketchEntityDisplayStyle {
 
 function createSketchEntityStyleLookup(session: SketchSessionState): Map<SketchEntityId, SketchEntityDisplayStyle> {
   const styleRecords = getPersistedSketchStyleRecords(session.fullDefinition)
-  if (styleRecords.size === 0) {
-    return new Map()
-  }
-
   const entityStyleById = new Map<SketchEntityId, SketchEntityDisplayStyle>()
   for (const entity of session.fullDefinition.entities) {
+    const localStyle = parseSketchStyleDefinition(entity.style)
     const styleId = getEntityStyleId(entity)
-    if (!styleId) {
-      continue
-    }
-
-    const style = styleRecords.get(styleId)
+    const persistedStyle = styleId ? styleRecords.get(styleId) : undefined
+    const style = mergeSketchEntityDisplayStyle(persistedStyle, localStyle)
     if (!style) {
       continue
     }
@@ -4422,6 +4572,87 @@ function createSketchEntityStyleLookup(session: SketchSessionState): Map<SketchE
   }
 
   return entityStyleById
+}
+
+function createSketchPointStyleLookup(session: SketchSessionState): Map<SketchPointId, SketchEntityDisplayStyle> {
+  const pointStyleById = new Map<SketchPointId, SketchEntityDisplayStyle>()
+
+  for (const point of session.fullDefinition.points) {
+    const style = parseSketchStyleDefinition(point.style)
+    if (!style) {
+      continue
+    }
+
+    pointStyleById.set(point.pointId, style)
+  }
+
+  return pointStyleById
+}
+
+function mergeSketchEntityDisplayStyle(
+  base: SketchEntityDisplayStyle | undefined,
+  override: SketchEntityDisplayStyle | undefined,
+): SketchEntityDisplayStyle | undefined {
+  if (!base) {
+    return override
+  }
+
+  if (!override) {
+    return base
+  }
+
+  return {
+    paintStyle: override.paintStyle ?? base.paintStyle,
+    strokeStyle: override.strokeStyle ?? base.strokeStyle,
+  }
+}
+
+function parseSketchStyleDefinition(style: SketchStyleDefinition | undefined): SketchEntityDisplayStyle | undefined {
+  if (!style) {
+    return undefined
+  }
+
+  const paintStyle = parseLocalPaintStyle(style)
+  const strokeStyle = parseLocalStrokeStyle(style)
+
+  if (!paintStyle && !strokeStyle) {
+    return undefined
+  }
+
+  return { paintStyle, strokeStyle }
+}
+
+function parseLocalPaintStyle(style: SketchStyleDefinition): SketchDisplayPaintStyle | undefined {
+  if (style.fillMode === undefined || style.fillMode === 'none') {
+    return undefined
+  }
+
+  const color =
+    parseColorValue(style.fillColor)
+    ?? (style.fillMode === 'gradient' ? parseColorValue(style.gradientStartColor) : null)
+    ?? 0x48b6ff
+
+  return {
+    color,
+    opacity: style.fillMode === 'gradient' ? 0.32 : 0.42,
+  }
+}
+
+function parseLocalStrokeStyle(style: SketchStyleDefinition): SketchDisplayStrokeStyle | undefined {
+  if (style.strokeEnabled !== true) {
+    return undefined
+  }
+
+  return {
+    color: parseColorValue(style.strokeColor) ?? 0xdde7f0,
+    opacity: 0.95,
+    width: style.strokeWidth,
+    lineCap: style.strokeCap,
+    lineJoin: style.strokeJoin,
+    miterLimit: style.strokeMiterLimit,
+    dashSize: style.strokeDashSize,
+    gapSize: style.strokeGapSize,
+  }
 }
 
 function getPersistedSketchStyleRecords(definition: SketchDefinition): Map<string, SketchEntityDisplayStyle> {
@@ -4507,9 +4738,20 @@ function parseStrokeStyle(value: Record<string, unknown> | null): SketchDisplayS
     color,
     opacity: getOptionalNumber(value.opacity) ?? 1,
     width: getOptionalNumber(value.width) ?? getOptionalNumber(value.thickness),
+    lineCap: getOptionalStrokeCap(value.lineCap),
+    lineJoin: getOptionalStrokeJoin(value.lineJoin),
+    miterLimit: getOptionalNumber(value.miterLimit),
     dashSize: getOptionalNumber(value.dashSize),
     gapSize: getOptionalNumber(value.gapSize),
   }
+}
+
+function getOptionalStrokeCap(value: unknown): SketchDisplayStrokeStyle['lineCap'] | undefined {
+  return value === 'butt' || value === 'round' || value === 'square' ? value : undefined
+}
+
+function getOptionalStrokeJoin(value: unknown): SketchDisplayStrokeStyle['lineJoin'] | undefined {
+  return value === 'miter' || value === 'round' || value === 'bevel' ? value : undefined
 }
 
 function parseColorValue(value: unknown): number | null {

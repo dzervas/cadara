@@ -83,6 +83,36 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     assert(event?.type === 'sketch.activeToolCleared', 'Escape should clear the active sketch tool before exiting sketch mode.')
   }
 
+  function testEscapeClearsActiveSketchStyleFocus() {
+    const event = getEscapeEvent({
+      activeCommand: {
+        commandSessionId: 'command_sketch-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      activeReferencePickerFieldId: null,
+      selection: [{
+        kind: 'sketchEntity',
+        sketchId: 'sketch_draft',
+        entityId: 'sketch_entity_1',
+      }],
+      sketchSession: {
+        ...createNewSketchSession(createStandardPlaneDefinition('xy')),
+        activeTool: null,
+        activeStyleFocus: {
+          toolId: 'stroke',
+          target: {
+            kind: 'sketchEntity',
+            sketchId: 'sketch_draft',
+            entityId: 'sketch_entity_1',
+          },
+        },
+      },
+    })
+
+    assert(event?.type === 'sketch.activeToolCleared', 'Escape should clear active sketch style focus before clearing selection.')
+  }
+
   function testEscapeDoesNothingWhenSketchIsIdle() {
     const event = getEscapeEvent({
       activeCommand: {
@@ -207,6 +237,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
   testSketchReopenIntentUsesSketchFlow()
   testEscapePrefersReferencePickerCancellation()
   testEscapeClearsActiveSketchToolBeforeExitingSketch()
+  testEscapeClearsActiveSketchStyleFocus()
   testEscapeDoesNothingWhenSketchIsIdle()
   testEscapeClearsSelectionWhenNoInteractionHandlesIt()
   testViewportClickSelectionRoutingAllowsConstraintsOnly()

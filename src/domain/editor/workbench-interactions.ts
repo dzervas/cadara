@@ -7,6 +7,7 @@ import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef, SelectionFilter } from '@/domain/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
 import {
+  getActiveSketchStyleToolId,
   isSketchConstructionSelected,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
@@ -59,7 +60,11 @@ export function getEscapeEvent(
     return { type: 'form.referencePickerCancelled' }
   }
 
-  if (state.sketchSession?.activeTool || (state.sketchSession && isSketchConstructionSelected(state.sketchSession))) {
+  if (
+    state.sketchSession?.activeTool
+    || (state.sketchSession && isSketchConstructionSelected(state.sketchSession))
+    || (state.sketchSession && getActiveSketchStyleToolId(state.sketchSession))
+  ) {
     return { type: 'sketch.activeToolCleared' }
   }
 

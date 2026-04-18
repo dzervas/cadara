@@ -28,6 +28,8 @@ import {
   deleteSelectedSketchAnnotation,
   deleteSketchReferenceTarget,
   finishSketchGeometryDrag,
+  focusSketchStyleTool,
+  getActiveSketchStyleToolId,
   getNextSketchHistoryCursor,
   getPreviousSketchHistoryCursor,
   getSketchSessionPreviewLabel,
@@ -46,6 +48,7 @@ import {
   updateSketchGeometryDrag,
   updateSketchConstraintHover,
   updateSketchEditToolHover,
+  updateSketchStyleFocusTarget,
   updateSketchReferenceProjection,
   updateSketchPointer,
   type SketchSessionState,
@@ -1627,8 +1630,23 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
 
       if (state.kind === 'editingSketch' && isPassiveSketchTool(event.toolId)) {
+        const session = focusSketchStyleTool(state.session, state.selection, event.toolId)
+
         return {
-          state,
+          state: {
+            ...state,
+            mode: 'sketch',
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
           effects: [],
         }
       }
@@ -1980,6 +1998,25 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (state.kind === 'editingSketch' && getActiveSketchStyleToolId(state.session)) {
+        const session = updateSketchStyleFocusTarget(state.session, [])
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
       const clearedState = {
         ...state,
         selection: [],
@@ -2060,6 +2097,26 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           activeReferencePickerFieldId: activeReferenceField?.id ?? state.activeReferencePickerFieldId,
           pendingPreviewRequestId: null,
         })
+      }
+
+      if (state.kind === 'editingSketch' && getActiveSketchStyleToolId(state.session)) {
+        const nextSelection = [event.target]
+        const session = updateSketchStyleFocusTarget(state.session, nextSelection)
+
+        return {
+          state: {
+            ...state,
+            selection: nextSelection,
+            hoverTarget: event.target,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
       }
 
       if (state.kind === 'editingSketch' && state.session.constructionTargetPicking) {

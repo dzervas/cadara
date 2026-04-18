@@ -8,6 +8,7 @@ import {
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   finishSketchGeometryDrag,
+  getSketchSessionDisplayRenderables,
   patchSketchStyleValue,
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
@@ -352,13 +353,70 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       [entityTarget],
       { intent: 'patchSketchStyle', field: 'strokeWidth', value: 2.5 },
     )
+    assert(
+      getSketchSessionDisplayRenderables(session).find((entry) =>
+        entry.target?.kind === 'sketchEntity' && entry.target.entityId === entityTarget.entityId,
+      )?.strokeStyle === undefined,
+      'Stroke fields should not render until stroke styling is explicitly enabled.',
+    )
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'strokeEnabled', value: true },
+    )
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'fillMode', value: 'gradient' },
+    )
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'gradientStartColor', value: '#00ffff' },
+    )
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'strokeMiterLimit', value: 7 },
+    )
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'strokeDashSize', value: 0.6 },
+    )
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'strokeGapSize', value: 0.25 },
+    )
 
     assert(
       session.definition.entities[0]?.style?.strokeWidth === 2.5,
       'Local style patch should update the selected sketch entity style in session definition.',
     )
     assert(
-      session.commitRequest?.definition.entities[0]?.style?.strokeWidth === 2.5,
+      getSketchSessionDisplayRenderables(session).find((entry) =>
+        entry.target?.kind === 'sketchEntity' && entry.target.entityId === entityTarget.entityId,
+      )?.strokeStyle?.width === 2.5,
+      'Explicitly enabled local stroke fields should render through sketch display metadata.',
+    )
+    assert(
+      session.definition.entities[0]?.style?.fillMode === 'gradient',
+      'Local style patch should update fill mode in session definition.',
+    )
+    assert(
+      session.definition.entities[0]?.style?.strokeMiterLimit === 7,
+      'Local style patch should update miter limit in session definition.',
+    )
+    assert(
+      session.definition.entities[0]?.style?.strokeDashSize === 0.6 &&
+        session.definition.entities[0]?.style?.strokeGapSize === 0.25,
+      'Local style patch should update dash fields in session definition.',
+    )
+    assert(
+      session.commitRequest?.definition.entities[0]?.style?.strokeWidth === 2.5 &&
+        session.commitRequest.definition.entities[0]?.style?.strokeEnabled === true &&
+        session.commitRequest.definition.entities[0]?.style?.strokeDashSize === 0.6,
       'Local style patch should rebuild commit request using the updated sketch definition.',
     )
   }

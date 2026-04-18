@@ -1499,7 +1499,7 @@ function SketchDisplayRenderableNode({ renderable, applyStyles }: SketchDisplayR
     case 'polyline':
       return <SketchDisplayPolylineNode renderable={renderable} applyStyles={applyStyles} />
     case 'marker':
-      return <SketchDisplayMarkerNode renderable={renderable} />
+      return <SketchDisplayMarkerNode renderable={renderable} applyStyles={applyStyles} />
   }
 }
 
@@ -1638,17 +1638,30 @@ function SketchDisplayPolylineNode({
   return <primitive object={line} />
 }
 
-function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+function SketchDisplayMarkerNode({
+  renderable,
+  applyStyles,
+}: {
+  renderable: SketchSessionDisplayRenderable
+  applyStyles: boolean
+}) {
   const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+  const defaultColor = renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchPoint
   const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchPoint,
+    color: applyStyles
+      ? renderable.paintStyle?.color ?? renderable.strokeStyle?.color ?? defaultColor
+      : defaultColor,
+    transparent: applyStyles && (
+      renderable.paintStyle?.opacity !== undefined || renderable.strokeStyle?.opacity !== undefined
+    ),
+    opacity: applyStyles ? renderable.paintStyle?.opacity ?? renderable.strokeStyle?.opacity ?? 1 : 1,
     metalness: 0.08,
     roughness: 0.34,
     emissive: renderable.role === 'reference' ? 0x4a3511 : 0x1c3245,
     emissiveIntensity: renderable.role === 'reference' ? 0.2 : 0.16,
     depthTest: true,
     depthWrite: false,
-  }), [renderable.role])
+  }), [applyStyles, defaultColor, renderable.paintStyle, renderable.role, renderable.strokeStyle])
   const pickProxy = useMemo(() => {
     if (!geometryData) {
       throw new Error('Display renderable is missing marker geometry.')

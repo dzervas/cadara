@@ -1270,6 +1270,9 @@ function buildSketchCurveRenderRecords(
           DEFAULT_ARC_SAMPLE_COUNT,
         )
         break
+      case 'spline':
+        points2D = entity.fitPoints
+        break
     }
 
     return [{

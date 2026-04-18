@@ -41,6 +41,11 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
         isConstruction: false,
         startPointId: 'sketch_point_a',
         endPointId: 'sketch_point_b',
+        style: {
+          strokeMiterLimit: 5,
+          strokeDashSize: 0.4,
+          strokeGapSize: 0.2,
+        },
       },
     ],
     constraintIds: [],
@@ -72,6 +77,8 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
           lineCap: 'round',
           lineJoin: 'round',
           miterLimit: 4,
+          dashSize: 0.6,
+          gapSize: 0.25,
         },
       },
       {
@@ -109,4 +116,9 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
   assert(roundTrip.success, 'Style payloads should survive serialize/parse round-trips.')
   assert(roundTrip.data.styles?.length === 2, 'Round-tripped style records should be preserved.')
   assert(roundTrip.data.styles?.[1]?.fill.kind === 'gradient', 'Round-tripped gradient fill should be preserved.')
+  assert(roundTrip.data.styles?.[0]?.stroke.dashSize === 0.6, 'Round-tripped style records should preserve dash size.')
+  assert(
+    roundTrip.data.entities[0]?.style?.strokeMiterLimit === 5,
+    'Round-tripped local style records should preserve miter limits.',
+  )
 })

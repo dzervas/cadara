@@ -223,12 +223,19 @@ export interface SketchToolValidationDescriptor {
   severity: 'info' | 'warning' | 'error'
 }
 
+export interface SketchToolControlGroupDescriptor {
+  id: string
+  label: string
+  controls: readonly SketchToolControlDescriptor[]
+}
+
 export interface SketchToolPresentationSchema {
   prompts: readonly SketchToolPromptDescriptor[]
   steps?: readonly SketchToolStepDescriptor[]
   cursor?: SketchToolCursorDescriptor | null
   selectionGuide?: SketchToolSelectionGuideDescriptor | null
   controls?: readonly SketchToolControlDescriptor[]
+  controlGroups?: readonly SketchToolControlGroupDescriptor[]
   measurements?: readonly SketchToolMeasurementDescriptor[]
   completionHints?: readonly SketchToolCompletionHintDescriptor[]
   overlays?: readonly SketchToolOverlayDescriptor[]

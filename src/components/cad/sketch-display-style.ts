@@ -20,6 +20,9 @@ export interface SketchDisplayPolylineMaterialConfig {
   color: number
   opacity: number
   lineWidth: number
+  lineCap: 'butt' | 'round' | 'square'
+  lineJoin: 'miter' | 'round' | 'bevel'
+  miterLimit: number
   dashSize: number
   gapSize: number
 }
@@ -54,7 +57,10 @@ export function getSketchDisplayPolylineMaterialConfig(
   applyStyles: boolean,
 ): SketchDisplayPolylineMaterialConfig {
   const defaultColor = renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchCurve
-  const linePattern = renderable.linePattern
+  const hasAuthoredDash = applyStyles
+    && (renderable.strokeStyle?.dashSize ?? 0) > 0
+    && (renderable.strokeStyle?.gapSize ?? 0) > 0
+  const linePattern = hasAuthoredDash ? 'dashed' : renderable.linePattern
   const defaultOpacity = linePattern === 'dashed'
     ? (renderable.role === 'reference' ? 0.7 : 0.88)
     : 0.95
@@ -64,6 +70,9 @@ export function getSketchDisplayPolylineMaterialConfig(
     color: applyStyles ? renderable.strokeStyle?.color ?? defaultColor : defaultColor,
     opacity: applyStyles ? renderable.strokeStyle?.opacity ?? defaultOpacity : defaultOpacity,
     lineWidth: applyStyles ? renderable.strokeStyle?.width ?? 1 : 1,
+    lineCap: applyStyles ? renderable.strokeStyle?.lineCap ?? 'round' : 'round',
+    lineJoin: applyStyles ? renderable.strokeStyle?.lineJoin ?? 'round' : 'round',
+    miterLimit: applyStyles ? renderable.strokeStyle?.miterLimit ?? 4 : 4,
     dashSize: applyStyles ? renderable.strokeStyle?.dashSize ?? 0.24 : 0.24,
     gapSize: applyStyles ? renderable.strokeStyle?.gapSize ?? 0.14 : 0.14,
   }
