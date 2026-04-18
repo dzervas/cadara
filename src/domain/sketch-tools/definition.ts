@@ -10,7 +10,7 @@ import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 
-export type SketchToolId = 'line' | 'rectangle' | 'circle'
+export type SketchToolId = 'line' | 'rectangle' | 'circle' | 'spline'
 
 export type SketchDraftEntity =
   | {
@@ -33,6 +33,15 @@ export type SketchDraftEntity =
       label: string
       isConstruction: boolean
     }
+  | {
+      id: string
+      kind: 'spline'
+      points: readonly SketchPoint[]
+      entityId: SketchEntityId | null
+      status: 'preview' | 'accepted'
+      label: string
+      isConstruction: boolean
+    }
 
 export interface SketchToolMetadata<TToolId extends SketchToolId = SketchToolId> {
   id: TToolId
@@ -47,6 +56,7 @@ export interface SketchToolRuntimeState {
   status: 'idle' | 'drawing'
   pointerDownPoint: SketchPoint | null
   livePoint: SketchPoint | null
+  placedPoints?: readonly SketchPoint[]
   validationMessage: string | null
 }
 
@@ -90,12 +100,26 @@ export interface SketchToolCommitFactories {
     centerPointId: SketchPointId,
     radius: number,
   ): SketchEntityDefinition
+  createArcEntity(
+    label: string,
+    entityId: SketchEntityId,
+    centerPointId: SketchPointId,
+    startPointId: SketchPointId,
+    endPointId: SketchPointId,
+    sweepDirection: 'clockwise' | 'counterClockwise',
+  ): SketchEntityDefinition
+  createSplineEntity(
+    label: string,
+    entityId: SketchEntityId,
+    fitPointIds: readonly SketchPointId[],
+  ): SketchEntityDefinition
 }
 
 export interface SketchToolCommitInput {
   sequence: number
   start: SketchPoint
   end: SketchPoint
+  points?: readonly SketchPoint[]
   isConstruction: boolean
   acceptedSnaps?: {
     start: SketchSnapCandidate | null

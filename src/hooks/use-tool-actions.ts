@@ -6,6 +6,7 @@ import type { ToolTriggerMetadata } from '@/domain/tools/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
+import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 
 export function useToolActionBus() {
   const context = useContext(ToolActionContext)
@@ -51,6 +52,8 @@ export function useToolActions() {
           ? 'part'
           : isRegisteredSketchToolId(toolId)
             || isRegisteredSketchConstraintToolId(toolId)
+            || isRegisteredSketchEditToolId(toolId)
+            || toolId === 'dimension'
             || toolId === 'construction'
             || toolId === 'projectReference'
             || toolId === 'finishSketch'

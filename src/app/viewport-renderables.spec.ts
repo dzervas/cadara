@@ -1,6 +1,12 @@
 import { test } from 'bun:test'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
+import {
+  acceptSketchDraw,
+  beginSketchTool,
+  createNewSketchSessionFromSupport,
+  startSketchDraw,
+} from '@/domain/editor/sketch-session'
 
 test('src/app/viewport-renderables.spec.ts', async () => {
   function assert(condition: unknown, message = 'Assertion failed'): asserts condition {
@@ -143,6 +149,48 @@ test('src/app/viewport-renderables.spec.ts', async () => {
         { 'sketch:sketch_a': true },
       ),
       'Sketch-owned selection targets should be hidden when their owning committed sketch is hidden.',
+    )
+  }
+
+  {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      'spline',
+    )
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [1, 2])
+
+    const previewComposed = composeViewportRenderables({
+      snapshotRenderables: [],
+      previewRenderables: null,
+      sketchSession: session,
+      hiddenTargetKeys: {},
+    })
+
+    assert(
+      previewComposed.sketchDisplayRenderables.some((renderable) =>
+        renderable.label === 'Spline preview'
+        && renderable.geometry.kind === 'polyline'
+        && renderable.geometry.points.length >= 2,
+      ),
+      'Spline preview should render as viewport polyline feedback.',
+    )
+
+    session = acceptSketchDraw(session, [3, 0])
+    const committedComposed = composeViewportRenderables({
+      snapshotRenderables: [],
+      previewRenderables: null,
+      sketchSession: session,
+      hiddenTargetKeys: {},
+    })
+
+    assert(
+      committedComposed.sketchDisplayRenderables.some((renderable) =>
+        renderable.target?.kind === 'sketchEntity'
+        && renderable.geometry.kind === 'polyline'
+        && renderable.geometry.points.length > 3,
+      ),
+      'Persisted spline geometry should render as a sampled viewport polyline.',
     )
   }
 })

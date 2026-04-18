@@ -126,6 +126,14 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       'Viewport clicks should request selection while Construction is picking an existing sketch target.',
     )
     assert(
+      shouldViewportClickRequestSelection('trim'),
+      'Viewport clicks should request selection while Trim is picking an existing sketch target.',
+    )
+    assert(
+      shouldViewportClickRequestSelection('offset'),
+      'Viewport clicks should request selection while Offset is picking an existing sketch target.',
+    )
+    assert(
       !shouldViewportClickRequestSelection('line'),
       'Viewport clicks should keep drawing tools on the pointer construction path.',
     )
@@ -165,6 +173,10 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     assert(
       getViewportCanvasClickIntent({ activeSketchTool: 'line', hasResolvedTarget: true }) === 'ignore',
       'Target clicks should preserve drawing-tool routing when selection clicks are not allowed.',
+    )
+    assert(
+      getViewportCanvasClickIntent({ activeSketchTool: 'trim', hasResolvedTarget: true }) === 'selectTarget',
+      'Trim target clicks should route through selection so sketch entities can be edited.',
     )
   }
 

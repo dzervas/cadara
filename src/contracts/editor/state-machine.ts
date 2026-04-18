@@ -2,6 +2,7 @@ import type { ToolId } from '@/domain/tools/tool-registry'
 import type { ToolbarMode } from '@/domain/tools/schema'
 import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
+import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import {
   applySelectionToFeatureEditSession,
   buildFeatureDefinition,
@@ -32,9 +33,11 @@ import {
   getSketchSessionPreviewLabel,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
+  patchSketchEditToolValue,
   patchSketchStyleValue,
   pinSketchConstraintPreview,
   selectSketchEditTarget,
+  selectSketchEditToolTarget,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
   selectSketchReferenceTarget,
@@ -42,6 +45,7 @@ import {
   toggleSketchConstructionTarget,
   updateSketchGeometryDrag,
   updateSketchConstraintHover,
+  updateSketchEditToolHover,
   updateSketchReferenceProjection,
   updateSketchPointer,
   type SketchSessionState,
@@ -1548,12 +1552,8 @@ function isFeatureTool(toolId: ToolId): toolId is Extract<ToolId, 'extrude' | 'r
     || toolId === 'transform'
 }
 
-function isPassiveSketchTool(toolId: ToolId): toolId is Extract<ToolId, 'spline' | 'dimension' | 'trim' | 'offset' | 'fill' | 'stroke' | 'fillType' | 'fillSolid' | 'fillGradient' | 'strokeOptions' | 'strokeWidth' | 'strokeCap' | 'strokeJoin' | 'strokeMiter' | 'strokeDash'> {
-  return toolId === 'spline'
-    || toolId === 'dimension'
-    || toolId === 'trim'
-    || toolId === 'offset'
-    || toolId === 'fill'
+function isPassiveSketchTool(toolId: ToolId): toolId is Extract<ToolId, 'fill' | 'stroke' | 'fillType' | 'fillSolid' | 'fillGradient' | 'strokeOptions' | 'strokeWidth' | 'strokeCap' | 'strokeJoin' | 'strokeMiter' | 'strokeDash'> {
+  return toolId === 'fill'
     || toolId === 'stroke'
     || toolId === 'fillType'
     || toolId === 'fillSolid'
@@ -1592,11 +1592,16 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         (
           isRegisteredSketchToolId(event.toolId)
           || isRegisteredSketchConstraintToolId(event.toolId)
+          || isRegisteredSketchEditToolId(event.toolId)
+          || event.toolId === 'dimension'
           || event.toolId === 'construction'
           || event.toolId === 'projectReference'
         )
       ) {
-        const session = beginSketchTool(state.session, event.toolId)
+        const session = beginSketchTool(
+          state.session,
+          event.toolId === 'dimension' ? 'dimensionDistance' : event.toolId,
+        )
 
         return {
           state: {
@@ -1831,6 +1836,24 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (state.kind === 'editingSketch' && state.session.activeEditTool) {
+        const session = updateSketchEditToolHover(state.session, null)
+
+        return {
+          state: {
+            ...state,
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
       return {
         state: withPreview(
           {
@@ -1884,6 +1907,24 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (state.kind === 'editingSketch' && state.session.activeEditTool) {
+        const session = updateSketchEditToolHover(state.session, event.target)
+
+        return {
+          state: {
+            ...state,
+            hoverTarget: event.target,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
       return {
         state: withPreview(
           {
@@ -1903,6 +1944,25 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'selection.cleared': {
       if (state.kind === 'editingSketch' && state.session.constraintAuthoring) {
         const session = updateSketchConstraintHover(state.session, null)
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      if (state.kind === 'editingSketch' && state.session.activeEditTool) {
+        const session = updateSketchEditToolHover(state.session, null)
 
         return {
           state: {
@@ -2049,6 +2109,29 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
 
         return emitSketchReferenceProjection(nextState, session)
+      }
+
+      if (state.kind === 'editingSketch' && state.session.activeEditTool) {
+        const session = selectSketchEditToolTarget(state.session, event.target)
+
+        return {
+          state: {
+            ...state,
+            selection: [event.target],
+            hoverTarget: event.target,
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
       }
 
       if (
@@ -2371,6 +2454,23 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (state.session.constraintAuthoring || state.session.activeAnnotationEdit) {
         const session = patchSketchConstraintValue(state.session, event.patch)
+
+        return {
+          state: {
+            ...state,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      if (state.session.activeEditTool) {
+        const session = patchSketchEditToolValue(state.session, event.patch)
 
         return {
           state: {

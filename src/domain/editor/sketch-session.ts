@@ -39,12 +39,18 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
+import { primitiveRefEquals } from '@/domain/editor/schema'
 import {
   buildSketchStyleControls,
   isSketchStyleTarget,
   parseSketchStylePatch,
   type SketchStylePatch,
 } from '@/domain/sketch-styles/definition'
+import type { OffsetSide } from '@/domain/sketch-editing/operations'
+import {
+  createOffsetContribution,
+  trimLineSegmentAtIntersections,
+} from '@/domain/sketch-editing/operations'
 import { mapSketchPointToWorld as mapSketchPointToWorldFromPlane } from '@/domain/modeling/occ/planes'
 import {
   createStandardPlaneDefinition,
@@ -72,6 +78,8 @@ import type {
   SketchToolId,
 } from '@/domain/sketch-tools/definition'
 import { getSketchToolDefinition } from '@/domain/sketch-tools/registry'
+import type { SketchEditToolId } from '@/domain/sketch-edit-tools/definition'
+import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import type { SketchSnapCandidate, SketchSnapSourceRef } from '@/domain/sketch-snapping/snap-candidates'
 import {
   collectSketchSnapGeometries,
@@ -85,6 +93,7 @@ export type SketchConstructionToolId = 'construction'
 export type SketchReferenceToolId = 'projectReference'
 export type SketchAuthoringToolId =
   | SketchToolId
+  | SketchEditToolId
   | SketchConstraintToolId
   | SketchConstructionToolId
   | SketchReferenceToolId
@@ -139,6 +148,15 @@ export interface SketchGeometryDragState {
   message: string | null
 }
 
+export interface SketchEditToolState {
+  toolId: SketchEditToolId
+  hoverTarget: PrimitiveRef | null
+  selectedTarget: PrimitiveRef | null
+  selectedTargets: PrimitiveRef[]
+  offsetDistance: number | null
+  offsetSide: OffsetSide
+}
+
 export interface SketchSessionState {
   sketchId: SketchId | null
   sketchLabel: string
@@ -156,10 +174,12 @@ export interface SketchSessionState {
   constructionModifierActive: boolean
   pointerDownPoint: SketchPoint | null
   livePoint: SketchPoint | null
+  toolPlacedPoints: readonly SketchPoint[]
   toolPresentation: SketchToolPresentationSchema | null
   constraintAuthoring: SketchConstraintAuthoringState | null
   activeAnnotationEdit: SketchAnnotationEditState | null
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null
+  activeEditTool: SketchEditToolState | null
   activeEditTarget: SketchPointRef | null
   activeDrag: SketchGeometryDragState | null
   activeSnap: SketchSnapCandidate | null
@@ -444,6 +464,8 @@ function getEntityPointIds(entity: SketchEntityDefinition) {
       return [entity.centerPointId]
     case 'point':
       return [entity.pointId]
+    case 'spline':
+      return entity.fitPointIds
   }
 }
 
@@ -525,10 +547,12 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -570,10 +594,12 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -648,6 +674,29 @@ function mapDefinitionEntityToDraftEntity(
         kind: 'circle',
         center: center.position,
         radius: entity.radius,
+        entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
+        status: 'accepted',
+        label: entity.label,
+        isConstruction: entity.isConstruction,
+      },
+    ]
+  }
+
+  if (entity.kind === 'spline') {
+    const splinePoints = entity.fitPointIds.flatMap((pointId) => {
+      const point = points.find((candidate) => candidate.pointId === pointId)
+      return point ? [point.position] : []
+    })
+
+    if (splinePoints.length < 3) {
+      return []
+    }
+
+    return [
+      {
+        id: entity.entityId,
+        kind: 'spline',
+        points: splinePoints,
         entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
         status: 'accepted',
         label: entity.label,
@@ -761,6 +810,47 @@ function createCircleEntityDefinition(
     isConstruction,
     centerPointId,
     radius,
+  }
+}
+
+function createArcEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  centerPointId: SketchPointId,
+  startPointId: SketchPointId,
+  endPointId: SketchPointId,
+  sweepDirection: 'clockwise' | 'counterClockwise',
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'arc',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    centerPointId,
+    startPointId,
+    endPointId,
+    sweepDirection,
+  }
+}
+
+function createSplineEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  fitPointIds: readonly SketchPointId[],
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'spline',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    fitPointIds,
+    degree: 2,
   }
 }
 
@@ -976,12 +1066,14 @@ function activateSketchConstraintTool(
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     entities: session.entities.filter((entity) => entity.status === 'accepted'),
     validationMessage: null,
     toolPresentation: buildConstraintToolPresentation(authoring),
     constraintAuthoring: authoring,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -1116,6 +1208,7 @@ function withConstructionFlag(
 function isDrawingSketchTool(toolId: SketchAuthoringToolId | null): toolId is SketchToolId {
   return toolId !== null
     && !isRegisteredSketchConstraintToolId(toolId)
+    && !isRegisteredSketchEditToolId(toolId)
     && toolId !== 'construction'
     && toolId !== 'projectReference'
 }
@@ -1145,6 +1238,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
       constraintAuthoring: null,
       activeAnnotationEdit: null,
       selectedAnnotation: null,
+      activeEditTool: null,
       activeEditTarget: null,
       activeDrag: null,
       activeSnap: null,
@@ -1167,6 +1261,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
     constraintAuthoring: null,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -1194,6 +1289,148 @@ function beginSketchReferenceTool(session: SketchSessionState): SketchSessionSta
     constraintAuthoring: null,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    activeSnap: null,
+    drawStartSnap: null,
+  }
+}
+
+function buildSketchEditToolPresentation(
+  state: SketchEditToolState,
+  validationMessage: string | null = null,
+  previewEntities: readonly SketchDraftEntity[] = [],
+): SketchToolPresentationSchema {
+  const isOffset = state.toolId === 'offset'
+  const selectedCount = state.selectedTargets.length
+  const hasSelection = selectedCount > 0
+  const hoverLabel = state.hoverTarget?.kind === 'sketchEntity' ? 'Sketch entity' : null
+  const validation = validationMessage
+    ? [{ id: `${state.toolId}-validation`, message: validationMessage, severity: 'error' as const }]
+    : []
+
+  return {
+    prompts: [{
+      id: `${state.toolId}-prompt`,
+      text: isOffset
+        ? hasSelection ? 'Set offset distance' : 'Select entities to offset'
+        : 'Select segment to trim',
+      tone: validation.length > 0 ? 'warning' : 'neutral',
+    }],
+    selectionGuide: {
+      id: `${state.toolId}-selection`,
+      label: isOffset ? 'Offset target' : 'Trim target',
+      acceptedKinds: isOffset ? ['line', 'circle', 'arc', 'spline'] : ['line', 'circle', 'arc', 'spline'],
+      selectedCount,
+      requiredCount: 1,
+      hoverLabel,
+    },
+    controls: isOffset
+      ? [
+          {
+            id: 'offset-distance',
+            kind: 'numeric' as const,
+            label: 'Distance',
+            value: state.offsetDistance,
+            unit: 'mm',
+            disabled: !hasSelection,
+            action: { type: 'patch' as const, patch: { intent: 'setOffsetDistance' } },
+          },
+          {
+            id: 'offset-side',
+            kind: 'option' as const,
+            label: 'Side',
+            value: state.offsetSide,
+            options: [
+              { value: 'left', label: 'Left / outward' },
+              { value: 'right', label: 'Right / inward' },
+            ],
+            disabled: !hasSelection,
+            action: { type: 'patch' as const, patch: { intent: 'setOffsetSide' } },
+          },
+        ]
+      : [],
+    completionHints: isOffset
+      ? [{
+          id: 'offset-completion',
+          text: hasSelection ? 'Confirm to create offset geometry' : 'Select connected lines or one curve',
+          ready: Boolean(hasSelection && previewEntities.length > 0 && validation.length === 0),
+        }]
+      : [],
+    floatingInput: isOffset && hasSelection
+      ? {
+          id: 'offset-distance-input',
+          label: 'Offset distance',
+          value: state.offsetDistance,
+          unit: 'mm',
+          min: 0,
+          confirmLabel: 'Create',
+          cancelLabel: 'Cancel',
+          placement: 'target',
+          anchor: previewEntities[0]?.kind === 'line'
+            ? {
+                kind: 'sketchPoint' as const,
+                point: [
+                  (previewEntities[0].start[0] + previewEntities[0].end[0]) / 2,
+                  (previewEntities[0].start[1] + previewEntities[0].end[1]) / 2,
+                ],
+                offset: { x: 18, y: -18 },
+              }
+            : previewEntities[0]?.kind === 'circle'
+              ? { kind: 'sketchPoint' as const, point: previewEntities[0].center, offset: { x: 18, y: -18 } }
+              : undefined,
+          submitAction: { type: 'patch', patch: { intent: 'commitOffset' } },
+          cancelAction: { type: 'patch', patch: { intent: 'cancelOffset' } },
+        }
+      : null,
+    overlays: state.hoverTarget
+      ? [{
+          id: `${state.toolId}-target-feedback`,
+          kind: 'referenceLabel',
+          label: hoverLabel ?? 'Unsupported target',
+          anchor: { kind: 'sketchPoint', point: [0, 0], offset: { x: 18, y: -18 } },
+        }]
+      : [],
+    validation,
+    extension: {
+      id: `${state.toolId}-workflow`,
+      payload: {
+        toolId: state.toolId,
+        hasSelection,
+        selectedCount,
+        previewEntityCount: previewEntities.length,
+      },
+    },
+  }
+}
+
+function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditToolId): SketchSessionState {
+  const activeEditTool: SketchEditToolState = {
+    toolId,
+    hoverTarget: null,
+    selectedTarget: null,
+    selectedTargets: [],
+    offsetDistance: 1,
+    offsetSide: 'left',
+  }
+
+  return {
+    ...session,
+    activeTool: toolId,
+    activeEditTool,
+    status: 'collectingTargets',
+    constructionTargetPicking: false,
+    referenceTargetPicking: false,
+    constructionModifierActive: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    validationMessage: null,
+    toolPresentation: buildSketchEditToolPresentation(activeEditTool),
+    constraintAuthoring: null,
+    activeAnnotationEdit: null,
+    selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -1218,6 +1455,10 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     }
   }
 
+  if (isRegisteredSketchEditToolId(toolId)) {
+    return beginSketchEditTool(session, toolId)
+  }
+
   const toolDefinition = getSketchToolDefinition(toolId)
   const activation = toolDefinition.activate()
   const constructionModifierActive =
@@ -1232,12 +1473,14 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     constructionModifierActive,
     pointerDownPoint: activation.state.pointerDownPoint,
     livePoint: activation.state.livePoint,
+    toolPlacedPoints: activation.state.placedPoints ?? [],
     entities: session.entities.filter((entity) => entity.status === 'accepted'),
     validationMessage: activation.state.validationMessage,
     toolPresentation: activation.presentation,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -1265,6 +1508,7 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     constraintAuthoring: null,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -1316,6 +1560,7 @@ export function updateSketchPointer(
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
+    toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
     entities: [
       ...session.entities.filter((entity) => entity.status === 'accepted'),
       ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
@@ -1352,6 +1597,255 @@ export function selectSketchEditTarget(
   }
 }
 
+function createSessionCommitFactories(
+  sequence: number,
+  sketchId: SketchId,
+) {
+  return {
+    createPointId: (suffix: string) => createPointId(sequence, suffix),
+    createEntityId: (suffix: string) => createEntityId(sequence, suffix),
+    createConstraintId: (suffix: string) => createConstraintId(sequence, suffix),
+    createDimensionId: (suffix: string) => createDimensionId(sequence, suffix),
+    createPoint: (label: string, pointId: SketchPointId, position: SketchPoint) =>
+      createPointDefinition(sketchId, pointId, label, position, false),
+    createLineEntity: (label: string, entityId: SketchEntityId, startPointId: SketchPointId, endPointId: SketchPointId) =>
+      createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId, false),
+    createCircleEntity: (label: string, entityId: SketchEntityId, centerPointId: SketchPointId, radius: number) =>
+      createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, false),
+    createArcEntity: (
+      label: string,
+      entityId: SketchEntityId,
+      centerPointId: SketchPointId,
+      startPointId: SketchPointId,
+      endPointId: SketchPointId,
+      sweepDirection: 'clockwise' | 'counterClockwise',
+    ) =>
+      createArcEntityDefinition(sketchId, entityId, label, centerPointId, startPointId, endPointId, sweepDirection, false),
+    createSplineEntity: (label: string, entityId: SketchEntityId, fitPointIds: readonly SketchPointId[]) =>
+      createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, false),
+  }
+}
+
+function getOffsetPreview(
+  session: SketchSessionState,
+  activeEditTool: SketchEditToolState,
+) {
+  const selectedTargets = activeEditTool.selectedTargets
+    .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => target.kind === 'sketchEntity')
+  if (selectedTargets.length === 0) {
+    return createOffsetContribution({
+      definition: session.definition,
+      entityIds: [],
+      distance: null,
+      side: activeEditTool.offsetSide,
+      sequence: session.sequence + 1,
+      factories: createSessionCommitFactories(session.sequence + 1, session.sketchId ?? ('sketch_draft' as SketchId)),
+    })
+  }
+
+  const nextSequence = session.sequence + 1
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  return createOffsetContribution({
+    definition: session.definition,
+    entityIds: selectedTargets.map((target) => target.entityId),
+    distance: activeEditTool.offsetDistance,
+    side: activeEditTool.offsetSide,
+    sequence: nextSequence,
+    factories: createSessionCommitFactories(nextSequence, sketchId),
+  })
+}
+
+export function updateSketchEditToolHover(
+  session: SketchSessionState,
+  target: PrimitiveRef | null,
+): SketchSessionState {
+  if (!session.activeEditTool) {
+    return session
+  }
+
+  const activeEditTool = {
+    ...session.activeEditTool,
+    hoverTarget: target,
+  }
+  const preview = activeEditTool.toolId === 'offset'
+    ? getOffsetPreview(session, activeEditTool)
+    : null
+
+  return {
+    ...session,
+    activeEditTool,
+    toolPresentation: buildSketchEditToolPresentation(
+      activeEditTool,
+      session.validationMessage,
+      preview?.previewEntities ?? [],
+    ),
+  }
+}
+
+export function selectSketchEditToolTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
+  const activeEditTool = session.activeEditTool
+  if (!activeEditTool || target.kind !== 'sketchEntity') {
+    return session
+  }
+
+  if (activeEditTool.toolId === 'trim') {
+    const nextSequence = session.sequence + 1
+    const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+    const result = trimLineSegmentAtIntersections({
+      definition: session.definition,
+      entityId: target.entityId,
+      nextPointId: (suffix) => createPointId(nextSequence, suffix),
+      nextEntityId: (suffix) => createEntityId(nextSequence, suffix),
+      createPoint: (label, pointId, position) =>
+        createPointDefinition(sketchId, pointId, label, position, false),
+      createLine: (label, entityId, startPointId, endPointId) =>
+        createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId, false),
+      createArc: (label, entityId, centerPointId, startPointId, endPointId, sweepDirection) =>
+        createArcEntityDefinition(sketchId, entityId, label, centerPointId, startPointId, endPointId, sweepDirection, false),
+      createSpline: (label, entityId, fitPointIds) =>
+        createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, false),
+    })
+
+    if (!result.changed) {
+      return {
+        ...session,
+        validationMessage: result.message,
+        toolPresentation: buildSketchEditToolPresentation(activeEditTool, result.message),
+      }
+    }
+
+    const historyCursor = createTailSketchHistoryCursor(result.definition)
+
+    return {
+      ...session,
+      definition: result.definition,
+      fullDefinition: cloneDefinition(result.definition),
+      historyCursor,
+      entities: result.definition.entities.flatMap((entity) =>
+        mapDefinitionEntityToDraftEntity(sketchId, result.definition.points, entity),
+      ),
+      sequence: nextSequence,
+      validationMessage: null,
+      commitRequest: rebuildSessionCommitRequest(session, result.definition),
+      toolPresentation: buildSketchEditToolPresentation(activeEditTool),
+      activeEditTarget: null,
+      activeDrag: null,
+    }
+  }
+
+  const nextSelectedTargets = activeEditTool.selectedTargets.some((selected) => primitiveRefEquals(selected, target))
+    ? activeEditTool.selectedTargets.filter((selected) => !primitiveRefEquals(selected, target))
+    : [...activeEditTool.selectedTargets, target]
+  const nextEditTool = {
+    ...activeEditTool,
+    selectedTarget: nextSelectedTargets[0] ?? null,
+    selectedTargets: nextSelectedTargets,
+    hoverTarget: null,
+  }
+  const preview = getOffsetPreview(session, nextEditTool)
+
+  return {
+    ...session,
+    activeEditTool: nextEditTool,
+    entities: [
+      ...session.entities.filter((entity) => entity.status === 'accepted'),
+      ...preview.previewEntities,
+    ],
+    validationMessage: preview.valid ? null : preview.message,
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool, preview.message, preview.previewEntities),
+  }
+}
+
+export function patchSketchEditToolValue(
+  session: SketchSessionState,
+  patch: Record<string, unknown>,
+): SketchSessionState {
+  const activeEditTool = session.activeEditTool
+  if (!activeEditTool || activeEditTool.toolId !== 'offset') {
+    return session
+  }
+
+  if (patch.intent === 'cancelOffset') {
+    const nextEditTool = {
+      ...activeEditTool,
+      selectedTarget: null,
+      selectedTargets: [],
+    }
+
+    return {
+      ...session,
+      activeEditTool: nextEditTool,
+      entities: session.entities.filter((entity) => entity.status === 'accepted'),
+      validationMessage: null,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+    }
+  }
+
+  if ('value' in patch && patch.intent !== 'commitOffset') {
+    const nextEditTool = {
+      ...activeEditTool,
+      offsetDistance: patch.intent === 'setOffsetSide'
+        ? activeEditTool.offsetDistance
+        : typeof patch.value === 'number' ? patch.value : null,
+      offsetSide: patch.intent === 'setOffsetSide' && (patch.value === 'left' || patch.value === 'right')
+        ? patch.value
+        : activeEditTool.offsetSide,
+    }
+    const preview = getOffsetPreview(session, nextEditTool)
+
+    return {
+      ...session,
+      activeEditTool: nextEditTool,
+      entities: [
+        ...session.entities.filter((entity) => entity.status === 'accepted'),
+        ...preview.previewEntities,
+      ],
+      validationMessage: preview.valid ? null : preview.message,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool, preview.message, preview.previewEntities),
+    }
+  }
+
+  if (patch.intent !== 'commitOffset') {
+    return session
+  }
+
+  const preview = getOffsetPreview(session, activeEditTool)
+  if (!preview.valid || !preview.contribution) {
+    return {
+      ...session,
+      validationMessage: preview.message,
+      toolPresentation: buildSketchEditToolPresentation(activeEditTool, preview.message, preview.previewEntities),
+    }
+  }
+
+  const nextSequence = session.sequence + 1
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const history = applySketchHistoryContribution(session, preview.contribution)
+  const nextEditTool = {
+    ...activeEditTool,
+    selectedTarget: null,
+    selectedTargets: [],
+  }
+
+  return {
+    ...session,
+    activeEditTool: nextEditTool,
+    entities: history.definition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, history.definition.points, entity),
+    ),
+    definition: history.definition,
+    fullDefinition: history.fullDefinition,
+    historyCursor: history.historyCursor,
+    sequence: nextSequence,
+    commitRequest: rebuildSessionCommitRequest(session, history.definition),
+    validationMessage: null,
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+  }
+}
+
 export function beginSketchGeometryDrag(
   session: SketchSessionState,
   target: PrimitiveRef,
@@ -1380,6 +1874,7 @@ export function beginSketchGeometryDrag(
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -1569,6 +2064,7 @@ export function toggleSketchConstructionTarget(
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -1709,6 +2205,7 @@ export function selectSketchReferenceTarget(
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -2266,6 +2763,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
       status: 'idle',
       pointerDownPoint: null,
       livePoint: null,
+      placedPoints: [],
       validationMessage: null,
     } satisfies import('@/domain/sketch-tools/definition').SketchToolRuntimeState,
     point: snap.point,
@@ -2276,6 +2774,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
+    toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
     entities: [
       ...session.entities.filter((entity) => entity.status === 'accepted'),
       ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
@@ -2311,7 +2810,25 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       status: result.state.status,
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
+      toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
       validationMessage: result.state.validationMessage,
+      toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
+      activeSnap: snap.candidate,
+    }
+  }
+
+  if (result.state.status !== 'idle') {
+    return {
+      ...session,
+      entities: [
+        ...session.entities.filter((entity) => entity.status === 'accepted'),
+        ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
+      ],
+      status: result.state.status,
+      pointerDownPoint: result.state.pointerDownPoint,
+      livePoint: result.state.livePoint,
+      toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
+      validationMessage: null,
       toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
       activeSnap: snap.candidate,
     }
@@ -2323,6 +2840,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     sequence: nextSequence,
     start: startPoint,
     end: endPoint,
+    points: result.state.placedPoints ?? [startPoint, endPoint],
     isConstruction: session.constructionModifierActive,
     acceptedSnaps: {
       start: session.drawStartSnap,
@@ -2339,6 +2857,10 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
         createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId, session.constructionModifierActive),
       createCircleEntity: (label, entityId, centerPointId, radius) =>
         createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, session.constructionModifierActive),
+      createArcEntity: (label, entityId, centerPointId, startPointId, endPointId, sweepDirection) =>
+        createArcEntityDefinition(sketchId, entityId, label, centerPointId, startPointId, endPointId, sweepDirection, session.constructionModifierActive),
+      createSplineEntity: (label, entityId, fitPointIds) =>
+        createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, session.constructionModifierActive),
     },
   })
   const definitionPatch = appendInferredSnapConstraints({
@@ -2364,6 +2886,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
+    toolPlacedPoints: result.state.status === 'idle' ? [] : result.state.placedPoints ?? session.toolPlacedPoints,
     sequence: nextSequence,
     commitRequest: buildCommitRequest({
       sketchId: session.sketchId,
@@ -2377,6 +2900,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     toolPresentation: result.presentation,
     activeAnnotationEdit: null,
     selectedAnnotation: null,
+    activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
@@ -2480,6 +3004,7 @@ function getToolRuntimeState(session: SketchSessionState): import('@/domain/sket
     status: session.status === 'drawing' ? 'drawing' : 'idle',
     pointerDownPoint: session.pointerDownPoint,
     livePoint: session.livePoint,
+    placedPoints: session.toolPlacedPoints,
     validationMessage: session.validationMessage,
   }
 }
@@ -2557,6 +3082,10 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
   }
 
   if (session.constraintAuthoring) {
+    return session.toolPresentation
+  }
+
+  if (session.activeEditTool) {
     return session.toolPresentation
   }
 
@@ -2784,6 +3313,7 @@ export function beginSketchAnnotationEdit(
     status: 'awaitingValue',
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
     toolPresentation: buildAnnotationEditPresentation(session, edit),
     constraintAuthoring: null,
     activeAnnotationEdit: edit,
@@ -3734,6 +4264,22 @@ function getAverageSketchPoint(points: readonly SketchPoint[]): SketchPoint | nu
   ]
 }
 
+function sampleSplinePoints(points: readonly SketchPoint[]): SketchPoint[] {
+  if (points.length < 3) {
+    return [...points]
+  }
+
+  const [start, control, end] = points
+  return Array.from({ length: 25 }, (_, index) => {
+    const t = index / 24
+    const oneMinusT = 1 - t
+    return [
+      oneMinusT * oneMinusT * start![0] + 2 * oneMinusT * t * control![0] + t * t * end![0],
+      oneMinusT * oneMinusT * start![1] + 2 * oneMinusT * t * control![1] + t * t * end![1],
+    ] as const
+  })
+}
+
 export function getSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const localStyleLookup = createSketchEntityStyleLookup(session)
@@ -3794,6 +4340,25 @@ function createDisplayRenderableForEntity(
           mapSketchPointToWorld(session.plane, entity.start),
           mapSketchPointToWorld(session.plane, entity.end),
         ],
+        isClosed: false,
+      },
+      linePattern: entity.isConstruction ? 'dashed' : 'solid',
+      role: 'local',
+      paintStyle: style?.paintStyle,
+      strokeStyle: style?.strokeStyle,
+    }
+  }
+
+  if (entity.kind === 'spline') {
+    return {
+      id: `renderable_sketch_spline_${index}` as RenderableId,
+      label: entity.label,
+      target: entity.entityId
+        ? createSketchEntityRef(session.sketchId ?? ('sketch_draft' as SketchId), entity.entityId)
+        : null,
+      geometry: {
+        kind: 'polyline',
+        points: sampleSplinePoints(entity.points).map((point) => mapSketchPointToWorld(session.plane, point)),
         isClosed: false,
       },
       linePattern: entity.isConstruction ? 'dashed' : 'solid',

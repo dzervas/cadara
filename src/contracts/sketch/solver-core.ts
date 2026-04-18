@@ -1559,6 +1559,15 @@ function validateDefinition(
     if (entity.kind === 'circle' && entity.radius <= 0) {
       diagnostics.push(makeDiagnostic('invalid-circle-radius', 'error', `Circle ${entity.entityId} must have a radius greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
     }
+
+    if (entity.kind === 'spline') {
+      const uniqueFitPointIds = new Set(entity.fitPointIds)
+      if (entity.fitPointIds.length < 3 || uniqueFitPointIds.size !== entity.fitPointIds.length) {
+        diagnostics.push(makeDiagnostic('invalid-spline-fit-points', 'error', `Spline ${entity.entityId} requires at least three distinct fit points.`, { kind: 'entity', entityId: entity.entityId }))
+      } else if (entity.fitPointIds.some((pointId) => !pointMap.has(pointId))) {
+        diagnostics.push(makeDiagnostic('missing-spline-fit-point', 'error', `Spline ${entity.entityId} references a missing fit point.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
   }
 
   for (const point of definition.points) {
@@ -2159,6 +2168,22 @@ function buildSolvedEntities(
       continue
     }
 
+    if (entity.kind === 'spline') {
+      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
+        const point = pointRecords.get(pointId)
+        return point ? [getPoint(values, point)] : []
+      })
+      if (fitPoints.length === entity.fitPointIds.length && fitPoints.length >= 3) {
+        solved.push({
+          entityId: entity.entityId,
+          kind: 'spline',
+          fitPoints,
+          degree: entity.degree,
+        })
+      }
+      continue
+    }
+
     const center = pointRecords.get(entity.centerPointId)
     const arcState = entityStates.get(entity.entityId)
     if (!center || !arcState || arcState.kind !== 'arc') {
@@ -2360,6 +2385,8 @@ function getEntityPoints(entity: SketchEntityDefinition): readonly SketchPointId
       return [entity.centerPointId]
     case 'arc':
       return [entity.centerPointId, entity.startPointId, entity.endPointId]
+    case 'spline':
+      return entity.fitPointIds
   }
 }
 

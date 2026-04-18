@@ -184,6 +184,26 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
       strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
     }).optional(),
   }),
+  z.object({
+    kind: z.literal('spline'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    fitPointIds: z.array(sketchPointIdSchema).min(3),
+    degree: z.union([z.literal(2), z.literal(3)]),
+    style: z.object({
+      fillMode: z.union([z.literal('none'), z.literal('solid'), z.literal('gradient')]).optional(),
+      fillColor: z.string().optional(),
+      gradientStartColor: z.string().optional(),
+      gradientEndColor: z.string().optional(),
+      strokeEnabled: z.boolean().optional(),
+      strokeColor: z.string().optional(),
+      strokeWidth: z.number().min(0).optional(),
+      strokeCap: z.union([z.literal('butt'), z.literal('round'), z.literal('square')]).optional(),
+      strokeJoin: z.union([z.literal('miter'), z.literal('round'), z.literal('bevel')]).optional(),
+    }).optional(),
+  }),
 ]).transform((value) => value as SketchEntityDefinition)
 
 const localSketchPointConstraintOperandSchema = z.object({

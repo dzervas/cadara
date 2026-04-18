@@ -344,6 +344,16 @@ function validateDefinition(
           diagnostics.push(makeDiagnostic('missing-arc-point', 'error', `Arc ${entity.entityId} references a missing point.`, { kind: 'entity', entityId: entity.entityId }))
         }
         break
+      case 'spline':
+        if (entity.fitPointIds.length < 3 || new Set(entity.fitPointIds).size !== entity.fitPointIds.length) {
+          diagnostics.push(makeDiagnostic('invalid-spline-fit-points', 'error', `Spline ${entity.entityId} requires at least three distinct fit points.`, { kind: 'entity', entityId: entity.entityId }))
+          break
+        }
+
+        if (entity.fitPointIds.some((pointId) => !points.has(pointId))) {
+          diagnostics.push(makeDiagnostic('missing-spline-fit-point', 'error', `Spline ${entity.entityId} references a missing fit point.`, { kind: 'entity', entityId: entity.entityId }))
+        }
+        break
     }
   }
 
@@ -539,6 +549,21 @@ function solvedGeometryForEntity(
             startPosition: start.position,
             endPosition: end.position,
             sweepDirection: entity.sweepDirection,
+          }
+        : null
+    }
+    case 'spline': {
+      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
+        const point = points.get(pointId)
+        return point ? [point.position] : []
+      })
+
+      return fitPoints.length === entity.fitPointIds.length && fitPoints.length >= 3
+        ? {
+            entityId: entity.entityId,
+            kind: 'spline',
+            fitPoints,
+            degree: entity.degree,
           }
         : null
     }

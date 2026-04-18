@@ -1580,7 +1580,71 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(cleared.state.command.toolId === 'sketch', 'Clearing an active sketch tool should restore sketch-session command identity.')
   }
 
-  function testPassiveSketchToolsDoNotDropSketchSession() {
+  function testRemainingSketchToolsActivateWithoutDroppingSketchSession() {
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sketch',
+      },
+    )
+
+    const openRequested = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+    })
+    const openEffect = openRequested.effects[0]
+
+    assert(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
+
+    const opened = transitionEditorState(openRequested.state, {
+      type: 'effect.sketchSessionOpened',
+      requestId: openEffect.requestId,
+      documentId: 'doc_workspace',
+      revisionId: 'rev_1',
+      commandSessionId: openEffect.commandSessionId,
+      session: createNewSketchSession(createStandardPlaneDefinition('xy')),
+    })
+    const withTool = transitionEditorState(opened.state, {
+      type: 'tool.activated',
+      toolId: 'line',
+    })
+
+    assert(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
+
+    const activeSketchToolIds = [
+      ['spline', 'spline'],
+      ['dimension', 'dimensionDistance'],
+      ['trim', 'trim'],
+      ['offset', 'offset'],
+    ] as const satisfies readonly (readonly [ToolId, string])[]
+
+    for (const [toolId, expectedActiveTool] of activeSketchToolIds) {
+      const result = transitionEditorState(withTool.state, {
+        type: 'tool.activated',
+        toolId,
+      })
+      const viewState = getEditorViewState(result.state)
+
+      assert(result.effects.length === 0, `${toolId} should not emit effects while editing a sketch.`)
+      assert(result.state.kind === 'editingSketch', `${toolId} should keep the editor in sketch editing.`)
+      assert(result.state.mode === 'sketch', `${toolId} should keep sketch toolbar mode.`)
+      assert(viewState.sketchSession !== null, `${toolId} should keep the sketch session visible to the UI.`)
+      assert(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
+      assert(result.state.command.toolId === toolId, `${toolId} should replace the active sketch command.`)
+      assert(result.state.session.activeTool === expectedActiveTool, `${toolId} should activate its sketch workflow.`)
+    }
+  }
+
+  function testPassiveSketchStyleToolsDoNotDropSketchSession() {
     const activated = transitionEditorState(
       {
         ...initialEditorState,
@@ -1621,10 +1685,6 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
 
     const passiveSketchToolIds = [
-      'spline',
-      'dimension',
-      'trim',
-      'offset',
       'fill',
       'stroke',
       'fillType',
@@ -2037,7 +2097,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testReferencePickerCancellationAndSessionCleanup()
   testSelectionClearEventClearsSelectionAndPreservesActiveState()
   testSketchToolClearStaysInSketchEditing()
-  testPassiveSketchToolsDoNotDropSketchSession()
+  testRemainingSketchToolsActivateWithoutDroppingSketchSession()
+  testPassiveSketchStyleToolsDoNotDropSketchSession()
   testConstraintAuthoringReceivesViewportHoverAndSelection()
   testConstraintAuthoringIgnoresInvalidViewportSelection()
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()

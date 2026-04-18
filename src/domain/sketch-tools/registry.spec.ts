@@ -26,11 +26,11 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
       .sort()
 
     assert(
-      JSON.stringify(registeredToolIds) === JSON.stringify(['circle', 'line', 'rectangle']),
+      JSON.stringify(registeredToolIds) === JSON.stringify(['circle', 'line', 'rectangle', 'spline']),
       'The sketch tool registry should contain every current drawing tool.',
     )
     assert(isRegisteredSketchToolId('line'), 'Line should resolve as a registered sketch tool.')
-    assert(!isRegisteredSketchToolId('spline'), 'Unmigrated drawing tools should not resolve as registered sketch tools.')
+    assert(isRegisteredSketchToolId('spline'), 'Spline should resolve as a registered sketch tool.')
   }
 
   function testLinePointerLifecycleProducesStagedGeometry() {
@@ -132,6 +132,27 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(accepted.entities.every((entity) => entity.status === 'accepted'), 'Accepted rectangle geometry should replace preview entities.')
   }
 
+  function testSplineCollectsThreePointsAndCommitsDurableGeometry() {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      'spline',
+    )
+
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [1, 2])
+
+    assert(session.status === 'drawing', 'Spline should keep collecting after the second point.')
+    assert(session.definition.entities.length === 0, 'Spline should not commit before it has enough points.')
+    assert(session.entities.some((entity) => entity.kind === 'spline' && entity.status === 'preview'), 'Spline should stage preview geometry while collecting points.')
+
+    session = acceptSketchDraw(session, [3, 0])
+
+    assert(session.status === 'idle', 'Spline should return to idle after its first complete curve.')
+    assert(session.definition.entities[0]?.kind === 'spline', 'Spline commit output should add a durable spline entity.')
+    assert(session.definition.points.length === 3, 'Spline commit output should add its fit points.')
+    assert(session.commitRequest?.definition.entities[0]?.kind === 'spline', 'Spline commit request should include durable spline geometry.')
+  }
+
   function testGenericPresentationAccessFromSession() {
     const session = beginSketchTool(
       createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
@@ -151,5 +172,6 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
   testCirclePresentationSchemaExposesPromptControlAndDiameterOverlay()
   testRectanglePresentationSchemaExposesAnchoredWidthAndHeightOverlays()
   testSessionRuntimeDelegatesCommitOutputToToolModule()
+  testSplineCollectsThreePointsAndCommitsDurableGeometry()
   testGenericPresentationAccessFromSession()
 })

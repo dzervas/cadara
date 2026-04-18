@@ -11,6 +11,7 @@ import {
   type SketchAuthoringToolId,
   type SketchSessionStatus,
 } from '@/domain/editor/sketch-session'
+import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 
@@ -82,6 +83,7 @@ export function shouldViewportClickRequestSelection(
   return activeSketchTool == null
     || activeSketchTool === 'construction'
     || activeSketchTool === 'projectReference'
+    || isRegisteredSketchEditToolId(activeSketchTool)
     || isRegisteredSketchConstraintToolId(activeSketchTool)
 }
 

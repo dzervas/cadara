@@ -140,6 +140,10 @@ export function collectSketchSnapGeometries(input: {
       label: point.label,
     }))
   const localEntityGeometries = input.definition.entities.flatMap((entity): SketchSnapGeometry[] => {
+    if (entity.kind === 'spline') {
+      return []
+    }
+
     const source: SketchSnapSourceRef = {
       kind: 'localEntity',
       entityId: entity.entityId,

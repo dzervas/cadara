@@ -2,11 +2,13 @@ import type { SketchToolDefinition, SketchToolId } from '@/domain/sketch-tools/d
 import { circleSketchToolDefinition } from '@/domain/sketch-tools/tools/circle'
 import { lineSketchToolDefinition } from '@/domain/sketch-tools/tools/line'
 import { rectangleSketchToolDefinition } from '@/domain/sketch-tools/tools/rectangle'
+import { splineSketchToolDefinition } from '@/domain/sketch-tools/tools/spline'
 
 export const sketchToolDefinitions = [
   lineSketchToolDefinition,
   rectangleSketchToolDefinition,
   circleSketchToolDefinition,
+  splineSketchToolDefinition,
 ] as const satisfies readonly SketchToolDefinition[]
 
 const sketchToolMap = new Map<SketchToolId, SketchToolDefinition>(

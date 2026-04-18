@@ -160,6 +160,23 @@ export type SketchEntityDefinition =
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition
     }
+  | {
+      kind: 'spline'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** True when the curve is construction-only and should not generate derived regions. */
+      isConstruction: boolean
+      /** Fit/control points defining this first-version spline curve. */
+      fitPointIds: readonly SketchPointId[]
+      /** Polynomial degree for this explicit spline representation. */
+      degree: 2 | 3
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
 
 export type LocalSketchPointConstraintOperand = {
   kind: 'localPoint'
@@ -665,6 +682,16 @@ export type SolvedSketchEntityGeometryRecord =
       endPosition: SketchPoint2D
       /** Solver-computed sweep direction from start to end. */
       sweepDirection: 'clockwise' | 'counterClockwise'
+    }
+  | {
+      /** Authored entity identity whose solved geometry is being reported. */
+      entityId: SketchEntityId
+      /** Stable discriminant for solved spline geometry. */
+      kind: 'spline'
+      /** Solver-computed fit/control points in sketch-plane units. */
+      fitPoints: readonly SketchPoint2D[]
+      /** Polynomial degree reported for the solved spline representation. */
+      degree: 2 | 3
     }
 
 /**

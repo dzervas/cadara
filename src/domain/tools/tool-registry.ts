@@ -6,6 +6,7 @@ import type {
 } from '@/domain/tools/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
 import { getRegisteredSketchToolDefinitions } from '@/domain/sketch-tools/registry'
+import { getRegisteredSketchEditToolDefinitions } from '@/domain/sketch-edit-tools/registry'
 
 export const toolGroups = {
   history: {
@@ -96,6 +97,15 @@ const sketchToolDefinitions = getRegisteredSketchToolDefinitions().map(({ metada
   modes: metadata.modes,
 })) satisfies readonly ToolDefinition[]
 
+const sketchEditToolDefinitions = getRegisteredSketchEditToolDefinitions().map(({ metadata }) => ({
+  id: metadata.id,
+  group: metadata.group,
+  name: metadata.name,
+  tooltip: metadata.tooltip,
+  icon: metadata.icon,
+  modes: metadata.modes,
+})) satisfies readonly ToolDefinition[]
+
 export const toolDefinitions = [
   {
     id: 'undo',
@@ -130,14 +140,6 @@ export const toolDefinitions = [
     modes: ['sketch'],
   },
   ...sketchToolDefinitions,
-  {
-    id: 'spline',
-    group: 'drawing',
-    name: 'Spline',
-    tooltip: 'Create spline geometry.',
-    icon: 'spline',
-    modes: ['sketch'],
-  },
   {
     id: 'dimension',
     group: 'dimensions',
@@ -222,14 +224,7 @@ export const toolDefinitions = [
     icon: 'constraintEqual',
     modes: ['sketch'],
   },
-  {
-    id: 'trim',
-    group: 'sketchOps',
-    name: 'Trim',
-    tooltip: 'Trim sketch segments.',
-    icon: 'trim',
-    modes: ['sketch'],
-  },
+  ...sketchEditToolDefinitions,
   {
     id: 'construction',
     group: 'sketchOps',
@@ -244,14 +239,6 @@ export const toolDefinitions = [
     name: 'Reference',
     tooltip: 'Reference model or existing sketch geometry in the active sketch.',
     icon: 'construction',
-    modes: ['sketch'],
-  },
-  {
-    id: 'offset',
-    group: 'sketchOps',
-    name: 'Offset',
-    tooltip: 'Offset sketch entities.',
-    icon: 'offset',
     modes: ['sketch'],
   },
   {
