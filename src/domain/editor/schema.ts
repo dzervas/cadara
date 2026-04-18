@@ -796,6 +796,10 @@ export function primitiveRefEquals(left: PrimitiveRef, right: PrimitiveRef) {
   return getPrimitiveRefKey(left) === getPrimitiveRefKey(right)
 }
 
+export function isDurablePrimitiveRef(target: PrimitiveRef): target is DurableRef {
+  return target.kind !== 'projectedReferenceGeometry' && target.kind !== 'sketchExternalReference'
+}
+
 export function getDefaultSelectionFilterForMode(mode: ToolbarMode): SelectionFilter {
   return mode === 'sketch' ? sketchSelectionFilter : defaultSelectionFilter
 }

@@ -2,9 +2,10 @@ services:
   agent:
     build:
       dockerfile: Dockerfile.agent
+    init: true
     ports:
-      - "8000:8000"
-      - "3100:3100"
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:3100:3100"
     volumes:
       - .:/app
       - .codex/container:/root/.codex
@@ -12,7 +13,7 @@ services:
   frontend:
     build: .
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: always
     volumes:
       - .:/app

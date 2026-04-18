@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Menu, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
 import { ChevronDown } from 'lucide-react'
 
@@ -25,7 +26,7 @@ export function ToolDropdownButton({
   const commandId = getToolbarToolCommandId(tool.id)
 
   return (
-    <Menu width={224} opened={opened} onChange={setOpened}>
+    <Menu width={224} opened={opened} onChange={setOpened} transitionProps={{ duration: 0 }}>
       <Menu.Target>
         <Tooltip
           disabled={opened}
@@ -75,11 +76,12 @@ export function ToolDropdownButton({
           return (
             <Menu.Item
               key={variant.id}
-              onClick={() =>
+              onClick={() => {
+                flushSync(() => setOpened(false))
                 triggerTool(variant.id, {
                   source: 'dropdown',
                 })
-              }
+              }}
               data-tool-id={variant.id}
               data-tool-tooltip={variant.tooltip}
               leftSection={<ToolbarToolIcon icon={variant.icon} />}

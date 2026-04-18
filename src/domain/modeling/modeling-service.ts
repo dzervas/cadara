@@ -555,7 +555,13 @@ function assertPrimitiveRef(value: unknown): PrimitiveRef {
 }
 
 function assertDurableRef(value: unknown): DurableRef {
-  return assertPrimitiveRef(value)
+  const target = assertPrimitiveRef(value)
+
+  if (target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchExternalReference') {
+    throw new Error('Invalid durable reference payload.')
+  }
+
+  return target
 }
 
 function assertSketchPlaneSupportRef(value: unknown): SketchPlaneSupportRef {
@@ -879,7 +885,7 @@ function normalizeAdvancedSolidFeatureParameters(value: unknown): AdvancedSolidF
 
       return {
         role: participant.role,
-        targets: participant.targets.map((target) => assertPrimitiveRef(target)),
+        targets: participant.targets.map((target) => assertDurableRef(target)),
       }
     }),
     ...(operationIntent ? { operationIntent } : {}),
@@ -969,7 +975,7 @@ function normalizeDiagnostics(value: unknown): ModelingDiagnostic[] {
       code: entry.code,
       severity: entry.severity,
       message: entry.message,
-      target: entry.target == null ? null : assertPrimitiveRef(entry.target),
+      target: entry.target == null ? null : assertDurableRef(entry.target),
       detail: entry.detail == null ? null : normalizeDiagnosticDetail(entry.detail),
     }
   })
@@ -1024,10 +1030,10 @@ function normalizeInvalidReferenceDetail(value: unknown): InvalidReferenceDetail
 
   return {
     reason: value.reason,
-    target: assertPrimitiveRef(value.target),
+    target: assertDurableRef(value.target),
     ownerFeatureId: value.ownerFeatureId === null ? null : assertFeatureId(value.ownerFeatureId),
     ownerSketchId: value.ownerSketchId === null ? null : assertSketchId(value.ownerSketchId),
-    sourceTarget: value.sourceTarget === null ? null : assertPrimitiveRef(value.sourceTarget),
+    sourceTarget: value.sourceTarget === null ? null : assertDurableRef(value.sourceTarget),
   }
 }
 
@@ -1063,7 +1069,7 @@ function normalizeDiagnosticDetail(value: unknown): ModelingDiagnosticDetail {
       return {
         kind: 'rebuildFailure',
         affectedFeatureIds: value.affectedFeatureIds.map((featureId) => assertFeatureId(featureId)),
-        affectedTargets: value.affectedTargets.map((target) => assertPrimitiveRef(target)),
+        affectedTargets: value.affectedTargets.map((target) => assertDurableRef(target)),
       }
     default:
       throw new Error('Invalid diagnostic detail kind.')
@@ -1318,7 +1324,7 @@ function normalizeReferences(value: unknown): ReferenceRecord[] {
     return {
       id: entry.id as ReferenceRecord['id'],
       label: entry.label,
-      target: assertPrimitiveRef(entry.target),
+      target: assertDurableRef(entry.target),
       ownerDocumentId: assertDocumentId(entry.ownerDocumentId),
       ownerRevisionId: assertRevisionId(entry.ownerRevisionId),
       ownerFeatureId: entry.ownerFeatureId as FeatureId | null,
@@ -2100,14 +2106,17 @@ function normalizeConstraintDefinition(value: unknown): ConstraintDefinition {
       throw new Error('Invalid two-line constraint payload.')
     }
 
+    const constraintId = assertConstraintId(value.constraintId)
+    const entityIds = [
+      assertSketchEntityId(value.entityIds[0]),
+      assertSketchEntityId(value.entityIds[1]),
+    ] as const
+    const label = value.label
+
     const base = {
-      constraintId: assertConstraintId(value.constraintId),
-      kind: value.kind,
-      label: value.label,
-      entityIds: [
-        assertSketchEntityId(value.entityIds[0]),
-        assertSketchEntityId(value.entityIds[1]),
-      ],
+      constraintId,
+      label,
+      entityIds,
     }
 
     if (value.kind === 'tangent') {
@@ -2122,7 +2131,10 @@ function normalizeConstraintDefinition(value: unknown): ConstraintDefinition {
       }
     }
 
-    return base
+    return {
+      ...base,
+      kind: value.kind,
+    }
   }
 
   if (value.kind === 'coincidentProjectedPoint') {
@@ -2864,8 +2876,8 @@ function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
       ...normalizeOwnership(entry),
       id: entry.id as SnapshotEntityId,
       label: entry.label,
-      target: assertPrimitiveRef(entry.target),
-      relatedTargets: entry.relatedTargets.map((target) => assertPrimitiveRef(target)),
+      target: assertDurableRef(entry.target),
+      relatedTargets: entry.relatedTargets.map((target) => assertDurableRef(target)),
       consumedByFeatureIds: entry.consumedByFeatureIds.map((featureId) => assertFeatureId(featureId)),
       selectionSemantics: entry.selectionSemantics.map((semantic) => {
         if (
@@ -2933,12 +2945,12 @@ function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
   }
 }
 
-function normalizeChangedTargets(value: unknown): PrimitiveRef[] {
+function normalizeChangedTargets(value: unknown): DurableRef[] {
   if (!Array.isArray(value)) {
     throw new Error('Invalid changed target payload.')
   }
 
-  return value.map((entry) => assertPrimitiveRef(entry))
+  return value.map((entry) => assertDurableRef(entry))
 }
 
 function normalizeResolution(value: unknown): ResolvedReferenceRecord {
@@ -3316,7 +3328,7 @@ function normalizeExportDocumentInput(
 function createExportDiagnostic(
   code: string,
   message: string,
-  target: PrimitiveRef | null,
+  target: DurableRef | null,
 ): DocumentExportDiagnostic {
   return {
     code,

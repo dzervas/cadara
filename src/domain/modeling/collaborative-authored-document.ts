@@ -1,6 +1,6 @@
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { DurableRef } from '@/contracts/shared/references'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 
 export const COLLABORATIVE_MERGE_DIAGNOSTIC_CODES = {
@@ -147,7 +147,7 @@ function collectInvalidReferenceDiagnostics(
   return diagnostics
 }
 
-function collectPrimitiveRefs(value: unknown): PrimitiveRef[] {
+function collectPrimitiveRefs(value: unknown): DurableRef[] {
   if (!isRecord(value)) {
     if (Array.isArray(value)) {
       return value.flatMap((entry) => collectPrimitiveRefs(entry))
@@ -163,7 +163,7 @@ function collectPrimitiveRefs(value: unknown): PrimitiveRef[] {
 }
 
 function primitiveRefExists(
-  target: PrimitiveRef,
+  target: DurableRef,
   featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
   sketchIds: ReadonlySet<AuthoredModelDocument['sketches'][number]['sketchId']>,
   bodyIds: ReadonlySet<AuthoredModelDocument['bodyLabels'][number]['bodyId']>,
@@ -189,7 +189,7 @@ function primitiveRefExists(
   }
 }
 
-function isPrimitiveRef(value: Record<string, unknown>): value is Record<string, unknown> & PrimitiveRef {
+function isPrimitiveRef(value: Record<string, unknown>): value is Record<string, unknown> & DurableRef {
   return typeof value.kind === 'string'
     && (
       ('featureId' in value && typeof value.featureId === 'string')
@@ -202,7 +202,7 @@ function isPrimitiveRef(value: Record<string, unknown>): value is Record<string,
 function createMergeDiagnostic(
   code: string,
   message: string,
-  target: PrimitiveRef | null,
+  target: DurableRef | null,
 ): ModelingDiagnostic {
   return {
     code,

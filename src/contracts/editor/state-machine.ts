@@ -71,6 +71,7 @@ import type {
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
+import type { DurableRef } from '@/contracts/shared/references'
 import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
 import type {
   CommandSessionId,
@@ -999,10 +1000,18 @@ function createPreviewFailedDiagnostics(
       code: 'feature-preview-failed',
       severity: 'error',
       message,
-      target,
+      target: getDurableDiagnosticTarget(target),
       detail: null,
     },
   ]
+}
+
+function getDurableDiagnosticTarget(target: PrimitiveRef | null): DurableRef | null {
+  if (!target || target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchExternalReference') {
+    return null
+  }
+
+  return target
 }
 
 function emitSnapshotFetch(
@@ -2773,7 +2782,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
                   code: 'feature-commit-failed',
                   severity: 'error',
                   message: event.message,
-                  target: getFeaturePrimarySelectionTarget(state.session),
+                  target: getDurableDiagnosticTarget(getFeaturePrimarySelectionTarget(state.session)),
                   detail: null,
                 },
               ],

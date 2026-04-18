@@ -146,6 +146,10 @@ export function ThreeCadViewport({
   const sketchHitPointRef = useRef(new THREE.Vector3())
   const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null)
+  const pendingSketchGeometryDragRef = useRef<{
+    target: PrimitiveRef
+    startPoint: readonly [number, number]
+  } | null>(null)
   const pickRootRef = useRef<THREE.Group | null>(null)
   const bindingsRef = useRef<CollectedBindings | null>(null)
   const hoverRef = useRef(onHover)
@@ -589,6 +593,31 @@ export function ThreeCadViewport({
         return
       }
 
+      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current
+      const pointerDown = primaryPointerDownRef.current
+
+      if (pendingSketchGeometryDrag && pointerDown) {
+        const dragDistance = Math.hypot(
+          event.clientX - pointerDown.x,
+          event.clientY - pointerDown.y,
+        )
+
+        if (dragDistance > 6) {
+          const point = projectSketchPoint(event.clientX, event.clientY)
+
+          if (point) {
+            event.preventDefault()
+            event.stopPropagation()
+            sketchGeometryDragRef.current = { target: pendingSketchGeometryDrag.target }
+            pendingSketchGeometryDragRef.current = null
+            sketchGeometryDragStartRef.current(pendingSketchGeometryDrag.target, pendingSketchGeometryDrag.startPoint)
+            sketchGeometryDragMoveRef.current(point)
+          }
+
+          return
+        }
+      }
+
       if (pointerWithinViewCube(event.clientX, event.clientY)) {
         clearHover()
         return
@@ -653,10 +682,10 @@ export function ThreeCadViewport({
             : null
 
       if (point && dragTarget) {
-        event.preventDefault()
-        event.stopPropagation()
-        sketchGeometryDragRef.current = { target: dragTarget }
-        sketchGeometryDragStartRef.current(dragTarget, point)
+        pendingSketchGeometryDragRef.current = {
+          target: dragTarget,
+          startPoint: point,
+        }
       }
     }
 
@@ -664,6 +693,7 @@ export function ThreeCadViewport({
       if (event.button !== 0) {
         primaryPointerDownRef.current = null
         sketchGeometryDragRef.current = null
+        pendingSketchGeometryDragRef.current = null
         return
       }
 
@@ -677,6 +707,7 @@ export function ThreeCadViewport({
 
         sketchGeometryDragRef.current = null
         primaryPointerDownRef.current = null
+        pendingSketchGeometryDragRef.current = null
         return
       }
 
@@ -692,6 +723,20 @@ export function ThreeCadViewport({
         event.clientY - pointerDown.y,
       )
 
+      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current
+      pendingSketchGeometryDragRef.current = null
+
+      if (pendingSketchGeometryDrag && dragDistance > 6) {
+        const point = projectSketchPoint(event.clientX, event.clientY)
+
+        if (point) {
+          sketchGeometryDragStartRef.current(pendingSketchGeometryDrag.target, pendingSketchGeometryDrag.startPoint)
+          sketchGeometryDragEndRef.current(point)
+        }
+
+        return
+      }
+
       if (dragDistance > 6 || !sketchSession) {
         return
       }
@@ -706,6 +751,7 @@ export function ThreeCadViewport({
     const handlePointerLeave = () => {
       if (!sketchGeometryDragRef.current) {
         primaryPointerDownRef.current = null
+        pendingSketchGeometryDragRef.current = null
       }
       clearHover()
     }

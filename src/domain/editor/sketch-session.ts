@@ -2272,11 +2272,13 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     return session
   }
 
+  const startPoint = session.pointerDownPoint
   const toolDefinition = getSketchToolDefinition(session.activeTool)
   const snap = resolveSessionSnap(session, point)
+  const endPoint = snap.point ?? point
   const result = toolDefinition.pointerRelease({
     state: getToolRuntimeState(session),
-    point: snap.point,
+    point: endPoint,
   })
 
   if (result.state.validationMessage) {
@@ -2296,8 +2298,8 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const baseDefinitionPatch = toolDefinition.createCommitContribution({
     sequence: nextSequence,
-    start: session.pointerDownPoint,
-    end: snap.point,
+    start: startPoint,
+    end: endPoint,
     isConstruction: session.constructionModifierActive,
     acceptedSnaps: {
       start: session.drawStartSnap,

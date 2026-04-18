@@ -257,7 +257,7 @@ function buildSegments(
       .map((entity) => [entity.entityId, entity]),
   )
 
-  return definition.entities.flatMap((entity) => {
+  const authoredSegments = definition.entities.flatMap((entity): SegmentRecord[] => {
     if (entity.isConstruction) {
       return []
     }
@@ -312,7 +312,9 @@ function buildSegments(
     }
 
     return []
-  }).concat(buildProjectedSegments(projectedReferences))
+  })
+
+  return authoredSegments.concat(buildProjectedSegments(projectedReferences))
 }
 
 function buildProjectedSegments(

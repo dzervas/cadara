@@ -374,7 +374,7 @@ function buildSketchSnapshotRecord(
     planeSupport: request.plane.support,
     definition,
     solvedSnapshot,
-    projectedReferences: structuredClone(projectedReferences),
+    projectedReferences: structuredClone([...projectedReferences]),
     regions: [...regions],
   }
 

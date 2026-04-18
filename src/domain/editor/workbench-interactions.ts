@@ -12,6 +12,7 @@ import {
   type SketchSessionStatus,
 } from '@/domain/editor/sketch-session'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
+import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 
 export function getNavigationReopenRequest(
   snapshot: DocumentSnapshot | null,
@@ -84,9 +85,9 @@ export function shouldViewportStartSketchGeometryDrag(
   activeSketchTool: SketchAuthoringToolId | null | undefined,
   sketchStatus: SketchSessionStatus | null | undefined,
 ) {
-  if (sketchStatus === 'drawing') {
+  if (sketchStatus !== 'idle') {
     return false
   }
 
-  return activeSketchTool == null
+  return activeSketchTool == null || isRegisteredSketchToolId(activeSketchTool)
 }

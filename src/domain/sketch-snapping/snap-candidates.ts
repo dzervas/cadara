@@ -804,6 +804,10 @@ function getCurveIntersections(
   }
 
   if (left.kind === 'lineSegment') {
+    if (right.kind === 'lineSegment') {
+      return lineLineIntersection(left, right)
+    }
+
     return lineCircleIntersections(left, right).filter((point) => pointLiesOnGeometry(point, right))
   }
 
