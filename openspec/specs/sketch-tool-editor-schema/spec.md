@@ -103,3 +103,32 @@ The sketch tool editor schema SHALL allow active tool previews to receive snap-a
 - **THEN** the preview geometry is rendered from the snapped coordinate
 - **AND** the tool can still access raw pointer metadata for labels or disambiguation
 
+### Requirement: Sketch tool schema SHALL support focused style control groups
+The sketch tool presentation schema SHALL describe focused style control groups for fill, stroke, fill type, and stroke options so generic sketch UI surfaces can render style controls without SVG-tool-specific React branches.
+
+#### Scenario: Fill controls are focused
+- **WHEN** the active sketch style command is fill-focused
+- **THEN** the schema exposes only the fill controls and target guidance relevant to that command
+
+#### Scenario: Stroke options are focused
+- **WHEN** the active sketch style command is stroke-options-focused
+- **THEN** the schema exposes stroke width, cap, join, miter, and dash controls supported by the sketch style contract
+
+### Requirement: Sketch tool schema SHALL support multi-point curve workflows
+The sketch tool presentation schema SHALL describe multi-point curve placement, including current point count, completion readiness, preview geometry, and cancellation/acceptance guidance.
+
+#### Scenario: Spline prompt updates after each point
+- **WHEN** a user places spline points during an active spline operation
+- **THEN** the schema exposes updated prompts, point count, preview geometry, and completion hints without requiring spline-specific React branches
+
+### Requirement: Sketch tool schema SHALL support sketch edit previews
+The sketch tool presentation schema SHALL describe edit-tool selection guidance, hover feedback, numeric controls, validation, and transient preview geometry for tools that mutate existing sketch entities.
+
+#### Scenario: Offset exposes distance control
+- **WHEN** the Offset tool has a selected entity
+- **THEN** the schema exposes the offset distance control and preview geometry needed by generic sketch UI surfaces
+
+#### Scenario: Trim exposes target feedback
+- **WHEN** the Trim tool hovers or selects a candidate segment
+- **THEN** the schema exposes target feedback and validation messages without requiring viewport code to implement trim rules
+

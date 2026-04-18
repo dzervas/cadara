@@ -101,3 +101,26 @@ The system SHALL expose Construction as a sketch-mode tool that can remain selec
 - **WHEN** an active sketch editing session ends
 - **THEN** construction authoring context is cleared
 
+### Requirement: Sketch style tools SHALL have explicit activation behavior
+Sketch style toolbar tools SHALL have explicit domain-level activation behavior that preserves active sketch editing state and routes to style control presentation instead of generic command selection state.
+
+#### Scenario: Runtime activates a style tool
+- **WHEN** the editor activates a sketch SVG/style tool while a sketch session is open
+- **THEN** the runtime keeps the active sketch session open
+- **AND** it resolves the requested style focus or target guidance through sketch-domain logic
+
+### Requirement: Sketch tool definitions SHALL support multi-point curve authoring
+Sketch drawing tool definitions SHALL support tools whose valid interaction requires more than two points and whose staged geometry changes after each accepted point.
+
+#### Scenario: Spline tool collects multiple points
+- **WHEN** a registered spline tool receives repeated valid point placements
+- **THEN** its tool definition updates staged spline preview geometry after each placement
+- **AND** it reports when the spline has enough points to complete
+
+### Requirement: Sketch edit tools SHALL have explicit domain definitions
+Sketch edit tools that mutate existing geometry SHALL have domain-level definitions for metadata, activation, selection requirements, validation, preview, and accepted draft mutation behavior.
+
+#### Scenario: Runtime activates an edit tool
+- **WHEN** the editor activates `trim` or `offset` while a sketch session is open
+- **THEN** the runtime resolves an explicit edit-tool behavior instead of falling through to generic selection-command state
+
