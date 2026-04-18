@@ -10,6 +10,11 @@ import {
   SketchConstraintAnnotations,
 } from '@/components/cad/sketch-constraint-annotations'
 import {
+  getSketchDisplayMeshMaterialConfig,
+  getSketchDisplayPolylineMaterialConfig,
+  shouldApplySketchDisplayStyles,
+} from '@/components/cad/sketch-display-style'
+import {
   collectSketchViewportFeedbackAnchors,
   getAnnotationProjectionId,
   type SketchViewportFeedbackProjection,
@@ -167,8 +172,9 @@ export function ThreeCadViewport({
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
   const sketchToolPatchRef = useRef(onSketchToolPatch)
   const {
-    state: { selectionFilter, selectionCatalog, sketchSession },
+    state: { mode, selectionFilter, selectionCatalog, sketchSession },
   } = useEditorState()
+  const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(mode, sketchSession !== null)
   const selectionRef = useRef(selection)
   const handleControlsRef = useCallback((controls: unknown) => {
     const nextControls = controls as ViewportCameraControls | null
@@ -838,7 +844,11 @@ export function ThreeCadViewport({
               <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
             ))}
             {sketchDisplayRenderables.map((renderable) => (
-              <SketchDisplayRenderableNode key={renderable.id} renderable={renderable} />
+              <SketchDisplayRenderableNode
+                key={renderable.id}
+                renderable={renderable}
+                applyStyles={sketchDisplayStylesEnabled}
+              />
             ))}
           </group>
         </Bvh>
@@ -1464,18 +1474,29 @@ function DocumentMarkerNode({ entry }: { entry: ViewportRenderableRecord }) {
   )
 }
 
-function SketchDisplayRenderableNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+interface SketchDisplayRenderableNodeProps {
+  renderable: SketchSessionDisplayRenderable
+  applyStyles: boolean
+}
+
+function SketchDisplayRenderableNode({ renderable, applyStyles }: SketchDisplayRenderableNodeProps) {
   switch (renderable.geometry.kind) {
     case 'mesh':
-      return <SketchDisplayMeshNode renderable={renderable} />
+      return <SketchDisplayMeshNode renderable={renderable} applyStyles={applyStyles} />
     case 'polyline':
-      return <SketchDisplayPolylineNode renderable={renderable} />
+      return <SketchDisplayPolylineNode renderable={renderable} applyStyles={applyStyles} />
     case 'marker':
       return <SketchDisplayMarkerNode renderable={renderable} />
   }
 }
 
-function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+function SketchDisplayMeshNode({
+  renderable,
+  applyStyles,
+}: {
+  renderable: SketchSessionDisplayRenderable
+  applyStyles: boolean
+}) {
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
   const geometry = useMemo(() => {
     if (!geometryData) {
@@ -1498,16 +1519,11 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
     }
     return nextGeometry
   }, [geometryData])
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: renderable.role === 'reference' ? SURFACE_COLORS.sketchReference : SURFACE_COLORS.sketchCurve,
-    transparent: true,
-    opacity: 0.24,
-    side: THREE.DoubleSide,
-    metalness: 0.08,
-    roughness: 0.58,
-    emissive: renderable.role === 'reference' ? 0x4a3511 : 0x214566,
-    emissiveIntensity: renderable.role === 'reference' ? 0.2 : 0.18,
-  }), [renderable.role])
+  const materialConfig = useMemo(
+    () => getSketchDisplayMeshMaterialConfig(renderable, applyStyles),
+    [applyStyles, renderable],
+  )
+  const material = useMemo(() => new THREE.MeshStandardMaterial(materialConfig), [materialConfig])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
@@ -1530,13 +1546,20 @@ function SketchDisplayMeshNode({ renderable }: { renderable: SketchSessionDispla
   )
 }
 
-function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDisplayRenderable }) {
+function SketchDisplayPolylineNode({
+  renderable,
+  applyStyles,
+}: {
+  renderable: SketchSessionDisplayRenderable
+  applyStyles: boolean
+}) {
   const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
   const line = useMemo(() => {
     if (!geometryData) {
       throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
     }
 
+    const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles)
     const nextLine = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(
         geometryData.isClosed && geometryData.points.length > 0
@@ -1550,25 +1573,27 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
             ]
           : geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2])),
       ),
-      renderable.linePattern === 'dashed'
+      materialConfig.linePattern === 'dashed'
         ? new THREE.LineDashedMaterial({
-            color: renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchCurve,
+            color: materialConfig.color,
             transparent: true,
-            opacity: renderable.role === 'reference' ? 0.7 : 0.88,
+            opacity: materialConfig.opacity,
             depthTest: true,
             depthWrite: false,
-            dashSize: 0.24,
-            gapSize: 0.14,
+            linewidth: materialConfig.lineWidth,
+            dashSize: materialConfig.dashSize,
+            gapSize: materialConfig.gapSize,
           })
         : new THREE.LineBasicMaterial({
-            color: renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchCurve,
+            color: materialConfig.color,
             transparent: true,
-            opacity: 0.95,
+            opacity: materialConfig.opacity,
             depthTest: true,
             depthWrite: false,
+            linewidth: materialConfig.lineWidth,
           }),
     )
-    if (renderable.linePattern === 'dashed') {
+    if (materialConfig.linePattern === 'dashed') {
       nextLine.computeLineDistances()
     }
     nextLine.renderOrder = 3
@@ -1584,7 +1609,7 @@ function SketchDisplayPolylineNode({ renderable }: { renderable: SketchSessionDi
     }
 
     return nextLine
-  }, [geometryData, renderable])
+  }, [applyStyles, geometryData, renderable])
 
   useEffect(() => {
     return () => {
@@ -1655,6 +1680,7 @@ function SketchDisplayMarkerNode({ renderable }: { renderable: SketchSessionDisp
     </group>
   )
 }
+
 
 function snapView(
   presetId: ViewNavigationPresetId,
