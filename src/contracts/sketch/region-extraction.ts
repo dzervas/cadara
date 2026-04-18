@@ -137,7 +137,7 @@ function filterAuthoredProjectedReferences(
 }
 
 function pointKey(point: SketchPoint2D) {
-  return `${point[0].toFixed(9)},${point[1].toFixed(9)}`
+  return `${point[0].toFixed(6)},${point[1].toFixed(6)}`
 }
 
 function equalsPoint(left: SketchPoint2D, right: SketchPoint2D) {

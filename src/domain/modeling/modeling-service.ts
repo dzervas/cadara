@@ -322,7 +322,10 @@ export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableReq
 export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'>
 export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'>
 export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'>
-export type ModelingSetFeatureCursorInput = Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'>
+export type ModelingSetFeatureCursorInput =
+  Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'> & {
+    persistHistory?: boolean
+  }
 export type ModelingExportDocumentInput = Omit<DocumentExportRequest, 'contractVersion' | 'documentId'>
 export type ModelingExportDocumentResult = DocumentExportResult
 export interface ModelingCommitSketchCorrelation {
@@ -3360,9 +3363,10 @@ function normalizeSetFeatureCursorInput(
   assertMutationBase(input)
 
   return {
-    ...input,
     contractVersion: CONTRACT_VERSION,
     documentId,
+    baseRevisionId: input.baseRevisionId,
+    cursor: input.cursor,
   }
 }
 
@@ -4421,7 +4425,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapSetFeatureCursorResponse(response, currentDocumentId),
-            () => createSetFeatureCursorHistoryEntry(request),
+            input.persistHistory === false ? null : () => createSetFeatureCursorHistoryEntry(request),
           )
         },
       })

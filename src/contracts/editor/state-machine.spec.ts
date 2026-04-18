@@ -48,6 +48,8 @@ import {
 } from '@/domain/editor/sketch-session'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
+import { createModelingService } from '@/domain/modeling/modeling-service'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createAppError, ResultAsync, type AppError } from '@/contracts/errors'
@@ -256,6 +258,182 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
 
     return response.snapshot
+  }
+
+  function cloneSnapshotWithCursor(
+    snapshot: DocumentSnapshot,
+    cursor: DocumentSnapshot['document']['cursor'],
+    revisionId: RevisionId,
+  ): DocumentSnapshot {
+    return {
+      ...snapshot,
+      revisionId,
+      cursor: structuredClone(cursor),
+      document: {
+        ...snapshot.document,
+        revisionId,
+        cursor: structuredClone(cursor),
+      },
+    }
+  }
+
+  function createCursorAwareRuntime(initialSnapshot: DocumentSnapshot) {
+    let snapshot = structuredClone(initialSnapshot)
+    let nextRevisionSequence = 1
+    const cursorMoves: {
+      baseRevisionId: RevisionId
+      cursor: DocumentSnapshot['document']['cursor']
+      transient?: boolean
+    }[] = []
+    const previewCalls: {
+      baseRevisionId: RevisionId
+      cursor: DocumentSnapshot['document']['cursor']
+    }[] = []
+    const featureCommitCalls: RevisionId[] = []
+    const sketchCommitCalls: RevisionId[] = []
+
+    const runtime: EditorEffectRuntime = {
+      getCurrentDocumentSnapshot: async () => snapshot,
+      commitSketch: async (input) => {
+        sketchCommitCalls.push(input.baseRevisionId)
+        const revisionId = `rev_sketch_commit_${nextRevisionSequence++}` as RevisionId
+        snapshot = cloneSnapshotWithCursor(snapshot, snapshot.document.cursor, revisionId)
+
+        return {
+          revisionId,
+          accepted: true,
+          diagnostics: [],
+        }
+      },
+      projectSketchReferences: async () => ({
+        projectedReferences: [],
+        diagnostics: [],
+      }),
+      evaluatePreview: async (input) => {
+        previewCalls.push({
+          baseRevisionId: input.baseRevisionId,
+          cursor: structuredClone(snapshot.document.cursor),
+        })
+
+        return {
+          revisionId: input.baseRevisionId,
+          stale: false,
+          diagnostics: [],
+          renderables: [],
+        }
+      },
+      commitFeature: async (input) => {
+        featureCommitCalls.push(input.baseRevisionId)
+        const revisionId = `rev_feature_commit_${nextRevisionSequence++}` as RevisionId
+        snapshot = cloneSnapshotWithCursor(snapshot, snapshot.document.cursor, revisionId)
+
+        return {
+          revisionId,
+          featureId: input.featureSession.featureId ?? ('feature_created' as const),
+          accepted: true,
+          diagnostics: [],
+        }
+      },
+      setDocumentCursor: async (input) => {
+        cursorMoves.push({
+          baseRevisionId: input.baseRevisionId,
+          cursor: structuredClone(input.cursor),
+          transient: input.transient,
+        })
+        const revisionId = `rev_cursor_${nextRevisionSequence++}` as RevisionId
+        snapshot = cloneSnapshotWithCursor(snapshot, input.cursor, revisionId)
+
+        return {
+          revisionId,
+          accepted: true,
+          diagnostics: [],
+        }
+      },
+    }
+
+    return {
+      runtime,
+      cursorMoves,
+      previewCalls,
+      featureCommitCalls,
+      sketchCommitCalls,
+      getSnapshot: () => snapshot,
+    }
+  }
+
+  async function createSketchExtrudeSketchRevolveSnapshot() {
+    const snapshot = structuredClone(await createMockWorkspaceSnapshot())
+    const history = snapshot.presentation.documentHistory
+    const sketchItem = history.find((item) => item.kind === 'sketch')
+    const extrudeItem = history.find((item) => item.kind === 'feature' && item.featureId === 'feature_extrude-1')
+
+    if (!sketchItem || sketchItem.kind !== 'sketch' || !extrudeItem || extrudeItem.kind !== 'feature') {
+      throw new Error('Mock snapshot must expose sketch and extrude history for rollback tests.')
+    }
+
+    const sketch2 = {
+      ...structuredClone(snapshot.sketches[0]!),
+      sketchId: 'sketch_second' as SketchId,
+      ownerSketchId: 'sketch_second' as SketchId,
+      label: 'Sketch 2',
+      sketch: {
+        ...structuredClone(snapshot.sketches[0]!.sketch),
+        sketchId: 'sketch_second' as SketchId,
+        ownerSketchId: 'sketch_second' as SketchId,
+        label: 'Sketch 2',
+      },
+    }
+    const revolve = {
+      ...structuredClone(snapshot.features.find((feature) => feature.featureId === 'feature_extrude-1')!),
+      featureId: 'feature_revolve-1',
+      ownerFeatureId: 'feature_revolve-1',
+      label: 'Revolve 1',
+    }
+    const sketch2Item = {
+      ...structuredClone(sketchItem),
+      id: 'document_history_item_sketch_sketch_second',
+      label: 'Sketch 2',
+      target: { kind: 'sketch' as const, sketchId: sketch2.sketchId },
+      sketchId: sketch2.sketchId,
+    }
+    const revolveItem = {
+      ...structuredClone(extrudeItem),
+      id: 'document_history_item_feature_feature_revolve-1',
+      label: 'Revolve 1',
+      target: { kind: 'feature' as const, featureId: revolve.featureId },
+      featureId: revolve.featureId,
+    }
+    const documentHistory = [
+      structuredClone(sketchItem),
+      structuredClone(extrudeItem),
+      sketch2Item,
+      revolveItem,
+    ]
+    const cursor = { kind: 'feature' as const, featureId: revolve.featureId }
+
+    return {
+      ...snapshot,
+      cursor,
+      documentHistory,
+      sketches: [...snapshot.sketches, sketch2],
+      features: [
+        ...snapshot.features.filter((feature) => feature.featureId === 'feature_extrude-1'),
+        revolve,
+      ],
+      document: {
+        ...snapshot.document,
+        cursor,
+        sketches: [...snapshot.document.sketches, sketch2],
+        features: [
+          ...snapshot.document.features.filter((feature) => feature.featureId === 'feature_extrude-1'),
+          revolve,
+        ],
+      },
+      presentation: {
+        ...snapshot.presentation,
+        documentHistory,
+      },
+    } satisfies DocumentSnapshot
   }
 
   function runEventTrace(events: readonly EditorEvent[]) {
@@ -509,17 +687,29 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       consumedByFeatureIds: [],
       selectionSemantics: ['existingSketch'] as const,
     }
+    const yzHistoryItem = {
+      id: 'document_history_item_sketch_sketch_yz',
+      label: 'Sketch YZ',
+      description: 'Authored sketch',
+      kind: 'sketch' as const,
+      target: { kind: 'sketch' as const, sketchId: yzSketchId },
+      sketchId: yzSketchId,
+      featureId: null,
+    }
 
     const baseSnapshot = createSnapshot()
 
     return {
       ...baseSnapshot,
+      cursor: { kind: 'sketch', sketchId: yzSketchId },
+      documentHistory: [yzHistoryItem],
       sketches: [
         ...baseSnapshot.sketches,
         yzSketch,
       ],
       document: {
         ...baseSnapshot.document,
+        cursor: { kind: 'sketch', sketchId: yzSketchId },
         sketches: [
           ...baseSnapshot.document.sketches,
           yzSketch,
@@ -535,6 +725,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       ],
       presentation: {
         ...baseSnapshot.presentation,
+        documentHistory: [yzHistoryItem],
         entities: [
           ...baseSnapshot.presentation.entities,
           yzSketchEntity,
@@ -1349,6 +1540,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         accepted: true,
         diagnostics: [],
       }),
+      setDocumentCursor: async () => ({
+        revisionId: runtimeSnapshot.revisionId,
+        accepted: true,
+        diagnostics: [],
+      }),
     }
 
     const result = await replayEditorEventsWithRuntime(
@@ -1395,6 +1591,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         accepted: true,
         diagnostics: [],
       }),
+      setDocumentCursor: async () => ({
+        revisionId: 'rev_1' as const,
+        accepted: true,
+        diagnostics: [],
+      }),
     }
 
     const result = await replayEditorEventsWithRuntime(
@@ -1426,6 +1627,234 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(result.state.kind === 'editingSketch', 'Committed sketch reopen should enter sketch editing.')
     assert(result.state.session.sketchId === 'sketch_yz', 'Committed sketch reopen should preserve the sketch identity.')
     assert(result.state.session.plane.key === 'yz', 'Committed sketch reopen should preserve the stored sketch plane.')
+  }
+
+  async function testFeatureEditEntryRollsBackBeforeHydrationFromTail() {
+    const snapshot = await createSketchExtrudeSketchRevolveSnapshot()
+    const { runtime, cursorMoves, previewCalls } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'feature', featureId: 'feature_extrude-1' },
+          toolId: 'extrude',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'editingFeature', 'Feature reopen should enter editing after rollback.')
+    assert(cursorMoves.length === 1, 'Feature reopen should move the document cursor before hydration.')
+    assert(cursorMoves[0]?.cursor.kind === 'sketch', 'Editing extrude should roll back to the preceding sketch.')
+    assert(cursorMoves[0]?.transient === true, 'Edit-entry rollback should be transient.')
+    assert(
+      result.state.snapshot?.document.cursor.kind === 'sketch',
+      'Feature edit snapshot should be refreshed at the rollback cursor.',
+    )
+    assert(previewCalls.length === 1, 'Feature edit preview should run after rollback snapshot refresh.')
+    assert(
+      previewCalls[0]?.cursor.kind === 'sketch',
+      'Feature edit preview should evaluate against the rolled-back document basis.',
+    )
+  }
+
+  async function testSketchEditEntryRollsBackBeforeOpenFromTail() {
+    const snapshot = await createSketchExtrudeSketchRevolveSnapshot()
+    const { runtime, cursorMoves } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'sketch', sketchId: 'sketch_second' },
+          toolId: 'sketch',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'editingSketch', 'Committed sketch reopen should enter sketch editing.')
+    assert(cursorMoves.length === 1, 'Sketch reopen should move the document cursor before opening.')
+    assert(
+      cursorMoves[0]?.cursor.kind === 'feature' && cursorMoves[0].cursor.featureId === 'feature_extrude-1',
+      'Editing sketch2 should roll back to the preceding extrude.',
+    )
+    assert(
+      result.state.snapshot?.document.cursor.kind === 'feature'
+        && result.state.snapshot.document.cursor.featureId === 'feature_extrude-1',
+      'Sketch edit snapshot should remain at the document rollback cursor.',
+    )
+    assert(
+      result.state.session.historyCursor.kind !== 'empty',
+      'Reopened sketch editing should preserve sketch-local history while the document is rolled back.',
+    )
+  }
+
+  async function testFeatureEditCancelRestoresTailCursor() {
+    const snapshot = await createSketchExtrudeSketchRevolveSnapshot()
+    const { runtime, cursorMoves } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'feature', featureId: 'feature_extrude-1' },
+          toolId: 'extrude',
+        },
+        {
+          type: 'command.cancelled',
+          commandSessionId: 'command_extrude-1',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'idle', 'Feature edit cancel should return to idle.')
+    assert(cursorMoves.length === 2, 'Feature edit cancel should restore the captured entry cursor.')
+    assert(
+      cursorMoves[1]?.cursor.kind === 'feature' && cursorMoves[1].cursor.featureId === 'feature_revolve-1',
+      'Feature edit cancel should restore the captured tail cursor.',
+    )
+  }
+
+  async function testFeatureEditCommitRestoresNonTailCursor() {
+    const tailSnapshot = await createSketchExtrudeSketchRevolveSnapshot()
+    const entryCursor = { kind: 'sketch' as const, sketchId: 'sketch_second' as SketchId }
+    const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.revisionId)
+    const { runtime, cursorMoves, featureCommitCalls } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'feature', featureId: 'feature_extrude-1' },
+          toolId: 'extrude',
+        },
+        {
+          type: 'command.commitRequested',
+          commandSessionId: 'command_extrude-1',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'idle', 'Feature edit commit should return to idle after restore.')
+    assert(featureCommitCalls.length === 1, 'Feature edit commit should submit the hydrated edit session.')
+    assert(cursorMoves.length === 2, 'Feature edit commit should restore the captured entry cursor.')
+    assert(
+      cursorMoves[1]?.cursor.kind === 'sketch' && cursorMoves[1].cursor.sketchId === 'sketch_second',
+      'Feature edit commit should restore the captured non-tail cursor instead of the history tail.',
+    )
+  }
+
+  async function testSketchAbortRestoresTailCursor() {
+    const snapshot = await createSketchExtrudeSketchRevolveSnapshot()
+    const { runtime, cursorMoves } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'sketch', sketchId: 'sketch_second' },
+          toolId: 'sketch',
+        },
+        {
+          type: 'command.cancelled',
+          commandSessionId: 'command_sketch-1',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'idle', 'Sketch abort should return to idle.')
+    assert(cursorMoves.length === 2, 'Sketch abort should restore the captured entry cursor.')
+    assert(
+      cursorMoves[1]?.cursor.kind === 'feature' && cursorMoves[1].cursor.featureId === 'feature_revolve-1',
+      'Sketch abort should restore the captured tail cursor.',
+    )
+  }
+
+  async function testFinishSketchRestoresNonTailCursor() {
+    const tailSnapshot = await createSketchExtrudeSketchRevolveSnapshot()
+    const entryCursor = { kind: 'sketch' as const, sketchId: 'sketch_second' as SketchId }
+    const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.revisionId)
+    const { runtime, cursorMoves } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'sketch', sketchId: 'sketch_second' },
+          toolId: 'sketch',
+        },
+        {
+          type: 'tool.activated',
+          toolId: 'finishSketch',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'idle', 'Finish sketch should return to idle after restore.')
+    assert(cursorMoves.length === 2, 'Finish sketch should restore the captured entry cursor.')
+    const sketchCommitIndex = result.effects.findIndex((effect) => effect.type === 'sketch.commit')
+    const restoreFetchIndex = result.effects.findIndex(
+      (effect, index) => index > sketchCommitIndex && effect.type === 'document.fetchSnapshot',
+    )
+    const restoreCursorIndex = result.effects.findIndex(
+      (effect, index) => index > restoreFetchIndex && effect.type === 'document.moveHistoryCursor',
+    )
+    assert(
+      sketchCommitIndex >= 0 && restoreFetchIndex > sketchCommitIndex && restoreCursorIndex > restoreFetchIndex,
+      'Finish sketch should refresh the committed snapshot before restoring the entry cursor.',
+    )
+    assert(
+      cursorMoves[1]?.cursor.kind === 'sketch' && cursorMoves[1].cursor.sketchId === 'sketch_second',
+      'Finish sketch should restore the captured non-tail cursor instead of the history tail.',
+    )
+  }
+
+  async function testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const runtime = createModelingServiceEditorEffectRuntime(service)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'feature', featureId: 'feature_extrude-1' },
+          toolId: 'extrude',
+        },
+        {
+          type: 'command.commitRequested',
+          commandSessionId: 'command_extrude-1',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'idle', 'Repository-backed feature edit commit should exit after cursor restore.')
+    assert(
+      result.state.snapshot?.document.cursor.kind === 'feature'
+        && result.state.snapshot.document.cursor.featureId === 'feature_fillet-1',
+      'Repository-backed feature edit commit should restore the tail cursor captured at edit entry.',
+    )
+    assert(
+      result.state.preview?.label !== 'The authored document changed after the current snapshot was loaded. Refresh before retrying this mutation.',
+      'Edit-exit cursor restore should not run against stale repository provenance.',
+    )
   }
 
   async function testXStateRuntimeBootstrapsAndLoadsSnapshot() {
@@ -2229,6 +2658,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testRuntimeLoopReopensStoredSketchPlane()
   await testRuntimeLoopReopensCommittedFeatureFromExplicitIntent()
   await testRuntimeLoopReopensSketchFromExplicitIntent()
+  await testFeatureEditEntryRollsBackBeforeHydrationFromTail()
+  await testSketchEditEntryRollsBackBeforeOpenFromTail()
+  await testFeatureEditCancelRestoresTailCursor()
+  await testFeatureEditCommitRestoresNonTailCursor()
+  await testSketchAbortRestoresTailCursor()
+  await testFinishSketchRestoresNonTailCursor()
+  await testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore()
   await testXStateRuntimeBootstrapsAndLoadsSnapshot()
   await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
 })

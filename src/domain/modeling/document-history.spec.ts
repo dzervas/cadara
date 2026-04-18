@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 
 import {
+  getDocumentHistoryCursorBeforeTarget,
   getDocumentHistoryCursorIndex,
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
@@ -24,6 +25,62 @@ test('src/domain/modeling/document-history.spec.ts', async () => {
   const items = snapshot.presentation.documentHistory
 
   assert(items.length >= 2, 'Seed document should expose multiple document history items.')
+  const firstItem = items[0]
+  const seedSketchItem = items.find((item) => item.kind === 'sketch')
+  const seedFeatureItem = items.find((item) => item.kind === 'feature')
+
+  assert(firstItem, 'Seed document should expose a first document history item.')
+  assert(seedSketchItem?.kind === 'sketch', 'Seed document should expose a sketch history item.')
+  assert(seedFeatureItem?.kind === 'feature', 'Seed document should expose a feature history item.')
+
+  const featureRollback = getDocumentHistoryCursorBeforeTarget(items, {
+    kind: 'feature',
+    featureId: seedFeatureItem.featureId,
+  })
+  assert(featureRollback !== null, 'Feature targets should resolve to a rollback cursor.')
+  assert(
+    getDocumentHistoryCursorIndex(items, featureRollback) === getDocumentHistoryCursorIndex(items, {
+      kind: 'feature',
+      featureId: seedFeatureItem.featureId,
+    }) - 1,
+    'Feature rollback cursor should point immediately before the target feature.',
+  )
+
+  const sketchRollback = getDocumentHistoryCursorBeforeTarget(items, {
+    kind: 'sketch',
+    sketchId: seedSketchItem.sketchId,
+  })
+  assert(sketchRollback !== null, 'Sketch targets should resolve to a rollback cursor.')
+  assert(
+    getDocumentHistoryCursorIndex(items, sketchRollback) === getDocumentHistoryCursorIndex(items, {
+      kind: 'sketch',
+      sketchId: seedSketchItem.sketchId,
+    }) - 1,
+    'Sketch rollback cursor should point immediately before the target sketch.',
+  )
+
+  const firstRollback = getDocumentHistoryCursorBeforeTarget(
+    items,
+    firstItem.kind === 'sketch'
+      ? { kind: 'sketch', sketchId: firstItem.sketchId }
+      : { kind: 'feature', featureId: firstItem.featureId },
+  )
+  assert(firstRollback?.kind === 'empty', 'The first history item should roll back to the empty cursor.')
+  assert(
+    getDocumentHistoryCursorBeforeTarget(items, {
+      kind: 'feature',
+      featureId: 'feature_missing',
+    }) === null,
+    'Missing feature targets should not resolve to a rollback cursor.',
+  )
+  assert(
+    getDocumentHistoryCursorBeforeTarget(items, {
+      kind: 'sketch',
+      sketchId: 'sketch_missing',
+    }) === null,
+    'Missing sketch targets should not resolve to a rollback cursor.',
+  )
+
   assert(
     getDocumentHistoryCursorIndex(items, snapshot.document.cursor) === items.length - 1,
     'Seed document cursor should start at the document history tail.',

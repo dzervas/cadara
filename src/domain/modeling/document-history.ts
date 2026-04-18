@@ -179,6 +179,19 @@ export function getDocumentHistoryCursorForIndex(
     : { kind: 'feature', featureId: item.featureId }
 }
 
+export function getDocumentHistoryCursorBeforeTarget(
+  items: readonly DocumentHistoryItemRecord[],
+  target: DocumentHistoryOrderEntry,
+): DocumentFeatureCursor | null {
+  const targetIndex = items.findIndex((item) =>
+    target.kind === 'sketch'
+      ? item.kind === 'sketch' && item.sketchId === target.sketchId
+      : item.kind === 'feature' && item.featureId === target.featureId,
+  )
+
+  return targetIndex < 0 ? null : getDocumentHistoryCursorForIndex(items, targetIndex - 1)
+}
+
 export function getPreviousDocumentHistoryCursor(snapshot: DocumentSnapshot): DocumentFeatureCursor | null {
   const items = snapshot.presentation.documentHistory
   const cursor = snapshot.document.cursor

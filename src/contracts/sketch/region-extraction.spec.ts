@@ -221,6 +221,83 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     assert(found.rings[0]?.boundaryEntityIds.length === 4, 'The ring should contain four edges.')
   }
 
+  async function testEndpointSelectionResidualsDeriveAdjacentProfiles() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_1_rect-bottom-left',
+        'sketch_point_1_rect-bottom-right',
+        'sketch_point_1_rect-top-right',
+        'sketch_point_1_rect-top-left',
+        'sketch_point_2_line-start',
+        'sketch_point_2_line-end',
+        'sketch_point_4_line-start',
+        'sketch_point_4_line-end',
+        'sketch_point_5_line-start',
+        'sketch_point_5_line-end',
+      ],
+      points: [
+        makePoint('sketch_point_1_rect-bottom-left', 'Bottom left', -14.291285910941498, -1.091872713913713),
+        makePoint('sketch_point_1_rect-bottom-right', 'Bottom right', -3.820764551724851, -1.0918727118189422),
+        makePoint('sketch_point_1_rect-top-right', 'Top right', -3.8207645448174223, 6.534128625935561),
+        makePoint('sketch_point_1_rect-top-left', 'Top left', -14.291285906887033, 6.534128628579854),
+        makePoint('sketch_point_2_line-start', 'Line 2 start', -17.50622951036383, -4.747048831429789),
+        makePoint('sketch_point_2_line-end', 'Line 2 end', -14.291285908581912, -1.0918727156232404),
+        makePoint('sketch_point_4_line-start', 'Line 4 start', -17.50622951036383, -4.747048831429789),
+        makePoint('sketch_point_4_line-end', 'Line 4 end', -19.066456551723654, 5.886265464155363),
+        makePoint('sketch_point_5_line-start', 'Line 5 start', -19.066456551723654, 5.886265464155363),
+        makePoint('sketch_point_5_line-end', 'Line 5 end', -14.291285911202246, 6.534128625935561),
+      ],
+      entityIds: [
+        'sketch_entity_1_rect-bottom',
+        'sketch_entity_1_rect-right',
+        'sketch_entity_1_rect-top',
+        'sketch_entity_1_rect-left',
+        'sketch_entity_2_line',
+        'sketch_entity_4_line',
+        'sketch_entity_5_line',
+      ],
+      entities: [
+        makeLine('sketch_entity_1_rect-bottom', 'Bottom', 'sketch_point_1_rect-bottom-left', 'sketch_point_1_rect-bottom-right'),
+        makeLine('sketch_entity_1_rect-right', 'Right', 'sketch_point_1_rect-bottom-right', 'sketch_point_1_rect-top-right'),
+        makeLine('sketch_entity_1_rect-top', 'Top', 'sketch_point_1_rect-top-right', 'sketch_point_1_rect-top-left'),
+        makeLine('sketch_entity_1_rect-left', 'Left', 'sketch_point_1_rect-top-left', 'sketch_point_1_rect-bottom-left'),
+        makeLine('sketch_entity_2_line', 'Line 2', 'sketch_point_2_line-start', 'sketch_point_2_line-end'),
+        makeLine('sketch_entity_4_line', 'Line 4', 'sketch_point_4_line-start', 'sketch_point_4_line-end'),
+        makeLine('sketch_entity_5_line', 'Line 5', 'sketch_point_5_line-start', 'sketch_point_5_line-end'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const solvedSnapshot = makeSolvedSnapshot(definition)
+    const found = findSketchRings(definition, solvedSnapshot)
+    assert(found.rings.length === 2, 'Endpoint selections with floating-point residuals should produce both adjacent rings.')
+    assert(found.unusedSegments.length === 0, 'Endpoint-selection residuals should not leave profile segments unused.')
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot,
+    })
+
+    assert(derived.regions.length === 2, 'Endpoint selections from existing vertices should derive both selectable profiles.')
+    assert(
+      derived.regions.some((region) =>
+        region.loops[0]?.segments.some((segment) =>
+          segment.source.kind === 'entity' && segment.source.entityId === 'sketch_entity_2_line',
+        ),
+      ),
+      'Derived profiles should include the second loop bounded by the referenced line endpoints.',
+    )
+  }
+
   async function testFindRingsMultipleAndDeriveRegions() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -701,6 +778,7 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
   async function run() {
     await testFindRingsNone()
     await testFindRingsOne()
+    await testEndpointSelectionResidualsDeriveAdjacentProfiles()
   await testFindRingsMultipleAndDeriveRegions()
   await testMixedLocalAndProjectedLoopPreservesProjectedIdentity()
   await testProjectedOnlyCircleLoopPreservesProjectedIdentity()

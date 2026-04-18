@@ -26,11 +26,11 @@ export class SketchWorkbenchHarness {
 
   async openWithOperationHistory(payload: ModelingOperationHistoryPayload, path = '/') {
     await this.seedOperationHistory(payload)
-    await this.open(withDisabledRepository(path))
+    await this.open(path)
   }
 
   async open(path = '/') {
-    await this.openPreservingStorage(path)
+    await this.openPreservingStorage(withDisabledRepository(path))
   }
 
   async openPreservingStorage(path = '/') {
@@ -40,8 +40,8 @@ export class SketchWorkbenchHarness {
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
   }
 
-  async reloadPreservingStorage(path = '/') {
-    await this.openPreservingStorage(path)
+  async reloadPreservingStorage(path?: string) {
+    await this.openPreservingStorage(withDisabledRepository(path ?? await this.currentPath()))
   }
 
   toolbarButton(name: string): Locator {
@@ -198,6 +198,10 @@ export class SketchWorkbenchHarness {
   private async revisionLabel() {
     const bodyText = await this.page.locator('body').textContent()
     return bodyText?.match(/Revision:\s*([^\s]+)/)?.[1] ?? 'loading'
+  }
+
+  private async currentPath() {
+    return this.page.evaluate(() => `${window.location.pathname}${window.location.search}${window.location.hash}`)
   }
 
   private async ensureStateDebuggerExpanded() {
