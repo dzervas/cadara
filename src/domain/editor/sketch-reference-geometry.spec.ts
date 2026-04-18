@@ -130,6 +130,55 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
     assert(reopened.definition.references.length === 1, 'Reopened sketch sessions should preserve authored references.')
   }
 
+  function testFaceBackedReopenPreservesNullPlaneKeyInCommitRequest() {
+    const plane = {
+      ...createStandardPlaneDefinition('xy'),
+      support: {
+        kind: 'face' as const,
+        bodyId: 'body_seed' as const,
+        faceId: 'face_seed' as const,
+      },
+      key: null,
+    }
+    const solved = solveSketchDefinitionCore({
+      definition: createDefinition(),
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    const session = createSketchSessionFromSnapshot({
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: null,
+      ownerSketchId: 'sketch_face',
+      ownerBodyId: null,
+      sketchId: 'sketch_face',
+      label: 'Face Sketch',
+      plane,
+      planeTarget: plane.support,
+      planeKey: null,
+      sketch: {
+        ownerDocumentId: 'doc_workspace',
+        ownerRevisionId: 'rev_0001',
+        ownerFeatureId: null,
+        ownerSketchId: 'sketch_face',
+        ownerBodyId: null,
+        sketchId: 'sketch_face',
+        label: 'Face Sketch',
+        planeSupport: plane.support,
+        definition: createDefinition(),
+        solvedSnapshot: solved.solvedSnapshot,
+        regions: [],
+      },
+    } satisfies SketchSnapshotRecord)
+
+    assert(session.plane.key === null, 'Face-backed reopened sketches should preserve a null authored plane key.')
+    assert(session.commitRequest?.planeKey === null, 'Face-backed reopened sketch commits should not default planeKey to XY.')
+  }
+
   function testDuplicateReferencesAreRejected() {
     let session = beginSketchTool(createSession(), 'projectReference')
     const target = {
@@ -300,6 +349,7 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
   }
 
   testReferenceAuthoringPersistsInCommitRequest()
+  testFaceBackedReopenPreservesNullPlaneKeyInCommitRequest()
   testDuplicateReferencesAreRejected()
   testInvalidReferenceDiagnosticsStayExplicit()
   testDuplicateReferenceRecordsAreRejected()

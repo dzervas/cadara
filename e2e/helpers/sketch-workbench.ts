@@ -24,24 +24,24 @@ export class SketchWorkbenchHarness {
     )
   }
 
-  async openWithOperationHistory(payload: ModelingOperationHistoryPayload) {
+  async openWithOperationHistory(payload: ModelingOperationHistoryPayload, path = '/') {
     await this.seedOperationHistory(payload)
-    await this.open()
+    await this.open(withDisabledRepository(path))
   }
 
-  async open() {
-    await this.openPreservingStorage()
+  async open(path = '/') {
+    await this.openPreservingStorage(path)
   }
 
-  async openPreservingStorage() {
-    await this.page.goto('/')
+  async openPreservingStorage(path = '/') {
+    await this.page.goto(path)
     await this.ensureStateDebuggerExpanded()
     await expect(this.page.getByText('Machine:')).toBeVisible()
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
   }
 
-  async reloadPreservingStorage() {
-    await this.openPreservingStorage()
+  async reloadPreservingStorage(path = '/') {
+    await this.openPreservingStorage(path)
   }
 
   toolbarButton(name: string): Locator {
@@ -209,4 +209,13 @@ export class SketchWorkbenchHarness {
       await expandButton.click()
     }
   }
+}
+
+function withDisabledRepository(path: string) {
+  const url = new URL(path, 'http://127.0.0.1:3000')
+  url.searchParams.set('cadDisableRepository', '1')
+
+  return path.startsWith('http://') || path.startsWith('https://')
+    ? url.toString()
+    : `${url.pathname}${url.search}${url.hash}`
 }

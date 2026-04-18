@@ -31,14 +31,14 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     super(page)
   }
 
-  override async open() {
-    await super.open()
+  override async open(path = '/') {
+    await super.open(path)
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
     await this.waitForAnimationFrames(2)
   }
 
-  override async reloadPreservingStorage() {
-    await super.reloadPreservingStorage()
+  override async reloadPreservingStorage(path = '/') {
+    await super.reloadPreservingStorage(path)
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
     await this.waitForAnimationFrames(2)
     await this.waitForStableCanvasFrames()
@@ -331,10 +331,10 @@ export function meanPixelDelta(left: Buffer, right: Buffer) {
 const VIEWPORT_TARGET_POINTS = {
   profile: { x: 380, y: 280 },
   face: { x: 254, y: 65 },
-  face1: { x: 90, y: 195 },
+  face1: { x: 80, y: 190 },
   face6: { x: 290, y: 35 },
   edge: { x: 190, y: 65 },
-  vertex: { x: 63, y: 148 },
+  vertex: { x: 50, y: 95 },
 } as const
 
 const VIEWPORT_TARGET_POINTS_BY_ID: Record<string, { x: number, y: number }> = {

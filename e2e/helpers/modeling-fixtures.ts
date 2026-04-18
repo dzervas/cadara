@@ -266,6 +266,186 @@ export function createBaseExtrudeOperationHistory(): ModelingOperationHistoryPay
   }
 }
 
+export function createVertexReferencedCircleOperationHistory(): ModelingOperationHistoryPayload {
+  const base = createBaseExtrudeOperationHistory()
+  const sketchId = 'sketch_2' as const
+  const referenceId = 'ref_vertex_center' as const
+  const centerPointId = 'sketch_point_circle_center' as const
+  const circleEntityId = 'sketch_entity_circle' as const
+
+  return {
+    ...base,
+    entries: [
+      ...base.entries,
+      {
+        kind: 'commitSketch',
+        payload: {
+          sketchId,
+          sketchLabel: 'Vertex Center Circle',
+          plane: {
+            key: 'xy',
+            support: { kind: 'construction', constructionId: 'construction_plane-xy' },
+            frame: {
+              origin: [0, 0, 0],
+              xAxis: [1, 0, 0],
+              yAxis: [0, 1, 0],
+              normal: [0, 0, 1],
+              linearUnit: 'documentLength',
+              handedness: 'rightHanded',
+            },
+          },
+          planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
+          planeKey: 'xy',
+          definition: {
+            schemaVersion: SKETCH_SCHEMA_VERSION,
+            referenceIds: [referenceId],
+            references: [{
+              referenceId,
+              kind: 'modelReference',
+              label: 'Referenced solid vertex',
+              source: {
+                kind: 'vertex',
+                bodyId: 'body_feature_extrude-1',
+                vertexId: 'vertex_body_feature_extrude-1_t0001_2',
+              },
+              projectionMode: 'projectAlongPlaneNormal',
+            }],
+            pointIds: [centerPointId],
+            points: [{
+              pointId: centerPointId,
+              label: 'Circle center',
+              target: { kind: 'sketchPoint', sketchId, pointId: centerPointId },
+              position: [0, 0],
+              isConstruction: false,
+            }],
+            entityIds: [circleEntityId],
+            entities: [{
+              kind: 'circle',
+              entityId: circleEntityId,
+              label: 'Circle',
+              target: { kind: 'sketchEntity', sketchId, entityId: circleEntityId },
+              isConstruction: false,
+              centerPointId,
+              radius: 2,
+            }],
+            constraintIds: ['constraint_circle_center_projected_vertex'],
+            constraints: [{
+              constraintId: 'constraint_circle_center_projected_vertex',
+              kind: 'coincidentProjectedPoint',
+              label: 'Circle center on vertex',
+              point: { kind: 'localPoint', pointId: centerPointId },
+              projectedPoint: {
+                kind: 'projectedGeometry',
+                reference: {
+                  kind: 'projectedPoint',
+                  referenceId,
+                  geometryId: `projected_geometry_${referenceId}_point`,
+                },
+              },
+            }],
+            dimensionIds: [],
+            dimensions: [],
+          },
+        },
+      },
+    ],
+  }
+}
+
+export function createFaceBackedVertexReferencedCircleOperationHistory(): ModelingOperationHistoryPayload {
+  const base = createBaseExtrudeOperationHistory()
+  const sketchId = 'sketch_2' as const
+  const referenceId = 'ref_face_vertex_center' as const
+  const centerPointId = 'sketch_point_face_circle_center' as const
+  const circleEntityId = 'sketch_entity_face_circle' as const
+
+  return {
+    ...base,
+    entries: [
+      ...base.entries,
+      {
+        kind: 'commitSketch',
+        payload: {
+          sketchId,
+          sketchLabel: 'Vertex Center Face Circle',
+          plane: {
+            key: null,
+            support: {
+              kind: 'face',
+              bodyId: 'body_feature_extrude-1',
+              faceId: 'face_body_feature_extrude-1_t0001_6',
+            },
+            frame: {
+              origin: [0, 0, 10],
+              xAxis: [1, 0, 0],
+              yAxis: [0, 1, 0],
+              normal: [0, 0, 1],
+              linearUnit: 'documentLength',
+              handedness: 'rightHanded',
+            },
+          },
+          planeTarget: {
+            kind: 'face',
+            bodyId: 'body_feature_extrude-1',
+            faceId: 'face_body_feature_extrude-1_t0001_6',
+          },
+          planeKey: null,
+          definition: {
+            schemaVersion: SKETCH_SCHEMA_VERSION,
+            referenceIds: [referenceId],
+            references: [{
+              referenceId,
+              kind: 'modelReference',
+              label: 'Referenced solid vertex',
+              source: {
+                kind: 'vertex',
+                bodyId: 'body_feature_extrude-1',
+                vertexId: 'vertex_body_feature_extrude-1_t0001_2',
+              },
+              projectionMode: 'projectAlongPlaneNormal',
+            }],
+            pointIds: [centerPointId],
+            points: [{
+              pointId: centerPointId,
+              label: 'Circle center',
+              target: { kind: 'sketchPoint', sketchId, pointId: centerPointId },
+              position: [0, 0],
+              isConstruction: false,
+            }],
+            entityIds: [circleEntityId],
+            entities: [{
+              kind: 'circle',
+              entityId: circleEntityId,
+              label: 'Circle',
+              target: { kind: 'sketchEntity', sketchId, entityId: circleEntityId },
+              isConstruction: false,
+              centerPointId,
+              radius: 2,
+            }],
+            constraintIds: ['constraint_face_circle_center_projected_vertex'],
+            constraints: [{
+              constraintId: 'constraint_face_circle_center_projected_vertex',
+              kind: 'coincidentProjectedPoint',
+              label: 'Circle center on vertex',
+              point: { kind: 'localPoint', pointId: centerPointId },
+              projectedPoint: {
+                kind: 'projectedGeometry',
+                reference: {
+                  kind: 'projectedPoint',
+                  referenceId,
+                  geometryId: `projected_geometry_${referenceId}_point`,
+                },
+              },
+            }],
+            dimensionIds: [],
+            dimensions: [],
+          },
+        },
+      },
+    ],
+  }
+}
+
 export function createTwoExtrudeBodiesOperationHistory(): ModelingOperationHistoryPayload {
   const firstSketchRequest = createCommitSketchRequest(
     'sketch_primary',

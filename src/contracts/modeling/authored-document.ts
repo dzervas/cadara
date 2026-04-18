@@ -34,6 +34,10 @@ export interface AuthoredBodyLabelRecord {
   label: string
 }
 
+export type AuthoredDocumentHistoryOrderEntry =
+  | { kind: 'sketch'; sketchId: SketchId }
+  | { kind: 'feature'; featureId: FeatureId }
+
 export interface AuthoredModelDocument {
   contractVersion: ContractVersion
   schemaVersion: AuthoredModelDocumentSchemaVersion
@@ -44,6 +48,7 @@ export interface AuthoredModelDocument {
   sketches: AuthoredSketchRecord[]
   features: AuthoredFeatureRecord[]
   featureOrder: FeatureId[]
+  historyOrder?: AuthoredDocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   bodyLabels: AuthoredBodyLabelRecord[]
 }
@@ -79,6 +84,11 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: DocumentSnapsh
       definition: structuredClone(feature.definition),
     })),
     featureOrder: snapshot.document.features.map((feature) => feature.featureId),
+    historyOrder: snapshot.presentation.documentHistory.map((item) =>
+      item.kind === 'sketch'
+        ? { kind: 'sketch' as const, sketchId: item.sketchId }
+        : { kind: 'feature' as const, featureId: item.featureId },
+    ),
     cursor: structuredClone(snapshot.document.cursor),
     bodyLabels: snapshot.document.bodies.map((body) => ({
       bodyId: body.bodyId,

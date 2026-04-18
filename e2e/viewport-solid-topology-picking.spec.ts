@@ -8,7 +8,7 @@ test.use({ viewport: { width: 1440, height: 960 } })
 
 const FACE_POINT = { x: 254, y: 65 }
 const EDGE_POINT = { x: 190, y: 65 }
-const VERTEX_POINT = { x: 63, y: 148 }
+const VERTEX_POINT = { x: 50, y: 95 }
 const BLANK_POINT = { x: 1000, y: 200 }
 
 const FACE_TARGET = 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'

@@ -153,6 +153,60 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     )
   }
 
+  function testProjectedCoincidentAuthoringCanConstrainCircleCenter() {
+    let session = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [4, 0])
+    session = addProjectedReference(session, {
+      referenceId: 'ref_circle_center',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_circle_center',
+        kind: 'point',
+        position: [3, 3],
+      }],
+      diagnostics: [],
+    })
+
+    const circle = session.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(circle?.kind === 'circle', 'Circle authoring should create a local circle entity.')
+
+    session = beginSketchTool(session, 'constraintCoincident')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: circle.entityId,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_circle_center',
+      geometryId: 'projected_geometry_circle_center',
+      geometryKind: 'point',
+    })
+
+    const constraint = session.definition.constraints.find(
+      (entry) => entry.kind === 'coincidentProjectedPoint',
+    )
+    assert(
+      constraint?.kind === 'coincidentProjectedPoint',
+      'Coincident authoring should support selecting a circle and a projected point to constrain the circle center.',
+    )
+    assert(
+      constraint.point.pointId === circle.centerPointId,
+      'Circle-to-projected-point coincident authoring should target the circle center point.',
+    )
+    const center = session.definition.points.find((point) => point.pointId === circle.centerPointId)
+    assert(
+      center && Math.hypot(center.position[0] - 3, center.position[1] - 3) < 1e-6,
+      'Circle-to-projected-point coincident authoring should solve the circle center onto the projected point immediately.',
+    )
+  }
+
   function testProjectedParallelAuthoringCommitsTypedOperand() {
     let session = createSessionWithTwoLines()
     const [firstLineId] = session.definition.entityIds
@@ -581,6 +635,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   testToolbarDefinitionsExposeConstraintFamilies()
   testGeometricConstraintAuthoringCommitsDurableRecord()
   testProjectedCoincidentAuthoringCommitsTypedOperand()
+  testProjectedCoincidentAuthoringCanConstrainCircleCenter()
   testProjectedParallelAuthoringCommitsTypedOperand()
   testPointOnProjectedCurveAuthoringCommitsTypedOperand()
   testReferenceTargetedConstraintAuthoringCommitsTypedOperands()

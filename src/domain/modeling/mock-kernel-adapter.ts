@@ -1,6 +1,6 @@
 import type { SketchDefinition, SketchRecord } from '@/contracts/sketch/schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
-import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
+import { SOLVER_SCHEMA_VERSION, type ProjectSketchExternalReferencesRequest, type ProjectSketchExternalReferencesResponse } from '@/contracts/solver/schema'
 import type {
   ConstraintId,
   BodyId,
@@ -20,10 +20,12 @@ import type {
   SketchEntityId,
   SketchPointId,
   SnapshotEntityId,
+  VertexId,
 } from '@/contracts/shared/ids'
 import { getPrimitiveRefKey } from '@/domain/editor/schema'
 import {
   createDocumentHistoryItems,
+  insertDocumentHistoryOrderEntryAfterCursor,
   createTailDocumentCursor,
   getAppliedFeatureIdsForDocumentCursor,
   getFeatureInsertionIndexForDocumentCursor,
@@ -88,6 +90,7 @@ import {
   evaluateMockSketchDefinition,
 } from '@/domain/solver/mock-sketch-solver-adapter'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
+import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
 
 const CONTRACT_VERSION = 'modeling-contract/v1alpha1' as const
 const REVISION_ID = 'rev_0001' as const
@@ -2034,6 +2037,83 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
             isClosed: false,
           },
         },
+        {
+          id: 'renderable_edge_outer_1' as RenderableId,
+          label: 'Outer edge',
+          ownerBodyId: 'body_part-1',
+          ownerFeatureId: 'feature_extrude-1',
+          binding: {
+            pickId: 'pick_edge_outer_1' as PickId,
+            pickPriority: 10,
+            target: { kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-1' },
+            topology: 'edge',
+            semanticClass: 'featureEdge',
+          },
+          geometry: {
+            kind: 'polyline',
+            points: [[4, -3, 12], [4, 3, 12]],
+            isClosed: false,
+          },
+        },
+        {
+          id: 'renderable_edge_outer_2' as RenderableId,
+          label: 'Outer edge',
+          ownerBodyId: 'body_part-1',
+          ownerFeatureId: 'feature_extrude-1',
+          binding: {
+            pickId: 'pick_edge_outer_2' as PickId,
+            pickPriority: 10,
+            target: { kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-2' },
+            topology: 'edge',
+            semanticClass: 'featureEdge',
+          },
+          geometry: {
+            kind: 'polyline',
+            points: [[4, 3, 12], [-4, 3, 12]],
+            isClosed: false,
+          },
+        },
+        {
+          id: 'renderable_edge_outer_3' as RenderableId,
+          label: 'Outer edge',
+          ownerBodyId: 'body_part-1',
+          ownerFeatureId: 'feature_extrude-1',
+          binding: {
+            pickId: 'pick_edge_outer_3' as PickId,
+            pickPriority: 10,
+            target: { kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-3' },
+            topology: 'edge',
+            semanticClass: 'featureEdge',
+          },
+          geometry: {
+            kind: 'polyline',
+            points: [[-4, 3, 12], [-4, -3, 12]],
+            isClosed: false,
+          },
+        },
+        ...([
+          ['vertex_front-right', [4, -3, 12]],
+          ['vertex_front-left', [-4, -3, 12]],
+          ['vertex_back-right', [4, 3, 12]],
+          ['vertex_back-left', [-4, 3, 12]],
+        ] as const).map(([vertexId, position]) => ({
+          id: `renderable_${vertexId}` as RenderableId,
+          label: 'Outer vertex',
+          ownerBodyId: 'body_part-1' as BodyId,
+          ownerFeatureId: 'feature_extrude-1' as FeatureId,
+          binding: {
+            pickId: `pick_${vertexId}` as PickId,
+            pickPriority: 5,
+            target: { kind: 'vertex' as const, bodyId: 'body_part-1' as BodyId, vertexId: vertexId as VertexId },
+            topology: 'vertex' as const,
+            semanticClass: 'featureVertex' as const,
+          },
+          geometry: {
+            kind: 'marker' as const,
+            position,
+            displayRadius: 0.12,
+          },
+        })),
       ],
     },
   }
@@ -2178,6 +2258,46 @@ function updateFeatureEntityRelationship(
 }
 
 function rebuildFeatureTree(snapshot: DocumentSnapshot) {
+  const historyOrder = snapshot.presentation.documentHistory?.length
+    ? snapshot.presentation.documentHistory.map((item) =>
+        item.kind === 'sketch'
+          ? { kind: 'sketch' as const, sketchId: item.sketchId }
+          : { kind: 'feature' as const, featureId: item.featureId },
+      )
+    : undefined
+  const sketchNodes = new Map(snapshot.document.sketches.map((sketch, index) => [
+    sketch.sketchId,
+    {
+      id: (index === 0 ? 'feature_tree_node_sketch_1' : `feature_tree_node_sketch_${index + 1}`) as FeatureTreeNodeId,
+      label: sketch.label,
+      description: `Sketch on ${(sketch.planeKey ?? 'xy').toUpperCase()} plane`,
+      kind: 'sketch' as const,
+      target: { kind: 'sketch' as const, sketchId: sketch.sketchId },
+      ownerFeatureId: null,
+      ownerSketchId: sketch.sketchId,
+      sourceFeatureId: null,
+    },
+  ]))
+  const featureNodes = new Map(snapshot.document.features.map((feature) => [
+    feature.featureId,
+    {
+      id: `feature_tree_node_${feature.featureId}` as FeatureTreeNodeId,
+      label: feature.label,
+      description: `${feature.definition.kind} feature`,
+      kind: 'feature' as const,
+      target: { kind: 'feature' as const, featureId: feature.featureId },
+      ownerFeatureId: feature.featureId,
+      ownerSketchId: null,
+      sourceFeatureId: null,
+    },
+  ]))
+  const historyItems = createDocumentHistoryItems({
+    featureTree: [],
+    features: snapshot.document.features,
+    sketches: snapshot.document.sketches,
+    historyOrder,
+  })
+
   snapshot.presentation.featureTree = [
     {
       id: 'feature_tree_node_plane_xy' as FeatureTreeNodeId,
@@ -2209,32 +2329,19 @@ function rebuildFeatureTree(snapshot: DocumentSnapshot) {
       ownerSketchId: null,
       sourceFeatureId: null,
     },
-    ...snapshot.document.sketches.map((sketch, index) => ({
-      id: (index === 0 ? 'feature_tree_node_sketch_1' : `feature_tree_node_sketch_${index + 1}`) as FeatureTreeNodeId,
-      label: sketch.label,
-      description: `Sketch on ${(sketch.planeKey ?? 'xy').toUpperCase()} plane`,
-      kind: 'sketch' as const,
-      target: { kind: 'sketch' as const, sketchId: sketch.sketchId },
-      ownerFeatureId: null,
-      ownerSketchId: sketch.sketchId,
-      sourceFeatureId: null,
-    })),
-    ...snapshot.document.features.map((feature) => ({
-      id: `feature_tree_node_${feature.featureId}` as FeatureTreeNodeId,
-      label: feature.label,
-      description: `${feature.definition.kind} feature`,
-      kind: 'feature' as const,
-      target: { kind: 'feature' as const, featureId: feature.featureId },
-      ownerFeatureId: feature.featureId,
-      ownerSketchId: null,
-      sourceFeatureId: null,
-    })),
+    ...historyItems.flatMap((item) => {
+      const node = item.kind === 'sketch'
+        ? sketchNodes.get(item.sketchId)
+        : featureNodes.get(item.featureId)
+      return node ? [node] : []
+    }),
   ]
   snapshot.featureTree = snapshot.presentation.featureTree
   snapshot.presentation.documentHistory = createDocumentHistoryItems({
     featureTree: snapshot.presentation.featureTree,
     features: snapshot.document.features,
     sketches: snapshot.document.sketches,
+    historyOrder,
   })
   snapshot.documentHistory = snapshot.presentation.documentHistory
 }
@@ -2353,6 +2460,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         planeSupport: sketch.plane.support,
         definition: structuredClone(sketch.definition),
         solvedSnapshot: evaluation.solve.solvedSnapshot,
+        projectedReferences: structuredClone(evaluation.projectedReferences),
         regions: evaluation.regions.regions.map((region) => ({ ...region, ownerRevisionId: document.revisionId })),
       }
 
@@ -2385,6 +2493,12 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     snapshot.features = snapshot.document.features
     snapshot.document.cursor = structuredClone(document.cursor)
     snapshot.cursor = snapshot.document.cursor
+    snapshot.presentation.documentHistory = createDocumentHistoryItems({
+      featureTree: snapshot.presentation.featureTree,
+      features: snapshot.document.features,
+      sketches: snapshot.document.sketches,
+      historyOrder: document.historyOrder,
+    })
 
     for (const label of document.bodyLabels) {
       const body = snapshot.document.bodies.find((entry) => entry.bodyId === label.bodyId)
@@ -2424,6 +2538,16 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       contractVersion: CONTRACT_VERSION,
       snapshot: applyCursorToMockSnapshot(structuredClone(await this.getSnapshot())),
     }
+  }
+
+  async projectSketchExternalReferences(
+    request: ProjectSketchExternalReferencesRequest,
+  ): Promise<ProjectSketchExternalReferencesResponse> {
+    assertSupportedModelingRequest(request)
+    return projectSketchExternalReferencesFromSnapshot(
+      applyCursorToMockSnapshot(structuredClone(await this.getSnapshot())),
+      request,
+    )
   }
 
   async createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse> {
@@ -2526,6 +2650,16 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         0,
         nextFeature,
       )
+      mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+        featureTree: mutableSnapshot.presentation.featureTree,
+        features: mutableSnapshot.document.features,
+        sketches: mutableSnapshot.document.sketches,
+        historyOrder: insertDocumentHistoryOrderEntryAfterCursor(
+          mutableSnapshot.presentation.documentHistory,
+          mutableSnapshot.document.cursor,
+          { kind: 'feature', featureId },
+        ),
+      })
       mutableSnapshot.document.cursor = { kind: 'feature', featureId }
       mutableSnapshot.cursor = mutableSnapshot.document.cursor
 
@@ -2657,7 +2791,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       })
     }
 
-    const projection = await this.solverAdapter.projectExternalReferences({
+    const projection = await this.projectSketchExternalReferences({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: solverCorrelation.projectionRequestId,
@@ -2778,7 +2912,19 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       if (existingIndex >= 0) {
         mutableSnapshot.document.sketches[existingIndex] = snapshotSketch
       } else {
+        mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+          featureTree: mutableSnapshot.presentation.featureTree,
+          features: mutableSnapshot.document.features,
+          sketches: [...mutableSnapshot.document.sketches, snapshotSketch],
+          historyOrder: insertDocumentHistoryOrderEntryAfterCursor(
+            mutableSnapshot.presentation.documentHistory,
+            mutableSnapshot.document.cursor,
+            { kind: 'sketch', sketchId },
+          ),
+        })
         mutableSnapshot.document.sketches.push(snapshotSketch)
+        mutableSnapshot.document.cursor = { kind: 'sketch', sketchId }
+        mutableSnapshot.cursor = mutableSnapshot.document.cursor
       }
 
       mutableSnapshot.presentation.entities = mutableSnapshot.presentation.entities.filter((entry) => entry.ownerSketchId !== sketchId)

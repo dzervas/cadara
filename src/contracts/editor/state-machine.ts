@@ -3553,6 +3553,21 @@ export async function runEditorEffect(
  */
 export function createModelingServiceEditorEffectRuntime(modelingService: {
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
+  projectSketchExternalReferences(input: {
+    solverSchemaVersion: typeof SOLVER_SCHEMA_VERSION
+    requestId: RequestId
+    revisionId: RevisionId
+    sketchId: NonNullable<SketchSessionState['sketchId']>
+    plane: SketchPlaneDefinition['frame']
+    tolerances: typeof EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES
+    references: {
+      referenceId: SketchSessionState['definition']['referenceIds'][number]
+      reference: SketchSessionState['definition']['references'][number]
+    }[]
+  }): Promise<{
+    projectedReferences: ProjectedSketchReferenceRecord[]
+    diagnostics: ProjectedSketchReferenceRecord['diagnostics']
+  }>
   sketchSolver: {
     createCommitCorrelation(requestId: RequestId): {
       requestId: RequestId
@@ -3689,19 +3704,11 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       }
     },
     async projectSketchReferences(input) {
-      if (!modelingService.sketchSolver) {
-        return {
-          projectedReferences: [],
-          diagnostics: [],
-        }
-      }
-
       const sketchId = input.session.sketchId ?? ('sketch_draft' as NonNullable<SketchSessionState['sketchId']>)
 
-      return modelingService.sketchSolver.projectExternalReferences({
+      return modelingService.projectSketchExternalReferences({
         solverSchemaVersion: SOLVER_SCHEMA_VERSION,
         requestId: input.requestId,
-        documentId: input.documentId,
         revisionId: input.baseRevisionId,
         sketchId,
         plane: input.session.plane.frame,

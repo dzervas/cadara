@@ -289,6 +289,38 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {
     assert(session.definition.entities.length === 1, 'Projected concentric snapping should only author the requested local circle.')
   }
 
+  function testProjectedPointCenterSnapCommitsDerivedReferenceConstraint() {
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [
+      {
+        referenceId: 'ref_projected_vertex',
+        status: 'projected',
+        geometry: [
+          {
+            geometryId: 'projected_geometry_vertex',
+            kind: 'point',
+            position: [2, 2],
+          },
+        ],
+        diagnostics: [],
+      },
+    ]
+    let session = addProjectedLineReference(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      projectedReferences,
+    )
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [2.03, 2.02])
+    session = updateSketchPointer(session, [3, 2])
+    session = acceptSketchDraw(session, [3, 2])
+
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'coincidentProjectedPoint'),
+      'Accepted projected point center snap while drawing a circle should constrain the circle center to the projected point.',
+    )
+    assert(session.definition.entities.length === 1, 'Projected point center snapping should only author the requested local circle.')
+  }
+
   function testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints() {
     const projectedLineReferences: ProjectedSketchReferenceRecord[] = [
       {
@@ -368,5 +400,6 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {
   testBothEndpointsSnappedToSameLineUseUniqueConstraintIds()
   testProjectedMidpointSnapCommitsDerivedReferenceConstraint()
   testProjectedConcentricSnapCommitsDerivedReferenceConstraint()
+  testProjectedPointCenterSnapCommitsDerivedReferenceConstraint()
   testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints()
 })

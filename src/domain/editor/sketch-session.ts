@@ -533,6 +533,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
   const fullDefinition = cloneDefinition(sketch.sketch.definition)
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
   const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
+  const planeKey = sketch.planeKey ?? sketch.plane.key ?? null
   const entities = definition.entities.flatMap((entity) =>
     mapDefinitionEntityToDraftEntity(sketch.sketchId, definition.points, entity),
   )
@@ -542,7 +543,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     sketchLabel: sketch.label,
     plane: sketch.plane,
     planeTarget: sketch.planeTarget,
-    planeKey: sketch.planeKey ?? 'xy',
+    planeKey,
     entities,
     definition,
     fullDefinition,
@@ -574,7 +575,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
       sketchLabel: sketch.label,
       plane: sketch.plane,
       planeTarget: sketch.planeTarget,
-      planeKey: sketch.planeKey ?? 'xy',
+      planeKey,
       definition,
     }),
     validationMessage: null,
@@ -2645,6 +2646,17 @@ function inferPointSnapConstraints(input: {
           curve: localEntityOperand(localCircleLikeEntityId),
           projectedCurve: projectedOperandFromSource(source),
         })
+        return
+      }
+
+      if (source.kind === 'projectedGeometry' && source.geometryKind === 'point') {
+        addConstraint(constraints, {
+          constraintId: createId(`inferred-coincident-projected-center-${index}`),
+          kind: 'coincidentProjectedPoint',
+          label: `Inferred projected center coincident ${input.sequence}`,
+          point: localPoint,
+          projectedPoint: projectedOperandFromSource(source),
+        })
       }
       return
     }
@@ -3729,6 +3741,31 @@ function solveEditedAnnotationDefinition(
   }
 }
 
+function solveCommittedConstraintDefinition(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): SketchDefinition {
+  const solved = solveSketchDefinitionCore({
+    definition,
+    projectedReferences,
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
+
+  if (solved.status.solveState !== 'solved' || !constraintsSatisfied) {
+    return definition
+  }
+
+  return applyPointPositionsToDefinition(
+    definition,
+    solved.solvedSnapshot.solvedPoints.map((point) => ({
+      pointId: point.pointId,
+      position: point.solvedPosition,
+    })),
+  )
+}
+
 function updateAnnotationValueInDefinition(
   definition: SketchDefinition,
   target: SketchConstraintRef | SketchDimensionRef,
@@ -3933,17 +3970,23 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     entities: [],
     ...contribution,
   })
+  const solvedDefinition = solveCommittedConstraintDefinition(history.definition, session.projectedReferences)
+  const solvedFullDefinition = solveCommittedConstraintDefinition(history.fullDefinition, session.projectedReferences)
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
 
   return {
     ...session,
-    definition: history.definition,
-    fullDefinition: history.fullDefinition,
+    entities: solvedDefinition.entities.flatMap((entity) =>
+      mapDefinitionEntityToDraftEntity(sketchId, solvedDefinition.points, entity),
+    ),
+    definition: solvedDefinition,
+    fullDefinition: solvedFullDefinition,
     historyCursor: history.historyCursor,
     sequence: session.sequence + 1,
     status: 'idle',
     constraintAuthoring: null,
     activeAnnotationEdit: null,
-    commitRequest: rebuildSessionCommitRequest(session, history.definition),
+    commitRequest: rebuildSessionCommitRequest(session, solvedDefinition),
     selectedAnnotation: null,
     toolPresentation: null,
     activeTool: null,

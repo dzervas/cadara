@@ -26,6 +26,7 @@ import type {
   PickId,
   ReferenceId,
   RenderableId,
+  SketchId,
   SnapshotEntityId,
   VertexId,
 } from '@/contracts/shared/ids'
@@ -334,11 +335,13 @@ function buildSnapshotPresentationRecords(
   producedTargetsByFeatureId: ReadonlyMap<FeatureId, readonly DurableRef[]>,
 ) {
   const features: FeatureSnapshotRecord[] = []
-  const featureTree: FeatureTreeNodeRecord[] = []
+  const constructionFeatureTree: FeatureTreeNodeRecord[] = []
   const objects: ObjectTreeNodeRecord[] = []
+  const sketchNodes = new Map<SketchId, FeatureTreeNodeRecord>()
+  const featureNodes = new Map<FeatureId, FeatureTreeNodeRecord>()
 
   for (const construction of state.constructions) {
-    featureTree.push({
+    constructionFeatureTree.push({
       id: createFeatureTreeNodeId('construction', construction.target),
       label: construction.label,
       description: 'Construction plane',
@@ -362,7 +365,7 @@ function buildSnapshotPresentationRecords(
 
   for (const sketch of state.sketches) {
     const target = { kind: 'sketch', sketchId: sketch.sketchId } as const
-    featureTree.push({
+    sketchNodes.set(sketch.sketchId, {
       id: createFeatureTreeNodeId('sketch', target),
       label: sketch.label,
       description: 'Authored sketch',
@@ -398,7 +401,7 @@ function buildSnapshotPresentationRecords(
     }
 
     features.push(snapshot)
-    featureTree.push({
+    featureNodes.set(snapshot.featureId, {
       id: createFeatureTreeNodeId('feature', { kind: 'feature', featureId: snapshot.featureId }),
       label: snapshot.label,
       description: `${snapshot.definition.kind} feature`,
@@ -409,6 +412,22 @@ function buildSnapshotPresentationRecords(
       sourceFeatureId: null,
     })
   }
+
+  const historyItems = createDocumentHistoryItems({
+    featureTree: [],
+    features,
+    sketches: state.sketches,
+    historyOrder: state.historyOrder,
+  })
+  const featureTree: FeatureTreeNodeRecord[] = [
+    ...constructionFeatureTree,
+    ...historyItems.flatMap((item) => {
+      const node = item.kind === 'sketch'
+        ? sketchNodes.get(item.sketchId)
+        : featureNodes.get(item.featureId)
+      return node ? [node] : []
+    }),
+  ]
 
   for (const body of state.bodies) {
     const target = { kind: 'body', bodyId: body.bodyId } as const
@@ -1413,6 +1432,7 @@ export function buildOccWorkspaceSnapshot(
       featureTree: document.featureTree,
       features: document.features,
       sketches: document.sketches,
+      historyOrder: state.historyOrder,
     }),
     entities: document.entities,
   }

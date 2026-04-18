@@ -3,6 +3,10 @@ import type {
   DocumentExportResult,
 } from '@/contracts/modeling/export'
 import type {
+  ProjectSketchExternalReferencesRequest,
+  ProjectSketchExternalReferencesResponse,
+} from '@/contracts/solver/schema'
+import type {
   CommitSketchRequest,
   CommitSketchResponse,
   AddDocumentVariableRequest,
@@ -44,6 +48,10 @@ export interface ModelingKernelAdapter {
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */
   commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>
+  /** Projects active-sketch external references against the requested document revision. */
+  projectSketchExternalReferences(
+    request: ProjectSketchExternalReferencesRequest,
+  ): Promise<ProjectSketchExternalReferencesResponse>
   /** Creates a new durable feature or rejects the submitted definition explicitly. */
   createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>
   /** Updates an existing durable feature or rejects the submitted definition explicitly. */

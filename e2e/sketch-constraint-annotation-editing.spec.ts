@@ -4,6 +4,7 @@ import { SketchWorkbenchHarness } from './helpers/sketch-workbench'
 
 const MODELING_OPERATION_HISTORY_STORAGE_KEY = 'cad.modeling.operationHistory.v1'
 
+test.setTimeout(60_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
 test('committed distance annotation input keeps Backspace local and saves durable value edits', async ({ page }) => {

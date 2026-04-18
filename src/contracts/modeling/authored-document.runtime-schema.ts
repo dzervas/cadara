@@ -62,6 +62,11 @@ const authoredDocumentFeatureCursorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('feature'), featureId: featureIdSchema }).strict(),
 ])
 
+const authoredDocumentHistoryOrderEntrySchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('sketch'), sketchId: sketchIdSchema }).strict(),
+  z.object({ kind: z.literal('feature'), featureId: featureIdSchema }).strict(),
+])
+
 export const authoredModelDocumentSchema = z.object({
   contractVersion: contractVersionSchema,
   schemaVersion: authoredModelDocumentSchemaVersionSchema,
@@ -76,6 +81,7 @@ export const authoredModelDocumentSchema = z.object({
   sketches: z.array(authoredSketchRecordSchema),
   features: z.array(authoredFeatureRecordSchema),
   featureOrder: z.array(featureIdSchema),
+  historyOrder: z.array(authoredDocumentHistoryOrderEntrySchema).optional(),
   cursor: authoredDocumentFeatureCursorSchema,
   bodyLabels: z.array(authoredBodyLabelRecordSchema),
 }).strict().superRefine((value, ctx) => {
@@ -100,6 +106,59 @@ export const authoredModelDocumentSchema = z.object({
   }
 
   const sketchIds = new Set(value.sketches.map((sketch) => sketch.sketchId))
+  const historyOrder = value.historyOrder ?? [
+    ...value.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
+    ...value.featureOrder.map((featureId) => ({ kind: 'feature' as const, featureId })),
+  ]
+  const seenHistoryTargets = new Set<string>()
+  for (const item of historyOrder) {
+    const key = item.kind === 'sketch' ? `sketch:${item.sketchId}` : `feature:${item.featureId}`
+    if (seenHistoryTargets.has(key)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Authored model document historyOrder must not contain duplicates.',
+        path: ['historyOrder'],
+      })
+      break
+    }
+    seenHistoryTargets.add(key)
+
+    if (item.kind === 'sketch' && !sketchIds.has(item.sketchId)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Authored model document historyOrder references a missing sketch.',
+        path: ['historyOrder'],
+      })
+    }
+    if (item.kind === 'feature' && !featureIdSet.has(item.featureId)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Authored model document historyOrder references a missing feature.',
+        path: ['historyOrder'],
+      })
+    }
+  }
+  for (const sketchId of sketchIds) {
+    if (!seenHistoryTargets.has(`sketch:${sketchId}`)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Authored model document historyOrder must contain each sketch exactly once.',
+        path: ['historyOrder'],
+      })
+      break
+    }
+  }
+  for (const featureId of featureIds) {
+    if (!seenHistoryTargets.has(`feature:${featureId}`)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Authored model document historyOrder must contain each feature exactly once.',
+        path: ['historyOrder'],
+      })
+      break
+    }
+  }
+
   if (value.cursor.kind === 'feature' && !featureIdSet.has(value.cursor.featureId)) {
     ctx.addIssue({
       code: 'custom',
@@ -115,11 +174,19 @@ export const authoredModelDocumentSchema = z.object({
     })
   }
 
-}).transform((value) => ({
-  ...value,
-  contractVersion: CONTRACT_VERSION,
-  schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
-}) as AuthoredModelDocument)
+}).transform((value) => {
+  const historyOrder = value.historyOrder ?? [
+    ...value.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
+    ...value.featureOrder.map((featureId) => ({ kind: 'feature' as const, featureId })),
+  ]
+
+  return {
+    ...value,
+    historyOrder,
+    contractVersion: CONTRACT_VERSION,
+    schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
+  } as AuthoredModelDocument
+})
 
 function firstIssueMessage(issue: ZodIssue) {
   if (issue.message.startsWith('Unsupported authored model document schema version')) {

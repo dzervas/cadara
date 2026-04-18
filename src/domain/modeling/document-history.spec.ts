@@ -5,6 +5,8 @@ import {
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
+import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
+import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/domain/modeling/document-history.spec.ts', async () => {
@@ -67,5 +69,58 @@ test('src/domain/modeling/document-history.spec.ts', async () => {
   assert(
     getNextDocumentHistoryCursor(beforeFirstSnapshot)?.kind === items[0]?.kind,
     'Redo should be available from the before-first document cursor position.',
+  )
+
+  const committed = await adapter.commitSketch({
+    contractVersion: 'modeling-contract/v1alpha1',
+    documentId: 'doc_workspace',
+    baseRevisionId: snapshot.revisionId,
+    sketchId: 'sketch_after_seed_feature',
+    sketchLabel: 'Sketch After Seed Feature',
+    plane: snapshot.sketches[0]!.plane,
+    planeTarget: snapshot.sketches[0]!.planeTarget,
+    planeKey: snapshot.sketches[0]!.planeKey,
+    solverCorrelation: {
+      requestId: 'request_history_order_sketch',
+      projectionRequestId: 'request_history_order_sketch:project',
+      validationRequestId: 'request_history_order_sketch:validate',
+      solveRequestId: 'request_history_order_sketch:solve',
+      regionRequestId: 'request_history_order_sketch:regions',
+    },
+    definition: {
+      schemaVersion: SKETCH_SCHEMA_VERSION,
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    },
+  })
+  assert(committed.revisionState.kind === 'accepted', 'History-order sketch commit should be accepted.')
+
+  const interleaved = (await adapter.getDocumentSnapshot({
+    contractVersion: 'modeling-contract/v1alpha1',
+    documentId: 'doc_workspace',
+  })).snapshot
+  const order = interleaved.presentation.documentHistory.map((item) =>
+    item.kind === 'sketch' ? item.sketchId : item.featureId,
+  )
+  assert(
+    order.indexOf('feature_extrude-1') < order.indexOf('sketch_after_seed_feature'),
+    'Sketches committed after a feature must remain after that feature in document history.',
+  )
+
+  const authored = createAuthoredModelDocumentFromSnapshot(interleaved)
+  const authoredOrder = authored.historyOrder?.map((item) =>
+    item.kind === 'sketch' ? item.sketchId : item.featureId,
+  ) ?? []
+  assert(
+    authoredOrder.indexOf('feature_extrude-1') < authoredOrder.indexOf('sketch_after_seed_feature'),
+    'Authored document persistence must preserve interleaved sketch/feature history order.',
   )
 })

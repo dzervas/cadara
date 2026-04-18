@@ -23,6 +23,106 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     }
   }
 
+  async function testSourceBackedSketchReferenceProjection() {
+    const adapter = new MockKernelAdapter()
+    const snapshot = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const sketch = snapshot.snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')
+    assert(sketch, 'Seed sketch must be available for source-backed projection tests.')
+
+    const projection = await adapter.projectSketchExternalReferences({
+      contractVersion: 'modeling-contract/v1alpha1',
+      solverSchemaVersion: 'sketch-solver/v1alpha1',
+      requestId: 'request_source_projection',
+      documentId: 'doc_workspace',
+      revisionId: snapshot.snapshot.revisionId,
+      sketchId: sketch.sketchId,
+      plane: sketch.plane.frame,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      references: [
+        {
+          referenceId: 'ref_project_vertex' as const,
+          reference: {
+            referenceId: 'ref_project_vertex' as const,
+            kind: 'modelReference',
+            label: 'Projected vertex',
+            source: { kind: 'vertex', bodyId: 'body_part-1', vertexId: 'vertex_front-right' },
+            projectionMode: 'projectAlongPlaneNormal',
+          },
+        },
+        {
+          referenceId: 'ref_project_edge' as const,
+          reference: {
+            referenceId: 'ref_project_edge' as const,
+            kind: 'modelReference',
+            label: 'Projected edge',
+            source: { kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-0' },
+            projectionMode: 'projectAlongPlaneNormal',
+          },
+        },
+        {
+          referenceId: 'ref_project_face' as const,
+          reference: {
+            referenceId: 'ref_project_face' as const,
+            kind: 'modelReference',
+            label: 'Projected face',
+            source: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
+            projectionMode: 'projectAlongPlaneNormal',
+          },
+        },
+        {
+          referenceId: 'ref_project_sketch_point' as const,
+          reference: {
+            referenceId: 'ref_project_sketch_point' as const,
+            kind: 'sketchReference',
+            label: 'Projected sketch point',
+            source: {
+              kind: 'sketchPoint',
+              sketchId: 'sketch_primary',
+              pointId: 'sketch_point_1_rect-bottom-left',
+            },
+            projectionMode: 'useExistingCoplanarGeometry',
+          },
+        },
+        {
+          referenceId: 'ref_project_sketch_entity' as const,
+          reference: {
+            referenceId: 'ref_project_sketch_entity' as const,
+            kind: 'sketchReference',
+            label: 'Projected sketch entity',
+            source: {
+              kind: 'sketchEntity',
+              sketchId: 'sketch_primary',
+              entityId: 'sketch_entity_1_rect-bottom',
+            },
+            projectionMode: 'useExistingCoplanarGeometry',
+          },
+        },
+      ],
+    })
+
+    const byId = new Map(projection.projectedReferences.map((reference) => [reference.referenceId, reference]))
+    assert(byId.get('ref_project_vertex')?.geometry[0]?.kind === 'point', 'Model vertices should project to points.')
+    assert(byId.get('ref_project_edge')?.geometry[0]?.kind === 'lineSegment', 'Model edges should project to line segments.')
+    assert(
+      (byId.get('ref_project_face')?.geometry.length ?? 0) >= 3
+        && byId.get('ref_project_face')?.geometry.every((geometry) => geometry.kind === 'lineSegment'),
+      'Planar faces should project to representable boundary line segments.',
+    )
+    assert(byId.get('ref_project_sketch_point')?.geometry[0]?.kind === 'point', 'Existing sketch points should project to points.')
+    assert(byId.get('ref_project_sketch_entity')?.geometry[0]?.kind === 'lineSegment', 'Existing sketch entities should project to supported geometry.')
+    assert(
+      projection.projectedReferences.every((reference) => reference.status === 'projected'),
+      'Supported source-backed references should all project successfully.',
+    )
+  }
+
   async function testExtrudePreviewDependsOnDefinition() {
     const adapter = new MockKernelAdapter()
     const snapshot = await adapter.getDocumentSnapshot({
@@ -449,7 +549,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
           referenceId,
           kind: 'modelReference' as const,
           label: 'Mock projected vertex',
-          source: { kind: 'vertex' as const, bodyId: 'body_mock', vertexId: 'vertex_mock' },
+          source: { kind: 'vertex' as const, bodyId: 'body_part-1', vertexId: 'vertex_front-right' },
           projectionMode: 'projectAlongPlaneNormal' as const,
         },
       ],
@@ -1644,6 +1744,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testUnsupportedFeatureDefinitionsAreRejectedByMock()
   await testMutationResponsesReportRebuildResults()
   await testAcceptedCreateMutatesCommittedSnapshot()
+  await testSourceBackedSketchReferenceProjection()
   await testRollbackCursorPreservesAndInsertsFeatureAfterCursor()
   await testAcceptedSketchCommitMutatesCommittedSnapshot()
   await testAcceptedSketchCommitPersistsActiveProjectionData()

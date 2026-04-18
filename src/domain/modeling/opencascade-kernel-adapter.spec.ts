@@ -28,13 +28,18 @@ import type {
 import type {
   BodyId,
   ConstructionId,
+  ConstraintId,
   EdgeId,
   DocumentId,
   FaceId,
   ProjectedGeometryId,
+  ReferenceId,
   RegionId,
   RevisionId,
+  SketchEntityId,
   SketchId,
+  SketchPointId,
+  VertexId,
 } from '@/contracts/shared/ids'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import {
@@ -50,6 +55,7 @@ import {
   DEFAULT_MOCK_SOLVER_TOLERANCES,
   evaluateMockSketchDefinition,
 } from '@/domain/solver/mock-sketch-solver-adapter'
+import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
 import {
   OCC_KERNEL_PRIMARY_SKETCH_ID,
   createSeedSketchCommitRequest,
@@ -3424,6 +3430,116 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures() {
+    const createReferenceSolver = () =>
+      new SketchConstraintSolverAdapter({
+        documentId: 'doc_workspace' as DocumentId,
+        revisionId: null,
+      })
+    const source = createAdapter(createReferenceSolver)
+    const committedSketch = await commitSeedSketch(source)
+    assert(committedSketch.revisionState.kind === 'accepted', 'Seed sketch should commit before referenced restore setup.')
+
+    const sketchSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(sketchSnapshot.snapshot)
+    const feature = await source.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: committedSketch.revisionId,
+      definition: createExtrudeDefinition(sketch, 5),
+    })
+    assert(feature.revisionState.kind === 'accepted', 'Referenced restore setup feature should commit.')
+
+    const featureSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const body = featureSnapshot.snapshot.bodies.find((entry) => entry.bodyId === 'body_feature_extrude-1')
+    const vertexId = body?.topology.vertexIds[0]
+    assert(vertexId, 'Committed extrude body should expose a durable vertex for sketch projection.')
+
+    const sketchId = 'sketch_2' as SketchId
+    const referenceId = 'ref_restore_vertex_center' as ReferenceId
+    const centerPointId = 'sketch_point_restore_circle_center' as SketchPointId
+    const circleEntityId = 'sketch_entity_restore_circle' as SketchEntityId
+    const constraintId = 'constraint_restore_circle_center_projected_vertex' as ConstraintId
+    const circleSketch = await source.commitSketch(createSketchCommitRequest(featureSnapshot.snapshot.revisionId, {
+      sketchLabel: 'RestoreVertexCenterCircle',
+      definition: {
+        schemaVersion: 'sketch-definition/v1alpha1',
+        referenceIds: [referenceId],
+        references: [{
+          referenceId,
+          kind: 'modelReference',
+          label: 'Referenced solid vertex',
+          source: {
+            kind: 'vertex',
+            bodyId: 'body_feature_extrude-1' as BodyId,
+            vertexId: vertexId as VertexId,
+          },
+          projectionMode: 'projectAlongPlaneNormal',
+        }],
+        pointIds: [centerPointId],
+        points: [{
+          pointId: centerPointId,
+          label: 'Circle center',
+          target: { kind: 'sketchPoint', sketchId, pointId: centerPointId },
+          position: [0, 0],
+          isConstruction: false,
+        }],
+        entityIds: [circleEntityId],
+        entities: [{
+          kind: 'circle',
+          entityId: circleEntityId,
+          label: 'Circle',
+          target: { kind: 'sketchEntity', sketchId, entityId: circleEntityId },
+          isConstruction: false,
+          centerPointId,
+          radius: 2,
+        }],
+        constraintIds: [constraintId],
+        constraints: [{
+          constraintId,
+          kind: 'coincidentProjectedPoint',
+          label: 'Circle center on vertex',
+          point: { kind: 'localPoint', pointId: centerPointId },
+          projectedPoint: {
+            kind: 'projectedGeometry',
+            reference: {
+              kind: 'projectedPoint',
+              referenceId,
+              geometryId: `projected_geometry_${referenceId}_point` as ProjectedGeometryId,
+            },
+          },
+        }],
+        dimensionIds: [],
+        dimensions: [],
+      },
+    }))
+    assert(circleSketch.revisionState.kind === 'accepted', 'Referenced circle sketch should commit before authored restore.')
+
+    const sourceSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const target = createAdapter(createReferenceSolver)
+    await target.restoreAuthoredModelDocument(createAuthoredModelDocumentFromSnapshot(sourceSnapshot.snapshot))
+    const restored = (await target.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const restoredSketch = restored.sketches.find((entry) => entry.sketchId === circleSketch.sketchId)
+    const restoredProjection = restoredSketch?.sketch.projectedReferences?.find((entry) => entry.referenceId === referenceId)
+    const restoredConstraint = restoredSketch?.sketch.solvedSnapshot.constraintStatuses.find((entry) => entry.constraintId === constraintId)
+
+    assert(restoredSketch, 'Authored restore should keep the sketch that references a prior solid vertex.')
+    assert(restoredProjection?.status === 'projected', 'Authored restore should project the solid vertex from prior feature context.')
+    assert(restoredConstraint?.status === 'satisfied', 'Restored circle center constraint should remain solved against the projected vertex.')
+  }
+
   async function testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore() {
     const seedSnapshot = (await createAdapter().getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
@@ -3511,8 +3627,9 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions()
   await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
   await testDocumentVariableExpressionsValidateBeforeOccMutation()
-  await testAuthoredRestoreAppliesOnlyFeaturesThroughCursor()
-  await testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore()
+        await testAuthoredRestoreAppliesOnlyFeaturesThroughCursor()
+        await testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures()
+        await testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
   await testOccGeometryExportsRejectInvalidTargets()
 

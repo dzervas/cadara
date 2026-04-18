@@ -8,6 +8,10 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { DocumentHistoryItemId } from '@/contracts/shared/ids'
 
+export type DocumentHistoryOrderEntry =
+  | { kind: 'sketch'; sketchId: NonNullable<DocumentHistoryItemRecord['sketchId']> }
+  | { kind: 'feature'; featureId: NonNullable<DocumentHistoryItemRecord['featureId']> }
+
 function createDocumentHistoryItemId(kind: DocumentHistoryItemRecord['kind'], id: string) {
   return `document_history_item_${kind}_${id}` as DocumentHistoryItemId
 }
@@ -16,6 +20,7 @@ export function createDocumentHistoryItems(input: {
   featureTree: readonly FeatureTreeNodeRecord[]
   features: readonly FeatureSnapshotRecord[]
   sketches: readonly SketchSnapshotRecord[]
+  historyOrder?: readonly DocumentHistoryOrderEntry[]
 }): DocumentHistoryItemRecord[] {
   const featuresById = new Map(input.features.map((feature) => [feature.featureId, feature]))
   const sketchesById = new Map(input.sketches.map((sketch) => [sketch.sketchId, sketch]))
@@ -58,6 +63,21 @@ export function createDocumentHistoryItems(input: {
     })
   }
 
+  for (const item of input.historyOrder ?? []) {
+    if (item.kind === 'sketch') {
+      const sketch = sketchesById.get(item.sketchId)
+      if (sketch) {
+        pushSketch(sketch)
+      }
+      continue
+    }
+
+    const feature = featuresById.get(item.featureId)
+    if (feature) {
+      pushFeature(feature)
+    }
+  }
+
   for (const node of input.featureTree) {
     if (node.kind === 'sketch' && node.ownerSketchId) {
       const sketch = sketchesById.get(node.ownerSketchId)
@@ -84,6 +104,34 @@ export function createDocumentHistoryItems(input: {
   }
 
   return items
+}
+
+export function createDocumentHistoryOrder(
+  items: readonly DocumentHistoryItemRecord[],
+): DocumentHistoryOrderEntry[] {
+  return items.map((item) =>
+    item.kind === 'sketch'
+      ? { kind: 'sketch' as const, sketchId: item.sketchId }
+      : { kind: 'feature' as const, featureId: item.featureId },
+  )
+}
+
+export function insertDocumentHistoryOrderEntryAfterCursor(
+  items: readonly DocumentHistoryItemRecord[],
+  cursor: DocumentFeatureCursor,
+  entry: DocumentHistoryOrderEntry,
+): DocumentHistoryOrderEntry[] {
+  const entryKey = entry.kind === 'sketch'
+    ? `sketch:${entry.sketchId}`
+    : `feature:${entry.featureId}`
+  const order = createDocumentHistoryOrder(items).filter((item) =>
+    item.kind === 'sketch'
+      ? `sketch:${item.sketchId}` !== entryKey
+      : `feature:${item.featureId}` !== entryKey,
+  )
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
+  order.splice(cursorIndex < 0 ? order.length : cursorIndex + 1, 0, entry)
+  return order
 }
 
 export function createTailDocumentCursor(items: readonly DocumentHistoryItemRecord[]): DocumentFeatureCursor {

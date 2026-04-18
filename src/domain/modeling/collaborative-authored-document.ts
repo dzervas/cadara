@@ -5,6 +5,7 @@ import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-
 
 export const COLLABORATIVE_MERGE_DIAGNOSTIC_CODES = {
   invalidFeatureOrder: 'merge-invalid-feature-order',
+  invalidHistoryOrder: 'merge-invalid-history-order',
   missingCursorTarget: 'merge-missing-cursor-target',
   invalidDurableReference: 'merge-invalid-durable-reference',
   unresolvedVariableCycle: 'merge-unresolved-variable-cycle',
@@ -21,6 +22,7 @@ export function normalizeCollaborativeAuthoredModelDocument(document: AuthoredMo
   const sketchIds = new Set(document.sketches.map((sketch) => sketch.sketchId))
   const bodyIds = new Set(document.bodyLabels.map((label) => label.bodyId))
   const featureOrder = normalizeFeatureOrder(document, featureIds, diagnostics)
+  const historyOrder = normalizeHistoryOrder(document, featureIds, sketchIds, diagnostics)
   const cursor = normalizeCursor(document, featureIds, sketchIds, diagnostics)
 
   diagnostics.push(...collectScalarDiagnostics(document))
@@ -30,10 +32,61 @@ export function normalizeCollaborativeAuthoredModelDocument(document: AuthoredMo
     document: {
       ...document,
       featureOrder,
+      historyOrder,
       cursor,
     },
     diagnostics,
   }
+}
+
+function normalizeHistoryOrder(
+  document: AuthoredModelDocument,
+  featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
+  sketchIds: ReadonlySet<AuthoredModelDocument['sketches'][number]['sketchId']>,
+  diagnostics: ModelingDiagnostic[],
+) {
+  const seen = new Set<string>()
+  const legacyOrder = [
+    ...document.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
+    ...document.featureOrder.map((featureId) => ({ kind: 'feature' as const, featureId })),
+  ]
+  const sourceOrder = document.historyOrder ?? legacyOrder
+  const normalized = sourceOrder.filter((item) => {
+    const exists = item.kind === 'sketch' ? sketchIds.has(item.sketchId) : featureIds.has(item.featureId)
+    const key = item.kind === 'sketch' ? `sketch:${item.sketchId}` : `feature:${item.featureId}`
+    if (!exists || seen.has(key)) {
+      diagnostics.push(createMergeDiagnostic(
+        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidHistoryOrder,
+        `Merged history order contained invalid or duplicate ${item.kind}.`,
+        item.kind === 'sketch'
+          ? { kind: 'sketch', sketchId: item.sketchId }
+          : { kind: 'feature', featureId: item.featureId },
+      ))
+      return false
+    }
+
+    seen.add(key)
+    return true
+  })
+
+  const missingSketches = [...sketchIds]
+    .filter((sketchId) => !seen.has(`sketch:${sketchId}`))
+    .sort()
+    .map((sketchId) => ({ kind: 'sketch' as const, sketchId }))
+  const missingFeatures = [...featureIds]
+    .filter((featureId) => !seen.has(`feature:${featureId}`))
+    .sort()
+    .map((featureId) => ({ kind: 'feature' as const, featureId }))
+
+  if (missingSketches.length + missingFeatures.length > 0) {
+    diagnostics.push(createMergeDiagnostic(
+      COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidHistoryOrder,
+      'Merged history order omitted authored sketches or features; appended deterministically by durable ID.',
+      null,
+    ))
+  }
+
+  return [...normalized, ...missingSketches, ...missingFeatures]
 }
 
 function normalizeFeatureOrder(

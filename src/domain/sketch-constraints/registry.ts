@@ -71,6 +71,21 @@ function localPointOperand(target: SketchConstraintTargetRecord) {
     : null
 }
 
+function localCoincidentPointOperand(target: SketchConstraintTargetRecord) {
+  if (target.point) {
+    return localPointOperand(target)
+  }
+
+  if (target.entity?.kind === 'circle' || target.entity?.kind === 'arc') {
+    return {
+      kind: 'localPoint' as const,
+      pointId: target.entity.centerPointId,
+    }
+  }
+
+  return null
+}
+
 function localEntityOperand(target: SketchConstraintTargetRecord) {
   return target.entity
     ? {
@@ -87,6 +102,7 @@ function resolveCoincidentTarget(
 ) {
   if (target.kind !== 'projectedReferenceGeometry') {
     return resolvePointTarget(definition, target, projectedReferences)
+      ?? resolveCircleTarget(definition, target, projectedReferences)
   }
 
   return resolvePointTarget(definition, target, projectedReferences)
@@ -479,13 +495,17 @@ const sketchConstraintDefinitions = [
         }
       }
 
-      const local = left.point ? left : right.point ? right : null
+      const local = localCoincidentPointOperand(left)
+        ? left
+        : localCoincidentPointOperand(right)
+          ? right
+          : null
       const projected = left.projected
         ? left.projected
         : right.projected
           ? right.projected
           : null
-      const point = local ? localPointOperand(local) : null
+      const point = local ? localCoincidentPointOperand(local) : null
 
       if (!point || !projected) {
         return {}

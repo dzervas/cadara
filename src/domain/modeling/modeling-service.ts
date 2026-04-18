@@ -145,6 +145,7 @@ import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
   ProjectSketchExternalReferencesRequest,
+  ProjectSketchExternalReferencesResponse,
   ResolveSketchReferenceRequest,
   SolveSketchRequest,
   ValidateSketchRequest,
@@ -181,6 +182,9 @@ export interface ModelingService {
   resetOperationHistory(): void
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
   commitSketch(input: ModelingCommitSketchInput): Promise<ModelingCommitSketchResult>
+  projectSketchExternalReferences(
+    input: ModelingProjectSketchExternalReferencesInput,
+  ): Promise<ProjectSketchExternalReferencesResponse>
   addDocumentVariable(input: ModelingAddDocumentVariableInput): Promise<ModelingDocumentVariableMutationResult>
   updateDocumentVariable(input: ModelingUpdateDocumentVariableInput): Promise<ModelingDocumentVariableMutationResult>
   createFeature(input: ModelingCreateFeatureInput): Promise<ModelingFeatureMutationResult>
@@ -324,6 +328,10 @@ export interface ModelingCommitSketchInput extends Omit<CommitSketchRequest, 'co
 }
 export type ModelingEvaluatePreviewInput = Omit<
   EvaluatePreviewRequest,
+  'contractVersion' | 'documentId'
+>
+export type ModelingProjectSketchExternalReferencesInput = Omit<
+  ProjectSketchExternalReferencesRequest,
   'contractVersion' | 'documentId'
 >
 
@@ -4118,6 +4126,16 @@ export function createModelingService(
         response,
         mapCommitSketchResponse(response, currentDocumentId),
         () => createCommitSketchHistoryEntry(request, response.sketchId),
+      )
+    },
+    async projectSketchExternalReferences(input) {
+      await restorePromise
+      await repositoryChangePromise
+      return adapter.projectSketchExternalReferences(
+        withContractVersion<ProjectSketchExternalReferencesRequest>({
+          ...input,
+          documentId: currentDocumentId,
+        }),
       )
     },
     async addDocumentVariable(input) {

@@ -9,6 +9,7 @@ import {
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
 } from '@/domain/modeling/opencascade-kernel-seed'
+import type { DocumentHistoryOrderEntry } from '@/domain/modeling/document-history'
 import {
   createConstructionPresentationArtifacts,
   executeOccFeature,
@@ -37,6 +38,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   bodyLabels: ReadonlyMap<BodyId, string>
   variables: readonly DocumentVariableRecord[]
   features: readonly OccAuthoringFeatureRecord[]
+  historyOrder: readonly DocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   diagnostics: readonly ModelingDiagnostic[]
   entities: readonly SnapshotEntityRecord[]
@@ -132,6 +134,7 @@ export function createOccAuthoringState(
     bodyLabels?: ReadonlyMap<BodyId, string>
     variables?: readonly DocumentVariableRecord[]
     features?: readonly OccAuthoringFeatureRecord[]
+    historyOrder?: readonly DocumentHistoryOrderEntry[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
     constructionPlanes?: ReadonlyMap<ConstructionId, SketchPlaneDefinition>
@@ -163,6 +166,10 @@ export function createOccAuthoringState(
   const baseBodies = applyBodyLabels(input.bodies ?? [], bodyLabels)
   const features = [...(input.features ?? [])]
   const sketches = input.sketches ?? []
+  const historyOrder = input.historyOrder ?? [
+    ...sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
+    ...features.map((feature) => ({ kind: 'feature' as const, featureId: feature.featureId })),
+  ]
   const cursor = input.cursor ?? createTailCursor(features, sketches)
   const referenceState = createOccReferenceState({
     documentId,
@@ -189,6 +196,7 @@ export function createOccAuthoringState(
     bodyLabels,
     variables,
     features,
+    historyOrder,
     cursor,
     diagnostics: [...(input.diagnostics ?? [])],
     entities: [],

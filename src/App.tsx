@@ -59,7 +59,7 @@ function App() {
             ? null
             : createLocalStorageOperationHistoryStore(window.localStorage),
         documentRepository:
-          typeof window === 'undefined'
+          typeof window === 'undefined' || shouldDisableDevRepository()
             ? null
             : createIndexedDbAutomergeDocumentRepository({
                 urlStore: createLocalStorageDocumentRepositoryUrlStore(window.localStorage),
@@ -108,6 +108,14 @@ function getDevRepositoryDatabaseName() {
   }
 
   return new URLSearchParams(window.location.search).get('cadRepositoryDbName') ?? undefined
+}
+
+function shouldDisableDevRepository() {
+  if (typeof window === 'undefined' || !import.meta.env.DEV) {
+    return false
+  }
+
+  return new URLSearchParams(window.location.search).get('cadDisableRepository') === '1'
 }
 
 export default App

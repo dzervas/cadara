@@ -6,7 +6,12 @@ import type {
 } from '@/contracts/modeling/export'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
-import type { ProjectedSketchReferenceRecord, SolverTolerancePolicy } from '@/contracts/solver/schema'
+import type {
+  ProjectedSketchReferenceRecord,
+  ProjectSketchExternalReferencesRequest,
+  ProjectSketchExternalReferencesResponse,
+  SolverTolerancePolicy,
+} from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import type {
   CommitSketchRequest,
@@ -76,6 +81,11 @@ import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
+import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
+import {
+  insertDocumentHistoryOrderEntryAfterCursor,
+  type DocumentHistoryOrderEntry,
+} from '@/domain/modeling/document-history'
 import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
@@ -434,6 +444,54 @@ function createRestoreSolverTolerances(
   }
 }
 
+function createAuthoredHistoryRestoreOrder(
+  document: AuthoredModelDocument,
+): OccAuthoringState['historyOrder'] {
+  const sketchById = new Set(document.sketches.map((sketch) => sketch.sketchId))
+  const featureById = new Set(document.features.map((feature) => feature.featureId))
+  const seen = new Set<string>()
+  const order: DocumentHistoryOrderEntry[] = []
+
+  const pushSketch = (sketchId: SketchId) => {
+    const key = `sketch:${sketchId}`
+    if (!sketchById.has(sketchId) || seen.has(key)) {
+      return
+    }
+
+    seen.add(key)
+    order.push({ kind: 'sketch', sketchId })
+  }
+
+  const pushFeature = (featureId: FeatureId) => {
+    const key = `feature:${featureId}`
+    if (!featureById.has(featureId) || seen.has(key)) {
+      return
+    }
+
+    seen.add(key)
+    order.push({ kind: 'feature', featureId })
+  }
+
+  for (const item of document.historyOrder ?? []) {
+    if (item.kind === 'sketch') {
+      pushSketch(item.sketchId)
+      continue
+    }
+
+    pushFeature(item.featureId)
+  }
+
+  for (const sketch of document.sketches) {
+    pushSketch(sketch.sketchId)
+  }
+
+  for (const featureId of document.featureOrder) {
+    pushFeature(featureId)
+  }
+
+  return order
+}
+
 function capitalizeFeatureKind(kind: FeatureDefinition['kind']) {
   return `${kind[0]!.toUpperCase()}${kind.slice(1)}`
 }
@@ -496,25 +554,80 @@ function isValidFeatureCursor(state: OccAuthoringState, cursor: OccAuthoringStat
   return state.features.some((feature) => feature.featureId === cursor.featureId)
 }
 
-function getCursorInsertionIndex(cursor: OccAuthoringState['cursor'], features: readonly OccAuthoringFeatureRecord[]) {
-  if (cursor.kind === 'empty' || cursor.kind === 'sketch') {
+function getCursorInsertionIndex(
+  cursor: OccAuthoringState['cursor'],
+  features: readonly OccAuthoringFeatureRecord[],
+  historyOrder?: OccAuthoringState['historyOrder'],
+) {
+  if (cursor.kind === 'empty') {
     return 0
   }
 
-  const index = features.findIndex((feature) => feature.featureId === cursor.featureId)
-  return index < 0 ? features.length : index + 1
+  if (!historyOrder) {
+    if (cursor.kind === 'sketch') {
+      return 0
+    }
+
+    const index = features.findIndex((feature) => feature.featureId === cursor.featureId)
+    return index < 0 ? features.length : index + 1
+  }
+
+  const cursorIndex = historyOrder.findIndex((item) =>
+    cursor.kind === 'sketch'
+      ? item.kind === 'sketch' && item.sketchId === cursor.sketchId
+      : item.kind === 'feature' && item.featureId === cursor.featureId,
+  )
+  if (cursorIndex < 0) {
+    return cursor.kind === 'feature'
+      ? Math.max(features.findIndex((feature) => feature.featureId === cursor.featureId) + 1, 0)
+      : features.length
+  }
+
+  const appliedFeatureIds = new Set(
+    historyOrder.slice(0, cursorIndex + 1)
+      .filter((item): item is Extract<OccAuthoringState['historyOrder'][number], { kind: 'feature' }> =>
+        item.kind === 'feature',
+      )
+      .map((item) => item.featureId),
+  )
+  return features.filter((feature) => appliedFeatureIds.has(feature.featureId)).length
 }
 
 function getAppliedFeatures(
   features: readonly OccAuthoringFeatureRecord[],
   cursor: OccAuthoringState['cursor'],
+  historyOrder?: OccAuthoringState['historyOrder'],
 ) {
-  if (cursor.kind === 'empty' || cursor.kind === 'sketch') {
+  if (cursor.kind === 'empty') {
     return []
   }
 
-  const cursorIndex = features.findIndex((feature) => feature.featureId === cursor.featureId)
-  return cursorIndex < 0 ? features : features.slice(0, cursorIndex + 1)
+  if (!historyOrder) {
+    if (cursor.kind === 'sketch') {
+      return []
+    }
+
+    const cursorIndex = features.findIndex((feature) => feature.featureId === cursor.featureId)
+    return cursorIndex < 0 ? features : features.slice(0, cursorIndex + 1)
+  }
+
+  const cursorIndex = historyOrder.findIndex((item) =>
+    cursor.kind === 'sketch'
+      ? item.kind === 'sketch' && item.sketchId === cursor.sketchId
+      : item.kind === 'feature' && item.featureId === cursor.featureId,
+  )
+  if (cursorIndex < 0) {
+    return cursor.kind === 'feature' ? features : []
+  }
+
+  const appliedFeatureIds = new Set(
+    historyOrder.slice(0, cursorIndex + 1)
+      .filter((item): item is Extract<OccAuthoringState['historyOrder'][number], { kind: 'feature' }> =>
+        item.kind === 'feature',
+      )
+      .map((item) => item.featureId),
+  )
+  return features.filter((feature) => appliedFeatureIds.has(feature.featureId))
 }
 
 function uniqueTargets(targets: readonly NonNullable<ModelingDiagnostic['target']>[]) {
@@ -769,13 +882,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private async rebuildAuthoredSketchRecord(
     document: AuthoredModelDocument,
     sketch: AuthoredModelDocument['sketches'][number],
+    sourceState: OccAuthoringState,
   ): Promise<SketchSnapshotRecord> {
     const sketchId = sketch.sketchId
     const definition = normalizeSketchDefinitionForSketchId(structuredClone(sketch.definition), sketchId)
     const correlation = createRestoreSolverCorrelation(sketchId, document.revisionId)
     const solverAdapter = this.getSolverAdapter(document.revisionId)
     const tolerances = createRestoreSolverTolerances(document, this.tolerances)
-    const projection = await solverAdapter.projectExternalReferences({
+    const projection = projectSketchExternalReferencesFromSnapshot(buildOccWorkspaceSnapshot(sourceState), {
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: correlation.projectionRequestId,
@@ -853,28 +967,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     )
   }
 
-  private getRestoredFeaturesForCursor(
-    document: AuthoredModelDocument,
-    features: readonly OccAuthoringFeatureRecord[],
-  ) {
-    const cursor = document.cursor
-
-    if (cursor.kind !== 'feature') {
-      return []
-    }
-
-    const cursorIndex = features.findIndex((feature) => feature.featureId === cursor.featureId)
-    return cursorIndex < 0 ? [] : features.slice(0, cursorIndex + 1)
-  }
-
   async restoreAuthoredModelDocument(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
   ): Promise<void> {
     const oc = await this.loadOpenCascadeInstance()
-    const sketches = await Promise.all(
-      document.sketches.map((sketch) => this.rebuildAuthoredSketchRecord(document, sketch)),
-    )
+    const historyOrder = createAuthoredHistoryRestoreOrder(document)
+    const sketchById = new Map(document.sketches.map((sketch) => [sketch.sketchId, sketch]))
     const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
     const features: OccAuthoringFeatureRecord[] = document.featureOrder
       .map((featureId) => featureById.get(featureId))
@@ -884,6 +983,46 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         label: feature.label,
         definition: structuredClone(feature.definition),
       }))
+    const featureRecordById = new Map(features.map((feature) => [feature.featureId, feature]))
+    const sketches: SketchSnapshotRecord[] = []
+    let projectionState = createOccAuthoringState(oc, {
+      documentId: document.documentId,
+      revisionId: document.revisionId,
+      modelingTolerance: document.settings.modelingTolerance,
+      variables: structuredClone(document.variables),
+      bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
+      historyOrder,
+      diagnostics,
+      cursor: { kind: 'empty' },
+    })
+    const pendingProjectionFeatures: OccAuthoringFeatureRecord[] = []
+
+    for (const item of historyOrder) {
+      if (item.kind === 'sketch') {
+        const authoredSketch = sketchById.get(item.sketchId)
+        if (!authoredSketch) {
+          continue
+        }
+
+        for (const feature of pendingProjectionFeatures.splice(0)) {
+          projectionState = applyOccFeatureToAuthoringState(projectionState, feature)
+        }
+
+        const rebuiltSketch = await this.rebuildAuthoredSketchRecord(document, authoredSketch, projectionState)
+        sketches.push(rebuiltSketch)
+        projectionState = {
+          ...projectionState,
+          sketches: [...projectionState.sketches, rebuiltSketch],
+        }
+        continue
+      }
+
+      const feature = featureRecordById.get(item.featureId)
+      if (feature) {
+        pendingProjectionFeatures.push(feature)
+      }
+    }
+
     let authoringState = createOccAuthoringState(oc, {
       documentId: document.documentId,
       revisionId: document.revisionId,
@@ -891,11 +1030,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketches,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
+      historyOrder,
       diagnostics,
       cursor: { kind: 'empty' },
     })
 
-    for (const feature of this.getRestoredFeaturesForCursor(document, features)) {
+    for (const feature of getAppliedFeatures(features, document.cursor, historyOrder)) {
       authoringState = applyOccFeatureToAuthoringState(authoringState, feature)
     }
 
@@ -936,6 +1076,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels?: ReadonlyMap<BodyId, string>
       variables?: OccAuthoringState['variables']
       features?: readonly OccAuthoringFeatureRecord[]
+      historyOrder?: OccAuthoringState['historyOrder']
       cursor?: OccAuthoringState['cursor']
     },
   ) {
@@ -949,13 +1090,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
+      historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
     })
 
     let current = baseState
     const features = input.features ?? runtimeState.authoringState.features
     const cursor = input.cursor ?? runtimeState.authoringState.cursor
 
-    for (const feature of getAppliedFeatures(features, cursor)) {
+    for (const feature of getAppliedFeatures(features, cursor, baseState.historyOrder)) {
       current = applyOccFeatureToAuthoringState(current, feature)
     }
 
@@ -1163,6 +1305,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels?: ReadonlyMap<BodyId, string>
       variables?: OccAuthoringState['variables']
       features?: readonly OccAuthoringFeatureRecord[]
+      historyOrder?: OccAuthoringState['historyOrder']
       cursor?: OccAuthoringState['cursor']
     },
   ): RebuildAttempt {
@@ -1178,13 +1321,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
+      historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
       previousReferenceState: runtimeState.authoringState.referenceState,
       cursor: { kind: 'empty' },
     })
 
     let current = baseState
 
-    for (const feature of getAppliedFeatures(features, cursor)) {
+    for (const feature of getAppliedFeatures(features, cursor, baseState.historyOrder)) {
       const invalidConsumedTargetDiagnostics = collectInvalidConsumedTargetDiagnostics(
         current,
         feature.definition,
@@ -1275,6 +1419,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
   }
 
+  async projectSketchExternalReferences(
+    request: ProjectSketchExternalReferencesRequest,
+  ): Promise<ProjectSketchExternalReferencesResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+
+    if (!this.runtimeState && !this.initializationPromise) {
+      return projectSketchExternalReferencesFromSnapshot(this.buildInitialSnapshotWithoutRuntime(), request)
+    }
+
+    const runtimeState = await this.getRuntimeState()
+    return projectSketchExternalReferencesFromSnapshot(
+      buildOccWorkspaceSnapshot(runtimeState.authoringState),
+      request,
+    )
+  }
+
   async commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse> {
     assertSupportedModelingRequest(request, this.documentId)
     const runtimeState = await this.getRuntimeState()
@@ -1313,7 +1473,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const correlation = request.solverCorrelation ?? createDefaultSolverCorrelation(sketchId, request.baseRevisionId)
     const solverAdapter = this.getSolverAdapter(request.baseRevisionId)
 
-    const projection = await solverAdapter.projectExternalReferences({
+    const projection = await this.projectSketchExternalReferences({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: correlation.projectionRequestId,
@@ -1400,13 +1560,23 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       solved.solvedSnapshot,
       projection.projectedReferences,
     )
-    const nextSketches = runtimeState.authoringState.sketches.some((entry) => entry.sketchId === sketchId)
+    const isNewSketch = !runtimeState.authoringState.sketches.some((entry) => entry.sketchId === sketchId)
+    const nextSketches = !isNewSketch
       ? runtimeState.authoringState.sketches.map((entry) => (entry.sketchId === sketchId ? snapshotRecord : entry))
       : [...runtimeState.authoringState.sketches, snapshotRecord]
+    const nextHistoryOrder = isNewSketch
+      ? insertDocumentHistoryOrderEntryAfterCursor(
+          buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation.documentHistory,
+          runtimeState.authoringState.cursor,
+          { kind: 'sketch', sketchId },
+        )
+      : runtimeState.authoringState.historyOrder
 
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
       sketches: nextSketches,
+      historyOrder: nextHistoryOrder,
+      cursor: isNewSketch ? { kind: 'sketch', sketchId } : runtimeState.authoringState.cursor,
     })
     if (!nextAuthoringState.ok) {
       const rejected = this.buildRejectedResult(
@@ -1469,6 +1639,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const insertionIndex = getCursorInsertionIndex(
       runtimeState.authoringState.cursor,
       runtimeState.authoringState.features,
+      runtimeState.authoringState.historyOrder,
     )
     const nextFeatures = [...runtimeState.authoringState.features]
     nextFeatures.splice(insertionIndex, 0, feature)
@@ -1476,6 +1647,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
       features: nextFeatures,
+      historyOrder: insertDocumentHistoryOrderEntryAfterCursor(
+        buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation.documentHistory,
+        runtimeState.authoringState.cursor,
+        { kind: 'feature', featureId },
+      ),
       cursor: { kind: 'feature', featureId },
     })
     if (!nextAuthoringState.ok) {
@@ -2138,6 +2314,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const previewInsertionIndex = getCursorInsertionIndex(
       runtimeState.authoringState.cursor,
       runtimeState.authoringState.features,
+      runtimeState.authoringState.historyOrder,
     )
     const previewFeatures = [
       ...runtimeState.authoringState.features.slice(0, previewInsertionIndex),
