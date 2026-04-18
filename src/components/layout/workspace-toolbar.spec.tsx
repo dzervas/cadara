@@ -103,8 +103,17 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   assert(
     sketchToolbarMarkup.includes('/icons/sketch-line-segment.svg') &&
       sketchToolbarMarkup.includes('/icons/sketch-dimension.svg') &&
-      sketchToolbarMarkup.includes('/icons/sketch-construction.svg'),
+      sketchToolbarMarkup.includes('/icons/sketch-construction.svg') &&
+      sketchToolbarMarkup.includes('/icons/svg-fill.svg') &&
+      sketchToolbarMarkup.includes('/icons/svg-stroke.svg'),
     'Sketch toolbar buttons and dropdown triggers should keep local SVG icons.',
+  )
+  assert(
+    sketchToolbarMarkup.includes('data-tool-id="fill"') &&
+      sketchToolbarMarkup.includes('data-tool-id="stroke"') &&
+      sketchToolbarMarkup.includes('data-tool-id="fillType"') &&
+      sketchToolbarMarkup.includes('data-tool-id="strokeOptions"'),
+    'Sketch toolbar should include the dedicated SVG style subsection tools.',
   )
   assert(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)') &&

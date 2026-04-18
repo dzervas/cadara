@@ -40,4 +40,9 @@ export const toolbarToolIconAssetMap: Record<ToolIconId, string> = {
   plane: 'c-plane.svg',
   combine: 'boolean-bodies.svg',
   history: 'change-history.svg',
+  svgFill: 'svg-fill.svg',
+  svgStroke: 'svg-stroke.svg',
+  svgStrokeCap: 'svg-stroke-cap.svg',
+  svgStrokeJoin: 'svg-stroke-join.svg',
+  svgGradient: 'svg-gradient.svg',
 }
