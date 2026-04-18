@@ -19,6 +19,7 @@ import { ModelingServiceProvider } from '@/hooks/modeling-service-provider'
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 import { ReportedErrorBoundary } from '@/components/layout/reported-error-boundary'
+import { BuildMetadataLabel } from '@/components/layout/build-metadata-label'
 
 function App() {
   const actionBus = useMemo(() => createToolActionBus(), [])
@@ -80,6 +81,7 @@ function App() {
           </EditorProvider>
         </ModelingServiceProvider>
       </ReportedErrorBoundary>
+      <BuildMetadataLabel />
     </ErrorReporterProvider>
   )
 }

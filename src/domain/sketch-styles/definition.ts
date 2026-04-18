@@ -1,4 +1,9 @@
-import type { SketchStyleDefinition } from '@/contracts/sketch/schema'
+import type {
+  SketchFillMode,
+  SketchStrokeCap,
+  SketchStrokeJoin,
+  SketchStyleDefinition,
+} from '@/contracts/sketch/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import type { SketchToolControlDescriptor } from '@/domain/sketch-tools/editor-schema'
 
@@ -15,14 +20,19 @@ export type SketchStylePatchField =
   | 'strokeCap'
   | 'strokeJoin'
 
-export type SketchStylePatch = {
-  intent: typeof SKETCH_STYLE_PATCH_INTENT
-  field: SketchStylePatchField
-  value: string | number | boolean | null
-}
+export type SketchStylePatch =
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'fillMode'; value: SketchFillMode }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'fillColor'; value: string }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'gradientStartColor'; value: string }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'gradientEndColor'; value: string }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'strokeEnabled'; value: boolean }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'strokeColor'; value: string }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'strokeWidth'; value: number }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'strokeCap'; value: SketchStrokeCap }
+  | { intent: typeof SKETCH_STYLE_PATCH_INTENT; field: 'strokeJoin'; value: SketchStrokeJoin }
 
 export function buildSketchStyleControls(style: SketchStyleDefinition | undefined): readonly SketchToolControlDescriptor[] {
-  const resolved: SketchStyleDefinition = {
+  const resolved: Required<SketchStyleDefinition> = {
     fillMode: style?.fillMode ?? 'none',
     fillColor: style?.fillColor ?? 'var(--cad-accent)',
     gradientStartColor: style?.gradientStartColor ?? 'var(--cad-accent)',

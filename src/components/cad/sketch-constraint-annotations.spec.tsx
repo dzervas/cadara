@@ -100,7 +100,7 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
     'Committed annotation glyphs should use toolbar SVG assets.',
   )
   assert(
-    markup.includes('/icons/sheet-width.svg') && markup.includes('/icons/sheet-height.svg'),
+    markup.includes('/icons/sketch-horizontal.svg') && markup.includes('/icons/sketch-vertical.svg'),
     'Horizontal and vertical constraint annotations should use visible public icon assets.',
   )
   assert(

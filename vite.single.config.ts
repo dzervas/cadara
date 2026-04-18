@@ -7,6 +7,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
 
+import { createBuildMetadataPlugin } from './build-metadata'
 import { toolbarToolIconAssetMap } from './src/components/layout/toolbar-tool-icon-assets'
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
@@ -136,7 +137,7 @@ function cadaraSingleHtmlPlugin(): Plugin {
 
 export default defineConfig({
   publicDir: false,
-  plugins: [react(), tailwindcss(), cadaraSingleHtmlPlugin()],
+  plugins: [createBuildMetadataPlugin(rootDir), react(), tailwindcss(), cadaraSingleHtmlPlugin()],
   assetsInclude: ['**/*.wasm'],
   resolve: {
     alias: {
