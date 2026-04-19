@@ -155,11 +155,11 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async setOperation(operation: 'newBody' | 'join' | 'cut' | 'intersect') {
-    await this.page.getByRole('button', { name: operation }).click()
+    await this.selectOperation(operation)
   }
 
   async setCombineOperation(operation: 'add' | 'subtract' | 'intersect') {
-    await this.page.getByRole('button', { name: operation }).click()
+    await this.selectOperation(operation)
   }
 
   async expectFeaturePreviewReady(kind: FeatureKind) {
@@ -215,6 +215,11 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     }
 
     throw new Error(`No current UI selector is configured for ${targetId}.`)
+  }
+
+  private async selectOperation(operation: string) {
+    await this.page.getByRole('combobox', { name: 'Operation' }).click()
+    await this.page.getByRole('option', { name: operation, exact: true }).click()
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {
