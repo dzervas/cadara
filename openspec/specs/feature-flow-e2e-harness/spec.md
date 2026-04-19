@@ -15,7 +15,7 @@ The system SHALL provide a lightweight Playwright harness for feature testing th
 - **THEN** the harness preserves the workbench document state across steps and exposes helper results that later steps can use without duplicating setup logic
 
 ### Requirement: Supported feature flows SHALL have Playwright coverage
-The system SHALL include Playwright e2e coverage for extrude, revolve, fillet, shell, plane, and boolean feature flows through the workbench UI.
+The system SHALL include Playwright e2e coverage for extrude, revolve, fillet, shell, plane, and Combine boolean feature flows through the workbench UI, including assertions that committed boolean geometry visibly changes and survives rebuild.
 
 #### Scenario: Extrude remains covered
 - **WHEN** the e2e suite runs the extrude feature flow
@@ -38,8 +38,10 @@ The system SHALL include Playwright e2e coverage for extrude, revolve, fillet, s
 - **THEN** the construction plane feature can be previewed and committed without runtime errors or failed diagnostics
 
 #### Scenario: Boolean is covered
-- **WHEN** the e2e suite runs a boolean feature flow with deterministic target bodies and explicit boolean scope
-- **THEN** the boolean operation can be previewed and committed without runtime errors or failed diagnostics
+- **WHEN** the e2e suite runs a Combine boolean feature flow with deterministic target bodies, tool bodies, and explicit operation intent
+- **THEN** the Combine operation can be previewed and committed without runtime errors or failed diagnostics
+- **AND** the viewport or generated snapshot demonstrates that committed geometry changed from the pre-combine body set
+- **AND** refreshing or rebuilding the document preserves the committed Combine result
 
 ### Requirement: Feature selection SHALL expose required durable target kinds
 The system SHALL expose viewport selection targets required by active feature authoring definitions, including durable edges for fillet, durable faces for shell and plane, durable bodies for boolean scope, and profile/axis references for revolve.

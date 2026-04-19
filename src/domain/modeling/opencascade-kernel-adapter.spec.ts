@@ -71,6 +71,8 @@ import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot
 import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
 import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
 import type { AppResultAsync } from '@/contracts/errors'
+import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
+import { getNextDocumentHistoryCursor } from '@/domain/modeling/document-history'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -332,6 +334,21 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       plane,
       planeTarget: plane.support,
       planeKey: plane.key,
+    }
+  }
+
+  function createServiceSketchCommitInput(
+    request: CommitSketchRequest,
+  ): Omit<CommitSketchRequest, 'contractVersion' | 'documentId'> {
+    return {
+      baseRevisionId: request.baseRevisionId,
+      solverCorrelation: request.solverCorrelation,
+      sketchId: request.sketchId,
+      sketchLabel: request.sketchLabel,
+      plane: request.plane,
+      planeTarget: request.planeTarget,
+      planeKey: request.planeKey,
+      definition: request.definition,
     }
   }
 
@@ -1307,6 +1324,107 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(
       rejected.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'rebuildFailure'),
       'Construction-axis revolve rejection must surface structured diagnostics.',
+    )
+  }
+
+  async function testRepositoryRestorePreservesRolledBackFutureRevolve() {
+    const adapter = createAdapter()
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(adapter, {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+    const seedSketchRequest = createSketchCommitRequest(initial.revisionId)
+    const seedSketchCommit = await unwrapModelingResult(service.commitSketch(createServiceSketchCommitInput(seedSketchRequest)))
+
+    assert(seedSketchCommit.revisionState.kind === 'accepted', 'Repository-backed seed sketch commit should be accepted.')
+
+    const sketchSnapshot = await service.getCurrentDocumentSnapshot()
+    const axisSketch = requirePrimarySketch(sketchSnapshot)
+    const axisExtrude = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: sketchSnapshot.revisionId,
+      definition: createExtrudeDefinition(axisSketch, 12),
+    }))
+    const axisBody = axisExtrude.changedTargets.find((target) => target.kind === 'body')
+
+    assert(axisExtrude.revisionState.kind === 'accepted', 'Repository-backed extrude create should be accepted.')
+    assert(axisBody?.kind === 'body', 'Repository-backed extrude create should produce a body target.')
+
+    const revolveSketchRequest = createSketchCommitRequest(axisExtrude.revisionId, {
+      sketchLabel: 'Repository Revolve Profile',
+      plane: createStandardPlaneDefinition('xz'),
+      definition: translateSeedDefinition(0, 0),
+    })
+    const revolveSketchCommit = await unwrapModelingResult(service.commitSketch(createServiceSketchCommitInput(revolveSketchRequest)))
+
+    assert(revolveSketchCommit.revisionState.kind === 'accepted', 'Repository-backed second sketch commit should be accepted.')
+
+    const preRevolveSnapshot = await service.getCurrentDocumentSnapshot()
+    const revolveSketch = requireSketch(preRevolveSnapshot, revolveSketchCommit.sketchId)
+    const axisEdgeId = await findPreviewableRevolveAxisEdge(
+      adapter,
+      preRevolveSnapshot.revisionId,
+      revolveSketch,
+      axisBody.bodyId,
+    )
+    const revolve = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: preRevolveSnapshot.revisionId,
+      definition: createRevolveDefinition(revolveSketch, axisBody.bodyId, axisEdgeId),
+    }))
+
+    assert(revolve.revisionState.kind === 'accepted', 'Repository-backed revolve create should be accepted.')
+
+    const rollback = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: revolve.revisionId,
+      cursor: { kind: 'sketch', sketchId: revolveSketchCommit.sketchId },
+    }))
+
+    assert(rollback.revisionState.kind === 'accepted', 'Repository-backed cursor rollback should be accepted.')
+
+    const persisted = documentRepository.savedDocuments.at(-1)
+    assert(persisted, 'Repository-backed cursor rollback should persist an authored document.')
+    assert(
+      persisted.features.some((feature) => feature.featureId === revolve.featureId),
+      'Persisted rolled-back authored document should retain the future revolve feature.',
+    )
+    assert(
+      persisted.cursor.kind === 'sketch' && persisted.cursor.sketchId === revolveSketchCommit.sketchId,
+      'Persisted rolled-back authored document should retain the sketch2 cursor.',
+    )
+    assert(
+      persisted.historyOrder?.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join('>') ===
+        `${seedSketchCommit.sketchId}>${axisExtrude.featureId}>${revolveSketchCommit.sketchId}>${revolve.featureId}`,
+      'Persisted rolled-back authored document should keep sketch - extrude - sketch2 - revolve history order.',
+    )
+
+    const restoredService = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const restoreState = await restoredService.getHistoryRestoreState()
+    const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+    const restoredHistory = restoredSnapshot.presentation.documentHistory.map((item) =>
+      item.kind === 'sketch' ? item.sketchId : item.featureId,
+    )
+    const nextCursor = getNextDocumentHistoryCursor(restoredSnapshot)
+
+    assert(restoreState.kind === 'restored', 'Fresh repository-backed service should restore the rolled-back document.')
+    assert(
+      restoredSnapshot.features.some((feature) => feature.featureId === revolve.featureId),
+      'Restored rolled-back document should retain the future revolve feature.',
+    )
+    assert(
+      restoredSnapshot.cursor.kind === 'sketch' && restoredSnapshot.cursor.sketchId === revolveSketchCommit.sketchId,
+      'Restored rolled-back document should retain the sketch2 cursor.',
+    )
+    assert(
+      restoredHistory.join('>') === `${seedSketchCommit.sketchId}>${axisExtrude.featureId}>${revolveSketchCommit.sketchId}>${revolve.featureId}`,
+      'Restored rolled-back document should preserve sketch - extrude - sketch2 - revolve history order.',
+    )
+    assert(
+      nextCursor?.kind === 'feature' && nextCursor.featureId === revolve.featureId,
+      'Restored rolled-back document should move the next cursor forward to the existing revolve feature.',
     )
   }
 
@@ -3586,17 +3704,25 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
 
     const emptyCursorSnapshot = await restore({ kind: 'empty' })
     assert(emptyCursorSnapshot.cursor.kind === 'empty', 'Restored empty cursor should remain empty.')
-    assert(emptyCursorSnapshot.features.length === 0, 'Empty cursor restore should not apply downstream features.')
+    assert(
+      emptyCursorSnapshot.features.map((feature) => feature.featureId).join('|') === `${firstFeature.featureId}|${secondFeature.featureId}`,
+      'Empty cursor restore should retain future authored feature records.',
+    )
+    assert(emptyCursorSnapshot.bodies.length === 0, 'Empty cursor restore should not expose downstream feature bodies.')
 
     const sketchCursorSnapshot = await restore({ kind: 'sketch', sketchId: sketch.sketchId })
     assert(sketchCursorSnapshot.cursor.kind === 'sketch', 'Restored sketch cursor should remain on the sketch.')
-    assert(sketchCursorSnapshot.features.length === 0, 'Sketch cursor restore should not apply features after that sketch.')
+    assert(
+      sketchCursorSnapshot.features.map((feature) => feature.featureId).join('|') === `${firstFeature.featureId}|${secondFeature.featureId}`,
+      'Sketch cursor restore should retain future authored feature records.',
+    )
+    assert(sketchCursorSnapshot.bodies.length === 0, 'Sketch cursor restore should not expose feature bodies after that sketch.')
 
     const firstFeatureCursorSnapshot = await restore({ kind: 'feature', featureId: firstFeature.featureId })
     assert(firstFeatureCursorSnapshot.cursor.kind === 'feature', 'Restored feature cursor should remain on the feature.')
     assert(
-      firstFeatureCursorSnapshot.features.map((feature) => feature.featureId).join('|') === firstFeature.featureId,
-      'Feature cursor restore should apply only features through the persisted cursor.',
+      firstFeatureCursorSnapshot.features.map((feature) => feature.featureId).join('|') === `${firstFeature.featureId}|${secondFeature.featureId}`,
+      'Feature cursor restore should retain future authored feature records.',
     )
     assert(
       firstFeatureCursorSnapshot.bodies.every((body) => body.ownerFeatureId !== secondFeature.featureId),
@@ -3775,6 +3901,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testPlaneFeatureCreateSupportsConstructionAndPlanarFaceReferences()
   await testExtrudePreviewCreateAndUpdateCommitGeometry()
   await testRevolvePreviewCreateAndConstructionAxisRejection()
+  await testRepositoryRestorePreservesRolledBackFutureRevolve()
   await testSweepPreviewCreateAndUnsupportedCases()
   await testLoftPreviewCreateAndUnsupportedCases()
   await testFilletCreateAndUpdateMutateBodyTopology()

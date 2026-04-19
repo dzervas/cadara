@@ -44,6 +44,8 @@ import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/mode
 export interface ModelingKernelAdapter {
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */
   restoreAuthoredModelDocument?(document: AuthoredDocument, diagnostics?: readonly ModelingDiagnostic[]): Promise<void>
+  /** Exports the complete authored document state, including history after the active cursor. */
+  exportAuthoredModelDocument?(documentId: AuthoredDocument['documentId']): Promise<AuthoredDocument>
   /** Returns the authoritative typed snapshot for the requested document. */
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */

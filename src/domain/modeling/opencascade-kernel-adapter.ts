@@ -43,7 +43,10 @@ import type {
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from '@/contracts/modeling/schema'
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import {
+  createAuthoredModelDocumentFromSnapshot,
+  type AuthoredModelDocument,
+} from '@/contracts/modeling/authored-document'
 import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
@@ -1039,14 +1042,26 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       authoringState = applyOccFeatureToAuthoringState(authoringState, feature)
     }
 
+    const rebuiltFeatures = new Map(authoringState.features.map((feature) => [feature.featureId, feature]))
     authoringState = {
       ...authoringState,
+      features: features.map((feature) => rebuiltFeatures.get(feature.featureId) ?? feature),
       cursor: document.cursor,
     }
     this.replaceRuntimeState({
       authoringState,
       revisionSequence: parseRevisionSequence(document.revisionId),
     })
+  }
+
+  async exportAuthoredModelDocument(documentId: AuthoredModelDocument['documentId']) {
+    const runtimeState = await this.getRuntimeState()
+
+    if (runtimeState.authoringState.documentId !== documentId) {
+      throw new Error(`OCC authored export requested document ${documentId}, but active document is ${runtimeState.authoringState.documentId}.`)
+    }
+
+    return createAuthoredModelDocumentFromSnapshot(buildOccWorkspaceSnapshot(runtimeState.authoringState))
   }
 
   private buildInitialSnapshotWithoutRuntime() {

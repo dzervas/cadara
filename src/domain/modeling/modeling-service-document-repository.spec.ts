@@ -5,9 +5,17 @@ import {
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
-import type { CreateFeatureRequest, CreateFeatureResponse, FeatureDefinition } from '@/contracts/modeling/schema'
+import type {
+  CreateFeatureRequest,
+  CreateFeatureResponse,
+  FeatureDefinition,
+  GetDocumentSnapshotRequest,
+  GetDocumentSnapshotResponse,
+} from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import type { AppResultAsync } from '@/contracts/errors'
+import { getDocumentHistoryCursorIndex } from '@/domain/modeling/document-history'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import { createModelingService, type ModelingService } from '@/domain/modeling/modeling-service'
@@ -133,6 +141,137 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(
       documentRepository.savedDocuments[0]?.features.some((feature) => feature.featureId === accepted.featureId),
       'Persisted authored documents should include the accepted feature rebuild input.',
+    )
+  }
+
+  async function testRepositoryCursorPersistenceExportsCompleteAuthoredState() {
+    class AppliedOnlySnapshotAdapter extends MockKernelAdapter {
+      override async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
+        const response = await super.getDocumentSnapshot(request)
+        const snapshot = structuredClone(response.snapshot)
+        const cursorIndex = getDocumentHistoryCursorIndex(snapshot.presentation.documentHistory, snapshot.document.cursor)
+        const appliedHistory = snapshot.document.cursor.kind === 'empty'
+          ? []
+          : snapshot.presentation.documentHistory.slice(0, cursorIndex + 1)
+        const appliedFeatureIds = new Set(
+          appliedHistory.flatMap((item) => item.kind === 'feature' ? [item.featureId] : []),
+        )
+        const appliedSketchIds = new Set(
+          appliedHistory.flatMap((item) => item.kind === 'sketch' ? [item.sketchId] : []),
+        )
+
+        snapshot.document.features = snapshot.document.features.filter((feature) => appliedFeatureIds.has(feature.featureId))
+        snapshot.features = snapshot.document.features
+        snapshot.document.sketches = snapshot.document.sketches.filter((sketch) => appliedSketchIds.has(sketch.sketchId))
+        snapshot.sketches = snapshot.document.sketches
+        snapshot.presentation.documentHistory = appliedHistory
+        snapshot.documentHistory = appliedHistory
+
+        return {
+          ...response,
+          snapshot,
+        }
+      }
+    }
+
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new AppliedOnlySnapshotAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+    const sourceSketch = initial.sketches[0]
+
+    assert(sourceSketch, 'Seed sketch should exist for repository cursor persistence coverage.')
+    const secondSketch = await unwrapModelingResult(service.commitSketch({
+      baseRevisionId: initial.revisionId,
+      sketchId: 'sketch_after_tail',
+      sketchLabel: 'Sketch After Tail',
+      plane: sourceSketch.plane,
+      planeTarget: sourceSketch.planeTarget,
+      planeKey: sourceSketch.planeKey,
+      solverCorrelation: {
+        requestId: 'request_repository_cursor_sketch',
+        projectionRequestId: 'request_repository_cursor_sketch:project',
+        validationRequestId: 'request_repository_cursor_sketch:validate',
+        solveRequestId: 'request_repository_cursor_sketch:solve',
+        regionRequestId: 'request_repository_cursor_sketch:regions',
+      },
+      definition: {
+        schemaVersion: SKETCH_SCHEMA_VERSION,
+        referenceIds: [],
+        references: [],
+        pointIds: [],
+        points: [],
+        entityIds: [],
+        entities: [],
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+      },
+    }))
+    assert(secondSketch.revisionState.kind === 'accepted', 'Second sketch commit should be accepted.')
+
+    const rollback = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: secondSketch.revisionId,
+      cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
+    }))
+    assert(rollback.revisionState.kind === 'accepted', 'Cursor rollback should be accepted.')
+
+    const persisted = documentRepository.savedDocuments.at(-1)
+    assert(persisted, 'Accepted cursor rollback should persist an authored document.')
+    assert(
+      persisted.sketches.some((sketch) => sketch.sketchId === 'sketch_after_tail'),
+      'Persisted authored document should include future sketches after the cursor.',
+    )
+    assert(
+      persisted.features.some((feature) => feature.featureId === 'feature_fillet-1'),
+      'Persisted authored document should include future features after the cursor.',
+    )
+    assert(
+      persisted.featureOrder.join('>') === 'feature_extrude-1>feature_fillet-1',
+      'Persisted authored document should keep the complete feature order.',
+    )
+    assert(
+      persisted.historyOrder?.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join('>') ===
+        'sketch_primary>feature_extrude-1>feature_fillet-1>sketch_after_tail',
+      'Persisted authored document should keep the complete history order.',
+    )
+    assert(
+      persisted.cursor.kind === 'feature' && persisted.cursor.featureId === 'feature_extrude-1',
+      'Persisted authored document should keep the requested cursor.',
+    )
+  }
+
+  async function testRepositoryCursorMovesBackAndForthWithoutRefreshConflict() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const rollback = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: snapshot.revisionId,
+      cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
+    }))
+    const forward = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: rollback.revisionId,
+      cursor: { kind: 'feature', featureId: 'feature_fillet-1' },
+    }))
+    const rollbackAgain = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: forward.revisionId,
+      cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
+    }))
+
+    assert(rollback.revisionState.kind === 'accepted', 'Repository-backed cursor rollback should be accepted.')
+    assert(forward.revisionState.kind === 'accepted', 'Repository-backed cursor redo should be accepted without a refresh.')
+    assert(rollbackAgain.revisionState.kind === 'accepted', 'Repository-backed repeated cursor rollback should be accepted without a refresh.')
+    assert(documentRepository.savedDocuments.length === 3, 'Each accepted cursor move should persist the authored document.')
+    assert(
+      documentRepository.savedDocuments.at(-1)?.cursor.kind === 'feature'
+        && documentRepository.savedDocuments.at(-1)?.cursor.featureId === 'feature_extrude-1',
+      'The final persisted cursor should match the last requested rollback target.',
     )
   }
 
@@ -491,6 +630,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   }
 
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
+  await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
+  await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
   await testRepositoryRestoreHydratesFreshModelingService()
   await testRepositoryRestoreIgnoresStaleOperationHistory()
   await testSeededRepositoryClearsInvalidOperationHistory()

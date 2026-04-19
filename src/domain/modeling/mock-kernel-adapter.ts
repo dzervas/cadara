@@ -74,7 +74,10 @@ import type {
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
 } from '@/contracts/modeling/schema'
-import type { AuthoredModelDocument as RepositoryAuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import {
+  createAuthoredModelDocumentFromSnapshot,
+  type AuthoredModelDocument as RepositoryAuthoredModelDocument,
+} from '@/contracts/modeling/authored-document'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
 import { getAdvancedParticipant, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
@@ -2551,6 +2554,16 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     }
 
     return this.snapshotPromise
+  }
+
+  async exportAuthoredModelDocument(documentId: RepositoryAuthoredModelDocument['documentId']) {
+    const snapshot = await this.getSnapshot()
+
+    if (snapshot.document.documentId !== documentId) {
+      throw new Error(`Mock authored export requested document ${documentId}, but active document is ${snapshot.document.documentId}.`)
+    }
+
+    return createAuthoredModelDocumentFromSnapshot(snapshot)
   }
 
   async restoreAuthoredModelDocument(

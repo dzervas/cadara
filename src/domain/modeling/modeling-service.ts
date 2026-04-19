@@ -3848,6 +3848,11 @@ export function createModelingService(
     }
   }
 
+  function markRepositorySnapshotFresh(metadata: DocumentRepositoryMetadata) {
+    rememberRepositoryMetadata(metadata)
+    snapshotRepositoryHeads = [...metadata.heads]
+  }
+
   function attachRepositoryProvenance(snapshot: DocumentSnapshot): DocumentSnapshot {
     const metadata = documentRepository ? currentRepositoryMetadata ?? documentRepository.getMetadata(currentDocumentId) : null
     if (!metadata) {
@@ -3901,6 +3906,18 @@ export function createModelingService(
   async function restoreAuthoredRepositoryDocument(document: Parameters<NonNullable<ModelingKernelAdapter['restoreAuthoredModelDocument']>>[0]) {
     const normalized = normalizeCollaborativeAuthoredModelDocument(document)
     await adapter.restoreAuthoredModelDocument?.(normalized.document, normalized.diagnostics)
+  }
+
+  async function exportAuthoredDocumentForRepository() {
+    if (adapter.exportAuthoredModelDocument) {
+      return adapter.exportAuthoredModelDocument(currentDocumentId)
+    }
+
+    const snapshot = validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+      currentDocumentId,
+    )
+    return createAuthoredModelDocumentFromSnapshot(snapshot)
   }
 
   async function createRepositoryHeadConflictResult<
@@ -4120,13 +4137,9 @@ export function createModelingService(
         return
       }
 
-      const migratedSnapshot = validateSnapshotResponse(
-        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
-        currentDocumentId,
-      )
       const writeResult = await documentRepository!.mutate({
         documentId: currentDocumentId,
-        document: createAuthoredModelDocumentFromSnapshot(migratedSnapshot),
+        document: await exportAuthoredDocumentForRepository(),
       })
       if (!writeResult.ok) {
         await documentRepository!.reset(currentDocumentId)
@@ -4135,7 +4148,7 @@ export function createModelingService(
         historyRestoreState = createRepositoryRestoreFailure(writeResult.status, historyRestoreState.entriesReplayed)
       }
       if (writeResult.ok) {
-        rememberRepositoryMetadata(writeResult.metadata)
+        markRepositorySnapshotFresh(writeResult.metadata)
       }
       return
     }
@@ -4215,17 +4228,13 @@ export function createModelingService(
         : result
     }
 
-    const snapshot = validateSnapshotResponse(
-      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
-      currentDocumentId,
-    )
     const writeResult = await documentRepository.mutate({
       documentId: currentDocumentId,
-      document: createAuthoredModelDocumentFromSnapshot(snapshot),
+      document: await exportAuthoredDocumentForRepository(),
     })
 
     if (writeResult.ok) {
-      rememberRepositoryMetadata(writeResult.metadata)
+      markRepositorySnapshotFresh(writeResult.metadata)
       return result
     }
 
