@@ -21,6 +21,7 @@ export type WorkbenchIconName =
   | 'mousePointer'
   | 'pencilRuler'
   | 'plus'
+  | 'reportBug'
   | 'ruler'
   | 'search'
   | 'slider'
@@ -49,6 +50,7 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   mousePointer: 'Select.svg',
   pencilRuler: 'sketch.svg',
   plus: 'plus.svg',
+  reportBug: 'bug.svg',
   ruler: 'sketch-dimension.svg',
   search: 'search.svg',
   slider: 'slider.svg',

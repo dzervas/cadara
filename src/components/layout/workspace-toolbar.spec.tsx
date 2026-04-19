@@ -75,6 +75,28 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
       toolbarMarkup.includes('/icons/GitHub-logo.svg'),
     'Toolbar should render a safe GitHub repository link at the end.',
   )
+  const reportBugToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: getEditorViewState(initialEditorState),
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar onReportBug={() => undefined} />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    reportBugToolbarMarkup.includes('aria-label="Report bug"') &&
+      reportBugToolbarMarkup.includes('type="button"') &&
+      reportBugToolbarMarkup.includes('/icons/bug.svg'),
+    'Toolbar should render the report-bug action as an icon-only button with local asset and accessible label.',
+  )
   assert(
     toolbarMarkup.includes('data-tool-id="undo"') &&
       toolbarMarkup.includes('data-tool-id="redo"') &&

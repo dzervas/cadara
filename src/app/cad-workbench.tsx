@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
 import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
@@ -26,7 +27,7 @@ import type {
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
-import { type AppError } from '@/contracts/errors'
+import { createAppError, errorContext, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
   getSketchAnnotationDescriptors,
@@ -71,6 +72,15 @@ import {
   DEFAULT_LEFT_SIDEBAR_WIDTH,
   getWorkbenchSidebarWidthFromPointer,
 } from '@/app/workbench-shell-layout'
+import {
+  createBugReportDebugArtifact,
+  createBugReportIssueDraft,
+  createBugReportPayload,
+  createFallbackBugReportIssueUrl,
+  downloadBugReportDebugArtifact,
+  type BugReportArtifactStatus,
+} from '@/domain/bug-reporting/report'
+import { getBuildModeLabel } from '@/components/layout/build-metadata'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
@@ -941,10 +951,92 @@ export function CadWorkbench() {
     isEnabled: () => toolbarHistoryAvailability.canRedo,
   }
 
+  const handleReportBug = () => {
+    try {
+      const result = createBugReportPayload({
+        build: {
+          version: appVersion,
+          commit: gitCommit,
+          mode: getBuildModeLabel(import.meta.env.MODE, import.meta.env.DEV),
+        },
+        editorState: {
+          mode,
+          activeCommand,
+          selection,
+          selectionFilter,
+          preview,
+          activeEditSession,
+          activeReferencePickerFieldId,
+          sketchSession,
+        },
+        snapshot,
+        storage: window.localStorage,
+        environment: {
+          navigator: window.navigator,
+          window,
+          document,
+        },
+      })
+      const artifact = createBugReportDebugArtifact(result)
+      let artifactStatus: BugReportArtifactStatus = { kind: 'not-needed' }
+
+      if (artifact) {
+        try {
+          downloadBugReportDebugArtifact(artifact)
+          artifactStatus = { kind: 'downloaded', filename: artifact.filename }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Debug artifact could not be downloaded.'
+          artifactStatus = {
+            kind: 'unavailable',
+            filename: artifact.filename,
+            reason: message,
+          }
+          errorReporter.report(
+            createAppError({
+              code: 'workbench/action-failed',
+              message: 'Bug-report debug artifact generation failed.',
+              context: errorContext('reason', message),
+              cause: error,
+            }),
+            {
+              source: 'workbench.reportBug',
+              visibility: 'developer',
+            },
+          )
+        }
+      }
+
+      const issueDraft = createBugReportIssueDraft(result, { artifactStatus })
+      const opened = window.open(issueDraft.url, '_blank', 'noopener,noreferrer')
+      if (!opened) {
+        setWorkbenchStatusMessage('GitHub bug report could not be opened. Check popup blocking for this site.')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bug-report payload generation failed.'
+      errorReporter.report(
+        createAppError({
+          code: 'workbench/action-failed',
+          message: 'Bug-report generation failed.',
+          context: errorContext('reason', message),
+          cause: error,
+        }),
+        {
+          source: 'workbench.reportBug',
+          visibility: 'developer',
+        },
+      )
+
+      const opened = window.open(createFallbackBugReportIssueUrl(error), '_blank', 'noopener,noreferrer')
+      if (!opened) {
+        setWorkbenchStatusMessage('GitHub bug report could not be opened. Check popup blocking for this site.')
+      }
+    }
+  }
+
   return (
     <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
-      <WorkspaceToolbar historyAvailability={toolbarHistoryAvailability} />
+      <WorkspaceToolbar historyAvailability={toolbarHistoryAvailability} onReportBug={handleReportBug} />
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar

@@ -26,9 +26,10 @@ const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
+  onReportBug?: () => void
 }
 
-export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps = {}) {
+export function WorkspaceToolbar({ historyAvailability, onReportBug }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
     state: { activeCommand, history, mode, selection, sketchSession },
@@ -162,6 +163,26 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
           )}
         </div>
         <ShortcutSettingsButton />
+        {onReportBug ? (
+          <Tooltip
+            label={
+              <ToolbarTooltipContent
+                title="Report bug"
+                description="Open a GitHub bug report with session diagnostics."
+              />
+            }
+          >
+            <ActionIcon
+              type="button"
+              variant="subtle"
+              color="workbench"
+              aria-label="Report bug"
+              onClick={onReportBug}
+            >
+              <WorkbenchIcon name="reportBug" className="h-4 w-4" />
+            </ActionIcon>
+          </Tooltip>
+        ) : null}
         <Tooltip
           label={
             <ToolbarTooltipContent

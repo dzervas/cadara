@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a Cadara app, modeling, viewport, or workflow bug.
+title: "[Bug Report]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for reproducible Cadara bugs. If Cadara downloaded a debug artifact, attach it in the screenshots/recordings section or drag it into the debug payload field.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the bug and list the smallest set of actions that triggers the bug.
+      placeholder: |
+        Extruding a circle produces invalid geometry
+
+        1. Open Cadara
+        2. Create ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots_recordings
+    attributes:
+      label: (Optional) Screenshots or recordings
+      description: Drag screenshots, recordings, or the generated debug artifact here when available.
+      placeholder: "Attach images, videos, or cadara-bug-report-*.json files here."
+    validations:
+      required: false
+  - type: textarea
+    id: document
+    attributes:
+      label: (Auto-generated or prompted to download) Document
+      description: Machine-generated debug JSON is kept separate from reproduction notes. Attach the generated artifact if the prefill says one was downloaded.
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: (Auto-generated) Environment
+      description: Cadara may prefill build, browser, viewport, route, and WebGL metadata here.
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: (Auto-generated) Diagnostics and errors
+      description: Cadara may prefill current modeling diagnostics or report-generation failures here.
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add any context not covered above.
+    validations:
+      required: false
