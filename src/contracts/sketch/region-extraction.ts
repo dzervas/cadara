@@ -84,6 +84,8 @@ function projectedKindForGeometry(geometry: ProjectedSketchReferenceGeometry): N
       return 'projectedCircle'
     case 'arc':
       return 'projectedArc'
+    case 'spline':
+      return 'projectedSpline'
   }
 }
 

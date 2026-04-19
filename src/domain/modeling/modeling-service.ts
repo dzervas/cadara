@@ -1818,6 +1818,19 @@ function normalizeProjectedSketchReferenceGeometry(value: unknown): ProjectedSke
     }
   }
 
+  if (value.kind === 'spline') {
+    if (!Array.isArray(value.fitPoints) || (value.degree !== 2 && value.degree !== 3) || typeof value.isClosed !== 'boolean') {
+      throw new Error('Invalid projected spline payload.')
+    }
+    return {
+      geometryId,
+      kind: 'spline',
+      fitPoints: value.fitPoints.map((point) => normalizePoint2D(point, 'Invalid projected spline point payload.')),
+      degree: value.degree,
+      isClosed: value.isClosed,
+    }
+  }
+
   throw new Error('Invalid projected sketch geometry kind payload.')
 }
 
@@ -2318,7 +2331,8 @@ function normalizeProjectedGeometryConstraintOperand(
       reference.kind !== 'projectedPoint' &&
       reference.kind !== 'projectedLineSegment' &&
       reference.kind !== 'projectedCircle' &&
-      reference.kind !== 'projectedArc'
+      reference.kind !== 'projectedArc' &&
+      reference.kind !== 'projectedSpline'
     ) ||
     !isString(reference.referenceId) ||
     !isString(reference.geometryId)
@@ -2708,6 +2722,7 @@ function normalizeRegionRecords(value: unknown): RegionRecord[] {
                               || segment.source.reference.kind === 'projectedLineSegment'
                               || segment.source.reference.kind === 'projectedCircle'
                               || segment.source.reference.kind === 'projectedArc'
+                              || segment.source.reference.kind === 'projectedSpline'
                             )
                               ? segment.source.reference.kind
                               : undefined,

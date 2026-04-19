@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 
 import type { SketchDefinition } from '@/contracts/sketch/schema'
+import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import {
   beginSketchGeometryDrag,
@@ -729,6 +730,63 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
   }
 
+  function testOffsetAddsProjectedCircleAndSplineCopies() {
+    const projectedReferences: ProjectedSketchReferenceRecord[] = [{
+      referenceId: 'ref_projected_curves',
+      status: 'projected',
+      geometry: [
+        {
+          geometryId: 'projected_geometry_circle',
+          kind: 'circle',
+          centerPosition: [0, 0],
+          radius: 2,
+        },
+        {
+          geometryId: 'projected_geometry_spline',
+          kind: 'spline',
+          fitPoints: [[0, 0], [1, 2], [2, 0]],
+          degree: 2,
+          isClosed: false,
+        },
+      ],
+      diagnostics: [],
+    }]
+
+    let circleSession = beginSketchTool({
+      ...createSessionFromDefinition(makeDefinition({ pointIds: [], points: [], entityIds: [], entities: [] })),
+      projectedReferences,
+    }, 'offset')
+    circleSession = selectSketchEditToolTarget(circleSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_projected_curves',
+      geometryId: 'projected_geometry_circle',
+      geometryKind: 'circle',
+    })
+    assert(circleSession.entities.some((entity) => entity.status === 'preview' && entity.kind === 'circle'), 'Projected circle offset should preview a circle.')
+    circleSession = patchSketchEditToolValue(circleSession, { value: 1 })
+    circleSession = patchSketchEditToolValue(circleSession, { intent: 'commitOffset' })
+    const offsetCircle = circleSession.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(offsetCircle?.kind === 'circle' && offsetCircle.radius === 3, 'Projected circle offset should create a sketch-owned circle.')
+
+    let splineSession = beginSketchTool({
+      ...createSessionFromDefinition(makeDefinition({ pointIds: [], points: [], entityIds: [], entities: [] })),
+      projectedReferences,
+    }, 'offset')
+    splineSession = selectSketchEditToolTarget(splineSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_projected_curves',
+      geometryId: 'projected_geometry_spline',
+      geometryKind: 'spline',
+    })
+    assert(splineSession.entities.some((entity) => entity.status === 'preview' && entity.kind === 'spline'), 'Projected spline offset should preview a spline.')
+    splineSession = patchSketchEditToolValue(splineSession, { value: 1 })
+    splineSession = patchSketchEditToolValue(splineSession, { intent: 'commitOffset' })
+    assert(
+      splineSession.definition.entities.some((entity) => entity.kind === 'spline'),
+      'Projected spline offset should create a sketch-owned spline.',
+    )
+  }
+
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
   testRectangleToolDragTranslatesWholeRectangle()
@@ -740,4 +798,5 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testOffsetCreatesContinuousOuterAndInnerSquares()
   testOffsetCreatesContinuousOpenAngle()
   testOffsetAddsCircleArcAndSplineCopies()
+  testOffsetAddsProjectedCircleAndSplineCopies()
 })

@@ -25,7 +25,7 @@ export type SketchConstraintToolId =
   | 'dimensionVertical'
   | 'dimensionRadius'
 
-export type SketchConstraintSelectionKind = 'point' | 'line' | 'circle'
+export type SketchConstraintSelectionKind = 'point' | 'line' | 'circle' | 'spline'
 
 export interface SketchConstraintSelectionStep {
   id: string
@@ -223,6 +223,19 @@ export function resolveCircleTarget(
   }
 }
 
+export function resolveCurveTarget(
+  _definition: SketchDefinition,
+  target: PrimitiveRef,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
+): SketchConstraintTargetRecord | null {
+  if (target.kind !== 'projectedReferenceGeometry') {
+    return null
+  }
+
+  const projected = resolveProjectedGeometryTarget(target, projectedReferences)
+  return projected?.kind === 'spline' ? projected : null
+}
+
 function midpointForLine(definition: SketchDefinition, entity: Extract<SketchEntityDefinition, { kind: 'lineSegment' }>): SketchPoint2D {
   const start = findPoint(definition, entity.startPointId)?.position ?? [0, 0]
   const end = findPoint(definition, entity.endPointId)?.position ?? [0, 0]
@@ -266,6 +279,16 @@ function resolveProjectedGeometryTarget(
         start: geometry.startPosition,
         end: geometry.endPosition,
       },
+    }
+  }
+
+  if (geometry.kind === 'spline') {
+    return {
+      target,
+      label: `Projected ${geometry.geometryId}`,
+      kind: 'spline',
+      anchor: geometry.fitPoints[0] ?? [0, 0],
+      projected: { reference: target, geometry },
     }
   }
 

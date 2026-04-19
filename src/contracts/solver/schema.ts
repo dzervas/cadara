@@ -175,6 +175,24 @@ export interface ProjectedSketchArcGeometry {
 }
 
 /**
+ * Projected 2D spline/freeform curve owned by the solver for an external
+ * reference. This representation covers source splines, Bezier curves, and
+ * other freeform model edges when the kernel exposes them as ordered samples.
+ */
+export interface ProjectedSketchSplineGeometry {
+  /** Stable projected-geometry identity scoped to one authored reference. */
+  geometryId: ProjectedGeometryId
+  /** Geometry discriminant for a projected spline/freeform result. */
+  kind: 'spline'
+  /** Projected curve sample/control points in sketch-plane units. */
+  fitPoints: readonly SketchPoint2D[]
+  /** Polynomial degree when known; sampled freeform curves use a bounded degree. */
+  degree: 2 | 3
+  /** True when the final point connects back to the first point. */
+  isClosed: boolean
+}
+
+/**
  * Union of all explicit 2D geometry that the solver may return for a projected
  * external sketch reference.
  */
@@ -183,6 +201,7 @@ export type ProjectedSketchReferenceGeometry =
   | ProjectedSketchLineSegmentGeometry
   | ProjectedSketchCircleGeometry
   | ProjectedSketchArcGeometry
+  | ProjectedSketchSplineGeometry
 
 /**
  * Machine-readable projection status for an authored external reference.

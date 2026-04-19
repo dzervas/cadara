@@ -179,6 +179,8 @@ function projectedKindForConstraintRef(kind: NonNullable<ProjectedSketchGeometry
       return 'circle'
     case 'projectedArc':
       return 'arc'
+    case 'projectedSpline':
+      return 'spline'
   }
 }
 

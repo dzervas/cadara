@@ -3,6 +3,7 @@ import type {
   SketchEntityDefinition,
   SketchPointDefinition,
 } from '@/contracts/sketch/schema'
+import type { ProjectedSketchReferenceGeometry } from '@/contracts/solver/schema'
 import type { SketchPoint } from '@/contracts/modeling/schema'
 import type { SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
 import type {
@@ -40,18 +41,24 @@ type CurveDescriptor =
   | {
       kind: 'lineSegment'
       entity: Extract<SketchEntityDefinition, { kind: 'lineSegment' }>
+      isConstruction: boolean
+      style: SketchEntityDefinition['style']
       start: SketchPoint
       end: SketchPoint
     }
   | {
       kind: 'circle'
       entity: Extract<SketchEntityDefinition, { kind: 'circle' }>
+      isConstruction: boolean
+      style: SketchEntityDefinition['style']
       center: SketchPoint
       radius: number
     }
   | {
       kind: 'arc'
       entity: Extract<SketchEntityDefinition, { kind: 'arc' }>
+      isConstruction: boolean
+      style: SketchEntityDefinition['style']
       center: SketchPoint
       start: SketchPoint
       end: SketchPoint
@@ -60,8 +67,16 @@ type CurveDescriptor =
   | {
       kind: 'spline'
       entity: Extract<SketchEntityDefinition, { kind: 'spline' }>
+      isConstruction: boolean
+      style: SketchEntityDefinition['style']
       points: readonly SketchPoint[]
     }
+
+export type OffsetCurveDescriptor =
+  | Omit<Extract<CurveDescriptor, { kind: 'lineSegment' }>, 'entity'>
+  | Omit<Extract<CurveDescriptor, { kind: 'circle' }>, 'entity'>
+  | Omit<Extract<CurveDescriptor, { kind: 'arc' }>, 'entity'>
+  | Omit<Extract<CurveDescriptor, { kind: 'spline' }>, 'entity'>
 
 type TrimIntersection = {
   point: SketchPoint
@@ -131,11 +146,29 @@ function getCurveDescriptor(
     case 'lineSegment': {
       const start = getPoint(definition, entity.startPointId)
       const end = getPoint(definition, entity.endPointId)
-      return start && end ? { kind: 'lineSegment', entity, start: start.position, end: end.position } : null
+      return start && end
+        ? {
+            kind: 'lineSegment',
+            entity,
+            isConstruction: entity.isConstruction,
+            style: entity.style,
+            start: start.position,
+            end: end.position,
+          }
+        : null
     }
     case 'circle': {
       const center = getPoint(definition, entity.centerPointId)
-      return center ? { kind: 'circle', entity, center: center.position, radius: entity.radius } : null
+      return center
+        ? {
+            kind: 'circle',
+            entity,
+            isConstruction: entity.isConstruction,
+            style: entity.style,
+            center: center.position,
+            radius: entity.radius,
+          }
+        : null
     }
     case 'arc': {
       const center = getPoint(definition, entity.centerPointId)
@@ -145,6 +178,8 @@ function getCurveDescriptor(
         ? {
             kind: 'arc',
             entity,
+            isConstruction: entity.isConstruction,
+            style: entity.style,
             center: center.position,
             start: start.position,
             end: end.position,
@@ -158,9 +193,61 @@ function getCurveDescriptor(
         return point ? [point.position] : []
       })
       return points.length === entity.fitPointIds.length && points.length >= 3
-        ? { kind: 'spline', entity, points }
+        ? {
+            kind: 'spline',
+            entity,
+            isConstruction: entity.isConstruction,
+            style: entity.style,
+            points,
+          }
         : null
     }
+  }
+}
+
+export function offsetCurveDescriptorFromProjectedGeometry(
+  geometry: ProjectedSketchReferenceGeometry,
+): OffsetCurveDescriptor | null {
+  switch (geometry.kind) {
+    case 'point':
+      return null
+    case 'lineSegment':
+      return {
+        kind: 'lineSegment',
+        isConstruction: false,
+        style: undefined,
+        start: geometry.startPosition,
+        end: geometry.endPosition,
+      }
+    case 'circle':
+      return {
+        kind: 'circle',
+        isConstruction: false,
+        style: undefined,
+        center: geometry.centerPosition,
+        radius: geometry.radius,
+      }
+    case 'arc':
+      return {
+        kind: 'arc',
+        isConstruction: false,
+        style: undefined,
+        center: geometry.centerPosition,
+        start: geometry.startPosition,
+        end: geometry.endPosition,
+        sweepDirection: geometry.sweepDirection,
+      }
+    case 'spline':
+      return geometry.fitPoints.length >= 3
+        ? {
+            kind: 'spline',
+            isConstruction: false,
+            style: undefined,
+            points: geometry.isClosed && geometry.fitPoints.length > 2
+              ? [...geometry.fitPoints, geometry.fitPoints[0]!]
+              : geometry.fitPoints,
+          }
+        : null
   }
 }
 
@@ -179,7 +266,7 @@ function sweepOffset(
     : normalizeAngle(startAngle - angle)
 }
 
-function arcSweep(curve: Extract<CurveDescriptor, { kind: 'arc' }>) {
+function arcSweep(curve: Extract<OffsetCurveDescriptor, { kind: 'arc' }>) {
   const startAngle = Math.atan2(curve.start[1] - curve.center[1], curve.start[0] - curve.center[0])
   const endAngle = Math.atan2(curve.end[1] - curve.center[1], curve.end[0] - curve.center[0])
   return sweepOffset(endAngle, startAngle, curve.sweepDirection)
@@ -580,7 +667,7 @@ function makePreviewSpline(id: string, points: readonly SketchPoint[], isConstru
   }
 }
 
-function createArcPreview(curve: Extract<CurveDescriptor, { kind: 'arc' }>, radius: number) {
+function createArcPreview(curve: Extract<OffsetCurveDescriptor, { kind: 'arc' }>, radius: number) {
   const startVector = normalize(subtract(curve.start, curve.center)) ?? [1, 0] as const
   const endVector = normalize(subtract(curve.end, curve.center)) ?? [1, 0] as const
   const midAngle = Math.atan2(curve.start[1] - curve.center[1], curve.start[0] - curve.center[0])
@@ -880,6 +967,7 @@ export function createOffsetContribution(input: {
   definition: SketchDefinition
   entityId?: SketchEntityId
   entityIds?: readonly SketchEntityId[]
+  curve?: OffsetCurveDescriptor
   distance: number | null
   side: OffsetSide
   sequence: number
@@ -910,8 +998,8 @@ export function createOffsetContribution(input: {
   const entity = targetEntityId
     ? input.definition.entities.find((candidate) => candidate.entityId === targetEntityId)
     : null
-  const curve = entity ? getCurveDescriptor(input.definition, entity) : null
-  if (!entity || !curve) {
+  const curve = input.curve ?? (entity ? getCurveDescriptor(input.definition, entity) : null)
+  if (!curve) {
     return {
       valid: false,
       message: 'Offset supports line, circle, arc, and spline entities.',
@@ -919,6 +1007,8 @@ export function createOffsetContribution(input: {
       previewEntities: [],
     }
   }
+  const isConstruction = curve.isConstruction
+  const style = curve.style
 
   if (curve.kind === 'lineSegment') {
     const length = distanceBetween(curve.start, curve.end)
@@ -960,7 +1050,7 @@ export function createOffsetContribution(input: {
         entityId: null,
         status: 'preview',
         label: 'Offset preview',
-        isConstruction: entity.isConstruction,
+        isConstruction,
       }],
       contribution: {
         points: [
@@ -970,8 +1060,8 @@ export function createOffsetContribution(input: {
         entities: [
           {
             ...input.factories.createLineEntity(`Offset ${input.sequence}`, entityId, startPointId, endPointId),
-            isConstruction: entity.isConstruction,
-            style: entity.style,
+            isConstruction,
+            style,
           },
         ],
       },
@@ -1004,7 +1094,7 @@ export function createOffsetContribution(input: {
         entityId: null,
         status: 'preview',
         label: 'Offset preview',
-        isConstruction: entity.isConstruction,
+        isConstruction,
       }],
       contribution: {
         points: [
@@ -1013,8 +1103,8 @@ export function createOffsetContribution(input: {
         entities: [
           {
             ...input.factories.createCircleEntity(`Offset ${input.sequence}`, entityId, centerPointId, radius),
-            isConstruction: entity.isConstruction,
-            style: entity.style,
+            isConstruction,
+            style,
           },
         ],
       },
@@ -1054,7 +1144,7 @@ export function createOffsetContribution(input: {
     return {
       valid: true,
       message: null,
-      previewEntities: [makePreviewSpline('preview-offset-arc', createArcPreview(curve, radius), entity.isConstruction)],
+      previewEntities: [makePreviewSpline('preview-offset-arc', createArcPreview(curve, radius), isConstruction)],
       contribution: {
         points: [
           input.factories.createPoint(`Offset ${input.sequence} center`, centerPointId, curve.center),
@@ -1071,8 +1161,8 @@ export function createOffsetContribution(input: {
               endPointId,
               curve.sweepDirection,
             ),
-            isConstruction: entity.isConstruction,
-            style: entity.style,
+            isConstruction,
+            style,
           },
         ],
       },
@@ -1086,7 +1176,7 @@ export function createOffsetContribution(input: {
   return {
     valid: true,
     message: null,
-    previewEntities: [makePreviewSpline('preview-offset-spline', offsetPoints, entity.isConstruction)],
+    previewEntities: [makePreviewSpline('preview-offset-spline', offsetPoints, isConstruction)],
     contribution: {
       points: offsetPoints.map((point, index) =>
         input.factories.createPoint(`Offset ${input.sequence} point ${index + 1}`, pointIds[index]!, point),
@@ -1094,8 +1184,8 @@ export function createOffsetContribution(input: {
       entities: [
         {
           ...input.factories.createSplineEntity(`Offset ${input.sequence}`, entityId, pointIds),
-          isConstruction: entity.isConstruction,
-          style: entity.style,
+          isConstruction,
+          style,
         },
       ],
     },

@@ -37,7 +37,7 @@ export interface ProjectedReferenceGeometryRef {
   kind: 'projectedReferenceGeometry'
   referenceId: ReferenceId
   geometryId: ProjectedGeometryId
-  geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc'
+  geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc' | 'spline'
 }
 
 export interface SketchExternalReferenceRef {

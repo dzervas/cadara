@@ -314,6 +314,8 @@ function projectedGeometryKindForRef(geometry: ProjectedSketchReferenceGeometry)
       return 'projectedCircle'
     case 'arc':
       return 'projectedArc'
+    case 'spline':
+      return 'projectedSpline'
   }
 }
 
@@ -399,7 +401,7 @@ function toProjectedBoundarySegmentGeometry(
   }
 
   const rejection = createProjectedRegionLoopRejection(source)
-  const error = new Error(`Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`) as Error & {
+  const error = new Error(`Projected ${geometry.kind} geometry ${source.reference.geometryId} cannot define a profile boundary.`) as Error & {
     code?: string
   }
   error.code = rejection.code
@@ -525,6 +527,8 @@ function buildProjectedBoundaryEdge(
     }
     case 'point':
       throw new Error(`Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`)
+    case 'spline':
+      throw new Error(`Projected spline geometry ${source.reference.geometryId} cannot define a profile boundary.`)
   }
 }
 

@@ -44,6 +44,7 @@ const projectedSketchGeometryRefSchema = z.object({
     z.literal('projectedLineSegment'),
     z.literal('projectedCircle'),
     z.literal('projectedArc'),
+    z.literal('projectedSpline'),
   ]).optional(),
   referenceId: referenceIdSchema,
   geometryId: projectedGeometryIdSchema,

@@ -143,16 +143,15 @@ function isCollinear(points: readonly SketchPoint2D[], tolerance: number) {
   )
 }
 
-function circleFromPoints(points: readonly SketchPoint2D[], tolerance: number) {
-  if (points.length < 3) {
-    return null
-  }
-
-  const a = points[0]!
-  const b = points[Math.floor(points.length / 2)]!
-  const c = points.at(-1)!
+function circleFromThreePoints(
+  a: SketchPoint2D,
+  b: SketchPoint2D,
+  c: SketchPoint2D,
+  tolerance: number,
+) {
   const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]))
-  if (Math.abs(d) <= tolerance) {
+  const span = Math.max(distance2d(a, b), distance2d(a, c), distance2d(b, c))
+  if (Math.abs(d) <= tolerance * Math.max(tolerance, span)) {
     return null
   }
 
@@ -168,6 +167,49 @@ function circleFromPoints(points: readonly SketchPoint2D[], tolerance: number) {
     return null
   }
 
+  return { center, radius }
+}
+
+function triangleMagnitude(a: SketchPoint2D, b: SketchPoint2D, c: SketchPoint2D) {
+  return Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+}
+
+function circleFromPoints(points: readonly SketchPoint2D[], tolerance: number) {
+  if (points.length < 3) {
+    return null
+  }
+
+  const first = points[0]!
+  let second = points[1]!
+  let maxDistance = distance2d(first, second)
+  for (const point of points.slice(2)) {
+    const pointDistance = distance2d(first, point)
+    if (pointDistance > maxDistance) {
+      maxDistance = pointDistance
+      second = point
+    }
+  }
+
+  let third: SketchPoint2D | null = null
+  let bestMagnitude = 0
+  for (const point of points) {
+    const magnitude = triangleMagnitude(first, second, point)
+    if (magnitude > bestMagnitude) {
+      bestMagnitude = magnitude
+      third = point
+    }
+  }
+
+  if (!third) {
+    return null
+  }
+
+  const circle = circleFromThreePoints(first, second, third, tolerance)
+  if (!circle) {
+    return null
+  }
+
+  const { center, radius } = circle
   const maxError = Math.max(...points.map((point) => Math.abs(distance2d(center, point) - radius)))
   return maxError <= Math.max(tolerance, radius * 1e-4) ? { center, radius } : null
 }
@@ -182,6 +224,10 @@ function signedPolylineArea(points: readonly SketchPoint2D[]) {
   return area / 2
 }
 
+function splineDegreeForPointCount(pointCount: number): 2 | 3 {
+  return pointCount >= 4 ? 3 : 2
+}
+
 function geometryFromWorldPolyline(input: {
   referenceId: ReferenceId
   suffix: string
@@ -194,25 +240,26 @@ function geometryFromWorldPolyline(input: {
   const unique = projected.filter((point, index) =>
     index === 0 || distance2d(point, projected[index - 1]!) > input.tolerances.minimumSegmentLength,
   )
-  if (unique.length < 2) {
+  const closesOnStart = unique.length >= 2
+    && distance2d(unique[0]!, unique.at(-1)!) <= input.tolerances.minimumSegmentLength
+  const candidate = closesOnStart ? unique.slice(0, -1) : unique
+  const isClosed = input.isClosed || closesOnStart
+
+  if (candidate.length < 2) {
     return null
   }
 
-  if (!input.isClosed && isCollinear(unique, input.tolerances.minimumSegmentLength)) {
+  if (!isClosed && isCollinear(candidate, input.tolerances.minimumSegmentLength)) {
     return {
       geometryId: createProjectedGeometryId(input.referenceId, input.suffix),
       kind: 'lineSegment',
-      startPosition: unique[0]!,
-      endPosition: unique.at(-1)!,
+      startPosition: candidate[0]!,
+      endPosition: candidate.at(-1)!,
     }
   }
 
-  const circle = circleFromPoints(unique, input.tolerances.minimumSegmentLength)
-  if (!circle) {
-    return null
-  }
-
-  if (input.isClosed || distance2d(unique[0]!, unique.at(-1)!) <= input.tolerances.minimumSegmentLength) {
+  const circle = circleFromPoints(candidate, input.tolerances.minimumSegmentLength)
+  if (circle && isClosed) {
     return {
       geometryId: createProjectedGeometryId(input.referenceId, input.suffix),
       kind: 'circle',
@@ -221,13 +268,25 @@ function geometryFromWorldPolyline(input: {
     }
   }
 
+  if (!circle) {
+    return candidate.length >= 3
+      ? {
+          geometryId: createProjectedGeometryId(input.referenceId, input.suffix),
+          kind: 'spline',
+          fitPoints: candidate,
+          degree: splineDegreeForPointCount(candidate.length),
+          isClosed,
+        }
+      : null
+  }
+
   return {
     geometryId: createProjectedGeometryId(input.referenceId, input.suffix),
     kind: 'arc',
     centerPosition: circle.center,
-    startPosition: unique[0]!,
-    endPosition: unique.at(-1)!,
-    sweepDirection: signedPolylineArea(unique) < 0 ? 'clockwise' : 'counterClockwise',
+    startPosition: candidate[0]!,
+    endPosition: candidate.at(-1)!,
+    sweepDirection: signedPolylineArea(candidate) < 0 ? 'clockwise' : 'counterClockwise',
   }
 }
 
@@ -459,8 +518,21 @@ function projectSketchEntityGeometry(input: {
           }]
         : null
     }
-    case 'spline':
-      return []
+    case 'spline': {
+      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
+        const point = worldPoint(pointId)
+        return point ? [projectWorldPoint(input.plane, point)] : []
+      })
+      return fitPoints.length === entity.fitPointIds.length
+        ? [{
+            geometryId: createProjectedGeometryId(input.referenceId, entity.entityId),
+            kind: 'spline' as const,
+            fitPoints,
+            degree: entity.degree,
+            isClosed: false,
+          }]
+        : null
+    }
   }
 }
 

@@ -200,6 +200,14 @@ function length(point: SketchPoint2D) {
   return Math.hypot(point[0], point[1])
 }
 
+function dot2(left: SketchPoint2D, right: SketchPoint2D) {
+  return left[0] * right[0] + left[1] * right[1]
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
 function addPointGradient(
   gradient: Float64Array,
   point: SolverPointRecord,
@@ -220,6 +228,8 @@ function projectedKindForConstraintRef(kind: NonNullable<ProjectedSketchGeometry
       return 'circle'
     case 'projectedArc':
       return 'arc'
+    case 'projectedSpline':
+      return 'spline'
   }
 }
 
@@ -369,6 +379,41 @@ function pointLineSignedDistance(
 
   const delta = subtract(point, start)
   return delta[0] * unit[1] - delta[1] * unit[0]
+}
+
+function pointSegmentDistance(
+  point: SketchPoint2D,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+) {
+  const segment = subtract(end, start)
+  const lengthSquared = dot2(segment, segment)
+
+  if (lengthSquared <= DEGENERATE_NORM_EPSILON) {
+    return length(subtract(point, start))
+  }
+
+  const t = clamp(dot2(subtract(point, start), segment) / lengthSquared, 0, 1)
+  return length(subtract(point, [
+    start[0] + segment[0] * t,
+    start[1] + segment[1] * t,
+  ]))
+}
+
+function pointSplineDistance(point: SketchPoint2D, geometry: Extract<ProjectedSketchReferenceGeometry, { kind: 'spline' }>) {
+  const fitPoints = geometry.isClosed && geometry.fitPoints.length > 2
+    ? [...geometry.fitPoints, geometry.fitPoints[0]!]
+    : geometry.fitPoints
+
+  if (fitPoints.length === 0) {
+    return 0
+  }
+
+  let best = Number.POSITIVE_INFINITY
+  for (let index = 0; index < fitPoints.length - 1; index += 1) {
+    best = Math.min(best, pointSegmentDistance(point, fitPoints[index]!, fitPoints[index + 1]!))
+  }
+  return Number.isFinite(best) ? best : length(subtract(point, fitPoints[0]!))
 }
 
 function midpoint(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {
@@ -918,6 +963,10 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
 
           if (projected.kind === 'arc') {
             return pointProjectedArcDistance(position, projected)
+          }
+
+          if (projected.kind === 'spline') {
+            return pointSplineDistance(position, projected)
           }
 
           const circleLike = projectedCircleLikeGeometry(projected)
@@ -1657,6 +1706,7 @@ function validateDefinition(
           'projectedLineSegment',
           'projectedCircle',
           'projectedArc',
+          'projectedSpline',
         ])
         break
       case 'parallelProjectedLine':

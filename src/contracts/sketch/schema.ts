@@ -746,7 +746,7 @@ export interface SketchSolveDiagnostic {
  */
 export interface ProjectedSketchGeometryRef {
   /** Optional selection/runtime discriminant for editor-facing projected targets. */
-  kind?: 'projectedPoint' | 'projectedLineSegment' | 'projectedCircle' | 'projectedArc'
+  kind?: 'projectedPoint' | 'projectedLineSegment' | 'projectedCircle' | 'projectedArc' | 'projectedSpline'
   /** Authored external reference that produced the projected geometry. */
   referenceId: ReferenceId
   /** Stable projected geometry identity scoped to `referenceId`. */

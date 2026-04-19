@@ -19,6 +19,7 @@ export type SketchSnapCandidateKind =
   | 'nearestOnLine'
   | 'nearestOnCircle'
   | 'nearestOnArc'
+  | 'nearestOnSpline'
   | 'intersection'
   | 'horizontalAlignment'
   | 'verticalAlignment'
@@ -44,13 +45,13 @@ export type SketchSnapSourceRef =
   | {
       kind: 'localEntity'
       entityId: SketchEntityId
-      geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc'
+      geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc' | 'spline'
     }
   | {
       kind: 'projectedGeometry'
       referenceId: ReferenceId
       geometryId: ProjectedGeometryId
-      geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc'
+      geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc' | 'spline'
     }
   | {
       kind: 'transientAnchor'
@@ -103,6 +104,13 @@ export type SketchSnapGeometry =
       sweepDirection: 'clockwise' | 'counterClockwise'
       label: string
     }
+  | {
+      kind: 'spline'
+      source: SketchSnapSourceRef
+      fitPoints: readonly SketchPoint2D[]
+      isClosed: boolean
+      label: string
+    }
 
 export interface ResolveSketchSnapInput {
   pointer: SketchPoint2D
@@ -140,10 +148,6 @@ export function collectSketchSnapGeometries(input: {
       label: point.label,
     }))
   const localEntityGeometries = input.definition.entities.flatMap((entity): SketchSnapGeometry[] => {
-    if (entity.kind === 'spline') {
-      return []
-    }
-
     const source: SketchSnapSourceRef = {
       kind: 'localEntity',
       entityId: entity.entityId,
@@ -200,6 +204,21 @@ export function collectSketchSnapGeometries(input: {
               end: end.position,
               sweepDirection: entity.sweepDirection,
               label: entity.label,
+          }]
+          : []
+      }
+      case 'spline': {
+        const fitPoints = entity.fitPointIds.flatMap((pointId) => {
+          const point = points.get(pointId)
+          return point ? [point.position] : []
+        })
+        return fitPoints.length === entity.fitPointIds.length
+          ? [{
+              kind: 'spline',
+              source,
+              fitPoints,
+              isClosed: false,
+              label: entity.label,
             }]
           : []
       }
@@ -251,6 +270,14 @@ export function collectSketchSnapGeometries(input: {
             start: geometry.startPosition,
             end: geometry.endPosition,
             sweepDirection: geometry.sweepDirection,
+            label,
+          }]
+        case 'spline':
+          return [{
+            kind: 'spline',
+            source,
+            fitPoints: geometry.fitPoints,
+            isClosed: geometry.isClosed,
             label,
           }]
       }
@@ -329,6 +356,34 @@ function collectPointCandidates(
       continue
     }
 
+    if (geometry.kind === 'spline') {
+      if (!geometry.isClosed) {
+        const start = geometry.fitPoints[0]
+        const end = geometry.fitPoints.at(-1)
+        if (start) {
+          candidates.push(createCandidate({
+            kind: 'endpoint',
+            point: start,
+            pointer,
+            tolerance,
+            activeTool,
+            sources: [geometry.source],
+          }))
+        }
+        if (end && end !== start) {
+          candidates.push(createCandidate({
+            kind: 'endpoint',
+            point: end,
+            pointer,
+            tolerance,
+            activeTool,
+            sources: [geometry.source],
+          }))
+        }
+      }
+      continue
+    }
+
     candidates.push(createCandidate({
       kind: 'center',
       point: geometry.center,
@@ -402,6 +457,19 @@ function collectCurveCandidates(
       const point = nearestPointOnArc(pointer, geometry)
       candidates.push(createCandidate({
         kind: 'nearestOnArc',
+        point,
+        pointer,
+        tolerance,
+        activeTool,
+        sources: [geometry.source],
+      }))
+      continue
+    }
+
+    if (geometry.kind === 'spline') {
+      const point = nearestPointOnSpline(pointer, geometry)
+      candidates.push(createCandidate({
+        kind: 'nearestOnSpline',
         point,
         pointer,
         tolerance,
@@ -618,6 +686,7 @@ function getCandidatePriority(kind: SketchSnapCandidateKind, activeTool: SketchT
     nearestOnLine: 34,
     nearestOnCircle: 36,
     nearestOnArc: 38,
+    nearestOnSpline: 40,
   }
   const activeDrawingBoost =
     (activeTool === 'line' || activeTool === 'rectangle')
@@ -647,6 +716,8 @@ function getCandidatePreview(kind: SketchSnapCandidateKind): SketchSnapPreviewMe
       return { label: 'On circle', glyph: 'curve' }
     case 'nearestOnArc':
       return { label: 'On arc', glyph: 'curve' }
+    case 'nearestOnSpline':
+      return { label: 'On curve', glyph: 'curve' }
     case 'intersection':
       return { label: 'Intersection', glyph: 'intersection' }
     case 'horizontalAlignment':
@@ -710,6 +781,28 @@ function projectPointToSegment(point: SketchPoint2D, start: SketchPoint2D, end: 
 
   const clamped = clamp(t, 0, 1)
   return [start[0] + (end[0] - start[0]) * clamped, start[1] + (end[1] - start[1]) * clamped]
+}
+
+function nearestPointOnSpline(
+  point: SketchPoint2D,
+  geometry: Extract<SketchSnapGeometry, { kind: 'spline' }>,
+): SketchPoint2D {
+  const segments = geometry.isClosed && geometry.fitPoints.length > 2
+    ? [...geometry.fitPoints, geometry.fitPoints[0]!]
+    : geometry.fitPoints
+  let nearest = segments[0] ?? point
+  let bestDistance = Number.POSITIVE_INFINITY
+
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const candidate = projectPointToSegment(point, segments[index]!, segments[index + 1]!)
+    const distance = distanceBetween(point, candidate)
+    if (distance < bestDistance) {
+      nearest = candidate
+      bestDistance = distance
+    }
+  }
+
+  return nearest
 }
 
 function projectPointToFiniteSegment(

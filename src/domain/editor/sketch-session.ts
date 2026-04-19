@@ -49,9 +49,10 @@ import {
   type SketchStylePatch,
   type SketchStyleToolId,
 } from '@/domain/sketch-styles/definition'
-import type { OffsetSide } from '@/domain/sketch-editing/operations'
+import type { OffsetCurveDescriptor, OffsetSide } from '@/domain/sketch-editing/operations'
 import {
   createOffsetContribution,
+  offsetCurveDescriptorFromProjectedGeometry,
   trimLineSegmentAtIntersections,
 } from '@/domain/sketch-editing/operations'
 import { mapSketchPointToWorkspaceWorld } from '@/domain/workspace/sketch-plane-mapping'
@@ -1744,7 +1745,13 @@ function getOffsetPreview(
   activeEditTool: SketchEditToolState,
 ) {
   const selectedTargets = activeEditTool.selectedTargets
+  const sketchEntityTargets = selectedTargets
     .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => target.kind === 'sketchEntity')
+  const projectedTarget = selectedTargets.length === 1 && selectedTargets[0]?.kind === 'projectedReferenceGeometry'
+    ? selectedTargets[0]
+    : null
+  const projectedCurve = projectedTarget ? getOffsetCurveForProjectedTarget(session, projectedTarget) : null
+
   if (selectedTargets.length === 0) {
     return createOffsetContribution({
       definition: session.definition,
@@ -1760,12 +1767,28 @@ function getOffsetPreview(
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   return createOffsetContribution({
     definition: session.definition,
-    entityIds: selectedTargets.map((target) => target.entityId),
+    entityIds: projectedCurve ? [] : sketchEntityTargets.map((target) => target.entityId),
+    curve: projectedCurve ?? undefined,
     distance: activeEditTool.offsetDistance,
     side: activeEditTool.offsetSide,
     sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, sketchId),
   })
+}
+
+function getOffsetCurveForProjectedTarget(
+  session: SketchSessionState,
+  target: Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>,
+): OffsetCurveDescriptor | null {
+  const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === target.referenceId)
+  if (!projectedReference || projectedReference.status !== 'projected') {
+    return null
+  }
+
+  const geometry = projectedReference.geometry.find((entry) =>
+    entry.geometryId === target.geometryId && entry.kind === target.geometryKind,
+  )
+  return geometry ? offsetCurveDescriptorFromProjectedGeometry(geometry) : null
 }
 
 export function updateSketchEditToolHover(
@@ -1800,11 +1823,15 @@ export function selectSketchEditToolTarget(
   target: PrimitiveRef,
 ): SketchSessionState {
   const activeEditTool = session.activeEditTool
-  if (!activeEditTool || target.kind !== 'sketchEntity') {
+  if (!activeEditTool) {
     return session
   }
 
   if (activeEditTool.toolId === 'trim') {
+    if (target.kind !== 'sketchEntity') {
+      return session
+    }
+
     const nextSequence = session.sequence + 1
     const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
     const result = trimLineSegmentAtIntersections({
@@ -1847,6 +1874,10 @@ export function selectSketchEditToolTarget(
       activeEditTarget: null,
       activeDrag: null,
     }
+  }
+
+  if (target.kind !== 'sketchEntity' && target.kind !== 'projectedReferenceGeometry') {
+    return session
   }
 
   const nextSelectedTargets = activeEditTool.selectedTargets.some((selected) => primitiveRefEquals(selected, target))
@@ -2438,6 +2469,8 @@ function projectedKindForSource(source: Extract<SketchSnapSourceRef, { kind: 'pr
       return 'projectedCircle'
     case 'arc':
       return 'projectedArc'
+    case 'spline':
+      return 'projectedSpline'
   }
 }
 
@@ -4339,7 +4372,9 @@ function createProjectedPrimitiveRef(
         ? 'lineSegment'
         : reference.kind === 'projectedCircle'
           ? 'circle'
-          : 'arc',
+          : reference.kind === 'projectedArc'
+            ? 'arc'
+            : 'spline',
   }
 }
 
@@ -4370,6 +4405,8 @@ function getProjectedGeometryAnchor(
     case 'circle':
     case 'arc':
       return geometry.centerPosition
+    case 'spline':
+      return geometry.fitPoints[0] ?? null
   }
 }
 
@@ -4936,6 +4973,21 @@ function createDisplayRenderableForProjectedGeometry(
           ])
         }),
         isClosed: true,
+      },
+      linePattern: 'dashed',
+      role: 'reference',
+    }
+  }
+
+  if (geometry.kind === 'spline') {
+    return {
+      id: `renderable_projected_${referenceId}_${geometry.geometryId}_${index}` as RenderableId,
+      label: `Projected ${geometry.geometryId}`,
+      target,
+      geometry: {
+        kind: 'polyline',
+        points: geometry.fitPoints.map((point) => mapSketchPointToWorld(session.plane, point)),
+        isClosed: geometry.isClosed,
       },
       linePattern: 'dashed',
       role: 'reference',

@@ -12,6 +12,7 @@ import type {
 } from '@/domain/sketch-constraints/definition'
 import {
   resolveCircleTarget,
+  resolveCurveTarget,
   resolveLineTarget,
   resolvePointTarget,
 } from '@/domain/sketch-constraints/definition'
@@ -48,6 +49,8 @@ function projectedGeometryKind(kind: NonNullable<SketchConstraintTargetRecord['p
       return 'projectedCircle'
     case 'arc':
       return 'projectedArc'
+    case 'spline':
+      return 'projectedSpline'
   }
 }
 
@@ -108,6 +111,7 @@ function resolveCoincidentTarget(
   return resolvePointTarget(definition, target, projectedReferences)
     ?? resolveLineTarget(definition, target, projectedReferences)
     ?? resolveCircleTarget(definition, target, projectedReferences)
+    ?? resolveCurveTarget(definition, target, projectedReferences)
 }
 
 function pointLineDistance(
@@ -457,8 +461,8 @@ const sketchConstraintDefinitions = [
       modes: ['sketch'],
     },
     steps: [
-      { id: 'point-a', label: 'Select first coincident target', acceptedKinds: ['point', 'line', 'circle'] },
-      { id: 'point-b', label: 'Select second coincident target', acceptedKinds: ['point', 'line', 'circle'] },
+      { id: 'point-a', label: 'Select first coincident target', acceptedKinds: ['point', 'line', 'circle', 'spline'] },
+      { id: 'point-b', label: 'Select second coincident target', acceptedKinds: ['point', 'line', 'circle', 'spline'] },
     ],
     resolveTarget(definition, target, projectedReferences) {
       return resolveCoincidentTarget(definition, target, projectedReferences)
@@ -511,7 +515,12 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
-      if (projected.geometry.kind === 'lineSegment' || projected.geometry.kind === 'circle' || projected.geometry.kind === 'arc') {
+      if (
+        projected.geometry.kind === 'lineSegment'
+        || projected.geometry.kind === 'circle'
+        || projected.geometry.kind === 'arc'
+        || projected.geometry.kind === 'spline'
+      ) {
         return {
           constraints: [
             {
