@@ -383,7 +383,7 @@ export function FeatureSidebar({
                 const isEditingVariable = editingVariableId === variable.variableId || variable.valueText === ''
                 const variableResultChip = (
                   <span
-                    className="min-w-12 shrink-0 truncate rounded border px-2 py-1 text-right font-mono text-[12px] leading-4"
+                    className="inline-block max-w-full shrink-0 truncate rounded border px-2 py-1 text-right font-mono text-[12px] leading-4"
                     aria-label={
                       variableResult.kind === 'error'
                         ? `Variable result error: ${variableResult.message}`
@@ -492,6 +492,12 @@ export function FeatureSidebar({
                             }}
                           >
                             {variable.valueText}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className="shrink-0 text-[12px] leading-4 text-[var(--mantine-color-dark-3)]"
+                          >
+                            =
                           </span>
                           {variableResult.kind === 'error' ? (
                             <Tooltip

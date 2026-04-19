@@ -131,7 +131,9 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(variableSidebarMarkup.includes('aria-label="Edit variable variable_width"'), 'Existing variables should expose a double-click row edit control.')
   assert(!variableSidebarMarkup.includes('aria-label="Variable name variable_width"'), 'Existing variables should render read-only rows until edited.')
   assert(variableSidebarMarkup.includes('data-variable-expression="variable_width"') && variableSidebarMarkup.includes('10 + 2'), 'Read-only variable rows should keep the authored expression visible.')
+  assert(variableSidebarMarkup.includes('aria-hidden="true" class="shrink-0 text-[12px] leading-4 text-[var(--mantine-color-dark-3)]">=</span>'), 'Read-only variable rows should separate expressions and results with an equals sign.')
   assert(variableSidebarMarkup.includes('font-mono') && variableSidebarMarkup.includes('>12</span>'), 'Variable expression results should render in a monospace value chip.')
+  assert(variableSidebarMarkup.includes('inline-block max-w-full shrink-0 truncate rounded border px-2 py-1 text-right font-mono'), 'Variable expression results should size to their text instead of using a fixed minimum width.')
   assert(variableSidebarMarkup.includes('var(--workbench-shell-success-surface)'), 'Successful variable results should use the shared success background.')
   assert(variableSidebarMarkup.includes('data-result-state="success"'), 'Successful variable results should expose success state metadata.')
 
