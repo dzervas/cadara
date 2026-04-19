@@ -172,6 +172,34 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
     ],
   } satisfies AdvancedSolidFeatureAuthoringDescriptor
 
+  const combineDescriptor = {
+    featureKind: 'combine',
+    participants: [
+      {
+        role: 'targetBody',
+        label: 'Target bodies',
+        required: true,
+        cardinality: { min: 1, max: null },
+        acceptedKinds: ['body'],
+      },
+      {
+        role: 'toolBody',
+        label: 'Tool bodies',
+        required: true,
+        cardinality: { min: 1, max: null },
+        acceptedKinds: ['body'],
+      },
+    ],
+    operationIntent: {
+      supportedIntents: ['add', 'subtract', 'intersect'],
+      requiredParticipantsByIntent: {
+        add: ['targetBody', 'toolBody'],
+        subtract: ['targetBody', 'toolBody'],
+        intersect: ['targetBody', 'toolBody'],
+      },
+    },
+  } satisfies AdvancedSolidFeatureAuthoringDescriptor
+
   const deleteSolidDescriptor = {
     featureKind: 'deleteSolid',
     participants: [
@@ -483,6 +511,70 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
     )
   }
 
+  function testCombineValidationAcceptsExplicitTargetToolBodiesAndBooleanIntent() {
+    const diagnostics = validateAdvancedSolidFeatureDefinition({
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'subtract',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target' }] },
+          { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool' }] },
+        ],
+      },
+    }, combineDescriptor)
+
+    assert(diagnostics.length === 0, 'Combine validation should accept explicit target bodies, tool bodies, and supported operation intent.')
+  }
+
+  function testCombineValidationRejectsMalformedParticipantsAndUnsupportedIntent() {
+    const missingTool = validateAdvancedSolidFeatureDefinition({
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'add',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target' }] },
+        ],
+      },
+    }, combineDescriptor)
+    const wrongTargetKind = validateAdvancedSolidFeatureDefinition({
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'intersect',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'face', bodyId: 'body_wrong', faceId: 'face_wrong' }] },
+          { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool' }] },
+        ],
+      },
+    }, combineDescriptor)
+    const unsupportedIntent = validateAdvancedSolidFeatureDefinition({
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target' }] },
+          { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool' }] },
+        ],
+      },
+    }, combineDescriptor)
+
+    assert(
+      missingTool.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'toolBody'),
+      'Combine validation should require explicit tool bodies.',
+    )
+    assert(
+      wrongTargetKind.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'targetBody'),
+      'Combine validation should reject non-body target participants.',
+    )
+    assert(
+      unsupportedIntent.some((diagnostic) => diagnostic.code === 'advanced-feature-unsupported-operation'),
+      'Combine validation should reject unsupported operation intents.',
+    )
+  }
+
   function testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets() {
     const valid = validateAdvancedSolidFeatureDefinition({
       kind: 'deleteSolid',
@@ -592,6 +684,8 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   testLoftValidationRejectsMissingProfilesAndInvalidBooleanTargets()
   testSplitValidationAcceptsExplicitTargetAndToolBodies()
   testSplitValidationRejectsMissingBodiesAndUnsupportedToolFamilies()
+  testCombineValidationAcceptsExplicitTargetToolBodiesAndBooleanIntent()
+  testCombineValidationRejectsMalformedParticipantsAndUnsupportedIntent()
   testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets()
   testMirrorValidationAcceptsExplicitBodiesPlaneAndCopyPolicy()
   testTransformValidationAcceptsBodyOnlyScopeAndTypedDistance()
@@ -708,6 +802,8 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   testLoftValidationRejectsMissingProfilesAndInvalidBooleanTargets()
   testSplitValidationAcceptsExplicitTargetAndToolBodies()
   testSplitValidationRejectsMissingBodiesAndUnsupportedToolFamilies()
+  testCombineValidationAcceptsExplicitTargetToolBodiesAndBooleanIntent()
+  testCombineValidationRejectsMalformedParticipantsAndUnsupportedIntent()
   testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets()
   testChamferEdgeParticipantsAndDistanceValidation()
   testThickenFaceParticipantsAndThicknessValidation()

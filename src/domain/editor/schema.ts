@@ -89,6 +89,7 @@ export type SelectionFilterKind =
   | 'revolveReferences'
   | 'sweepReferences'
   | 'loftReferences'
+  | 'combineReferences'
   | 'splitReferences'
   | 'deleteSolidReferences'
   | 'mirrorReferences'
@@ -512,6 +513,42 @@ export const splitSelectionFilter: SelectionFilter = {
           id: 'split-tool-body',
           label: 'Split tool body',
           description: 'Select one body to use as the split tool.',
+          acceptedKinds: ['body'],
+          acceptedSemantics: ['body'],
+        },
+      ],
+    },
+  ],
+}
+
+export const combineSelectionFilter: SelectionFilter = {
+  kind: 'combineReferences',
+  allowedKinds: ['body'],
+  label: 'Combine references',
+  requirements: [
+    {
+      id: 'combine-target-body',
+      label: 'Target bodies',
+      description: 'Combine requires one or more explicit target bodies.',
+      slots: [
+        {
+          id: 'combine-target-body',
+          label: 'Target body',
+          description: 'Select one or more bodies to receive the boolean result.',
+          acceptedKinds: ['body'],
+          acceptedSemantics: ['body'],
+        },
+      ],
+    },
+    {
+      id: 'combine-tool-body',
+      label: 'Tool bodies',
+      description: 'Combine requires one or more explicit tool bodies.',
+      slots: [
+        {
+          id: 'combine-tool-body',
+          label: 'Tool body',
+          description: 'Select one or more bodies used as boolean tools.',
           acceptedKinds: ['body'],
           acceptedSemantics: ['body'],
         },
@@ -1089,6 +1126,8 @@ export function getSelectionPreviewLabel(
       ? 'revolve reference'
       : filter.kind === 'sweepReferences'
         ? 'sweep reference'
+        : filter.kind === 'combineReferences'
+          ? 'combine reference'
         : filter.kind === 'thickenReferences'
           ? 'thicken reference'
         : filter.kind === 'filletEdges'

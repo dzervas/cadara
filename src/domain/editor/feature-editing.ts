@@ -18,6 +18,8 @@ export type {
   FeatureDraftPatch,
   FeatureEditSessionState,
   FeatureEditSessionStateBase,
+  CombineFeatureEditSessionState,
+  CombineFeatureParameterDraft,
   ChamferFeatureEditSessionState,
   ChamferFeatureParameterDraft,
   FilletFeatureEditSessionState,
@@ -110,6 +112,7 @@ export function hydrateFeatureEditSession(
     && feature.definition.kind !== 'loft'
     && feature.definition.kind !== 'chamfer'
     && feature.definition.kind !== 'thicken'
+    && feature.definition.kind !== 'combine'
     && feature.definition.kind !== 'split'
     && feature.definition.kind !== 'deleteSolid'
     && feature.definition.kind !== 'mirror'

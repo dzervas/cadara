@@ -101,6 +101,12 @@ export interface ThickenFeatureParameterDraft {
   }
 }
 
+export interface CombineFeatureParameterDraft {
+  targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
+  toolBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
+  operationIntent: MaybeAuthoredValue<Exclude<AdvancedSolidOperationIntent, 'create'>>
+}
+
 export interface SplitFeatureParameterDraft {
   targetBodyTarget: Extract<PrimitiveRef, { kind: 'body' }> | null
   toolBodyTarget: Extract<PrimitiveRef, { kind: 'body' }> | null
@@ -133,6 +139,7 @@ export interface FeatureDraftByKind {
   loft: LoftFeatureParameterDraft
   chamfer: ChamferFeatureParameterDraft
   thicken: ThickenFeatureParameterDraft
+  combine: CombineFeatureParameterDraft
   split: SplitFeatureParameterDraft
   deleteSolid: DeleteSolidFeatureParameterDraft
   mirror: MirrorFeatureParameterDraft
@@ -149,6 +156,7 @@ export interface FeatureParametersByKind {
   loft: AdvancedSolidFeatureParameters
   chamfer: AdvancedSolidFeatureParameters
   thicken: AdvancedSolidFeatureParameters
+  combine: AdvancedSolidFeatureParameters
   split: AdvancedSolidFeatureParameters
   deleteSolid: AdvancedSolidFeatureParameters
   mirror: AdvancedSolidFeatureParameters
@@ -165,6 +173,7 @@ export interface FeatureVersionByKind {
   loft: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   chamfer: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   thicken: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
+  combine: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   split: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   deleteSolid: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   mirror: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
@@ -172,7 +181,7 @@ export interface FeatureVersionByKind {
 }
 
 export type FeatureDefinitionByKind<TKind extends AuthoredFeatureKind> =
-  TKind extends 'sweep' | 'loft' | 'chamfer' | 'thicken' | 'split' | 'deleteSolid' | 'mirror' | 'transform'
+  TKind extends 'sweep' | 'loft' | 'chamfer' | 'thicken' | 'combine' | 'split' | 'deleteSolid' | 'mirror' | 'transform'
     ? AdvancedSolidFeatureDefinition & { kind: TKind }
     : Extract<FeatureDefinition, { kind: TKind }>
 
@@ -201,6 +210,7 @@ export type SweepFeatureEditSessionState = FeatureEditSessionStateForKind<'sweep
 export type LoftFeatureEditSessionState = FeatureEditSessionStateForKind<'loft'>
 export type ChamferFeatureEditSessionState = FeatureEditSessionStateForKind<'chamfer'>
 export type ThickenFeatureEditSessionState = FeatureEditSessionStateForKind<'thicken'>
+export type CombineFeatureEditSessionState = FeatureEditSessionStateForKind<'combine'>
 export type SplitFeatureEditSessionState = FeatureEditSessionStateForKind<'split'>
 export type DeleteSolidFeatureEditSessionState = FeatureEditSessionStateForKind<'deleteSolid'>
 export type MirrorFeatureEditSessionState = FeatureEditSessionStateForKind<'mirror'>
@@ -216,6 +226,7 @@ export type FeatureEditSessionState =
   | LoftFeatureEditSessionState
   | ChamferFeatureEditSessionState
   | ThickenFeatureEditSessionState
+  | CombineFeatureEditSessionState
   | SplitFeatureEditSessionState
   | DeleteSolidFeatureEditSessionState
   | MirrorFeatureEditSessionState

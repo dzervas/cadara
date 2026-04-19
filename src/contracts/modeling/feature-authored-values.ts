@@ -61,6 +61,10 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
         { path: ['parameters', 'options', 'thickness'], label: 'Thicken thickness', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'options', 'side'], label: 'Thicken side', valueKind: { kind: 'enumString', options: ['oneSide', 'symmetric'] } },
       ]
+    case 'combine':
+      return [
+        { path: ['parameters', 'operationIntent'], label: 'Combine operation intent', valueKind: { kind: 'enumString', options: ['add', 'subtract', 'intersect'] } },
+      ]
     case 'mirror':
       return [
         { path: ['parameters', 'options', 'copy'], label: 'Mirror copy', valueKind: { kind: 'boolean' } },

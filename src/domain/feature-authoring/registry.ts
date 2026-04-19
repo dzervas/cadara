@@ -1,6 +1,7 @@
 import type { AuthoredFeatureKind } from '@/contracts/modeling/schema'
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
 import { chamferAuthoringDefinition } from '@/domain/feature-authoring/features/chamfer'
+import { combineAuthoringDefinition } from '@/domain/feature-authoring/features/combine'
 import { deleteSolidAuthoringDefinition } from '@/domain/feature-authoring/features/delete-solid'
 import { extrudeAuthoringDefinition } from '@/domain/feature-authoring/features/extrude'
 import { filletAuthoringDefinition } from '@/domain/feature-authoring/features/fillet'
@@ -24,6 +25,7 @@ export const featureAuthoringDefinitions = [
   loftAuthoringDefinition,
   chamferAuthoringDefinition,
   thickenAuthoringDefinition,
+  combineAuthoringDefinition,
   splitAuthoringDefinition,
   deleteSolidAuthoringDefinition,
   mirrorAuthoringDefinition,

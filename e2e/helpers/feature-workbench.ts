@@ -20,6 +20,7 @@ type FeatureKind =
   | 'fillet'
   | 'chamfer'
   | 'thicken'
+  | 'combine'
   | 'deleteSolid'
   | 'mirror'
   | 'transform'
@@ -87,6 +88,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
       fillet: 'Round selected edges.',
       chamfer: 'Bevel selected edges.',
       thicken: 'Offset selected faces into a solid.',
+      combine: 'Boolean explicit target bodies with explicit tool bodies.',
       deleteSolid: 'Delete one or more solid bodies from the document.',
       mirror: 'Mirror selected bodies across an explicit plane reference.',
       transform: 'Translate selected bodies along an explicit planar reference normal.',
@@ -153,6 +155,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async setOperation(operation: 'newBody' | 'join' | 'cut' | 'intersect') {
+    await this.page.getByRole('button', { name: operation }).click()
+  }
+
+  async setCombineOperation(operation: 'add' | 'subtract' | 'intersect') {
     await this.page.getByRole('button', { name: operation }).click()
   }
 

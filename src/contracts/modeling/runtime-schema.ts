@@ -236,6 +236,7 @@ const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional
 
 const advancedDefinitionSchema = z.object({
   kind: z.union([
+    z.literal('combine'),
     z.literal('sweep'),
     z.literal('loft'),
     z.literal('wrap'),

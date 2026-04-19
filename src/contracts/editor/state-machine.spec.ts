@@ -903,6 +903,47 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   function testSplitAndDeleteSolidActivationStartFeatureSessions() {
+    const combineCatalog = createRegionSelectionCatalog()
+    const combineActivation = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        selectionCatalog: {
+          ...combineCatalog,
+          selectableTargetKeys: [...combineCatalog.selectableTargetKeys, 'body:body_b'],
+        },
+        selection: [{ kind: 'body', bodyId: 'body_a' }],
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'combine',
+      },
+    )
+
+    assert(combineActivation.state.kind === 'editingFeature', 'Combine activation should enter feature editing.')
+    assert(combineActivation.state.session.featureType === 'combine', 'Combine activation should create a combine session.')
+    assert(
+      combineActivation.state.session.draft.targetBodyTargets[0]?.bodyId === 'body_a',
+      'Combine activation should seed the selected body as a target body.',
+    )
+    assert(combineActivation.effects.length === 0, 'Combine activation should wait for explicit tool bodies before previewing.')
+
+    const combineToolSelection = transitionEditorState(combineActivation.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'body', bodyId: 'body_b' },
+    })
+
+    assert(
+      combineToolSelection.state.kind === 'editingFeature' &&
+        combineToolSelection.state.session.featureType === 'combine' &&
+        combineToolSelection.state.session.draft.toolBodyTargets[0]?.bodyId === 'body_b',
+      'Combine body selection should fill explicit tool bodies after the target role is populated.',
+    )
+    assert(combineToolSelection.effects[0]?.type === 'feature.evaluatePreview', 'Complete Combine drafts should request a preview effect.')
+
     const splitActivation = transitionEditorState(
       {
         ...initialEditorState,

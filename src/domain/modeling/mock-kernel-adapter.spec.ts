@@ -9,7 +9,10 @@ import {
   PLANE_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
+import type { BodyId, FeatureId, ObjectTreeNodeId } from '@/contracts/shared/ids'
+import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import {
+  combineAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
   mirrorAdvancedFeatureExample,
   splitAdvancedFeatureExample,
@@ -21,6 +24,39 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     if (!condition) {
       throw new Error(message)
     }
+  }
+
+  async function addMockToolBody(adapter: MockKernelAdapter, bodyId: BodyId) {
+    const snapshot = await (adapter as unknown as { getSnapshot(): Promise<DocumentSnapshot> }).getSnapshot()
+    const sourceBody = snapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')
+    const sourceObject = snapshot.presentation.objects.find((item) => item.target.kind === 'body' && item.target.bodyId === 'body_part-1')
+
+    assert(sourceBody, 'Mock fixture should expose a source body to clone for multi-body tests.')
+    assert(sourceObject, 'Mock fixture should expose a source body object row to clone for multi-body tests.')
+
+    snapshot.document.bodies = [
+      ...snapshot.document.bodies,
+      {
+        ...structuredClone(sourceBody),
+        bodyId,
+        label: 'Mock tool body',
+        ownerFeatureId: 'feature_mock_tool' as FeatureId,
+      },
+    ]
+    snapshot.bodies = snapshot.document.bodies
+    snapshot.presentation.objects = [
+      ...snapshot.presentation.objects,
+      {
+        ...structuredClone(sourceObject),
+        id: `object_tree_node_${bodyId}` as ObjectTreeNodeId,
+        label: 'Mock tool body',
+        target: { kind: 'body', bodyId },
+        ownerBodyId: bodyId,
+        ownerFeatureId: 'feature_mock_tool' as FeatureId,
+      },
+    ]
+    snapshot.document.objects = snapshot.presentation.objects
+    snapshot.objects = snapshot.presentation.objects
   }
 
   async function testSourceBackedSketchReferenceProjection() {
@@ -1179,6 +1215,75 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(after.snapshot.revisionId === created.revisionId, 'Rejected split create requests must not mutate committed document state.')
   }
 
+  async function testCombinePreviewCommitAndValidationUseAdvancedParticipants() {
+    const adapter = new MockKernelAdapter()
+    await addMockToolBody(adapter, 'body_part-2' as BodyId)
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const combineDefinition = {
+      ...combineAdvancedFeatureExample,
+      parameters: {
+        operationIntent: 'subtract' as const,
+        participants: [
+          { role: 'targetBody' as const, targets: [{ kind: 'body' as const, bodyId: 'body_part-1' as BodyId }] },
+          { role: 'toolBody' as const, targets: [{ kind: 'body' as const, bodyId: 'body_part-2' as BodyId }] },
+        ],
+      },
+    }
+    const invalidDefinition = {
+      ...combineDefinition,
+      parameters: {
+        ...combineDefinition.parameters,
+        participants: [
+          { role: 'targetBody' as const, targets: [{ kind: 'body' as const, bodyId: 'body_part-1' as BodyId }] },
+          { role: 'toolBody' as const, targets: [{ kind: 'body' as const, bodyId: 'body_part-1' as BodyId }] },
+        ],
+      },
+    }
+
+    const preview = await adapter.evaluatePreview({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: before.snapshot.revisionId,
+      previewId: 'preview_combine_valid',
+      definition: combineDefinition,
+    })
+    const created = await adapter.createFeature({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: before.snapshot.revisionId,
+      definition: combineDefinition,
+    })
+    const invalid = await adapter.createFeature({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: created.revisionId,
+      definition: invalidDefinition,
+    })
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const committedCombine = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const targetBody = after.snapshot.bodies.find((body) => body.bodyId === 'body_part-1')
+
+    assert(preview.render.records.length > 0, 'Supported mock combine previews should return transient renderables.')
+    assert(preview.diagnostics.length === 0, 'Supported mock combine previews should not emit diagnostics.')
+    assert(created.revisionState.kind === 'accepted', 'Supported mock combine create requests should be accepted.')
+    assert(committedCombine?.definition.kind === 'combine', 'Committed mock combine should be present in the next snapshot.')
+    assert(committedCombine.definition.parameters.operationIntent === 'subtract', 'Committed mock combine should preserve the operation intent.')
+    assert(targetBody?.label.includes('(subtract)') === true, 'Committed mock combine should visibly relabel the target body output.')
+    assert(!after.snapshot.bodies.some((body) => body.bodyId === 'body_part-2'), 'Committed mock combine should consume the tool body row.')
+    assert(
+      !after.snapshot.presentation.objects.some((item) => item.target.kind === 'body' && item.target.bodyId === 'body_part-2'),
+      'Committed mock combine should remove the consumed tool body from object navigation.',
+    )
+    assert(invalid.revisionState.kind === 'rejected', 'Invalid combine role overlap should reject explicitly.')
+    assert(after.snapshot.revisionId === created.revisionId, 'Rejected combine create requests must not mutate committed document state.')
+  }
+
   async function testDeleteSolidPreviewCommitAndValidationUseAdvancedParticipants() {
     const adapter = new MockKernelAdapter()
     const before = await adapter.getDocumentSnapshot({
@@ -1760,6 +1865,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     await testChamferPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()
     await testThickenPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()
     await testSplitPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()
+    await testCombinePreviewCommitAndValidationUseAdvancedParticipants()
     await testDeleteSolidPreviewCommitAndValidationUseAdvancedParticipants()
     await testMirrorPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()
     await testTransformPreviewCommitAndValidationUseAdvancedParticipants()

@@ -37,7 +37,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sort()
 
     assert(
-      JSON.stringify(registeredKinds) === JSON.stringify(['chamfer', 'deleteSolid', 'extrude', 'fillet', 'loft', 'mirror', 'plane', 'revolve', 'shell', 'split', 'sweep', 'thicken', 'transform']),
+      JSON.stringify(registeredKinds) === JSON.stringify(['chamfer', 'combine', 'deleteSolid', 'extrude', 'fillet', 'loft', 'mirror', 'plane', 'revolve', 'shell', 'split', 'sweep', 'thicken', 'transform']),
       'The feature authoring registry should contain every current authored feature kind.',
     )
   }
@@ -518,6 +518,69 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
   }
 
+  function testCombineDraftSelectionOperationAndHydration() {
+    const targetBody = { kind: 'body' as const, bodyId: 'body_target' as const }
+    const toolBody = { kind: 'body' as const, bodyId: 'body_tool' as const }
+    const secondToolBody = { kind: 'body' as const, bodyId: 'body_tool_2' as const }
+    const initialSession = createFeatureEditSession({
+      featureType: 'combine',
+      selectedTarget: targetBody,
+    })
+
+    assert(initialSession.featureType === 'combine', 'Combine activation should create a combine authoring session.')
+    assert(buildFeatureDefinition(initialSession) === null, 'Combine drafts without tool bodies should not build a modeling definition.')
+
+    const targetField = getFormField(initialSession, 'combine-target-bodies')
+    const toolField = getFormField(initialSession, 'combine-tool-bodies')
+    const operationField = getFormField(initialSession, 'combine-operation-intent')
+
+    assert(targetField?.kind === 'referenceCollection', 'Combine should expose target bodies as a reference collection.')
+    assert(toolField?.kind === 'referenceCollection', 'Combine should expose tool bodies as a reference collection.')
+    assert(operationField?.kind === 'enum', 'Combine should expose operation intent as a generic enum field.')
+
+    const withTool = patchFeatureEditSession(
+      initialSession,
+      createFeatureEditorReferenceSelectionPatch(toolField, toolBody),
+    )
+    const intersectSession = patchFeatureEditSession(
+      withTool,
+      createFeatureEditorFieldPatch(getFormField(withTool, 'combine-operation-intent'), 'intersect'),
+    )
+    const withSecondTool = patchFeatureEditSession(
+      intersectSession,
+      createFeatureEditorReferenceSelectionPatch(getFormField(intersectSession, 'combine-tool-bodies'), secondToolBody),
+    )
+    const definition = buildFeatureDefinition(withSecondTool)
+
+    assert(definition?.kind === 'combine', 'Completed Combine drafts should build a combine advanced-solid definition.')
+    assert(definition.parameters.operationIntent === 'intersect', 'Combine definitions should preserve the explicit operation intent.')
+    assert(
+      definition.parameters.participants.find((participant) => participant.role === 'targetBody')?.targets[0] === targetBody,
+      'Combine definitions should preserve explicit targetBody participants.',
+    )
+    assert(
+      definition.parameters.participants.find((participant) => participant.role === 'toolBody')?.targets.length === 2,
+      'Combine definitions should preserve explicit toolBody collections.',
+    )
+
+    const hydrated = hydrateFeatureEditSession({
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: 'feature_combine-1',
+      ownerSketchId: null,
+      ownerBodyId: null,
+      featureId: 'feature_combine-1',
+      label: 'feature_combine-1',
+      definition,
+      producedTargets: [{ kind: 'body', bodyId: 'body_target' }],
+    })
+
+    assert(hydrated?.featureType === 'combine', 'Combine snapshots should hydrate into combine edit sessions.')
+    assert(hydrated.draft.targetBodyTargets.length === 1, 'Combine hydration should preserve target bodies.')
+    assert(hydrated.draft.toolBodyTargets.length === 2, 'Combine hydration should preserve tool bodies.')
+    assert(hydrated.draft.operationIntent === 'intersect', 'Combine hydration should preserve operation intent.')
+  }
+
   function testDeleteSolidDraftSelectionAndHydration() {
     const bodyA = { kind: 'body' as const, bodyId: 'body_a' as const }
     const bodyB = { kind: 'body' as const, bodyId: 'body_b' as const }
@@ -860,6 +923,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const loft = definitions.find((definition) => definition.metadata.kind === 'loft')
     const chamfer = definitions.find((definition) => definition.metadata.kind === 'chamfer')
     const thicken = definitions.find((definition) => definition.metadata.kind === 'thicken')
+    const combine = definitions.find((definition) => definition.metadata.kind === 'combine')
     const split = definitions.find((definition) => definition.metadata.kind === 'split')
     const deleteSolid = definitions.find((definition) => definition.metadata.kind === 'deleteSolid')
     const mirror = definitions.find((definition) => definition.metadata.kind === 'mirror')
@@ -872,6 +936,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     assert(loft?.advancedParticipants?.some((participant) => participant.role === 'profile'), 'Loft should declare ordered profile participants for profile-family coverage.')
     assert(chamfer?.advancedParticipants?.some((participant) => participant.role === 'edge'), 'Chamfer should declare edge participants for topology modifier substrate coverage.')
     assert(thicken?.advancedParticipants?.some((participant) => participant.role === 'face'), 'Thicken should declare face participants for face-driven advanced solid coverage.')
+    assert(combine?.advancedParticipants?.some((participant) => participant.role === 'targetBody'), 'Combine should declare explicit targetBody participants for body boolean coverage.')
+    assert(combine?.advancedParticipants?.some((participant) => participant.role === 'toolBody'), 'Combine should declare explicit toolBody participants for body boolean coverage.')
     assert(split?.advancedParticipants?.some((participant) => participant.role === 'toolBody'), 'Split should declare explicit toolBody participants for body split coverage.')
     assert(deleteSolid?.advancedParticipants?.some((participant) => participant.role === 'body'), 'Delete-solid should declare explicit body participants for body removal coverage.')
     assert(mirror?.advancedParticipants?.some((participant) => participant.role === 'plane'), 'Mirror should declare an explicit mirror plane participant.')
@@ -905,6 +971,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       'src/domain/feature-authoring/features/loft.ts',
       'src/domain/feature-authoring/features/chamfer.ts',
       'src/domain/feature-authoring/features/thicken.ts',
+      'src/domain/feature-authoring/features/combine.ts',
       'src/domain/feature-authoring/features/split.ts',
       'src/domain/feature-authoring/features/delete-solid.ts',
       'src/domain/feature-authoring/features/mirror.ts',
@@ -1056,6 +1123,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testLoftHydrationPreservesOrderedProfilesForEditing()
   testThickenDraftSelectionOptionsAndDefinitionBuilder()
   testThickenHydrationPreservesFaceTargetsAndOptions()
+  testCombineDraftSelectionOperationAndHydration()
   testSplitDraftSelectionAndDefinitionBuilder()
   testDeleteSolidDraftSelectionAndHydration()
   testMirrorDraftSelectionOptionHandlingAndHydration()

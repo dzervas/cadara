@@ -339,14 +339,6 @@ export const toolDefinitions = [
   },
   ...featureToolDefinitions,
   {
-    id: 'combine',
-    group: 'features',
-    name: 'Combine',
-    tooltip: 'Boolean selected parts.',
-    icon: 'combine',
-    modes: ['part'],
-  },
-  {
     id: 'linearPattern',
     group: 'patterns',
     name: 'Linear Pattern',

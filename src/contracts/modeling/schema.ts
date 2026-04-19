@@ -83,6 +83,7 @@ export type AuthoredFeatureKind =
   | 'loft'
   | 'chamfer'
   | 'thicken'
+  | 'combine'
   | 'split'
   | 'deleteSolid'
   | 'mirror'

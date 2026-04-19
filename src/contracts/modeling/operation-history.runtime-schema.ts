@@ -30,6 +30,7 @@ import { sketchPlaneDefinitionSchema, sketchPlaneSupportRefSchema } from '@/cont
 
 const transportOnlyFields = ['contractVersion', 'documentId', 'baseRevisionId', 'requestId', 'solverCorrelation'] as const
 const advancedFeatureKinds = new Set([
+  'combine',
   'sweep',
   'loft',
   'wrap',

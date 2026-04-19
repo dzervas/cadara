@@ -102,6 +102,25 @@ test('split previews and commits from explicit target and tool bodies', async ({
   await workbench.expectBodyCountAtLeast(3)
 })
 
+test('combine subtract previews, commits, and persists consumed tool output', async ({ page }) => {
+  const workbench = new FeatureWorkbenchHarness(page)
+
+  const fixture = await workbench.openWithTwoExtrudeBodiesFixture()
+  await workbench.selectBodyTarget(fixture.targetBody)
+  await workbench.activateFeature('combine')
+  await workbench.setCombineOperation('subtract')
+  await workbench.selectBodyTarget(fixture.toolBody)
+
+  await workbench.expectFeaturePreviewReady('combine')
+  await workbench.commitFeature('feature_combine-1')
+  await workbench.expectBodyPresent(fixture.targetBody)
+  await workbench.expectBodyAbsent(fixture.toolBody)
+
+  await workbench.reloadPreservingStorage()
+  await workbench.expectBodyPresent(fixture.targetBody)
+  await workbench.expectBodyAbsent(fixture.toolBody)
+})
+
 test('delete-solid previews and commits from an explicit body target', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 

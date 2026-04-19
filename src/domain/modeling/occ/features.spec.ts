@@ -717,6 +717,114 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assert(intersectResult.bodies[0]?.bodyId === bodyA.bodyId, 'Per-target intersect should preserve the remaining target body id when only one body overlaps.')
   }
 
+  async function testCombineExecutesBodyBooleansAndConsumesTools() {
+    const oc = await getDefaultOpenCascadeInstance()
+
+    async function makeOverlappingContext(prefix: string) {
+      const target = await makeBoxBody(oc, `body_phase4_combine_${prefix}_target` as BodyId, 4, 4, 4, `feature_phase4_combine_${prefix}_target_seed` as FeatureId)
+      const tool = await makeBoxBody(oc, `body_phase4_combine_${prefix}_tool` as BodyId, 4, 4, 4, `feature_phase4_combine_${prefix}_tool_seed` as FeatureId, [2, 0, 0])
+      const context = await createContext({ bodies: [target, tool] })()
+      return { context, target, tool }
+    }
+
+    const add = await makeOverlappingContext('add')
+    const addResult = executeOccFeature(add.context, 'feature_phase4_combine_add' as FeatureId, {
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'add',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'body', bodyId: add.target.bodyId }] },
+          { role: 'toolBody', targets: [{ kind: 'body', bodyId: add.tool.bodyId }] },
+        ],
+      },
+    })
+    const addBody = addResult.bodies.find((body) => body.bodyId === add.target.bodyId)
+    assert(addResult.bodies.length === 1, 'Combine add should consume the tool body into the target output.')
+    assert(addBody != null, 'Combine add should preserve the primary target body identity.')
+    assertClose(await bodyVolume(add.context.oc, addBody.shape), 96, 1e-6, 'Combine add should fuse overlapping target and tool volumes.')
+    assert(addResult.producedTargets[0]?.kind === 'body' && addResult.producedTargets[0].bodyId === add.target.bodyId, 'Combine add should report the preserved target as produced output.')
+
+    const subtract = await makeOverlappingContext('subtract')
+    const subtractResult = executeOccFeature(subtract.context, 'feature_phase4_combine_subtract' as FeatureId, {
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'subtract',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'body', bodyId: subtract.target.bodyId }] },
+          { role: 'toolBody', targets: [{ kind: 'body', bodyId: subtract.tool.bodyId }] },
+        ],
+      },
+    })
+    const subtractBody = subtractResult.bodies.find((body) => body.bodyId === subtract.target.bodyId)
+    assert(subtractResult.bodies.length === 1, 'Combine subtract should remove the consumed tool body from the body list.')
+    assert(subtractBody != null, 'Combine subtract should preserve the target body identity.')
+    assertClose(await bodyVolume(subtract.context.oc, subtractBody.shape), 32, 1e-6, 'Combine subtract should cut the overlapping tool volume from the target.')
+    assert(subtractResult.historyInvalidations.size > 0, 'Combine subtract should report topology invalidation history.')
+
+    const intersect = await makeOverlappingContext('intersect')
+    const intersectResult = executeOccFeature(intersect.context, 'feature_phase4_combine_intersect' as FeatureId, {
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'intersect',
+        participants: [
+          { role: 'targetBody', targets: [{ kind: 'body', bodyId: intersect.target.bodyId }] },
+          { role: 'toolBody', targets: [{ kind: 'body', bodyId: intersect.tool.bodyId }] },
+        ],
+      },
+    })
+    const intersectBody = intersectResult.bodies.find((body) => body.bodyId === intersect.target.bodyId)
+    assert(intersectResult.bodies.length === 1, 'Combine intersect should consume the tool body and keep the common target output.')
+    assert(intersectBody != null, 'Combine intersect should preserve the target body identity for non-empty common volume.')
+    assertClose(await bodyVolume(intersect.context.oc, intersectBody.shape), 32, 1e-6, 'Combine intersect should keep only the common overlapping volume.')
+  }
+
+  async function testCombineRejectsEmptyAndMalformedBodyRoles() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const target = await makeBoxBody(oc, 'body_phase4_combine_empty_target' as BodyId, 2, 2, 2, 'feature_phase4_combine_empty_target_seed' as FeatureId)
+    const disjointTool = await makeBoxBody(oc, 'body_phase4_combine_empty_tool' as BodyId, 2, 2, 2, 'feature_phase4_combine_empty_tool_seed' as FeatureId, [10, 0, 0])
+    const context = await createContext({ bodies: [target, disjointTool] })()
+
+    let emptyIntersection: string | null = null
+    try {
+      executeOccFeature(context, 'feature_phase4_combine_empty' as FeatureId, {
+        kind: 'combine',
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: 'intersect',
+          participants: [
+            { role: 'targetBody', targets: [{ kind: 'body', bodyId: target.bodyId }] },
+            { role: 'toolBody', targets: [{ kind: 'body', bodyId: disjointTool.bodyId }] },
+          ],
+        },
+      })
+    } catch (error) {
+      emptyIntersection = error instanceof Error ? error.message : String(error)
+    }
+
+    let duplicateRole: string | null = null
+    try {
+      executeOccFeature(context, 'feature_phase4_combine_duplicate' as FeatureId, {
+        kind: 'combine',
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: 'subtract',
+          participants: [
+            { role: 'targetBody', targets: [{ kind: 'body', bodyId: target.bodyId }] },
+            { role: 'toolBody', targets: [{ kind: 'body', bodyId: target.bodyId }] },
+          ],
+        },
+      })
+    } catch (error) {
+      duplicateRole = error instanceof Error ? error.message : String(error)
+    }
+
+    assert(emptyIntersection?.includes('OCC combine produced no solid result bodies') === true, 'Combine empty intersections should reject with an explicit empty-result diagnostic message.')
+    assert(duplicateRole?.includes('target and tool bodies must be distinct') === true, 'Combine should reject duplicate target/tool body roles explicitly.')
+  }
+
   async function testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid() {
     const oc = await getDefaultOpenCascadeInstance()
     const profilePlane = createStandardPlaneDefinition('xz')
@@ -1316,6 +1424,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testExtrudeJoinRejectsMultiSolidResultShapes()
   await testExtrudeRejectsInvalidExtentAndBooleanScope()
   await testCutAndIntersectApplyPerTargetPolicy()
+  await testCombineExecutesBodyBooleansAndConsumesTools()
+  await testCombineRejectsEmptyAndMalformedBodyRoles()
   await testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid()
   await testRevolveRejectsNonPlanarFaceProfilesExplicitly()
   await testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath()

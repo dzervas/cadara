@@ -944,6 +944,57 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       return { accepted: true as const, diagnostics: [] }
     }
+    case 'combine': {
+      const targetBodyTargets = getAdvancedParticipant(definition, 'targetBody')?.targets ?? []
+      const toolBodyTargets = getAdvancedParticipant(definition, 'toolBody')?.targets ?? []
+      const intent = definition.parameters.operationIntent
+
+      if (intent !== 'add' && intent !== 'subtract' && intent !== 'intersect') {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-combine',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Combine requires add, subtract, or intersect operation intent.')],
+        }
+      }
+
+      if (targetBodyTargets.length === 0 || targetBodyTargets.some((target) => target.kind !== 'body')) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-combine',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Combine requires at least one explicit targetBody participant.')],
+        }
+      }
+
+      if (toolBodyTargets.length === 0 || toolBodyTargets.some((target) => target.kind !== 'body')) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-combine',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Combine requires at least one explicit toolBody participant.')],
+        }
+      }
+
+      if (
+        targetBodyTargets.some((target) => target.kind !== 'body' || !hasBodyTarget(snapshot, target.bodyId)) ||
+        toolBodyTargets.some((target) => target.kind !== 'body' || !hasBodyTarget(snapshot, target.bodyId))
+      ) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-combine',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Combine body participants must resolve to live durable bodies.')],
+        }
+      }
+
+      const targetBodyIds = new Set(targetBodyTargets.map((target) => target.kind === 'body' ? target.bodyId : null))
+      if (toolBodyTargets.some((target) => target.kind === 'body' && targetBodyIds.has(target.bodyId))) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-combine',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Combine targetBody and toolBody participants must be distinct.')],
+        }
+      }
+
+      return { accepted: true as const, diagnostics: [] }
+    }
     case 'split': {
       const targetBodyTargets = getAdvancedParticipant(definition, 'targetBody')?.targets ?? []
       const toolBodyTargets = getAdvancedParticipant(definition, 'toolBody')?.targets ?? []
@@ -1147,6 +1198,11 @@ function buildPreviewRenderables(definition: FeatureDefinition, snapshot: Docume
   }
 
   if (definition.kind === 'split') {
+    const body = getAdvancedParticipant(definition, 'targetBody')?.targets[0]
+    return body ? createPreviewRenderableSet(getPrimitiveRefKey(body)) : []
+  }
+
+  if (definition.kind === 'combine') {
     const body = getAdvancedParticipant(definition, 'targetBody')?.targets[0]
     return body ? createPreviewRenderableSet(getPrimitiveRefKey(body)) : []
   }
@@ -1823,8 +1879,8 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
       angularToleranceRadians: 0.0001,
     },
     capabilities: {
-      supportedFeatureKinds: ['extrude', 'fillet', 'sweep', 'loft', 'chamfer', 'thicken', 'split', 'deleteSolid'],
-      previewableFeatureKinds: ['extrude', 'sweep', 'loft', 'chamfer', 'thicken', 'split', 'deleteSolid'],
+      supportedFeatureKinds: ['extrude', 'fillet', 'sweep', 'loft', 'chamfer', 'thicken', 'combine', 'split', 'deleteSolid'],
+      previewableFeatureKinds: ['extrude', 'sweep', 'loft', 'chamfer', 'thicken', 'combine', 'split', 'deleteSolid'],
       supportedProfileKinds: ['region', 'face'],
       supportsFaceBackedSketchPlanes: true,
       supportsDurableTopologyNaming: false,
@@ -2365,6 +2421,81 @@ function rebuildObjectTree(snapshot: DocumentSnapshot) {
   snapshot.objects = snapshot.presentation.objects
 }
 
+function getMockCombineBodyIds(
+  definition: FeatureDefinition,
+  role: 'targetBody' | 'toolBody',
+) {
+  if (definition.kind !== 'combine') {
+    return []
+  }
+
+  return (getAdvancedParticipant(definition, role)?.targets ?? [])
+    .flatMap((target) => target.kind === 'body' ? [target.bodyId] : [])
+}
+
+function applyMockCombineSnapshotMutation(
+  snapshot: DocumentSnapshot,
+  featureId: FeatureId,
+  definition: FeatureDefinition,
+) {
+  const targetBodyIds = getMockCombineBodyIds(definition, 'targetBody')
+  const toolBodyIds = getMockCombineBodyIds(definition, 'toolBody')
+
+  if (targetBodyIds.length === 0 || toolBodyIds.length === 0) {
+    return
+  }
+
+  const targetBodyIdSet = new Set(targetBodyIds)
+  const toolBodyIdSet = new Set(toolBodyIds)
+  const operation = definition.kind === 'combine' ? definition.parameters.operationIntent : null
+
+  snapshot.document.bodies = snapshot.document.bodies
+    .filter((body) => !toolBodyIdSet.has(body.bodyId))
+    .map((body) => targetBodyIdSet.has(body.bodyId)
+      ? {
+          ...body,
+          ownerFeatureId: featureId,
+          label: `${body.label} (${operation})`,
+        }
+      : body)
+  snapshot.bodies = snapshot.document.bodies
+
+  snapshot.presentation.objects = snapshot.presentation.objects
+    .filter((item) => item.target.kind !== 'body' || !toolBodyIdSet.has(item.target.bodyId))
+    .map((item) => item.target.kind === 'body' && targetBodyIdSet.has(item.target.bodyId)
+      ? {
+          ...item,
+          ownerFeatureId: featureId,
+          label: `${item.label} (${operation})`,
+        }
+      : item)
+  snapshot.document.objects = snapshot.presentation.objects
+  snapshot.objects = snapshot.presentation.objects
+
+  snapshot.document.render.records = snapshot.document.render.records
+    .filter((record) => record.ownerBodyId === null || !toolBodyIdSet.has(record.ownerBodyId))
+    .map((record) => record.ownerBodyId !== null && targetBodyIdSet.has(record.ownerBodyId)
+      ? {
+          ...record,
+          ownerFeatureId: featureId,
+          label: `${record.label} (${operation})`,
+        }
+      : record)
+  snapshot.render = snapshot.document.render
+
+  snapshot.presentation.entities = snapshot.presentation.entities
+    .filter((entry) => entry.ownerBodyId === null || !toolBodyIdSet.has(entry.ownerBodyId))
+    .map((entry) => entry.ownerBodyId !== null && targetBodyIdSet.has(entry.ownerBodyId)
+      ? {
+          ...entry,
+          ownerFeatureId: featureId,
+          label: `${entry.label} (${operation})`,
+        }
+      : entry)
+  snapshot.document.entities = snapshot.presentation.entities
+  snapshot.entities = snapshot.presentation.entities
+}
+
 function allocateFeatureId(snapshot: DocumentSnapshot, kind: FeatureDefinition['kind']): FeatureId {
   const prefix = `feature_${kind}-`
   let nextOrdinal = 1
@@ -2675,6 +2806,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }))
 
       updateFeatureEntityRelationship(mutableSnapshot, featureId, changedTargets)
+      applyMockCombineSnapshotMutation(mutableSnapshot, featureId, resolvedDefinition.definition)
       rebuildFeatureTree(mutableSnapshot)
       rebuildObjectTree(mutableSnapshot)
 
@@ -3125,7 +3257,9 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       }
 
       updateFeatureEntityRelationship(mutableSnapshot, request.featureId, mutableFeature.producedTargets)
+      applyMockCombineSnapshotMutation(mutableSnapshot, request.featureId, resolvedDefinition.definition)
       rebuildFeatureTree(mutableSnapshot)
+      rebuildObjectTree(mutableSnapshot)
 
       const diagnostics: UpdateFeatureResponse['diagnostics'] = [
         {

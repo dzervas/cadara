@@ -21,6 +21,7 @@ export type AdvancedParticipantRole =
 export type AdvancedSolidOperationIntent = 'create' | 'add' | 'subtract' | 'intersect'
 
 export type AdvancedSolidFeatureKind =
+  | 'combine'
   | 'sweep'
   | 'loft'
   | 'wrap'
@@ -101,6 +102,7 @@ export interface AdvancedFeatureValidationDiagnostic {
 }
 
 const advancedSolidFeatureKinds: readonly AdvancedSolidFeatureKind[] = [
+  'combine',
   'sweep',
   'loft',
   'wrap',
@@ -324,6 +326,18 @@ export const splitAdvancedFeatureExample = {
   kind: 'split',
   featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   parameters: {
+    participants: [
+      { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target' as BodyId }] },
+      { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool' as BodyId }] },
+    ],
+  },
+} satisfies AdvancedSolidFeatureDefinition
+
+export const combineAdvancedFeatureExample = {
+  kind: 'combine',
+  featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  parameters: {
+    operationIntent: 'subtract',
     participants: [
       { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target' as BodyId }] },
       { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool' as BodyId }] },

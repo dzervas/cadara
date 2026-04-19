@@ -1348,6 +1348,156 @@ function executeThickenFeature(
   }
 }
 
+function getCombineBodyTargets(
+  definition: AdvancedSolidFeatureDefinition & { kind: 'combine' },
+  role: 'targetBody' | 'toolBody',
+) {
+  const targets = getAdvancedParticipant(definition, role)?.targets ?? []
+
+  if (targets.length === 0) {
+    throw new Error(`advanced-feature-unsupported-kernel-case: OCC combine requires at least one ${role} participant.`)
+  }
+
+  for (const target of targets) {
+    if (target.kind !== 'body') {
+      throw new Error(`advanced-feature-unsupported-kernel-case: OCC combine ${role} participants must be durable body targets.`)
+    }
+  }
+
+  return targets as readonly Extract<DurableRef, { kind: 'body' }>[]
+}
+
+function getCombineBooleanOperation(definition: AdvancedSolidFeatureDefinition & { kind: 'combine' }): Exclude<FeatureBooleanOperation, 'newBody'> {
+  const intent = definition.parameters.operationIntent
+
+  switch (intent) {
+    case 'add':
+      return 'join'
+    case 'subtract':
+      return 'cut'
+    case 'intersect':
+      return 'intersect'
+    default:
+      throw new Error('advanced-feature-unsupported-kernel-case: OCC combine requires add, subtract, or intersect operation intent.')
+  }
+}
+
+function mergeHistoryInvalidations(
+  target: Map<string, OccReferenceInvalidationRecord>,
+  source: Map<string, OccReferenceInvalidationRecord>,
+) {
+  for (const [key, value] of source) {
+    target.set(key, value)
+  }
+}
+
+function executeCombineFeature(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  definition: AdvancedSolidFeatureDefinition & { kind: 'combine' },
+): OccFeatureExecutionResult {
+  const targetBodies = getCombineBodyTargets(definition, 'targetBody')
+  const toolBodies = getCombineBodyTargets(definition, 'toolBody')
+  const operation = getCombineBooleanOperation(definition)
+  const targetBodyIds = targetBodies.map((target) => target.bodyId)
+  const toolBodyIds = toolBodies.map((target) => target.bodyId)
+  requireUniqueTargetBodies(targetBodyIds)
+  requireUniqueTargetBodies(toolBodyIds)
+
+  if (targetBodyIds.some((bodyId) => toolBodyIds.includes(bodyId))) {
+    throw new Error('advanced-feature-unsupported-kernel-case: OCC combine target and tool bodies must be distinct.')
+  }
+
+  const historyInvalidations = new Map<string, OccReferenceInvalidationRecord>()
+  const nextBodies = [...context.bodies]
+  const producedTargets: DurableRef[] = []
+
+  if (operation === 'join') {
+    const [firstTargetBodyId, ...remainingTargetBodyIds] = targetBodyIds
+    const firstTargetBody = requireBody(context, firstTargetBodyId!)
+    let currentShape: InstanceType<OpenCascadeInstance['TopoDS_Shape']> = firstTargetBody.shape
+    let firstTargetHistorySource: ReturnType<typeof runBoolean>['builder'] | null = null
+
+    for (const bodyId of [...remainingTargetBodyIds, ...toolBodyIds]) {
+      const body = requireBody(context, bodyId)
+      const result = runBoolean(context.oc, 'join', currentShape, body.shape)
+      currentShape = result.shape
+      if (!firstTargetHistorySource) {
+        firstTargetHistorySource = result.builder
+      }
+    }
+
+    const replacementResult = resolveReplacementBodies(context, firstTargetBodyId!, currentShape, ownerFeatureId, {
+      allowEmpty: true,
+      ...(firstTargetHistorySource ? { historySource: firstTargetHistorySource } : {}),
+    })
+    const firstIndex = nextBodies.findIndex((entry) => entry.bodyId === firstTargetBodyId)
+    nextBodies.splice(firstIndex, 1, ...replacementResult.replacements)
+    mergeHistoryInvalidations(historyInvalidations, replacementResult.historyInvalidations)
+
+    for (const bodyId of [...remainingTargetBodyIds, ...toolBodyIds]) {
+      const body = requireBody(context, bodyId)
+      const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId)
+      if (index >= 0) {
+        nextBodies.splice(index, 1)
+      }
+      mergeHistoryInvalidations(historyInvalidations, createDeletedBodyInvalidations(body))
+    }
+
+    for (const replacement of replacementResult.replacements) {
+      producedTargets.push({ kind: 'body', bodyId: replacement.bodyId })
+    }
+  } else {
+    for (const targetBodyId of targetBodyIds) {
+      const targetBody = requireBody(context, targetBodyId)
+      let currentShape: InstanceType<OpenCascadeInstance['TopoDS_Shape']> = targetBody.shape
+      let lastBuilder: ReturnType<typeof runBoolean>['builder'] | null = null
+
+      for (const toolBodyId of toolBodyIds) {
+        const toolBody = requireBody(context, toolBodyId)
+        const result = runBoolean(context.oc, operation, currentShape, toolBody.shape)
+        currentShape = result.shape
+        lastBuilder = result.builder
+      }
+
+      const replacementResult = resolveReplacementBodies(context, targetBodyId, currentShape, ownerFeatureId, {
+        allowEmpty: true,
+        ...(lastBuilder ? { historySource: lastBuilder } : {}),
+      })
+      const targetIndex = nextBodies.findIndex((entry) => entry.bodyId === targetBodyId)
+      nextBodies.splice(targetIndex, 1, ...replacementResult.replacements)
+      mergeHistoryInvalidations(historyInvalidations, replacementResult.historyInvalidations)
+
+      for (const replacement of replacementResult.replacements) {
+        producedTargets.push({ kind: 'body', bodyId: replacement.bodyId })
+      }
+    }
+
+    for (const toolBodyId of toolBodyIds) {
+      const toolBody = requireBody(context, toolBodyId)
+      const index = nextBodies.findIndex((entry) => entry.bodyId === toolBodyId)
+      if (index >= 0) {
+        nextBodies.splice(index, 1)
+      }
+      mergeHistoryInvalidations(historyInvalidations, createDeletedBodyInvalidations(toolBody))
+    }
+  }
+
+  if (producedTargets.length === 0) {
+    throw new Error('advanced-feature-unsupported-kernel-case: OCC combine produced no solid result bodies.')
+  }
+
+  return {
+    bodies: nextBodies,
+    constructions: [...context.constructions],
+    constructionPlanes: new Map(context.constructionPlanes),
+    producedTargets,
+    entities: [],
+    renderRecords: [],
+    historyInvalidations,
+  }
+}
+
 function getSplitTargetBody(definition: AdvancedSolidFeatureDefinition & { kind: 'split' }) {
   const targets = getAdvancedParticipant(definition, 'targetBody')?.targets ?? []
 
@@ -1790,6 +1940,8 @@ export function executeOccFeature(
       return executeChamferFeature(context, ownerFeatureId, definition as AdvancedSolidFeatureDefinition & { kind: 'chamfer' })
     case 'thicken':
       return executeThickenFeature(context, ownerFeatureId, definition as AdvancedSolidFeatureDefinition & { kind: 'thicken' })
+    case 'combine':
+      return executeCombineFeature(context, ownerFeatureId, definition as AdvancedSolidFeatureDefinition & { kind: 'combine' })
     case 'split':
       return executeSplitFeature(context, ownerFeatureId, definition as AdvancedSolidFeatureDefinition & { kind: 'split' })
     case 'deleteSolid':

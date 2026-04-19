@@ -85,6 +85,12 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     return resolved.value
   }
 
+  async function expectModelingError<T>(result: AppResultAsync<T>) {
+    const resolved = await result
+    assert(resolved.isErr(), 'Modeling result should be an error.')
+    return resolved.error
+  }
+
   function createProjectedGeometryId(referenceId: string, ordinal: number): ProjectedGeometryId {
     return `projected_geometry_${referenceId}_${ordinal}` as ProjectedGeometryId
   }
@@ -693,6 +699,24 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
         participants: [
           { role: 'targetBody', targets: [{ kind: 'body', bodyId: targetBodyId }] },
           { role: 'toolBody', targets: [{ kind: 'body', bodyId: toolBodyId }] },
+        ],
+      },
+    }
+  }
+
+  function createCombineDefinition(
+    targetBodyIds: readonly BodyId[],
+    toolBodyIds: readonly BodyId[],
+    operationIntent: 'add' | 'subtract' | 'intersect',
+  ): FeatureDefinition {
+    return {
+      kind: 'combine',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent,
+        participants: [
+          { role: 'targetBody', targets: targetBodyIds.map((bodyId) => ({ kind: 'body' as const, bodyId })) },
+          { role: 'toolBody', targets: toolBodyIds.map((bodyId) => ({ kind: 'body' as const, bodyId })) },
         ],
       },
     }
@@ -1965,6 +1989,149 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(
       unsupportedPlane.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'rebuildFailure'),
       'Unsupported split create rejection must surface structured diagnostics.',
+    )
+  }
+
+  async function testCombinePreviewCreateReplayAndValidation() {
+    const store = createMemoryOperationHistoryStore()
+    const service = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: store,
+    })
+
+    const firstRequest = createSketchCommitRequest('rev_0001', {
+      sketchLabel: 'Combine Target',
+    })
+    const firstSketchCommit = await unwrapModelingResult(service.commitSketch({
+      baseRevisionId: firstRequest.baseRevisionId,
+      solverCorrelation: firstRequest.solverCorrelation,
+      sketchId: firstRequest.sketchId,
+      sketchLabel: firstRequest.sketchLabel,
+      plane: firstRequest.plane,
+      planeTarget: firstRequest.planeTarget,
+      planeKey: firstRequest.planeKey,
+      definition: firstRequest.definition,
+    }))
+    assert(firstSketchCommit.revisionState.kind === 'accepted', 'First combine sketch should commit before boolean coverage.')
+
+    const secondRequest = createSketchCommitRequest(firstSketchCommit.revisionId, {
+      sketchLabel: 'Combine Tool',
+      definition: translateSeedDefinition(2, 0),
+    })
+    const secondSketchCommit = await unwrapModelingResult(service.commitSketch({
+      baseRevisionId: secondRequest.baseRevisionId,
+      solverCorrelation: secondRequest.solverCorrelation,
+      sketchId: secondRequest.sketchId,
+      sketchLabel: secondRequest.sketchLabel,
+      plane: secondRequest.plane,
+      planeTarget: secondRequest.planeTarget,
+      planeKey: secondRequest.planeKey,
+      definition: secondRequest.definition,
+    }))
+    assert(secondSketchCommit.revisionState.kind === 'accepted', 'Second combine sketch should commit before boolean coverage.')
+
+    const thirdRequest = createSketchCommitRequest(secondSketchCommit.revisionId, {
+      sketchLabel: 'Combine Disjoint Tool',
+      definition: translateSeedDefinition(30, 0),
+    })
+    const thirdSketchCommit = await unwrapModelingResult(service.commitSketch({
+      baseRevisionId: thirdRequest.baseRevisionId,
+      solverCorrelation: thirdRequest.solverCorrelation,
+      sketchId: thirdRequest.sketchId,
+      sketchLabel: thirdRequest.sketchLabel,
+      plane: thirdRequest.plane,
+      planeTarget: thirdRequest.planeTarget,
+      planeKey: thirdRequest.planeKey,
+      definition: thirdRequest.definition,
+    }))
+    assert(thirdSketchCommit.revisionState.kind === 'accepted', 'Disjoint combine sketch should commit before empty-result coverage.')
+
+    const sketchSnapshot = await service.getCurrentDocumentSnapshot()
+    const firstSketch = requireSketch(sketchSnapshot, firstSketchCommit.sketchId)
+    const secondSketch = requireSketch(sketchSnapshot, secondSketchCommit.sketchId)
+    const thirdSketch = requireSketch(sketchSnapshot, thirdSketchCommit.sketchId)
+
+    async function createServiceExtrudeBody(baseRevisionId: RevisionId, sketch: SketchSnapshotRecord, label: string) {
+      const created = await unwrapModelingResult(service.createFeature({
+        baseRevisionId,
+        featureLabel: label,
+        definition: createExtrudeDefinition(sketch, 6),
+      }))
+      const bodyTarget = created.changedTargets.find((target) => target.kind === 'body')
+
+      assert(created.revisionState.kind === 'accepted', `${label} extrude should commit before combine coverage.`)
+      assert(bodyTarget?.kind === 'body', `${label} extrude should report a produced body target.`)
+      return { response: created, bodyId: bodyTarget.bodyId }
+    }
+
+    const targetBody = await createServiceExtrudeBody(sketchSnapshot.revisionId, firstSketch, 'Combine Target Body')
+    const toolBody = await createServiceExtrudeBody(targetBody.response.revisionId, secondSketch, 'Combine Tool Body')
+    const disjointToolBody = await createServiceExtrudeBody(toolBody.response.revisionId, thirdSketch, 'Combine Disjoint Tool Body')
+    const combineDefinition = createCombineDefinition([targetBody.bodyId], [toolBody.bodyId], 'subtract')
+    const beforePreview = await service.getCurrentDocumentSnapshot()
+    const beforeTargetSignature = committedBodySignature(beforePreview, targetBody.bodyId)
+
+    const preview = await service.evaluatePreview({
+      baseRevisionId: disjointToolBody.response.revisionId,
+      previewId: 'preview_combine_subtract',
+      definition: combineDefinition,
+    })
+    const afterPreview = await service.getCurrentDocumentSnapshot()
+
+    assert(preview.freshness.kind === 'fresh', 'Fresh combine previews must report fresh freshness state.')
+    assertNoErrorDiagnostics(preview.diagnostics, 'Combine subtract preview must not emit error diagnostics.')
+    assert(preview.renderables.length > 0, 'Combine subtract preview must return transient renderables.')
+    assert(afterPreview.bodies.some((body) => body.bodyId === toolBody.bodyId), 'Combine preview must not mutate the committed tool body.')
+    assert(
+      committedBodySignature(afterPreview, targetBody.bodyId) === beforeTargetSignature,
+      'Combine preview must leave committed target geometry unchanged.',
+    )
+
+    const created = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: disjointToolBody.response.revisionId,
+      definition: combineDefinition,
+    }))
+    assert(created.revisionState.kind === 'accepted', 'Combine subtract create must be accepted for valid target/tool bodies.')
+    assert(created.rebuildResult.kind === 'rebuilt', 'Accepted combine create must rebuild.')
+    assert(created.changedTargets.some((target) => target.kind === 'body' && target.bodyId === targetBody.bodyId), 'Combine create must report the surviving target body.')
+
+    const after = await service.getCurrentDocumentSnapshot()
+    const afterTargetSignature = committedBodySignature(after, targetBody.bodyId)
+    const committedCombine = after.features.find((feature) => feature.featureId === created.featureId)
+    assert(committedCombine?.definition.kind === 'combine', 'Committed combine feature should persist in the feature timeline.')
+    assert(after.bodies.some((body) => body.bodyId === targetBody.bodyId), 'Combine create should preserve the target body id.')
+    assert(after.bodies.every((body) => body.bodyId !== toolBody.bodyId), 'Combine create should remove the consumed tool body.')
+    assert(after.bodies.some((body) => body.bodyId === disjointToolBody.bodyId), 'Combine create should preserve unrelated bodies.')
+    assert(afterTargetSignature !== beforeTargetSignature, 'Combine create should change the surviving target body geometry.')
+
+    const staleTool = await expectModelingError(service.createFeature({
+      baseRevisionId: created.revisionId,
+      definition: createCombineDefinition([targetBody.bodyId], [toolBody.bodyId], 'add'),
+    }))
+    assert(staleTool.code === 'modeling/diagnostic', 'Combine with a consumed tool body should reject stale references.')
+
+    const emptyIntersection = await expectModelingError(service.createFeature({
+      baseRevisionId: created.revisionId,
+      definition: createCombineDefinition([targetBody.bodyId], [disjointToolBody.bodyId], 'intersect'),
+    }))
+    assert(emptyIntersection.code === 'modeling/diagnostic', 'Combine empty intersections should reject instead of committing a no-op.')
+
+    const afterRejected = await service.getCurrentDocumentSnapshot()
+    assert(afterRejected.revisionId === after.revisionId, 'Rejected combine requests must not mutate committed document state.')
+
+    const restoredService = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: store,
+    })
+    const restored = await restoredService.getCurrentDocumentSnapshot()
+    const restoredCombine = restored.features.find((feature) => feature.featureId === created.featureId)
+
+    assert(restoredCombine?.definition.kind === 'combine', 'Restored operation history should replay committed combine features.')
+    assert(restored.bodies.some((body) => body.bodyId === targetBody.bodyId), 'Restored combine output should preserve the target body id.')
+    assert(restored.bodies.every((body) => body.bodyId !== toolBody.bodyId), 'Restored combine output should keep the consumed tool body removed.')
+    assert(
+      committedBodySignature(restored, targetBody.bodyId) === afterTargetSignature,
+      'Restored combine output should match the committed post-boolean target geometry.',
     )
   }
 
@@ -3616,6 +3783,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testShellPreviewCreateUpdateAndSnapshotRoundTrip()
   await testThickenPreviewCreateAndUnsupportedCases()
   await testSplitPreviewCreateAndUnsupportedCases()
+  await testCombinePreviewCreateReplayAndValidation()
   await testDeleteSolidPreviewCreateAndReferenceInvalidation()
   await testMirrorPreviewCreateAndCopyBodies()
   await testTransformPreviewCreateAndReplaceBody()

@@ -14,6 +14,7 @@ import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
   chamferAdvancedFeatureExample,
+  combineAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
   loftAdvancedFeatureExample,
   mirrorAdvancedFeatureExample,
@@ -725,6 +726,51 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(!result.ok && result.reasonCode === 'invalid-advanced-participant', 'Invalid advanced participants should report a stable reason code.')
   }
 
+  function testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries() {
+    const payload: ModelingOperationHistoryPayload = {
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        createCreateFeatureHistoryEntry({
+          ...createFeatureRequest,
+          definition: combineAdvancedFeatureExample,
+        }),
+        {
+          kind: 'updateFeature',
+          payload: {
+            featureId: 'feature_combine-1',
+            definition: {
+              ...combineAdvancedFeatureExample,
+              parameters: {
+                ...combineAdvancedFeatureExample.parameters,
+                operationIntent: 'intersect',
+                participants: [
+                  { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target_next' }] },
+                  { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool_next' }] },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    }
+
+    const result = validateOperationHistoryPayload(payload)
+
+    assert(result.ok, 'Combine advanced solid feature history payloads should validate.')
+    assert(
+      result.ok
+        && result.payload.entries[0]?.kind === 'createFeature'
+        && result.payload.entries[0].payload.definition.kind === 'combine'
+        && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'targetBody')
+        && getAuthoredLiteralValue(result.payload.entries[0].payload.definition.parameters.operationIntent) === 'subtract'
+        && result.payload.entries[1]?.kind === 'updateFeature'
+        && result.payload.entries[1].payload.definition.kind === 'combine'
+        && getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.operationIntent) === 'intersect'
+        && result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'toolBody'),
+      'Combine operation history must preserve participant roles and operation intent across create and update entries.',
+    )
+  }
+
   function testPreservesThickenParticipantsAndOptions() {
     const payload: ModelingOperationHistoryPayload = {
       ...createEmptyOperationHistory('doc_workspace'),
@@ -910,6 +956,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   testPreservesAdvancedParticipantsAndOperationIntent()
   testPreservesChamferParticipantsAndDistanceOptions()
   testPreservesSplitParticipantsAcrossCreateAndUpdateEntries()
+  testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries()
   testPreservesDeleteSolidParticipantsAcrossCreateAndUpdateEntries()
   testPreservesLoftParticipantOrderAndGuideCurves()
   testRejectsInvalidAdvancedParticipants()
