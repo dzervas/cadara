@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Paper, Text, ThemeIcon, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Paper, Select, Text, ThemeIcon, Tooltip } from '@mantine/core'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
@@ -468,37 +468,42 @@ function EnumField(props: {
       field={props.field}
       documentVariables={props.documentVariables}
       onPatch={props.onPatch}
-      renderControl={({ value, disabled, onLiteralChange }) => (
-        <div className="grid grid-cols-4 gap-2">
-          {props.field.options.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              disabled={disabled}
-              variant={value === option.value ? 'light' : 'default'}
-              color="workbench"
-              onClick={() => onLiteralChange(option.value)}
-              styles={{
-                root: {
-                  backgroundColor:
-                    value === option.value
-                      ? 'var(--workbench-shell-accent-surface)'
-                      : 'var(--workbench-shell-surface)',
-                  borderColor:
-                    value === option.value
-                      ? 'var(--workbench-shell-border-strong)'
-                      : 'var(--workbench-shell-border)',
-                  color:
-                    value === option.value
-                      ? 'var(--workbench-shell-text)'
-                      : 'var(--workbench-shell-text-muted)',
-                },
-              }}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
+      renderControl={({ id, value, disabled, hasError, onBlur, onLiteralChange }) => (
+        <Select
+          id={id}
+          aria-label={props.field.label}
+          aria-invalid={hasError || undefined}
+          data={props.field.options.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          value={value}
+          disabled={disabled}
+          onBlur={onBlur}
+          onChange={(nextValue) => {
+            if (nextValue !== null) {
+              onLiteralChange(nextValue)
+            }
+          }}
+          allowDeselect={false}
+          comboboxProps={{ withinPortal: true }}
+          styles={{
+            input: {
+              backgroundColor: 'var(--workbench-shell-surface)',
+              borderColor: hasError ? 'var(--workbench-shell-danger-border)' : 'var(--workbench-shell-border)',
+              color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
+              height: 40,
+            },
+            dropdown: {
+              backgroundColor: 'var(--workbench-shell-overlay-strong)',
+              borderColor: 'var(--workbench-shell-border)',
+              boxShadow: 'var(--workbench-panel-shadow)',
+            },
+            option: {
+              color: 'var(--workbench-shell-text)',
+            },
+          }}
+        />
       )}
     />
   )
@@ -872,7 +877,7 @@ export function FeatureInspector({
   return (
     <Paper
       component="aside"
-      className="flex h-full max-h-full w-[320px] min-w-[320px] flex-col overflow-hidden"
+      className="flex h-full max-h-full w-[320px] min-w-0 max-w-full flex-col overflow-hidden"
       style={{
         background: 'var(--workbench-shell-surface-panel)',
         border: '1px solid var(--workbench-shell-border)',

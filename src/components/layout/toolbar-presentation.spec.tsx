@@ -71,4 +71,8 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
       tooltipMarkup.includes('--workbench-tooltip-description'),
     'Toolbar tooltip copy should derive its contrast treatment from shared workbench theme variables.',
   )
+  assert(
+    tooltipMarkup.includes('whitespace-normal') && tooltipMarkup.includes('break-words'),
+    'Toolbar tooltip copy should wrap instead of forcing long text onto one line.',
+  )
 })

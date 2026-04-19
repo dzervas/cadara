@@ -189,6 +189,8 @@ export const workbenchTheme = createTheme({
           backgroundColor: 'var(--workbench-tooltip-surface)',
           border: '1px solid var(--workbench-tooltip-border)',
           boxShadow: 'var(--workbench-panel-shadow)',
+          maxWidth: 'min(280px, calc(100vw - 32px))',
+          whiteSpace: 'normal',
         },
       },
     },

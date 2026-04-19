@@ -96,6 +96,17 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
     'Feature inspector should render f(x) affordances for expression-capable numeric and enum fields.',
   )
   assert(
+    incompleteRevolveMarkup.includes('role="combobox"') && !incompleteRevolveMarkup.includes('grid grid-cols-4 gap-2'),
+    'Feature inspector enum fields should render as dropdown selections instead of fixed option button grids.',
+  )
+  assert(
+    incompleteRevolveMarkup.includes('w-[320px]') &&
+      incompleteRevolveMarkup.includes('min-w-0') &&
+      incompleteRevolveMarkup.includes('max-w-full') &&
+      !incompleteRevolveMarkup.includes('min-w-[320px]'),
+    'Feature inspector should fit inside narrow viewport overlays instead of enforcing a hard minimum width.',
+  )
+  assert(
     !incompleteRevolveMarkup.includes('Edit Profile targets expression'),
     'Feature inspector should not render expression affordances for reference fields.',
   )
