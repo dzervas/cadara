@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "onshape-clone",
+      "name": "cadara",
       "dependencies": {
         "@automerge/automerge-repo": "^2.5.5",
         "@automerge/automerge-repo-network-broadcastchannel": "^2.5.5",
