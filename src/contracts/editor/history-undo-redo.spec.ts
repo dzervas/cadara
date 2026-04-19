@@ -98,6 +98,51 @@ test('src/contracts/editor/history-undo-redo.spec.ts', async () => {
     assert(redone.state.session.definition.entityIds.length === 2, 'Sketch redo should restore visible geometry through the cursor.')
   }
 
+  function testSketchGeometryDeletionUndoRestoresDependentConstraints() {
+    const state = createEditingSketchState()
+    const entityId = state.session.definition.entityIds[0]
+    const dependentConstraintId = state.session.definition.constraints.find((constraint) =>
+      'entityId' in constraint && constraint.entityId === entityId,
+    )?.constraintId
+    assert(entityId, 'Deletion undo fixture should create an entity.')
+    assert(dependentConstraintId, 'Deletion undo fixture should create a dependent constraint.')
+
+    const deleted = transitionEditorState({
+      ...state,
+      selection: [{
+        kind: 'sketchEntity',
+        sketchId: 'sketch_draft',
+        entityId,
+      }],
+      hoverTarget: {
+        kind: 'sketchEntity',
+        sketchId: 'sketch_draft',
+        entityId,
+      },
+    }, { type: 'sketch.annotationDeleteRequested' })
+
+    assert(deleted.state.kind === 'editingSketch', 'Geometry deletion should keep the sketch session active.')
+    assert(!deleted.state.session.definition.entityIds.includes(entityId), 'Geometry deletion should remove the selected entity.')
+    assert(
+      !deleted.state.session.definition.constraintIds.includes(dependentConstraintId),
+      'Geometry deletion should remove dependent constraints.',
+    )
+    assert(deleted.state.selection.length === 0, 'Geometry deletion should clear selection.')
+    assert(deleted.state.hoverTarget === null, 'Geometry deletion should clear hover state.')
+
+    const undone = transitionEditorState(deleted.state, { type: 'tool.activated', toolId: 'undo' })
+    assert(undone.effects.length === 0, 'Sketch deletion undo should remain sketch-local.')
+    assert(undone.state.kind === 'editingSketch', 'Sketch deletion undo should keep the sketch session active.')
+    assert(
+      undone.state.session.definition.entityIds.includes(entityId),
+      'One toolbar Undo activation should restore deleted geometry.',
+    )
+    assert(
+      undone.state.session.definition.constraintIds.includes(dependentConstraintId),
+      'One toolbar Undo activation should restore dependent constraints.',
+    )
+  }
+
   async function testIdleDocumentHistoryDoesNotUseTimelineCursor() {
     const { state } = await createLoadedIdleState()
 
@@ -130,6 +175,7 @@ test('src/contracts/editor/history-undo-redo.spec.ts', async () => {
   }
 
   await testSketchUndoRedo()
+  testSketchGeometryDeletionUndoRestoresDependentConstraints()
   await testIdleDocumentHistoryDoesNotUseTimelineCursor()
   testFeatureEditingDoesNotExposeHistory()
 })

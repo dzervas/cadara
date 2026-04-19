@@ -35,6 +35,7 @@ import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-sc
 export interface ExtrudeFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[]
   depth: MaybeAuthoredValue<number>
+  direction: 'positive' | 'negative'
   operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
@@ -44,6 +45,7 @@ export interface RevolveFeatureParameterDraft {
   axisTarget: RevolveAxisRef | null
   startAngle: MaybeAuthoredValue<number>
   angle: MaybeAuthoredValue<number>
+  direction: 'clockwise' | 'counterClockwise'
   operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
@@ -61,6 +63,7 @@ export interface ShellFeatureParameterDraft {
   bodyTarget: Extract<PrimitiveRef, { kind: 'body' }> | null
   faceTargets: readonly Extract<PrimitiveRef, { kind: 'face' }>[]
   thickness: MaybeAuthoredValue<number>
+  direction: 'inside' | 'outside'
   operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
@@ -94,6 +97,7 @@ export interface ThickenFeatureParameterDraft {
   options: {
     thickness: MaybeAuthoredValue<number>
     side: MaybeAuthoredValue<'oneSide' | 'symmetric'>
+    direction: 'positive' | 'negative'
   }
 }
 
@@ -116,6 +120,7 @@ export interface TransformFeatureParameterDraft {
   bodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
   transformReferenceTarget: Extract<PrimitiveRef, { kind: 'construction' | 'face' }> | null
   distance: MaybeAuthoredValue<number>
+  direction: 'positive' | 'negative'
 }
 
 export interface FeatureDraftByKind {

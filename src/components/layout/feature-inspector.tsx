@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Paper, Text, ThemeIcon } from '@mantine/core'
+import { ActionIcon, Button, Paper, Text, ThemeIcon, Tooltip } from '@mantine/core'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
@@ -390,6 +390,43 @@ function NumericField(props: {
   documentVariables: readonly DocumentVariableRecord[]
   onPatch: (patch: Record<string, unknown>) => void
 }) {
+  function renderDirectionToggle() {
+    const toggle = props.field.directionToggle
+    if (!toggle) {
+      return null
+    }
+
+    const isForward = toggle.value === toggle.forwardValue
+    const nextValue = isForward ? toggle.reverseValue : toggle.forwardValue
+    const currentLabel = isForward ? toggle.forwardLabel : toggle.reverseLabel
+    const nextLabel = isForward ? toggle.reverseLabel : toggle.forwardLabel
+
+    return (
+      <Tooltip label={`Flip to ${nextLabel}`} withArrow>
+        <ActionIcon
+          component="button"
+          type="button"
+          onClick={() => props.onPatch({ [toggle.patch.patchKey]: nextValue })}
+          aria-label={`Flip ${props.field.label} direction`}
+          aria-pressed={!isForward}
+          variant="default"
+          size={40}
+          styles={{
+            root: {
+              backgroundColor: 'var(--workbench-shell-surface)',
+              borderColor: isForward ? 'var(--workbench-shell-border)' : 'var(--mantine-color-workbench-5)',
+              color: isForward ? 'var(--workbench-shell-text-muted)' : 'var(--mantine-color-workbench-4)',
+              flex: '0 0 auto',
+            },
+          }}
+          title={currentLabel}
+        >
+          <WorkbenchIcon name="flipDirection" className="h-4 w-4" />
+        </ActionIcon>
+      </Tooltip>
+    )
+  }
+
   return (
     <ExpressionFieldShell
       control={props.control}
@@ -397,18 +434,23 @@ function NumericField(props: {
       documentVariables={props.documentVariables}
       onPatch={props.onPatch}
       renderControl={({ id, value, disabled, hasError, onBlur, onLiteralChange }) => (
-        <Input
-          id={id}
-          type="number"
-          value={value}
-          step={props.field.step ?? 0.1}
-          disabled={disabled}
-          onBlur={onBlur}
-          onChange={(event) => onLiteralChange(event.target.value)}
-          aria-invalid={hasError || undefined}
-          error={hasError}
-          className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] ${fieldBorderClass({ error: hasError ? props.field.error ?? { message: '' } : null })}`}
-        />
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <Input
+              id={id}
+              type="number"
+              value={value}
+              step={props.field.step ?? 0.1}
+              disabled={disabled}
+              onBlur={onBlur}
+              onChange={(event) => onLiteralChange(event.target.value)}
+              aria-invalid={hasError || undefined}
+              error={hasError}
+              className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] ${fieldBorderClass({ error: hasError ? props.field.error ?? { message: '' } : null })}`}
+            />
+          </div>
+          {renderDirectionToggle()}
+        </div>
       )}
     />
   )

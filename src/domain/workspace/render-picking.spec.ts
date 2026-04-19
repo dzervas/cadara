@@ -235,6 +235,30 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
 
   {
     const faceMesh = createBoundMesh(faceRenderable)
+
+    const faceResolved = resolvePickTarget(
+      [createIntersection(faceMesh, 0.5)],
+      (target) => target.kind === 'face',
+    )
+    assertDeepEqual(
+      faceResolved?.target,
+      faceRenderable.binding.target,
+      'Face filters must keep selecting the exact face hit.',
+    )
+
+    const bodyResolved = resolvePickTarget(
+      [createIntersection(faceMesh, 0.5)],
+      (target) => target.kind === 'body',
+    )
+    assertDeepEqual(
+      bodyResolved?.target,
+      { kind: 'body', bodyId: 'body_a' },
+      'Body filters must resolve a face hit to the owning body.',
+    )
+  }
+
+  {
+    const faceMesh = createBoundMesh(faceRenderable)
     const edgeLine = createBoundLine(edgeRenderable)
 
     const resolved = resolvePickTarget([
@@ -536,6 +560,32 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
 
     sketchLine.geometry.dispose()
     material.dispose()
+  }
+
+  {
+    const faceMesh = createBoundMesh(faceRenderable)
+    const edgeLine = createBoundLine(edgeRenderable)
+    const root = new THREE.Group()
+    root.add(faceMesh)
+    root.add(edgeLine)
+
+    const bindings = collectBindings(root)
+    assert(bindings !== null)
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [{ kind: 'body', bodyId: 'body_a' }], null)
+
+    assert(faceMesh.material instanceof THREE.MeshStandardMaterial)
+    assertEqual(
+      faceMesh.material.color.getHex(),
+      0xf7f4ec,
+      'Selected body targets must highlight owned face renderables.',
+    )
+    assert(edgeLine.material instanceof THREE.LineBasicMaterial)
+    assertEqual(
+      edgeLine.material.color.getHex(),
+      0xf4fbff,
+      'Selected body targets must highlight owned edge renderables.',
+    )
   }
 
   {

@@ -795,6 +795,62 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
   }
 
+  function testDirectionFlipTogglesPatchFeatureDirections() {
+    const profile = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
+    const axis = { kind: 'edge' as const, bodyId: 'body_axis' as const, edgeId: 'edge_axis' as const }
+    const face = { kind: 'face' as const, bodyId: 'body_a' as const, faceId: 'face_top' as const }
+    const body = { kind: 'body' as const, bodyId: 'body_a' as const }
+
+    const extrudeSession = createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile })
+    const extrudeDepthField = getFormField(extrudeSession, 'extrude-depth')
+    assert(extrudeDepthField?.kind === 'numeric' && extrudeDepthField.directionToggle, 'Extrude depth should expose a direction flip toggle.')
+    const flippedExtrude = patchFeatureEditSession(extrudeSession, { [extrudeDepthField.directionToggle.patch.patchKey]: extrudeDepthField.directionToggle.reverseValue })
+    const extrudeDefinition = buildFeatureDefinition(flippedExtrude)
+    assert(extrudeDefinition?.kind === 'extrude' && extrudeDefinition.parameters.endExtent.direction === 'negative', 'Extrude direction flip should reverse the blind extent normal.')
+
+    const revolveSession = applySelectionToFeatureEditSession(
+      createFeatureEditSession({ featureType: 'revolve', selectedTarget: profile }),
+      axis,
+    )
+    const revolveAngleField = getFormField(revolveSession, 'revolve-angle')
+    assert(revolveAngleField?.kind === 'numeric' && revolveAngleField.directionToggle, 'Revolve angle should expose a sweep direction flip toggle.')
+    const flippedRevolve = patchFeatureEditSession(revolveSession, { [revolveAngleField.directionToggle.patch.patchKey]: revolveAngleField.directionToggle.reverseValue })
+    const revolveDefinition = buildFeatureDefinition(flippedRevolve)
+    assert(revolveDefinition?.kind === 'revolve' && revolveDefinition.parameters.extent.direction === 'clockwise', 'Revolve direction flip should reverse the angular sweep direction.')
+
+    const shellSession = createFeatureEditSession({ featureType: 'shell', selectedTarget: face })
+    const shellThicknessField = getFormField(shellSession, 'shell-thickness')
+    assert(shellThicknessField?.kind === 'numeric' && shellThicknessField.directionToggle, 'Shell thickness should expose a wall direction flip toggle.')
+    const flippedShell = patchFeatureEditSession(shellSession, { [shellThicknessField.directionToggle.patch.patchKey]: shellThicknessField.directionToggle.reverseValue })
+    const shellDefinition = buildFeatureDefinition(flippedShell)
+    assert(shellDefinition?.kind === 'shell' && shellDefinition.parameters.direction === 'outside', 'Shell direction flip should preserve an outside wall direction.')
+
+    const thickenSession = createFeatureEditSession({ featureType: 'thicken', selectedTarget: face })
+    const thickenThicknessField = getFormField(thickenSession, 'thicken-thickness')
+    assert(thickenThicknessField?.kind === 'numeric' && thickenThicknessField.directionToggle, 'Thicken thickness should expose a normal direction flip toggle.')
+    const flippedThicken = patchFeatureEditSession(thickenSession, { [thickenThicknessField.directionToggle.patch.patchKey]: thickenThicknessField.directionToggle.reverseValue })
+    const thickenDefinition = buildFeatureDefinition(flippedThicken)
+    assert(thickenDefinition?.kind === 'thicken' && thickenDefinition.parameters.options?.direction === 'negative', 'Thicken direction flip should persist the negative normal direction.')
+
+    const transformSession = applySelectionToFeatureEditSession(
+      createFeatureEditSession({ featureType: 'transform', selectedTarget: body }),
+      face,
+    )
+    const transformDistanceField = getFormField(transformSession, 'transform-distance')
+    assert(transformDistanceField?.kind === 'numeric' && transformDistanceField.directionToggle, 'Transform distance should expose a normal direction flip toggle.')
+    const flippedTransform = patchFeatureEditSession(transformSession, { [transformDistanceField.directionToggle.patch.patchKey]: transformDistanceField.directionToggle.reverseValue })
+    const transformDefinition = buildFeatureDefinition(flippedTransform)
+    assert(transformDefinition?.kind === 'transform' && transformDefinition.parameters.options?.direction === 'negative', 'Transform direction flip should persist the negative normal direction.')
+
+    const filletSession = createFeatureEditSession({ featureType: 'fillet', selectedTarget: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } })
+    const filletRadiusField = getFormField(filletSession, 'fillet-radius')
+    assert(filletRadiusField?.kind === 'numeric' && !filletRadiusField.directionToggle, 'Fillet radius should not expose an ambiguous direction toggle.')
+
+    const chamferSession = createFeatureEditSession({ featureType: 'chamfer', selectedTarget: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } })
+    const chamferDistanceField = getFormField(chamferSession, 'chamfer-distance')
+    assert(chamferDistanceField?.kind === 'numeric' && !chamferDistanceField.directionToggle, 'Chamfer distance should not expose an ambiguous direction toggle.')
+  }
+
   function testAdvancedParticipantDescriptorsAreMachineReadable() {
     const definitions: readonly FeatureAuthoringDefinition[] = getRegisteredFeatureAuthoringDefinitions()
     const extrude = definitions.find((definition) => definition.metadata.kind === 'extrude')
@@ -1007,6 +1063,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testProfileBasedAuthoringUsesReferenceCollections()
   testShellOwnsFaceSelectionDefaultsAndFormSchema()
   testShellBooleanTargetSelectorVisibilityAndScope()
+  testDirectionFlipTogglesPatchFeatureDirections()
   testAdvancedParticipantDescriptorsAreMachineReadable()
   testAdvancedAuthoringAndInspectorDoNotImportKernelModules()
   testGenericFormEventsPatchRevolveAndShellDrafts()

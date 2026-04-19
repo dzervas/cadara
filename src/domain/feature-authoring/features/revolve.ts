@@ -4,6 +4,10 @@ import { createSelectionFilterForRequirement, revolveSelectionFilter } from '@/d
 import { REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
+function isRevolveDirection(value: unknown): value is 'clockwise' | 'counterClockwise' {
+  return value === 'clockwise' || value === 'counterClockwise'
+}
+
 export const revolveAuthoringDefinition = {
   metadata: {
     kind: 'revolve',
@@ -54,6 +58,7 @@ export const revolveAuthoringDefinition = {
       axisTarget: asRevolveAxisRef(input.selectedTarget),
       startAngle: 0,
       angle: Math.PI * 2,
+      direction: 'counterClockwise',
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     }
@@ -64,6 +69,7 @@ export const revolveAuthoringDefinition = {
       axisTarget: feature.parameters.axis,
       startAngle: feature.parameters.startAngle,
       angle: feature.parameters.extent.radians,
+      direction: feature.parameters.extent.direction,
       operation: feature.parameters.operation,
       booleanScope: feature.parameters.booleanScope,
     }
@@ -83,6 +89,7 @@ export const revolveAuthoringDefinition = {
         patch.axisTarget === undefined ? draft.axisTarget : asRevolveAxisRef(patch.axisTarget as Parameters<typeof asRevolveAxisRef>[0]),
       startAngle: acceptAuthoredPatch(patch.startAngle, draft.startAngle, (value): value is number => typeof value === 'number'),
       angle: acceptAuthoredPatch(patch.angle, draft.angle, (value): value is number => typeof value === 'number'),
+      direction: isRevolveDirection(patch.direction) ? patch.direction : draft.direction,
       operation: acceptAuthoredPatch(patch.operation, draft.operation, isBooleanOperation),
       booleanScope: toBooleanScope(patch, draft.booleanScope),
     }
@@ -150,7 +157,7 @@ export const revolveAuthoringDefinition = {
             startAngle: authoredDefinitionValue(draft.startAngle, 0) as number,
             extent: {
               kind: 'angle',
-              direction: 'counterClockwise',
+              direction: draft.direction,
               radians: authoredDefinitionValue(draft.angle, Math.PI * 2) as number,
             },
             angle: authoredDefinitionValue(draft.angle, Math.PI * 2) as number,
@@ -218,7 +225,7 @@ export const revolveAuthoringDefinition = {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.angle, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
+            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, directionToggle: { patch: { patchKey: 'direction' }, value: session.draft.direction, forwardValue: 'counterClockwise', reverseValue: 'clockwise', forwardLabel: 'Counter-clockwise', reverseLabel: 'Clockwise' }, authoredValue: expressionCapableAuthoredValue(session.draft.angle, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
             { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.startAngle, { kind: 'angle' }), patch: { patchKey: 'startAngle' } },
             {
               kind: 'enum',

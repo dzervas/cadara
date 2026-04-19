@@ -26,6 +26,7 @@ import {
   beginSketchTool,
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
+  deleteSelectedSketchGeometry,
   deleteSketchReferenceTarget,
   finishSketchGeometryDrag,
   focusSketchStyleTool,
@@ -33,6 +34,7 @@ import {
   getNextSketchHistoryCursor,
   getPreviousSketchHistoryCursor,
   getSketchSessionPreviewLabel,
+  isEditableSketchGeometrySelection,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
   patchSketchEditToolValue,
@@ -2897,10 +2899,13 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           : null
         const session = referenceTarget
           ? deleteSketchReferenceTarget(state.session, referenceTarget)
-          : deleteSelectedSketchAnnotation(state.session)
+          : isEditableSketchGeometrySelection(state.session, state.selection)
+            ? deleteSelectedSketchGeometry(state.session, state.selection)
+            : deleteSelectedSketchAnnotation(state.session)
         const nextState: SketchEditorState = {
           ...state,
           selection: [],
+          hoverTarget: null,
           session,
           preview: {
             kind: 'sketch',

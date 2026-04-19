@@ -291,6 +291,8 @@ export interface ShellFeatureParameters {
   faceTargets: readonly ShellFaceRef[]
   /** Positive shell thickness in document modeling units. */
   thickness: number
+  /** Offset side relative to the source body. Omitted legacy values mean inside. */
+  direction?: 'inside' | 'outside'
   /** Boolean behavior applied to the shell result. */
   operation: FeatureBooleanOperation
   /** Explicit participant scope for non-standalone boolean operations. */

@@ -132,6 +132,10 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
     activeShellMarkup.includes('Clear Removable faces') && activeShellMarkup.includes('Remove body_a.face_side'),
     'Feature inspector should render clear-all and per-instance remove controls for multi-instance fields.',
   )
+  assert(
+    activeShellMarkup.includes('Flip Thickness direction'),
+    'Feature inspector should render numeric direction flip buttons for fields that support directional magnitudes.',
+  )
 
   const shellSchema = getFeatureEditorFormSchema(baseShellSession)
   const activeShellSchema = getFeatureEditorFormSchema(

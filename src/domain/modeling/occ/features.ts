@@ -1243,6 +1243,20 @@ function getThickenSide(definition: AdvancedSolidFeatureDefinition & { kind: 'th
   throw new Error('advanced-feature-unsupported-kernel-case: OCC thicken side must be oneSide.')
 }
 
+function getThickenDirection(definition: AdvancedSolidFeatureDefinition & { kind: 'thicken' }) {
+  const direction = definition.parameters.options?.direction
+
+  if (direction === undefined || direction === 'positive') {
+    return 'positive'
+  }
+
+  if (direction === 'negative') {
+    return 'negative'
+  }
+
+  throw new Error('advanced-feature-unsupported-kernel-case: OCC thicken direction must be positive or negative.')
+}
+
 function getThickenFaceTargets(definition: AdvancedSolidFeatureDefinition & { kind: 'thicken' }) {
   const faceTargets = getAdvancedParticipant(definition, 'face')?.targets ?? []
 
@@ -1265,7 +1279,8 @@ function buildThickenFeatureShape(
 ) {
   const [faceTarget] = getThickenFaceTargets(definition)
   const thickness = getThickenThickness(definition)
-  const side = getThickenSide(definition)
+  getThickenSide(definition)
+  const direction = getThickenDirection(definition)
   const body = requireBody(context, faceTarget!.bodyId)
   const face = requireFace(body, faceTarget!.faceId)
 
@@ -1274,7 +1289,7 @@ function buildThickenFeatureShape(
     extrusionNormal = getExtrusionNormalForPlanarFace(
       context.oc,
       face,
-      side === 'inside' ? 'negative' : 'positive',
+      direction,
     )
   } catch {
     throw new Error('advanced-feature-unsupported-kernel-case: OCC thicken requires a planar face target.')
@@ -1613,6 +1628,20 @@ function getTransformDistance(definition: AdvancedSolidFeatureDefinition & { kin
   return distance
 }
 
+function getTransformDirection(definition: AdvancedSolidFeatureDefinition & { kind: 'transform' }) {
+  const direction = definition.parameters.options?.direction
+
+  if (direction === undefined || direction === 'positive') {
+    return 'positive'
+  }
+
+  if (direction === 'negative') {
+    return 'negative'
+  }
+
+  throw new Error('advanced-feature-unsupported-kernel-case: OCC transform direction must be positive or negative.')
+}
+
 function executeTransformFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -1626,9 +1655,11 @@ function executeTransformFeature(
   requireUniqueTargetBodies(bodyTargets.map((target) => target.bodyId))
   const referenceTarget = getTransformReferenceTarget(definition)
   const distance = getTransformDistance(definition)
+  const direction = getTransformDirection(definition)
   const plane = resolvePlanarReferencePlane(context, referenceTarget, `construction_${ownerFeatureId}_transform` as ConstructionId)
+  const signedDistance = direction === 'positive' ? distance : -distance
   const translation = new context.oc.gp_Trsf_1()
-  translation.SetTranslation_1(toGpVec(context.oc, scale(normalize(plane.frame.normal), distance)))
+  translation.SetTranslation_1(toGpVec(context.oc, scale(normalize(plane.frame.normal), signedDistance)))
 
   const nextBodies = [...context.bodies]
   const historyInvalidations = new Map<string, OccReferenceInvalidationRecord>()
@@ -1691,11 +1722,14 @@ function buildShellFeatureShape(
     closingFaces.Append_1(requireFace(sourceBody, target.faceId))
   }
 
+  const signedThickness = parameters.direction === 'outside'
+    ? parameters.thickness
+    : -parameters.thickness
   const shell = new context.oc.BRepOffsetAPI_MakeThickSolid()
   shell.MakeThickSolidByJoin(
     sourceBody.shape,
     closingFaces,
-    -parameters.thickness,
+    signedThickness,
     context.modelingTolerance,
     context.oc.BRepOffset_Mode.BRepOffset_Skin as never,
     false,

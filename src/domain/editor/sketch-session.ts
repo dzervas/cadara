@@ -171,6 +171,7 @@ export interface SketchSessionState {
   definition: SketchDefinition
   fullDefinition: SketchDefinition
   historyCursor: SketchHistoryCursor
+  historyOperations: SketchHistoryOperation[]
   activeTool: SketchAuthoringToolId | null
   status: SketchSessionStatus
   constructionTargetPicking: boolean
@@ -236,6 +237,13 @@ export interface SketchDisplayStrokeStyle {
 export type SketchHistoryCursor =
   | { kind: 'empty' }
   | { kind: 'item'; itemId: string }
+
+export interface SketchHistoryOperation {
+  itemId: string
+  beforeCursor: SketchHistoryCursor
+  beforeDefinition: SketchDefinition
+  afterDefinition: SketchDefinition
+}
 
 export type SketchHistoryItem =
   | {
@@ -417,6 +425,11 @@ export function getSketchHistoryCursorForIndex(
 }
 
 export function getPreviousSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
+  const operation = getSketchHistoryOperationForCursor(session, session.historyCursor)
+  if (operation) {
+    return operation.beforeCursor
+  }
+
   const items = getSketchHistoryItems(session.fullDefinition)
   const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
 
@@ -438,6 +451,14 @@ export function getPreviousSketchHistoryCursor(session: SketchSessionState): Ske
 }
 
 export function getNextSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
+  const operation = session.historyOperations.find((entry) =>
+    sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
+  )
+
+  if (operation) {
+    return { kind: 'item', itemId: operation.itemId }
+  }
+
   const items = getSketchHistoryItems(session.fullDefinition)
   const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
 
@@ -475,6 +496,23 @@ function getEntityPointIds(entity: SketchEntityDefinition) {
     case 'spline':
       return entity.fitPointIds
   }
+}
+
+function sketchHistoryCursorsEqual(left: SketchHistoryCursor, right: SketchHistoryCursor) {
+  if (left.kind === 'empty' || right.kind === 'empty') {
+    return left.kind === right.kind
+  }
+
+  return left.itemId === right.itemId
+}
+
+function getSketchHistoryOperationForCursor(
+  session: SketchSessionState,
+  cursor: SketchHistoryCursor,
+) {
+  return cursor.kind === 'item'
+    ? session.historyOperations.find((entry) => entry.itemId === cursor.itemId) ?? null
+    : null
 }
 
 export function filterSketchDefinitionThroughCursor(
@@ -549,6 +587,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     definition,
     fullDefinition,
     historyCursor,
+    historyOperations: [],
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
@@ -597,6 +636,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     definition,
     fullDefinition: cloneDefinition(definition),
     historyCursor: { kind: 'empty' },
+    historyOperations: [],
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
@@ -892,7 +932,10 @@ function applySketchHistoryContribution(
   session: SketchSessionState,
   patch: SketchToolCommitContribution,
 ) {
-  const truncatedDefinition = truncateDefinitionAfterCursor(session.fullDefinition, session.historyCursor)
+  const operation = getSketchHistoryOperationForCursor(session, session.historyCursor)
+  const truncatedDefinition = operation
+    ? cloneDefinition(operation.afterDefinition)
+    : truncateDefinitionAfterCursor(session.fullDefinition, session.historyCursor)
   const fullDefinition = appendDefinition(truncatedDefinition, patch)
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
   const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
@@ -901,6 +944,9 @@ function applySketchHistoryContribution(
     fullDefinition,
     historyCursor,
     definition,
+    historyOperations: session.historyOperations.filter((entry) =>
+      !sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
+    ),
   }
 }
 
@@ -908,18 +954,53 @@ export function moveSketchHistoryCursor(
   session: SketchSessionState,
   cursor: SketchHistoryCursor,
 ): SketchSessionState {
-  const items = getSketchHistoryItems(session.fullDefinition)
+  const operation = getSketchHistoryOperationForCursor(session, cursor)
+  if (operation) {
+    return rebuildSessionForDefinition(session, {
+      definition: operation.afterDefinition,
+      fullDefinition: operation.afterDefinition,
+      historyCursor: cursor,
+      historyOperations: session.historyOperations,
+    })
+  }
+
+  const redoSourceOperation = session.historyOperations.find((entry) =>
+    sketchHistoryCursorsEqual(entry.beforeCursor, cursor),
+  )
+  const fullDefinition = redoSourceOperation?.beforeDefinition ?? session.fullDefinition
+  const items = getSketchHistoryItems(fullDefinition)
   const normalizedCursor =
     cursor.kind === 'empty' || items.some((item) => item.id === cursor.itemId)
       ? cursor
-      : createTailSketchHistoryCursor(session.fullDefinition)
-  const definition = filterSketchDefinitionThroughCursor(session.fullDefinition, normalizedCursor)
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+      : createTailSketchHistoryCursor(fullDefinition)
+  const definition = filterSketchDefinitionThroughCursor(fullDefinition, normalizedCursor)
 
+  return rebuildSessionForDefinition(session, {
+    definition,
+    fullDefinition,
+    historyCursor: normalizedCursor,
+    historyOperations: session.historyOperations,
+  })
+}
+
+function rebuildSessionForDefinition(
+  session: SketchSessionState,
+  input: {
+    definition: SketchDefinition
+    fullDefinition: SketchDefinition
+    historyCursor: SketchHistoryCursor
+    historyOperations: SketchHistoryOperation[]
+  },
+): SketchSessionState {
+  const definition = cloneDefinition(input.definition)
+  const fullDefinition = cloneDefinition(input.fullDefinition)
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   return {
     ...session,
-    historyCursor: normalizedCursor,
+    historyCursor: input.historyCursor,
     definition,
+    fullDefinition,
+    historyOperations: [...input.historyOperations],
     entities: definition.entities.flatMap((entity) =>
       mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
     ),
@@ -929,6 +1010,177 @@ export function moveSketchHistoryCursor(
     activeDrag: null,
     validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, definition),
+  }
+}
+
+export function isEditableSketchGeometrySelection(
+  session: SketchSessionState,
+  targets: readonly PrimitiveRef[],
+) {
+  return getSelectedSketchGeometryIds(session, targets) !== null
+}
+
+function getSelectedSketchGeometryIds(
+  session: SketchSessionState,
+  targets: readonly PrimitiveRef[],
+) {
+  const sketchId = getSessionSketchId(session)
+  const selectedPointIds = new Set<SketchPointId>()
+  const selectedEntityIds = new Set<SketchEntityId>()
+
+  for (const target of targets) {
+    if (target.kind === 'sketchPoint' && target.sketchId === sketchId) {
+      selectedPointIds.add(target.pointId)
+    }
+
+    if (target.kind === 'sketchEntity' && target.sketchId === sketchId) {
+      selectedEntityIds.add(target.entityId)
+    }
+  }
+
+  const existingPointIds = new Set(session.definition.pointIds)
+  const existingEntityIds = new Set(session.definition.entityIds)
+  const pointIds = new Set([...selectedPointIds].filter((pointId) => existingPointIds.has(pointId)))
+  const entityIds = new Set([...selectedEntityIds].filter((entityId) => existingEntityIds.has(entityId)))
+
+  if (pointIds.size === 0 && entityIds.size === 0) {
+    return null
+  }
+
+  return { pointIds, entityIds }
+}
+
+export function constraintReferencesSketchGeometry(
+  constraint: ConstraintDefinition,
+  deletedPointIds: ReadonlySet<SketchPointId>,
+  deletedEntityIds: ReadonlySet<SketchEntityId>,
+) {
+  switch (constraint.kind) {
+    case 'coincident':
+    case 'angle':
+      return constraint.pointIds.some((pointId) => deletedPointIds.has(pointId))
+    case 'horizontal':
+    case 'vertical':
+      return deletedEntityIds.has(constraint.entityId)
+    case 'coincidentProjectedPoint':
+    case 'pointOnProjectedCurve':
+    case 'midpointProjectedLine':
+      return deletedPointIds.has(constraint.point.pointId)
+    case 'midpoint':
+      return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
+    case 'pointOnCurve':
+      return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.curve.entityId)
+    case 'parallelProjectedLine':
+    case 'perpendicularProjectedLine':
+      return deletedEntityIds.has(constraint.line.entityId)
+    case 'tangentProjectedCurve':
+    case 'concentricProjectedCurve':
+      return deletedEntityIds.has(constraint.curve.entityId)
+    case 'tangent':
+    case 'concentric':
+    case 'parallel':
+    case 'perpendicular':
+    case 'equalLength':
+      return constraint.entityIds.some((entityId) => deletedEntityIds.has(entityId))
+    case 'fixPoint':
+      return deletedPointIds.has(constraint.pointId)
+  }
+}
+
+export function dimensionReferencesSketchGeometry(
+  dimension: DimensionDefinition,
+  deletedPointIds: ReadonlySet<SketchPointId>,
+  deletedEntityIds: ReadonlySet<SketchEntityId>,
+) {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance':
+      return dimension.pointIds.some((pointId) => deletedPointIds.has(pointId))
+    case 'circleRadius':
+      return deletedEntityIds.has(dimension.entityId)
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return deletedEntityIds.has(dimension.entityId) || deletedPointIds.has(dimension.pointId)
+  }
+}
+
+export function deleteSelectedSketchGeometry(
+  session: SketchSessionState,
+  targets: readonly PrimitiveRef[],
+): SketchSessionState {
+  const selected = getSelectedSketchGeometryIds(session, targets)
+
+  if (!selected) {
+    return session
+  }
+
+  const beforeDefinition = cloneDefinition(session.definition)
+  const deletedEntityIds = new Set(selected.entityIds)
+  for (const entity of beforeDefinition.entities) {
+    if (getEntityPointIds(entity).some((pointId) => selected.pointIds.has(pointId))) {
+      deletedEntityIds.add(entity.entityId)
+    }
+  }
+
+  const remainingEntities = beforeDefinition.entities.filter((entity) => !deletedEntityIds.has(entity.entityId))
+  const remainingEntityPointIds = new Set(remainingEntities.flatMap((entity) => getEntityPointIds(entity)))
+  const deletedPointIds = new Set(
+    beforeDefinition.pointIds.filter((pointId) =>
+      selected.pointIds.has(pointId) || !remainingEntityPointIds.has(pointId),
+    ),
+  )
+  const points = beforeDefinition.points.filter((point) => !deletedPointIds.has(point.pointId))
+  const constraints = beforeDefinition.constraints.filter((constraint) =>
+    !constraintReferencesSketchGeometry(constraint, deletedPointIds, deletedEntityIds),
+  )
+  const dimensions = beforeDefinition.dimensions.filter((dimension) =>
+    !dimensionReferencesSketchGeometry(dimension, deletedPointIds, deletedEntityIds),
+  )
+  const afterDefinition: SketchDefinition = {
+    ...beforeDefinition,
+    pointIds: points.map((point) => point.pointId),
+    points,
+    entityIds: remainingEntities.map((entity) => entity.entityId),
+    entities: remainingEntities,
+    constraintIds: constraints.map((constraint) => constraint.constraintId),
+    constraints,
+    dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+    dimensions,
+  }
+  const operation: SketchHistoryOperation = {
+    itemId: `sketch_history_delete_${session.sequence + 1}`,
+    beforeCursor: session.historyCursor,
+    beforeDefinition,
+    afterDefinition,
+  }
+
+  return {
+    ...rebuildSessionForDefinition(session, {
+      definition: afterDefinition,
+      fullDefinition: afterDefinition,
+      historyCursor: { kind: 'item', itemId: operation.itemId },
+      historyOperations: [
+        ...session.historyOperations.filter((entry) =>
+          !sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
+        ),
+        operation,
+      ],
+    }),
+    activeTool: null,
+    status: 'idle',
+    constructionTargetPicking: false,
+    referenceTargetPicking: false,
+    pointerDownPoint: null,
+    livePoint: null,
+    toolPlacedPoints: [],
+    toolPresentation: null,
+    constraintAuthoring: null,
+    activeEditTool: null,
+    activeStyleFocus: null,
+    activeSnap: null,
+    drawStartSnap: null,
+    sequence: session.sequence + 1,
   }
 }
 
@@ -1983,6 +2235,7 @@ export function patchSketchEditToolValue(
     definition: history.definition,
     fullDefinition: history.fullDefinition,
     historyCursor: history.historyCursor,
+    historyOperations: history.historyOperations,
     sequence: nextSequence,
     commitRequest: rebuildSessionCommitRequest(session, history.definition),
     validationMessage: null,
@@ -3040,6 +3293,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     definition: history.definition,
     fullDefinition: history.fullDefinition,
     historyCursor: history.historyCursor,
+    historyOperations: history.historyOperations,
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
@@ -4015,6 +4269,7 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     definition: solvedDefinition,
     fullDefinition: solvedFullDefinition,
     historyCursor: history.historyCursor,
+    historyOperations: history.historyOperations,
     sequence: session.sequence + 1,
     status: 'idle',
     constraintAuthoring: null,

@@ -210,13 +210,15 @@ export function resolveAllCandidates(
       continue
     }
 
-    if (acceptsTarget && !acceptsTarget(hit.target)) {
+    const acceptedTarget = getAcceptedPickTarget(hit, acceptsTarget)
+
+    if (!acceptedTarget) {
       continue
     }
 
     return {
       pickId: hit.pickId,
-      target: hit.target,
+      target: acceptedTarget,
       renderable: hit.renderable,
     }
   }
@@ -246,12 +248,52 @@ export function updateWorkspaceHighlight(
         continue
       }
 
-      const isSelected = selection.some((entry) => primitiveRefEquals(entry, target))
-      const isHovered = hoverTarget !== null && primitiveRefEquals(hoverTarget, target)
-      const isRelatedActive = relatedActiveTargets.some((entry) => primitiveRefEquals(entry, target))
+      const isSelected = selection.some((entry) => targetActivatesBoundTarget(entry, target))
+      const isHovered = hoverTarget !== null && targetActivatesBoundTarget(hoverTarget, target)
+      const isRelatedActive = relatedActiveTargets.some((entry) => targetActivatesBoundTarget(entry, target))
       applyRenderableState(material, semanticClass, origin, isSelected || isHovered || isRelatedActive, isSelected)
     }
   }
+}
+
+function getAcceptedPickTarget(
+  hit: PickCandidate,
+  acceptsTarget: ((target: PrimitiveRef) => boolean) | null,
+): PrimitiveRef | null {
+  if (!acceptsTarget || acceptsTarget(hit.target)) {
+    return hit.target
+  }
+
+  const ownerBodyTarget = getOwnerBodyTarget(hit)
+  return ownerBodyTarget && acceptsTarget(ownerBodyTarget) ? ownerBodyTarget : null
+}
+
+function getOwnerBodyTarget(hit: PickCandidate): PrimitiveRef | null {
+  switch (hit.target.kind) {
+    case 'face':
+    case 'edge':
+    case 'vertex':
+    case 'loop':
+      return { kind: 'body', bodyId: hit.target.bodyId }
+    default:
+      return hit.renderable?.ownerBodyId ? { kind: 'body', bodyId: hit.renderable.ownerBodyId } : null
+  }
+}
+
+function targetActivatesBoundTarget(activeTarget: PrimitiveRef, boundTarget: PrimitiveRef) {
+  return primitiveRefEquals(activeTarget, boundTarget)
+    || (
+      activeTarget.kind === 'body'
+      && isBodyTopologyTarget(boundTarget)
+      && activeTarget.bodyId === boundTarget.bodyId
+    )
+}
+
+function isBodyTopologyTarget(target: PrimitiveRef) {
+  return target.kind === 'face'
+    || target.kind === 'edge'
+    || target.kind === 'vertex'
+    || target.kind === 'loop'
 }
 
 function applyRenderableState(

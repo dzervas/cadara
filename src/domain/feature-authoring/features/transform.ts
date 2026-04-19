@@ -43,6 +43,10 @@ export const transformOptions = [
   },
 ] as const
 
+function isNormalDirection(value: unknown): value is 'positive' | 'negative' {
+  return value === 'positive' || value === 'negative'
+}
+
 function filterBodyTargets(value: unknown) {
   return Array.isArray(value)
     ? value.filter((entry): entry is Extract<PrimitiveRef, { kind: 'body' }> => asBodyRef(entry as PrimitiveRef) !== null)
@@ -60,17 +64,30 @@ function buildTransformDefinition(draft: TransformFeatureParameterDraft) {
       ],
       options: {
         distance: authoredDefinitionValue(draft.distance, 1),
+        direction: draft.direction,
       },
     },
   }
 }
 
 function getTransformValidationDiagnostics(draft: TransformFeatureParameterDraft) {
-  return validateAdvancedSolidFeatureDefinition(buildTransformDefinition(draft), {
+  const diagnostics = validateAdvancedSolidFeatureDefinition(buildTransformDefinition(draft), {
     featureKind: 'transform',
     participants: transformParticipants,
     options: transformOptions,
   })
+
+  if (!isNormalDirection(draft.direction)) {
+    diagnostics.push({
+      code: 'advanced-feature-invalid-option',
+      severity: 'error',
+      role: null,
+      target: null,
+      message: 'Direction must be positive or negative.',
+    })
+  }
+
+  return diagnostics
 }
 
 export const transformAuthoringDefinition = {
@@ -93,13 +110,16 @@ export const transformAuthoringDefinition = {
       bodyTargets: selectedBody ? [selectedBody] : [],
       transformReferenceTarget: selectedReference,
       distance: 1,
+      direction: 'positive',
     }
   },
   hydrateDraft(feature) {
+    const direction = feature.parameters.options?.direction
     return {
       bodyTargets: filterBodyTargets(feature.parameters.participants.find((participant) => participant.role === 'body')?.targets ?? []),
       transformReferenceTarget: asPlaneReferenceTarget(feature.parameters.participants.find((participant) => participant.role === 'transformReference')?.targets[0] ?? null),
       distance: (feature.parameters.options?.distance ?? 1) as TransformFeatureParameterDraft['distance'],
+      direction: isNormalDirection(direction) ? direction : 'positive',
     }
   },
   applyPatch(draft, patch) {
@@ -115,6 +135,7 @@ export const transformAuthoringDefinition = {
           : asPlaneReferenceTarget(patch.transformReferenceTarget as PrimitiveRef | null),
       distance:
         acceptAuthoredPatch(patch.distance, draft.distance, (value): value is number => typeof value === 'number'),
+      direction: isNormalDirection(patch.direction) ? patch.direction : draft.direction,
     }
   },
   applySelection(draft, target) {
@@ -230,6 +251,14 @@ export const transformAuthoringDefinition = {
               value: authoredNumberFormValue(session.draft.distance),
               input: 'number',
               step: 0.1,
+              directionToggle: {
+                patch: { patchKey: 'direction' },
+                value: session.draft.direction,
+                forwardValue: 'positive',
+                reverseValue: 'negative',
+                forwardLabel: 'Positive normal',
+                reverseLabel: 'Negative normal',
+              },
               error:
                 isPositiveAuthoredNumber(session.draft.distance)
                   ? null

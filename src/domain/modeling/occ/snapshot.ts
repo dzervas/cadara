@@ -311,6 +311,7 @@ function createSnapshotFeatureDefinition(
           bodyTarget: definition.parameters.bodyTarget,
           faceTargets: definition.parameters.faceTargets,
           thickness: definition.parameters.thickness,
+          direction: definition.parameters.direction,
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },

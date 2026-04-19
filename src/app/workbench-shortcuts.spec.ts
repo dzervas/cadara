@@ -43,6 +43,32 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
     'Backspace shortcut should dispatch the annotation delete event.',
   )
 
+  const deleteGeometryFixture = createFixture({
+    mode: 'sketch',
+    selection: [{ kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_1' } as PrimitiveRef],
+    sketchSession: createSketchSession(),
+  })
+
+  const deleteGeometryResult = deleteGeometryFixture.press({ key: 'Delete' })
+  assert(deleteGeometryResult.commandId === 'editor.deleteSelection', 'Delete should resolve for selected sketch geometry.')
+  assert(
+    deleteGeometryFixture.dispatchedEvents.at(-1)?.type === 'sketch.annotationDeleteRequested',
+    'Delete shortcut should dispatch the shared delete-selection event for sketch geometry.',
+  )
+
+  const backspacePointFixture = createFixture({
+    mode: 'sketch',
+    selection: [{ kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_1' } as PrimitiveRef],
+    sketchSession: createSketchSession(),
+  })
+
+  const backspacePointResult = backspacePointFixture.press({ key: 'Backspace' })
+  assert(backspacePointResult.commandId === 'editor.deleteSelection', 'Backspace should resolve for selected sketch points.')
+  assert(
+    backspacePointFixture.dispatchedEvents.at(-1)?.type === 'sketch.annotationDeleteRequested',
+    'Backspace shortcut should dispatch the shared delete-selection event for sketch points.',
+  )
+
   const sketchFixture = createFixture({
     mode: 'sketch',
     sketchSession: createSketchSession(),
@@ -211,6 +237,11 @@ function createSketchSession(
   styleToolId: 'stroke' | null = null,
 ) {
   return {
+    sketchId: null,
+    definition: {
+      pointIds: ['sketch_point_1'],
+      entityIds: ['sketch_entity_1'],
+    },
     activeTool,
     activeStyleFocus: styleToolId
       ? {

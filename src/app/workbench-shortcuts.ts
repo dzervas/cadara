@@ -1,4 +1,5 @@
 import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-machine'
+import { isEditableSketchGeometrySelection } from '@/domain/editor/sketch-session'
 import { getEscapeEvent } from '@/domain/editor/workbench-interactions'
 import { getToolCommandId, type ShortcutScope } from '@/domain/shortcuts/commands'
 import type { ToolTriggerMetadata } from '@/domain/tools/schema'
@@ -55,7 +56,13 @@ export function createWorkbenchShortcutCommandHandlers({
       execute: () => dispatch({ type: 'sketch.annotationDeleteRequested' }),
       isEnabled: () =>
         sketchSession !== null
-        && (selection[0]?.kind === 'constraint' || selection[0]?.kind === 'dimension'),
+        && (
+          selection[0]?.kind === 'constraint'
+          || selection[0]?.kind === 'dimension'
+          || selection[0]?.kind === 'projectedReferenceGeometry'
+          || selection[0]?.kind === 'sketchExternalReference'
+          || isEditableSketchGeometrySelection(sketchSession, selection)
+        ),
     },
     'editor.focusSearch': {
       execute: focusSearch,

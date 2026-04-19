@@ -51,6 +51,10 @@ function isThickenSide(value: unknown): value is 'oneSide' | 'symmetric' {
   return value === 'oneSide' || value === 'symmetric'
 }
 
+function isNormalDirection(value: unknown): value is 'positive' | 'negative' {
+  return value === 'positive' || value === 'negative'
+}
+
 function filterTargets<TTarget extends PrimitiveRef>(
   value: unknown,
   coerce: (target: PrimitiveRef | null) => TTarget | null,
@@ -90,6 +94,7 @@ function buildThickenDefinition(draft: ThickenFeatureParameterDraft) {
       options: {
         thickness: authoredDefinitionValue(draft.options.thickness, 1),
         side: authoredDefinitionValue(draft.options.side, 'oneSide'),
+        direction: draft.options.direction,
       },
     },
   }
@@ -110,6 +115,16 @@ function getThickenValidationDiagnostics(draft: ThickenFeatureParameterDraft) {
       role: null,
       target: null,
       message: 'Side must be oneSide or symmetric.',
+    })
+  }
+
+  if (!isNormalDirection(draft.options.direction)) {
+    diagnostics.push({
+      code: 'advanced-feature-invalid-option',
+      severity: 'error',
+      role: null,
+      target: null,
+      message: 'Direction must be positive or negative.',
     })
   }
 
@@ -139,6 +154,7 @@ export const thickenAuthoringDefinition = {
       options: {
         thickness: 1,
         side: 'oneSide',
+        direction: 'positive',
       },
     }
   },
@@ -147,6 +163,7 @@ export const thickenAuthoringDefinition = {
       feature.parameters.participants.find((participant) => participant.role === role)?.targets ?? []
     const thickness = feature.parameters.options?.thickness
     const side = feature.parameters.options?.side
+    const direction = feature.parameters.options?.direction
 
     return {
       faceTargets: filterTargets(getParticipantTargets('face'), asFaceRef),
@@ -155,11 +172,14 @@ export const thickenAuthoringDefinition = {
       options: {
         thickness: (thickness ?? 1) as ThickenFeatureParameterDraft['options']['thickness'],
         side: (isThickenSide(side) ? side : side ?? 'oneSide') as ThickenFeatureParameterDraft['options']['side'],
+        direction: isNormalDirection(direction) ? direction : 'positive',
       },
     }
   },
   applyPatch(draft, patch) {
     const optionPatch = patch.options
+    const directionPatch = patch.direction
+      ?? (optionPatch && typeof optionPatch === 'object' ? (optionPatch as { direction?: unknown }).direction : undefined)
     return {
       ...draft,
       faceTargets:
@@ -188,6 +208,7 @@ export const thickenAuthoringDefinition = {
             draft.options.side,
             isThickenSide,
           ) as ThickenFeatureParameterDraft['options']['side'],
+        direction: isNormalDirection(directionPatch) ? directionPatch : draft.options.direction,
       },
     }
   },
@@ -320,6 +341,14 @@ export const thickenAuthoringDefinition = {
               value: authoredNumberFormValue(session.draft.options.thickness),
               input: 'number',
               step: 0.1,
+              directionToggle: {
+                patch: { patchKey: 'direction' },
+                value: session.draft.options.direction,
+                forwardValue: 'positive',
+                reverseValue: 'negative',
+                forwardLabel: 'Positive normal',
+                reverseLabel: 'Negative normal',
+              },
               error:
                 isPositiveAuthoredNumber(session.draft.options.thickness)
                   ? null

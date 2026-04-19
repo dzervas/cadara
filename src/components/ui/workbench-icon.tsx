@@ -12,6 +12,7 @@ export type WorkbenchIconName =
   | 'edit'
   | 'eyeClosed'
   | 'eyeOpen'
+  | 'flipDirection'
   | 'history'
   | 'info'
   | 'keyboard'
@@ -38,6 +39,7 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   edit: 'edit.svg',
   eyeClosed: 'eye_closed.svg',
   eyeOpen: 'eye_open.svg',
+  flipDirection: 'flip-direction.svg',
   history: 'revision-history.svg',
   info: 'info.svg',
   keyboard: 'keyboard-search-empty.svg',

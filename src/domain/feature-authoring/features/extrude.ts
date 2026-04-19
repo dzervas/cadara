@@ -4,6 +4,10 @@ import { createSelectionFilterForRequirement, extrudeSelectionFilter } from '@/d
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
+function isExtrudeDirection(value: unknown): value is 'positive' | 'negative' {
+  return value === 'positive' || value === 'negative'
+}
+
 export const extrudeAuthoringDefinition = {
   metadata: {
     kind: 'extrude',
@@ -45,6 +49,7 @@ export const extrudeAuthoringDefinition = {
     return {
       profileTargets: profileTarget ? [profileTarget] : [],
       depth: 12,
+      direction: 'positive',
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     }
@@ -53,6 +58,7 @@ export const extrudeAuthoringDefinition = {
     return {
       profileTargets: [...feature.parameters.profiles],
       depth: feature.parameters.endExtent.distance,
+      direction: feature.parameters.endExtent.direction,
       operation: feature.parameters.operation,
       booleanScope: feature.parameters.booleanScope,
     }
@@ -69,6 +75,7 @@ export const extrudeAuthoringDefinition = {
               ? [patch.profileTarget as typeof draft.profileTargets[number]]
               : draft.profileTargets,
       depth: acceptAuthoredPatch(patch.depth, draft.depth, (value): value is number => typeof value === 'number'),
+      direction: isExtrudeDirection(patch.direction) ? patch.direction : draft.direction,
       operation: acceptAuthoredPatch(patch.operation, draft.operation, isBooleanOperation),
       booleanScope: toBooleanScope(patch, draft.booleanScope),
     }
@@ -128,7 +135,7 @@ export const extrudeAuthoringDefinition = {
             startExtent: { kind: 'profilePlane' },
             endExtent: {
               kind: 'blind',
-              direction: 'positive',
+              direction: draft.direction,
               distance: authoredDefinitionValue(draft.depth, 12) as number,
             },
             operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
@@ -179,6 +186,14 @@ export const extrudeAuthoringDefinition = {
               value: authoredNumberFormValue(session.draft.depth),
               input: 'number',
               step: 0.1,
+              directionToggle: {
+                patch: { patchKey: 'direction' },
+                value: session.draft.direction,
+                forwardValue: 'positive',
+                reverseValue: 'negative',
+                forwardLabel: 'Positive normal',
+                reverseLabel: 'Negative normal',
+              },
               authoredValue: expressionCapableAuthoredValue(session.draft.depth, { kind: 'positiveNumber' }),
               error: isPositiveAuthoredNumber(session.draft.depth) ? null : { message: 'Depth must be greater than zero.' },
               patch: { patchKey: 'depth' },

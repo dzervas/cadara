@@ -4,6 +4,10 @@ import { createSelectionFilterForRequirement, shellSelectionFilter } from '@/dom
 import { SHELL_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asFaceRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
+function isShellDirection(value: unknown): value is 'inside' | 'outside' {
+  return value === 'inside' || value === 'outside'
+}
+
 export const shellAuthoringDefinition = {
   metadata: {
     kind: 'shell',
@@ -53,6 +57,7 @@ export const shellAuthoringDefinition = {
       bodyTarget: asBodyRef(input.selectedTarget) ?? (selectedFace ? { kind: 'body', bodyId: selectedFace.bodyId } : null),
       faceTargets: selectedFace ? [selectedFace] : [],
       thickness: 1,
+      direction: 'inside',
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     }
@@ -62,6 +67,7 @@ export const shellAuthoringDefinition = {
       bodyTarget: feature.parameters.bodyTarget,
       faceTargets: [...feature.parameters.faceTargets],
       thickness: feature.parameters.thickness,
+      direction: feature.parameters.direction ?? 'inside',
       operation: feature.parameters.operation,
       booleanScope: feature.parameters.booleanScope,
     }
@@ -80,6 +86,7 @@ export const shellAuthoringDefinition = {
               ? [patch.faceTarget as typeof draft.faceTargets[number]]
               : draft.faceTargets,
       thickness: acceptAuthoredPatch(patch.thickness, draft.thickness, (value): value is number => typeof value === 'number'),
+      direction: isShellDirection(patch.direction) ? patch.direction : draft.direction,
       operation: acceptAuthoredPatch(patch.operation, draft.operation, isBooleanOperation),
       booleanScope: toBooleanScope(patch, draft.booleanScope),
     }
@@ -147,6 +154,7 @@ export const shellAuthoringDefinition = {
             bodyTarget: draft.bodyTarget,
             faceTargets: draft.faceTargets,
             thickness: authoredDefinitionValue(draft.thickness, 1) as number,
+            direction: draft.direction,
             operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
             booleanScope: draft.booleanScope,
           },
@@ -211,7 +219,7 @@ export const shellAuthoringDefinition = {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            { kind: 'numeric', id: 'shell-thickness', label: 'Thickness', value: authoredNumberFormValue(session.draft.thickness), input: 'number', step: 0.1, authoredValue: expressionCapableAuthoredValue(session.draft.thickness, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.thickness) ? null : { message: 'Thickness must be greater than zero.' }, patch: { patchKey: 'thickness' } },
+            { kind: 'numeric', id: 'shell-thickness', label: 'Thickness', value: authoredNumberFormValue(session.draft.thickness), input: 'number', step: 0.1, directionToggle: { patch: { patchKey: 'direction' }, value: session.draft.direction, forwardValue: 'inside', reverseValue: 'outside', forwardLabel: 'Inside', reverseLabel: 'Outside' }, authoredValue: expressionCapableAuthoredValue(session.draft.thickness, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.thickness) ? null : { message: 'Thickness must be greater than zero.' }, patch: { patchKey: 'thickness' } },
             {
               kind: 'enum',
               id: 'shell-operation',

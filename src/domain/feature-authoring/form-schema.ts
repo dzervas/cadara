@@ -62,8 +62,18 @@ export interface FeatureNumericField extends FeatureFormFieldBase {
   value: number | string
   input: 'number' | 'angleDegrees'
   step?: number
+  directionToggle?: FeatureNumericDirectionToggle
   authoredValue?: FeatureEditorAuthoredValueBinding
   patch: FeatureEditorPatchBinding
+}
+
+export interface FeatureNumericDirectionToggle {
+  patch: FeatureEditorPatchBinding
+  value: string
+  forwardValue: string
+  reverseValue: string
+  forwardLabel: string
+  reverseLabel: string
 }
 
 export interface FeatureEnumField extends FeatureFormFieldBase {

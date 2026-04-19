@@ -8,6 +8,7 @@ import {
   beginSketchTool,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
+  deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
   getSketchSessionDisplayRenderables,
   patchSketchStyleValue,
@@ -325,6 +326,115 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     assert(
       session.validationMessage === 'Geometry is constrained and cannot move to that position.',
       'Blocked drag should leave visible constrained-movement feedback.',
+    )
+  }
+
+  function testSelectedEntityDeletionRemovesDependentAnnotations() {
+    const session = createSessionFromDefinition({
+      ...makeDefinition({
+        pointIds: ['sketch_point_center', 'sketch_point_a', 'sketch_point_b'],
+        points: [
+          makePoint('sketch_point_center', 'Center', 0, 0),
+          makePoint('sketch_point_a', 'A', 2, 0),
+          makePoint('sketch_point_b', 'B', 4, 0),
+        ],
+        entityIds: ['sketch_entity_circle', 'sketch_entity_ab'],
+        entities: [
+          makeCircle('sketch_entity_circle', 'Circle', 'sketch_point_center', 1),
+          makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        ],
+      }),
+      constraintIds: ['constraint_horizontal_ab'],
+      constraints: [{
+        constraintId: 'constraint_horizontal_ab',
+        kind: 'horizontal',
+        label: 'AB horizontal',
+        entityId: 'sketch_entity_ab',
+      }],
+      dimensionIds: ['dimension_radius', 'dimension_width'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_radius',
+          kind: 'circleRadius',
+          label: 'Radius',
+          entityId: 'sketch_entity_circle',
+          value: 1,
+        },
+        {
+          dimensionId: 'dimension_width',
+          kind: 'horizontalDistance',
+          label: 'Width',
+          pointIds: ['sketch_point_a', 'sketch_point_b'],
+          value: 2,
+        },
+      ],
+    })
+    const deleted = deleteSelectedSketchGeometry(session, [{
+      kind: 'sketchEntity',
+      sketchId: 'sketch_primary',
+      entityId: 'sketch_entity_circle',
+    }])
+
+    assert(!deleted.definition.entityIds.includes('sketch_entity_circle'), 'Entity deletion should remove the selected entity.')
+    assert(
+      deleted.definition.constraintIds.includes('constraint_horizontal_ab'),
+      'Entity deletion should preserve unrelated entity constraints.',
+    )
+    assert(
+      !deleted.definition.dimensionIds.includes('dimension_radius'),
+      'Entity deletion should remove dimensions that reference the deleted entity.',
+    )
+    assert(
+      deleted.definition.dimensionIds.includes('dimension_width'),
+      'Entity deletion should preserve unrelated dimensions.',
+    )
+    assert(
+      deleted.commitRequest?.definition.entityIds.includes('sketch_entity_circle') === false,
+      'Entity deletion should rebuild the commit request without deleted geometry.',
+    )
+  }
+
+  function testSelectedPointDeletionRemovesDependentGeometryAndAnnotations() {
+    const session = createSessionFromDefinition(createSquareDefinition(true))
+    const deleted = deleteSelectedSketchGeometry(session, [{
+      kind: 'sketchPoint',
+      sketchId: 'sketch_primary',
+      pointId: 'sketch_point_a',
+    }])
+
+    assert(!deleted.definition.pointIds.includes('sketch_point_a'), 'Point deletion should remove the selected point.')
+    assert(
+      !deleted.definition.entityIds.includes('sketch_entity_ab') && !deleted.definition.entityIds.includes('sketch_entity_da'),
+      'Point deletion should remove local entities that reference the deleted point.',
+    )
+    assert(
+      !deleted.definition.constraintIds.includes('constraint_fix_a'),
+      'Point deletion should remove point constraints that reference the deleted point.',
+    )
+    assert(
+      deleted.definition.constraintIds.includes('constraint_vertical_bc'),
+      'Point deletion should preserve unrelated constraints.',
+    )
+    assert(
+      !deleted.definition.dimensionIds.includes('dimension_width') && !deleted.definition.dimensionIds.includes('dimension_height'),
+      'Point deletion should remove dimensions that reference deleted point ids.',
+    )
+    const remainingPointIds = new Set(deleted.definition.pointIds)
+    assert(
+      deleted.definition.entities.every((entity) =>
+        entity.kind === 'spline'
+          ? entity.fitPointIds.every((pointId) => remainingPointIds.has(pointId))
+          : entity.kind === 'circle'
+            ? remainingPointIds.has(entity.centerPointId)
+            : entity.kind === 'point'
+              ? remainingPointIds.has(entity.pointId)
+              : entity.kind === 'arc'
+                ? remainingPointIds.has(entity.centerPointId)
+                  && remainingPointIds.has(entity.startPointId)
+                  && remainingPointIds.has(entity.endPointId)
+                : remainingPointIds.has(entity.startPointId) && remainingPointIds.has(entity.endPointId),
+      ),
+      'Point deletion should not leave entities with dangling point references.',
     )
   }
 
@@ -791,6 +901,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testConstrainedSquareDragTranslatesSolvedShape()
   testRectangleToolDragTranslatesWholeRectangle()
   testImmovableConstrainedDragBlocksWithoutChangingDraft()
+  testSelectedEntityDeletionRemovesDependentAnnotations()
+  testSelectedPointDeletionRemovesDependentGeometryAndAnnotations()
   testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets()
   testTrimSplitsLineAtClearIntersections()
   testTrimHandlesCircleArcAndSplineTargets()

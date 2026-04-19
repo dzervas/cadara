@@ -206,6 +206,7 @@ const shellDefinitionSchema = z.object({
     bodyTarget: z.object({ kind: z.literal('body'), bodyId: bodyIdSchema }),
     faceTargets: z.array(z.object({ kind: z.literal('face'), bodyId: bodyIdSchema, faceId: faceIdSchema })),
     thickness: authoredPositiveNumberSchema('Shell thickness must be positive.'),
+    direction: z.union([z.literal('inside'), z.literal('outside')]).optional(),
     operation: booleanOperationAuthoredSchema.optional(),
     booleanScope: z.object({ kind: z.string() }).passthrough(),
   }).passthrough(),
