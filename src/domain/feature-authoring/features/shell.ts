@@ -53,13 +53,15 @@ export const shellAuthoringDefinition = {
   },
   createDraft(input) {
     const selectedFace = asFaceRef(input.selectedTarget)
+    const bodyTarget = asBodyRef(input.selectedTarget)
+      ?? (selectedFace ? { kind: 'body' as const, bodyId: selectedFace.bodyId } : null)
     return {
-      bodyTarget: asBodyRef(input.selectedTarget) ?? (selectedFace ? { kind: 'body', bodyId: selectedFace.bodyId } : null),
+      bodyTarget,
       faceTargets: selectedFace ? [selectedFace] : [],
       thickness: 1,
       direction: 'inside',
-      operation: 'newBody',
-      booleanScope: { kind: 'standalone' },
+      operation: 'intersect',
+      booleanScope: bodyTarget ? { kind: 'targetBody', bodyId: bodyTarget.bodyId } : { kind: 'standalone' },
     }
   },
   hydrateDraft(feature) {
@@ -100,10 +102,15 @@ export const shellAuthoringDefinition = {
     }
 
     if (target.kind === 'face') {
+      const bodyTarget = { kind: 'body' as const, bodyId: target.bodyId }
       return {
         ...draft,
-        bodyTarget: draft.bodyTarget ?? { kind: 'body', bodyId: target.bodyId },
+        bodyTarget: draft.bodyTarget ?? bodyTarget,
         faceTargets: appendUniqueTarget(draft.faceTargets, target),
+        booleanScope:
+          authoredStringLiteral(draft.operation, 'newBody') === 'newBody' || getBooleanScopeBodyTargets(draft.booleanScope).length > 0
+            ? draft.booleanScope
+            : { kind: 'targetBody', bodyId: bodyTarget.bodyId },
       }
     }
 

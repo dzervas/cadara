@@ -806,14 +806,32 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   }
 
   function testShellOwnsFaceSelectionDefaultsAndFormSchema() {
+    const selectedFace = { kind: 'face' as const, bodyId: 'body_a' as const, faceId: 'face_top' as const }
     const session = createFeatureEditSession({
       featureType: 'shell',
-      selectedTarget: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+      selectedTarget: selectedFace,
     })
 
     assert(session.featureType === 'shell', 'Shell activation should create a shell authoring session.')
     assert(session.draft.bodyTarget?.bodyId === 'body_a', 'Shell should infer the source body from the selected removable face.')
     assert(session.draft.faceTargets.length === 1, 'Shell should seed removable faces from the selected face.')
+    assert(session.draft.operation === 'intersect', 'Shell should default to intersect instead of creating a new body.')
+    assert(
+      session.draft.booleanScope.kind === 'targetBody' && session.draft.booleanScope.bodyId === 'body_a',
+      'Shell should default the boolean target to the selected source body.',
+    )
+
+    const selectionAfterActivationSession = applySelectionToFeatureEditSession(
+      createFeatureEditSession({ featureType: 'shell', selectedTarget: null }),
+      selectedFace,
+    )
+
+    assert(
+      selectionAfterActivationSession.featureType === 'shell' &&
+        selectionAfterActivationSession.draft.booleanScope.kind === 'targetBody' &&
+        selectionAfterActivationSession.draft.booleanScope.bodyId === 'body_a',
+      'Shell face selection should seed the default intersect target after command activation.',
+    )
 
     const schema = getFeatureEditorFormSchema(session)
     const fieldIds = schema.sections.flatMap((section) => section.fields.map((field) => field.id))
@@ -830,22 +848,30 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: { kind: 'face', bodyId: 'body_source', faceId: 'face_top' },
     })
     const operationField = getFormField(initialSession, 'shell-operation')
-    const hiddenTargetField = getFormField(initialSession, 'shell-target-bodies')
+    const visibleTargetField = getFormField(initialSession, 'shell-target-bodies')
+    const initialDefinition = buildFeatureDefinition(initialSession)
 
     assert(operationField?.kind === 'enum', 'Shell schema should expose operation as a generic enum field.')
-    assert(hiddenTargetField?.kind === 'referenceCollection', 'Shell schema should expose boolean target bodies as a reference collection.')
-    assert(hiddenTargetField.hidden === true, 'Shell should hide boolean target bodies for newBody operation.')
+    assert(operationField.value === 'intersect', 'Shell operation should default to intersect.')
+    assert(visibleTargetField?.kind === 'referenceCollection', 'Shell schema should expose boolean target bodies as a reference collection.')
+    assert(visibleTargetField.hidden !== true, 'Shell should show boolean target bodies for its default intersect operation.')
+    assert(
+      initialDefinition?.kind === 'shell' &&
+        initialDefinition.parameters.operation === 'intersect' &&
+        initialDefinition.parameters.booleanScope.kind === 'targetBody' &&
+        initialDefinition.parameters.booleanScope.bodyId === 'body_source',
+      'Shell should build an intersect definition against the selected source body by default.',
+    )
 
-    const intersectSession = patchFeatureEditSession(initialSession, createFeatureEditorFieldPatch(operationField, 'intersect'))
-    const visibleTargetField = getFormField(intersectSession, 'shell-target-bodies')
+    const emptyTargetSession = patchFeatureEditSession(initialSession, createFeatureEditorClearReferencePatch(visibleTargetField))
+    assert(buildFeatureDefinition(emptyTargetSession) === null, 'Shell boolean drafts without target bodies should not build a definition.')
 
-    assert(visibleTargetField?.kind === 'referenceCollection', 'Shell target bodies field should remain a reference collection.')
-    assert(visibleTargetField.hidden !== true, 'Shell should show boolean target bodies for intersect operation.')
-    assert(buildFeatureDefinition(intersectSession) === null, 'Shell boolean drafts without target bodies should not build a definition.')
+    const emptyTargetField = getFormField(emptyTargetSession, 'shell-target-bodies')
+    assert(emptyTargetField?.kind === 'referenceCollection', 'Shell target bodies field should remain a reference collection.')
 
     const targetSession = patchFeatureEditSession(
-      intersectSession,
-      createFeatureEditorReferenceSelectionPatch(visibleTargetField, targetBody),
+      emptyTargetSession,
+      createFeatureEditorReferenceSelectionPatch(emptyTargetField, targetBody),
     )
     const definition = buildFeatureDefinition(targetSession)
 
