@@ -3,8 +3,14 @@ import { test } from 'bun:test'
 import { createAppError } from '@/contracts/errors'
 import { createDefaultErrorReporter } from '@/contracts/errors/default-reporter'
 import {
+  checkSentryDsnReachability,
+  createSentryDsnTestUrl,
+} from '@/contracts/errors/sentry-client'
+import {
   BUGSINK_DSN,
   createSentryErrorReporter,
+  initializeSentryErrorReporting,
+  shouldEnableSentryErrorReporting,
   type SentryBrowserBoundary,
 } from '@/contracts/errors/sentry-reporter'
 import {
@@ -20,6 +26,9 @@ interface CapturedEvent {
   value: unknown
   context: unknown
 }
+
+const expectedTestEnvelopeUrl =
+  'https://example.test/api/42/envelope/?sentry_version=7&sentry_key=public&sentry_client=sentry.javascript.browser%2F10.49.0'
 
 test('src/contracts/errors/sentry-reporter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -78,6 +87,37 @@ test('src/contracts/errors/sentry-reporter.spec.ts', async () => {
   assert(duplicate === null, 'Sentry reporter should preserve dedupe behavior.')
   assert(initOptions.length === 1, 'Sentry reporter should initialize the SDK once on creation.')
   assert((initOptions[0] as { dsn?: string }).dsn === BUGSINK_DSN, 'Sentry reporter should use the Bugsink DSN.')
+  assert(initializeSentryErrorReporting({ client }), 'Repeated initialization should report the initialized client.')
+  assert(initOptions.length === 1, 'Sentry reporter should not initialize the same SDK client twice.')
+  assert(
+    createSentryDsnTestUrl('https://public@example.test/sentry/42') === expectedTestEnvelopeUrl,
+    'The Sentry DSN test URL should target the project envelope endpoint with Sentry query metadata.',
+  )
+  const checkedRequests: { input: string, init?: RequestInit }[] = []
+  assert(
+    await checkSentryDsnReachability({
+      dsn: 'https://public@example.test/sentry/42',
+      fetchLike(input, init) {
+        checkedRequests.push({ input, init })
+        return Promise.resolve()
+      },
+    }),
+    'Reachability checks should pass when the browser request resolves.',
+  )
+  assert(
+    checkedRequests[0]?.input === expectedTestEnvelopeUrl,
+    'Reachability checks should request the derived Sentry envelope endpoint.',
+  )
+  assert(checkedRequests[0]?.init?.method === 'GET', 'Reachability checks should use a visible browser GET probe.')
+  assert(
+    !(await checkSentryDsnReachability({
+      dsn: 'https://public@example.test/sentry/42',
+      fetchLike() {
+        return Promise.reject(new Error('blocked'))
+      },
+    })),
+    'Reachability checks should fail when the browser blocks the request.',
+  )
   assert(capturedEvents.length === 1, 'Dedupe should suppress duplicate SDK captures.')
   assert(capturedEvents[0]?.kind === 'exception', 'Error causes should be captured as exceptions to preserve stacks.')
   assert(capturedEvents[0]?.value === cause, 'The original Error cause should be sent to the SDK.')
@@ -152,12 +192,102 @@ test('src/contracts/errors/sentry-reporter.spec.ts', async () => {
   assert(initOptions.length === 1, 'Non-production reporter selection should not initialize Sentry.')
   assert(devConsoleRecords.length === 1, 'Non-production reporter selection should keep local reporting.')
 
+  const productionInitOptions: unknown[] = []
+  const productionClient: SentryBrowserBoundary = {
+    init(options) {
+      productionInitOptions.push(options)
+    },
+    captureException() {
+      return 'event_exception'
+    },
+    captureMessage() {
+      return 'event_message'
+    },
+  }
   const productionReporter = createDefaultErrorReporter({
     isProduction: true,
-    sentryClient: client,
+    sentryClient: productionClient,
   })
   productionReporter.report(error, { source: 'unit-production' })
-  assert(initOptions.length === 2, 'Production reporter selection should initialize Sentry.')
+  assert(productionInitOptions.length === 1, 'Production reporter selection should initialize Sentry.')
+
+  const disabledInitOptions: unknown[] = []
+  const disabledClient: SentryBrowserBoundary = {
+    init(options) {
+      disabledInitOptions.push(options)
+    },
+    captureException() {
+      return 'event_exception'
+    },
+    captureMessage() {
+      return 'event_message'
+    },
+  }
+  assert(
+    !initializeSentryErrorReporting({ client: disabledClient, enabled: false }),
+    'Disabled Sentry initialization should report that no client was initialized.',
+  )
+  assert(disabledInitOptions.length === 0, 'Disabled Sentry initialization should not call the SDK.')
+  const disabledProbeUrls: string[] = []
+  assert(
+    !initializeSentryErrorReporting({
+      client: disabledClient,
+      enabled: false,
+      dsn: 'https://public@example.test/sentry/42',
+      checkDsnReachability: true,
+      fetchLike(input) {
+        disabledProbeUrls.push(input)
+        return Promise.resolve()
+      },
+    }),
+    'Disabled Sentry initialization should still leave SDK reporting disabled.',
+  )
+  await Promise.resolve()
+  assert(
+    disabledProbeUrls[0] === expectedTestEnvelopeUrl,
+    'The DSN probe should still run when full Sentry reporting is disabled.',
+  )
+  assert(disabledInitOptions.length === 0, 'The dev probe should not initialize the SDK.')
+  const probeInitOptions: unknown[] = []
+  const probeUrls: string[] = []
+  const probeClient: SentryBrowserBoundary = {
+    init(options) {
+      probeInitOptions.push(options)
+    },
+    captureException() {
+      return 'event_exception'
+    },
+    captureMessage() {
+      return 'event_message'
+    },
+  }
+  assert(
+    initializeSentryErrorReporting({
+      client: probeClient,
+      dsn: 'https://public@example.test/sentry/42',
+      checkDsnReachability: true,
+      fetchLike(input) {
+        probeUrls.push(input)
+        return Promise.resolve()
+      },
+    }),
+    'Enabled Sentry initialization should start successfully when the SDK initializes.',
+  )
+  await Promise.resolve()
+  assert(probeInitOptions.length === 1, 'The probe client should still initialize the SDK once.')
+  assert(probeUrls[0] === expectedTestEnvelopeUrl, 'Sentry init should probe DSN reachability.')
+  assert(
+    shouldEnableSentryErrorReporting({ isProduction: true, search: null }),
+    'Production builds should enable Sentry reporting.',
+  )
+  assert(
+    !shouldEnableSentryErrorReporting({ isProduction: false, search: null }),
+    'Non-production builds should keep Sentry disabled by default.',
+  )
+  assert(
+    shouldEnableSentryErrorReporting({ isProduction: false, search: '?cadEnableSentry=1' }),
+    'The development query opt-in should enable Sentry reporting.',
+  )
 
   clearActiveDocumentTelemetryContext()
 })

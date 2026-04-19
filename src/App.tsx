@@ -20,6 +20,7 @@ import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 import { ReportedErrorBoundary } from '@/components/layout/reported-error-boundary'
 import { BuildMetadataLabel } from '@/components/layout/build-metadata-label'
+import { SentryAdBlockNotification } from '@/components/layout/sentry-ad-block-notification'
 
 function App() {
   const actionBus = useMemo(() => createToolActionBus(), [])
@@ -81,6 +82,7 @@ function App() {
           </EditorProvider>
         </ModelingServiceProvider>
       </ReportedErrorBoundary>
+      <SentryAdBlockNotification />
       <BuildMetadataLabel />
     </ErrorReporterProvider>
   )

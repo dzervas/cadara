@@ -1,9 +1,7 @@
-import * as SentryBrowser from '@sentry/browser'
 import type {
-  BrowserOptions,
   CaptureContext,
   SeverityLevel,
-} from '@sentry/browser'
+} from '@/contracts/errors/sentry-client'
 
 import type { AppError, AppErrorSeverity } from '@/contracts/errors/app-error'
 import {
@@ -12,16 +10,22 @@ import {
   type ErrorReporter,
 } from '@/contracts/errors/reporter'
 import {
+  BUGSINK_DSN,
+  defaultSentryBrowserClient,
+  initializeSentryErrorReporting,
+  shouldEnableSentryErrorReporting,
+  type SentryBrowserBoundary,
+} from '@/contracts/errors/sentry-client'
+import {
   getErrorReporterTelemetryContext,
   type ActiveDocumentTelemetryContext,
 } from '@/contracts/errors/telemetry-context'
 
-export const BUGSINK_DSN = 'https://0f8f70678fa14347ad0d762e7db3c74c@errors.dzerv.art/1'
-
-export interface SentryBrowserBoundary {
-  init(options?: BrowserOptions): unknown
-  captureException(exception: unknown, captureContext?: CaptureContext): string
-  captureMessage(message: string, captureContext?: CaptureContext | SeverityLevel): string
+export {
+  BUGSINK_DSN,
+  initializeSentryErrorReporting,
+  shouldEnableSentryErrorReporting,
+  type SentryBrowserBoundary,
 }
 
 interface ConsoleLike {
@@ -36,17 +40,10 @@ interface SentryErrorReporterOptions {
 }
 
 export function createSentryErrorReporter(options: SentryErrorReporterOptions = {}): ErrorReporter {
-  const client = options.client ?? SentryBrowser
+  const client = options.client ?? defaultSentryBrowserClient
   const reportedDedupeKeys = new Set<string>()
 
-  try {
-    client.init({
-      dsn: options.dsn ?? BUGSINK_DSN,
-      environment: options.environment ?? 'production',
-    })
-  } catch (error) {
-    options.consoleLike?.error('[app-error-reporter]', error)
-  }
+  initializeSentryErrorReporting({ ...options, client })
 
   return {
     report(error, metadata) {

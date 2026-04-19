@@ -3,6 +3,7 @@ import { extname, join, relative } from 'node:path'
 import { test } from 'bun:test'
 
 const allowedVendorImportFiles = new Set([
+  'src/contracts/errors/sentry-client.ts',
   'src/contracts/errors/sentry-reporter.ts',
 ])
 const scannedExtensions = new Set(['.ts', '.tsx'])

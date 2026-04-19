@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { Divider, Paper, ScrollArea, Text, TextInput } from '@mantine/core'
+import { ActionIcon, Divider, Paper, ScrollArea, Text, TextInput, Tooltip } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { ShortcutSettingsButton } from '@/components/shortcuts/shortcut-settings'
 import { ToolButton } from '@/components/layout/tool-button'
 import { ToolDropdownButton } from '@/components/layout/tool-dropdown-button'
+import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import {
   getToolById,
   getToolbarSectionsForMode,
@@ -20,6 +21,8 @@ import {
 import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
+
+const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
@@ -159,6 +162,26 @@ export function WorkspaceToolbar({ historyAvailability }: WorkspaceToolbarProps 
           )}
         </div>
         <ShortcutSettingsButton />
+        <Tooltip
+          label={
+            <ToolbarTooltipContent
+              title="GitHub"
+              description="Open the Cadara repository."
+            />
+          }
+        >
+          <ActionIcon
+            component="a"
+            href={REPOSITORY_URL}
+            target="_blank"
+            rel="noreferrer"
+            variant="subtle"
+            color="workbench"
+            aria-label="Open repository on GitHub"
+          >
+            <WorkbenchIcon name="github" className="h-4 w-4" />
+          </ActionIcon>
+        </Tooltip>
       </div>
     </Paper>
   )

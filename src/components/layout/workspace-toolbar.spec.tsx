@@ -68,6 +68,14 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     'Toolbar buttons should expose concise accessibility labels based on the tool name.',
   )
   assert(
+    toolbarMarkup.includes('href="https://github.com/dzervas/cadara"') &&
+      toolbarMarkup.includes('target="_blank"') &&
+      toolbarMarkup.includes('rel="noreferrer"') &&
+      toolbarMarkup.includes('aria-label="Open repository on GitHub"') &&
+      toolbarMarkup.includes('/icons/GitHub-logo.svg'),
+    'Toolbar should render a safe GitHub repository link at the end.',
+  )
+  assert(
     toolbarMarkup.includes('data-tool-id="undo"') &&
       toolbarMarkup.includes('data-tool-id="redo"') &&
       getToolMarkup(toolbarMarkup, 'undo').includes('data-disabled="true"') &&
