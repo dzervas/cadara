@@ -26,6 +26,19 @@ export function ToolDropdownButton({
   const { triggerTool } = useToolActions()
   const [opened, setOpened] = useState(false)
   const commandId = getToolbarToolCommandId(tool.id)
+  const controlBackground = disabled
+    ? 'var(--workbench-shell-control-surface)'
+    : active
+      ? 'var(--workbench-shell-accent-surface)'
+      : 'transparent'
+  const controlBorder = disabled
+    ? 'var(--workbench-shell-border)'
+    : active
+      ? 'var(--workbench-shell-accent)'
+      : 'transparent'
+  const controlColor = disabled
+    ? 'var(--workbench-shell-text-dim)'
+    : 'var(--workbench-shell-text)'
 
   return (
     <Menu width={224} opened={opened} onChange={setOpened} transitionProps={{ duration: 0 }}>
@@ -47,23 +60,22 @@ export function ToolDropdownButton({
               radius="md"
               px={10}
               h={40}
-              withBorder={active}
+              withBorder={disabled || active}
               style={{
                 alignItems: 'center',
-                backgroundColor: active ? 'var(--workbench-shell-accent-surface)' : 'transparent',
-                borderColor: active
-                  ? 'var(--workbench-shell-accent)'
-                  : 'transparent',
-                color: 'var(--workbench-shell-text)',
+                backgroundColor: controlBackground,
+                borderColor: controlBorder,
+                color: controlColor,
                 display: 'flex',
                 gap: 4,
+                opacity: disabled ? 0.46 : 1,
               }}
             >
               <ToolbarToolIcon icon={tool.icon} />
               <WorkbenchIcon
                 name="chevronDown"
                 className="h-3.5 w-3.5"
-                style={{ color: 'var(--workbench-shell-text-muted)' }}
+                style={{ color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text-muted)' }}
               />
             </Paper>
           </UnstyledButton>

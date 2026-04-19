@@ -19,6 +19,7 @@ import {
   requireAcceptedModelingResult,
   runWorkbenchAction,
 } from '@/app/workbench-action'
+import { getWorkbenchHistoryAvailability } from '@/app/workbench-history'
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
@@ -44,6 +45,10 @@ import {
   getFeatureSnapshot,
   getSelectionDetail,
 } from '@/domain/modeling/document-snapshot-view'
+import {
+  getNextDocumentHistoryCursor,
+  getPreviousDocumentHistoryCursor,
+} from '@/domain/modeling/document-history'
 import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useErrorReporter } from '@/hooks/use-error-reporter'
@@ -243,10 +248,12 @@ export function CadWorkbench() {
   }
   const toolbarHistoryAvailability: EditorHistoryAvailability = sketchSession
     ? history
-    : {
-        canUndo: undoStack.length > 0 && !isUndoRedoRunning,
-        canRedo: redoStack.length > 0 && !isUndoRedoRunning,
-      }
+    : getWorkbenchHistoryAvailability({
+        snapshot,
+        undoStackLength: undoStack.length,
+        redoStackLength: redoStack.length,
+        isUndoRedoRunning,
+      })
 
   const handleViewportHover = (target: PrimitiveRef) => {
     dispatch({ type: 'viewport.hovered', target })
@@ -422,23 +429,68 @@ export function CadWorkbench() {
     }
   }
 
+  const applyDocumentCursor = async (
+    cursor: DocumentFeatureCursor,
+    operation: string,
+    fallbackMessage: string,
+  ) => {
+    const currentSnapshot = snapshotRef.current
+    if (!currentSnapshot) {
+      return false
+    }
+
+    const result = await runWorkbenchAction({
+      operation,
+      reporter: errorReporter,
+      context: [{ key: 'baseRevisionId', value: currentSnapshot.document.revisionId }],
+      action: () => modelingService.setFeatureCursor({
+        baseRevisionId: currentSnapshot.document.revisionId,
+        cursor,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation,
+        fallbackMessage,
+        context: [{ key: 'baseRevisionId', value: currentSnapshot.document.revisionId }],
+      }),
+      onError: (error) => setWorkbenchStatusMessage(error.message),
+    })
+
+    if (result.isOk()) {
+      dispatch({ type: 'document.refreshRequested' })
+      return true
+    }
+
+    return false
+  }
+
   const performWorkbenchUndo = async () => {
     if (sketchSessionRef.current || isUndoRedoRunning) {
       return
     }
 
     const entry = undoStackRef.current.at(-1)
-    if (!entry) {
+    const documentCursor = entry ? null : snapshotRef.current ? getPreviousDocumentHistoryCursor(snapshotRef.current) : null
+    if (!entry && !documentCursor) {
       return
     }
 
     setIsUndoRedoRunning(true)
-    const accepted = await applyUndoEntry(entry, 'undo')
-    if (accepted) {
-      setUndoStack((current) => current.slice(0, -1))
-      setRedoStack((current) => [...current, entry])
+    try {
+      if (entry) {
+        const accepted = await applyUndoEntry(entry, 'undo')
+        if (accepted) {
+          setUndoStack((current) => current.slice(0, -1))
+          setRedoStack((current) => [...current, entry])
+        }
+        return
+      }
+
+      if (documentCursor) {
+        await applyDocumentCursor(documentCursor, 'Undo document history', 'Document history undo failed.')
+      }
+    } finally {
+      setIsUndoRedoRunning(false)
     }
-    setIsUndoRedoRunning(false)
   }
 
   const performWorkbenchRedo = async () => {
@@ -447,17 +499,28 @@ export function CadWorkbench() {
     }
 
     const entry = redoStackRef.current.at(-1)
-    if (!entry) {
+    const documentCursor = entry ? null : snapshotRef.current ? getNextDocumentHistoryCursor(snapshotRef.current) : null
+    if (!entry && !documentCursor) {
       return
     }
 
     setIsUndoRedoRunning(true)
-    const accepted = await applyUndoEntry(entry, 'redo')
-    if (accepted) {
-      setRedoStack((current) => current.slice(0, -1))
-      setUndoStack((current) => [...current, entry])
+    try {
+      if (entry) {
+        const accepted = await applyUndoEntry(entry, 'redo')
+        if (accepted) {
+          setRedoStack((current) => current.slice(0, -1))
+          setUndoStack((current) => [...current, entry])
+        }
+        return
+      }
+
+      if (documentCursor) {
+        await applyDocumentCursor(documentCursor, 'Redo document history', 'Document history redo failed.')
+      }
+    } finally {
+      setIsUndoRedoRunning(false)
     }
-    setIsUndoRedoRunning(false)
   }
 
   useEffect(() => {
@@ -767,29 +830,7 @@ export function CadWorkbench() {
   }
 
   const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
-    if (!snapshot) {
-      return
-    }
-
-    void runWorkbenchAction({
-      operation: 'Move feature cursor',
-      reporter: errorReporter,
-      context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
-      action: () => modelingService.setFeatureCursor({
-        baseRevisionId: snapshot.document.revisionId,
-        cursor,
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
-        operation: 'Move feature cursor',
-        fallbackMessage: 'Feature cursor rollback failed.',
-        context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
-      }),
-      onError: (error) => setWorkbenchStatusMessage(error.message),
-    }).then((result) => {
-      if (result.isOk()) {
-        dispatch({ type: 'document.refreshRequested' })
-      }
-    })
+    void applyDocumentCursor(cursor, 'Move feature cursor', 'Feature cursor rollback failed.')
   }
 
   const handleSketchMove = (point: readonly [number, number]) => {

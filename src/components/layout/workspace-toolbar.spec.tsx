@@ -70,8 +70,14 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   assert(
     toolbarMarkup.includes('data-tool-id="undo"') &&
       toolbarMarkup.includes('data-tool-id="redo"') &&
-      getToolMarkup(toolbarMarkup, 'undo').includes('data-disabled="true"'),
-    'Undo should render disabled when no history step is available.',
+      getToolMarkup(toolbarMarkup, 'undo').includes('data-disabled="true"') &&
+      getToolMarkup(toolbarMarkup, 'redo').includes('data-disabled="true"'),
+    'Undo and redo should render disabled when no history step is available.',
+  )
+  assert(
+    getToolMarkup(toolbarMarkup, 'undo').includes('opacity:0.46') &&
+      getToolMarkup(toolbarMarkup, 'redo').includes('opacity:0.46'),
+    'Disabled undo and redo buttons should render with a visibly muted toolbar treatment.',
   )
   assert(!toolbarMarkup.includes('Filter:'), 'Toolbar should not duplicate the selection filter debugger readout.')
   assert(!toolbarMarkup.includes('Requirement:'), 'Toolbar should not duplicate the requirement debugger readout.')
