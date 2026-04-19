@@ -5,12 +5,28 @@ import path from 'node:path'
 
 import { createBuildMetadataPlugin } from './build-metadata'
 
+export function shouldUseCloudflareOpenCascadeCdn(env: NodeJS.ProcessEnv = process.env) {
+  return env.CF_PAGES === '1'
+    || env.WORKERS_CI === '1'
+    || env.CADARA_USE_OCC_CDN === '1'
+}
+
+function createOpenCascadeAlias() {
+  return shouldUseCloudflareOpenCascadeCdn()
+    ? [{
+        find: /^opencascade\.js$/,
+        replacement: path.resolve(__dirname, './src/domain/modeling/occ/opencascade-cdn-entry.ts'),
+      }]
+    : []
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [createBuildMetadataPlugin(__dirname), react(), tailwindcss()],
   assetsInclude: ['**/*.wasm'],
   resolve: {
     alias: [
+      ...createOpenCascadeAlias(),
       {
         find: '@',
         replacement: path.resolve(__dirname, './src'),

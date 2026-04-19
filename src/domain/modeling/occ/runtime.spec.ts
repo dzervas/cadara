@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import {
+  createOpenCascadeInitializerFromMainJS,
   createOpenCascadeInstanceLoader,
   getDefaultOpenCascadeEntrySpecifier,
   getDefaultOpenCascadeInstance,
@@ -139,6 +140,37 @@ test('src/domain/modeling/occ/runtime.spec.ts', async () => {
     assert(recovered === instance, 'Loader must recover and cache the next successful initialization result.')
   }
 
+  async function testBrowserOpenCascadeInitializerUsesConfiguredWasmUrl() {
+    const instance = createMockOpenCascadeInstance()
+    const modules: Record<string, unknown>[] = []
+    const mainJS = function (module: Record<string, unknown>) {
+      modules.push(module)
+
+      return Promise.resolve(instance)
+    } as unknown as NonNullable<Parameters<typeof createOpenCascadeInitializerFromMainJS>[0]>
+
+    const initializer = createOpenCascadeInitializerFromMainJS(
+      mainJS,
+      () => 'https://cdn.example/opencascade.full.wasm',
+    )
+    const oc = await initializer()
+
+    assert(oc === instance, 'Browser initializer must resolve the created OCJS instance.')
+    assert(modules.length === 1, 'Browser initializer must construct OCJS exactly once.')
+
+    const locateFile = modules[0]?.locateFile
+
+    assert(typeof locateFile === 'function', 'Browser initializer must provide a locateFile hook.')
+    assert(
+      locateFile('opencascade.full.wasm') === 'https://cdn.example/opencascade.full.wasm',
+      'Browser initializer must resolve the OCC wasm file from the configured CDN URL.',
+    )
+    assert(
+      locateFile('opencascade.full.worker.js') === 'opencascade.full.worker.js',
+      'Browser initializer must leave unrelated files untouched when no worker URL is configured.',
+    )
+  }
+
   async function testGetDefaultOpenCascadeInstanceInitializesNodeOpenCascade() {
     resetDefaultOpenCascadeInstanceForTests()
 
@@ -163,6 +195,7 @@ test('src/domain/modeling/occ/runtime.spec.ts', async () => {
   await testLoadDefaultOpenCascadeFactoryUsesBrowserEntryOutsideNodeRuntime()
   await testCreateOpenCascadeInstanceLoaderCachesTheInitializedInstance()
   await testCreateOpenCascadeInstanceLoaderRetriesAfterInitializationFailure()
+  await testBrowserOpenCascadeInitializerUsesConfiguredWasmUrl()
   await testGetDefaultOpenCascadeInstanceInitializesNodeOpenCascade()
 
   console.log('OCC phase 1 runtime bootstrap tests passed.')

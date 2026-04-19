@@ -1,7 +1,24 @@
 import type { OpenCascadeInstance } from 'opencascade.js/dist/opencascade.full'
 
+const DEFAULT_OPENCASCADE_WASM_CDN_URL =
+  'https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.b5ff984/dist/opencascade.full.wasm'
+
+type OpenCascadeMainJS = new (module: Record<string, unknown>) => Promise<OpenCascadeInstance>
+
+interface OpenCascadeDynamicLibraryHost {
+  loadDynamicLibrary(
+    lib: string,
+    options: {
+      loadAsync: boolean
+      global: boolean
+      nodelete: boolean
+      allowUndefined: boolean
+    },
+  ): Promise<unknown>
+}
+
 export interface OpenCascadeInitializationOptions {
-  mainJS?: unknown
+  mainJS?: OpenCascadeMainJS
   mainWasm?: string
   worker?: string
   libs?: string[]
@@ -39,6 +56,60 @@ export function getDefaultOpenCascadeEntrySpecifier(
   return (options.isNodeRuntime ?? isNodeRuntime())
     ? 'opencascade.js/dist/node.js'
     : 'opencascade.js'
+}
+
+function getConfiguredOpenCascadeWasmUrl() {
+  const viteEnv = (import.meta as ImportMeta & {
+    env?: { VITE_OPENCASCADE_WASM_URL?: string }
+  }).env
+  const configuredUrl = viteEnv?.VITE_OPENCASCADE_WASM_URL?.trim()
+
+  return configuredUrl && configuredUrl.length > 0
+    ? configuredUrl
+    : DEFAULT_OPENCASCADE_WASM_CDN_URL
+}
+
+export function createOpenCascadeInitializerFromMainJS(
+  defaultMainJS: OpenCascadeMainJS,
+  getDefaultMainWasm = getConfiguredOpenCascadeWasmUrl,
+): OpenCascadeInitializer {
+  return async ({
+    mainJS = defaultMainJS,
+    mainWasm = getDefaultMainWasm(),
+    worker,
+    libs = [],
+    module = {},
+  } = {}) => {
+    const oc = await new mainJS({
+      locateFile(path: string) {
+        if (path.endsWith('.wasm')) {
+          return mainWasm
+        }
+        if (path.endsWith('.worker.js') && worker) {
+          return worker
+        }
+        return path
+      },
+      ...module,
+    })
+
+    const dynamicLibraryHost = oc as OpenCascadeInstance & Partial<OpenCascadeDynamicLibraryHost>
+
+    for (const lib of libs) {
+      if (!dynamicLibraryHost.loadDynamicLibrary) {
+        throw new Error('OpenCascade runtime does not support dynamic library loading.')
+      }
+
+      await dynamicLibraryHost.loadDynamicLibrary(lib, {
+        loadAsync: true,
+        global: true,
+        nodelete: true,
+        allowUndefined: false,
+      })
+    }
+
+    return oc
+  }
 }
 
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
