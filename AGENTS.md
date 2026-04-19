@@ -23,6 +23,7 @@
 - `ToolActionProvider` supplies the current mode and the shared action bus to the UI.
 - Mantine theme configuration should live in a central theme module with an easily editable dark-first colors tuple as the source of truth for shell chrome.
 - Prefer Mantine components and theme overrides over bespoke UI wrappers, long Tailwind class stacks, or custom shell CSS.
+- NEVER silence unhandled exceptions. They must either bubble up and handled by the error handling component or handled gracefully
 
 ## Current Behavior Rules
 

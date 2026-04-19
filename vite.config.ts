@@ -25,6 +25,7 @@ export default defineConfig({
     entries: ['index.html'],
   },
   build: {
+    sourcemap: true,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

@@ -95,7 +95,7 @@ export function createCompositeErrorReporter(reporters: readonly ErrorReporter[]
   }
 }
 
-function createErrorReportRecord(error: AppError, metadata: ErrorReportMetadata): ErrorReportRecord {
+export function createErrorReportRecord(error: AppError, metadata: ErrorReportMetadata): ErrorReportRecord {
   return {
     error,
     metadata: {

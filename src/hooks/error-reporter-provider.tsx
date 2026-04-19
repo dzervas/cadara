@@ -1,6 +1,7 @@
 import { useMemo, type PropsWithChildren } from 'react'
 
-import { createConsoleErrorReporter, type ErrorReporter } from '@/contracts/errors'
+import type { ErrorReporter } from '@/contracts/errors'
+import { createDefaultErrorReporter } from '@/contracts/errors/default-reporter'
 import { ErrorReporterContext } from '@/hooks/error-reporter-context'
 
 interface ErrorReporterProviderProps extends PropsWithChildren {
@@ -8,10 +9,13 @@ interface ErrorReporterProviderProps extends PropsWithChildren {
 }
 
 export function ErrorReporterProvider({ children, reporter }: ErrorReporterProviderProps) {
-  const defaultReporter = useMemo(() => createConsoleErrorReporter(), [])
+  const contextReporter = useMemo(
+    () => reporter ?? createDefaultErrorReporter({ isProduction: import.meta.env.PROD }),
+    [reporter],
+  )
 
   return (
-    <ErrorReporterContext.Provider value={reporter ?? defaultReporter}>
+    <ErrorReporterContext.Provider value={contextReporter}>
       {children}
     </ErrorReporterContext.Provider>
   )

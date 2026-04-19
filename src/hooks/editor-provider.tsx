@@ -8,6 +8,11 @@ import {
   type EditorEvent,
 } from '@/contracts/editor/state-machine'
 import {
+  clearActiveDocumentTelemetryContext,
+  createActiveDocumentTelemetryContext,
+  publishActiveDocumentTelemetryContext,
+} from '@/contracts/errors/telemetry-context'
+import {
   createEditorRuntimeActor,
   type EditorRuntimeActor,
 } from '@/contracts/editor/runtime-machine'
@@ -52,6 +57,18 @@ export function EditorProvider({ modelingService, children }: EditorProviderProp
       actor.stop()
     }
   }, [errorReporter, modelingService, runtime])
+
+  useEffect(() => {
+    if (!machineState.snapshot) {
+      clearActiveDocumentTelemetryContext()
+      return undefined
+    }
+
+    publishActiveDocumentTelemetryContext(createActiveDocumentTelemetryContext(machineState.snapshot))
+    return () => {
+      clearActiveDocumentTelemetryContext()
+    }
+  }, [machineState.snapshot])
 
   const dispatch = useCallback((event: EditorEvent) => {
     actorRef.current?.send(event)
