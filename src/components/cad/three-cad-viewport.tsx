@@ -343,7 +343,6 @@ export function ThreeCadViewport({
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setClearColor(0x000000, 0)
-    renderer.setSize(VIEW_CUBE_SIZE_PX, VIEW_CUBE_SIZE_PX, false)
     cubeElement.appendChild(renderer.domElement)
 
     const pointer = new THREE.Vector2()
@@ -400,6 +399,16 @@ export function ThreeCadViewport({
       })
     }
 
+    const resizeRenderer = () => {
+      const cubeSize = Math.max(1, Math.floor(Math.min(cubeElement.clientWidth, cubeElement.clientHeight)))
+      renderer.setSize(cubeSize, cubeSize, false)
+
+      if (attachedControls) {
+        requestRender()
+      }
+    }
+    const resizeObserver = new ResizeObserver(resizeRenderer)
+
     const attachControls = () => {
       animationFrameId = 0
       const controls = controlsRef.current
@@ -415,10 +424,13 @@ export function ThreeCadViewport({
     }
 
     renderer.domElement.addEventListener('pointerdown', handlePointerDown)
+    resizeObserver.observe(cubeElement)
+    resizeRenderer()
     animationFrameId = window.requestAnimationFrame(attachControls)
 
     return () => {
       window.cancelAnimationFrame(animationFrameId)
+      resizeObserver.disconnect()
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
       attachedControls?.removeEventListener('change', requestRender)
       viewCubeScene.dispose()
@@ -924,7 +936,10 @@ export function ThreeCadViewport({
         ref={viewCubeRef}
         data-testid="view-cube"
         className="pointer-events-auto absolute right-4 top-4 z-20"
-        style={{ width: VIEW_CUBE_SIZE_PX, height: VIEW_CUBE_SIZE_PX }}
+        style={{
+          aspectRatio: '1 / 1',
+          width: `min(${VIEW_CUBE_SIZE_PX}px, calc(100% - 32px))`,
+        }}
       />
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}

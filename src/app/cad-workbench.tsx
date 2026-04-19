@@ -1065,8 +1065,8 @@ export function CadWorkbench() {
             <div className="mx-auto h-full w-px bg-[var(--cad-border)] transition hover:bg-[var(--cad-accent)]" />
           </div>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col">
-          <main className="relative min-h-0 flex-1 overflow-hidden border-l border-[var(--cad-border)] bg-[var(--workbench-viewport-background)]">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden border-l border-[var(--cad-border)] bg-[var(--workbench-viewport-background)]">
             <ThreeCadViewport
               renderables={viewportRenderables.documentRenderables}
               sketchDisplayRenderables={viewportRenderables.sketchDisplayRenderables}

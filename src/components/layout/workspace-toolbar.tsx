@@ -94,27 +94,29 @@ export function WorkspaceToolbar({ historyAvailability, onReportBug }: Workspace
         borderBottom: '1px solid var(--workbench-shell-border)',
       }}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          {visibleSections.map((section, index) => (
-            <div
-              key={section.id}
-              className="flex items-center gap-3"
-            >
-              <div className="flex items-center gap-1">
-                {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+          <div className="flex w-max items-center gap-3">
+            {visibleSections.map((section, index) => (
+              <div
+                key={section.id}
+                className="flex items-center gap-3"
+              >
+                <div className="flex items-center gap-1">
+                  {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
+                </div>
+                {index < visibleSections.length - 1 ? (
+                  <Divider
+                    orientation="vertical"
+                    style={{ borderColor: 'var(--workbench-shell-border-strong)', height: 'auto' }}
+                  />
+                ) : null}
               </div>
-              {index < visibleSections.length - 1 ? (
-                <Divider
-                  orientation="vertical"
-                  style={{ borderColor: 'var(--workbench-shell-border-strong)', height: 'auto' }}
-                />
-              ) : null}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
-        <div className="relative w-full max-w-[240px]">
+        <div className="relative w-full max-w-[240px] shrink-0">
           <TextInput
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
@@ -162,7 +164,9 @@ export function WorkspaceToolbar({ historyAvailability, onReportBug }: Workspace
             </Paper>
           )}
         </div>
-        <ShortcutSettingsButton />
+        <div className="shrink-0">
+          <ShortcutSettingsButton />
+        </div>
         {onReportBug ? (
           <Tooltip
             label={
@@ -176,6 +180,7 @@ export function WorkspaceToolbar({ historyAvailability, onReportBug }: Workspace
               type="button"
               variant="subtle"
               color="workbench"
+              className="shrink-0"
               aria-label="Report bug"
               onClick={onReportBug}
             >
@@ -198,6 +203,7 @@ export function WorkspaceToolbar({ historyAvailability, onReportBug }: Workspace
             rel="noreferrer"
             variant="subtle"
             color="workbench"
+            className="shrink-0"
             aria-label="Open repository on GitHub"
           >
             <WorkbenchIcon name="github" className="h-4 w-4" />

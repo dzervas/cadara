@@ -56,6 +56,12 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
 
   assert(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')
   assert(
+    toolbarMarkup.includes('overflow-x-auto') &&
+      toolbarMarkup.includes('w-max') &&
+      toolbarMarkup.includes('shrink-0'),
+    'Toolbar tools should scroll inside the header instead of widening the workbench shell.',
+  )
+  assert(
     toolbarMarkup.includes('/icons/extrude.svg'),
     'Toolbar should render standard tool buttons with local SVG assets.',
   )
