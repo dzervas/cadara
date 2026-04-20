@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
+import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import type { DocumentFeatureCursor, DocumentHistoryItemRecord, DocumentSnapshot } from '@/contracts/modeling/schema'
@@ -16,6 +17,7 @@ import {
   TIMELINE_CURSOR_GLYPH,
 } from '@/components/layout/feature-timeline-bar.helpers'
 import { getDocumentHistoryCursorForIndex } from '@/domain/modeling/document-history'
+import { getDocumentHistoryItemToolIcon } from '@/domain/tools/tool-icon-resolvers'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 
@@ -225,6 +227,9 @@ export function FeatureTimelineBar({
               ? anchorElements.map((anchorIndex) => {
                   const item = historyItems[anchorIndex]
                   const target = item?.target ?? null
+                  const itemToolIcon = item
+                    ? getDocumentHistoryItemToolIcon(item, snapshot?.document.features ?? [])
+                    : null
                   const targetKey = target ? getPrimitiveRefKey(target) : null
                   const isSelected =
                     targetKey !== null
@@ -329,7 +334,9 @@ export function FeatureTimelineBar({
                             aria-disabled={!isAllowed}
                             title={`${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
                           >
-                            {item.kind === 'sketch' ? (
+                            {itemToolIcon ? (
+                              <ToolIcon icon={itemToolIcon} className="h-4 w-4" />
+                            ) : item.kind === 'sketch' ? (
                               <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
                             ) : (
                               <WorkbenchIcon name="layers" className="h-4 w-4" />

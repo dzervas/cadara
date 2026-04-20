@@ -1,6 +1,6 @@
 import type { SketchAnnotationDescriptor } from '@/domain/editor/sketch-session'
 import type { SketchConstraintRef, SketchDimensionRef } from '@/contracts/shared/references'
-import { getToolbarToolIconSrc } from '@/components/layout/toolbar-tool-icon-src'
+import { getToolIconSrc } from '@/domain/tools/tool-icons'
 import {
   getAnnotationProjectionId,
   layoutSketchAnnotationProjections,
@@ -106,17 +106,17 @@ function annotationTargetsEqual(
 function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphKind']) {
   switch (glyphKind) {
     case 'constraintCoincident':
-      return getToolbarToolIconSrc('constraintCoincident')
+      return getToolIconSrc('constraintCoincident')
     case 'constraintParallel':
-      return getToolbarToolIconSrc('constraintParallel')
+      return getToolIconSrc('constraintParallel')
     case 'constraintEqual':
-      return getToolbarToolIconSrc('constraintEqual')
+      return getToolIconSrc('constraintEqual')
     case 'constraintHorizontal':
       return '/icons/sketch-horizontal.svg'
     case 'constraintVertical':
       return '/icons/sketch-vertical.svg'
     case 'constraintFixed':
-      return getToolbarToolIconSrc('constraintFix')
+      return getToolIconSrc('constraintFix')
     case 'constraintAngle':
       return '/icons/drawing-angular-dim-line-to-line.svg'
     case 'constraintPerpendicular':
@@ -124,24 +124,24 @@ function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphK
     case 'constraintTangent':
       return '/icons/sketch-tangent.svg'
     case 'constraintConcentric':
-      return getToolbarToolIconSrc('constraintConcentric')
+      return getToolIconSrc('constraintConcentric')
     case 'constraintMidpoint':
-      return getToolbarToolIconSrc('constraintMidpoint')
+      return getToolIconSrc('constraintMidpoint')
     case 'constraintNormal':
-      return getToolbarToolIconSrc('constraintNormal')
+      return getToolIconSrc('constraintNormal')
     case 'constraintPierce':
-      return getToolbarToolIconSrc('constraintPierce')
+      return getToolIconSrc('constraintPierce')
     case 'constraintSymmetric':
-      return getToolbarToolIconSrc('constraintSymmetric')
+      return getToolIconSrc('constraintSymmetric')
     case 'dimensionDistance':
-      return getToolbarToolIconSrc('dimension')
+      return getToolIconSrc('dimension')
     case 'dimensionHorizontal':
-      return getToolbarToolIconSrc('dimension')
+      return getToolIconSrc('dimension')
     case 'dimensionVertical':
-      return getToolbarToolIconSrc('dimension')
+      return getToolIconSrc('dimension')
     case 'dimensionRadius':
-      return getToolbarToolIconSrc('dimension')
+      return getToolIconSrc('dimension')
     case 'dimensionCoincident':
-      return getToolbarToolIconSrc('dimension')
+      return getToolIconSrc('dimension')
   }
 }

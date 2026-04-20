@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionIcon, Paper, Text, Tooltip } from '@mantine/core'
 
+import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -12,6 +13,7 @@ import {
 } from '@/domain/editor/schema'
 import type { DocumentSnapshot, DocumentVariableRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
+import { getObjectTreeNodeToolIcon } from '@/domain/tools/tool-icon-resolvers'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureSidebarProps {
@@ -251,6 +253,7 @@ export function FeatureSidebar({
                 const isSelected =
                   visibleSelection.some((entry) => getPrimitiveRefKey(entry) === targetKey)
                 const isAllowed = selectionFilterAllowsTarget(selectionFilter, selection, target, selectionCatalog)
+                const itemToolIcon = getObjectTreeNodeToolIcon(item)
                 const menuItems: WorkbenchContextMenuEntry[] = [
                   {
                     kind: 'item',
@@ -318,7 +321,9 @@ export function FeatureSidebar({
                             className="flex h-4 w-4 shrink-0 items-center justify-center"
                             style={{ color: 'var(--mantine-color-workbench-4)' }}
                           >
-                            {item.kind === 'body' ? (
+                            {itemToolIcon ? (
+                              <ToolIcon icon={itemToolIcon} className="h-3.5 w-3.5" />
+                            ) : item.kind === 'body' ? (
                               <WorkbenchIcon name="box" className="h-3.5 w-3.5" />
                             ) : item.kind === 'sketch' ? (
                               <WorkbenchIcon name="pencilRuler" className="h-3.5 w-3.5" />

@@ -8,7 +8,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
 
 import { createBuildMetadataPlugin } from './build-metadata'
-import { toolbarToolIconAssetMap } from './src/components/layout/toolbar-tool-icon-assets'
+import { toolIconAssetFileNames } from './src/domain/tools/tool-icons'
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
 const singleHtmlFileName = 'cadara-single.html'
@@ -63,7 +63,7 @@ ${source}
 
 async function readToolbarIconDataUrls() {
   const icons: Record<string, string> = {}
-  const iconFileNames = new Set(Object.values(toolbarToolIconAssetMap))
+  const iconFileNames = new Set(Object.values(toolIconAssetFileNames))
 
   for (const fileName of iconFileNames) {
     const svg = await readFile(path.join(rootDir, 'public/icons', fileName), 'utf8')

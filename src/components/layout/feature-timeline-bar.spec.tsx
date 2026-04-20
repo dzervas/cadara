@@ -77,6 +77,8 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(sidebarMarkup.includes('Parts &amp; Objects'), 'Sidebar should keep the parts and objects section.')
   assert(sidebarMarkup.includes('Renamed Object'), 'Sidebar parts and objects should render rename overrides.')
   assert(sidebarMarkup.includes('Sketch 1'), 'Sidebar parts and objects should include committed sketches.')
+  assert(sidebarMarkup.includes('/icons/new-sketch.svg'), 'Sidebar sketch rows should use shared sketch tool icons.')
+  assert(sidebarMarkup.includes('/icons/c-plane.svg'), 'Sidebar construction rows should use shared plane tool icons.')
   assert(
     sidebarMarkup.includes('Double-click to reopen authoring in place'),
     'Sidebar sketch rows should expose double-click reopen behavior.',
@@ -252,6 +254,8 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(timelineMarkup.includes('aria-label="Feature timeline"'), 'Timeline should expose a region label.')
   assert(timelineMarkup.includes('aria-label="Select Sketch 1. Double-click to reopen."'), 'Timeline should expose committed sketch selection labels.')
   assert(timelineMarkup.includes('aria-label="Select Extrude 1. Double-click to reopen."'), 'Timeline should expose feature selection labels.')
+  assert(timelineMarkup.includes('/icons/new-sketch.svg'), 'Timeline sketch entries should use shared sketch tool icons.')
+  assert(timelineMarkup.includes('/icons/extrude.svg'), 'Timeline feature entries should use shared feature tool icons.')
   assert(timelineMarkup.includes('aria-current="step"'), 'Timeline should expose the current cursor position.')
   assert(!timelineMarkup.includes('>Extrude 1</button>'), 'Timeline feature controls should be icon-only.')
   assert(
@@ -321,6 +325,8 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
 
   assert(sketchHistoryMarkup.includes('data-history-mode="sketch"'), 'History shell should switch to sketch mode during sketch edit sessions.')
   assert(sketchHistoryMarkup.includes('aria-label="Sketch history"'), 'Sketch edit sessions should render sketch-local history.')
+  assert(sketchHistoryMarkup.includes('/icons/sketch-line-segment.svg'), 'Sketch history entity entries should use shared drawing tool icons.')
+  assert(sketchHistoryMarkup.includes('/icons/sketch-dimension.svg'), 'Sketch history dimension entries should use shared dimension tool icons.')
   assert(sketchHistoryMarkup.includes('aria-haspopup="menu"'), 'Sketch history items should expose custom context menu affordances.')
   assert(
     sketchHistoryMarkup.includes('data-transition-state="leaving-down"'),

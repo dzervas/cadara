@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
-import { getToolbarToolIconSrc } from '@/components/layout/toolbar-tool-icon-src'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
+import { getToolIconSrc, toolIconAssetFileNames } from '@/domain/tools/tool-icons'
 
 test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -50,7 +50,7 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
     }
 
     assert(
-      getToolbarToolIconSrc('extrude') === 'data:image/svg+xml;base64,PHN2Zy8+',
+      getToolIconSrc('extrude') === 'data:image/svg+xml;base64,PHN2Zy8+',
       'Toolbar icons should use injected single-file SVG assets when present.',
     )
   } finally {
@@ -75,4 +75,82 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
     tooltipMarkup.includes('whitespace-normal') && tooltipMarkup.includes('break-words'),
     'Toolbar tooltip copy should wrap instead of forcing long text onto one line.',
   )
+})
+
+test('tool icon assets stay centralized outside toolbar, sidebar, and history components', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const expectedCurrentToolbarAssets: typeof toolIconAssetFileNames = {
+    undo: 'undo.svg',
+    redo: 'redo.svg',
+    sketch: 'new-sketch.svg',
+    line: 'sketch-line-segment.svg',
+    rectangle: 'sketch-rectangle.svg',
+    circle: 'sketch-circle.svg',
+    construction: 'sketch-construction.svg',
+    spline: 'sketch-spline.svg',
+    dimension: 'sketch-dimension.svg',
+    constraintCoincident: 'sketch-coincident.svg',
+    constraintParallel: 'sketch-parallel.svg',
+    constraintPerpendicular: 'sketch-perpendicular.svg',
+    constraintTangent: 'sketch-tangent.svg',
+    constraintEqual: 'sketch-equal.svg',
+    constraintConcentric: 'sketch-concentric.svg',
+    constraintMidpoint: 'sketch-midpoint.svg',
+    constraintNormal: 'sketch-normal.svg',
+    constraintPierce: 'sketch-pierce.svg',
+    constraintSymmetric: 'sketch-symmetric.svg',
+    constraintFix: 'sketch-fix.svg',
+    extrude: 'extrude.svg',
+    revolve: 'revolve.svg',
+    sweep: 'sweep.svg',
+    loft: 'loft.svg',
+    split: 'split-part.svg',
+    fillet: 'fillet.svg',
+    chamfer: 'chamfer.svg',
+    thicken: 'thicken.svg',
+    deleteSolid: 'delete-bodies.svg',
+    shell: 'shell.svg',
+    linearPattern: 'linear-pattern.svg',
+    circularPattern: 'circular-pattern.svg',
+    curvePattern: 'curve-pattern.svg',
+    moveFace: 'move-face.svg',
+    mirror: 'mirror.svg',
+    transform: 'transform.svg',
+    measure: 'measure.svg',
+    sectionView: 'SectionView-Linked.svg',
+    trim: 'sketch-trim.svg',
+    offset: 'sketch-offset.svg',
+    finishSketch: 'check_mark.svg',
+    search: 'search.svg',
+    plane: 'c-plane.svg',
+    combine: 'boolean-bodies.svg',
+    history: 'change-history.svg',
+    svgFill: 'svg-fill.svg',
+    svgStroke: 'svg-stroke.svg',
+    svgStrokeCap: 'svg-stroke-cap.svg',
+    svgStrokeJoin: 'svg-stroke-join.svg',
+    svgGradient: 'svg-gradient.svg',
+  }
+
+  assert(
+    JSON.stringify(toolIconAssetFileNames) === JSON.stringify(expectedCurrentToolbarAssets),
+    'The shared tool icon source should preserve every current toolbar SVG filename.',
+  )
+
+  for (const componentPath of [
+    'src/components/layout/toolbar-tool-icon.tsx',
+    'src/components/layout/feature-timeline-bar.tsx',
+    'src/components/layout/history-timeline-shell.tsx',
+    'src/components/layout/feature-sidebar.tsx',
+  ]) {
+    const source = readFileSync(componentPath, 'utf8')
+    assert(!source.includes('Record<ToolIconId, string>'), `${componentPath} should not define a tool icon asset filename map.`)
+    assert(!source.includes('toolbarToolIconAssetMap'), `${componentPath} should not import the old toolbar-local icon map.`)
+    assert(!source.includes('getToolbarToolIconSrc'), `${componentPath} should not import the old toolbar-local icon helper.`)
+  }
 })

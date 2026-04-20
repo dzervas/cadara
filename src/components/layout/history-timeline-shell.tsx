@@ -1,3 +1,4 @@
+import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
@@ -12,6 +13,7 @@ import type { DocumentFeatureCursor, DocumentSnapshot } from '@/contracts/modeli
 import type { DocumentHistoryItemRecord } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getPrimitiveRefKey, selectionFilterAllowsTarget } from '@/domain/editor/schema'
+import { getSketchHistoryItemToolIcon } from '@/domain/tools/tool-icon-resolvers'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface HistoryTimelineShellProps {
@@ -155,6 +157,7 @@ function SketchHistoryTimelineBar({
             const isSelected = visibleSelection.some((entry) => getPrimitiveRefKey(entry) === targetKey)
             const isAllowed = selectionFilterAllowsTarget(selectionFilter, selection, item.target, selectionCatalog)
             const isAfterCursor = index > cursorIndex
+            const itemToolIcon = getSketchHistoryItemToolIcon(item, session.fullDefinition)
             const description =
               item.kind === 'entity' ? 'Sketch entity' : item.kind === 'constraint' ? 'Sketch constraint' : 'Sketch dimension'
             const menuItems: WorkbenchContextMenuEntry[] = [
@@ -207,7 +210,7 @@ function SketchHistoryTimelineBar({
                   }}
                   onDoubleClick={() => onCursorRequested?.(getSketchHistoryCursorForIndex(items, index))}
                 >
-                  {getSketchHistoryIcon(item.kind)}
+                  {itemToolIcon ? <ToolIcon icon={itemToolIcon} className="h-4 w-4" /> : getSketchHistoryIcon(item.kind)}
                 </button>
               </WorkbenchContextMenu>
             )

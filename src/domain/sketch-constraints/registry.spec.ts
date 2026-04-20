@@ -15,7 +15,7 @@ import {
   updateSketchReferenceProjection,
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
-import { toolbarToolIconAssetMap } from '@/components/layout/toolbar-tool-icon-assets'
+import { toolIconAssetFileNames } from '@/domain/tools/tool-icons'
 import {
   getRegisteredSketchConstraintDefinitions,
   selectPointToPointDimensionReference,
@@ -136,7 +136,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       assert(tool.group === 'constraints', `${toolId} should register in the sketch constraint group.`)
       assert(tool.modes.length === 1 && tool.modes[0] === 'sketch', `${toolId} should be sketch-only.`)
       assert(tool.icon === toolId, `${toolId} should use a stable matching icon id.`)
-      assert(toolbarToolIconAssetMap[tool.icon] === asset, `${toolId} should map to ${asset}.`)
+      assert(toolIconAssetFileNames[tool.icon] === asset, `${toolId} should map to ${asset}.`)
       assert(sketchConstraintSection?.toolIds.includes(tool.id), `${toolId} should be exposed in the sketch toolbar.`)
       assert(!partToolIds.includes(tool.id), `${toolId} should not be exposed in part mode.`)
       assert(registeredConstraintIds.has(tool.id), `${toolId} should have sketch constraint behavior registered.`)

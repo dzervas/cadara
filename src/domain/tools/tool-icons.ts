@@ -1,6 +1,10 @@
 import type { ToolIconId } from '@/domain/tools/schema'
 
-export const toolbarToolIconAssetMap: Record<ToolIconId, string> = {
+type SingleFileAssets = {
+  icons?: Record<string, string>
+}
+
+export const toolIconAssetFileNames: Record<ToolIconId, string> = {
   undo: 'undo.svg',
   redo: 'redo.svg',
   sketch: 'new-sketch.svg',
@@ -51,4 +55,17 @@ export const toolbarToolIconAssetMap: Record<ToolIconId, string> = {
   svgStrokeCap: 'svg-stroke-cap.svg',
   svgStrokeJoin: 'svg-stroke-join.svg',
   svgGradient: 'svg-gradient.svg',
+}
+
+export function getToolIconAssetFileName(icon: ToolIconId) {
+  return toolIconAssetFileNames[icon]
+}
+
+export function getToolIconSrc(icon: ToolIconId) {
+  const fileName = getToolIconAssetFileName(icon)
+  const globalAssets = globalThis as typeof globalThis & {
+    __CADARA_SINGLE_ASSETS__?: SingleFileAssets
+  }
+
+  return globalAssets.__CADARA_SINGLE_ASSETS__?.icons?.[fileName] ?? `/icons/${fileName}`
 }
