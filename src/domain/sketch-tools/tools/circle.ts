@@ -7,9 +7,7 @@ import type {
 } from '@/domain/sketch-tools/definition'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import {
-  createIdleState,
-  createPointerMoveResult,
-  createPointerReleaseResult,
+  createSketchToolDefinition,
   distanceBetween,
   validateDistance,
 } from '@/domain/sketch-tools/shared'
@@ -106,8 +104,7 @@ function buildCirclePresentation(state: SketchToolRuntimeState): SketchToolPrese
   }
 }
 
-export const circleSketchToolDefinition: SketchToolDefinition<'circle'> = {
-  metadata: {
+export const circleSketchToolDefinition: SketchToolDefinition<'circle'> = createSketchToolDefinition({
     id: 'circle',
     group: 'drawing',
     name: 'Circle',
@@ -118,39 +115,10 @@ export const circleSketchToolDefinition: SketchToolDefinition<'circle'> = {
       familyId: 'circle-family',
       variantIds: ['circle', 'threePointCircle'],
     },
-  },
-  activate() {
-    const state = createIdleState()
-
-    return {
-      state,
-      stagedEntities: [],
-      presentation: buildCirclePresentation(state),
-    }
-  },
-  pointerMove(input) {
-    return createPointerMoveResult({
-      pointerInput: input,
-      buildPreview: buildCirclePreview,
-      buildPresentation: buildCirclePresentation,
-      validate: validateCircle,
-    })
-  },
-  pointerRelease(input) {
-    return createPointerReleaseResult({
-      pointerInput: input,
-      buildPreview: buildCirclePreview,
-      buildPresentation: buildCirclePresentation,
-      validate: validateCircle,
-    })
-  },
-  getStagedEntities(state) {
-    return state.pointerDownPoint && state.livePoint
-      ? buildCirclePreview(state.pointerDownPoint, state.livePoint)
-      : []
-  },
+}, {
+  buildPreview: buildCirclePreview,
+  buildPresentation: buildCirclePresentation,
   validate: validateCircle,
-  getPresentation: buildCirclePresentation,
   createCommitContribution({ sequence, start, end, factories }): SketchToolCommitContribution {
     const centerPointId = factories.createPointId('circle-center')
     const radius = distanceBetween(start, end)
@@ -174,4 +142,4 @@ export const circleSketchToolDefinition: SketchToolDefinition<'circle'> = {
       ],
     }
   },
-}
+})

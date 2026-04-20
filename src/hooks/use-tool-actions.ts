@@ -1,6 +1,5 @@
-import { useContext } from 'react'
-
 import { ToolActionContext } from '@/hooks/tool-action-context'
+import { createRequiredContextHook } from '@/hooks/create-required-context-hook'
 import type { ToolId } from '@/domain/tools/tool-registry'
 import type { ToolTriggerMetadata } from '@/domain/tools/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
@@ -8,26 +7,22 @@ import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 
+const useRequiredToolActionContext = createRequiredContextHook(
+  ToolActionContext,
+  'useToolActionContext',
+  'ToolActionProvider',
+)
+
 export function useToolActionBus() {
-  const context = useContext(ToolActionContext)
-
-  if (!context) {
-    throw new Error('useToolActionBus must be used inside ToolActionProvider.')
-  }
-
-  return context.actionBus
+  return useRequiredToolActionContext().actionBus
 }
 
 export function useToolActions() {
-  const context = useContext(ToolActionContext)
+  const { actionBus } = useRequiredToolActionContext()
   const {
     machineState,
     dispatch,
   } = useEditorState()
-
-  if (!context) {
-    throw new Error('useToolActions must be used inside ToolActionProvider.')
-  }
 
   return {
     triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
@@ -35,7 +30,7 @@ export function useToolActions() {
         if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.undoRequested' })
         }
-        context.actionBus.triggerTool(toolId, machineState.mode, metadata)
+        actionBus.triggerTool(toolId, machineState.mode, metadata)
         return
       }
 
@@ -43,7 +38,7 @@ export function useToolActions() {
         if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.redoRequested' })
         }
-        context.actionBus.triggerTool(toolId, machineState.mode, metadata)
+        actionBus.triggerTool(toolId, machineState.mode, metadata)
         return
       }
 
@@ -65,7 +60,7 @@ export function useToolActions() {
         toolId,
       })
 
-      context.actionBus.triggerTool(toolId, nextMode, metadata)
+      actionBus.triggerTool(toolId, nextMode, metadata)
     },
   }
 }

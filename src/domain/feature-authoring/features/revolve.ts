@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, revolveSelectionFilter } from '@/domain/editor/schema'
 import { REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createBooleanOperationFields, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 function isRevolveDirection(value: unknown): value is 'clockwise' | 'counterClockwise' {
   return value === 'clockwise' || value === 'counterClockwise'
@@ -227,45 +227,15 @@ export const revolveAuthoringDefinition = {
           fields: [
             { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, directionToggle: { patch: { patchKey: 'direction' }, value: session.draft.direction, forwardValue: 'counterClockwise', reverseValue: 'clockwise', forwardLabel: 'Counter-clockwise', reverseLabel: 'Clockwise' }, authoredValue: expressionCapableAuthoredValue(session.draft.angle, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
             { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.startAngle, { kind: 'angle' }), patch: { patchKey: 'startAngle' } },
-            {
-              kind: 'enum',
-              id: 'revolve-operation',
-              label: 'Operation',
-              value: operation,
-              options: [
-                { value: 'newBody', label: 'newBody' },
-                { value: 'join', label: 'join' },
-                { value: 'cut', label: 'cut' },
-                { value: 'intersect', label: 'intersect' },
-              ],
-              authoredValue: expressionCapableAuthoredValue(session.draft.operation, { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] }),
-              patch: { patchKey: 'operation' },
-            },
-            {
-              kind: 'referenceCollection',
-              id: 'revolve-target-bodies',
-              label: 'Boolean target bodies',
-              value: booleanTargetBodies,
-              emptyLabel: 'None selected',
-              helper: 'Join, cut, and intersect require at least one explicit target body.',
-              hidden: operation === 'newBody',
-              error: operation === 'newBody' || booleanTargetBodies.length > 0
-                ? null
-                : { message: 'Select at least one target body.' },
-              advancedParticipant: {
-                role: 'targetBody',
-                required: operation !== 'newBody',
-                cardinality: { min: operation === 'newBody' ? 0 : 1, max: null },
-                selectedCount: booleanTargetBodies.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(revolveSelectionFilter, 'revolve-boolean-target', 'Revolve target body'),
-                itemLabel: 'Target body',
-              },
-              patch: { patchKey: 'booleanTargetBodyIds' },
-            },
+            ...createBooleanOperationFields({
+              prefix: 'revolve',
+              operation,
+              operationValue: session.draft.operation,
+              booleanTargetBodies,
+              selectionFilter: revolveSelectionFilter,
+              selectionRequirementId: 'revolve-boolean-target',
+              selectionRequirementLabel: 'Revolve target body',
+            }),
           ],
         },
         {

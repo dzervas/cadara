@@ -1,10 +1,9 @@
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-  validateAdvancedSolidFeatureDefinition,
   type AdvancedParticipantRole,
   type AdvancedSolidOperationIntent,
 } from '@/contracts/modeling/advanced-solid'
-import { primitiveRefEquals, createSelectionFilterForRequirement, loftSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
+import { primitiveRefEquals, loftSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
 import type { FeatureAuthoringDefinition, LoftFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import {
   acceptAuthoredPatch,
@@ -14,8 +13,14 @@ import {
   asSweepPathRef,
   authoredDefinitionValue,
   authoredStringLiteral,
+  buildAdvancedSolidParticipants,
+  createAdvancedOperationIntentFields,
   createMissingInputDiagnostic,
-  expressionCapableAuthoredValue,
+  createReferenceCollectionField,
+  filterTargets,
+  isAdvancedOperationIntent,
+  toFeaturePhaseDiagnostics,
+  validateAdvancedSolidDraft,
 } from '@/domain/feature-authoring/features/shared'
 
 const loftParticipants = [
@@ -51,19 +56,6 @@ const loftOperationIntent = {
   },
 } as const
 
-function isOperationIntent(value: unknown): value is AdvancedSolidOperationIntent {
-  return value === 'create' || value === 'add' || value === 'subtract' || value === 'intersect'
-}
-
-function filterTargets<TTarget extends PrimitiveRef>(
-  value: unknown,
-  coerce: (target: PrimitiveRef | null) => TTarget | null,
-) {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is TTarget => coerce(entry as PrimitiveRef) !== null)
-    : []
-}
-
 function getTargetsForRole(draft: LoftFeatureParameterDraft, role: AdvancedParticipantRole) {
   switch (role) {
     case 'profile':
@@ -78,27 +70,17 @@ function getTargetsForRole(draft: LoftFeatureParameterDraft, role: AdvancedParti
 }
 
 function buildLoftParticipants(draft: LoftFeatureParameterDraft) {
-  return loftParticipants
-    .map((participant) => ({
-      role: participant.role,
-      targets: getTargetsForRole(draft, participant.role),
-    }))
-    .filter((participant) => participant.targets.length > 0)
+  return buildAdvancedSolidParticipants(loftParticipants, (role) => getTargetsForRole(draft, role))
 }
 
 function getLoftValidationDiagnostics(draft: LoftFeatureParameterDraft) {
-  return validateAdvancedSolidFeatureDefinition({
-    kind: 'loft',
-    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-    parameters: {
-      operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
-      participants: buildLoftParticipants(draft),
-      ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
-    },
-  }, {
+  return validateAdvancedSolidDraft({
     featureKind: 'loft',
-    participants: loftParticipants,
-    operationIntent: loftOperationIntent,
+    operationIntent: draft.operationIntent,
+    participants: buildLoftParticipants(draft),
+    participantDescriptors: loftParticipants,
+    operationIntentDescriptor: loftOperationIntent,
+    options: draft.options,
   })
 }
 
@@ -174,7 +156,7 @@ export const loftAuthoringDefinition = {
         patch.guideCurveTargets === undefined
           ? draft.guideCurveTargets
           : filterTargets(patch.guideCurveTargets, asSweepPathRef),
-      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isOperationIntent),
+      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isAdvancedOperationIntent),
       targetBodyTargets:
         patch.targetBodyTargets === undefined
           ? draft.targetBodyTargets
@@ -221,16 +203,7 @@ export const loftAuthoringDefinition = {
   getMissingInputsDiagnostics(input) {
     const diagnostics = getLoftValidationDiagnostics(input.draft)
     if (diagnostics.length > 0) {
-      return diagnostics.map((diagnostic) => ({
-        code: `feature-${input.phase}-${diagnostic.code}`,
-        severity: input.phase === 'preview' ? 'warning' as const : 'error' as const,
-        message: diagnostic.message,
-        target: diagnostic.target,
-        detail: {
-          kind: 'advancedFeatureValidation' as const,
-          diagnostic,
-        },
-      }))
+      return toFeaturePhaseDiagnostics({ phase: input.phase, diagnostics })
     }
 
     return [createMissingInputDiagnostic({
@@ -262,98 +235,50 @@ export const loftAuthoringDefinition = {
           id: 'references',
           title: 'References',
           fields: [
-            {
-              kind: 'referenceCollection',
+            createReferenceCollectionField({
               id: 'loft-profiles',
               label: 'Profile targets',
               value: session.draft.profileTargets,
-              emptyLabel: 'None selected',
               helper: 'Accepted targets: derived sketch regions or planar faces. Order is preserved and drives the loft sections.',
               error: session.draft.profileTargets.length >= 2 ? null : { message: 'Select at least two profile targets.' },
-              advancedParticipant: {
-                role: 'profile',
-                required: true,
-                cardinality: { min: 2, max: null },
-                selectedCount: session.draft.profileTargets.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(loftSelectionFilter, 'loft-profile', 'Loft profile'),
-                itemLabel: 'Profile',
-              },
-              patch: { patchKey: 'profileTargets' },
+              participant: loftParticipants[0],
+              selectionFilter: loftSelectionFilter,
+              selectionRequirementId: 'loft-profile',
+              selectionRequirementLabel: 'Loft profile',
+              itemLabel: 'Profile',
+              patchKey: 'profileTargets',
               ordering: {
                 moveUpPatchKey: 'moveProfileTargetEarlier',
                 moveDownPatchKey: 'moveProfileTargetLater',
               },
-            },
-            {
-              kind: 'referenceCollection',
+            }),
+            createReferenceCollectionField({
               id: 'loft-guide-curves',
               label: 'Guide curves',
               value: session.draft.guideCurveTargets,
-              emptyLabel: 'None selected',
               helper: 'Guide curves are stored in the contract and reported as unsupported by the initial kernel path.',
-              advancedParticipant: {
-                role: 'guideCurve',
-                required: false,
-                cardinality: { min: 0, max: null },
-                selectedCount: session.draft.guideCurveTargets.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(loftSelectionFilter, 'loft-guide-curve', 'Loft guide curve'),
-                itemLabel: 'Guide curve',
-              },
-              patch: { patchKey: 'guideCurveTargets' },
-            },
+              participant: loftParticipants[1],
+              selectionFilter: loftSelectionFilter,
+              selectionRequirementId: 'loft-guide-curve',
+              selectionRequirementLabel: 'Loft guide curve',
+              itemLabel: 'Guide curve',
+              patchKey: 'guideCurveTargets',
+            }),
           ],
         },
         {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            {
-              kind: 'enum',
-              id: 'loft-operation-intent',
-              label: 'Operation',
-              value: operationIntent,
-              options: [
-                { value: 'create', label: 'create' },
-                { value: 'add', label: 'add' },
-                { value: 'subtract', label: 'subtract' },
-                { value: 'intersect', label: 'intersect' },
-              ],
-              authoredValue: expressionCapableAuthoredValue(session.draft.operationIntent, { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] }),
-              patch: { patchKey: 'operationIntent' },
-            },
-            {
-              kind: 'referenceCollection',
-              id: 'loft-target-bodies',
-              label: 'Boolean target bodies',
-              value: session.draft.targetBodyTargets,
-              emptyLabel: 'None selected',
-              helper: 'Add, subtract, and intersect require at least one explicit target body.',
-              hidden: operationIntent === 'create',
-              error: operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
-                ? null
-                : { message: 'Select at least one target body.' },
-              advancedParticipant: {
-                role: 'targetBody',
-                required: operationIntent !== 'create',
-                cardinality: { min: operationIntent === 'create' ? 0 : 1, max: null },
-                selectedCount: session.draft.targetBodyTargets.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(loftSelectionFilter, 'loft-boolean-target', 'Loft target body'),
-                itemLabel: 'Target body',
-              },
-              patch: { patchKey: 'targetBodyTargets' },
-            },
+            ...createAdvancedOperationIntentFields({
+              prefix: 'loft',
+              operationIntent,
+              operationValue: session.draft.operationIntent,
+              targetBodyTargets: session.draft.targetBodyTargets,
+              selectionFilter: loftSelectionFilter,
+              selectionRequirementId: 'loft-boolean-target',
+              selectionRequirementLabel: 'Loft target body',
+            }),
           ],
         },
         {

@@ -7,9 +7,7 @@ import type {
 } from '@/domain/sketch-tools/definition'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import {
-  createIdleState,
-  createPointerMoveResult,
-  createPointerReleaseResult,
+  createSketchToolDefinition,
   midpoint,
   validateRectangle,
 } from '@/domain/sketch-tools/shared'
@@ -179,8 +177,7 @@ function buildRectanglePresentation(state: SketchToolRuntimeState): SketchToolPr
   }
 }
 
-export const rectangleSketchToolDefinition: SketchToolDefinition<'rectangle'> = {
-  metadata: {
+export const rectangleSketchToolDefinition: SketchToolDefinition<'rectangle'> = createSketchToolDefinition({
     id: 'rectangle',
     group: 'drawing',
     name: 'Rectangle',
@@ -191,39 +188,10 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<'rectangle'> = 
       familyId: 'rectangle-family',
       variantIds: ['rectangle', 'centerPointRectangle', 'alignedRectangle'],
     },
-  },
-  activate() {
-    const state = createIdleState()
-
-    return {
-      state,
-      stagedEntities: [],
-      presentation: buildRectanglePresentation(state),
-    }
-  },
-  pointerMove(input) {
-    return createPointerMoveResult({
-      pointerInput: input,
-      buildPreview: buildRectanglePreview,
-      buildPresentation: buildRectanglePresentation,
-      validate: validateRectangle,
-    })
-  },
-  pointerRelease(input) {
-    return createPointerReleaseResult({
-      pointerInput: input,
-      buildPreview: buildRectanglePreview,
-      buildPresentation: buildRectanglePresentation,
-      validate: validateRectangle,
-    })
-  },
-  getStagedEntities(state) {
-    return state.pointerDownPoint && state.livePoint
-      ? buildRectanglePreview(state.pointerDownPoint, state.livePoint)
-      : []
-  },
+}, {
+  buildPreview: buildRectanglePreview,
+  buildPresentation: buildRectanglePresentation,
   validate: validateRectangle,
-  getPresentation: buildRectanglePresentation,
   createCommitContribution({ sequence, start, end, factories }): SketchToolCommitContribution {
     const { bottomLeft, bottomRight, topRight, topLeft } = getRectangleCorners(start, end)
     const cornerIds = [
@@ -298,4 +266,4 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<'rectangle'> = 
       ],
     }
   },
-}
+})

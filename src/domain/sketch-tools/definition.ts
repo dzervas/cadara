@@ -7,7 +7,7 @@ import type {
 } from '@/contracts/sketch/schema'
 import type { SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPoint } from '@/contracts/modeling/schema'
-import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
+import type { ToolMetadataBase } from '@/domain/tools/metadata'
 import type { SketchToolControlValue, SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 
@@ -33,54 +33,37 @@ export type SketchToolId =
   | 'controlPointSpline'
   | 'profileText'
 
+export interface SketchDraftEntityBase {
+  id: string
+  entityId: SketchEntityId | null
+  status: 'preview' | 'accepted'
+  label: string
+  isConstruction: boolean
+}
+
 export type SketchDraftEntity =
-  | {
-      id: string
+  | SketchDraftEntityBase & {
       kind: 'line'
       start: SketchPoint
       end: SketchPoint
-      entityId: SketchEntityId | null
-      status: 'preview' | 'accepted'
-      label: string
-      isConstruction: boolean
     }
-  | {
-      id: string
+  | SketchDraftEntityBase & {
       kind: 'circle'
       center: SketchPoint
       radius: number
-      entityId: SketchEntityId | null
-      status: 'preview' | 'accepted'
-      label: string
-      isConstruction: boolean
     }
-  | {
-      id: string
+  | SketchDraftEntityBase & {
       kind: 'spline'
       points: readonly SketchPoint[]
-      entityId: SketchEntityId | null
-      status: 'preview' | 'accepted'
-      label: string
-      isConstruction: boolean
     }
-  | {
-      id: string
+  | SketchDraftEntityBase & {
       kind: 'polyline'
       points: readonly SketchPoint[]
       isClosed: boolean
-      entityId: SketchEntityId | null
-      status: 'preview' | 'accepted'
-      label: string
-      isConstruction: boolean
     }
 
-export interface SketchToolMetadata<TToolId extends SketchToolId = SketchToolId> {
-  id: TToolId
-  name: string
-  tooltip: string
-  icon: ToolIconId
+export interface SketchToolMetadata<TToolId extends SketchToolId = SketchToolId> extends ToolMetadataBase<TToolId> {
   group: 'drawing'
-  modes: readonly ToolbarMode[]
   dropdown?: {
     familyId: string
     variantIds: readonly SketchToolId[]

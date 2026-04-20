@@ -8,9 +8,7 @@ import type {
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import {
   angleBetweenDegrees,
-  createIdleState,
-  createPointerMoveResult,
-  createPointerReleaseResult,
+  createSketchToolDefinition,
   distanceBetween,
   midpoint,
   validateDistance,
@@ -106,8 +104,7 @@ function buildLinePresentation(state: SketchToolRuntimeState): SketchToolPresent
   }
 }
 
-export const lineSketchToolDefinition: SketchToolDefinition<'line'> = {
-  metadata: {
+export const lineSketchToolDefinition: SketchToolDefinition<'line'> = createSketchToolDefinition({
     id: 'line',
     group: 'drawing',
     name: 'Line',
@@ -118,39 +115,10 @@ export const lineSketchToolDefinition: SketchToolDefinition<'line'> = {
       familyId: 'line-family',
       variantIds: ['line', 'midpointLine'],
     },
-  },
-  activate() {
-    const state = createIdleState()
-
-    return {
-      state,
-      stagedEntities: [],
-      presentation: buildLinePresentation(state),
-    }
-  },
-  pointerMove(input) {
-    return createPointerMoveResult({
-      pointerInput: input,
-      buildPreview: buildLinePreview,
-      buildPresentation: buildLinePresentation,
-      validate: validateLine,
-    })
-  },
-  pointerRelease(input) {
-    return createPointerReleaseResult({
-      pointerInput: input,
-      buildPreview: buildLinePreview,
-      buildPresentation: buildLinePresentation,
-      validate: validateLine,
-    })
-  },
-  getStagedEntities(state) {
-    return state.pointerDownPoint && state.livePoint
-      ? buildLinePreview(state.pointerDownPoint, state.livePoint)
-      : []
-  },
+}, {
+  buildPreview: buildLinePreview,
+  buildPresentation: buildLinePresentation,
   validate: validateLine,
-  getPresentation: buildLinePresentation,
   createCommitContribution({ sequence, start, end, factories }): SketchToolCommitContribution {
     const startPointId = factories.createPointId('line-start')
     const endPointId = factories.createPointId('line-end')
@@ -166,4 +134,4 @@ export const lineSketchToolDefinition: SketchToolDefinition<'line'> = {
       ],
     }
   },
-}
+})

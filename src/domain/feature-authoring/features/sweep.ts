@@ -1,12 +1,11 @@
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-  validateAdvancedSolidFeatureDefinition,
   type AdvancedParticipantRole,
   type AdvancedSolidOperationIntent,
 } from '@/contracts/modeling/advanced-solid'
 import type { FeatureAuthoringDefinition, SweepFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, sweepSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asSweepPathRef, authoredDefinitionValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asSweepPathRef, authoredDefinitionValue, authoredStringLiteral, buildAdvancedSolidParticipants, createAdvancedOperationIntentFields, createMissingInputDiagnostic, createReferenceCollectionField, filterTargets, isAdvancedOperationIntent, toFeaturePhaseDiagnostics, validateAdvancedSolidDraft } from '@/domain/feature-authoring/features/shared'
 
 const sweepParticipants = [
   {
@@ -48,19 +47,6 @@ const sweepOperationIntent = {
   },
 } as const
 
-function isOperationIntent(value: unknown): value is AdvancedSolidOperationIntent {
-  return value === 'create' || value === 'add' || value === 'subtract' || value === 'intersect'
-}
-
-function filterTargets<TTarget extends PrimitiveRef>(
-  value: unknown,
-  coerce: (target: PrimitiveRef | null) => TTarget | null,
-) {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is TTarget => coerce(entry as PrimitiveRef) !== null)
-    : []
-}
-
 function getTargetsForRole(draft: SweepFeatureParameterDraft, role: AdvancedParticipantRole) {
   switch (role) {
     case 'profile':
@@ -77,27 +63,17 @@ function getTargetsForRole(draft: SweepFeatureParameterDraft, role: AdvancedPart
 }
 
 function buildSweepParticipants(draft: SweepFeatureParameterDraft) {
-  return sweepParticipants
-    .map((participant) => ({
-      role: participant.role,
-      targets: getTargetsForRole(draft, participant.role),
-    }))
-    .filter((participant) => participant.targets.length > 0)
+  return buildAdvancedSolidParticipants(sweepParticipants, (role) => getTargetsForRole(draft, role))
 }
 
 function getSweepValidationDiagnostics(draft: SweepFeatureParameterDraft) {
-  return validateAdvancedSolidFeatureDefinition({
-    kind: 'sweep',
-    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-    parameters: {
-      operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
-      participants: buildSweepParticipants(draft),
-      ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
-    },
-  }, {
+  return validateAdvancedSolidDraft({
     featureKind: 'sweep',
-    participants: sweepParticipants,
-    operationIntent: sweepOperationIntent,
+    operationIntent: draft.operationIntent,
+    participants: buildSweepParticipants(draft),
+    participantDescriptors: sweepParticipants,
+    operationIntentDescriptor: sweepOperationIntent,
+    options: draft.options,
   })
 }
 
@@ -158,7 +134,7 @@ export const sweepAuthoringDefinition = {
         patch.guideCurveTargets === undefined
           ? draft.guideCurveTargets
           : filterTargets(patch.guideCurveTargets, asSweepPathRef),
-      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isOperationIntent),
+      operationIntent: acceptAuthoredPatch(patch.operationIntent, draft.operationIntent, isAdvancedOperationIntent),
       targetBodyTargets:
         patch.targetBodyTargets === undefined
           ? draft.targetBodyTargets
@@ -204,16 +180,7 @@ export const sweepAuthoringDefinition = {
   getMissingInputsDiagnostics(input) {
     const diagnostics = getSweepValidationDiagnostics(input.draft)
     if (diagnostics.length > 0) {
-      return diagnostics.map((diagnostic) => ({
-        code: `feature-${input.phase}-${diagnostic.code}`,
-        severity: input.phase === 'preview' ? 'warning' as const : 'error' as const,
-        message: diagnostic.message,
-        target: diagnostic.target,
-        detail: {
-          kind: 'advancedFeatureValidation' as const,
-          diagnostic,
-        },
-      }))
+      return toFeaturePhaseDiagnostics({ phase: input.phase, diagnostics })
     }
 
     return [createMissingInputDiagnostic({
@@ -246,26 +213,19 @@ export const sweepAuthoringDefinition = {
           title: 'References',
           fields: [
             {
-              kind: 'referenceCollection',
-              id: 'sweep-profile',
-              label: 'Profile targets',
-              value: session.draft.profileTargets,
-              emptyLabel: 'None selected',
-              helper: 'Accepted targets: derived sketch regions or planar faces.',
-              error: session.draft.profileTargets.length > 0 ? null : { message: 'Select at least one profile target.' },
-              advancedParticipant: {
-                role: 'profile',
-                required: true,
-                cardinality: { min: 1, max: null },
-                selectedCount: session.draft.profileTargets.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(sweepSelectionFilter, 'sweep-profile', 'Sweep profile'),
+              ...createReferenceCollectionField({
+                id: 'sweep-profile',
+                label: 'Profile targets',
+                value: session.draft.profileTargets,
+                helper: 'Accepted targets: derived sketch regions or planar faces.',
+                error: session.draft.profileTargets.length > 0 ? null : { message: 'Select at least one profile target.' },
+                participant: sweepParticipants[0],
+                selectionFilter: sweepSelectionFilter,
+                selectionRequirementId: 'sweep-profile',
+                selectionRequirementLabel: 'Sweep profile',
                 itemLabel: 'Profile',
-              },
-              patch: { patchKey: 'profileTargets' },
+                patchKey: 'profileTargets',
+              }),
             },
             {
               kind: 'referencePicker',
@@ -288,72 +248,33 @@ export const sweepAuthoringDefinition = {
               },
               patch: { patchKey: 'pathTarget' },
             },
-            {
-              kind: 'referenceCollection',
+            createReferenceCollectionField({
               id: 'sweep-guide-curves',
               label: 'Guide curves',
               value: session.draft.guideCurveTargets,
-              emptyLabel: 'None selected',
               helper: 'Guide curves are stored in the contract and reported as unsupported by the initial OCC builder.',
-              advancedParticipant: {
-                role: 'guideCurve',
-                required: false,
-                cardinality: { min: 0, max: null },
-                selectedCount: session.draft.guideCurveTargets.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(sweepSelectionFilter, 'sweep-guide-curve', 'Sweep guide curve'),
-                itemLabel: 'Guide curve',
-              },
-              patch: { patchKey: 'guideCurveTargets' },
-            },
+              participant: sweepParticipants[2],
+              selectionFilter: sweepSelectionFilter,
+              selectionRequirementId: 'sweep-guide-curve',
+              selectionRequirementLabel: 'Sweep guide curve',
+              itemLabel: 'Guide curve',
+              patchKey: 'guideCurveTargets',
+            }),
           ],
         },
         {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            {
-              kind: 'enum',
-              id: 'sweep-operation-intent',
-              label: 'Operation',
-              value: operationIntent,
-              options: [
-                { value: 'create', label: 'create' },
-                { value: 'add', label: 'add' },
-                { value: 'subtract', label: 'subtract' },
-                { value: 'intersect', label: 'intersect' },
-              ],
-              authoredValue: expressionCapableAuthoredValue(session.draft.operationIntent, { kind: 'enumString', options: ['create', 'add', 'subtract', 'intersect'] }),
-              patch: { patchKey: 'operationIntent' },
-            },
-            {
-              kind: 'referenceCollection',
-              id: 'sweep-target-bodies',
-              label: 'Boolean target bodies',
-              value: session.draft.targetBodyTargets,
-              emptyLabel: 'None selected',
-              helper: 'Add, subtract, and intersect require at least one explicit target body.',
-              hidden: operationIntent === 'create',
-              error: operationIntent === 'create' || session.draft.targetBodyTargets.length > 0
-                ? null
-                : { message: 'Select at least one target body.' },
-              advancedParticipant: {
-                role: 'targetBody',
-                required: operationIntent !== 'create',
-                cardinality: { min: operationIntent === 'create' ? 0 : 1, max: null },
-                selectedCount: session.draft.targetBodyTargets.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(sweepSelectionFilter, 'sweep-boolean-target', 'Sweep target body'),
-                itemLabel: 'Target body',
-              },
-              patch: { patchKey: 'targetBodyTargets' },
-            },
+            ...createAdvancedOperationIntentFields({
+              prefix: 'sweep',
+              operationIntent,
+              operationValue: session.draft.operationIntent,
+              targetBodyTargets: session.draft.targetBodyTargets,
+              selectionFilter: sweepSelectionFilter,
+              selectionRequirementId: 'sweep-boolean-target',
+              selectionRequirementLabel: 'Sweep target body',
+            }),
           ],
         },
         {

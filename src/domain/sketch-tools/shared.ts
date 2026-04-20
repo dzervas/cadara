@@ -1,6 +1,14 @@
 import type { SketchPoint } from '@/contracts/modeling/schema'
+import {
+  distanceBetween as distanceBetweenPoints,
+  midpoint as pointMidpoint,
+} from '@/domain/sketch/point-math'
 import type {
   SketchDraftEntity,
+  SketchToolCommitContribution,
+  SketchToolCommitInput,
+  SketchToolDefinition,
+  SketchToolMetadata,
   SketchToolPointerInput,
   SketchToolPointerResult,
   SketchToolRuntimeState,
@@ -11,7 +19,7 @@ import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-
 const epsilon = 0.0001
 
 export function distanceBetween(start: SketchPoint, end: SketchPoint) {
-  return Math.hypot(end[0] - start[0], end[1] - start[1])
+  return distanceBetweenPoints(start, end)
 }
 
 export function angleBetweenDegrees(start: SketchPoint, end: SketchPoint) {
@@ -20,7 +28,7 @@ export function angleBetweenDegrees(start: SketchPoint, end: SketchPoint) {
 }
 
 export function midpoint(start: SketchPoint, end: SketchPoint): SketchPoint {
-  return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
+  return pointMidpoint(start, end)
 }
 
 export function validateDistance(
@@ -131,5 +139,52 @@ export function createPointerReleaseResult(input: {
     state: nextState,
     stagedEntities: validation.valid ? [] : [],
     presentation: input.buildPresentation(nextState),
+  }
+}
+
+export function createSketchToolDefinition<TToolId extends SketchToolMetadata['id']>(
+  metadata: SketchToolMetadata<TToolId>,
+  input: {
+    buildPreview(start: SketchPoint, end: SketchPoint): readonly SketchDraftEntity[]
+    buildPresentation(state: SketchToolRuntimeState): SketchToolPresentationSchema
+    validate(start: SketchPoint, end: SketchPoint): SketchToolValidationResult
+    createCommitContribution(input: SketchToolCommitInput): SketchToolCommitContribution
+  },
+): SketchToolDefinition<TToolId> {
+  return {
+    metadata,
+    activate() {
+      const state = createIdleState()
+
+      return {
+        state,
+        stagedEntities: [],
+        presentation: input.buildPresentation(state),
+      }
+    },
+    pointerMove(pointerInput) {
+      return createPointerMoveResult({
+        pointerInput,
+        buildPreview: input.buildPreview,
+        buildPresentation: input.buildPresentation,
+        validate: input.validate,
+      })
+    },
+    pointerRelease(pointerInput) {
+      return createPointerReleaseResult({
+        pointerInput,
+        buildPreview: input.buildPreview,
+        buildPresentation: input.buildPresentation,
+        validate: input.validate,
+      })
+    },
+    getStagedEntities(state) {
+      return state.pointerDownPoint && state.livePoint
+        ? input.buildPreview(state.pointerDownPoint, state.livePoint)
+        : []
+    },
+    validate: input.validate,
+    getPresentation: input.buildPresentation,
+    createCommitContribution: input.createCommitContribution,
   }
 }

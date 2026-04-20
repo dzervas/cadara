@@ -17,9 +17,7 @@ import {
   pointsDistinct,
 } from '@/domain/sketch-tools/geometry'
 import {
-  createIdleState,
-  createPointerMoveResult,
-  createPointerReleaseResult,
+  createSketchToolDefinition,
   distanceBetween,
   validateDistance,
 } from '@/domain/sketch-tools/shared'
@@ -78,8 +76,7 @@ export function createRegularPolygonSketchToolDefinition(input: {
     }
   }
 
-  return {
-    metadata: {
+  return createSketchToolDefinition({
       id: input.id,
       group: 'drawing',
       name: input.name,
@@ -88,34 +85,10 @@ export function createRegularPolygonSketchToolDefinition(input: {
       modes: ['sketch'],
       dropdown: input.dropdown,
     },
-    activate() {
-      const state = createIdleState()
-
-      return { state, stagedEntities: [], presentation: buildPresentation(state) }
-    },
-    pointerMove(pointerInput) {
-      return createPointerMoveResult({
-        pointerInput,
-        buildPreview,
-        buildPresentation,
-        validate,
-      })
-    },
-    pointerRelease(pointerInput) {
-      return createPointerReleaseResult({
-        pointerInput,
-        buildPreview,
-        buildPresentation,
-        validate,
-      })
-    },
-    getStagedEntities(state) {
-      return state.pointerDownPoint && state.livePoint
-        ? buildPreview(state.pointerDownPoint, state.livePoint)
-        : []
-    },
+  {
+    buildPreview,
+    buildPresentation,
     validate,
-    getPresentation: buildPresentation,
     createCommitContribution({ sequence, start, end, factories }): SketchToolCommitContribution {
       if (!pointsDistinct(start, end)) {
         return { points: [], entities: [] }
@@ -180,7 +153,7 @@ export function createRegularPolygonSketchToolDefinition(input: {
         ],
       }
     },
-  }
+  })
 }
 
 function getVertexRadius(mode: 'inscribed' | 'circumscribed', circleRadius: number, sideCount: number) {

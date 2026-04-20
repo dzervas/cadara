@@ -1,5 +1,6 @@
 import type { AuthoredFeatureKind } from '@/contracts/modeling/schema'
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
+import { createRegistry } from '@/domain/tools/registry-factory'
 import { chamferAuthoringDefinition } from '@/domain/feature-authoring/features/chamfer'
 import { combineAuthoringDefinition } from '@/domain/feature-authoring/features/combine'
 import { deleteSolidAuthoringDefinition } from '@/domain/feature-authoring/features/delete-solid'
@@ -32,28 +33,43 @@ export const featureAuthoringDefinitions = [
   transformAuthoringDefinition,
 ] as const satisfies readonly FeatureAuthoringDefinition[]
 
-const featureAuthoringRegistry = new Map<AuthoredFeatureKind, FeatureAuthoringDefinition>(
-  featureAuthoringDefinitions.map((definition) => [definition.metadata.kind, definition]),
+const featureAuthoringRegistry = createRegistry<AuthoredFeatureKind, FeatureAuthoringDefinition>(
+  featureAuthoringDefinitions,
+  (definition) => definition.metadata.kind,
+  'Feature authoring definition',
 )
+
+function isFeatureAuthoringDefinitionForKind<TKind extends AuthoredFeatureKind>(
+  definition: unknown,
+  featureKind: TKind,
+): definition is FeatureAuthoringDefinition<TKind> {
+  return Boolean(
+    definition
+      && typeof definition === 'object'
+      && 'metadata' in definition
+      && (definition as { metadata?: { kind?: unknown } }).metadata?.kind === featureKind,
+  )
+}
 
 export function getFeatureAuthoringDefinition<TKind extends AuthoredFeatureKind>(
   featureKind: TKind,
 ): FeatureAuthoringDefinition<TKind> {
   const definition = featureAuthoringRegistry.get(featureKind)
 
-  if (!definition) {
-    throw new Error(`No feature authoring definition registered for "${featureKind}".`)
+  if (isFeatureAuthoringDefinitionForKind(definition, featureKind)) {
+    return definition
   }
 
-  return definition as unknown as FeatureAuthoringDefinition<TKind>
+  throw new Error(`Feature authoring definition ${featureKind} resolved to a mismatched feature kind.`)
 }
 
 export function findFeatureAuthoringDefinition<TKind extends AuthoredFeatureKind>(
   featureKind: TKind,
 ): FeatureAuthoringDefinition<TKind> | null {
-  return (featureAuthoringRegistry.get(featureKind) as FeatureAuthoringDefinition<TKind> | undefined) ?? null
+  const definition = featureAuthoringRegistry.find?.(featureKind)
+  return definition && isFeatureAuthoringDefinitionForKind(definition, featureKind) ? definition : null
 }
 
 export function getRegisteredFeatureAuthoringDefinitions() {
-  return featureAuthoringDefinitions
+  return featureAuthoringRegistry.getAll()
 }

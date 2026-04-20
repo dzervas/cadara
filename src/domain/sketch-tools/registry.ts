@@ -1,4 +1,5 @@
 import type { SketchToolDefinition, SketchToolId } from '@/domain/sketch-tools/definition'
+import { createRegistry } from '@/domain/tools/registry-factory'
 import {
   bezierCurveSketchToolDefinition,
   conicSketchToolDefinition,
@@ -45,24 +46,20 @@ export const sketchToolDefinitions = [
   profileTextSketchToolDefinition,
 ] as const satisfies readonly SketchToolDefinition[]
 
-const sketchToolMap = new Map<SketchToolId, SketchToolDefinition>(
-  sketchToolDefinitions.map((definition) => [definition.metadata.id, definition]),
+const sketchToolRegistry = createRegistry<SketchToolId, SketchToolDefinition>(
+  sketchToolDefinitions,
+  (definition) => definition.metadata.id,
+  'Sketch tool',
 )
 
 export function getSketchToolDefinition(toolId: SketchToolId): SketchToolDefinition {
-  const definition = sketchToolMap.get(toolId)
-
-  if (!definition) {
-    throw new Error(`Sketch tool ${toolId} is not registered.`)
-  }
-
-  return definition
+  return sketchToolRegistry.get(toolId)
 }
 
 export function getRegisteredSketchToolDefinitions(): readonly SketchToolDefinition[] {
-  return sketchToolDefinitions
+  return sketchToolRegistry.getAll()
 }
 
 export function isRegisteredSketchToolId(toolId: string): toolId is SketchToolId {
-  return sketchToolMap.has(toolId as SketchToolId)
+  return sketchToolRegistry.has(toolId)
 }

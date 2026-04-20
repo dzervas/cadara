@@ -1,5 +1,8 @@
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import type { ProjectedSketchGeometryRef } from '@/contracts/sketch/schema'
+import type { ConstraintDefinition } from '@/contracts/sketch/schema'
+import { distanceBetween, midpoint } from '@/domain/sketch/point-math'
+import { createRegistry } from '@/domain/tools/registry-factory'
 import type {
   SketchToolDimensionReferenceKind,
   SketchToolOverlayDescriptor,
@@ -19,14 +22,6 @@ import {
 
 function formatSelectedLabels(targets: readonly SketchConstraintTargetRecord[]) {
   return targets.map((target) => target.label).join(' / ')
-}
-
-function distanceBetween(left: readonly [number, number], right: readonly [number, number]) {
-  return Math.hypot(right[0] - left[0], right[1] - left[1])
-}
-
-function midpoint(left: readonly [number, number], right: readonly [number, number]): readonly [number, number] {
-  return [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2]
 }
 
 function normalize(vector: readonly [number, number]): readonly [number, number] {
@@ -98,65 +93,39 @@ function localEntityOperand(target: SketchConstraintTargetRecord) {
     : null
 }
 
-function resolveCoincidentTarget(
-  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
-  target: PrimitiveRef,
-  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
-) {
-  if (target.kind !== 'projectedReferenceGeometry') {
-    return resolvePointTarget(definition, target, projectedReferences)
-      ?? resolveCircleTarget(definition, target, projectedReferences)
-  }
+type ConstraintTargetResolver = SketchConstraintDefinition['resolveTarget']
 
-  return resolvePointTarget(definition, target, projectedReferences)
-    ?? resolveLineTarget(definition, target, projectedReferences)
-    ?? resolveCircleTarget(definition, target, projectedReferences)
-    ?? resolveCurveTarget(definition, target, projectedReferences)
-}
+function createCompositeResolver(resolvers: readonly ConstraintTargetResolver[]): ConstraintTargetResolver {
+  return (definition, target, projectedReferences) => {
+    for (const resolver of resolvers) {
+      const resolved = resolver(definition, target, projectedReferences)
 
-function resolvePointOrLineTarget(
-  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
-  target: PrimitiveRef,
-  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
-) {
-  return resolvePointTarget(definition, target, projectedReferences)
-    ?? resolveLineTarget(definition, target, projectedReferences)
-}
+      if (resolved) {
+        return resolved
+      }
+    }
 
-function resolvePierceTarget(
-  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
-  target: PrimitiveRef,
-  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
-) {
-  return resolvePointTarget(definition, target, projectedReferences)
-    ?? resolveLineTarget(definition, target, projectedReferences)
-    ?? resolveCircleTarget(definition, target, projectedReferences)
-    ?? resolveCurveTarget(definition, target, projectedReferences)
-}
-
-function resolveNormalTarget(
-  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
-  target: PrimitiveRef,
-  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
-) {
-  return resolvePointTarget(definition, target, projectedReferences)
-    ?? resolveLineTarget(definition, target, projectedReferences)
-    ?? resolveCircleTarget(definition, target, projectedReferences)
-}
-
-function resolveFixTarget(
-  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
-  target: PrimitiveRef,
-) {
-  if (target.kind === 'projectedReferenceGeometry') {
     return null
   }
-
-  return resolvePointTarget(definition, target)
-    ?? resolveLineTarget(definition, target)
-    ?? resolveCircleTarget(definition, target)
-    ?? resolveCurveTarget(definition, target)
 }
+
+const resolveCoincidentTarget: ConstraintTargetResolver = (definition, target, projectedReferences) =>
+  target.kind === 'projectedReferenceGeometry'
+    ? createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])(
+        definition,
+        target,
+        projectedReferences,
+      )
+    : createCompositeResolver([resolvePointTarget, resolveCircleTarget])(definition, target, projectedReferences)
+
+const resolvePointOrLineTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget])
+const resolvePierceTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])
+const resolveNormalTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget])
+
+const resolveFixTarget: ConstraintTargetResolver = (definition, target) =>
+  target.kind === 'projectedReferenceGeometry'
+    ? null
+    : createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])(definition, target)
 
 function selectedLocalPoint(targets: readonly SketchConstraintTargetRecord[]) {
   return targets.find((target) => target.point) ?? null
@@ -202,6 +171,17 @@ function selectedLocalCurve(targets: readonly SketchConstraintTargetRecord[]) {
       || target.entity.kind === 'spline'
     ),
   ) ?? null
+}
+
+function singleConstraint(constraint: ConstraintDefinition | null | undefined) {
+  return constraint ? { constraints: [constraint] } : {}
+}
+
+function createLocalOrProjectedConstraint(input: {
+  localBuilder(): ConstraintDefinition | null
+  projectedBuilder(): ConstraintDefinition | null
+}) {
+  return singleConstraint(input.localBuilder() ?? input.projectedBuilder())
 }
 
 function buildRelationshipPreview(
@@ -677,42 +657,36 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
-      if (first.entity && second.entity) {
-        return {
-          constraints: [
-            {
-              constraintId: input.createConstraintId('parallel'),
-              kind: 'parallel',
-              label: `Parallel ${input.sequence}`,
-              entityIds: [first.entity.entityId, second.entity.entityId],
-            },
-          ],
-        }
-      }
-
       const local = first.entity ? first : second.entity ? second : null
       const projected = first.projected?.geometry.kind === 'lineSegment'
         ? first.projected
         : second.projected?.geometry.kind === 'lineSegment'
           ? second.projected
           : null
-      const line = local ? localEntityOperand(local) : null
 
-      if (!line || !projected) {
-        return {}
-      }
+      return createLocalOrProjectedConstraint({
+        localBuilder: () => first.entity && second.entity
+          ? {
+              constraintId: input.createConstraintId('parallel'),
+              kind: 'parallel',
+              label: `Parallel ${input.sequence}`,
+              entityIds: [first.entity.entityId, second.entity.entityId],
+            }
+          : null,
+        projectedBuilder: () => {
+          const line = local ? localEntityOperand(local) : null
 
-      return {
-        constraints: [
-          {
+          return line && projected
+            ? {
             constraintId: input.createConstraintId('parallel-projected-line'),
             kind: 'parallelProjectedLine',
             label: `Parallel ${input.sequence}`,
             line,
             projectedLine: projectedOperand(projected),
-          },
-        ],
-      }
+              }
+            : null
+        },
+      })
     },
   },
   {
@@ -741,42 +715,36 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
-      if (first.entity && second.entity) {
-        return {
-          constraints: [
-            {
-              constraintId: input.createConstraintId('perpendicular'),
-              kind: 'perpendicular',
-              label: `Perpendicular ${input.sequence}`,
-              entityIds: [first.entity.entityId, second.entity.entityId],
-            },
-          ],
-        }
-      }
-
       const local = first.entity ? first : second.entity ? second : null
       const projected = first.projected?.geometry.kind === 'lineSegment'
         ? first.projected
         : second.projected?.geometry.kind === 'lineSegment'
           ? second.projected
           : null
-      const line = local ? localEntityOperand(local) : null
 
-      if (!line || !projected) {
-        return {}
-      }
+      return createLocalOrProjectedConstraint({
+        localBuilder: () => first.entity && second.entity
+          ? {
+              constraintId: input.createConstraintId('perpendicular'),
+              kind: 'perpendicular',
+              label: `Perpendicular ${input.sequence}`,
+              entityIds: [first.entity.entityId, second.entity.entityId],
+            }
+          : null,
+        projectedBuilder: () => {
+          const line = local ? localEntityOperand(local) : null
 
-      return {
-        constraints: [
-          {
+          return line && projected
+            ? {
             constraintId: input.createConstraintId('perpendicular-projected-line'),
             kind: 'perpendicularProjectedLine',
             label: `Perpendicular ${input.sequence}`,
             line,
             projectedLine: projectedOperand(projected),
-          },
-        ],
-      }
+              }
+            : null
+        },
+      })
     },
   },
   {
@@ -910,34 +878,32 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
-      if (first.entity && second.entity) {
-        return {
-          constraints: [{
-            constraintId: input.createConstraintId('concentric'),
-            kind: 'concentric',
-            label: `Concentric ${input.sequence}`,
-            entityIds: [first.entity.entityId, second.entity.entityId],
-          }],
-        }
-      }
-
       const local = selectedLocalCircleLike(input.selectedTargets)
       const projected = selectedProjectedCircleLike(input.selectedTargets)
-      const curve = local ? localEntityOperand(local) : null
 
-      if (!curve || !projected) {
-        return {}
-      }
+      return createLocalOrProjectedConstraint({
+        localBuilder: () => first.entity && second.entity
+          ? {
+              constraintId: input.createConstraintId('concentric'),
+              kind: 'concentric',
+              label: `Concentric ${input.sequence}`,
+              entityIds: [first.entity.entityId, second.entity.entityId],
+            }
+          : null,
+        projectedBuilder: () => {
+          const curve = local ? localEntityOperand(local) : null
 
-      return {
-        constraints: [{
-          constraintId: input.createConstraintId('concentric-projected-curve'),
-          kind: 'concentricProjectedCurve',
-          label: `Concentric ${input.sequence}`,
-          curve,
-          projectedCurve: projectedOperand(projected),
-        }],
-      }
+          return curve && projected
+            ? {
+                constraintId: input.createConstraintId('concentric-projected-curve'),
+                kind: 'concentricProjectedCurve',
+                label: `Concentric ${input.sequence}`,
+                curve,
+                projectedCurve: projectedOperand(projected),
+              }
+            : null
+        },
+      })
     },
   },
   {
@@ -969,33 +935,30 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
-      if (localLine) {
-        const line = localEntityOperand(localLine)
+      return createLocalOrProjectedConstraint({
+        localBuilder: () => {
+          const line = localLine ? localEntityOperand(localLine) : null
 
-        return line
-          ? {
-              constraints: [{
+          return line
+            ? {
                 constraintId: input.createConstraintId('midpoint'),
                 kind: 'midpoint',
                 label: `Midpoint ${input.sequence}`,
                 point: pointOperand,
                 line,
-              }],
-            }
-          : {}
-      }
-
-      return projectedLine
-        ? {
-            constraints: [{
+              }
+            : null
+        },
+        projectedBuilder: () => projectedLine
+          ? {
               constraintId: input.createConstraintId('midpoint-projected-line'),
               kind: 'midpointProjectedLine',
               label: `Midpoint ${input.sequence}`,
               point: pointOperand,
               projectedLine: projectedOperand(projectedLine),
-            }],
-          }
-        : {}
+            }
+          : null,
+      })
     },
   },
   {
@@ -1090,33 +1053,30 @@ const sketchConstraintDefinitions = [
         return {}
       }
 
-      if (localCurve) {
-        const curve = localEntityOperand(localCurve)
+      return createLocalOrProjectedConstraint({
+        localBuilder: () => {
+          const curve = localCurve ? localEntityOperand(localCurve) : null
 
-        return curve
-          ? {
-              constraints: [{
+          return curve
+            ? {
                 constraintId: input.createConstraintId('point-on-curve'),
                 kind: 'pointOnCurve',
                 label: `Pierce ${input.sequence}`,
                 point: pointOperand,
                 curve,
-              }],
-            }
-          : {}
-      }
-
-      return projectedCurve
-        ? {
-            constraints: [{
+              }
+            : null
+        },
+        projectedBuilder: () => projectedCurve
+          ? {
               constraintId: input.createConstraintId('point-on-projected-curve'),
               kind: 'pointOnProjectedCurve',
               label: `Pierce ${input.sequence}`,
               point: pointOperand,
               projectedCurve: projectedOperand(projectedCurve),
-            }],
-          }
-        : {}
+            }
+          : null,
+      })
     },
   },
   {
@@ -1144,37 +1104,38 @@ const sketchConstraintDefinitions = [
       const localLine = selectedLocalLine(input.selectedTargets)
       const projectedLine = selectedProjectedLine(input.selectedTargets)
 
-      if (points.length !== 2 || !points[0]?.point || !points[1]?.point) {
+      const [firstPoint, secondPoint] = points
+
+      if (!firstPoint?.point || !secondPoint?.point) {
         return {}
       }
 
-      if (localLine) {
-        const axis = localEntityOperand(localLine)
+      const pointIds = [firstPoint.point.pointId, secondPoint.point.pointId] as const
 
-        return axis
-          ? {
-              constraints: [{
+      return createLocalOrProjectedConstraint({
+        localBuilder: () => {
+          const axis = localLine ? localEntityOperand(localLine) : null
+
+          return axis
+            ? {
                 constraintId: input.createConstraintId('symmetric'),
                 kind: 'symmetric',
                 label: `Symmetric ${input.sequence}`,
-                pointIds: [points[0].point.pointId, points[1].point.pointId],
+                pointIds,
                 axis,
-              }],
-            }
-          : {}
-      }
-
-      return projectedLine
-        ? {
-            constraints: [{
+              }
+            : null
+        },
+        projectedBuilder: () => projectedLine
+          ? {
               constraintId: input.createConstraintId('symmetric-projected-line'),
               kind: 'symmetricProjectedLine',
               label: `Symmetric ${input.sequence}`,
-              pointIds: [points[0].point.pointId, points[1].point.pointId],
+              pointIds,
               projectedLine: projectedOperand(projectedLine),
-            }],
-          }
-        : {}
+            }
+          : null,
+      })
     },
   },
   {
@@ -1233,7 +1194,7 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: 'dimensionDistance',
       name: 'Distance',
-      tooltip: 'Author an aligned distance between two points.',
+      tooltip: 'Create aligned distance dimensions.',
       icon: 'dimension',
       group: 'dimensions',
       modes: ['sketch'],
@@ -1287,7 +1248,7 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: 'dimensionHorizontal',
       name: 'Horizontal',
-      tooltip: 'Author a horizontal distance between two points.',
+      tooltip: 'Create horizontal distance dimensions.',
       icon: 'dimension',
       group: 'dimensions',
       modes: ['sketch'],
@@ -1336,7 +1297,7 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: 'dimensionVertical',
       name: 'Vertical',
-      tooltip: 'Author a vertical distance between two points.',
+      tooltip: 'Create vertical distance dimensions.',
       icon: 'dimension',
       group: 'dimensions',
       modes: ['sketch'],
@@ -1385,7 +1346,7 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: 'dimensionRadius',
       name: 'Radius',
-      tooltip: 'Author a radius dimension for one circle.',
+      tooltip: 'Create circle radius dimensions.',
       icon: 'dimension',
       group: 'dimensions',
       modes: ['sketch'],
@@ -1425,26 +1386,22 @@ const sketchConstraintDefinitions = [
   },
 ] as const satisfies readonly SketchConstraintDefinition[]
 
-const constraintMap = new Map<SketchConstraintToolId, SketchConstraintDefinition>(
-  sketchConstraintDefinitions.map((definition) => [definition.metadata.id, definition]),
+const constraintRegistry = createRegistry<SketchConstraintToolId, SketchConstraintDefinition>(
+  sketchConstraintDefinitions,
+  (definition) => definition.metadata.id,
+  'Sketch constraint tool',
 )
 
 export function getSketchConstraintDefinition(toolId: SketchConstraintToolId) {
-  const definition = constraintMap.get(toolId)
-
-  if (!definition) {
-    throw new Error(`Sketch constraint tool ${toolId} is not registered.`)
-  }
-
-  return definition
+  return constraintRegistry.get(toolId)
 }
 
 export function getRegisteredSketchConstraintDefinitions() {
-  return sketchConstraintDefinitions
+  return constraintRegistry.getAll()
 }
 
 export function isRegisteredSketchConstraintToolId(toolId: string): toolId is SketchConstraintToolId {
-  return constraintMap.has(toolId as SketchConstraintToolId)
+  return constraintRegistry.has(toolId)
 }
 
 export function resolveSketchConstraintTarget(

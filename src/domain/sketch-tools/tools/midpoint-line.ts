@@ -9,9 +9,7 @@ import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-
 import { createMidpointConstraint } from '@/domain/sketch-tools/constraints'
 import { mirrorPointAcrossCenter } from '@/domain/sketch-tools/geometry'
 import {
-  createIdleState,
-  createPointerMoveResult,
-  createPointerReleaseResult,
+  createSketchToolDefinition,
   distanceBetween,
   validateDistance,
 } from '@/domain/sketch-tools/shared'
@@ -79,47 +77,17 @@ function buildMidpointLinePresentation(state: SketchToolRuntimeState): SketchToo
   }
 }
 
-export const midpointLineSketchToolDefinition: SketchToolDefinition<'midpointLine'> = {
-  metadata: {
+export const midpointLineSketchToolDefinition: SketchToolDefinition<'midpointLine'> = createSketchToolDefinition({
     id: 'midpointLine',
     group: 'drawing',
     name: 'Midpoint Line',
     tooltip: 'Create a line from its midpoint and one endpoint.',
     icon: 'line',
     modes: ['sketch'],
-  },
-  activate() {
-    const state = createIdleState()
-
-    return {
-      state,
-      stagedEntities: [],
-      presentation: buildMidpointLinePresentation(state),
-    }
-  },
-  pointerMove(input) {
-    return createPointerMoveResult({
-      pointerInput: input,
-      buildPreview: buildMidpointLinePreview,
-      buildPresentation: buildMidpointLinePresentation,
-      validate: validateMidpointLine,
-    })
-  },
-  pointerRelease(input) {
-    return createPointerReleaseResult({
-      pointerInput: input,
-      buildPreview: buildMidpointLinePreview,
-      buildPresentation: buildMidpointLinePresentation,
-      validate: validateMidpointLine,
-    })
-  },
-  getStagedEntities(state) {
-    return state.pointerDownPoint && state.livePoint
-      ? buildMidpointLinePreview(state.pointerDownPoint, state.livePoint)
-      : []
-  },
+}, {
+  buildPreview: buildMidpointLinePreview,
+  buildPresentation: buildMidpointLinePresentation,
   validate: validateMidpointLine,
-  getPresentation: buildMidpointLinePresentation,
   createCommitContribution({ sequence, start, end, factories }): SketchToolCommitContribution {
     const reflected = mirrorPointAcrossCenter(start, end)
     const midpointId = factories.createPointId('midpoint-line-midpoint')
@@ -146,4 +114,4 @@ export const midpointLineSketchToolDefinition: SketchToolDefinition<'midpointLin
       ],
     }
   },
-}
+})

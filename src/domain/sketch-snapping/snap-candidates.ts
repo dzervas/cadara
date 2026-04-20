@@ -7,6 +7,10 @@ import type {
   SketchPointId,
 } from '@/contracts/shared/ids'
 import type { SketchToolId } from '@/domain/sketch-tools/definition'
+import {
+  distanceBetween,
+  midpoint,
+} from '@/domain/sketch/point-math'
 
 const DEFAULT_SNAP_TOLERANCE = 0.18
 const EPSILON = 1e-9
@@ -768,14 +772,6 @@ function sourceKey(source: SketchSnapSourceRef) {
 
 function pointKey(point: SketchPoint2D) {
   return `${point[0].toFixed(6)},${point[1].toFixed(6)}`
-}
-
-function midpoint(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {
-  return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
-}
-
-function distanceBetween(left: SketchPoint2D, right: SketchPoint2D) {
-  return Math.hypot(left[0] - right[0], left[1] - right[1])
 }
 
 function projectPointToSegment(point: SketchPoint2D, start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {

@@ -1,4 +1,4 @@
-import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
+import type { ToolMetadataBase } from '@/domain/tools/metadata'
 
 export type SketchEditToolId =
   | 'trim'
@@ -33,13 +33,8 @@ export interface SketchEditToolSelectionRequirement {
   allowsMultiple?: boolean
 }
 
-export interface SketchEditToolMetadata<TToolId extends SketchEditToolId = SketchEditToolId> {
-  id: TToolId
-  name: string
-  tooltip: string
-  icon: ToolIconId
+export interface SketchEditToolMetadata<TToolId extends SketchEditToolId = SketchEditToolId> extends ToolMetadataBase<TToolId> {
   group: 'sketchOps'
-  modes: readonly ToolbarMode[]
   selection: SketchEditToolSelectionRequirement
   previewLabel: string
   validationMessages: {

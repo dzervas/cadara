@@ -14,6 +14,7 @@ import type {
   SketchToolCommitContribution,
   SketchToolCommitFactories,
 } from '@/domain/sketch-tools/definition'
+import { distanceBetween as distanceBetweenPoints } from '@/domain/sketch/point-math'
 
 export type OffsetSide = 'left' | 'right'
 
@@ -141,7 +142,7 @@ const EPSILON = 1e-6
 const CURVE_SAMPLE_COUNT = 96
 
 function distanceBetween(left: SketchPoint, right: SketchPoint) {
-  return Math.hypot(right[0] - left[0], right[1] - left[1])
+  return distanceBetweenPoints(left, right)
 }
 
 function pointsAlmostEqual(left: SketchPoint, right: SketchPoint) {

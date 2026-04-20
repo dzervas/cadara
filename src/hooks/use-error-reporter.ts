@@ -1,13 +1,8 @@
-import { useContext } from 'react'
-
 import { ErrorReporterContext } from '@/hooks/error-reporter-context'
+import { createRequiredContextHook } from '@/hooks/create-required-context-hook'
 
-export function useErrorReporter() {
-  const reporter = useContext(ErrorReporterContext)
-
-  if (!reporter) {
-    throw new Error('useErrorReporter must be used inside ErrorReporterProvider.')
-  }
-
-  return reporter
-}
+export const useErrorReporter = createRequiredContextHook(
+  ErrorReporterContext,
+  'useErrorReporter',
+  'ErrorReporterProvider',
+)

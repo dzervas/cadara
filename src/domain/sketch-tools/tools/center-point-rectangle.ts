@@ -12,9 +12,7 @@ import {
 } from '@/domain/sketch-tools/constraints'
 import { getAxisAlignedRectangleCorners } from '@/domain/sketch-tools/geometry'
 import {
-  createIdleState,
-  createPointerMoveResult,
-  createPointerReleaseResult,
+  createSketchToolDefinition,
   midpoint,
   validateRectangle,
 } from '@/domain/sketch-tools/shared'
@@ -90,43 +88,17 @@ function buildCenterPointRectanglePresentation(state: SketchToolRuntimeState): S
   }
 }
 
-export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<'centerPointRectangle'> = {
-  metadata: {
+export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<'centerPointRectangle'> = createSketchToolDefinition({
     id: 'centerPointRectangle',
     group: 'drawing',
     name: 'Center Rectangle',
     tooltip: 'Create an axis-aligned rectangle from its center.',
     icon: 'rectangle',
     modes: ['sketch'],
-  },
-  activate() {
-    const state = createIdleState()
-
-    return { state, stagedEntities: [], presentation: buildCenterPointRectanglePresentation(state) }
-  },
-  pointerMove(input) {
-    return createPointerMoveResult({
-      pointerInput: input,
-      buildPreview: buildCenterPointRectanglePreview,
-      buildPresentation: buildCenterPointRectanglePresentation,
-      validate: validateCenterPointRectangle,
-    })
-  },
-  pointerRelease(input) {
-    return createPointerReleaseResult({
-      pointerInput: input,
-      buildPreview: buildCenterPointRectanglePreview,
-      buildPresentation: buildCenterPointRectanglePresentation,
-      validate: validateCenterPointRectangle,
-    })
-  },
-  getStagedEntities(state) {
-    return state.pointerDownPoint && state.livePoint
-      ? buildCenterPointRectanglePreview(state.pointerDownPoint, state.livePoint)
-      : []
-  },
+}, {
+  buildPreview: buildCenterPointRectanglePreview,
+  buildPresentation: buildCenterPointRectanglePresentation,
   validate: validateCenterPointRectangle,
-  getPresentation: buildCenterPointRectanglePresentation,
   createCommitContribution({ sequence, start, end, factories }): SketchToolCommitContribution {
     const { bottomLeft, bottomRight, topRight, topLeft, center } = getAxisAlignedRectangleCorners(start, end)
     const cornerIds = [
@@ -175,4 +147,4 @@ export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<'cen
       ],
     }
   },
-}
+})

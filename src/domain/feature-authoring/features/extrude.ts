@@ -2,7 +2,7 @@ import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/defi
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, extrudeSelectionFilter } from '@/domain/editor/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createBooleanOperationFields, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
 
 function isExtrudeDirection(value: unknown): value is 'positive' | 'negative' {
   return value === 'positive' || value === 'negative'
@@ -198,45 +198,15 @@ export const extrudeAuthoringDefinition = {
               error: isPositiveAuthoredNumber(session.draft.depth) ? null : { message: 'Depth must be greater than zero.' },
               patch: { patchKey: 'depth' },
             },
-            {
-              kind: 'enum',
-              id: 'extrude-operation',
-              label: 'Operation',
-              value: operation,
-              options: [
-                { value: 'newBody', label: 'newBody' },
-                { value: 'join', label: 'join' },
-                { value: 'cut', label: 'cut' },
-                { value: 'intersect', label: 'intersect' },
-              ],
-              authoredValue: expressionCapableAuthoredValue(session.draft.operation, { kind: 'enumString', options: ['newBody', 'join', 'cut', 'intersect'] }),
-              patch: { patchKey: 'operation' },
-            },
-            {
-              kind: 'referenceCollection',
-              id: 'extrude-target-bodies',
-              label: 'Boolean target bodies',
-              value: booleanTargetBodies,
-              emptyLabel: 'None selected',
-              helper: 'Join, cut, and intersect require at least one explicit target body.',
-              hidden: operation === 'newBody',
-              error: operation === 'newBody' || booleanTargetBodies.length > 0
-                ? null
-                : { message: 'Select at least one target body.' },
-              advancedParticipant: {
-                role: 'targetBody',
-                required: operation !== 'newBody',
-                cardinality: { min: operation === 'newBody' ? 0 : 1, max: null },
-                selectedCount: booleanTargetBodies.length,
-              },
-              picker: {
-                mode: 'appendUnique',
-                allowsMultiple: true,
-                selectionFilter: createSelectionFilterForRequirement(extrudeSelectionFilter, 'extrude-target-body', 'Extrude target body'),
-                itemLabel: 'Target body',
-              },
-              patch: { patchKey: 'booleanTargetBodyIds' },
-            },
+            ...createBooleanOperationFields({
+              prefix: 'extrude',
+              operation,
+              operationValue: session.draft.operation,
+              booleanTargetBodies,
+              selectionFilter: extrudeSelectionFilter,
+              selectionRequirementId: 'extrude-target-body',
+              selectionRequirementLabel: 'Extrude target body',
+            }),
           ],
         },
         {

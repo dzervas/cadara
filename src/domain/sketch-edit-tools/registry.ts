@@ -1,4 +1,5 @@
 import type { SketchEditToolDefinition, SketchEditToolId } from '@/domain/sketch-edit-tools/definition'
+import { createRegistry } from '@/domain/tools/registry-factory'
 
 export const sketchEditToolDefinitions = [
   {
@@ -240,24 +241,20 @@ export const sketchEditToolDefinitions = [
   },
 ] as const satisfies readonly SketchEditToolDefinition[]
 
-const sketchEditToolMap = new Map<SketchEditToolId, SketchEditToolDefinition>(
-  sketchEditToolDefinitions.map((definition) => [definition.metadata.id, definition]),
+const sketchEditToolRegistry = createRegistry<SketchEditToolId, SketchEditToolDefinition>(
+  sketchEditToolDefinitions,
+  (definition) => definition.metadata.id,
+  'Sketch edit tool',
 )
 
 export function getRegisteredSketchEditToolDefinitions(): readonly SketchEditToolDefinition[] {
-  return sketchEditToolDefinitions
+  return sketchEditToolRegistry.getAll()
 }
 
 export function getSketchEditToolDefinition(toolId: SketchEditToolId): SketchEditToolDefinition {
-  const definition = sketchEditToolMap.get(toolId)
-
-  if (!definition) {
-    throw new Error(`Unknown sketch edit tool: ${toolId}`)
-  }
-
-  return definition
+  return sketchEditToolRegistry.get(toolId)
 }
 
 export function isRegisteredSketchEditToolId(toolId: string): toolId is SketchEditToolId {
-  return sketchEditToolMap.has(toolId as SketchEditToolId)
+  return sketchEditToolRegistry.has(toolId)
 }

@@ -7,6 +7,8 @@ import type {
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
 import { getRegisteredSketchToolDefinitions } from '@/domain/sketch-tools/registry'
 import { getRegisteredSketchEditToolDefinitions } from '@/domain/sketch-edit-tools/registry'
+import { getRegisteredSketchConstraintDefinitions } from '@/domain/sketch-constraints/registry'
+import { toToolDefinition } from '@/domain/tools/tool-definition-adapter'
 
 export const toolGroups = {
   history: {
@@ -79,33 +81,24 @@ export const toolGroups = {
 
 export type ToolGroupId = keyof typeof toolGroups
 
-const featureToolDefinitions = getRegisteredFeatureAuthoringDefinitions().map(({ metadata }) => ({
-  id: metadata.toolId,
-  group: metadata.groupId,
-  name: metadata.name,
-  tooltip: metadata.tooltip,
-  icon: metadata.icon,
-  modes: metadata.modes,
-})) satisfies readonly ToolDefinition[]
+const featureToolDefinitions = getRegisteredFeatureAuthoringDefinitions()
+  .map(({ metadata }) => toToolDefinition({
+    ...metadata,
+    id: metadata.toolId,
+    group: metadata.groupId,
+  })) satisfies readonly ToolDefinition[]
 
-const sketchToolDefinitions = getRegisteredSketchToolDefinitions().map(({ metadata }) => ({
-  id: metadata.id,
-  group: metadata.group,
-  name: metadata.name,
-  tooltip: metadata.tooltip,
-  icon: metadata.icon,
-  modes: metadata.modes,
-  ...(metadata.dropdown ? { dropdown: metadata.dropdown } : {}),
-})) satisfies readonly ToolDefinition[]
+const sketchToolDefinitions = getRegisteredSketchToolDefinitions()
+  .map(({ metadata }) => toToolDefinition(metadata)) satisfies readonly ToolDefinition[]
 
-const sketchEditToolDefinitions = getRegisteredSketchEditToolDefinitions().map(({ metadata }) => ({
-  id: metadata.id,
-  group: metadata.group,
-  name: metadata.name,
-  tooltip: metadata.tooltip,
-  icon: metadata.icon,
-  modes: metadata.modes,
-})) satisfies readonly ToolDefinition[]
+const sketchEditToolDefinitions = getRegisteredSketchEditToolDefinitions()
+  .map(({ metadata }) => toToolDefinition(metadata)) satisfies readonly ToolDefinition[]
+
+const sketchConstraintToolDefinitions = getRegisteredSketchConstraintDefinitions()
+  .map(({ metadata }) => toToolDefinition(metadata)) satisfies readonly ToolDefinition[]
+
+const sketchDimensionToolDefinitions = sketchConstraintToolDefinitions.filter((tool) => tool.group === 'dimensions')
+const sketchRelationshipToolDefinitions = sketchConstraintToolDefinitions.filter((tool) => tool.group === 'constraints')
 
 export const toolDefinitions = [
   {
@@ -153,126 +146,8 @@ export const toolDefinitions = [
       variantIds: ['dimensionDistance', 'dimensionHorizontal', 'dimensionVertical', 'dimensionRadius'],
     },
   },
-  {
-    id: 'dimensionDistance',
-    group: 'dimensions',
-    name: 'Distance',
-    tooltip: 'Create aligned distance dimensions.',
-    icon: 'dimension',
-    modes: ['sketch'],
-  },
-  {
-    id: 'dimensionHorizontal',
-    group: 'dimensions',
-    name: 'Horizontal',
-    tooltip: 'Create horizontal distance dimensions.',
-    icon: 'dimension',
-    modes: ['sketch'],
-  },
-  {
-    id: 'dimensionVertical',
-    group: 'dimensions',
-    name: 'Vertical',
-    tooltip: 'Create vertical distance dimensions.',
-    icon: 'dimension',
-    modes: ['sketch'],
-  },
-  {
-    id: 'dimensionRadius',
-    group: 'dimensions',
-    name: 'Radius',
-    tooltip: 'Create circle radius dimensions.',
-    icon: 'dimension',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintCoincident',
-    group: 'constraints',
-    name: 'Coincident',
-    tooltip: 'Constrain geometry to shared positions.',
-    icon: 'constraintCoincident',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintParallel',
-    group: 'constraints',
-    name: 'Parallel',
-    tooltip: 'Keep sketch entities parallel.',
-    icon: 'constraintParallel',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintPerpendicular',
-    group: 'constraints',
-    name: 'Perpendicular',
-    tooltip: 'Keep sketch entities perpendicular.',
-    icon: 'constraintPerpendicular',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintTangent',
-    group: 'constraints',
-    name: 'Tangent',
-    tooltip: 'Keep sketch curves tangent.',
-    icon: 'constraintTangent',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintEqual',
-    group: 'constraints',
-    name: 'Equal',
-    tooltip: 'Make sketch entities equal.',
-    icon: 'constraintEqual',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintConcentric',
-    group: 'constraints',
-    name: 'Concentric',
-    tooltip: 'Keep circle and arc centers coincident.',
-    icon: 'constraintConcentric',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintMidpoint',
-    group: 'constraints',
-    name: 'Midpoint',
-    tooltip: 'Constrain a point to a line midpoint.',
-    icon: 'constraintMidpoint',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintNormal',
-    group: 'constraints',
-    name: 'Normal',
-    tooltip: 'Keep a line normal to a curve at a contact point.',
-    icon: 'constraintNormal',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintPierce',
-    group: 'constraints',
-    name: 'Pierce',
-    tooltip: 'Constrain a point onto a curve.',
-    icon: 'constraintPierce',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintSymmetric',
-    group: 'constraints',
-    name: 'Symmetric',
-    tooltip: 'Mirror two points about a line.',
-    icon: 'constraintSymmetric',
-    modes: ['sketch'],
-  },
-  {
-    id: 'constraintFix',
-    group: 'constraints',
-    name: 'Fix Geometry',
-    tooltip: 'Fix selected sketch geometry in place.',
-    icon: 'constraintFix',
-    modes: ['sketch'],
-  },
+  ...sketchDimensionToolDefinitions,
+  ...sketchRelationshipToolDefinitions,
   ...sketchEditToolDefinitions,
   {
     id: 'construction',

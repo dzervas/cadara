@@ -29,7 +29,7 @@ import type {
 } from '@/contracts/shared/versioning'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import type { FeatureId, PrimitiveRef, RevisionId, SelectionFilter } from '@/domain/editor/schema'
-import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
+import type { ToolMetadataBase } from '@/domain/tools/metadata'
 import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 
 export interface ExtrudeFeatureParameterDraft {
@@ -234,14 +234,11 @@ export type FeatureEditSessionState =
 
 export type FeatureDraftPatch = Record<string, unknown>
 
-export interface FeatureAuthoringMetadata<TKind extends AuthoredFeatureKind = AuthoredFeatureKind> {
+export interface FeatureAuthoringMetadata<TKind extends AuthoredFeatureKind = AuthoredFeatureKind>
+  extends Omit<ToolMetadataBase<TKind>, 'id'> {
   kind: TKind
-  name: string
-  tooltip: string
-  icon: ToolIconId
   toolId: TKind
   groupId: 'features' | 'transforms'
-  modes: readonly ToolbarMode[]
 }
 
 export interface CreateFeatureDraftInput {

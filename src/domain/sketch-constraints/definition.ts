@@ -8,7 +8,7 @@ import type {
 } from '@/contracts/sketch/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
-import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
+import type { ToolMetadataBase } from '@/domain/tools/metadata'
 import type {
   SketchToolDimensionReferenceKind,
   SketchToolOverlayDescriptor,
@@ -46,13 +46,8 @@ export interface SketchConstraintValueSpec {
   defaultValue: number
 }
 
-export interface SketchConstraintMetadata<TToolId extends SketchConstraintToolId = SketchConstraintToolId> {
-  id: TToolId
-  name: string
-  tooltip: string
-  icon: ToolIconId
+export interface SketchConstraintMetadata<TToolId extends SketchConstraintToolId = SketchConstraintToolId> extends ToolMetadataBase<TToolId> {
   group: 'constraints' | 'dimensions'
-  modes: readonly ToolbarMode[]
 }
 
 export interface SketchConstraintTargetRecord {
