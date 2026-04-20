@@ -939,7 +939,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     )
   }
 
-  async function testLoftUnsupportedCasesReturnStructuredDiagnosticsWithoutMutation() {
+  async function testLoftAdvancedControlsAndUnsupportedCasesReturnStructuredDiagnosticsWithoutMutation() {
     const adapter = new MockKernelAdapter()
     const before = await adapter.getDocumentSnapshot({
       contractVersion: 'modeling-contract/v1alpha1',
@@ -960,6 +960,29 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
           },
           { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-1' }] },
         ],
+        options: {
+          guideContinuity: 'normalToGuide',
+          profileConditions: {
+            startCondition: 'normal',
+            startMagnitude: 1,
+            endCondition: 'tangent',
+            endMagnitude: 1,
+          },
+        },
+      },
+    } as const
+    const pathAndGuideDefinition = {
+      ...guideCurveDefinition,
+      parameters: {
+        ...guideCurveDefinition.parameters,
+        participants: [
+          ...guideCurveDefinition.parameters.participants,
+          { role: 'path' as const, targets: [{ kind: 'edge' as const, bodyId: 'body_part-1' as const, edgeId: 'edge_outer-0' as const }] },
+        ],
+        options: {
+          ...guideCurveDefinition.parameters.options,
+          path: { sectionCount: 5 },
+        },
       },
     } as const
     const booleanDefinition = {
@@ -984,8 +1007,15 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
       baseRevisionId: before.snapshot.revisionId,
-      previewId: 'preview_loft_guide_unsupported',
+      previewId: 'preview_loft_guide_supported',
       definition: guideCurveDefinition,
+    })
+    const pathGuidePreview = await adapter.evaluatePreview({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: before.snapshot.revisionId,
+      previewId: 'preview_loft_path_guide_unsupported',
+      definition: pathAndGuideDefinition,
     })
     const booleanCreate = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
@@ -998,9 +1028,10 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       documentId: 'doc_workspace',
     })
 
-    assert(guidePreview.render.records.length === 0, 'Unsupported loft previews must not return transient renderables.')
+    assert(guidePreview.render.records.length > 0, 'Supported guide-curve loft previews should return transient renderables.')
+    assert(guidePreview.diagnostics.length === 0, 'Supported guide-curve loft previews should not emit diagnostics.')
     assert(
-      guidePreview.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'advancedFeatureValidation'),
+      pathGuidePreview.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'advancedFeatureValidation'),
       'Unsupported loft previews must return structured advanced-feature diagnostics.',
     )
     assert(booleanCreate.revisionState.kind === 'rejected', 'Unsupported loft boolean create requests should be rejected.')
@@ -1861,7 +1892,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testSweepPreviewAndCommitUseAdvancedParticipants()
   await testSweepUnsupportedCasesReturnStructuredDiagnosticsWithoutMutation()
     await testLoftPreviewAndCommitUseOrderedAdvancedParticipants()
-    await testLoftUnsupportedCasesReturnStructuredDiagnosticsWithoutMutation()
+    await testLoftAdvancedControlsAndUnsupportedCasesReturnStructuredDiagnosticsWithoutMutation()
     await testChamferPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()
     await testThickenPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()
     await testSplitPreviewCommitAndUnsupportedCasesUseAdvancedParticipants()

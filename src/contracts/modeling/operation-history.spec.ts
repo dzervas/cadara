@@ -753,8 +753,19 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
                       { kind: 'region', sketchId: 'sketch_loft_a', regionId: 'region_loft_a' },
                     ],
                   },
+                  { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
                   { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_guide', edgeId: 'edge_guide' }] },
                 ],
+                options: {
+                  path: { sectionCount: 6 },
+                  guideContinuity: 'normalToGuide',
+                  profileConditions: {
+                    startCondition: 'normal',
+                    startMagnitude: 1,
+                    endCondition: 'tangent',
+                    endMagnitude: 1,
+                  },
+                },
               },
             },
           },
@@ -771,8 +782,9 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         result.payload.entries[1].payload.definition.kind === 'loft' &&
         result.payload.entries[1].payload.definition.parameters.participants[0]?.role === 'profile' &&
         result.payload.entries[1].payload.definition.parameters.participants[0]?.targets[0]?.kind === 'face' &&
+        result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'path') &&
         result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'guideCurve'),
-      'Loft operation history must preserve ordered profile participants and guide curves across updates.',
+      'Loft operation history must preserve ordered profile participants, path, and guide curves across updates.',
     )
   }
 

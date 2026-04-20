@@ -1490,7 +1490,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       [0.15, 0.15, 4],
     )
     const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1])
+    const pathEdgeId = findEdgeIdByDirection(oc, faceBody, [0, 0, 1])
     assert(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
+    assert(pathEdgeId != null, 'Expected loft support body to expose a linear path edge.')
     const context = await createContext({ sketches: [sketch], bodies: [faceBody] })()
 
     const result = executeOccFeature(context, 'feature_phase4_loft' as FeatureId, {
@@ -1514,9 +1516,32 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
     assert(producedBody != null, 'Standalone loft must append the produced body.')
     assert(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone loft should produce non-empty solid geometry.')
+
+    const pathResult = executeOccFeature(context, 'feature_phase4_loft_path' as FeatureId, {
+      kind: 'loft',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          {
+            role: 'profile',
+            targets: [
+              { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
+              { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
+            ],
+          },
+          { role: 'path', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: pathEdgeId }] },
+        ],
+        options: { path: { sectionCount: 3 } },
+      },
+    })
+    const pathBodyTarget = pathResult.producedTargets[0]
+    assert(pathBodyTarget?.kind === 'body', 'Path loft must produce a new body target.')
+    const pathBody = pathResult.bodies.find((body) => body.bodyId === pathBodyTarget.bodyId)
+    assert(pathBody != null && await bodyVolume(context.oc, pathBody.shape) > 0, 'Path loft should produce non-empty solid geometry.')
   }
 
-  async function testLoftRejectsUnsupportedGuideCurvesAndBooleanComposition() {
+  async function testLoftAdvancedControlsAndUnsupportedCombinations() {
     const oc = await getDefaultOpenCascadeInstance()
     const plane = createStandardPlaneDefinition('xy')
     const { sketch, region } = createRectangleSketch('sketch_phase4_loft_reject' as SketchId, plane, {
@@ -1539,9 +1564,44 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assert(guideEdgeId != null, 'Expected loft support body to expose a durable guide edge.')
     const context = await createContext({ sketches: [sketch], bodies: [faceBody] })()
 
-    let guideError: string | null = null
+    const advancedResult = executeOccFeature(context, 'feature_phase4_loft_advanced' as FeatureId, {
+      kind: 'loft',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          {
+            role: 'profile',
+            targets: [
+              { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
+              { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
+            ],
+          },
+          { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId }] },
+        ],
+        options: {
+          guideContinuity: 'normalToGuide',
+          profileConditions: {
+            startCondition: 'normal',
+            startMagnitude: 1,
+            endCondition: 'tangent',
+            endMagnitude: 1,
+          },
+          matchConnections: [
+            {
+              from: { kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId },
+              to: { kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId },
+            },
+          ],
+        },
+      },
+    })
+
+    assert(advancedResult.producedTargets[0]?.kind === 'body', 'Guide continuity, profile conditions, and one match connection should execute for loft.')
+
+    let pathGuideError: string | null = null
     try {
-      executeOccFeature(context, 'feature_phase4_loft_guide_reject' as FeatureId, {
+      executeOccFeature(context, 'feature_phase4_loft_path_guide_reject' as FeatureId, {
         kind: 'loft',
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
@@ -1554,12 +1614,14 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
                 { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
               ],
             },
+            { role: 'path', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId }] },
             { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId }] },
           ],
+          options: { path: { sectionCount: 3 } },
         },
       })
     } catch (error) {
-      guideError = error instanceof Error ? error.message : String(error)
+      pathGuideError = error instanceof Error ? error.message : String(error)
     }
 
     let booleanError: string | null = null
@@ -1585,7 +1647,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       booleanError = error instanceof Error ? error.message : String(error)
     }
 
-    assert(guideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Guide-curve lofts must reject with an explicit unsupported-case code.')
+    assert(pathGuideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Path plus guide-curve lofts must reject with an explicit unsupported-case code.')
     assert(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean lofts must reject with an explicit unsupported-case code.')
   }
 
@@ -1863,7 +1925,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies()
   await testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition()
   await testLoftBuildsStandaloneBodyFromOrderedProfiles()
-  await testLoftRejectsUnsupportedGuideCurvesAndBooleanComposition()
+  await testLoftAdvancedControlsAndUnsupportedCombinations()
   await testFilletReplacesAffectedBody()
   await testFilletRejectsEmptyEdgeTargetList()
   await testSplitReplacesTargetBodyWithExplicitResultBodies()

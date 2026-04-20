@@ -71,7 +71,7 @@ test('src/domain/modeling/feature-value-expressions.spec.ts', () => {
           ],
         },
       ],
-      options: { sectionCount },
+      options: { path: { sectionCount } },
     },
   })
   const resolvedSectionCount = resolveFeatureDefinitionValues({
@@ -79,9 +79,9 @@ test('src/domain/modeling/feature-value-expressions.spec.ts', () => {
     variables: [{ variableId: 'variable_sections', name: 'sections', valueText: '3' }],
   })
   assert(
-    resolvedSectionCount.ok &&
+      resolvedSectionCount.ok &&
       resolvedSectionCount.definition.kind === 'loft' &&
-      resolvedSectionCount.definition.parameters.options?.sectionCount === 4,
+      (resolvedSectionCount.definition.parameters.options?.path as { sectionCount?: unknown } | undefined)?.sectionCount === 4,
     'Expression-authored positive integer advanced options should resolve to concrete integer values.',
   )
 

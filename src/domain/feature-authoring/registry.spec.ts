@@ -463,6 +463,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const profileA = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
     const profileB = { kind: 'face' as const, bodyId: 'body_b' as const, faceId: 'face_b' as const }
     const profileC = { kind: 'region' as const, sketchId: 'sketch_c' as const, regionId: 'region_c' as const }
+    const path = { kind: 'edge' as const, bodyId: 'body_path' as const, edgeId: 'edge_path' as const }
     const guideCurve = { kind: 'edge' as const, bodyId: 'body_path' as const, edgeId: 'edge_guide' as const }
     const initialSession = createFeatureEditSession({
       featureType: 'loft',
@@ -490,6 +491,31 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'loft-guide-curves')
     assert(guideField?.kind === 'referenceCollection', 'Loft form schema should expose guide curves as a reference collection.')
+    const pathField = getFormField(reorderedSession, 'loft-path')
+    assert(pathField?.kind === 'referencePicker', 'Loft form schema should expose path as a single reference picker.')
+    const pathSession = patchFeatureEditSession(
+      reorderedSession,
+      createFeatureEditorReferenceSelectionPatch(pathField, path),
+    )
+    const pathDefinition = buildFeatureDefinition(pathSession)
+    assert(
+      pathDefinition?.kind === 'loft' &&
+        pathDefinition.parameters.participants.some((participant) => participant.role === 'path' && participant.targets[0] === path) &&
+        (pathDefinition.parameters.options?.path as { sectionCount?: unknown } | undefined)?.sectionCount === 5,
+      'Loft definitions should preserve path separately from guide curves and default path section count to 5.',
+    )
+    const sectionCountField = getFormField(pathSession, 'loft-section-count')
+    assert(sectionCountField?.kind === 'numeric', 'Loft path options should expose section count as a numeric field.')
+    const explicitSectionSession = patchFeatureEditSession(
+      pathSession,
+      createFeatureEditorFieldPatch(sectionCountField, 7),
+    )
+    const explicitSectionDefinition = buildFeatureDefinition(explicitSectionSession)
+    assert(
+      explicitSectionDefinition?.kind === 'loft' &&
+        (explicitSectionDefinition.parameters.options?.path as { sectionCount?: unknown } | undefined)?.sectionCount === 7,
+      'Loft definitions should preserve explicit path section count.',
+    )
 
     const guideSession = patchFeatureEditSession(
       reorderedSession,
@@ -506,6 +532,25 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       definition.parameters.participants.some((participant) => participant.role === 'guideCurve' && participant.targets[0] === guideCurve),
       'Loft definitions should preserve optional guide-curve participants.',
     )
+    const guideContinuityField = getFormField(guideSession, 'loft-guide-continuity')
+    assert(guideContinuityField?.kind === 'enum', 'Loft guide options should expose guide continuity as an enum field.')
+    const guideContinuitySession = patchFeatureEditSession(
+      guideSession,
+      createFeatureEditorFieldPatch(guideContinuityField, 'normalToGuide'),
+    )
+    const guideContinuityDefinition = buildFeatureDefinition(guideContinuitySession)
+    assert(
+      guideContinuityDefinition?.kind === 'loft' &&
+        guideContinuityDefinition.parameters.options?.guideContinuity === 'normalToGuide',
+      'Loft definitions should preserve guide continuity controls.',
+    )
+    const startConditionField = getFormField(guideSession, 'loft-start-condition')
+    assert(startConditionField?.kind === 'enum', 'Loft profile options should expose start condition as an enum field.')
+    const startMagnitudeField = getFormField(
+      patchFeatureEditSession(guideSession, createFeatureEditorFieldPatch(startConditionField, 'normal')),
+      'loft-start-condition-magnitude',
+    )
+    assert(startMagnitudeField?.kind === 'numeric' && startMagnitudeField.hidden !== true, 'Loft normal start condition should expose magnitude.')
 
     const createOperationField = getFormField(guideSession, 'loft-operation-intent')
     const hiddenTargetBodiesField = getFormField(guideSession, 'loft-target-bodies')
@@ -541,8 +586,19 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
                 { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
               ],
             },
+            { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
             { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_g', edgeId: 'edge_g' }] },
           ],
+          options: {
+            path: { sectionCount: 8 },
+            guideContinuity: 'normalToGuide',
+            profileConditions: {
+              startCondition: 'normal',
+              startMagnitude: 1.25,
+              endCondition: 'none',
+              endMagnitude: 1,
+            },
+          },
         },
       },
       producedTargets: [{ kind: 'body', bodyId: 'body_loft-1' }],
@@ -556,6 +612,12 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     assert(
       hydrated?.draft.guideCurveTargets[0]?.kind === 'edge',
       'Loft hydration should preserve guide-curve participants for edit sessions.',
+    )
+    assert(
+      hydrated?.draft.pathTarget?.kind === 'edge' &&
+        hydrated.draft.options.path?.sectionCount === 8 &&
+        hydrated.draft.options.guideContinuity === 'normalToGuide',
+      'Loft hydration should preserve path and guide continuity options for edit sessions.',
     )
   }
 

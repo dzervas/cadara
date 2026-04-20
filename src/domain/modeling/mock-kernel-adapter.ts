@@ -817,6 +817,7 @@ function validateFeatureDefinitionAgainstSnapshot(
     }
     case 'loft': {
       const profileTargets = getAdvancedParticipant(definition, 'profile')?.targets ?? []
+      const pathTargets = getAdvancedParticipant(definition, 'path')?.targets ?? []
       const guideCurveTargets = getAdvancedParticipant(definition, 'guideCurve')?.targets ?? []
       const targetBodyTargets = getAdvancedParticipant(definition, 'targetBody')?.targets ?? []
 
@@ -849,11 +850,49 @@ function validateFeatureDefinitionAgainstSnapshot(
         }
       }
 
-      if (guideCurveTargets.length > 0) {
+      if (pathTargets.length > 1 || pathTargets.some((target) => target.kind !== 'edge' && target.kind !== 'sketchEntity')) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-loft',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Loft path participant must be one edge or sketch entity target.')],
+        }
+      }
+
+      if (pathTargets.some((target) =>
+        (target.kind === 'edge' && !hasEdgeTarget(snapshot, target.bodyId, target.edgeId)) ||
+        (target.kind === 'sketchEntity' && !hasSketchEntityTarget(snapshot, target.sketchId, target.entityId))
+      )) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-loft',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Loft path participant must resolve to a live durable target.')],
+        }
+      }
+
+      if (guideCurveTargets.some((target) => target.kind !== 'edge' && target.kind !== 'sketchEntity')) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-loft',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Loft guide-curve participants must be edge or sketch entity targets.')],
+        }
+      }
+
+      if (guideCurveTargets.some((target) =>
+        (target.kind === 'edge' && !hasEdgeTarget(snapshot, target.bodyId, target.edgeId)) ||
+        (target.kind === 'sketchEntity' && !hasSketchEntityTarget(snapshot, target.sketchId, target.entityId))
+      )) {
+        return {
+          accepted: false as const,
+          reasonCode: 'mock-invalid-loft',
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Loft guide-curve participants must resolve to live durable targets.')],
+        }
+      }
+
+      if (pathTargets.length > 0 && guideCurveTargets.length > 0) {
         return {
           accepted: false as const,
           reasonCode: 'advanced-feature-unsupported-kernel-case',
-          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Mock loft does not implement guide-curve participants yet.')],
+          diagnostics: [createUnsupportedFeatureDiagnostic(definition, 'Mock loft does not implement combined path and guide-curve participants yet.')],
         }
       }
 

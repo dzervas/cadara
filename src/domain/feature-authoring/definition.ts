@@ -19,6 +19,7 @@ import type {
   AdvancedSolidFeatureParameters,
   AdvancedSolidOperationIntent,
   AuthoredFeatureKind,
+  LoftAdvancedOptions,
   SweepAdvancedOptions,
 } from '@/contracts/modeling/schema'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
@@ -93,12 +94,11 @@ export interface SweepFeatureParameterDraft {
 
 export interface LoftFeatureParameterDraft {
   profileTargets: readonly Extract<PrimitiveRef, { kind: 'region' | 'face' }>[]
+  pathTarget: Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }> | null
   guideCurveTargets: readonly Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }>[]
   operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
-  options: {
-    sectionCount: MaybeAuthoredValue<number>
-  }
+  options: LoftAdvancedOptions
 }
 
 export interface ChamferFeatureParameterDraft {

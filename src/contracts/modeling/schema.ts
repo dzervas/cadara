@@ -72,6 +72,12 @@ export type {
   SweepAdvancedOptions,
   SweepProfileControl,
   SweepTwistOption,
+  LoftAdvancedOptions,
+  LoftGuideContinuity,
+  LoftMatchConnection,
+  LoftPathOptions,
+  LoftProfileConditionKind,
+  LoftProfileConditionOptions,
 } from '@/contracts/modeling/advanced-solid'
 
 /** Re-exported preview identifier used by modeling preview requests. */

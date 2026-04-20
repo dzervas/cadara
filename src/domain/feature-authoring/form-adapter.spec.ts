@@ -173,7 +173,7 @@ test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
                   expressionCapable: true,
                   valueKind: { kind: 'positiveInteger' },
                 },
-                patch: { patchKey: 'options', valuePath: ['sectionCount'] },
+                patch: { patchKey: 'options', valuePath: ['path', 'sectionCount'] },
               },
             ],
           },
@@ -243,7 +243,7 @@ test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
   assert(
     nestedPatch?.options &&
       typeof nestedPatch.options === 'object' &&
-      (nestedPatch.options as Record<string, unknown>).sectionCount === 6,
+      ((nestedPatch.options as Record<string, unknown>).path as Record<string, unknown>).sectionCount === 6,
     'Adapter nested option fields should emit nested option patches without feature-specific branching.',
   )
 

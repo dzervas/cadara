@@ -34,7 +34,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import { renderExportSchema } from '@/contracts/render/runtime-schema'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
-import { durableRefSchema } from '@/contracts/shared/references.runtime-schema'
+import { durableRefSchema, edgeRefSchema, vertexRefSchema } from '@/contracts/shared/references.runtime-schema'
 import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 import {
   bodyIdSchema,
@@ -364,8 +364,33 @@ const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional
   if ('copy' in next) {
     next.copy = authoredBooleanSchema('Mirror copy').parse(next.copy)
   }
+  if ('path' in next) {
+    next.path = z.object({
+      sectionCount: authoredPositiveIntegerSchema('Section count'),
+    }).strict().parse(next.path)
+  }
   if ('sectionCount' in next) {
     next.sectionCount = authoredPositiveIntegerSchema('Section count').parse(next.sectionCount)
+  }
+  if ('guideContinuity' in next) {
+    next.guideContinuity = authoredEnumValueSchema(
+      ['none', 'normalToGuide', 'tangentToGuide', 'matchTangent', 'matchCurvature'],
+      'Loft guide continuity',
+    ).parse(next.guideContinuity)
+  }
+  if ('profileConditions' in next) {
+    next.profileConditions = z.object({
+      startCondition: authoredEnumValueSchema(['none', 'normal', 'tangent'], 'Loft start condition'),
+      startMagnitude: authoredPositiveNumberSchema('Loft start condition magnitude').optional(),
+      endCondition: authoredEnumValueSchema(['none', 'normal', 'tangent'], 'Loft end condition'),
+      endMagnitude: authoredPositiveNumberSchema('Loft end condition magnitude').optional(),
+    }).strict().parse(next.profileConditions)
+  }
+  if ('matchConnections' in next) {
+    next.matchConnections = z.array(z.object({
+      from: z.union([edgeRefSchema, vertexRefSchema]),
+      to: z.union([edgeRefSchema, vertexRefSchema]),
+    }).strict()).parse(next.matchConnections)
   }
   if ('profileControl' in next) {
     next.profileControl = authoredEnumValueSchema(

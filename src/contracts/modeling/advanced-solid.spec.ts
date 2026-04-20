@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  LOFT_ADVANCED_OPTION_DESCRIPTORS,
   SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   validateAdvancedFeatureOptions,
   validateAdvancedSolidFeatureDefinition,
@@ -38,6 +39,13 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
         required: false,
         cardinality: { min: 0, max: null },
         acceptedKinds: ['body'],
+      },
+      {
+        role: 'path',
+        label: 'Path',
+        required: false,
+        cardinality: { min: 0, max: 1 },
+        acceptedKinds: ['edge', 'sketchEntity'],
       },
       {
         role: 'guideCurve',
@@ -104,6 +112,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
         intersect: ['targetBody'],
       },
     },
+    options: LOFT_ADVANCED_OPTION_DESCRIPTORS,
   } satisfies AdvancedSolidFeatureAuthoringDescriptor
 
   const chamferDescriptor = {
@@ -483,6 +492,45 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
     assert(valid.length === 0, 'Loft validation should accept two or more ordered profiles and optional guide curves.')
   }
 
+  function testLoftValidationPreservesPathGuidesProfileConditionsAndConnections() {
+    const valid = validateAdvancedSolidFeatureDefinition({
+      kind: 'loft',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          {
+            role: 'profile',
+            targets: [
+              { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+              { kind: 'face', bodyId: 'body_b', faceId: 'face_b' },
+            ],
+          },
+          { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
+          { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_guide', edgeId: 'edge_guide' }] },
+        ],
+        options: {
+          path: { sectionCount: 5 },
+          guideContinuity: 'normalToGuide',
+          profileConditions: {
+            startCondition: 'normal',
+            startMagnitude: createExpressionAuthoredValue('start_scale'),
+            endCondition: 'tangent',
+            endMagnitude: 1,
+          },
+          matchConnections: [
+            {
+              from: { kind: 'vertex', bodyId: 'body_a', vertexId: 'vertex_a' },
+              to: { kind: 'edge', bodyId: 'body_b', edgeId: 'edge_b' },
+            },
+          ],
+        },
+      },
+    }, loftDescriptor)
+
+    assert(valid.length === 0, 'Loft validation should accept path, guide continuity, profile conditions, and complete match connections.')
+  }
+
   function testLoftValidationRejectsMissingProfilesAndInvalidBooleanTargets() {
     const missingProfiles = validateAdvancedSolidFeatureDefinition({
       kind: 'loft',
@@ -521,6 +569,41 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
     assert(
       invalidBoolean.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'targetBody'),
       'Loft boolean validation should require explicit body targets.',
+    )
+  }
+
+  function testLoftValidationRejectsInvalidSectionCountsGuideCurvesAndConnections() {
+    const invalid = validateAdvancedSolidFeatureDefinition({
+      kind: 'loft',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          {
+            role: 'profile',
+            targets: [
+              { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+              { kind: 'region', sketchId: 'sketch_b', regionId: 'region_b' },
+            ],
+          },
+          { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
+          { role: 'guideCurve', targets: [{ kind: 'face', bodyId: 'body_wrong', faceId: 'face_wrong' }] },
+        ],
+        options: {
+          path: { sectionCount: 0 },
+          guideContinuity: 'normalToGuide',
+          matchConnections: [{ from: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } }],
+        },
+      },
+    }, loftDescriptor)
+
+    assert(
+      invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
+      'Loft validation should reject invalid path section counts and incomplete connections.',
+    )
+    assert(
+      invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'guideCurve'),
+      'Loft validation should reject invalid guide-curve target kinds.',
     )
   }
 
@@ -968,7 +1051,9 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   testAdvancedOperationIntentValidationRejectsUnsupportedModes()
   testSweepPathCardinalityAndBooleanTargetValidation()
   testLoftValidationPreservesOrderedProfilesAndGuideCurves()
+  testLoftValidationPreservesPathGuidesProfileConditionsAndConnections()
   testLoftValidationRejectsMissingProfilesAndInvalidBooleanTargets()
+  testLoftValidationRejectsInvalidSectionCountsGuideCurvesAndConnections()
   testSplitValidationAcceptsExplicitTargetAndToolBodies()
   testSplitValidationRejectsMissingBodiesAndUnsupportedToolFamilies()
   testCombineValidationAcceptsExplicitTargetToolBodiesAndBooleanIntent()

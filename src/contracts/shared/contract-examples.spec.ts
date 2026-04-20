@@ -621,6 +621,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
     assert(sweepAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'profile'), 'Sweep example must preserve a profile participant role.')
     assert(sweepAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'path'), 'Sweep example must preserve a path participant role.')
     assert(loftAdvancedFeatureExample.parameters.participants[0]?.role === 'profile', 'Loft example must preserve ordered profile participants.')
+    assert(loftAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'path'), 'Loft example must preserve optional path participants.')
     assert(loftAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'guideCurve'), 'Loft example must preserve optional guide-curve participants.')
     assert(chamferAdvancedFeatureExample.parameters.participants[0]?.role === 'edge', 'Chamfer example must preserve topology modifier edge participants.')
     assert(thickenAdvancedFeatureExample.parameters.participants[0]?.role === 'face', 'Thicken example must preserve explicit face participants.')

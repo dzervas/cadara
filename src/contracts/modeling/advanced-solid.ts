@@ -153,6 +153,41 @@ export interface AdvancedFeatureValidationDiagnostic {
   target: DurableRef | null
 }
 
+export type LoftGuideContinuity =
+  | 'none'
+  | 'normalToGuide'
+  | 'tangentToGuide'
+  | 'matchTangent'
+  | 'matchCurvature'
+
+export type LoftProfileConditionKind = 'none' | 'normal' | 'tangent'
+
+export interface LoftProfileConditionOptions {
+  condition: MaybeAuthoredValue<LoftProfileConditionKind>
+  magnitude?: MaybeAuthoredValue<number>
+}
+
+export interface LoftPathOptions {
+  sectionCount: MaybeAuthoredValue<number>
+}
+
+export interface LoftMatchConnection {
+  from: DurableRef
+  to: DurableRef
+}
+
+export interface LoftAdvancedOptions extends Record<string, unknown> {
+  path?: LoftPathOptions
+  guideContinuity?: MaybeAuthoredValue<LoftGuideContinuity>
+  profileConditions?: {
+    startCondition: MaybeAuthoredValue<LoftProfileConditionKind>
+    startMagnitude?: MaybeAuthoredValue<number>
+    endCondition: MaybeAuthoredValue<LoftProfileConditionKind>
+    endMagnitude?: MaybeAuthoredValue<number>
+  }
+  matchConnections?: readonly LoftMatchConnection[]
+}
+
 const advancedSolidFeatureKinds: readonly AdvancedSolidFeatureKind[] = [
   'combine',
   'sweep',
@@ -189,11 +224,65 @@ const advancedParticipantRoles: readonly AdvancedParticipantRole[] = [
 
 export const LOFT_ADVANCED_OPTION_DESCRIPTORS = [
   {
-    key: 'sectionCount',
-    label: 'Section count',
-    required: true,
-    valueKind: 'positiveInteger',
-    patchTarget: { patchKey: 'options', valuePath: ['sectionCount'] },
+    key: 'path',
+    label: 'Path options',
+    required: false,
+    valueKind: 'group',
+    options: [
+      {
+        key: 'sectionCount',
+        label: 'Section count',
+        required: true,
+        valueKind: 'positiveInteger',
+        patchTarget: { patchKey: 'options', valuePath: ['path', 'sectionCount'] },
+      },
+    ],
+  },
+  {
+    key: 'guideContinuity',
+    label: 'Guide continuity',
+    required: false,
+    valueKind: 'enum',
+    enumValues: ['none', 'normalToGuide', 'tangentToGuide', 'matchTangent', 'matchCurvature'],
+    patchTarget: { patchKey: 'options', valuePath: ['guideContinuity'] },
+  },
+  {
+    key: 'profileConditions',
+    label: 'Profile conditions',
+    required: false,
+    valueKind: 'group',
+    options: [
+      {
+        key: 'startCondition',
+        label: 'Start condition',
+        required: true,
+        valueKind: 'enum',
+        enumValues: ['none', 'normal', 'tangent'],
+        patchTarget: { patchKey: 'options', valuePath: ['profileConditions', 'startCondition'] },
+      },
+      {
+        key: 'startMagnitude',
+        label: 'Start magnitude',
+        required: false,
+        valueKind: 'positiveNumber',
+        patchTarget: { patchKey: 'options', valuePath: ['profileConditions', 'startMagnitude'] },
+      },
+      {
+        key: 'endCondition',
+        label: 'End condition',
+        required: true,
+        valueKind: 'enum',
+        enumValues: ['none', 'normal', 'tangent'],
+        patchTarget: { patchKey: 'options', valuePath: ['profileConditions', 'endCondition'] },
+      },
+      {
+        key: 'endMagnitude',
+        label: 'End magnitude',
+        required: false,
+        valueKind: 'positiveNumber',
+        patchTarget: { patchKey: 'options', valuePath: ['profileConditions', 'endMagnitude'] },
+      },
+    ],
   },
 ] as const satisfies readonly AdvancedFeatureOptionDescriptor[]
 
@@ -383,8 +472,54 @@ export function validateAdvancedSolidFeatureDefinition(
   }
 
   diagnostics.push(...validateAdvancedFeatureOptions(definition.parameters.options ?? {}, descriptor.options ?? []))
+  if (definition.kind === 'loft') {
+    diagnostics.push(...validateLoftAdvancedOptions(definition as AdvancedSolidFeatureDefinition & { kind: 'loft' }))
+  }
 
   return diagnostics
+}
+
+function validateLoftAdvancedOptions(definition: AdvancedSolidFeatureDefinition & { kind: 'loft' }) {
+  const diagnostics: AdvancedFeatureValidationDiagnostic[] = []
+  const options = definition.parameters.options ?? {}
+  const guideTargets = getAdvancedParticipant(definition, 'guideCurve')?.targets ?? []
+  const guideContinuity = getAuthoredLiteralValue(options.guideContinuity as MaybeAuthoredValue<unknown>)
+
+  if (guideContinuity !== undefined && guideContinuity !== 'none' && guideTargets.length === 0) {
+    diagnostics.push(createInvalidOptionDiagnostic('Guide continuity requires at least one guide curve participant.'))
+  }
+
+  const connections = options.matchConnections
+  if (connections === undefined) {
+    return diagnostics
+  }
+
+  if (!Array.isArray(connections)) {
+    return [...diagnostics, createInvalidOptionDiagnostic('Match connections must be a connection list.')]
+  }
+
+  for (const connection of connections) {
+    if (!isRecord(connection)) {
+      diagnostics.push(createInvalidOptionDiagnostic('Match connection entries must be option groups.'))
+      continue
+    }
+
+    const from = connection.from
+    const to = connection.to
+    if (!isLoftConnectionEndpoint(from) || !isLoftConnectionEndpoint(to)) {
+      diagnostics.push(createInvalidOptionDiagnostic('Match connections require one durable edge or vertex selection on each profile side.'))
+    }
+  }
+
+  return diagnostics
+}
+
+function isLoftConnectionEndpoint(value: unknown): value is DurableRef {
+  return isRecord(value)
+    && (
+      (value.kind === 'edge' && typeof value.bodyId === 'string' && typeof value.edgeId === 'string') ||
+      (value.kind === 'vertex' && typeof value.bodyId === 'string' && typeof value.vertexId === 'string')
+    )
 }
 
 export function validateAdvancedFeatureOptions(
@@ -579,8 +714,25 @@ export const loftAdvancedFeatureExample = {
           { kind: 'face', bodyId: 'body_loft_b', faceId: 'face_loft_b' },
         ],
       },
+      { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
       { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_guide', edgeId: 'edge_guide' }] },
     ],
+    options: {
+      path: { sectionCount: 5 },
+      guideContinuity: 'normalToGuide',
+      profileConditions: {
+        startCondition: 'normal',
+        startMagnitude: 1,
+        endCondition: 'tangent',
+        endMagnitude: 1,
+      },
+      matchConnections: [
+        {
+          from: { kind: 'edge', bodyId: 'body_loft_a', edgeId: 'edge_loft_a' },
+          to: { kind: 'vertex', bodyId: 'body_loft_b', vertexId: 'vertex_loft_b' },
+        },
+      ],
+    },
   },
 } satisfies AdvancedSolidFeatureDefinition
 

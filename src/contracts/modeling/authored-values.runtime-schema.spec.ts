@@ -84,14 +84,19 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
         },
       ],
       options: {
-        sectionCount: { source: 'expression', valueText: 'sections + 1' },
+        path: {
+          sectionCount: { source: 'expression', valueText: 'sections + 1' },
+        },
       },
     },
   })
   assert(
     advancedOptionExpression.kind === 'loft' &&
-      isExpressionAuthoredValue(advancedOptionExpression.parameters.options?.sectionCount) &&
-      advancedOptionExpression.parameters.options.sectionCount.valueText === 'sections + 1',
+      !!advancedOptionExpression.parameters.options?.path &&
+      typeof advancedOptionExpression.parameters.options.path === 'object' &&
+      'sectionCount' in advancedOptionExpression.parameters.options.path &&
+      isExpressionAuthoredValue(advancedOptionExpression.parameters.options.path.sectionCount) &&
+      advancedOptionExpression.parameters.options.path.sectionCount.valueText === 'sections + 1',
     'Runtime validation should preserve expression-authored positive integer advanced options.',
   )
 
@@ -132,7 +137,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
           targets: [{ source: 'expression', valueText: 'profileRef' }],
         },
       ],
-      options: { sectionCount: 2 },
+      options: { path: { sectionCount: 2 } },
     },
   })
   assert(!advancedReferenceExpression.success, 'Runtime validation should reject expression wrappers on advanced participant references.')

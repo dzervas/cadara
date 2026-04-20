@@ -1640,16 +1640,30 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     const guideEdgeId = currentBody.topology.edgeIds[0]
     const region = loftSketch.sketch.regions[0]
     assert(region, 'Committed sketch must expose a region for unsupported loft coverage.')
-    const unsupportedGuide = await adapter.evaluatePreview({
+    const guidePreview = await adapter.evaluatePreview({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
       baseRevisionId: created.revisionId,
-      previewId: 'preview_loft_unsupported_guide',
+      previewId: 'preview_loft_supported_guide',
       definition: createLoftDefinition(loftSketch, {
         kind: 'region',
         sketchId: upperSketch.sketchId,
         regionId: upperRegion.regionId,
       }, [
+        { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId! }] },
+      ]),
+    })
+    const unsupportedPathGuide = await adapter.evaluatePreview({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: created.revisionId,
+      previewId: 'preview_loft_unsupported_path_guide',
+      definition: createLoftDefinition(loftSketch, {
+        kind: 'region',
+        sketchId: upperSketch.sketchId,
+        regionId: upperRegion.regionId,
+      }, [
+        { role: 'path', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId! }] },
         { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId! }] },
       ]),
     })
@@ -1676,7 +1690,8 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       },
     })
 
-    assert(hasErrorDiagnostics(unsupportedGuide.diagnostics), 'Guide-curve loft preview must emit explicit unsupported diagnostics.')
+    assertNoErrorDiagnostics(guidePreview.diagnostics, 'Guide-curve loft preview must not emit error diagnostics.')
+    assert(hasErrorDiagnostics(unsupportedPathGuide.diagnostics), 'Path plus guide-curve loft preview must emit explicit unsupported diagnostics.')
     assert(unsupportedBoolean.revisionState.kind === 'rejected', 'Boolean loft create must reject unsupported composition explicitly.')
     assert(
       unsupportedBoolean.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'rebuildFailure'),
