@@ -27,6 +27,25 @@ export interface OffsetContributionResult {
   previewEntities: readonly SketchDraftEntity[]
 }
 
+export interface SketchEditOperationResult {
+  valid: boolean
+  message: string | null
+  definition: SketchDefinition | null
+  contribution: SketchToolCommitContribution | null
+  previewEntities: readonly SketchDraftEntity[]
+}
+
+export type SketchEditOperationFactories = Pick<
+  SketchToolCommitFactories,
+  'createPointId'
+  | 'createEntityId'
+  | 'createPoint'
+  | 'createLineEntity'
+  | 'createCircleEntity'
+  | 'createArcEntity'
+  | 'createSplineEntity'
+>
+
 type CurveSample = {
   point: SketchPoint
   t: number
@@ -845,6 +864,441 @@ function averagePoint(left: SketchPoint, right: SketchPoint): SketchPoint {
   return [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2]
 }
 
+function dot(left: SketchPoint, right: SketchPoint) {
+  return left[0] * right[0] + left[1] * right[1]
+}
+
+function cross(left: SketchPoint, right: SketchPoint) {
+  return left[0] * right[1] - left[1] * right[0]
+}
+
+function createInvalidOperationResult(
+  message: string,
+  previewEntities: readonly SketchDraftEntity[] = [],
+): SketchEditOperationResult {
+  return {
+    valid: false,
+    message,
+    definition: null,
+    contribution: null,
+    previewEntities,
+  }
+}
+
+function createContributionOperationResult(
+  contribution: SketchToolCommitContribution,
+  previewEntities: readonly SketchDraftEntity[],
+): SketchEditOperationResult {
+  return {
+    valid: true,
+    message: null,
+    definition: null,
+    contribution,
+    previewEntities,
+  }
+}
+
+function createMutationOperationResult(
+  definition: SketchDefinition,
+  previewEntities: readonly SketchDraftEntity[],
+): SketchEditOperationResult {
+  return {
+    valid: true,
+    message: null,
+    definition,
+    contribution: null,
+    previewEntities,
+  }
+}
+
+function getLineDescriptorById(definition: SketchDefinition, entityId: SketchEntityId) {
+  const entity = definition.entities.find((candidate) => candidate.entityId === entityId)
+  if (!entity || entity.kind !== 'lineSegment') {
+    return null
+  }
+
+  const start = getPoint(definition, entity.startPointId)
+  const end = getPoint(definition, entity.endPointId)
+  if (!start || !end || pointsAlmostEqual(start.position, end.position)) {
+    return null
+  }
+
+  return {
+    entity,
+    startPoint: start,
+    endPoint: end,
+    start: start.position,
+    end: end.position,
+  }
+}
+
+function getSelectedLineDescriptors(definition: SketchDefinition, entityIds: readonly SketchEntityId[]) {
+  return entityIds.map((entityId) => getLineDescriptorById(definition, entityId))
+}
+
+function findSharedLineCorner(
+  first: NonNullable<ReturnType<typeof getLineDescriptorById>>,
+  second: NonNullable<ReturnType<typeof getLineDescriptorById>>,
+) {
+  const candidates = [
+    { firstPoint: first.startPoint, firstOther: first.end, secondPoint: second.startPoint, secondOther: second.end },
+    { firstPoint: first.startPoint, firstOther: first.end, secondPoint: second.endPoint, secondOther: second.start },
+    { firstPoint: first.endPoint, firstOther: first.start, secondPoint: second.startPoint, secondOther: second.end },
+    { firstPoint: first.endPoint, firstOther: first.start, secondPoint: second.endPoint, secondOther: second.start },
+  ]
+
+  const match = candidates.find((candidate) =>
+    candidate.firstPoint.pointId === candidate.secondPoint.pointId
+    || pointsAlmostEqual(candidate.firstPoint.position, candidate.secondPoint.position),
+  )
+
+  if (!match) {
+    return null
+  }
+
+  return {
+    pointId: match.firstPoint.pointId,
+    point: match.firstPoint.position,
+    firstOther: match.firstOther,
+    secondOther: match.secondOther,
+  }
+}
+
+function replaceLineEndpoint(
+  entity: Extract<SketchEntityDefinition, { kind: 'lineSegment' }>,
+  originalPointId: SketchPointId,
+  replacementPointId: SketchPointId,
+) {
+  return {
+    ...entity,
+    startPointId: entity.startPointId === originalPointId ? replacementPointId : entity.startPointId,
+    endPointId: entity.endPointId === originalPointId ? replacementPointId : entity.endPointId,
+  }
+}
+
+function makePreviewLine(
+  id: string,
+  label: string,
+  start: SketchPoint,
+  end: SketchPoint,
+  isConstruction: boolean,
+): SketchDraftEntity {
+  return {
+    id,
+    kind: 'line',
+    start,
+    end,
+    entityId: null,
+    status: 'preview',
+    label,
+    isConstruction,
+  }
+}
+
+function makePreviewPolyline(
+  id: string,
+  label: string,
+  points: readonly SketchPoint[],
+  isClosed: boolean,
+  isConstruction: boolean,
+): SketchDraftEntity {
+  return {
+    id,
+    kind: 'polyline',
+    points,
+    isClosed,
+    entityId: null,
+    status: 'preview',
+    label,
+    isConstruction,
+  }
+}
+
+function appendPointsAndEntities(
+  definition: SketchDefinition,
+  points: readonly SketchPointDefinition[],
+  entities: readonly SketchEntityDefinition[],
+): SketchDefinition {
+  return {
+    ...definition,
+    pointIds: [...definition.pointIds, ...points.map((point) => point.pointId)],
+    points: [...definition.points, ...points],
+    entityIds: [...definition.entityIds, ...entities.map((entity) => entity.entityId)],
+    entities: [...definition.entities, ...entities],
+  }
+}
+
+function updateDefinitionEntities(
+  definition: SketchDefinition,
+  updatedEntities: readonly SketchEntityDefinition[],
+) {
+  const updatedById = new Map(updatedEntities.map((entity) => [entity.entityId, entity]))
+  return {
+    ...definition,
+    entities: definition.entities.map((entity) => updatedById.get(entity.entityId) ?? entity),
+  }
+}
+
+export function createSketchFilletMutation(input: {
+  definition: SketchDefinition
+  entityIds: readonly SketchEntityId[]
+  radius: number | null
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  if (input.radius === null || input.radius <= EPSILON) {
+    return createInvalidOperationResult('Fillet radius must be greater than zero.')
+  }
+
+  if (input.entityIds.length !== 2) {
+    return createInvalidOperationResult('Sketch fillet needs two adjacent sketch lines.')
+  }
+
+  const [first, second] = getSelectedLineDescriptors(input.definition, input.entityIds)
+  if (!first || !second) {
+    return createInvalidOperationResult('Sketch fillet currently supports two adjacent line segments.')
+  }
+
+  const corner = findSharedLineCorner(first, second)
+  if (!corner) {
+    return createInvalidOperationResult('Sketch fillet needs two lines that share a corner.')
+  }
+
+  const firstDirection = normalize(subtract(corner.firstOther, corner.point))
+  const secondDirection = normalize(subtract(corner.secondOther, corner.point))
+  if (!firstDirection || !secondDirection) {
+    return createInvalidOperationResult('Sketch fillet target is too short.')
+  }
+
+  const clampedDot = Math.max(-1, Math.min(1, dot(firstDirection, secondDirection)))
+  const angle = Math.acos(clampedDot)
+  if (angle <= EPSILON || Math.abs(Math.PI - angle) <= EPSILON) {
+    return createInvalidOperationResult('Sketch fillet needs a non-collinear corner.')
+  }
+
+  const trimDistance = input.radius / Math.tan(angle / 2)
+  const firstLength = distanceBetween(corner.point, corner.firstOther)
+  const secondLength = distanceBetween(corner.point, corner.secondOther)
+  if (trimDistance <= EPSILON || trimDistance >= firstLength || trimDistance >= secondLength) {
+    return createInvalidOperationResult('Fillet radius is too large for the selected corner.')
+  }
+
+  const firstTangent = add(corner.point, scale(firstDirection, trimDistance))
+  const secondTangent = add(corner.point, scale(secondDirection, trimDistance))
+  const bisector = normalize(add(firstDirection, secondDirection))
+  if (!bisector) {
+    return createInvalidOperationResult('Sketch fillet needs a non-collinear corner.')
+  }
+
+  const center = add(corner.point, scale(bisector, input.radius / Math.sin(angle / 2)))
+  const centerPointId = input.factories.createPointId('fillet-center')
+  const firstPointId = input.factories.createPointId('fillet-tangent-a')
+  const secondPointId = input.factories.createPointId('fillet-tangent-b')
+  const arcEntityId = input.factories.createEntityId('fillet-arc')
+  const isConstruction = first.entity.isConstruction && second.entity.isConstruction
+  const arcEntity = {
+    ...input.factories.createArcEntity(
+      `Fillet ${input.sequence}`,
+      arcEntityId,
+      centerPointId,
+      firstPointId,
+      secondPointId,
+      cross(firstDirection, secondDirection) > 0 ? 'clockwise' : 'counterClockwise',
+    ),
+    isConstruction,
+    style: first.entity.style ?? second.entity.style,
+  }
+  const updatedFirst = replaceLineEndpoint(first.entity, corner.pointId, firstPointId)
+  const updatedSecond = replaceLineEndpoint(second.entity, corner.pointId, secondPointId)
+  const definition = appendPointsAndEntities(
+    updateDefinitionEntities(input.definition, [updatedFirst, updatedSecond]),
+    [
+      input.factories.createPoint(`Fillet ${input.sequence} center`, centerPointId, center),
+      input.factories.createPoint(`Fillet ${input.sequence} tangent A`, firstPointId, firstTangent),
+      input.factories.createPoint(`Fillet ${input.sequence} tangent B`, secondPointId, secondTangent),
+    ],
+    [arcEntity],
+  )
+
+  return createMutationOperationResult(definition, [
+    makePreviewLine('preview-fillet-trim-a', 'Fillet preview', corner.firstOther, firstTangent, first.entity.isConstruction),
+    makePreviewLine('preview-fillet-trim-b', 'Fillet preview', corner.secondOther, secondTangent, second.entity.isConstruction),
+    makePreviewSpline('preview-fillet-arc', [firstTangent, pointOnCircle(center, input.radius, (Math.atan2(firstTangent[1] - center[1], firstTangent[0] - center[0]) + Math.atan2(secondTangent[1] - center[1], secondTangent[0] - center[0])) / 2), secondTangent], isConstruction),
+  ])
+}
+
+export function createSketchChamferMutation(input: {
+  definition: SketchDefinition
+  entityIds: readonly SketchEntityId[]
+  distance: number | null
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  if (input.distance === null || input.distance <= EPSILON) {
+    return createInvalidOperationResult('Chamfer distance must be greater than zero.')
+  }
+
+  if (input.entityIds.length !== 2) {
+    return createInvalidOperationResult('Sketch chamfer needs two adjacent sketch lines.')
+  }
+
+  const [first, second] = getSelectedLineDescriptors(input.definition, input.entityIds)
+  if (!first || !second) {
+    return createInvalidOperationResult('Sketch chamfer currently supports two adjacent line segments.')
+  }
+
+  const corner = findSharedLineCorner(first, second)
+  if (!corner) {
+    return createInvalidOperationResult('Sketch chamfer needs two lines that share a corner.')
+  }
+
+  const firstDirection = normalize(subtract(corner.firstOther, corner.point))
+  const secondDirection = normalize(subtract(corner.secondOther, corner.point))
+  if (!firstDirection || !secondDirection || Math.abs(cross(firstDirection, secondDirection)) <= EPSILON) {
+    return createInvalidOperationResult('Sketch chamfer needs a non-collinear corner.')
+  }
+
+  if (
+    input.distance >= distanceBetween(corner.point, corner.firstOther)
+    || input.distance >= distanceBetween(corner.point, corner.secondOther)
+  ) {
+    return createInvalidOperationResult('Chamfer distance is too large for the selected corner.')
+  }
+
+  const firstTangent = add(corner.point, scale(firstDirection, input.distance))
+  const secondTangent = add(corner.point, scale(secondDirection, input.distance))
+  const firstPointId = input.factories.createPointId('chamfer-point-a')
+  const secondPointId = input.factories.createPointId('chamfer-point-b')
+  const chamferEntityId = input.factories.createEntityId('chamfer-line')
+  const isConstruction = first.entity.isConstruction && second.entity.isConstruction
+  const chamferEntity = {
+    ...input.factories.createLineEntity(`Chamfer ${input.sequence}`, chamferEntityId, firstPointId, secondPointId),
+    isConstruction,
+    style: first.entity.style ?? second.entity.style,
+  }
+  const updatedFirst = replaceLineEndpoint(first.entity, corner.pointId, firstPointId)
+  const updatedSecond = replaceLineEndpoint(second.entity, corner.pointId, secondPointId)
+  const definition = appendPointsAndEntities(
+    updateDefinitionEntities(input.definition, [updatedFirst, updatedSecond]),
+    [
+      input.factories.createPoint(`Chamfer ${input.sequence} point A`, firstPointId, firstTangent),
+      input.factories.createPoint(`Chamfer ${input.sequence} point B`, secondPointId, secondTangent),
+    ],
+    [chamferEntity],
+  )
+
+  return createMutationOperationResult(definition, [
+    makePreviewLine('preview-chamfer-trim-a', 'Chamfer preview', corner.firstOther, firstTangent, first.entity.isConstruction),
+    makePreviewLine('preview-chamfer-trim-b', 'Chamfer preview', corner.secondOther, secondTangent, second.entity.isConstruction),
+    makePreviewLine('preview-chamfer-line', 'Chamfer preview', firstTangent, secondTangent, isConstruction),
+  ])
+}
+
+export function createSketchExtendMutation(input: {
+  definition: SketchDefinition
+  entityIds: readonly SketchEntityId[]
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  if (input.entityIds.length !== 2) {
+    return createInvalidOperationResult('Sketch extend needs a target line and a boundary line.')
+  }
+
+  const target = getLineDescriptorById(input.definition, input.entityIds[0]!)
+  const boundary = getLineDescriptorById(input.definition, input.entityIds[1]!)
+  if (!target || !boundary) {
+    return createInvalidOperationResult('Sketch extend currently supports a line extended to another line.')
+  }
+
+  const intersection = infiniteLineIntersection({
+    start: target.start,
+    end: target.end,
+    otherStart: boundary.start,
+    otherEnd: boundary.end,
+  })
+  if (!intersection) {
+    return createInvalidOperationResult('Sketch extend needs non-parallel lines.')
+  }
+
+  const targetVector = subtract(target.end, target.start)
+  const targetLengthSquared = dot(targetVector, targetVector)
+  const t = targetLengthSquared <= EPSILON ? 0 : dot(subtract(intersection, target.start), targetVector) / targetLengthSquared
+  if (t >= -EPSILON && t <= 1 + EPSILON) {
+    return createInvalidOperationResult('Sketch extend needs an intersection outside the selected line.')
+  }
+
+  const replaceStart = t < 0
+  const replacementPointId = input.factories.createPointId('extend-endpoint')
+  const updatedTarget = {
+    ...target.entity,
+    startPointId: replaceStart ? replacementPointId : target.entity.startPointId,
+    endPointId: replaceStart ? target.entity.endPointId : replacementPointId,
+  }
+  const definition = appendPointsAndEntities(
+    updateDefinitionEntities(input.definition, [updatedTarget]),
+    [input.factories.createPoint(`Extend ${input.sequence} endpoint`, replacementPointId, intersection)],
+    [],
+  )
+
+  return createMutationOperationResult(definition, [
+    makePreviewLine('preview-extend-line', 'Extend preview', replaceStart ? intersection : target.start, replaceStart ? target.end : intersection, target.entity.isConstruction),
+  ])
+}
+
+export function createSketchSplitMutation(input: {
+  definition: SketchDefinition
+  entityIds: readonly SketchEntityId[]
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  if (input.entityIds.length !== 2) {
+    return createInvalidOperationResult('Sketch split needs a target line and a crossing boundary line.')
+  }
+
+  const target = getLineDescriptorById(input.definition, input.entityIds[0]!)
+  const boundary = getLineDescriptorById(input.definition, input.entityIds[1]!)
+  if (!target || !boundary) {
+    return createInvalidOperationResult('Sketch split currently supports a line split by another line.')
+  }
+
+  const intersection = lineLineIntersection({
+    start: target.start,
+    end: target.end,
+    otherStart: boundary.start,
+    otherEnd: boundary.end,
+  })
+  if (!intersection || intersection.t <= EPSILON || intersection.t >= 1 - EPSILON) {
+    return createInvalidOperationResult('Sketch split needs a boundary crossing inside the selected line.')
+  }
+
+  const splitPointId = input.factories.createPointId('split-point')
+  const splitEntityId = input.factories.createEntityId('split-line')
+  const updatedTarget = {
+    ...target.entity,
+    endPointId: splitPointId,
+  }
+  const splitEntity = {
+    ...input.factories.createLineEntity(
+      `${target.entity.label} split`,
+      splitEntityId,
+      splitPointId,
+      target.entity.endPointId,
+    ),
+    isConstruction: target.entity.isConstruction,
+    style: target.entity.style,
+  }
+  const definition = appendPointsAndEntities(
+    updateDefinitionEntities(input.definition, [updatedTarget]),
+    [input.factories.createPoint(`Split ${input.sequence} point`, splitPointId, intersection.point)],
+    [splitEntity],
+  )
+
+  return createMutationOperationResult(definition, [
+    makePreviewLine('preview-split-a', 'Split preview', target.start, intersection.point, target.entity.isConstruction),
+    makePreviewLine('preview-split-b', 'Split preview', intersection.point, target.end, target.entity.isConstruction),
+  ])
+}
+
 function createContinuousLineOffsetContribution(input: {
   definition: SketchDefinition
   entityIds: readonly SketchEntityId[]
@@ -967,6 +1421,340 @@ function createContinuousLineOffsetContribution(input: {
       }),
     },
   }
+}
+
+function prefixFactories(
+  factories: SketchEditOperationFactories,
+  prefix: string,
+): SketchEditOperationFactories {
+  return {
+    ...factories,
+    createPointId: (suffix) => factories.createPointId(`${prefix}-${suffix}`),
+    createEntityId: (suffix) => factories.createEntityId(`${prefix}-${suffix}`),
+  }
+}
+
+function createLineSlotContribution(input: {
+  curve: Extract<CurveDescriptor, { kind: 'lineSegment' }>
+  width: number
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  const direction = normalize(subtract(input.curve.end, input.curve.start))
+  const normal = direction ? leftNormal(direction) : null
+  if (!normal) {
+    return createInvalidOperationResult('Slot reference is too short.')
+  }
+
+  const halfWidth = input.width / 2
+  const offset = scale(normal, halfWidth)
+  const leftStart = add(input.curve.start, offset)
+  const leftEnd = add(input.curve.end, offset)
+  const rightEnd = subtract(input.curve.end, offset)
+  const rightStart = subtract(input.curve.start, offset)
+  const leftStartPointId = input.factories.createPointId('slot-left-start')
+  const leftEndPointId = input.factories.createPointId('slot-left-end')
+  const rightEndPointId = input.factories.createPointId('slot-right-end')
+  const rightStartPointId = input.factories.createPointId('slot-right-start')
+  const leftLineId = input.factories.createEntityId('slot-left-line')
+  const endArcId = input.factories.createEntityId('slot-end-arc')
+  const rightLineId = input.factories.createEntityId('slot-right-line')
+  const startArcId = input.factories.createEntityId('slot-start-arc')
+  const isConstruction = input.curve.isConstruction
+  const style = input.curve.style
+
+  return createContributionOperationResult({
+    points: [
+      input.factories.createPoint(`Slot ${input.sequence} left start`, leftStartPointId, leftStart),
+      input.factories.createPoint(`Slot ${input.sequence} left end`, leftEndPointId, leftEnd),
+      input.factories.createPoint(`Slot ${input.sequence} right end`, rightEndPointId, rightEnd),
+      input.factories.createPoint(`Slot ${input.sequence} right start`, rightStartPointId, rightStart),
+    ],
+    entities: [
+      {
+        ...input.factories.createLineEntity(`Slot ${input.sequence} left`, leftLineId, leftStartPointId, leftEndPointId),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createArcEntity(
+          `Slot ${input.sequence} end`,
+          endArcId,
+          input.curve.entity.endPointId,
+          leftEndPointId,
+          rightEndPointId,
+          'clockwise',
+        ),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createLineEntity(`Slot ${input.sequence} right`, rightLineId, rightEndPointId, rightStartPointId),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createArcEntity(
+          `Slot ${input.sequence} start`,
+          startArcId,
+          input.curve.entity.startPointId,
+          rightStartPointId,
+          leftStartPointId,
+          'clockwise',
+        ),
+        isConstruction,
+        style,
+      },
+    ],
+  }, [
+    makePreviewPolyline('preview-slot-line', 'Slot preview', [leftStart, leftEnd, rightEnd, rightStart], true, isConstruction),
+  ])
+}
+
+function createArcSlotContribution(input: {
+  curve: Extract<CurveDescriptor, { kind: 'arc' }>
+  width: number
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  const baseRadius = distanceBetween(input.curve.center, input.curve.start)
+  const halfWidth = input.width / 2
+  const innerRadius = baseRadius - halfWidth
+  const outerRadius = baseRadius + halfWidth
+  const startVector = normalize(subtract(input.curve.start, input.curve.center))
+  const endVector = normalize(subtract(input.curve.end, input.curve.center))
+
+  if (innerRadius <= EPSILON || !startVector || !endVector) {
+    return createInvalidOperationResult('Slot width would create an invalid arc slot.')
+  }
+
+  const outerStart = add(input.curve.center, scale(startVector, outerRadius))
+  const outerEnd = add(input.curve.center, scale(endVector, outerRadius))
+  const innerStart = add(input.curve.center, scale(startVector, innerRadius))
+  const innerEnd = add(input.curve.center, scale(endVector, innerRadius))
+  const outerStartId = input.factories.createPointId('slot-outer-start')
+  const outerEndId = input.factories.createPointId('slot-outer-end')
+  const innerStartId = input.factories.createPointId('slot-inner-start')
+  const innerEndId = input.factories.createPointId('slot-inner-end')
+  const outerArcId = input.factories.createEntityId('slot-outer-arc')
+  const innerArcId = input.factories.createEntityId('slot-inner-arc')
+  const startCapId = input.factories.createEntityId('slot-start-cap')
+  const endCapId = input.factories.createEntityId('slot-end-cap')
+  const isConstruction = input.curve.isConstruction
+  const style = input.curve.style
+
+  return createContributionOperationResult({
+    points: [
+      input.factories.createPoint(`Slot ${input.sequence} outer start`, outerStartId, outerStart),
+      input.factories.createPoint(`Slot ${input.sequence} outer end`, outerEndId, outerEnd),
+      input.factories.createPoint(`Slot ${input.sequence} inner start`, innerStartId, innerStart),
+      input.factories.createPoint(`Slot ${input.sequence} inner end`, innerEndId, innerEnd),
+    ],
+    entities: [
+      {
+        ...input.factories.createArcEntity(
+          `Slot ${input.sequence} outer`,
+          outerArcId,
+          input.curve.entity.centerPointId,
+          outerStartId,
+          outerEndId,
+          input.curve.sweepDirection,
+        ),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createLineEntity(`Slot ${input.sequence} end cap`, endCapId, outerEndId, innerEndId),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createArcEntity(
+          `Slot ${input.sequence} inner`,
+          innerArcId,
+          input.curve.entity.centerPointId,
+          innerEndId,
+          innerStartId,
+          input.curve.sweepDirection === 'counterClockwise' ? 'clockwise' : 'counterClockwise',
+        ),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createLineEntity(`Slot ${input.sequence} start cap`, startCapId, innerStartId, outerStartId),
+        isConstruction,
+        style,
+      },
+    ],
+  }, [
+    makePreviewSpline('preview-slot-outer-arc', createArcPreview(input.curve, outerRadius), isConstruction),
+    makePreviewSpline('preview-slot-inner-arc', createArcPreview(input.curve, innerRadius), isConstruction),
+    makePreviewLine('preview-slot-start-cap', 'Slot preview', innerStart, outerStart, isConstruction),
+    makePreviewLine('preview-slot-end-cap', 'Slot preview', outerEnd, innerEnd, isConstruction),
+  ])
+}
+
+function createSplineSlotContribution(input: {
+  curve: Extract<CurveDescriptor, { kind: 'spline' }>
+  width: number
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  const halfWidth = input.width / 2
+  const leftPoints = offsetSplinePoints(input.curve.points, halfWidth, 'left')
+  const rightPoints = offsetSplinePoints(input.curve.points, halfWidth, 'right')
+  const leftPointIds = leftPoints.map((_, index) => input.factories.createPointId(`slot-left-spline-${index + 1}`))
+  const rightPointIds = rightPoints.map((_, index) => input.factories.createPointId(`slot-right-spline-${index + 1}`))
+  const leftSplineId = input.factories.createEntityId('slot-left-spline')
+  const rightSplineId = input.factories.createEntityId('slot-right-spline')
+  const startCapId = input.factories.createEntityId('slot-spline-start-cap')
+  const endCapId = input.factories.createEntityId('slot-spline-end-cap')
+  const isConstruction = input.curve.isConstruction
+  const style = input.curve.style
+
+  return createContributionOperationResult({
+    points: [
+      ...leftPoints.map((point, index) =>
+        input.factories.createPoint(`Slot ${input.sequence} left ${index + 1}`, leftPointIds[index]!, point),
+      ),
+      ...rightPoints.map((point, index) =>
+        input.factories.createPoint(`Slot ${input.sequence} right ${index + 1}`, rightPointIds[index]!, point),
+      ),
+    ],
+    entities: [
+      {
+        ...input.factories.createSplineEntity(`Slot ${input.sequence} left`, leftSplineId, leftPointIds),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createLineEntity(`Slot ${input.sequence} end cap`, endCapId, leftPointIds.at(-1)!, rightPointIds.at(-1)!),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createSplineEntity(`Slot ${input.sequence} right`, rightSplineId, [...rightPointIds].reverse()),
+        isConstruction,
+        style,
+      },
+      {
+        ...input.factories.createLineEntity(`Slot ${input.sequence} start cap`, startCapId, rightPointIds[0]!, leftPointIds[0]!),
+        isConstruction,
+        style,
+      },
+    ],
+  }, [
+    makePreviewSpline('preview-slot-left-spline', leftPoints, isConstruction),
+    makePreviewSpline('preview-slot-right-spline', rightPoints, isConstruction),
+    makePreviewLine('preview-slot-spline-start-cap', 'Slot preview', rightPoints[0]!, leftPoints[0]!, isConstruction),
+    makePreviewLine('preview-slot-spline-end-cap', 'Slot preview', leftPoints.at(-1)!, rightPoints.at(-1)!, isConstruction),
+  ])
+}
+
+function createClosedLineSlotContribution(input: {
+  definition: SketchDefinition
+  entityIds: readonly SketchEntityId[]
+  width: number
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  const chain = buildOrderedLineChain(input.definition, input.entityIds)
+  if (!chain.valid) {
+    return createInvalidOperationResult(chain.message)
+  }
+
+  if (!chain.closed) {
+    return createInvalidOperationResult('Slot multi-selection needs one closed line profile.')
+  }
+
+  const halfWidth = input.width / 2
+  const outer = createContinuousLineOffsetContribution({
+    definition: input.definition,
+    entityIds: input.entityIds,
+    distance: halfWidth,
+    side: 'left',
+    sequence: input.sequence,
+    factories: prefixFactories(input.factories, 'slot-outer'),
+  })
+  const inner = createContinuousLineOffsetContribution({
+    definition: input.definition,
+    entityIds: input.entityIds,
+    distance: halfWidth,
+    side: 'right',
+    sequence: input.sequence,
+    factories: prefixFactories(input.factories, 'slot-inner'),
+  })
+
+  if (!outer.valid || !outer.contribution) {
+    return createInvalidOperationResult(outer.message ?? 'Slot could not offset the closed profile.')
+  }
+
+  if (!inner.valid || !inner.contribution) {
+    return createInvalidOperationResult(inner.message ?? 'Slot could not offset the closed profile.')
+  }
+
+  return createContributionOperationResult({
+    points: [...outer.contribution.points, ...inner.contribution.points],
+    entities: [...outer.contribution.entities, ...inner.contribution.entities],
+  }, [...outer.previewEntities, ...inner.previewEntities])
+}
+
+export function createSketchSlotContribution(input: {
+  definition: SketchDefinition
+  entityIds: readonly SketchEntityId[]
+  width: number | null
+  sequence: number
+  factories: SketchEditOperationFactories
+}): SketchEditOperationResult {
+  if (input.width === null || input.width <= EPSILON) {
+    return createInvalidOperationResult('Slot width must be greater than zero.')
+  }
+
+  if (input.entityIds.length === 0) {
+    return createInvalidOperationResult('Select a line, arc, spline, or closed line profile for the slot.')
+  }
+
+  if (input.entityIds.length > 1) {
+    return createClosedLineSlotContribution({
+      ...input,
+      width: input.width,
+    })
+  }
+
+  const entity = input.definition.entities.find((candidate) => candidate.entityId === input.entityIds[0])
+  const curve = entity ? getCurveDescriptor(input.definition, entity) : null
+  if (!curve) {
+    return createInvalidOperationResult('Slot supports a line, arc, spline, or closed line profile.')
+  }
+
+  if (curve.kind === 'lineSegment') {
+    return createLineSlotContribution({
+      curve,
+      width: input.width,
+      sequence: input.sequence,
+      factories: input.factories,
+    })
+  }
+
+  if (curve.kind === 'arc') {
+    return createArcSlotContribution({
+      curve,
+      width: input.width,
+      sequence: input.sequence,
+      factories: input.factories,
+    })
+  }
+
+  if (curve.kind === 'spline') {
+    return createSplineSlotContribution({
+      curve,
+      width: input.width,
+      sequence: input.sequence,
+      factories: input.factories,
+    })
+  }
+
+  return createInvalidOperationResult('Slot supports a line, arc, spline, or closed line profile.')
 }
 
 export function createOffsetContribution(input: {

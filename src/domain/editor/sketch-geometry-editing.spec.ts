@@ -926,6 +926,111 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
   }
 
+  function testSketchFilletChamferAndSlotUseSessionPreviewAndCommit() {
+    const cornerDefinition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 4, 0),
+        makePoint('sketch_point_c', 'C', 0, 4),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_ac'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_ac', 'AC', 'sketch_point_a', 'sketch_point_c'),
+      ],
+    })
+
+    let filletSession = beginSketchTool(createSessionFromDefinition(cornerDefinition), 'sketchFillet')
+    filletSession = selectSketchEditToolTarget(filletSession, cornerDefinition.entities[0]!.target)
+    filletSession = selectSketchEditToolTarget(filletSession, cornerDefinition.entities[1]!.target)
+    assert(filletSession.toolStagedEntities.length > 0, 'Sketch fillet should preview supported adjacent line edits.')
+    filletSession = patchSketchEditToolValue(filletSession, { value: 1 })
+    filletSession = patchSketchEditToolValue(filletSession, { intent: 'commitSketchEditOperator' })
+    assert(
+      filletSession.definition.entities.some((entity) => entity.kind === 'arc'),
+      'Sketch fillet should commit durable arc geometry through the session.',
+    )
+    assert(filletSession.activeTool === 'sketchFillet', 'Sketch fillet should keep the active sketch session open.')
+
+    let chamferSession = beginSketchTool(createSessionFromDefinition(cornerDefinition), 'sketchChamfer')
+    chamferSession = selectSketchEditToolTarget(chamferSession, cornerDefinition.entities[0]!.target)
+    chamferSession = selectSketchEditToolTarget(chamferSession, cornerDefinition.entities[1]!.target)
+    chamferSession = patchSketchEditToolValue(chamferSession, { value: 1 })
+    chamferSession = patchSketchEditToolValue(chamferSession, { intent: 'commitSketchEditOperator' })
+    assert(chamferSession.definition.entities.length === 3, 'Sketch chamfer should add one durable chamfer segment.')
+
+    const lineDefinition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 4, 0),
+      ],
+      entityIds: ['sketch_entity_ab'],
+      entities: [makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b')],
+    })
+    let slotSession = beginSketchTool(createSessionFromDefinition(lineDefinition), 'sketchSlot')
+    slotSession = selectSketchEditToolTarget(slotSession, lineDefinition.entities[0]!.target)
+    assert(slotSession.toolStagedEntities.length > 0, 'Sketch slot should preview slot boundary geometry.')
+    slotSession = patchSketchEditToolValue(slotSession, { value: 2 })
+    slotSession = patchSketchEditToolValue(slotSession, { intent: 'commitSketchEditOperator' })
+    assert(
+      slotSession.definition.entities.filter((entity) => entity.kind === 'arc').length === 2,
+      'Sketch slot around a line should commit rounded end arcs.',
+    )
+  }
+
+  function testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState() {
+    const extendDefinition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 1, 0),
+        makePoint('sketch_point_c', 'C', 3, -1),
+        makePoint('sketch_point_d', 'D', 3, 1),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_cd'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+      ],
+    })
+    let extendSession = beginSketchTool(createSessionFromDefinition(extendDefinition), 'sketchExtend')
+    extendSession = selectSketchEditToolTarget(extendSession, extendDefinition.entities[0]!.target)
+    extendSession = selectSketchEditToolTarget(extendSession, extendDefinition.entities[1]!.target)
+    assertIncludesPoint(extendSession.definition.points, [3, 0], 'Sketch extend should update the selected line endpoint at the boundary.')
+    assert(extendSession.definition.entities.length === 2, 'Sketch extend should preserve unrelated boundary geometry.')
+
+    const splitDefinition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 4, 0),
+        makePoint('sketch_point_c', 'C', 2, -1),
+        makePoint('sketch_point_d', 'D', 2, 1),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_cd'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+      ],
+    })
+    let splitSession = beginSketchTool(createSessionFromDefinition(splitDefinition), 'sketchSplit')
+    splitSession = selectSketchEditToolTarget(splitSession, splitDefinition.entities[0]!.target)
+    splitSession = selectSketchEditToolTarget(splitSession, splitDefinition.entities[1]!.target)
+    assert(splitSession.definition.entities.length === 3, 'Sketch split should divide the selected line in session state.')
+    assertIncludesPoint(splitSession.definition.points, [2, 0], 'Sketch split should add the split point at the crossing boundary.')
+
+    let unsupportedSession = beginSketchTool(createSessionFromDefinition(splitDefinition), 'sketchFillet')
+    unsupportedSession = selectSketchEditToolTarget(unsupportedSession, splitDefinition.entities[0]!.target)
+    unsupportedSession = selectSketchEditToolTarget(unsupportedSession, splitDefinition.entities[1]!.target)
+    assert(
+      unsupportedSession.validationMessage === 'Sketch fillet needs two lines that share a corner.',
+      'Sketch edit operators should report unsupported valid combinations without mutating.',
+    )
+    assert(unsupportedSession.definition.entities.length === splitDefinition.entities.length, 'Unsupported fillet should not change the sketch definition.')
+  }
+
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
   testRectangleToolDragTranslatesWholeRectangle()
@@ -940,4 +1045,6 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testOffsetCreatesContinuousOpenAngle()
   testOffsetAddsCircleArcAndSplineCopies()
   testOffsetAddsProjectedCircleAndSplineCopies()
+  testSketchFilletChamferAndSlotUseSessionPreviewAndCommit()
+  testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState()
 })

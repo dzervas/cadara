@@ -51,9 +51,15 @@ import {
 } from '@/domain/sketch-styles/definition'
 import type { OffsetCurveDescriptor, OffsetSide } from '@/domain/sketch-editing/operations'
 import {
+  createSketchChamferMutation,
+  createSketchExtendMutation,
+  createSketchFilletMutation,
+  createSketchSlotContribution,
+  createSketchSplitMutation,
   createOffsetContribution,
   offsetCurveDescriptorFromProjectedGeometry,
   trimLineSegmentAtIntersections,
+  type SketchEditOperationResult,
 } from '@/domain/sketch-editing/operations'
 import { mapSketchPointToWorkspaceWorld } from '@/domain/workspace/sketch-plane-mapping'
 import {
@@ -84,7 +90,7 @@ import type {
 import { sampleArcPoints } from '@/domain/sketch-tools/geometry'
 import { getSketchToolDefinition } from '@/domain/sketch-tools/registry'
 import type { SketchEditToolId } from '@/domain/sketch-edit-tools/definition'
-import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
+import { getSketchEditToolDefinition, isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import type { SketchSnapCandidate, SketchSnapSourceRef } from '@/domain/sketch-snapping/snap-candidates'
 import {
   collectSketchSnapGeometries,
@@ -165,6 +171,7 @@ export interface SketchEditToolState {
   selectedTargets: PrimitiveRef[]
   offsetDistance: number | null
   offsetSide: OffsetSide
+  toolValue: number | null
 }
 
 export interface SketchSessionState {
@@ -1891,9 +1898,29 @@ function buildSketchEditToolPresentation(
   previewEntities: readonly SketchDraftEntity[] = [],
 ): SketchToolPresentationSchema {
   const isOffset = state.toolId === 'offset'
+  const isTrim = state.toolId === 'trim'
+  const definition = getSketchEditToolDefinition(state.toolId)
+  const metadata = definition.metadata
   const selectedCount = state.selectedTargets.length
   const hasSelection = selectedCount > 0
   const hoverLabel = state.hoverTarget?.kind === 'sketchEntity' ? 'Sketch entity' : null
+  const needsNumericValue =
+    state.toolId === 'sketchFillet'
+    || state.toolId === 'sketchChamfer'
+    || state.toolId === 'sketchSlot'
+  const numericLabel = state.toolId === 'sketchFillet'
+    ? 'Radius'
+    : state.toolId === 'sketchChamfer'
+      ? 'Distance'
+      : 'Width'
+  const isReady = hasSelection && previewEntities.length > 0 && validationMessage === null
+  const promptText = isOffset
+    ? hasSelection ? 'Set offset distance' : metadata.validationMessages.emptySelection
+    : isTrim
+      ? metadata.validationMessages.emptySelection
+      : hasSelection
+        ? needsNumericValue ? `Set ${numericLabel.toLowerCase()}` : `Accept ${metadata.name.toLowerCase()}`
+        : metadata.validationMessages.emptySelection
   const validation = validationMessage
     ? [{ id: `${state.toolId}-validation`, message: validationMessage, severity: 'error' as const }]
     : []
@@ -1901,51 +1928,62 @@ function buildSketchEditToolPresentation(
   return {
     prompts: [{
       id: `${state.toolId}-prompt`,
-      text: isOffset
-        ? hasSelection ? 'Set offset distance' : 'Select entities to offset'
-        : 'Select segment to trim',
+      text: promptText,
       tone: validation.length > 0 ? 'warning' : 'neutral',
     }],
     selectionGuide: {
       id: `${state.toolId}-selection`,
-      label: isOffset ? 'Offset target' : 'Trim target',
-      acceptedKinds: isOffset ? ['line', 'circle', 'arc', 'spline'] : ['line', 'circle', 'arc', 'spline'],
+      label: metadata.selection.label,
+      acceptedKinds: metadata.selection.acceptedKinds,
       selectedCount,
-      requiredCount: 1,
+      requiredCount: metadata.selection.requiredCount,
       hoverLabel,
     },
-    controls: isOffset
-      ? [
-          {
-            id: 'offset-distance',
+    controls: [
+      ...(isOffset
+        ? [
+            {
+              id: 'offset-distance',
+              kind: 'numeric' as const,
+              label: 'Distance',
+              value: state.offsetDistance,
+              unit: 'mm',
+              disabled: !hasSelection,
+              action: { type: 'patch' as const, patch: { intent: 'setOffsetDistance' } },
+            },
+            {
+              id: 'offset-side',
+              kind: 'option' as const,
+              label: 'Side',
+              value: state.offsetSide,
+              options: [
+                { value: 'left', label: 'Left / outward' },
+                { value: 'right', label: 'Right / inward' },
+              ],
+              disabled: !hasSelection,
+              action: { type: 'patch' as const, patch: { intent: 'setOffsetSide' } },
+            },
+          ]
+        : []),
+      ...(needsNumericValue
+        ? [{
+            id: `${state.toolId}-value`,
             kind: 'numeric' as const,
-            label: 'Distance',
-            value: state.offsetDistance,
+            label: numericLabel,
+            value: state.toolValue,
             unit: 'mm',
             disabled: !hasSelection,
-            action: { type: 'patch' as const, patch: { intent: 'setOffsetDistance' } },
-          },
-          {
-            id: 'offset-side',
-            kind: 'option' as const,
-            label: 'Side',
-            value: state.offsetSide,
-            options: [
-              { value: 'left', label: 'Left / outward' },
-              { value: 'right', label: 'Right / inward' },
-            ],
-            disabled: !hasSelection,
-            action: { type: 'patch' as const, patch: { intent: 'setOffsetSide' } },
-          },
-        ]
-      : [],
-    completionHints: isOffset
-      ? [{
-          id: 'offset-completion',
-          text: hasSelection ? 'Confirm to create offset geometry' : 'Select connected lines or one curve',
-          ready: Boolean(hasSelection && previewEntities.length > 0 && validation.length === 0),
-        }]
-      : [],
+            action: { type: 'patch' as const, patch: { intent: 'setSketchEditValue' } },
+          }]
+        : []),
+    ],
+    completionHints: [{
+      id: `${state.toolId}-completion`,
+      text: isOffset
+        ? hasSelection ? 'Confirm to create offset geometry' : 'Select connected lines or one curve'
+        : hasSelection ? `Confirm ${metadata.previewLabel.toLowerCase()}` : metadata.validationMessages.emptySelection,
+      ready: Boolean(isReady),
+    }],
     floatingInput: isOffset && hasSelection
       ? {
           id: 'offset-distance-input',
@@ -1971,6 +2009,20 @@ function buildSketchEditToolPresentation(
           submitAction: { type: 'patch', patch: { intent: 'commitOffset' } },
           cancelAction: { type: 'patch', patch: { intent: 'cancelOffset' } },
         }
+      : needsNumericValue && hasSelection
+        ? {
+            id: `${state.toolId}-value-input`,
+            label: numericLabel,
+            value: state.toolValue,
+            unit: 'mm',
+            min: 0,
+            confirmLabel: 'Create',
+            cancelLabel: 'Cancel',
+            placement: 'target',
+            anchor: getPreviewAnchor(previewEntities),
+            submitAction: { type: 'patch', patch: { intent: 'commitSketchEditOperator' } },
+            cancelAction: { type: 'patch', patch: { intent: 'cancelSketchEditOperator' } },
+          }
       : null,
     overlays: state.hoverTarget
       ? [{
@@ -1987,10 +2039,38 @@ function buildSketchEditToolPresentation(
         toolId: state.toolId,
         hasSelection,
         selectedCount,
+        mutationContract: metadata.mutationContract,
         previewEntityCount: previewEntities.length,
       },
     },
   }
+}
+
+function getPreviewAnchor(previewEntities: readonly SketchDraftEntity[]): SketchToolAnchorDescriptor | undefined {
+  const preview = previewEntities[0]
+  if (!preview) {
+    return undefined
+  }
+
+  if (preview.kind === 'line') {
+    return {
+      kind: 'sketchPoint',
+      point: midpointSketchPoints(preview.start, preview.end),
+      offset: { x: 18, y: -18 },
+    }
+  }
+
+  if (preview.kind === 'circle') {
+    return { kind: 'sketchPoint', point: preview.center, offset: { x: 18, y: -18 } }
+  }
+
+  const points = preview.kind === 'spline' || preview.kind === 'polyline' ? preview.points : []
+  const point = points[Math.floor(points.length / 2)]
+  return point ? { kind: 'sketchPoint', point, offset: { x: 18, y: -18 } } : undefined
+}
+
+function midpointSketchPoints(left: SketchPoint, right: SketchPoint): SketchPoint {
+  return [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2]
 }
 
 function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditToolId): SketchSessionState {
@@ -2001,6 +2081,7 @@ function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditTool
     selectedTargets: [],
     offsetDistance: 1,
     offsetSide: 'left',
+    toolValue: toolId === 'sketchSlot' ? 2 : 1,
   }
 
   return {
@@ -2361,6 +2442,104 @@ function getOffsetCurveForProjectedTarget(
   return geometry ? offsetCurveDescriptorFromProjectedGeometry(geometry) : null
 }
 
+function getSelectedSketchEntityIds(activeEditTool: SketchEditToolState): SketchEntityId[] {
+  return activeEditTool.selectedTargets
+    .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => target.kind === 'sketchEntity')
+    .map((target) => target.entityId)
+}
+
+function getSketchEditOperatorResult(
+  session: SketchSessionState,
+  activeEditTool: SketchEditToolState,
+): SketchEditOperationResult {
+  const entityIds = getSelectedSketchEntityIds(activeEditTool)
+  const nextSequence = session.sequence + 1
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const factories = createSessionCommitFactories(nextSequence, sketchId)
+
+  switch (activeEditTool.toolId) {
+    case 'sketchFillet':
+      return createSketchFilletMutation({
+        definition: session.definition,
+        entityIds,
+        radius: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchChamfer':
+      return createSketchChamferMutation({
+        definition: session.definition,
+        entityIds,
+        distance: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchExtend':
+      return createSketchExtendMutation({
+        definition: session.definition,
+        entityIds,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchSplit':
+      return createSketchSplitMutation({
+        definition: session.definition,
+        entityIds,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchSlot':
+      return createSketchSlotContribution({
+        definition: session.definition,
+        entityIds,
+        width: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'trim':
+    case 'offset':
+      return {
+        valid: false,
+        message: null,
+        definition: null,
+        contribution: null,
+        previewEntities: [],
+      }
+  }
+}
+
+function applySketchEditOperationResult(
+  session: SketchSessionState,
+  result: SketchEditOperationResult,
+) {
+  const nextSequence = session.sequence + 1
+  if (result.definition) {
+    const historyCursor = createTailSketchHistoryCursor(result.definition)
+    return {
+      definition: result.definition,
+      fullDefinition: cloneDefinition(result.definition),
+      historyCursor,
+      historyOperations: session.historyOperations,
+      sequence: nextSequence,
+      commitRequest: rebuildSessionCommitRequest(session, result.definition),
+    }
+  }
+
+  if (result.contribution) {
+    const history = applySketchHistoryContribution(session, result.contribution)
+    return {
+      definition: history.definition,
+      fullDefinition: history.fullDefinition,
+      historyCursor: history.historyCursor,
+      historyOperations: history.historyOperations,
+      sequence: nextSequence,
+      commitRequest: rebuildSessionCommitRequest(session, history.definition),
+    }
+  }
+
+  return null
+}
+
 export function updateSketchEditToolHover(
   session: SketchSessionState,
   target: PrimitiveRef | null,
@@ -2375,7 +2554,9 @@ export function updateSketchEditToolHover(
   }
   const preview = activeEditTool.toolId === 'offset'
     ? getOffsetPreview(session, activeEditTool)
-    : null
+    : activeEditTool.toolId === 'trim'
+      ? null
+      : getSketchEditOperatorResult(session, activeEditTool)
 
   return {
     ...session,
@@ -2444,20 +2625,79 @@ export function selectSketchEditToolTarget(
     }
   }
 
-  if (target.kind !== 'sketchEntity' && target.kind !== 'projectedReferenceGeometry') {
+  if (activeEditTool.toolId === 'offset' && target.kind !== 'sketchEntity' && target.kind !== 'projectedReferenceGeometry') {
     return session
   }
 
-  const nextSelectedTargets = activeEditTool.selectedTargets.some((selected) => primitiveRefEquals(selected, target))
+  if (activeEditTool.toolId === 'offset') {
+    const nextSelectedTargets = activeEditTool.selectedTargets.some((selected) => primitiveRefEquals(selected, target))
+      ? activeEditTool.selectedTargets.filter((selected) => !primitiveRefEquals(selected, target))
+      : [...activeEditTool.selectedTargets, target]
+    const nextEditTool = {
+      ...activeEditTool,
+      selectedTarget: nextSelectedTargets[0] ?? null,
+      selectedTargets: nextSelectedTargets,
+      hoverTarget: null,
+    }
+    const preview = getOffsetPreview(session, nextEditTool)
+
+    return {
+      ...session,
+      activeEditTool: nextEditTool,
+      toolStagedEntities: preview.previewEntities,
+      validationMessage: preview.valid ? null : preview.message,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool, preview.message, preview.previewEntities),
+    }
+  }
+
+  if (target.kind !== 'sketchEntity') {
+    const message = getSketchEditToolDefinition(activeEditTool.toolId).metadata.validationMessages.unsupportedTarget
+    return {
+      ...session,
+      validationMessage: message,
+      toolPresentation: buildSketchEditToolPresentation(activeEditTool, message),
+    }
+  }
+
+  const metadata = getSketchEditToolDefinition(activeEditTool.toolId).metadata
+  const isSelected = activeEditTool.selectedTargets.some((selected) => primitiveRefEquals(selected, target))
+  const nextSelectedTargets = isSelected
     ? activeEditTool.selectedTargets.filter((selected) => !primitiveRefEquals(selected, target))
-    : [...activeEditTool.selectedTargets, target]
+    : metadata.selection.allowsMultiple || activeEditTool.selectedTargets.length < metadata.selection.requiredCount
+      ? [...activeEditTool.selectedTargets, target]
+      : [...activeEditTool.selectedTargets.slice(1), target]
   const nextEditTool = {
     ...activeEditTool,
     selectedTarget: nextSelectedTargets[0] ?? null,
     selectedTargets: nextSelectedTargets,
     hoverTarget: null,
   }
-  const preview = getOffsetPreview(session, nextEditTool)
+  const preview = getSketchEditOperatorResult(session, nextEditTool)
+
+  if (
+    (nextEditTool.toolId === 'sketchExtend' || nextEditTool.toolId === 'sketchSplit')
+    && nextSelectedTargets.length >= metadata.selection.requiredCount
+    && preview.valid
+  ) {
+    const applied = applySketchEditOperationResult(session, preview)
+    if (applied) {
+      const resetEditTool = {
+        ...nextEditTool,
+        selectedTarget: null,
+        selectedTargets: [],
+      }
+      return {
+        ...session,
+        ...applied,
+        activeEditTool: resetEditTool,
+        toolStagedEntities: [],
+        validationMessage: null,
+        toolPresentation: buildSketchEditToolPresentation(resetEditTool),
+        activeEditTarget: null,
+        activeDrag: null,
+      }
+    }
+  }
 
   return {
     ...session,
@@ -2473,8 +2713,12 @@ export function patchSketchEditToolValue(
   patch: Record<string, unknown>,
 ): SketchSessionState {
   const activeEditTool = session.activeEditTool
-  if (!activeEditTool || activeEditTool.toolId !== 'offset') {
+  if (!activeEditTool) {
     return session
+  }
+
+  if (activeEditTool.toolId !== 'offset') {
+    return patchSketchEditOperatorValue(session, activeEditTool, patch)
   }
 
   if (patch.intent === 'cancelOffset') {
@@ -2547,6 +2791,79 @@ export function patchSketchEditToolValue(
     commitRequest: rebuildSessionCommitRequest(session, history.definition),
     validationMessage: null,
     toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+  }
+}
+
+function patchSketchEditOperatorValue(
+  session: SketchSessionState,
+  activeEditTool: SketchEditToolState,
+  patch: Record<string, unknown>,
+): SketchSessionState {
+  if (patch.intent === 'cancelSketchEditOperator') {
+    const nextEditTool = {
+      ...activeEditTool,
+      selectedTarget: null,
+      selectedTargets: [],
+    }
+
+    return {
+      ...session,
+      activeEditTool: nextEditTool,
+      toolStagedEntities: [],
+      validationMessage: null,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+    }
+  }
+
+  if ('value' in patch && patch.intent !== 'commitSketchEditOperator') {
+    const nextEditTool = {
+      ...activeEditTool,
+      toolValue: typeof patch.value === 'number' ? patch.value : null,
+    }
+    const preview = getSketchEditOperatorResult(session, nextEditTool)
+
+    return {
+      ...session,
+      activeEditTool: nextEditTool,
+      toolStagedEntities: preview.previewEntities,
+      validationMessage: preview.valid ? null : preview.message,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool, preview.message, preview.previewEntities),
+    }
+  }
+
+  if (patch.intent !== 'commitSketchEditOperator') {
+    return session
+  }
+
+  const preview = getSketchEditOperatorResult(session, activeEditTool)
+  if (!preview.valid) {
+    return {
+      ...session,
+      validationMessage: preview.message,
+      toolPresentation: buildSketchEditToolPresentation(activeEditTool, preview.message, preview.previewEntities),
+    }
+  }
+
+  const applied = applySketchEditOperationResult(session, preview)
+  if (!applied) {
+    return session
+  }
+
+  const nextEditTool = {
+    ...activeEditTool,
+    selectedTarget: null,
+    selectedTargets: [],
+  }
+
+  return {
+    ...session,
+    ...applied,
+    activeEditTool: nextEditTool,
+    toolStagedEntities: [],
+    validationMessage: null,
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+    activeEditTarget: null,
+    activeDrag: null,
   }
 }
 

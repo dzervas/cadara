@@ -537,7 +537,17 @@ const toolbarSections = [
     label: 'Edit',
     align: 'center',
     modes: ['sketch'],
-    toolIds: ['trim', 'construction', 'projectReference', 'offset'],
+    toolIds: [
+      'trim',
+      'offset',
+      'sketchFillet',
+      'sketchChamfer',
+      'sketchExtend',
+      'sketchSplit',
+      'sketchSlot',
+      'construction',
+      'projectReference',
+    ],
   },
   {
     id: 'svgStyle',

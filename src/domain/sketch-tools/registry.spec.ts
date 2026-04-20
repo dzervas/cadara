@@ -13,6 +13,10 @@ import {
   getSketchToolDefinition,
   isRegisteredSketchToolId,
 } from '@/domain/sketch-tools/registry'
+import {
+  getRegisteredSketchEditToolDefinitions,
+  isRegisteredSketchEditToolId,
+} from '@/domain/sketch-edit-tools/registry'
 import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/domain/tools/tool-registry'
 
 test('src/domain/sketch-tools/registry.spec.ts', async () => {
@@ -24,6 +28,9 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
 
   function testRegistryContainsCurrentSketchToolSet() {
     const registeredToolIds = getRegisteredSketchToolDefinitions()
+      .map((definition) => definition.metadata.id)
+      .sort()
+    const registeredEditToolIds = getRegisteredSketchEditToolDefinitions()
       .map((definition) => definition.metadata.id)
       .sort()
 
@@ -49,6 +56,20 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(isRegisteredSketchToolId('line'), 'Line should resolve as a registered sketch tool.')
     assert(isRegisteredSketchToolId('midpointLine'), 'Midpoint Line should resolve as a registered sketch tool.')
     assert(isRegisteredSketchToolId('spline'), 'Spline should resolve as a registered sketch tool.')
+    assert(
+      JSON.stringify(registeredEditToolIds) === JSON.stringify([
+        'offset',
+        'sketchChamfer',
+        'sketchExtend',
+        'sketchFillet',
+        'sketchSlot',
+        'sketchSplit',
+        'trim',
+      ]),
+      'The sketch edit registry should contain every current edit operator.',
+    )
+    assert(isRegisteredSketchEditToolId('sketchFillet'), 'Sketch fillet should resolve as a registered sketch edit tool.')
+    assert(!isRegisteredSketchEditToolId('fillet'), 'Part fillet should stay distinct from sketch fillet.')
   }
 
   function testToolFamiliesAndDiscoveryExposePrimitiveConstructors() {
@@ -79,9 +100,25 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(sketchDrawingSection?.toolIds.includes('centerPointArc'), 'Sketch toolbar should include an arc family trigger.')
     assert(sketchDrawingSection?.toolIds.includes('inscribedPolygon'), 'Sketch toolbar should include a polygon family trigger.')
     assert(
+      getToolbarSectionsForMode('sketch').some((section) =>
+        section.id === 'sketchOps'
+        && section.toolIds.includes('sketchFillet')
+        && section.toolIds.includes('sketchChamfer')
+        && section.toolIds.includes('sketchExtend')
+        && section.toolIds.includes('sketchSplit')
+        && section.toolIds.includes('sketchSlot'),
+      ),
+      'Sketch toolbar should include the sketch edit operators.',
+    )
+    assert(
       searchToolDefinitions('tangent').some((tool) => tool.id === 'tangentArc')
         && searchToolDefinitions('polygon').some((tool) => tool.id === 'circumscribedPolygon'),
       'Tool search should discover sketch constructor dropdown variants.',
+    )
+    assert(
+      searchToolDefinitions('fillet').some((tool) => tool.id === 'sketchFillet')
+        && searchToolDefinitions('fillet').some((tool) => tool.id === 'fillet'),
+      'Tool search should expose sketch and part fillet tools separately.',
     )
   }
 
