@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 
 import { featureDefinitionSchema } from '@/contracts/modeling/runtime-schema'
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import { getAuthoredLiteralValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 
@@ -67,4 +68,46 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
     },
   })
   assert(!referenceExpression.success, 'Runtime validation should reject expression wrappers on reference fields.')
+
+  const advancedOptionExpression = featureDefinitionSchema.parse({
+    kind: 'loft',
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: 'create',
+      participants: [
+        {
+          role: 'profile',
+          targets: [
+            { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+            { kind: 'region', sketchId: 'sketch_b', regionId: 'region_b' },
+          ],
+        },
+      ],
+      options: {
+        sectionCount: { source: 'expression', valueText: 'sections + 1' },
+      },
+    },
+  })
+  assert(
+    advancedOptionExpression.kind === 'loft' &&
+      isExpressionAuthoredValue(advancedOptionExpression.parameters.options?.sectionCount) &&
+      advancedOptionExpression.parameters.options.sectionCount.valueText === 'sections + 1',
+    'Runtime validation should preserve expression-authored positive integer advanced options.',
+  )
+
+  const advancedReferenceExpression = featureDefinitionSchema.safeParse({
+    kind: 'loft',
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: 'create',
+      participants: [
+        {
+          role: 'profile',
+          targets: [{ source: 'expression', valueText: 'profileRef' }],
+        },
+      ],
+      options: { sectionCount: 2 },
+    },
+  })
+  assert(!advancedReferenceExpression.success, 'Runtime validation should reject expression wrappers on advanced participant references.')
 })

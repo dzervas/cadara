@@ -136,6 +136,8 @@ const authoredPositiveNumberSchema = (message: string) =>
   authoredValueSchema(positiveNumberSchema(message), message)
 
 const authoredNumberSchema = (label: string) => authoredValueSchema(numberSchema, label)
+const authoredPositiveIntegerSchema = (label: string) =>
+  authoredValueSchema(z.number().int().positive(`${label} must be a positive integer.`), label)
 const authoredBooleanSchema = (label: string) => authoredValueSchema(z.boolean(), label)
 
 const booleanOperationAuthoredSchema = authoredEnumValueSchema(['newBody', 'join', 'cut', 'intersect'], 'Boolean operation')
@@ -226,6 +228,9 @@ const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional
   }
   if ('copy' in next) {
     next.copy = authoredBooleanSchema('Mirror copy').parse(next.copy)
+  }
+  if ('sectionCount' in next) {
+    next.sectionCount = authoredPositiveIntegerSchema('Section count').parse(next.sectionCount)
   }
   if ('side' in next) {
     next.side = thickenSideAuthoredSchema.parse(next.side)

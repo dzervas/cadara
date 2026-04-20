@@ -7,6 +7,7 @@ export type MaybeAuthoredValue<T> = T | AuthoredValue<T>
 export type FeatureValueKindDescriptor =
   | { kind: 'finiteNumber' }
   | { kind: 'positiveNumber' }
+  | { kind: 'positiveInteger' }
   | { kind: 'integer'; minimum?: number }
   | { kind: 'boolean' }
   | { kind: 'string' }
@@ -95,6 +96,20 @@ export function validateFeatureValueKind(
       return finite.value > 0
         ? finite
         : { ok: false, failure: { code: 'not-positive', message: 'Value must be greater than zero.' } }
+    }
+    case 'positiveInteger': {
+      const finite = validateFiniteNumber(value)
+      if (!finite.ok) {
+        return finite
+      }
+
+      if (!Number.isInteger(finite.value)) {
+        return { ok: false, failure: { code: 'not-integer', message: 'Value must be an integer.' } }
+      }
+
+      return finite.value > 0
+        ? finite
+        : { ok: false, failure: { code: 'not-positive', message: 'Value must be a positive integer.' } }
     }
     case 'integer': {
       const finite = validateFiniteNumber(value)

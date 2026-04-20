@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 
 import { createExpressionAuthoredValue, createLiteralAuthoredValue } from '@/contracts/modeling/authored-values'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import { resolveFeatureDefinitionValues } from '@/domain/modeling/feature-value-expressions'
 import type { FeatureDefinition } from '@/contracts/modeling/schema'
 
@@ -55,4 +56,42 @@ test('src/domain/modeling/feature-value-expressions.spec.ts', () => {
     variables: [{ variableId: 'variable_depth', name: 'depth', valueText: '-3' }],
   })
   assert(!invalidDomain.ok && invalidDomain.diagnostics.some((diagnostic) => diagnostic.code === 'feature-value-expression-not-positive'), 'Invalid dependent results should surface value-kind diagnostics.')
+
+  const loft = (sectionCount: unknown): FeatureDefinition => ({
+    kind: 'loft',
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: 'create',
+      participants: [
+        {
+          role: 'profile',
+          targets: [
+            { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
+            { kind: 'region', sketchId: 'sketch_b', regionId: 'region_b' },
+          ],
+        },
+      ],
+      options: { sectionCount },
+    },
+  })
+  const resolvedSectionCount = resolveFeatureDefinitionValues({
+    definition: loft(createExpressionAuthoredValue('sections + 1')),
+    variables: [{ variableId: 'variable_sections', name: 'sections', valueText: '3' }],
+  })
+  assert(
+    resolvedSectionCount.ok &&
+      resolvedSectionCount.definition.kind === 'loft' &&
+      resolvedSectionCount.definition.parameters.options?.sectionCount === 4,
+    'Expression-authored positive integer advanced options should resolve to concrete integer values.',
+  )
+
+  const invalidSectionCount = resolveFeatureDefinitionValues({
+    definition: loft(createExpressionAuthoredValue('sections / 2')),
+    variables: [{ variableId: 'variable_sections', name: 'sections', valueText: '3' }],
+  })
+  assert(
+    !invalidSectionCount.ok &&
+      invalidSectionCount.diagnostics.some((diagnostic) => diagnostic.code === 'feature-value-expression-not-integer'),
+    'Positive integer advanced option expressions should reject non-integer results before geometry execution.',
+  )
 })

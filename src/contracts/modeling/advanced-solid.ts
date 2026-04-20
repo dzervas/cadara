@@ -1,6 +1,12 @@
 import type { BodyId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
-import { getAuthoredLiteralValue, type MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
+import {
+  getAuthoredLiteralValue,
+  isExpressionAuthoredValue,
+  validateFeatureValueKind,
+  type FeatureValueKindDescriptor,
+  type MaybeAuthoredValue,
+} from '@/contracts/modeling/authored-values'
 
 export const ADVANCED_SOLID_FEATURE_SCHEMA_VERSION = 'advanced-solid-feature/v0' as const
 
@@ -56,12 +62,56 @@ export interface AdvancedOperationIntentDescriptor {
   requiredParticipantsByIntent?: Partial<Record<AdvancedSolidOperationIntent, readonly AdvancedParticipantRole[]>>
 }
 
-export interface AdvancedFeatureOptionDescriptor {
+export type AdvancedFeatureScalarOptionValueKind =
+  | 'boolean'
+  | 'enum'
+  | 'angle'
+  | 'positiveNumber'
+  | 'positiveInteger'
+
+export interface AdvancedFeatureOptionPatchTarget {
+  patchKey: string
+  valuePath?: readonly (string | number)[]
+}
+
+export interface AdvancedFeatureScalarOptionDescriptor {
   key: string
   label: string
   required: boolean
-  valueKind: 'positiveNumber' | 'boolean'
+  valueKind: AdvancedFeatureScalarOptionValueKind
+  enumValues?: readonly string[]
+  patchTarget?: AdvancedFeatureOptionPatchTarget
 }
+
+export interface AdvancedFeatureOptionGroupDescriptor {
+  key: string
+  label: string
+  required: boolean
+  valueKind: 'group'
+  options: readonly AdvancedFeatureOptionDescriptor[]
+  patchTarget?: AdvancedFeatureOptionPatchTarget
+}
+
+export interface AdvancedFeatureDiscriminatedOptionVariant {
+  value: string
+  label: string
+  options: readonly AdvancedFeatureOptionDescriptor[]
+}
+
+export interface AdvancedFeatureDiscriminatedOptionGroupDescriptor {
+  key: string
+  label: string
+  required: boolean
+  valueKind: 'discriminatedGroup'
+  discriminantKey: string
+  variants: readonly AdvancedFeatureDiscriminatedOptionVariant[]
+  patchTarget?: AdvancedFeatureOptionPatchTarget
+}
+
+export type AdvancedFeatureOptionDescriptor =
+  | AdvancedFeatureScalarOptionDescriptor
+  | AdvancedFeatureOptionGroupDescriptor
+  | AdvancedFeatureDiscriminatedOptionGroupDescriptor
 
 export interface AdvancedParticipantValue {
   role: AdvancedParticipantRole
@@ -132,6 +182,16 @@ const advancedParticipantRoles: readonly AdvancedParticipantRole[] = [
   'transformReference',
   'enclosingRegionSeed',
 ]
+
+export const LOFT_ADVANCED_OPTION_DESCRIPTORS = [
+  {
+    key: 'sectionCount',
+    label: 'Section count',
+    required: true,
+    valueKind: 'positiveInteger',
+    patchTarget: { patchKey: 'options', valuePath: ['sectionCount'] },
+  },
+] as const satisfies readonly AdvancedFeatureOptionDescriptor[]
 
 export function isAdvancedSolidFeatureKind(value: unknown): value is AdvancedSolidFeatureKind {
   return typeof value === 'string' && advancedSolidFeatureKinds.includes(value as AdvancedSolidFeatureKind)
@@ -224,46 +284,176 @@ export function validateAdvancedSolidFeatureDefinition(
     }
   }
 
-  const options = definition.parameters.options ?? {}
-  for (const option of descriptor.options ?? []) {
-    const optionValue = options[option.key]
-    const value = optionValue === undefined ? undefined : getAuthoredLiteralValue(optionValue as MaybeAuthoredValue<unknown>)
+  diagnostics.push(...validateAdvancedFeatureOptions(definition.parameters.options ?? {}, descriptor.options ?? []))
 
-    if (option.required && value === undefined) {
-      diagnostics.push(createAdvancedDiagnostic({
-        code: 'advanced-feature-invalid-option',
-        role: null,
-        message: `${option.label} is required.`,
-      }))
-      continue
-    }
+  return diagnostics
+}
 
-    if (
-      value !== undefined &&
-      option.valueKind === 'positiveNumber' &&
-      (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
-    ) {
-      diagnostics.push(createAdvancedDiagnostic({
-        code: 'advanced-feature-invalid-option',
-        role: null,
-        message: `${option.label} must be a positive number.`,
-      }))
-    }
+export function validateAdvancedFeatureOptions(
+  options: Record<string, unknown>,
+  descriptors: readonly AdvancedFeatureOptionDescriptor[],
+): AdvancedFeatureValidationDiagnostic[] {
+  const diagnostics: AdvancedFeatureValidationDiagnostic[] = []
 
-    if (
-      value !== undefined &&
-      option.valueKind === 'boolean' &&
-      typeof value !== 'boolean'
-    ) {
-      diagnostics.push(createAdvancedDiagnostic({
-        code: 'advanced-feature-invalid-option',
-        role: null,
-        message: `${option.label} must be true or false.`,
-      }))
-    }
+  for (const descriptor of descriptors) {
+    diagnostics.push(...validateAdvancedFeatureOption(options, descriptor))
   }
 
   return diagnostics
+}
+
+function validateAdvancedFeatureOption(
+  options: Record<string, unknown>,
+  descriptor: AdvancedFeatureOptionDescriptor,
+): AdvancedFeatureValidationDiagnostic[] {
+  switch (descriptor.valueKind) {
+    case 'group':
+      return validateAdvancedFeatureOptionGroup(options, descriptor)
+    case 'discriminatedGroup':
+      return validateAdvancedFeatureDiscriminatedOptionGroup(options, descriptor)
+    default:
+      return validateAdvancedFeatureScalarOption(options, descriptor)
+  }
+}
+
+function validateAdvancedFeatureScalarOption(
+  options: Record<string, unknown>,
+  descriptor: AdvancedFeatureScalarOptionDescriptor,
+): AdvancedFeatureValidationDiagnostic[] {
+  const optionValue = options[descriptor.key]
+  const value = optionValue === undefined
+    ? undefined
+    : getAuthoredLiteralValue(optionValue as MaybeAuthoredValue<unknown>)
+
+  if (descriptor.required && value === undefined) {
+    return [createInvalidOptionDiagnostic(`${descriptor.label} is required.`)]
+  }
+
+  if (optionValue !== undefined && isExpressionAuthoredValue(optionValue)) {
+    return []
+  }
+
+  if (value === undefined) {
+    return []
+  }
+
+  const valueKind = getFeatureValueKindDescriptor(descriptor)
+  const validation = validateFeatureValueKind(value, valueKind)
+  return validation.ok
+    ? []
+    : [createInvalidOptionDiagnostic(`${descriptor.label}: ${validation.failure.message}`)]
+}
+
+function validateAdvancedFeatureOptionGroup(
+  options: Record<string, unknown>,
+  descriptor: AdvancedFeatureOptionGroupDescriptor,
+): AdvancedFeatureValidationDiagnostic[] {
+  const groupValue = options[descriptor.key]
+
+  if (descriptor.required && groupValue === undefined) {
+    return [createInvalidOptionDiagnostic(`${descriptor.label} is required.`)]
+  }
+
+  if (groupValue === undefined) {
+    return []
+  }
+
+  if (!isRecord(groupValue)) {
+    return [createInvalidOptionDiagnostic(`${descriptor.label} must be an option group.`)]
+  }
+
+  return validateAdvancedFeatureOptions(groupValue, descriptor.options)
+}
+
+function validateAdvancedFeatureDiscriminatedOptionGroup(
+  options: Record<string, unknown>,
+  descriptor: AdvancedFeatureDiscriminatedOptionGroupDescriptor,
+): AdvancedFeatureValidationDiagnostic[] {
+  const rawDiscriminantValue = options[descriptor.discriminantKey]
+  const discriminantValue = getAuthoredLiteralValue(rawDiscriminantValue as MaybeAuthoredValue<unknown>)
+
+  if (descriptor.required && discriminantValue === undefined) {
+    return [createInvalidOptionDiagnostic(`${descriptor.label} is required.`)]
+  }
+
+  if (rawDiscriminantValue !== undefined && isExpressionAuthoredValue(rawDiscriminantValue)) {
+    return []
+  }
+
+  if (discriminantValue === undefined) {
+    return []
+  }
+
+  if (typeof discriminantValue !== 'string') {
+    return [createInvalidOptionDiagnostic(`${descriptor.label} must select a variant.`)]
+  }
+
+  const activeVariant = descriptor.variants.find((variant) => variant.value === discriminantValue)
+  if (!activeVariant) {
+    return [createInvalidOptionDiagnostic(`${descriptor.label} must be one of: ${descriptor.variants.map((variant) => variant.value).join(', ')}.`)]
+  }
+
+  const inactiveKeys = new Set(
+    descriptor.variants
+      .filter((variant) => variant.value !== activeVariant.value)
+      .flatMap((variant) => collectAdvancedFeatureOptionKeys(variant.options)),
+  )
+  const diagnostics: AdvancedFeatureValidationDiagnostic[] = []
+
+  for (const inactiveKey of inactiveKeys) {
+    if (options[inactiveKey] !== undefined) {
+      diagnostics.push(createInvalidOptionDiagnostic(`${descriptor.label} has inactive ${inactiveKey} value for ${discriminantValue}.`))
+    }
+  }
+
+  diagnostics.push(...validateAdvancedFeatureOptions(options, activeVariant.options))
+  return diagnostics
+}
+
+function collectAdvancedFeatureOptionKeys(descriptors: readonly AdvancedFeatureOptionDescriptor[]): string[] {
+  return descriptors.flatMap((descriptor) => {
+    if (descriptor.valueKind === 'group') {
+      return [descriptor.key, ...collectAdvancedFeatureOptionKeys(descriptor.options)]
+    }
+
+    if (descriptor.valueKind === 'discriminatedGroup') {
+      return [
+        descriptor.discriminantKey,
+        ...descriptor.variants.flatMap((variant) => collectAdvancedFeatureOptionKeys(variant.options)),
+      ]
+    }
+
+    return [descriptor.key]
+  })
+}
+
+export function getFeatureValueKindDescriptor(
+  descriptor: AdvancedFeatureScalarOptionDescriptor,
+): FeatureValueKindDescriptor {
+  switch (descriptor.valueKind) {
+    case 'boolean':
+      return { kind: 'boolean' }
+    case 'enum':
+      return { kind: 'enumString', options: descriptor.enumValues ?? [] }
+    case 'angle':
+      return { kind: 'angle' }
+    case 'positiveNumber':
+      return { kind: 'positiveNumber' }
+    case 'positiveInteger':
+      return { kind: 'positiveInteger' }
+  }
+}
+
+function createInvalidOptionDiagnostic(message: string) {
+  return createAdvancedDiagnostic({
+    code: 'advanced-feature-invalid-option',
+    role: null,
+    message,
+  })
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export const sweepAdvancedFeatureExample = {

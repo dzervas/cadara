@@ -1,9 +1,11 @@
 import { test } from 'bun:test'
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  validateAdvancedFeatureOptions,
   validateAdvancedSolidFeatureDefinition,
   type AdvancedSolidFeatureAuthoringDescriptor,
 } from '@/contracts/modeling/advanced-solid'
+import { createExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 
 test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -794,6 +796,95 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
     )
   }
 
+  function testAdvancedOptionDescriptorsValidateAllScalarKindsAndGroups() {
+    const diagnostics = validateAdvancedFeatureOptions({
+      enabled: true,
+      mode: 'smooth',
+      draftAngle: Math.PI / 8,
+      distance: 2,
+      sectionCount: 4,
+      continuity: {
+        enabled: false,
+        mode: 'sharp',
+      },
+    }, [
+      { key: 'enabled', label: 'Enabled', required: true, valueKind: 'boolean' },
+      { key: 'mode', label: 'Mode', required: true, valueKind: 'enum', enumValues: ['smooth', 'sharp'] },
+      { key: 'draftAngle', label: 'Draft angle', required: true, valueKind: 'angle' },
+      { key: 'distance', label: 'Distance', required: true, valueKind: 'positiveNumber' },
+      { key: 'sectionCount', label: 'Section count', required: true, valueKind: 'positiveInteger' },
+      {
+        key: 'continuity',
+        label: 'Continuity',
+        required: true,
+        valueKind: 'group',
+        options: [
+          { key: 'enabled', label: 'Continuity enabled', required: true, valueKind: 'boolean' },
+          { key: 'mode', label: 'Continuity mode', required: true, valueKind: 'enum', enumValues: ['sharp', 'tangent'] },
+        ],
+      },
+    ])
+
+    const invalid = validateAdvancedFeatureOptions({ sectionCount: 2.5 }, [
+      { key: 'sectionCount', label: 'Section count', required: true, valueKind: 'positiveInteger' },
+    ])
+
+    assert(diagnostics.length === 0, 'Advanced option descriptors should validate boolean, enum, angle, numeric, integer, and group values.')
+    assert(
+      invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
+      'Positive integer option validation should reject non-integer values.',
+    )
+  }
+
+  function testDiscriminatedOptionValidationRejectsInactiveVariantValues() {
+    const descriptors = [
+      {
+        key: 'twist',
+        label: 'Twist',
+        required: true,
+        valueKind: 'discriminatedGroup',
+        discriminantKey: 'twistType',
+        variants: [
+          {
+            value: 'none',
+            label: 'None',
+            options: [],
+          },
+          {
+            value: 'angle',
+            label: 'Angle',
+            options: [{ key: 'twistAngle', label: 'Twist angle', required: true, valueKind: 'angle' }],
+          },
+          {
+            value: 'pitch',
+            label: 'Pitch',
+            options: [
+              { key: 'turns', label: 'Turns', required: true, valueKind: 'positiveNumber' },
+              { key: 'pitch', label: 'Pitch', required: true, valueKind: 'positiveNumber' },
+            ],
+          },
+        ],
+      },
+    ] as const
+
+    const valid = validateAdvancedFeatureOptions({
+      twistType: 'angle',
+      twistAngle: createExpressionAuthoredValue('twist'),
+    }, descriptors)
+    const invalid = validateAdvancedFeatureOptions({
+      twistType: 'angle',
+      twistAngle: Math.PI,
+      turns: 2,
+      pitch: 10,
+    }, descriptors)
+
+    assert(valid.length === 0, 'Expression-authored active variant values should remain valid before expression resolution.')
+    assert(
+      invalid.some((diagnostic) => diagnostic.message.includes('inactive turns')),
+      'Discriminated option validation should reject stale inactive variant values.',
+    )
+  }
+
   testAdvancedParticipantValidationAcceptsRoleSpecificPayloads()
   testAdvancedParticipantValidationRejectsMissingAndWrongKinds()
   testAdvancedOperationIntentValidationRejectsUnsupportedModes()
@@ -807,4 +898,6 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets()
   testChamferEdgeParticipantsAndDistanceValidation()
   testThickenFaceParticipantsAndThicknessValidation()
+  testAdvancedOptionDescriptorsValidateAllScalarKindsAndGroups()
+  testDiscriminatedOptionValidationRejectsInactiveVariantValues()
 })

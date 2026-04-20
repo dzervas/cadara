@@ -7,6 +7,7 @@ export type FeatureEditorPatch = Record<string, unknown>
 
 export interface FeatureEditorPatchBinding {
   patchKey: string
+  valuePath?: readonly (string | number)[]
 }
 
 export interface FeatureEditorAuthoredValueBinding {
@@ -33,6 +34,8 @@ export interface FeatureEditorFormSection {
 export type FeatureEditorFormField =
   | FeatureNumericField
   | FeatureEnumField
+  | FeatureOptionGroupField
+  | FeatureDiscriminatedOptionGroupField
   | FeatureReferencePickerField
   | FeatureReferenceCollectionField
   | FeatureSummaryField
@@ -87,6 +90,24 @@ export interface FeatureEnumField extends FeatureFormFieldBase {
 export interface FeatureEnumFieldOption {
   value: string
   label: string
+}
+
+export interface FeatureOptionGroupField extends FeatureFormFieldBase {
+  kind: 'optionGroup'
+  fields: readonly FeatureEditorFormField[]
+}
+
+export interface FeatureDiscriminatedOptionGroupField extends FeatureFormFieldBase {
+  kind: 'discriminatedOptionGroup'
+  discriminant: FeatureEnumField
+  variants: readonly FeatureDiscriminatedOptionVariant[]
+  showInactiveFields?: boolean
+}
+
+export interface FeatureDiscriminatedOptionVariant {
+  value: string
+  label: string
+  fields: readonly FeatureEditorFormField[]
 }
 
 export interface FeatureReferencePickerField extends FeatureFormFieldBase {

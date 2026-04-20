@@ -12,6 +12,7 @@ import type {
   RevolveFeatureParameters,
   ShellFeatureParameters,
   AdvancedOperationIntentDescriptor,
+  AdvancedFeatureOptionDescriptor,
   AdvancedParticipantDescriptor,
   AdvancedSolidFeatureParameters,
   AdvancedSolidOperationIntent,
@@ -82,7 +83,9 @@ export interface LoftFeatureParameterDraft {
   guideCurveTargets: readonly Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }>[]
   operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
-  options: Record<string, unknown>
+  options: {
+    sectionCount: MaybeAuthoredValue<number>
+  }
 }
 
 export interface ChamferFeatureParameterDraft {
@@ -250,6 +253,7 @@ export interface FeatureAuthoringDefinition<TKind extends AuthoredFeatureKind = 
   featureTypeVersion: FeatureVersionByKind[TKind]
   selectionFilter: SelectionFilter
   advancedParticipants?: readonly AdvancedParticipantDescriptor[]
+  advancedOptions?: readonly AdvancedFeatureOptionDescriptor[]
   operationIntent?: AdvancedOperationIntentDescriptor
   createDraft(input: CreateFeatureDraftInput): FeatureDraftByKind[TKind]
   hydrateDraft(feature: FeatureDefinitionByKind<TKind>): FeatureDraftByKind[TKind]

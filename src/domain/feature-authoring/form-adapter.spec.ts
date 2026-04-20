@@ -12,6 +12,7 @@ import {
 import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
 import { createFeatureEditSession, patchFeatureEditSession } from '@/domain/editor/feature-editing'
 import { createExpressionAuthoredValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 
 test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -147,5 +148,110 @@ test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
   assert(
     shellFacesField?.kind === 'referenceCollection' && !('authoredValue' in shellFacesField),
     'Reference collection fields should not expose expression source metadata.',
+  )
+
+  const conditionalSchema = {
+    sections: [
+      {
+        id: 'advanced',
+        title: 'Advanced',
+        fields: [
+          {
+            kind: 'optionGroup',
+            id: 'loft-path-options',
+            label: 'Path options',
+            fields: [
+              {
+                kind: 'numeric',
+                id: 'loft-section-count',
+                label: 'Section count',
+                value: 4,
+                input: 'number',
+                authoredValue: {
+                  expressionCapable: true,
+                  valueKind: { kind: 'positiveInteger' },
+                },
+                patch: { patchKey: 'options', valuePath: ['sectionCount'] },
+              },
+            ],
+          },
+          {
+            kind: 'discriminatedOptionGroup',
+            id: 'extent-options',
+            label: 'Extent',
+            discriminant: {
+              kind: 'enum',
+              id: 'extent-mode',
+              label: 'Extent mode',
+              value: 'distance',
+              options: [
+                { value: 'distance', label: 'Distance' },
+                { value: 'throughAll', label: 'Through all' },
+              ],
+              patch: { patchKey: 'options', valuePath: ['extentMode'] },
+            },
+            variants: [
+              {
+                value: 'distance',
+                label: 'Distance',
+                fields: [
+                  {
+                    kind: 'numeric',
+                    id: 'extent-distance',
+                    label: 'Distance',
+                    value: 12,
+                    input: 'number',
+                    patch: { patchKey: 'options', valuePath: ['distance'] },
+                  },
+                ],
+              },
+              {
+                value: 'throughAll',
+                label: 'Through all',
+                fields: [
+                  {
+                    kind: 'numeric',
+                    id: 'through-all-offset',
+                    label: 'Offset',
+                    value: 0,
+                    input: 'number',
+                    hidden: true,
+                    patch: { patchKey: 'options', valuePath: ['offset'] },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  } satisfies FeatureEditorFormSchema
+  const conditionalValues = createFeatureEditorFormValues(conditionalSchema)
+  assert(
+    'loft-section-count' in conditionalValues &&
+      'extent-mode' in conditionalValues &&
+      'extent-distance' in conditionalValues &&
+      !('through-all-offset' in conditionalValues),
+    'Adapter form values should recurse into groups and active discriminated variants only.',
+  )
+
+  const sectionCountField = conditionalSchema.sections[0]!.fields[0]!
+  assert(sectionCountField.kind === 'optionGroup', 'Conditional schema should contain a grouped option field.')
+  const nestedPatch = createFeatureEditorPatchFromFormValue(sectionCountField.fields[0]!, '6')
+  assert(
+    nestedPatch?.options &&
+      typeof nestedPatch.options === 'object' &&
+      (nestedPatch.options as Record<string, unknown>).sectionCount === 6,
+    'Adapter nested option fields should emit nested option patches without feature-specific branching.',
+  )
+
+  const discriminatedField = conditionalSchema.sections[0]!.fields[1]!
+  assert(discriminatedField.kind === 'discriminatedOptionGroup', 'Conditional schema should contain a discriminated option field.')
+  const discriminantPatch = createFeatureEditorPatchFromFormValue(discriminatedField.discriminant, 'throughAll')
+  assert(
+    discriminantPatch?.options &&
+      typeof discriminantPatch.options === 'object' &&
+      (discriminantPatch.options as Record<string, unknown>).extentMode === 'throughAll',
+    'Adapter discriminant fields should patch through their declared nested option target.',
   )
 })

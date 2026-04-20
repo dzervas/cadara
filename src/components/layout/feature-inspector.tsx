@@ -807,6 +807,67 @@ function FeatureFormFieldRenderer(props: {
           onPatch={props.onPatch}
         />
       )
+    case 'optionGroup':
+      return (
+        <div className="space-y-2 border-l border-[var(--workbench-shell-border)] pl-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+            {props.field.label}
+          </p>
+          <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
+          {props.field.fields.map((field) => (
+            <FeatureFormFieldRenderer
+              key={field.id}
+              control={props.control}
+              field={field}
+              documentVariables={props.documentVariables}
+              activeReferencePickerFieldId={props.activeReferencePickerFieldId}
+              onReferencePickerActivate={props.onReferencePickerActivate}
+              onPatch={props.onPatch}
+            />
+          ))}
+        </div>
+      )
+    case 'discriminatedOptionGroup': {
+      const field = props.field
+      const variants = field.showInactiveFields
+        ? field.variants
+        : field.variants.filter((variant) => variant.value === field.discriminant.value)
+
+      return (
+        <div className="space-y-2 border-l border-[var(--workbench-shell-border)] pl-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+            {field.label}
+          </p>
+          <FieldMessage helper={formatParticipantHelper(field)} error={field.error} />
+          <FeatureFormFieldRenderer
+            control={props.control}
+            field={field.discriminant}
+            documentVariables={props.documentVariables}
+            activeReferencePickerFieldId={props.activeReferencePickerFieldId}
+            onReferencePickerActivate={props.onReferencePickerActivate}
+            onPatch={props.onPatch}
+          />
+          {variants.map((variant) => (
+            <div key={variant.value} className="space-y-2">
+              {field.showInactiveFields ? (
+                <p className="text-[11px] text-[var(--mantine-color-dark-2)]">{variant.label}</p>
+              ) : null}
+              {variant.fields.map((field) => (
+                <FeatureFormFieldRenderer
+                  key={field.id}
+                  control={props.control}
+                  field={field}
+                  documentVariables={props.documentVariables}
+                  activeReferencePickerFieldId={props.activeReferencePickerFieldId}
+                  onReferencePickerActivate={props.onReferencePickerActivate}
+                  onPatch={props.onPatch}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )
+    }
     case 'summary':
       return <ReferenceCard title={props.field.label} value={props.field.value} helper={props.field.helper} />
     case 'diagnostics':

@@ -33,14 +33,7 @@ export type FeatureEditorFormValue = FeatureEditorControlFormValue | string | Pr
 export type FeatureEditorFormValues = Record<string, FeatureEditorFormValue>
 
 export function getFeatureEditorInputFields(schema: FeatureEditorFormSchema): FeatureEditorPatchableField[] {
-  return schema.sections.flatMap((section) =>
-    section.fields.filter((field): field is FeatureEditorPatchableField =>
-      field.kind === 'numeric'
-      || field.kind === 'enum'
-      || field.kind === 'referencePicker'
-      || field.kind === 'referenceCollection',
-    ),
-  )
+  return schema.sections.flatMap((section) => section.fields.flatMap(getFeatureEditorInputFieldsFromField))
 }
 
 export function createFeatureEditorFormValues(schema: FeatureEditorFormSchema): FeatureEditorFormValues {
@@ -421,4 +414,31 @@ function referenceCollectionFormValuesEqual(left: FeatureEditorFormValue, right:
 
 function isPrimitiveRef(value: unknown): value is PrimitiveRef {
   return !!value && typeof value === 'object' && 'kind' in value
+}
+
+function getFeatureEditorInputFieldsFromField(field: FeatureEditorFormField): FeatureEditorPatchableField[] {
+  switch (field.kind) {
+    case 'numeric':
+    case 'enum':
+    case 'referencePicker':
+    case 'referenceCollection':
+      return [field]
+    case 'optionGroup':
+      return field.fields.flatMap(getFeatureEditorInputFieldsFromField)
+    case 'discriminatedOptionGroup': {
+      const activeVariant = field.variants.find((variant) => variant.value === field.discriminant.value)
+      const variantFields = field.showInactiveFields
+        ? field.variants.flatMap((variant) => variant.fields)
+        : activeVariant?.fields ?? []
+
+      return [
+        field.discriminant,
+        ...variantFields.flatMap(getFeatureEditorInputFieldsFromField),
+      ]
+    }
+    case 'summary':
+    case 'diagnostics':
+    case 'custom':
+      return []
+  }
 }

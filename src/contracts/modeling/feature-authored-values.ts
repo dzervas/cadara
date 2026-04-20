@@ -2,6 +2,12 @@ import {
   ensureLiteralAuthoredValue,
   type FeatureValueKindDescriptor,
 } from '@/contracts/modeling/authored-values'
+import {
+  getFeatureValueKindDescriptor,
+  LOFT_ADVANCED_OPTION_DESCRIPTORS,
+  type AdvancedFeatureOptionDescriptor,
+  type AdvancedFeatureScalarOptionDescriptor,
+} from '@/contracts/modeling/advanced-solid'
 import type { FeatureDefinition } from '@/contracts/modeling/schema'
 
 type MutableRecord = Record<string, unknown>
@@ -80,6 +86,7 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
     case 'loft':
       return [
         { path: ['parameters', 'operationIntent'], label: 'Loft operation intent', valueKind: { kind: 'enumString', options: ADVANCED_OPERATION_INTENT_OPTIONS } },
+        ...getAdvancedFeatureOptionExpressionFields(['parameters', 'options'], LOFT_ADVANCED_OPTION_DESCRIPTORS),
       ]
     case 'plane':
     case 'split':
@@ -87,6 +94,46 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
       return []
     default:
       return []
+  }
+}
+
+export function getAdvancedFeatureOptionExpressionFields(
+  basePath: readonly (string | number)[],
+  descriptors: readonly AdvancedFeatureOptionDescriptor[],
+): FeatureValueExpressionFieldDescriptor[] {
+  return descriptors.flatMap((descriptor) => getAdvancedFeatureOptionExpressionField(basePath, descriptor))
+}
+
+function getAdvancedFeatureOptionExpressionField(
+  basePath: readonly (string | number)[],
+  descriptor: AdvancedFeatureOptionDescriptor,
+): FeatureValueExpressionFieldDescriptor[] {
+  if (descriptor.valueKind === 'group') {
+    return getAdvancedFeatureOptionExpressionFields([...basePath, descriptor.key], descriptor.options)
+  }
+
+  if (descriptor.valueKind === 'discriminatedGroup') {
+    return [
+      {
+        path: [...basePath, descriptor.discriminantKey],
+        label: descriptor.label,
+        valueKind: { kind: 'enumString', options: descriptor.variants.map((variant) => variant.value) },
+      },
+      ...descriptor.variants.flatMap((variant) => getAdvancedFeatureOptionExpressionFields(basePath, variant.options)),
+    ]
+  }
+
+  return [getScalarAdvancedFeatureOptionExpressionField(basePath, descriptor)]
+}
+
+function getScalarAdvancedFeatureOptionExpressionField(
+  basePath: readonly (string | number)[],
+  descriptor: AdvancedFeatureScalarOptionDescriptor,
+): FeatureValueExpressionFieldDescriptor {
+  return {
+    path: [...basePath, descriptor.key],
+    label: descriptor.label,
+    valueKind: getFeatureValueKindDescriptor(descriptor),
   }
 }
 

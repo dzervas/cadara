@@ -1,8 +1,10 @@
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  LOFT_ADVANCED_OPTION_DESCRIPTORS,
   type AdvancedParticipantRole,
   type AdvancedSolidOperationIntent,
 } from '@/contracts/modeling/advanced-solid'
+import { isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 import { primitiveRefEquals, loftSelectionFilter, type PrimitiveRef } from '@/domain/editor/schema'
 import type { FeatureAuthoringDefinition, LoftFeatureParameterDraft } from '@/domain/feature-authoring/definition'
 import {
@@ -12,6 +14,8 @@ import {
   asExtrudeProfileRef,
   asSweepPathRef,
   authoredDefinitionValue,
+  authoredNumberFormValue,
+  authoredNumberLiteral,
   authoredStringLiteral,
   buildAdvancedSolidParticipants,
   createAdvancedOperationIntentFields,
@@ -80,6 +84,7 @@ function getLoftValidationDiagnostics(draft: LoftFeatureParameterDraft) {
     participants: buildLoftParticipants(draft),
     participantDescriptors: loftParticipants,
     operationIntentDescriptor: loftOperationIntent,
+    optionDescriptors: LOFT_ADVANCED_OPTION_DESCRIPTORS,
     options: draft.options,
   })
 }
@@ -118,6 +123,7 @@ export const loftAuthoringDefinition = {
   featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   selectionFilter: loftSelectionFilter,
   advancedParticipants: loftParticipants,
+  advancedOptions: LOFT_ADVANCED_OPTION_DESCRIPTORS,
   operationIntent: loftOperationIntent,
   createDraft(input) {
     const profileTarget = asExtrudeProfileRef(input.selectedTarget)
@@ -126,7 +132,7 @@ export const loftAuthoringDefinition = {
       guideCurveTargets: [],
       operationIntent: 'create',
       targetBodyTargets: [],
-      options: {},
+      options: { sectionCount: 2 },
     }
   },
   hydrateDraft(feature) {
@@ -138,7 +144,9 @@ export const loftAuthoringDefinition = {
       guideCurveTargets: filterTargets(getParticipantTargets('guideCurve'), asSweepPathRef),
       operationIntent: feature.parameters.operationIntent ?? 'create',
       targetBodyTargets: filterTargets(getParticipantTargets('targetBody'), asBodyRef),
-      options: feature.parameters.options ? { ...feature.parameters.options } : {},
+      options: {
+        sectionCount: (feature.parameters.options?.sectionCount ?? 2) as LoftFeatureParameterDraft['options']['sectionCount'],
+      },
     }
   },
   applyPatch(draft, patch) {
@@ -162,7 +170,14 @@ export const loftAuthoringDefinition = {
           ? draft.targetBodyTargets
           : filterTargets(patch.targetBodyTargets, asBodyRef),
       options: patch.options && typeof patch.options === 'object' && !Array.isArray(patch.options)
-        ? { ...patch.options }
+        ? {
+            ...draft.options,
+            sectionCount: acceptAuthoredPatch(
+              (patch.options as Record<string, unknown>).sectionCount,
+              draft.options.sectionCount,
+              (value): value is number => typeof value === 'number',
+            ),
+          }
         : draft.options,
     }
   },
@@ -221,7 +236,9 @@ export const loftAuthoringDefinition = {
           parameters: {
             operationIntent: authoredDefinitionValue(draft.operationIntent, 'create') as AdvancedSolidOperationIntent,
             participants: buildLoftParticipants(draft),
-            ...(Object.keys(draft.options).length > 0 ? { options: draft.options } : {}),
+            options: {
+              sectionCount: authoredDefinitionValue(draft.options.sectionCount, 2),
+            },
           },
         }
       : null
@@ -229,6 +246,9 @@ export const loftAuthoringDefinition = {
   getFormSchema(session) {
     const diagnostics = session.diagnostics
     const operationIntent = authoredStringLiteral(session.draft.operationIntent, 'create')
+    const sectionCount = authoredNumberLiteral(session.draft.options.sectionCount)
+    const sectionCountIsValid = isExpressionAuthoredValue(session.draft.options.sectionCount)
+      || (sectionCount !== null && Number.isInteger(sectionCount) && sectionCount > 0)
     return {
       sections: [
         {
@@ -279,6 +299,29 @@ export const loftAuthoringDefinition = {
               selectionRequirementId: 'loft-boolean-target',
               selectionRequirementLabel: 'Loft target body',
             }),
+            {
+              kind: 'optionGroup',
+              id: 'loft-path-options',
+              label: 'Path options',
+              fields: [
+                {
+                  kind: 'numeric',
+                  id: 'loft-section-count',
+                  label: 'Section count',
+                  value: authoredNumberFormValue(session.draft.options.sectionCount),
+                  input: 'number',
+                  step: 1,
+                  authoredValue: {
+                    expressionCapable: true,
+                    valueKind: { kind: 'positiveInteger' },
+                    source: isExpressionAuthoredValue(session.draft.options.sectionCount) ? 'expression' : 'literal',
+                    expressionText: isExpressionAuthoredValue(session.draft.options.sectionCount) ? session.draft.options.sectionCount.valueText : null,
+                  },
+                  error: sectionCountIsValid ? null : { message: 'Section count must be a positive integer.' },
+                  patch: LOFT_ADVANCED_OPTION_DESCRIPTORS[0].patchTarget,
+                },
+              ],
+            },
           ],
         },
         {

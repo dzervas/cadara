@@ -9,19 +9,40 @@ export function createFeatureEditorFieldPatch(
   field: FeatureEditorPatchableField,
   value: unknown,
 ): FeatureEditorPatch {
-  if (field.kind === 'numeric' && field.input === 'angleDegrees' && isLiteralAuthoredValue(value)) {
-    return {
-      [field.patch.patchKey]: createLiteralAuthoredValue(
+  const nextValue = field.kind === 'numeric' && field.input === 'angleDegrees' && isLiteralAuthoredValue(value)
+    ? createLiteralAuthoredValue(
         typeof value.value === 'number' ? value.value * (Math.PI / 180) : value.value,
-      ),
-    }
+      )
+    : field.kind === 'numeric' && field.input === 'angleDegrees' && typeof value === 'number'
+      ? value * (Math.PI / 180)
+      : value
+
+  if (field.patch.valuePath) {
+    return createNestedPatch(field.patch.patchKey, field.patch.valuePath, nextValue)
   }
 
-  return {
-    [field.patch.patchKey]: field.kind === 'numeric' && field.input === 'angleDegrees' && typeof value === 'number'
-      ? value * (Math.PI / 180)
-      : value,
+  return { [field.patch.patchKey]: nextValue }
+}
+
+function createNestedPatch(
+  patchKey: string,
+  valuePath: readonly (string | number)[],
+  value: unknown,
+): FeatureEditorPatch {
+  if (valuePath.length === 0) {
+    return { [patchKey]: value }
   }
+
+  const root: Record<string, unknown> = {}
+  let current = root
+  for (const segment of valuePath.slice(0, -1)) {
+    const next: Record<string, unknown> = {}
+    current[String(segment)] = next
+    current = next
+  }
+
+  current[String(valuePath[valuePath.length - 1])] = value
+  return { [patchKey]: root }
 }
 
 function getReferenceArray(field: FeatureEditorReferenceField) {

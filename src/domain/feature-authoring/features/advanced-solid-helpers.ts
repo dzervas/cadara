@@ -7,6 +7,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 import type {
+  AdvancedFeatureOptionDescriptor,
   AdvancedOperationIntentDescriptor,
   AdvancedParticipantDescriptor,
   AuthoredFeatureKind,
@@ -36,6 +37,7 @@ export function validateAdvancedSolidDraft(input: {
   participants: readonly ReturnType<typeof buildAdvancedSolidParticipants>[number][]
   participantDescriptors: readonly AdvancedParticipantDescriptor[]
   operationIntentDescriptor: AdvancedOperationIntentDescriptor
+  optionDescriptors?: readonly AdvancedFeatureOptionDescriptor[]
   options: Record<string, unknown>
 }) {
   return validateAdvancedSolidFeatureDefinition({
@@ -50,6 +52,7 @@ export function validateAdvancedSolidDraft(input: {
     featureKind: input.featureKind,
     participants: input.participantDescriptors,
     operationIntent: input.operationIntentDescriptor,
+    options: input.optionDescriptors,
   })
 }
 
@@ -68,4 +71,3 @@ export function toFeaturePhaseDiagnostics(input: {
     },
   }))
 }
-

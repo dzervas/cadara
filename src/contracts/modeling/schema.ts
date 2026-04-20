@@ -51,6 +51,12 @@ export interface SnapshotMutationBasis {
 export type {
   AdvancedFeatureValidationDiagnostic,
   AdvancedFeatureOptionDescriptor,
+  AdvancedFeatureOptionGroupDescriptor,
+  AdvancedFeatureOptionPatchTarget,
+  AdvancedFeatureScalarOptionDescriptor,
+  AdvancedFeatureScalarOptionValueKind,
+  AdvancedFeatureDiscriminatedOptionGroupDescriptor,
+  AdvancedFeatureDiscriminatedOptionVariant,
   AdvancedOperationIntentDescriptor,
   AdvancedParticipantCardinality,
   AdvancedParticipantDescriptor,
