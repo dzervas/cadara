@@ -1,8 +1,26 @@
+import * as THREE from 'three'
+
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
+import {
+  getPrimitiveRefKey,
+  getPrimitiveRefLabel,
+} from '@/domain/editor/schema'
+import { getBoundTarget } from '@/domain/workspace/render-picking'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 
 interface MutableRef<T> {
   current: T
+}
+
+interface ViewportSize {
+  width: number
+  height: number
+}
+
+interface RenderIdleSample {
+  delta: number
+  isEditorIdle: boolean
+  sceneKey: string
 }
 
 export function scheduleCoalescedSketchGeometryDragMove(input: {
@@ -61,6 +79,96 @@ export function createViewportBvhSceneKey(
       ].join(':')
     }),
   ].join('|')
+}
+
+export function projectSceneTargetCentroidToViewport(input: {
+  root: THREE.Object3D | null
+  camera: THREE.Camera | null
+  objectId: string
+  viewport: ViewportSize
+}) {
+  if (!input.root || !input.camera || input.viewport.width <= 0 || input.viewport.height <= 0) {
+    return null
+  }
+
+  const targetBox = new THREE.Box3()
+  let foundTarget = false
+
+  input.root.traverse((object) => {
+    const target = getBoundTarget(object)
+
+    if (!target) {
+      return
+    }
+
+    const matchesTarget =
+      object.name === input.objectId
+      || getPrimitiveRefLabel(target) === input.objectId
+      || getPrimitiveRefKey(target) === input.objectId
+
+    if (!matchesTarget) {
+      return
+    }
+
+    const objectBox = new THREE.Box3().setFromObject(object)
+    if (objectBox.isEmpty()) {
+      return
+    }
+
+    targetBox.union(objectBox)
+    foundTarget = true
+  })
+
+  if (!foundTarget || targetBox.isEmpty()) {
+    return null
+  }
+
+  input.camera.updateMatrixWorld()
+  const centroid = targetBox.getCenter(new THREE.Vector3())
+  const projected = centroid.project(input.camera)
+
+  if (
+    projected.x < -1
+    || projected.x > 1
+    || projected.y < -1
+    || projected.y > 1
+    || projected.z < -1
+    || projected.z > 1
+  ) {
+    return null
+  }
+
+  return {
+    x: ((projected.x + 1) / 2) * input.viewport.width,
+    y: ((1 - projected.y) / 2) * input.viewport.height,
+  }
+}
+
+export function createRenderIdleTracker(options: {
+  maxStableDelta?: number
+  requiredStableFrames?: number
+} = {}) {
+  const maxStableDelta = options.maxStableDelta ?? 0.5
+  const requiredStableFrames = options.requiredStableFrames ?? 3
+  let stableFrameCount = 0
+  let lastSceneKey: string | null = null
+
+  return {
+    update(sample: RenderIdleSample) {
+      const sceneChanged = lastSceneKey !== null && lastSceneKey !== sample.sceneKey
+      const visuallyStable = sample.delta <= maxStableDelta && !sceneChanged
+
+      lastSceneKey = sample.sceneKey
+
+      if (!sample.isEditorIdle || !visuallyStable) {
+        stableFrameCount = 0
+        return false
+      }
+
+      stableFrameCount += 1
+      return stableFrameCount >= requiredStableFrames
+    },
+  }
 }
 
 export function getSketchStructuralGeometryToken(geometry: SketchSessionDisplayRenderable['geometry']) {

@@ -11,7 +11,7 @@ test('keeps sketch preview interactions active after starting a sketch', async (
   await page.getByRole('button', { name: /Top Plane/ }).first().click()
   await workbench.expectSketchSessionActive()
   await workbench.activateTool('Create line geometry.')
-  await expect.poll(async () => await page.locator('body').textContent() ?? '', { timeout: 10_000 }).toContain('Command: line')
+  await expect.poll(() => page.evaluate(() => window.__cadTestState?.command ?? ''), { timeout: 10_000 }).toBe('line')
   await workbench.waitForAnimationFrames(2)
 
   const canvas = page.locator('main canvas').first()

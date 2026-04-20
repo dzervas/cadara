@@ -35,14 +35,13 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   override async open(path = '/') {
     await super.open(path)
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
-    await this.waitForAnimationFrames(2)
+    await this.waitForRenderIdle()
   }
 
   override async reloadPreservingStorage(path = '/') {
     await super.reloadPreservingStorage(path)
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
-    await this.waitForAnimationFrames(2)
-    await this.waitForStableCanvasFrames()
+    await this.waitForRenderIdle()
   }
 
   async openWithRectangleProfileFixture() {
@@ -131,11 +130,9 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   async selectSupportedLoftFaceProfile() {
     await this.activateFeature('loft')
     await expect.poll(() => this.featureSessionLabel(), { timeout: 10_000 }).toContain('create:loft:')
-    await this.collapseStateDebuggerIfExpanded()
-    await this.clickViewportAtReal(VIEWPORT_TARGET_POINTS.face1)
-    await this.expandStateDebuggerIfCollapsed()
+    await this.selectReferenceThroughCurrentUi('body_feature_extrude-1.face_body_feature_extrude-1_t0001_1')
     await expect.poll(() => this.currentEditorSelection(), { timeout: 10_000 }).toContain('body_feature_extrude-1.face_body_feature_extrude-1_t0001_1')
-    await this.clickViewportAtReal(VIEWPORT_TARGET_POINTS.face6)
+    await this.selectReferenceThroughCurrentUi('body_feature_extrude-1.face_body_feature_extrude-1_t0001_6')
 
     await expect.poll(async () => {
       if (await this.hasVisibleFeatureErrorDiagnostics()) {
@@ -170,9 +167,16 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   async commitFeature(expectedFeatureId?: string) {
     await this.page.getByRole('button', { name: 'Commit' }).click()
     await expect.poll(() => this.machineLabel(), { timeout: 75_000 }).toContain('idle')
+    await this.waitForRenderIdle(30_000)
 
     if (expectedFeatureId) {
-      await expect(this.page.getByText(expectedFeatureId).first()).toBeVisible({ timeout: 30_000 })
+      await expect.poll(
+        () => this.page.evaluate(
+          (featureId) => window.__cadTestState?.featureIds.includes(featureId) ?? false,
+          expectedFeatureId,
+        ),
+        { timeout: 30_000 },
+      ).toBe(true, { message: `${expectedFeatureId} should be present in the committed document.` })
     }
   }
 
@@ -180,13 +184,18 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     return this.viewport().screenshot()
   }
 
-  async waitForStableCanvasFrames(maxDelta = 2) {
-    await expect.poll(async () => {
-      const firstFrame = await this.canvasBytes()
-      await this.waitForAnimationFrames(2)
-      const secondFrame = await this.canvasBytes()
-      return meanPixelDelta(firstFrame, secondFrame)
-    }, { timeout: 15_000 }).toBeLessThan(maxDelta)
+  async waitForRenderIdle(timeout = 15_000) {
+    await this.page.waitForSelector('[data-render-idle="true"]', { timeout })
+  }
+
+  async selectReferenceByViewportPicking(targetId: string) {
+    const viewportPoint = await this.projectTargetToScreen(targetId)
+
+    if (!viewportPoint) {
+      throw new Error(`No projected viewport point is available for ${targetId}.`)
+    }
+
+    await this.clickViewportAtReal(viewportPoint)
   }
 
   async expectBodyPresent(bodyId: string) {
@@ -202,7 +211,13 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async selectReferenceThroughCurrentUi(targetId: string) {
-    const viewportPoint = VIEWPORT_TARGET_POINTS_BY_ID[targetId]
+    const selected = await this.page.evaluate((id) => window.__cadSelectTarget?.(id) ?? false, targetId)
+
+    if (selected) {
+      return
+    }
+
+    const viewportPoint = await this.projectTargetToScreen(targetId)
     if (viewportPoint) {
       await this.clickViewportAtReal(viewportPoint)
       return
@@ -223,7 +238,14 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {
-    const targetId = resolveViewportTargetForPattern(pattern)
+    const targetId = await this.page.evaluate(
+      ({ source, flags }) => {
+        const matcher = new RegExp(source, flags)
+        const targets = window.__cadTestState?.selectableTargets ?? []
+        return targets.find((target) => matcher.test(`Select viewport target ${target}`)) ?? null
+      },
+      { source: pattern.source, flags: pattern.flags },
+    )
 
     if (!targetId) {
       return null
@@ -256,47 +278,27 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async revisionLabel() {
-    const bodyText = await this.page.locator('body').textContent()
-    return bodyText?.match(/Revision:\s*([^\s]+)/)?.[1] ?? 'loading'
+    return this.page.evaluate(() => window.__cadTestState?.revision ?? 'loading')
   }
 
   private async machineLabel() {
-    const bodyText = await this.page.locator('body').textContent()
-    return bodyText?.match(/Machine:\s*([^\s]+)/)?.[1] ?? ''
+    return this.page.evaluate(() => window.__cadTestState?.machineState ?? '')
   }
 
   private async featureSessionLabel() {
-    const bodyText = await this.page.locator('body').textContent()
-    return bodyText?.match(/Feature session:\s*([^\s]+)/)?.[1] ?? ''
+    return this.page.evaluate(() => window.__cadTestState?.featureSession ?? '')
   }
 
   private async currentPreviewDiagnosticsText() {
-    const bodyText = await this.page.locator('body').textContent()
-    return bodyText?.match(/Diagnostics(.*?)CancelCommit/s)?.[1] ?? ''
+    return this.page.evaluate(() => window.__cadTestState?.previewDiagnostics ?? '')
   }
 
   private async hasVisibleFeatureErrorDiagnostics() {
     return this.page.locator('aside').getByText(/^error$/i).isVisible().catch(() => false)
   }
 
-  private async collapseStateDebuggerIfExpanded() {
-    const collapseButton = this.page.getByRole('button', {
-      name: 'Collapse state debugger',
-    })
-
-    if (await collapseButton.isVisible().catch(() => false)) {
-      await collapseButton.click()
-    }
-  }
-
-  private async expandStateDebuggerIfCollapsed() {
-    const expandButton = this.page.getByRole('button', {
-      name: 'Expand state debugger',
-    })
-
-    if (await expandButton.isVisible().catch(() => false)) {
-      await expandButton.click()
-    }
+  private async projectTargetToScreen(targetId: string) {
+    return this.page.evaluate((id) => window.__cadProjectToScreen?.(id) ?? null, targetId)
   }
 }
 
@@ -339,44 +341,10 @@ export function meanPixelDelta(left: Buffer, right: Buffer) {
   return total / Math.max(length, 1)
 }
 
-const VIEWPORT_TARGET_POINTS = {
-  profile: { x: 380, y: 280 },
-  face: { x: 254, y: 65 },
-  face1: { x: 80, y: 190 },
-  face6: { x: 290, y: 35 },
-  edge: { x: 190, y: 65 },
-  vertex: { x: 50, y: 95 },
-} as const
-
-const VIEWPORT_TARGET_POINTS_BY_ID: Record<string, { x: number, y: number }> = {
-  'sketch_primary.region_primary-outer': VIEWPORT_TARGET_POINTS.profile,
-  'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6': VIEWPORT_TARGET_POINTS.face,
-  'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_12': VIEWPORT_TARGET_POINTS.edge,
-  'body_feature_extrude-1.vertex_body_feature_extrude-1_t0001_2': VIEWPORT_TARGET_POINTS.vertex,
-}
-
 const SIDEBAR_TARGET_LABELS: Record<string, string | RegExp> = {
   'body_feature_extrude-1': 'feature_extrude-1',
   'body_feature_extrude-2': 'feature_extrude-2',
   'construction_plane-xy': 'Top Plane',
   'construction_plane-yz': 'Right Plane',
   'construction_plane-xz': 'Front Plane',
-}
-
-function resolveViewportTargetForPattern(pattern: RegExp) {
-  const source = pattern.source
-
-  if (source.includes('body_feature_extrude-1') && source.includes('face_')) {
-    return 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'
-  }
-
-  if (source.includes('body_feature_extrude-1') && source.includes('edge_')) {
-    return 'body_feature_extrude-1.edge_body_feature_extrude-1_t0001_12'
-  }
-
-  if (source.includes('body_feature_extrude-1$')) {
-    return 'body_feature_extrude-1'
-  }
-
-  return null
 }

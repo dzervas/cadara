@@ -4,7 +4,7 @@
 TBD - created by archiving change stabilize-basic-feature-e2e-harness. Update Purpose after archive.
 ## Requirements
 ### Requirement: Feature flow tests SHALL use a reusable Playwright harness
-The system SHALL provide a lightweight Playwright harness for feature testing that can open the workbench, create deterministic sketch/body fixtures, activate feature tools, set feature form values, select durable viewport targets, preview features, commit features, and compose multiple feature steps in a single scenario.
+The system SHALL provide a lightweight Playwright harness for feature testing that can open the workbench, create deterministic sketch/body fixtures, activate feature tools, set feature form values, select durable viewport targets, preview features, commit features, and compose multiple feature steps in a single scenario. State reads (machine state, selection targets, revision, feature session, preview diagnostics) SHALL use the structured `window.__cadTestState` bridge instead of regex-based `body.textContent()` scraping. Viewport geometry selection for non-picking tests SHALL use the programmatic `window.__cadSelectTarget()` bridge or the coordinate projection `window.__cadProjectToScreen()` bridge instead of hardcoded pixel coordinate maps. Canvas frame stability checks SHALL use the `data-render-idle` DOM attribute instead of screenshot byte-delta comparison.
 
 #### Scenario: Single feature flow uses shared helpers
 - **WHEN** an e2e test creates a base sketch and runs a single feature operation
@@ -13,6 +13,18 @@ The system SHALL provide a lightweight Playwright harness for feature testing th
 #### Scenario: Multi-feature chain uses shared helpers
 - **WHEN** an e2e test runs a sequence such as sketch profile, extrude, fillet, shell, and boolean
 - **THEN** the harness preserves the workbench document state across steps and exposes helper results that later steps can use without duplicating setup logic
+
+#### Scenario: State reads use structured bridge
+- **WHEN** the harness reads machine state, selection targets, revision, or feature session
+- **THEN** the harness calls `page.evaluate(() => window.__cadTestState.<field>)` instead of parsing `body.textContent()` with regex
+
+#### Scenario: Viewport selection uses projection or programmatic bridge
+- **WHEN** the harness selects a geometry target in the viewport for a non-picking test
+- **THEN** the harness resolves coordinates via `window.__cadProjectToScreen()` or dispatches selection via `window.__cadSelectTarget()` instead of using hardcoded pixel offsets
+
+#### Scenario: Canvas stability uses render-idle signal
+- **WHEN** the harness waits for the viewport to settle after a commit or reload
+- **THEN** the harness awaits `[data-render-idle="true"]` instead of polling screenshot byte-delta comparisons
 
 ### Requirement: Supported feature flows SHALL have Playwright coverage
 The system SHALL include Playwright e2e coverage for extrude, revolve, fillet, shell, plane, and Combine boolean feature flows through the workbench UI, including assertions that committed boolean geometry visibly changes and survives rebuild.

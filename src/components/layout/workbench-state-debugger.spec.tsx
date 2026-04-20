@@ -29,6 +29,9 @@ test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
       previewState: 'Draft extrude profile',
       selectionFilterLabel: 'Extrude profiles, planar faces, or boolean bodies',
       activeTargetRule: 'Join, cut, and intersect require one explicit target body.',
+      selectableTargets: ['sketch_1.region_profile', 'body_1'],
+      featureIds: ['feature_extrude-1'],
+      previewDiagnostics: 'No diagnostics reported for the current preview.',
       hoverTarget: 'none',
       requirements: [
         {

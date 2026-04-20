@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 import {
   getPrimitiveRefKey,
+  getPrimitiveRefLabel,
   primitiveRefEquals,
   type PrimitiveRef,
 } from '@/domain/editor/schema'
@@ -750,6 +751,7 @@ export function bindRenderableObject(
   origin: ViewportRenderableOrigin,
   renderable?: RenderableEntityRecord,
 ) {
+  object.name = object.name || getPrimitiveRefLabel(target)
   object.userData.target = target
   object.userData.semanticClass = semanticClass
   object.userData.renderableOrigin = origin

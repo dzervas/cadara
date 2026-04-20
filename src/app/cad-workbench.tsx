@@ -17,6 +17,10 @@ import {
   type ObjectExportModalState,
 } from '@/app/object-export-state'
 import {
+  dispatchCadTestSelection,
+  syncCadTestState,
+} from '@/app/cad-test-bridge'
+import {
   requireAcceptedModelingResult,
   runWorkbenchAction,
 } from '@/app/workbench-action'
@@ -111,6 +115,7 @@ export function CadWorkbench() {
       mode,
       preview,
       selectionFilter,
+      selectionCatalog,
       activeReferencePickerFieldId,
       history,
     },
@@ -241,6 +246,11 @@ export function CadWorkbench() {
     previewState: preview?.label ?? 'No active preview',
     selectionFilterLabel: selectionFilter?.label ?? 'No active selection filter',
     activeTargetRule: selectionFilter?.requirements[0]?.description ?? 'No active target rule',
+    selectableTargets: snapshot?.presentation.entities.map((entity) => getPrimitiveRefLabel(entity.target)) ?? [],
+    featureIds: snapshot?.document.features.map((feature) => feature.featureId) ?? [],
+    previewDiagnostics:
+      activeEditSession?.diagnostics.map((diagnostic) => `${diagnostic.severity}: ${diagnostic.message}`).join('\n')
+      ?? '',
     requirements:
       selectionFilter?.requirements.map((requirement) => ({
         id: requirement.id,
@@ -258,6 +268,31 @@ export function CadWorkbench() {
     hoverTarget: visibleHoverTarget ? getPrimitiveRefLabel(visibleHoverTarget) : 'none',
     topologyDebug: createTopologyDebugSummary(snapshot),
   }
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      syncCadTestState(debuggerState)
+    }
+  })
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return
+    }
+
+    window.__cadSelectTarget = (targetId: string) => dispatchCadTestSelection({
+      targetId,
+      snapshot,
+      selection,
+      selectionFilter,
+      selectionCatalog,
+      dispatch,
+    })
+
+    return () => {
+      delete window.__cadSelectTarget
+    }
+  }, [dispatch, selection, selectionCatalog, selectionFilter, snapshot])
   const toolbarHistoryAvailability: EditorHistoryAvailability = sketchSession
     ? history
     : getWorkbenchHistoryAvailability({

@@ -57,7 +57,7 @@ test('committed distance annotation input keeps Backspace local and saves durabl
   await expect(distanceGlyph).toHaveAttribute('aria-label', /31\.00/)
 
   await workbench.activateTool('Exit the active sketch.')
-  await expect.poll(async () => await page.getByText('Machine:').textContent(), { timeout: 10_000 }).toContain('idle')
+  await workbench.expectMachine('idle')
 
   const committedDimensionValues = await page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey)
@@ -112,7 +112,7 @@ test('edited rectangle width annotation solves and still finishes the sketch', a
   await expect(widthGlyph).toHaveAttribute('aria-label', /31\.00/)
 
   await workbench.activateTool('Exit the active sketch.')
-  await expect.poll(async () => await page.getByText('Machine:').textContent(), { timeout: 10_000 }).toContain('idle')
+  await workbench.expectMachine('idle')
 
   const committedWidthValues = await page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey)
@@ -168,7 +168,7 @@ test('edited rectangle height annotation solves and still finishes the sketch', 
   await expect(heightGlyph).toHaveAttribute('aria-label', /29\.00/)
 
   await workbench.activateTool('Exit the active sketch.')
-  await expect.poll(async () => await page.getByText('Machine:').textContent(), { timeout: 10_000 }).toContain('idle')
+  await workbench.expectMachine('idle')
 
   const committedHeightValues = await page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey)
@@ -224,7 +224,7 @@ test('edited circle radius annotation solves and still finishes the sketch', asy
   await expect(radiusGlyph).toHaveAttribute('aria-label', /18\.00/)
 
   await workbench.activateTool('Exit the active sketch.')
-  await expect.poll(async () => await page.getByText('Machine:').textContent(), { timeout: 10_000 }).toContain('idle')
+  await workbench.expectMachine('idle')
 
   const committedRadiusValues = await page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey)

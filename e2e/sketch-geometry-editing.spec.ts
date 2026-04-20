@@ -30,7 +30,7 @@ test('dragging an active sketch vertex updates the committed sketch definition',
   await page.mouse.up()
 
   await workbench.activateTool('Exit the active sketch.')
-  await expect.poll(async () => await page.getByText('Machine:').textContent(), { timeout: 10_000 }).toContain('idle')
+  await workbench.expectMachine('idle')
 
   const pointPositions = await page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey)

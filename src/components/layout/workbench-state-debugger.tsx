@@ -33,6 +33,9 @@ export interface WorkbenchStateDebuggerModel {
   previewState: string
   selectionFilterLabel: string
   activeTargetRule: string
+  selectableTargets: readonly string[]
+  featureIds: readonly string[]
+  previewDiagnostics: string
   requirements: readonly WorkbenchStateDebuggerRequirement[]
   selectionDetail: WorkbenchStateDebuggerSelectionDetail
   hoverTarget: string
@@ -54,9 +57,14 @@ function DebuggerRow(props: { label: string; value: string | number }) {
 
 export function WorkbenchStateDebugger({ state, defaultExpanded = false }: WorkbenchStateDebuggerProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
+  const pointerPassthrough = isCadTestMode()
 
   return (
-    <div className="pointer-events-auto absolute bottom-4 left-4 max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]">
+    <div
+      className={`absolute bottom-4 left-4 max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)] ${
+        pointerPassthrough ? 'pointer-events-none' : 'pointer-events-auto'
+      }`}
+    >
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
@@ -168,4 +176,16 @@ export function WorkbenchStateDebugger({ state, defaultExpanded = false }: Workb
       ) : null}
     </div>
   )
+}
+
+function isCadTestMode() {
+  if (import.meta.env.TEST === true || import.meta.env.TEST === 'true') {
+    return true
+  }
+
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return new URLSearchParams(window.location.search).has('cadTestMode')
 }

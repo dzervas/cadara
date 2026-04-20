@@ -1,6 +1,6 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
 
 import {
@@ -77,7 +77,9 @@ import { useEditorState } from '@/hooks/use-editor-state'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 import {
   cancelCoalescedSketchGeometryDragMove,
+  createRenderIdleTracker,
   createViewportBvhSceneKey,
+  projectSceneTargetCentroidToViewport,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
 
@@ -190,6 +192,7 @@ export function ThreeCadViewport({
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
   const sketchToolPatchRef = useRef(onSketchToolPatch)
   const {
+    machineState,
     state: { mode, selectionFilter, selectionCatalog, sketchSession },
   } = useEditorState()
   const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(mode, sketchSession !== null)
@@ -895,6 +898,33 @@ export function ThreeCadViewport({
     }
   }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSession])
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return
+    }
+
+    window.__cadProjectToScreen = (objectId: string) => {
+      const viewportElement = viewportRef.current
+      const rect = viewportElement?.getBoundingClientRect()
+
+      return projectSceneTargetCentroidToViewport({
+        root: pickRootRef.current,
+        camera: cameraRef.current,
+        objectId,
+        viewport: {
+          width: rect?.width ?? 0,
+          height: rect?.height ?? 0,
+        },
+      })
+    }
+
+    return () => {
+      delete window.__cadProjectToScreen
+    }
+  }, [])
+
+  const isEditorRenderIdle = machineState.kind === 'idle'
+
   return (
     <div ref={viewportRef} data-testid="cad-viewport" className="relative h-full w-full">
       <Canvas
@@ -924,6 +954,11 @@ export function ThreeCadViewport({
         <SketchProjectionFrameWatcher
           enabled={Boolean(sketchSession)}
           onCameraChanged={updateSketchFeedbackProjections}
+        />
+        <RenderIdleSignal
+          isEditorIdle={isEditorRenderIdle}
+          sceneKey={bvhSceneKey}
+          viewportRef={viewportRef}
         />
         <Bvh key={bvhSceneKey} enabled>
           <group ref={pickRootRef}>
@@ -1020,6 +1055,44 @@ function SketchProjectionFrameWatcher({
 
     lastCameraTokenRef.current = token
     onCameraChanged()
+  })
+
+  return null
+}
+
+function RenderIdleSignal({
+  isEditorIdle,
+  sceneKey,
+  viewportRef,
+}: {
+  isEditorIdle: boolean
+  sceneKey: string
+  viewportRef: RefObject<HTMLDivElement | null>
+}) {
+  const trackerRef = useRef(createRenderIdleTracker())
+
+  useEffect(() => {
+    viewportRef.current?.removeAttribute('data-render-idle')
+  }, [isEditorIdle, sceneKey, viewportRef])
+
+  useFrame((_, delta) => {
+    const viewportElement = viewportRef.current
+
+    if (!viewportElement) {
+      return
+    }
+
+    const isIdle = trackerRef.current.update({
+      delta,
+      isEditorIdle,
+      sceneKey,
+    })
+
+    if (isIdle) {
+      viewportElement.setAttribute('data-render-idle', 'true')
+    } else {
+      viewportElement.removeAttribute('data-render-idle')
+    }
   })
 
   return null

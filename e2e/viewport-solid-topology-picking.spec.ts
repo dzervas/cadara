@@ -76,13 +76,13 @@ test('reload preserves the same topology targets and blank-space behavior', asyn
 
   await expect(page.getByText('History restore failed')).toHaveCount(0)
 
-  await workbench.selectReference(FACE_TARGET)
+  await workbench.clickViewportAtReal(FACE_POINT)
   await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(FACE_TARGET)
 
-  await workbench.selectReference(EDGE_TARGET)
+  await workbench.clickViewportAtReal(EDGE_POINT)
   await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(EDGE_TARGET)
 
-  await workbench.selectReference(VERTEX_TARGET)
+  await workbench.clickViewportAtReal(VERTEX_POINT)
   await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe(VERTEX_TARGET)
 
   await workbench.hoverViewportAtReal(BLANK_POINT)

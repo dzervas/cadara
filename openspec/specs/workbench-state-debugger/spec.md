@@ -19,7 +19,7 @@ The system SHALL present current workbench state in a single bottom-left viewpor
 - **THEN** the bottom-left debugger overlay displays that no selection filter and no active target rule are present
 
 ### Requirement: Debugger is collapsible
-The system SHALL allow the unified state debugger to collapse and expand without changing editor, document, command, selection, sketch, or feature edit state.
+The system SHALL allow the unified state debugger to collapse and expand without changing editor, document, command, selection, sketch, or feature edit state. In test mode (indicated by a `cadTestMode` query parameter or `import.meta.env.TEST` flag), the debugger overlay SHALL apply `pointer-events: none` so it does not intercept viewport clicks, eliminating the need for tests to toggle collapse/expand state before viewport interactions.
 
 #### Scenario: User collapses the debugger
 - **WHEN** the user activates the debugger collapse control
@@ -28,6 +28,10 @@ The system SHALL allow the unified state debugger to collapse and expand without
 #### Scenario: User expands the debugger
 - **WHEN** the user activates the debugger expand control
 - **THEN** the overlay restores the detailed state rows using the current editor state
+
+#### Scenario: Test mode disables pointer interception
+- **WHEN** the application runs with the test mode flag active
+- **THEN** the state debugger overlay has `pointer-events: none` and does not intercept clicks on the underlying viewport surface
 
 ### Requirement: Duplicate debugger readouts are removed from other layout surfaces
 The system SHALL remove debugger-only readouts for editor session, active mode, selection filter, and inspector contract/revision state from the feature sidebar and feature inspector while preserving navigation and feature editing behavior.

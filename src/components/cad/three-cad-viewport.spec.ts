@@ -2,9 +2,13 @@ import { test } from 'bun:test'
 
 import {
   cancelCoalescedSketchGeometryDragMove,
+  createRenderIdleTracker,
   createViewportBvhSceneKey,
+  projectSceneTargetCentroidToViewport,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
+import { bindRenderableObject } from '@/domain/workspace/render-picking'
+import * as THREE from 'three'
 
 test('src/components/cad/three-cad-viewport.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -117,7 +121,79 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     )
   }
 
+  function testProjectionBridgeResolvesKnownTarget() {
+    const root = new THREE.Group()
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())
+
+    camera.position.set(0, 0, 10)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+    bindRenderableObject(
+      mesh,
+      null,
+      { kind: 'body', bodyId: 'body_feature_extrude-1' },
+      'bodyFace',
+      'document',
+    )
+    root.add(mesh)
+
+    const point = projectSceneTargetCentroidToViewport({
+      root,
+      camera,
+      objectId: 'body_feature_extrude-1',
+      viewport: { width: 200, height: 100 },
+    })
+    const missingPoint = projectSceneTargetCentroidToViewport({
+      root,
+      camera,
+      objectId: 'missing-target',
+      viewport: { width: 200, height: 100 },
+    })
+
+    assert(point !== null, 'Projection bridge should return coordinates for a known target.')
+    assert(Math.abs(point.x - 100) < 0.001, 'Projected target should be centered horizontally.')
+    assert(Math.abs(point.y - 50) < 0.001, 'Projected target should be centered vertically.')
+    assert(missingPoint === null, 'Projection bridge should return null for unknown targets.')
+
+    mesh.geometry.dispose()
+    if (mesh.material instanceof THREE.Material) {
+      mesh.material.dispose()
+    }
+  }
+
+  function testRenderIdleTrackerRequiresStableIdleFrames() {
+    const tracker = createRenderIdleTracker({ requiredStableFrames: 2, maxStableDelta: 0.05 })
+    const active = tracker.update({
+      delta: 0.016,
+      isEditorIdle: false,
+      sceneKey: 'scene-a',
+    })
+    const firstIdle = tracker.update({
+      delta: 0.016,
+      isEditorIdle: true,
+      sceneKey: 'scene-a',
+    })
+    const secondIdle = tracker.update({
+      delta: 0.016,
+      isEditorIdle: true,
+      sceneKey: 'scene-a',
+    })
+    const sceneChanged = tracker.update({
+      delta: 0.016,
+      isEditorIdle: true,
+      sceneKey: 'scene-b',
+    })
+
+    assert(active === false, 'Render idle should stay false while the editor is active.')
+    assert(firstIdle === false, 'Render idle should require consecutive stable frames.')
+    assert(secondIdle === true, 'Render idle should become true after enough stable idle frames.')
+    assert(sceneChanged === false, 'Render idle should clear when the scene changes.')
+  }
+
   testDragMovesCoalesceToLatestPoint()
   testDragMoveCancellationDropsPendingFrame()
   testSketchBvhKeyIgnoresPositionalPolylineUpdates()
+  testProjectionBridgeResolvesKnownTarget()
+  testRenderIdleTrackerRequiresStableIdleFrames()
 })

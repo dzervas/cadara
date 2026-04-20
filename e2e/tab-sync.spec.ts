@@ -34,6 +34,7 @@ function createSyncedWorkbenchUrl(channelName: string, databaseName: string) {
     cadLocalPeerSync: '1',
     cadLocalPeerSyncChannel: channelName,
     cadRepositoryDbName: databaseName,
+    cadTestMode: '1',
   })
 
   return `/?${params}`
@@ -41,8 +42,7 @@ function createSyncedWorkbenchUrl(channelName: string, databaseName: string) {
 
 async function openSyncedWorkbench(page: Page, url: string) {
   await page.goto(url)
-  await ensureStateDebuggerExpanded(page)
-  await expect(page.getByText('Machine:')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.__cadTestState?.machineState ?? ''), { timeout: 30_000 }).not.toBe('')
   await expect.poll(() => revisionLabel(page), { timeout: 30_000 }).not.toBe('loading')
 }
 
@@ -56,17 +56,6 @@ async function waitForRepositoryUrl(page: Page) {
   ).toContain('doc_workspace')
 }
 
-async function ensureStateDebuggerExpanded(page: Page) {
-  const expandButton = page.getByRole('button', {
-    name: 'Expand state debugger',
-  })
-
-  if (await expandButton.isVisible().catch(() => false)) {
-    await expandButton.click()
-  }
-}
-
 async function revisionLabel(page: Page) {
-  const bodyText = await page.locator('body').textContent()
-  return bodyText?.match(/Revision:\s*([^\s]+)/)?.[1] ?? 'loading'
+  return page.evaluate(() => window.__cadTestState?.revision ?? 'loading')
 }

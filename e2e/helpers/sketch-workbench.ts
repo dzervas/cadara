@@ -35,8 +35,7 @@ export class SketchWorkbenchHarness {
 
   async openPreservingStorage(path = '/') {
     await this.page.goto(path)
-    await this.ensureStateDebuggerExpanded()
-    await expect(this.page.getByText('Machine:')).toBeVisible()
+    await expect.poll(() => this.readMachineLabel(), { timeout: 30_000 }).not.toBe('')
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
   }
 
@@ -113,26 +112,19 @@ export class SketchWorkbenchHarness {
   }
 
   async currentHoverTarget() {
-    const bodyText = await this.page.locator('body').textContent()
-    return bodyText?.match(/Hover target:\s*([\s\S]*?)Selection detail:/)?.[1]?.replace(/\s+/g, '').trim() ?? 'none'
+    return this.page.evaluate(() => window.__cadTestState?.hoverTarget ?? 'none')
   }
 
   async currentEditorSelection() {
-    const bodyText = await this.page.locator('body').textContent()
-    const match = bodyText?.match(/Selection targets:\s*(.*?)Revision:/s)
-    return match?.[1]?.trim() ?? ''
+    return this.page.evaluate(() => window.__cadTestState?.selectionTargets ?? '')
   }
 
   async currentSketchSession() {
-    const bodyText = await this.page.locator('body').textContent()
-    const match = bodyText?.match(/Sketch session:\s*(.*?)Sketch plane:/s)
-    return match?.[1]?.trim() ?? 'none'
+    return this.page.evaluate(() => window.__cadTestState?.sketchSession ?? 'none')
   }
 
   async currentMachineSelectionCount() {
-    const bodyText = await this.page.locator('body').textContent()
-    const match = bodyText?.match(/Machine:\s*[^\n]*Command:\s*[^\n]*Phase:\s*[^\n]*Selection:\s*(\d+)/s)
-    return match ? Number(match[1]) : NaN
+    return this.page.evaluate(() => window.__cadTestState?.selectionCount ?? Number.NaN)
   }
 
   async clearHoverByLeavingViewport() {
@@ -183,41 +175,36 @@ export class SketchWorkbenchHarness {
   }
 
   async expectSketchPlane(label: string) {
-    await expect(this.page.getByText('Sketch plane:')).toContainText(label)
+    await expect.poll(() => this.page.evaluate(() => window.__cadTestState?.sketchPlane ?? 'none')).toBe(label)
   }
 
   async expectSketchSessionActive() {
     await this.expectMachine('editingSketch')
-    await expect(this.page.getByText('Sketch plane:')).not.toContainText('none')
+    await expect.poll(() => this.page.evaluate(() => window.__cadTestState?.sketchPlane ?? 'none')).not.toBe('none')
   }
 
-  async expectMachine(kind: string) {
-    await expect(this.page.getByText('Machine:')).toContainText(kind)
+  async expectMachine(kind: string, timeout = 10_000) {
+    await expect.poll(() => this.readMachineLabel(), { timeout }).toContain(kind)
   }
 
   private async revisionLabel() {
-    const bodyText = await this.page.locator('body').textContent()
-    return bodyText?.match(/Revision:\s*([^\s]+)/)?.[1] ?? 'loading'
+    return this.page.evaluate(() => window.__cadTestState?.revision ?? 'loading')
+  }
+
+  private async readMachineLabel() {
+    return this.page.evaluate(() => window.__cadTestState?.machineState ?? '')
   }
 
   private async currentPath() {
     return this.page.evaluate(() => `${window.location.pathname}${window.location.search}${window.location.hash}`)
   }
 
-  private async ensureStateDebuggerExpanded() {
-    const expandButton = this.page.getByRole('button', {
-      name: 'Expand state debugger',
-    })
-
-    if (await expandButton.isVisible().catch(() => false)) {
-      await expandButton.click()
-    }
-  }
 }
 
 function withDisabledRepository(path: string) {
   const url = new URL(path, 'http://127.0.0.1:3000')
   url.searchParams.set('cadDisableRepository', '1')
+  url.searchParams.set('cadTestMode', '1')
 
   return path.startsWith('http://') || path.startsWith('https://')
     ? url.toString()
