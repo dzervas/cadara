@@ -12,7 +12,6 @@
     "load-time": "bun ./scripts/load-time.ts",
     "benchmark:sketch-solver": "bun ./scripts/sketch-solver-benchmark.ts",
     "test": "bun test src",
-    "test:occ-limitations": "bun test ignored-tests/occ-kernel-limitations",
     "test:e2e": "playwright test",
     "test:all": "bun run lint && bun run build && bun run test && bun run test:e2e"
   },

@@ -19,6 +19,12 @@ import type {
 import type { DocumentId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import {
+  reconcileReplacementTopology,
+  seedOccTopologyNaming,
+  type OccTopologyHistorySource,
+  type OccTopologyNamingBodyState,
+} from '@/domain/modeling/occ/topology-naming'
 
 function solidShapeType(oc: OpenCascadeInstance) {
   return oc.TopAbs_ShapeEnum.TopAbs_SOLID as unknown as number
@@ -54,6 +60,7 @@ export interface OccTrackedBody {
   facesById: Map<FaceId, InstanceType<OpenCascadeInstance['TopoDS_Face']>>
   edgesById: Map<EdgeId, InstanceType<OpenCascadeInstance['TopoDS_Edge']>>
   verticesById: Map<VertexId, InstanceType<OpenCascadeInstance['TopoDS_Vertex']>>
+  naming?: OccTopologyNamingBodyState
 }
 
 export interface OccAuthoringFeatureRecordLike {
@@ -77,6 +84,7 @@ export const OCC_REFERENCE_INVALIDATION_REASONS = {
   missing: 'occ-missing-reference',
   topologyDeleted: 'occ-topology-deleted',
   topologyModified: 'occ-topology-modified',
+  topologyAmbiguous: 'occ-topology-ambiguous',
 } as const satisfies Record<string, string>
 
 const OCC_INVALID_REFERENCE_DIAGNOSTIC_CODE = 'occ-invalid-reference'
@@ -265,6 +273,7 @@ function enumerateFaces(
     facesById.set(faceId, oc.TopoDS.Face_1(faceMap.FindKey(index)))
   }
 
+  faceMap.delete()
   return { faceIds, facesById }
 }
 
@@ -285,6 +294,7 @@ function enumerateEdges(
     edgesById.set(edgeId, oc.TopoDS.Edge_1(edgeMap.FindKey(index)))
   }
 
+  edgeMap.delete()
   return { edgeIds, edgesById }
 }
 
@@ -305,6 +315,7 @@ function enumerateVertices(
     verticesById.set(vertexId, oc.TopoDS.Vertex_1(vertexMap.FindKey(index)))
   }
 
+  vertexMap.delete()
   return { vertexIds, verticesById }
 }
 
@@ -316,6 +327,8 @@ function buildTrackedSolidBody(
     ownerFeatureId: FeatureId | null
     topologyToken: string
     shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
+    naming?: OccTopologyNamingBodyState
+    seedNaming?: boolean
   },
 ): OccTrackedBody {
   const solids = extractSolidShapes(oc, input.shape)
@@ -332,7 +345,7 @@ function buildTrackedSolidBody(
   const edges = enumerateEdges(oc, input.bodyId, topologyToken, solid)
   const vertices = enumerateVertices(oc, input.bodyId, topologyToken, solid)
 
-  return {
+  const body = {
     bodyId: input.bodyId,
     label: input.label,
     ownerFeatureId: input.ownerFeatureId,
@@ -346,6 +359,12 @@ function buildTrackedSolidBody(
     facesById: faces.facesById,
     edgesById: edges.edgesById,
     verticesById: vertices.verticesById,
+    naming: input.naming,
+  } satisfies OccTrackedBody
+
+  return {
+    ...body,
+    naming: input.naming ?? (input.seedNaming === false ? undefined : seedOccTopologyNaming(oc, body)),
   }
 }
 
@@ -387,6 +406,42 @@ export function trackReplacementSolidBody(
     topologyToken: advanceTopologyToken(input.previous.topologyToken),
     shape: input.shape,
   })
+}
+
+export function reconcileReplacementSolidBody(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody
+    ownerFeatureId: FeatureId | null
+    shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
+    historySources: readonly OccTopologyHistorySource[]
+  },
+) {
+  const replacement = buildTrackedSolidBody(oc, {
+    bodyId: input.previous.bodyId,
+    label: input.previous.label,
+    ownerFeatureId: input.ownerFeatureId,
+    topologyToken: advanceTopologyToken(input.previous.topologyToken),
+    shape: input.shape,
+    seedNaming: false,
+  })
+  const reconciliation = reconcileReplacementTopology(oc, {
+    previous: input.previous,
+    replacement,
+    historySources: input.historySources,
+  })
+
+  return {
+    body: {
+      ...replacement,
+      topology: reconciliation.topology,
+      facesById: reconciliation.facesById,
+      edgesById: reconciliation.edgesById,
+      verticesById: reconciliation.verticesById,
+      naming: reconciliation.naming,
+    } satisfies OccTrackedBody,
+    historyInvalidations: reconciliation.invalidations,
+  }
 }
 
 export function createBodySnapshotRecord(

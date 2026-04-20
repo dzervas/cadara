@@ -50,6 +50,7 @@ import {
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
+import { createTopologyDebugSummary } from '@/domain/modeling/topology-debug'
 import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useErrorReporter } from '@/hooks/use-error-reporter'
@@ -255,6 +256,7 @@ export function CadWorkbench() {
       targetLabel: primarySelection ? getPrimitiveRefLabel(primarySelection) : 'none',
     },
     hoverTarget: visibleHoverTarget ? getPrimitiveRefLabel(visibleHoverTarget) : 'none',
+    topologyDebug: createTopologyDebugSummary(snapshot),
   }
   const toolbarHistoryAvailability: EditorHistoryAvailability = sketchSession
     ? history

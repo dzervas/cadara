@@ -51,6 +51,29 @@ test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
         relatedLabels: ['Extrude 1'],
         targetLabel: 'sketch_1.region_profile',
       },
+      topologyDebug: {
+        bodyCount: 1,
+        liveTopologyReferences: 26,
+        invalidatedTopologyReferences: 2,
+        bodies: [
+          {
+            bodyId: 'body_1',
+            label: 'Body 1',
+            faces: 6,
+            edges: 12,
+            vertices: 8,
+            liveReferences: 26,
+            invalidatedReferences: 2,
+          },
+        ],
+        invalidations: [
+          {
+            reason: 'occ-topology-ambiguous',
+            count: 2,
+            examples: ['body_1.face_old', 'body_1.edge_old'],
+          },
+        ],
+      },
     }
   }
 
@@ -72,10 +95,13 @@ test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
   )
   assert(expandedMarkup.includes('(2 slots)'), 'Expanded debugger should render selection requirement slot counts.')
   assert(expandedMarkup.includes('Profile region'), 'Expanded debugger should render selection detail.')
+  assert(expandedMarkup.includes('Topology naming'), 'Expanded debugger should include the hidden topology debug section.')
+  assert(expandedMarkup.includes('occ-topology-ambiguous'), 'Topology debug section should render invalidation reasons.')
 
   const collapsedMarkup = renderToStaticMarkup(<WorkbenchStateDebugger state={createDebuggerModel()} />)
   assert(collapsedMarkup.includes('aria-expanded="false"'), 'Collapsed debugger should expose collapsed state.')
   assert(collapsedMarkup.includes('State Debugger'), 'Collapsed debugger should retain an expand affordance.')
   assert(!collapsedMarkup.includes('Active mode'), 'Collapsed debugger should hide detailed rows.')
   assert(!collapsedMarkup.includes('Boolean target'), 'Collapsed debugger should hide requirement rows.')
+  assert(!collapsedMarkup.includes('Topology naming'), 'Collapsed debugger should hide topology debug rows.')
 })

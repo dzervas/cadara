@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
+import type { TopologyDebugSummary } from '@/domain/modeling/topology-debug'
 
 export interface WorkbenchStateDebuggerRequirement {
   id: string
@@ -35,6 +36,7 @@ export interface WorkbenchStateDebuggerModel {
   requirements: readonly WorkbenchStateDebuggerRequirement[]
   selectionDetail: WorkbenchStateDebuggerSelectionDetail
   hoverTarget: string
+  topologyDebug: TopologyDebugSummary
 }
 
 interface WorkbenchStateDebuggerProps {
@@ -123,6 +125,45 @@ export function WorkbenchStateDebugger({ state, defaultExpanded = false }: Workb
             />
             <DebuggerRow label="Target" value={state.selectionDetail.targetLabel} />
           </div>
+
+          <details className="border-t border-[var(--cad-border)] pt-2">
+            <summary className="cursor-pointer text-[var(--cad-foreground)]">
+              Topology naming
+            </summary>
+            <div className="mt-2 grid gap-2">
+              <div className="grid gap-1">
+                <DebuggerRow label="Bodies" value={state.topologyDebug.bodyCount} />
+                <DebuggerRow label="Live topology refs" value={state.topologyDebug.liveTopologyReferences} />
+                <DebuggerRow label="Invalid topology refs" value={state.topologyDebug.invalidatedTopologyReferences} />
+              </div>
+
+              <div className="grid gap-1">
+                {state.topologyDebug.bodies.length > 0 ? (
+                  state.topologyDebug.bodies.map((body) => (
+                    <div key={body.bodyId}>
+                      <span className="text-[var(--cad-foreground)]">{body.label}</span>: {body.faces}F/{body.edges}E/{body.vertices}V,{' '}
+                      {body.liveReferences} live, {body.invalidatedReferences} invalid
+                    </div>
+                  ))
+                ) : (
+                  <div>No body topology.</div>
+                )}
+              </div>
+
+              <div className="grid gap-1">
+                {state.topologyDebug.invalidations.length > 0 ? (
+                  state.topologyDebug.invalidations.map((invalidation) => (
+                    <div key={invalidation.reason}>
+                      <span className="text-[var(--cad-foreground)]">{invalidation.reason}</span>: {invalidation.count}
+                      {invalidation.examples.length > 0 ? ` (${invalidation.examples.join(', ')})` : ''}
+                    </div>
+                  ))
+                ) : (
+                  <div>No topology invalidations.</div>
+                )}
+              </div>
+            </div>
+          </details>
         </div>
       ) : null}
     </div>

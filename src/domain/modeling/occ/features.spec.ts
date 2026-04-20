@@ -15,7 +15,11 @@ import {
 } from '@/domain/modeling/occ/authoring-state'
 import { buildConstructionPlaneFromPlanarFace } from '@/domain/modeling/occ/sketch-profile'
 import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
-import { trackNewSolidBody } from '@/domain/modeling/occ/topology'
+import {
+  getOccDurableRefKey,
+  OCC_REFERENCE_INVALIDATION_REASONS,
+  trackNewSolidBody,
+} from '@/domain/modeling/occ/topology'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -551,6 +555,11 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
 
     assert(result.bodies.length === 1, 'Sequential join should collapse ordered target bodies into the first target body.')
     assert(result.bodies[0]?.bodyId === bodyA.bodyId, 'Sequential join should preserve the first target body id.')
+    assert(
+      result.historyInvalidations.get(getOccDurableRefKey({ kind: 'body', bodyId: bodyB.bodyId }))?.reason
+        === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+      'Sequential join should invalidate consumed target bodies as deleted topology.',
+    )
   }
 
   async function testExtrudeJoinRefinesSameDomainTopology() {
@@ -1295,7 +1304,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assert(result.bodies.length === 1, 'Transform should replace the selected body in place.')
     assert(result.bodies[0]?.bodyId === body.bodyId, 'Transform should preserve the selected body id when replacing the translated result.')
     assert(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body' && result.producedTargets[0].bodyId === body.bodyId, 'Transform should report the replaced body target.')
-    assert(result.historyInvalidations.size > 0, 'Transform should preserve topology invalidation history for the replaced body.')
+    assert(result.bodies[0]?.topology.faceIds.includes(body.topology.faceIds[0]!), 'Transform should preserve uniquely resolved topology ids for the replaced body.')
   }
 
   async function testShellBuildsPreviewableSolidFromExplicitBodyAndFaces() {
