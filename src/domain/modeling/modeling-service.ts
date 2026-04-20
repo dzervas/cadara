@@ -74,6 +74,7 @@ import type {
   SketchSnapshotRecord,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
+  SnapshotMutationBasis,
   SnapshotEntityRecord,
   UpdateFeatureResponse,
   UpdateFeatureRequest,
@@ -320,17 +321,19 @@ export interface ModelingDocumentVariableMutationResult {
   diagnostics: ModelingDiagnostic[]
 }
 
-export type ModelingCreateFeatureInput = Omit<CreateFeatureRequest, 'contractVersion' | 'documentId'>
-export type ModelingAddDocumentVariableInput = Omit<AddDocumentVariableRequest, 'contractVersion' | 'documentId'>
-export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'>
-export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableRequest, 'contractVersion' | 'documentId'>
-export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'>
-export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'>
-export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'>
+type ModelingMutationBasisInput = Pick<SnapshotMutationBasis, 'baseRepositoryHeads'>
+
+export type ModelingCreateFeatureInput = Omit<CreateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingAddDocumentVariableInput = Omit<AddDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingSetFeatureCursorInput =
   Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'> & {
     persistHistory?: boolean
-  }
+  } & Partial<ModelingMutationBasisInput>
 export type ModelingExportDocumentInput = Omit<DocumentExportRequest, 'contractVersion' | 'documentId'>
 export type ModelingExportDocumentResult = DocumentExportResult
 
@@ -350,7 +353,7 @@ export interface ModelingCommitSketchCorrelation {
   regionRequestId: RequestId
 }
 
-export interface ModelingCommitSketchInput extends Omit<CommitSketchRequest, 'contractVersion' | 'documentId'> {
+export interface ModelingCommitSketchInput extends Omit<CommitSketchRequest, 'contractVersion' | 'documentId'>, Partial<ModelingMutationBasisInput> {
   solverCorrelation: ModelingCommitSketchCorrelation | null
 }
 export type ModelingEvaluatePreviewInput = Omit<
@@ -3337,8 +3340,20 @@ function mapResolvedReferenceResponse(
 
 function assertMutationBase(input: {
   baseRevisionId: RevisionId
+  baseRepositoryHeads?: readonly string[]
 }) {
   assertRevisionId(input.baseRevisionId)
+  if (input.baseRepositoryHeads !== undefined && !Array.isArray(input.baseRepositoryHeads)) {
+    throw new Error('Invalid repository heads mutation basis.')
+  }
+}
+
+function stripRepositoryMutationBasis<T extends { baseRepositoryHeads?: readonly string[] }>(
+  input: T,
+): Omit<T, 'baseRepositoryHeads'> {
+  const requestInput = { ...input }
+  delete requestInput.baseRepositoryHeads
+  return requestInput
 }
 
 function normalizeCreateFeatureInput(
@@ -3346,9 +3361,10 @@ function normalizeCreateFeatureInput(
   documentId: DocumentId,
 ): CreateFeatureRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     definition: normalizeFeatureDefinition(input.definition),
     contractVersion: CONTRACT_VERSION,
     documentId,
@@ -3360,9 +3376,10 @@ function normalizeCommitSketchInput(
   documentId: DocumentId,
 ): CommitSketchRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
@@ -3373,9 +3390,10 @@ function normalizeUpdateFeatureInput(
   documentId: DocumentId,
 ): UpdateFeatureRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     definition: normalizeFeatureDefinition(input.definition),
     contractVersion: CONTRACT_VERSION,
     documentId,
@@ -3387,9 +3405,10 @@ function normalizeDeleteFeatureInput(
   documentId: DocumentId,
 ): DeleteFeatureRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
@@ -3400,9 +3419,10 @@ function normalizeRenameBodyInput(
   documentId: DocumentId,
 ): RenameBodyRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
@@ -3413,9 +3433,10 @@ function normalizeAddDocumentVariableInput(
   documentId: DocumentId,
 ): AddDocumentVariableRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     variableId: input.variableId === undefined ? undefined : assertDocumentVariableId(input.variableId),
     contractVersion: CONTRACT_VERSION,
     documentId,
@@ -3427,9 +3448,10 @@ function normalizeUpdateDocumentVariableInput(
   documentId: DocumentId,
 ): UpdateDocumentVariableRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     variableId: assertDocumentVariableId(input.variableId),
     contractVersion: CONTRACT_VERSION,
     documentId,
@@ -3441,9 +3463,10 @@ function normalizeReorderFeatureInput(
   documentId: DocumentId,
 ): ReorderFeatureRequest {
   assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
 
   return {
-    ...input,
+    ...requestInput,
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
@@ -3914,7 +3937,6 @@ export function createModelingService(
     diagnostics: [],
   }
   let currentRepositoryMetadata: DocumentRepositoryMetadata | null = null
-  let snapshotRepositoryHeads: readonly string[] | null = null
   let seedAuthoredDocument: AuthoredModelDocument | null = null
   let repositoryChangePromise = Promise.resolve()
   let isRestoringRepositoryDocument = documentRepository !== null
@@ -3929,7 +3951,6 @@ export function createModelingService(
 
   function markRepositorySnapshotFresh(metadata: DocumentRepositoryMetadata) {
     rememberRepositoryMetadata(metadata)
-    snapshotRepositoryHeads = [...metadata.heads]
   }
 
   function attachRepositoryProvenance(snapshot: DocumentSnapshot): DocumentSnapshot {
@@ -3941,8 +3962,6 @@ export function createModelingService(
       }
     }
 
-    snapshotRepositoryHeads = [...metadata.heads]
-
     return {
       ...snapshot,
       provenance: {
@@ -3952,18 +3971,19 @@ export function createModelingService(
     }
   }
 
-  function repositoryHeadsChangedSinceSnapshot() {
-    if (!currentRepositoryMetadata || !snapshotRepositoryHeads) {
+  function repositoryHeadsChangedSinceBasis(input: { baseRepositoryHeads?: readonly string[] }) {
+    if (!currentRepositoryMetadata || !input.baseRepositoryHeads) {
       return false
     }
 
-    return !sameStringSet(currentRepositoryMetadata.heads, snapshotRepositoryHeads)
+    return !sameStringSet(currentRepositoryMetadata.heads, input.baseRepositoryHeads)
   }
 
   function addRepositoryFreshnessDiagnostic<T extends { revisionState: MutationRevisionState; diagnostics: ModelingDiagnostic[] }>(
     result: T,
+    input: { baseRepositoryHeads?: readonly string[] },
   ): T {
-    if (!repositoryHeadsChangedSinceSnapshot()) {
+    if (!repositoryHeadsChangedSinceBasis(input)) {
       return result
     }
 
@@ -4114,7 +4134,7 @@ export function createModelingService(
       changedTargets: PrimitiveRef[]
       diagnostics: ModelingDiagnostic[]
     },
-  >(result: T): Promise<T> {
+  >(result: T, input: { baseRepositoryHeads?: readonly string[] }): Promise<T> {
     await repositoryChangePromise
     const snapshot = validateSnapshotResponse(
       await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
@@ -4122,7 +4142,7 @@ export function createModelingService(
     )
     const diagnostics = result.diagnostics.some((diagnostic) => diagnostic.code === 'repository-head-conflict')
       ? result.diagnostics
-      : addRepositoryFreshnessDiagnostic(result).diagnostics
+      : addRepositoryFreshnessDiagnostic(result, input).diagnostics
     const expectedRevisionId = result.revisionState.kind === 'accepted'
       ? result.revisionState.baseRevisionId
       : result.revisionId
@@ -4155,17 +4175,18 @@ export function createModelingService(
   }>(
     response: ModelingOperationResult,
     result: T,
+    input: { baseRepositoryHeads?: readonly string[] },
     createHistoryEntry: (() => ModelingOperationHistoryEntry) | null,
   ): Promise<T> {
-    const repositoryConflict = repositoryHeadsChangedSinceSnapshot()
-    const freshResult = repositoryConflict ? addRepositoryFreshnessDiagnostic(result) : result
+    const repositoryConflict = repositoryHeadsChangedSinceBasis(input)
+    const freshResult = repositoryConflict ? addRepositoryFreshnessDiagnostic(result, input) : result
 
     if (!isAcceptedMutation(response)) {
       return freshResult
     }
 
     if (repositoryConflict) {
-      return createRepositoryHeadConflictResult(freshResult)
+      return createRepositoryHeadConflictResult(freshResult, input)
     }
 
     if (createHistoryEntry) {
@@ -4494,6 +4515,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapCommitSketchResponse(response, currentDocumentId),
+            input,
             () => createCommitSketchHistoryEntry(request, response.sketchId),
           )
         },
@@ -4522,6 +4544,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapDocumentVariableResponse(response, currentDocumentId),
+            input,
             () => createAddDocumentVariableHistoryEntry(request, response.variableId),
           )
         },
@@ -4543,6 +4566,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapDocumentVariableResponse(response, currentDocumentId),
+            input,
             () => createUpdateDocumentVariableHistoryEntry(request),
           )
         },
@@ -4561,6 +4585,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapFeatureMutationResponse(response, currentDocumentId),
+            input,
             () => createCreateFeatureHistoryEntry(request),
           )
         },
@@ -4582,6 +4607,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapFeatureMutationResponse(response, currentDocumentId),
+            input,
             () => createUpdateFeatureHistoryEntry(request),
           )
         },
@@ -4603,6 +4629,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapDeleteFeatureResponse(response, currentDocumentId),
+            input,
             () => createDeleteFeatureHistoryEntry(request),
           )
         },
@@ -4624,6 +4651,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapRenameBodyResponse(response, currentDocumentId),
+            input,
             () => createRenameBodyHistoryEntry(request),
           )
         },
@@ -4645,6 +4673,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapReorderFeatureResponse(response, currentDocumentId),
+            input,
             () => createReorderFeatureHistoryEntry(request),
           )
         },
@@ -4663,6 +4692,7 @@ export function createModelingService(
           return finalizeMutationResult(
             response,
             mapSetFeatureCursorResponse(response, currentDocumentId),
+            input,
             input.persistHistory === false ? null : () => createSetFeatureCursorHistoryEntry(request),
           )
         },

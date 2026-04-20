@@ -54,6 +54,7 @@ const editorEventTypes = [
   'sketch.toolPatched',
   'sketch.activeToolCleared',
   'sketch.historyCursorRequested',
+  'document.historyCursorRequested',
   'history.undoRequested',
   'history.redoRequested',
   'sketch.annotationDeleteRequested',

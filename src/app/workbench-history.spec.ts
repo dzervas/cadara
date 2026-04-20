@@ -18,7 +18,7 @@ test('src/app/workbench-history.spec.ts', async () => {
   })).snapshot
 
   const tailAvailability = getWorkbenchHistoryAvailability({
-    snapshot,
+    documentHistory: { canUndo: true, canRedo: false },
     undoStackLength: 0,
     redoStackLength: 0,
     isUndoRedoRunning: false,
@@ -30,16 +30,8 @@ test('src/app/workbench-history.spec.ts', async () => {
   const previousCursor = getPreviousDocumentHistoryCursor(snapshot)
   assert(previousCursor, 'Seed document should have a previous document history cursor.')
 
-  const rolledBackSnapshot = {
-    ...snapshot,
-    document: {
-      ...snapshot.document,
-      cursor: previousCursor,
-    },
-    cursor: previousCursor,
-  }
   const rolledBackAvailability = getWorkbenchHistoryAvailability({
-    snapshot: rolledBackSnapshot,
+    documentHistory: { canUndo: false, canRedo: true },
     undoStackLength: 0,
     redoStackLength: 0,
     isUndoRedoRunning: false,
@@ -48,7 +40,7 @@ test('src/app/workbench-history.spec.ts', async () => {
   assert(rolledBackAvailability.canRedo, 'Document history should enable redo after a cursor rollback.')
 
   const localStackAvailability = getWorkbenchHistoryAvailability({
-    snapshot: null,
+    documentHistory: { canUndo: false, canRedo: false },
     undoStackLength: 1,
     redoStackLength: 1,
     isUndoRedoRunning: false,
@@ -58,7 +50,7 @@ test('src/app/workbench-history.spec.ts', async () => {
   assert(localStackAvailability.canRedo, 'Local redo entries should keep redo available without a snapshot.')
 
   const runningAvailability = getWorkbenchHistoryAvailability({
-    snapshot,
+    documentHistory: { canUndo: true, canRedo: true },
     undoStackLength: 1,
     redoStackLength: 1,
     isUndoRedoRunning: true,

@@ -1,12 +1,7 @@
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
-import {
-  getNextDocumentHistoryCursor,
-  getPreviousDocumentHistoryCursor,
-} from '@/domain/modeling/document-history'
 
 interface WorkbenchHistoryAvailabilityInput {
-  snapshot: DocumentSnapshot | null
+  documentHistory: EditorHistoryAvailability
   undoStackLength: number
   redoStackLength: number
   isUndoRedoRunning: boolean
@@ -20,9 +15,7 @@ export function getWorkbenchHistoryAvailability(
   }
 
   return {
-    canUndo: input.undoStackLength > 0
-      || (input.snapshot ? getPreviousDocumentHistoryCursor(input.snapshot) !== null : false),
-    canRedo: input.redoStackLength > 0
-      || (input.snapshot ? getNextDocumentHistoryCursor(input.snapshot) !== null : false),
+    canUndo: input.undoStackLength > 0 || input.documentHistory.canUndo,
+    canRedo: input.redoStackLength > 0 || input.documentHistory.canRedo,
   }
 }

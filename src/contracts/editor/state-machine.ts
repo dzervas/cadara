@@ -77,12 +77,17 @@ import {
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import {
   getDocumentHistoryCursorBeforeTarget,
+  getDocumentHistoryCursorIndex,
+  getNextDocumentHistoryCursor,
+  getPreviousDocumentHistoryCursor,
+  isValidDocumentHistoryCursor,
   type DocumentHistoryOrderEntry,
 } from '@/domain/modeling/document-history'
 import type {
   DocumentFeatureCursor,
   DocumentSnapshot,
   ModelingDiagnostic,
+  SnapshotMutationBasis,
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
@@ -384,6 +389,13 @@ export interface SketchHistoryCursorRequestedEvent {
   cursor: SketchHistoryCursor
 }
 
+/** Moves the document-level authored history cursor through the editor runtime. */
+export interface DocumentHistoryCursorRequestedEvent {
+  type: 'document.historyCursorRequested'
+  /** Cursor position requested by document timeline, undo, or redo UI. */
+  cursor: DocumentFeatureCursor
+}
+
 /** Requests an undo step in the active authored history context. */
 export interface HistoryUndoRequestedEvent {
   type: 'history.undoRequested'
@@ -469,6 +481,7 @@ export type EditorEvent =
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
   | SketchHistoryCursorRequestedEvent
+  | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
@@ -745,6 +758,8 @@ export type EditorEffect =
       documentId: DocumentId
       /** Base revision against which the feature mutation must be applied. */
       baseRevisionId: RevisionId
+      /** Snapshot basis that owns repository freshness for this mutation. */
+      mutationBasis: SnapshotMutationBasis
       /** Feature session snapshot captured when the commit request was emitted. */
       featureSession: FeatureEditSessionState
     }
@@ -758,6 +773,8 @@ export type EditorEffect =
       documentId: DocumentId
       /** Base revision against which the sketch mutation must be applied. */
       baseRevisionId: RevisionId
+      /** Snapshot basis that owns repository freshness for this mutation. */
+      mutationBasis: SnapshotMutationBasis
       /** Sketch session snapshot captured when the commit request was emitted. */
       session: SketchSessionState
     }
@@ -777,6 +794,8 @@ export type EditorEffect =
       documentId: DocumentId
       /** Base revision against which the cursor mutation must be applied. */
       baseRevisionId: RevisionId
+      /** Snapshot basis that owns repository freshness for this mutation. */
+      mutationBasis: SnapshotMutationBasis
       /** Target document history cursor. */
       cursor: DocumentFeatureCursor
       /** True when this cursor move is editor-session orchestration and should not be persisted as history. */
@@ -1000,6 +1019,7 @@ export interface EditorEffectRuntime {
   commitSketch(input: {
     requestId: RequestId
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     session: SketchSessionState
   }): Promise<{
     revisionId: RevisionId
@@ -1031,6 +1051,7 @@ export interface EditorEffectRuntime {
   /** Creates or updates a feature from the active feature session. */
   commitFeature(input: {
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     featureSession: FeatureEditSessionState
   }): Promise<{
     revisionId: RevisionId
@@ -1043,6 +1064,7 @@ export interface EditorEffectRuntime {
   /** Moves the committed document history cursor against a base revision. */
   setDocumentCursor?(input: {
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     cursor: DocumentFeatureCursor
     transient?: boolean
   }): Promise<{
@@ -1247,12 +1269,40 @@ function emitSnapshotFetch(
   }
 }
 
+function getSnapshotMutationBasis(state: EditorState): SnapshotMutationBasis | null {
+  const baseRevisionId = state.document.revisionId
+  if (baseRevisionId === null) {
+    return null
+  }
+
+  const repositoryHeads =
+    state.snapshot?.revisionId === baseRevisionId
+      ? state.snapshot.provenance?.repositoryHeads
+      : undefined
+
+  return repositoryHeads
+    ? { baseRevisionId, baseRepositoryHeads: [...repositoryHeads] }
+    : { baseRevisionId }
+}
+
+function hasPendingDocumentCursorRefresh(state: EditorState) {
+  return state.pendingHistoryCursorRequestId !== null || state.pendingSnapshotRequestId !== null
+}
+
+function isRefreshableDocumentCursorConflict(event: Extract<EditorEvent, { type: 'effect.documentCursorMoved' }>) {
+  return event.actualRevisionId !== undefined
+    || event.diagnostics.some((diagnostic) =>
+      diagnostic.code === 'repository-head-conflict' || diagnostic.detail?.kind === 'revisionConflict',
+    )
+}
+
 function emitDocumentCursorMove(
   state: EditorState,
   cursor: DocumentFeatureCursor,
   transient: boolean,
 ): EditorTransitionResult {
-  if (state.document.documentId === null || state.document.revisionId === null) {
+  const mutationBasis = getSnapshotMutationBasis(state)
+  if (state.document.documentId === null || mutationBasis === null || hasPendingDocumentCursorRefresh(state)) {
     return {
       state,
       effects: [],
@@ -1272,7 +1322,8 @@ function emitDocumentCursorMove(
         type: 'document.moveHistoryCursor',
         requestId,
         documentId: state.document.documentId,
-        baseRevisionId: state.document.revisionId,
+        baseRevisionId: mutationBasis.baseRevisionId,
+        mutationBasis,
         cursor,
         transient,
       },
@@ -1399,7 +1450,8 @@ function emitFeaturePreview(state: FeatureEditorState): EditorTransitionResult {
 }
 
 function emitFeatureCommit(state: FeatureEditorState): EditorTransitionResult {
-  if (state.document.revisionId === null) {
+  const mutationBasis = getSnapshotMutationBasis(state)
+  if (mutationBasis === null) {
     return {
       state,
       effects: [],
@@ -1453,7 +1505,8 @@ function emitFeatureCommit(state: FeatureEditorState): EditorTransitionResult {
         requestId,
         commandSessionId: state.command.commandSessionId,
         documentId: state.document.documentId,
-        baseRevisionId: state.document.revisionId,
+        baseRevisionId: mutationBasis.baseRevisionId,
+        mutationBasis,
         featureSession: draftSession,
       },
     ],
@@ -1552,7 +1605,8 @@ function emitFeatureHydration(
 }
 
 function emitSketchCommit(state: SketchEditorState): EditorTransitionResult {
-  if (!state.session.commitRequest || state.document.revisionId === null) {
+  const mutationBasis = getSnapshotMutationBasis(state)
+  if (!state.session.commitRequest || mutationBasis === null) {
     if (state.editSessionCursorContext?.phase === 'active') {
       return emitEditSessionCursorRestore(toIdleState(state, 'part'))
     }
@@ -1594,7 +1648,8 @@ function emitSketchCommit(state: SketchEditorState): EditorTransitionResult {
         requestId,
         commandSessionId: state.command.commandSessionId,
         documentId: state.document.documentId,
-        baseRevisionId: state.document.revisionId,
+        baseRevisionId: mutationBasis.baseRevisionId,
+        mutationBasis,
         session: state.session,
       },
     ],
@@ -2884,6 +2939,22 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           effects: [],
         }
       }
+    case 'document.historyCursorRequested':
+      if (
+        state.kind !== 'idle' ||
+        !state.snapshot ||
+        hasPendingDocumentCursorRefresh(state) ||
+        !isValidDocumentHistoryCursor(state.snapshot.presentation.documentHistory, event.cursor) ||
+        getDocumentHistoryCursorIndex(state.snapshot.presentation.documentHistory, event.cursor)
+          === getDocumentHistoryCursorIndex(state.snapshot.presentation.documentHistory, state.snapshot.document.cursor)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return emitDocumentCursorMove(state, event.cursor, false)
     case 'sketch.annotationDeleteRequested':
       if (state.kind !== 'editingSketch') {
         return {
@@ -3039,21 +3110,21 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         const message =
           event.diagnostics[0]?.message ??
           `Document history cursor move rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+        const nextState = withPreview(
+          {
+            ...state,
+            pendingHistoryCursorRequestId: null,
+          },
+          {
+            kind: 'selection',
+            label: message,
+            target: state.selection[0] ?? null,
+          },
+        )
 
-        return {
-          state: withPreview(
-            {
-              ...state,
-              pendingHistoryCursorRequestId: null,
-            },
-            {
-              kind: 'selection',
-              label: message,
-              target: state.selection[0] ?? null,
-            },
-          ),
-          effects: [],
-        }
+        return isRefreshableDocumentCursorConflict(event)
+          ? emitSnapshotFetch(nextState, null)
+          : { state: nextState, effects: [] }
       }
 
       return emitSnapshotFetch(
@@ -3788,6 +3859,7 @@ export async function runEditorEffect(
       try {
         const result = await runtime.commitFeature({
           baseRevisionId: effect.baseRevisionId,
+          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
           featureSession: effect.featureSession,
         })
 
@@ -3813,6 +3885,7 @@ export async function runEditorEffect(
         const result = await runtime.commitSketch({
           requestId: effect.requestId,
           baseRevisionId: effect.baseRevisionId,
+          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
           session: effect.session,
         })
 
@@ -3875,6 +3948,7 @@ export async function runEditorEffect(
 
         const result = await runtime.setDocumentCursor({
           baseRevisionId: effect.baseRevisionId,
+          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
           cursor: effect.cursor,
           transient: effect.transient,
         })
@@ -3955,6 +4029,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   commitSketch: (input: {
     requestId: RequestId
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     sketchId: SketchSessionState['commitRequest'] extends null
       ? never
       : NonNullable<SketchSessionState['commitRequest']>['sketchId']
@@ -3998,6 +4073,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   }>
   createFeature: (input: {
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     definition: NonNullable<ReturnType<typeof buildFeatureDefinition>>
   }) => AppResultAsync<{
     revisionId: RevisionId
@@ -4010,6 +4086,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   }>
   updateFeature: (input: {
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     definition: NonNullable<ReturnType<typeof buildFeatureDefinition>>
     featureId: FeatureId
   }) => AppResultAsync<{
@@ -4023,6 +4100,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   }>
   setFeatureCursor: (input: {
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     cursor: DocumentFeatureCursor
     persistHistory?: boolean
   }) => AppResultAsync<{
@@ -4040,6 +4118,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       const result = await modelingService.commitSketch({
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,
+        baseRepositoryHeads: input.baseRepositoryHeads,
         sketchId: input.session.commitRequest?.sketchId ?? null,
         sketchLabel: input.session.commitRequest?.sketchLabel ?? input.session.sketchLabel,
         plane: input.session.commitRequest?.plane ?? input.session.plane,
@@ -4118,6 +4197,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
 
       const baseInput = {
         baseRevisionId: input.baseRevisionId,
+        baseRepositoryHeads: input.baseRepositoryHeads,
         definition,
       }
 
@@ -4163,6 +4243,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     async setDocumentCursor(input) {
       const result = await modelingService.setFeatureCursor({
         baseRevisionId: input.baseRevisionId,
+        baseRepositoryHeads: input.baseRepositoryHeads,
         cursor: input.cursor,
         persistHistory: input.transient ? false : undefined,
       })
@@ -4249,7 +4330,14 @@ export function getEditorHistoryAvailability(state: EditorState): EditorHistoryA
     return { canUndo: false, canRedo: false }
   }
 
-  return { canUndo: false, canRedo: false }
+  if (hasPendingDocumentCursorRefresh(state)) {
+    return { canUndo: false, canRedo: false }
+  }
+
+  return {
+    canUndo: state.snapshot ? getPreviousDocumentHistoryCursor(state.snapshot) !== null : false,
+    canRedo: state.snapshot ? getNextDocumentHistoryCursor(state.snapshot) !== null : false,
+  }
 }
 
 /**

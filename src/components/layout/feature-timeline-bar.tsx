@@ -26,6 +26,7 @@ interface FeatureTimelineBarProps {
   onSelectTarget: (target: PrimitiveRef) => void
   onReopenTarget: (target: PrimitiveRef) => void
   onCursorRequested?: (cursor: DocumentFeatureCursor) => void
+  cursorDisabled?: boolean
   onDeleteFeature: (item: FeatureHistoryItem) => void
   onRenameItem: (item: DocumentHistoryItemRecord) => void
   onSuppressFeature: (item: FeatureHistoryItem) => void
@@ -41,6 +42,7 @@ export function FeatureTimelineBar({
   onSelectTarget,
   onReopenTarget,
   onCursorRequested,
+  cursorDisabled = false,
   onDeleteFeature,
   onRenameItem,
   onSuppressFeature,
@@ -82,6 +84,10 @@ export function FeatureTimelineBar({
       .filter((value): value is number => value !== null)
 
     const handlePointerMove = (event: PointerEvent) => {
+      if (cursorDisabled) {
+        return
+      }
+
       const nearestIndex = getNearestTimelineAnchorIndex(getAnchorCenterXs(), event.clientX)
       if (nearestIndex >= -1) {
         setDragCursorIndex(nearestIndex)
@@ -90,7 +96,7 @@ export function FeatureTimelineBar({
 
     const handlePointerUp = () => {
       setDragCursorIndex((current) => {
-        if (current !== null && current !== cursorIndex) {
+        if (!cursorDisabled && current !== null && current !== cursorIndex) {
           onCursorRequested?.(getPositionCursor(current))
         }
 
@@ -105,7 +111,7 @@ export function FeatureTimelineBar({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [cursorIndex, dragCursorIndex, getPositionCursor, onCursorRequested])
+  }, [cursorDisabled, cursorIndex, dragCursorIndex, getPositionCursor, onCursorRequested])
 
   useEffect(() => {
     const handle = handleRef.current
@@ -137,6 +143,10 @@ export function FeatureTimelineBar({
   }, [activeCursorIndex, historyItems.length])
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (cursorDisabled) {
+      return
+    }
+
     event.preventDefault()
     const nearestIndex = getNearestTimelineAnchorIndex(
       anchorRefs.current
@@ -188,6 +198,8 @@ export function FeatureTimelineBar({
               aria-label={getTimelineCursorAriaLabel(historyItems, activeCursorIndex)}
               aria-current={dragCursorIndex === null ? 'step' : undefined}
               aria-grabbed={dragCursorIndex !== null}
+              aria-disabled={cursorDisabled}
+              disabled={cursorDisabled}
               onPointerDown={handlePointerDown}
             >
               <span
@@ -273,6 +285,7 @@ export function FeatureTimelineBar({
                       label: 'Roll cursor here',
                       commandId: 'context.rollCursorHere' as const,
                       icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
+                      disabled: cursorDisabled,
                       onSelect: () => onCursorRequested?.(getPositionCursor(anchorIndex)),
                     },
                     ...(item.kind === 'feature' ? [

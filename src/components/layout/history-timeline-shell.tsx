@@ -22,6 +22,7 @@ interface HistoryTimelineShellProps {
   onSelectTarget: (target: PrimitiveRef) => void
   onReopenTarget: (target: PrimitiveRef) => void
   onDocumentCursorRequested?: (cursor: DocumentFeatureCursor) => void
+  documentCursorDisabled?: boolean
   onSketchCursorRequested?: (cursor: SketchHistoryCursor) => void
   onDeleteFeature: (item: Extract<DocumentHistoryItemRecord, { kind: 'feature' }>) => void
   onRenameDocumentItem: (item: DocumentHistoryItemRecord) => void
@@ -35,6 +36,7 @@ export function HistoryTimelineShell({
   onSelectTarget,
   onReopenTarget,
   onDocumentCursorRequested,
+  documentCursorDisabled = false,
   onSketchCursorRequested,
   onDeleteFeature,
   onRenameDocumentItem,
@@ -66,6 +68,7 @@ export function HistoryTimelineShell({
           onSelectTarget={onSelectTarget}
           onReopenTarget={onReopenTarget}
           onCursorRequested={onDocumentCursorRequested}
+          cursorDisabled={documentCursorDisabled}
           onDeleteFeature={onDeleteFeature}
           onRenameItem={onRenameDocumentItem}
           onSuppressFeature={onSuppressFeature}

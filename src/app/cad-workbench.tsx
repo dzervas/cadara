@@ -261,7 +261,7 @@ export function CadWorkbench() {
   const toolbarHistoryAvailability: EditorHistoryAvailability = sketchSession
     ? history
     : getWorkbenchHistoryAvailability({
-        snapshot,
+        documentHistory: history,
         undoStackLength: undoStack.length,
         redoStackLength: redoStack.length,
         isUndoRedoRunning,
@@ -441,67 +441,35 @@ export function CadWorkbench() {
     }
   }
 
-  const applyDocumentCursor = async (
-    cursor: DocumentFeatureCursor,
-    operation: string,
-    fallbackMessage: string,
-  ) => {
-    const currentSnapshot = snapshotRef.current
-    if (!currentSnapshot) {
-      return false
-    }
-
-    const result = await runWorkbenchAction({
-      operation,
-      reporter: errorReporter,
-      context: [{ key: 'baseRevisionId', value: currentSnapshot.document.revisionId }],
-      action: () => modelingService.setFeatureCursor({
-        baseRevisionId: currentSnapshot.document.revisionId,
-        cursor,
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
-        operation,
-        fallbackMessage,
-        context: [{ key: 'baseRevisionId', value: currentSnapshot.document.revisionId }],
-      }),
-      onError: (error) => setWorkbenchStatusMessage(error.message),
-    })
-
-    if (result.isOk()) {
-      dispatch({ type: 'document.refreshRequested' })
-      return true
-    }
-
-    return false
-  }
-
   const performWorkbenchUndo = async () => {
     if (sketchSessionRef.current || isUndoRedoRunning) {
       return
     }
 
     const entry = undoStackRef.current.at(-1)
-    const documentCursor = entry ? null : snapshotRef.current ? getPreviousDocumentHistoryCursor(snapshotRef.current) : null
+    const documentCursor = entry || !history.canUndo || !snapshotRef.current
+      ? null
+      : getPreviousDocumentHistoryCursor(snapshotRef.current)
     if (!entry && !documentCursor) {
       return
     }
 
-    setIsUndoRedoRunning(true)
-    try {
-      if (entry) {
+    if (entry) {
+      setIsUndoRedoRunning(true)
+      try {
         const accepted = await applyUndoEntry(entry, 'undo')
         if (accepted) {
           setUndoStack((current) => current.slice(0, -1))
           setRedoStack((current) => [...current, entry])
         }
         return
+      } finally {
+        setIsUndoRedoRunning(false)
       }
+    }
 
-      if (documentCursor) {
-        await applyDocumentCursor(documentCursor, 'Undo document history', 'Document history undo failed.')
-      }
-    } finally {
-      setIsUndoRedoRunning(false)
+    if (documentCursor) {
+      dispatch({ type: 'document.historyCursorRequested', cursor: documentCursor })
     }
   }
 
@@ -511,27 +479,29 @@ export function CadWorkbench() {
     }
 
     const entry = redoStackRef.current.at(-1)
-    const documentCursor = entry ? null : snapshotRef.current ? getNextDocumentHistoryCursor(snapshotRef.current) : null
+    const documentCursor = entry || !history.canRedo || !snapshotRef.current
+      ? null
+      : getNextDocumentHistoryCursor(snapshotRef.current)
     if (!entry && !documentCursor) {
       return
     }
 
-    setIsUndoRedoRunning(true)
-    try {
-      if (entry) {
+    if (entry) {
+      setIsUndoRedoRunning(true)
+      try {
         const accepted = await applyUndoEntry(entry, 'redo')
         if (accepted) {
           setRedoStack((current) => current.slice(0, -1))
           setUndoStack((current) => [...current, entry])
         }
         return
+      } finally {
+        setIsUndoRedoRunning(false)
       }
+    }
 
-      if (documentCursor) {
-        await applyDocumentCursor(documentCursor, 'Redo document history', 'Document history redo failed.')
-      }
-    } finally {
-      setIsUndoRedoRunning(false)
+    if (documentCursor) {
+      dispatch({ type: 'document.historyCursorRequested', cursor: documentCursor })
     }
   }
 
@@ -842,7 +812,7 @@ export function CadWorkbench() {
   }
 
   const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
-    void applyDocumentCursor(cursor, 'Move feature cursor', 'Feature cursor rollback failed.')
+    dispatch({ type: 'document.historyCursorRequested', cursor })
   }
 
   const handleSketchMove = (point: readonly [number, number]) => {
@@ -1246,6 +1216,7 @@ export function CadWorkbench() {
             onSelectTarget={handleShellSelect}
             onReopenTarget={handleNavigationReopen}
             onDocumentCursorRequested={handleTimelineCursorRequested}
+            documentCursorDisabled={!history.canUndo && !history.canRedo}
             onSketchCursorRequested={(cursor) => dispatch({ type: 'sketch.historyCursorRequested', cursor })}
             onDeleteFeature={handleFeatureDelete}
             onRenameDocumentItem={handleDocumentHistoryRename}

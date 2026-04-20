@@ -275,6 +275,45 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
+  async function testRepositoryCursorMovesUseRefreshedHeadsAcrossRollbackRedoLoop() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+    const rollback = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: initial.revisionId,
+      baseRepositoryHeads: initial.provenance?.repositoryHeads,
+      cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
+    }))
+    const afterRollback = await service.getCurrentDocumentSnapshot()
+    const redo = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: afterRollback.revisionId,
+      baseRepositoryHeads: afterRollback.provenance?.repositoryHeads,
+      cursor: { kind: 'feature', featureId: 'feature_fillet-1' },
+    }))
+    const afterRedo = await service.getCurrentDocumentSnapshot()
+    const rollbackAgain = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: afterRedo.revisionId,
+      baseRepositoryHeads: afterRedo.provenance?.repositoryHeads,
+      cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
+    }))
+
+    assert(rollback.revisionState.kind === 'accepted', 'First rollback should be accepted against the loaded heads.')
+    assert(redo.revisionState.kind === 'accepted', 'Redo should be accepted against refreshed heads.')
+    assert(rollbackAgain.revisionState.kind === 'accepted', 'Second rollback should be accepted against refreshed heads.')
+    assert(
+      [...rollback.diagnostics, ...redo.diagnostics, ...rollbackAgain.diagnostics]
+        .every((diagnostic) => diagnostic.code !== 'repository-head-conflict'),
+      'Refreshed repository heads should avoid repeated authored-document conflict diagnostics.',
+    )
+    assert(
+      documentRepository.savedDocuments.at(-1)?.features.some((feature) => feature.featureId === 'feature_fillet-1'),
+      'Cursor rollback persistence should preserve future authored history for redo.',
+    )
+  }
+
   async function testRepositoryRestoreHydratesFreshModelingService() {
     const documentRepository = createMemoryDocumentRepository()
     const service = createModelingService(new MockKernelAdapter(), {
@@ -553,6 +592,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const staleMutation = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.revisionId,
+      baseRepositoryHeads: snapshot.provenance?.repositoryHeads,
       definition,
     }))
     assert(staleMutation.code === 'modeling/diagnostic', 'Mutations against a peer-superseded snapshot should conflict.')
@@ -572,6 +612,12 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       refreshed.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Peer Synced Body',
       'Peer repository changes should hydrate the modeling snapshot through the service.',
     )
+    const accepted = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: refreshed.revisionId,
+      baseRepositoryHeads: refreshed.provenance?.repositoryHeads,
+      definition,
+    }))
+    assert(accepted.revisionState.kind === 'accepted', 'Fresh repository heads should allow the mutation.')
     unsubscribe()
   }
 
@@ -608,6 +654,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const result = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.revisionId,
+      baseRepositoryHeads: snapshot.provenance?.repositoryHeads,
       definition,
     }))
     assert(result.code === 'modeling/diagnostic', 'In-flight repository head changes should convert accepted mutations to conflicts.')
@@ -632,6 +679,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
+  await testRepositoryCursorMovesUseRefreshedHeadsAcrossRollbackRedoLoop()
   await testRepositoryRestoreHydratesFreshModelingService()
   await testRepositoryRestoreIgnoresStaleOperationHistory()
   await testSeededRepositoryClearsInvalidOperationHistory()

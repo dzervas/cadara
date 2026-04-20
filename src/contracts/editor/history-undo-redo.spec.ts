@@ -8,6 +8,7 @@ import {
   type SketchEditorState,
 } from '@/contracts/editor/state-machine'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
+import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-history'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import {
   acceptSketchDraw,
@@ -143,15 +144,35 @@ test('src/contracts/editor/history-undo-redo.spec.ts', async () => {
     )
   }
 
-  async function testIdleDocumentHistoryDoesNotUseTimelineCursor() {
-    const { state } = await createLoadedIdleState()
+  async function testIdleDocumentHistoryAvailabilityAndCursorRequest() {
+    const { state, snapshot } = await createLoadedIdleState()
+    const previousCursor = getPreviousDocumentHistoryCursor(snapshot)
+    assert(previousCursor, 'Loaded document fixture should have a previous document cursor.')
 
-    assert(!getEditorHistoryAvailability(state).canUndo, 'Idle editor runtime should not expose timeline cursor undo.')
-    assert(!getEditorHistoryAvailability(state).canRedo, 'Idle editor runtime should not expose timeline cursor redo.')
+    assert(getEditorHistoryAvailability(state).canUndo, 'Idle editor runtime should expose document cursor undo.')
+    assert(!getEditorHistoryAvailability(state).canRedo, 'Idle editor runtime should disable redo at the document tail.')
+
+    const requested = transitionEditorState(state, {
+      type: 'document.historyCursorRequested',
+      cursor: previousCursor,
+    })
+
+    assert(requested.effects.length === 1, 'Document cursor requests should emit one runtime effect.')
+    assert(requested.effects[0]?.type === 'document.moveHistoryCursor', 'Document cursor requests should use the editor cursor effect.')
     assert(
-      transitionEditorState(state, { type: 'history.undoRequested' }).state === state,
-      'Idle editor runtime undo should not move the document timeline cursor.',
+      requested.state.pendingHistoryCursorRequestId === requested.effects[0]?.requestId,
+      'Document cursor requests should mark the cursor mutation pending.',
     )
+    assert(
+      !getEditorHistoryAvailability(requested.state).canUndo && !getEditorHistoryAvailability(requested.state).canRedo,
+      'Pending cursor mutations should disable document history availability.',
+    )
+
+    const duplicate = transitionEditorState(requested.state, {
+      type: 'document.historyCursorRequested',
+      cursor: previousCursor,
+    })
+    assert(duplicate.effects.length === 0, 'A second cursor move should not be emitted while the first is pending.')
   }
 
   function testFeatureEditingDoesNotExposeHistory() {
@@ -176,6 +197,6 @@ test('src/contracts/editor/history-undo-redo.spec.ts', async () => {
 
   await testSketchUndoRedo()
   testSketchGeometryDeletionUndoRestoresDependentConstraints()
-  await testIdleDocumentHistoryDoesNotUseTimelineCursor()
+  await testIdleDocumentHistoryAvailabilityAndCursorRequest()
   testFeatureEditingDoesNotExposeHistory()
 })

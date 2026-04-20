@@ -43,6 +43,11 @@ export interface DocumentSnapshotProvenance {
   repositorySource: 'local' | 'peer' | 'restore' | 'seed' | 'reset' | null
 }
 
+export interface SnapshotMutationBasis {
+  baseRevisionId: RevisionId
+  baseRepositoryHeads?: readonly string[]
+}
+
 export type {
   AdvancedFeatureValidationDiagnostic,
   AdvancedFeatureOptionDescriptor,

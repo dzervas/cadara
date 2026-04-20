@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import {
+  getEditorHistoryAvailability,
   getEditorViewState,
   getEditorSelectionKey,
   type EditorEffectRuntime,
@@ -47,6 +48,7 @@ import {
   startSketchDraw,
 } from '@/domain/editor/sketch-session'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
+import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-history'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createModelingService } from '@/domain/modeling/modeling-service'
@@ -1898,6 +1900,67 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  async function testDocumentCursorRequestUsesSnapshotBasisAndRefreshesOnConflict() {
+    const snapshot = structuredClone(await createMockWorkspaceSnapshot())
+    snapshot.provenance = {
+      repositoryHeads: ['head_a'],
+      repositorySource: 'peer',
+    }
+    const previousCursor = getPreviousDocumentHistoryCursor(snapshot)
+    assert(previousCursor, 'Repository cursor fixture should expose a previous cursor.')
+
+    const boot = transitionEditorState(initialEditorState, { type: 'session.started' })
+    const fetchEffect = boot.effects[0]
+    assert(fetchEffect?.type === 'document.fetchSnapshot', 'Session start should fetch a snapshot.')
+    const loaded = transitionEditorState(boot.state, {
+      type: 'effect.snapshotLoaded',
+      payload: {
+        requestId: fetchEffect.requestId,
+        documentId: snapshot.documentId,
+        revisionId: snapshot.revisionId,
+        snapshot,
+        selectionCatalog: buildSelectionTargetCatalog(snapshot),
+      },
+    })
+    const requested = transitionEditorState(loaded.state, {
+      type: 'document.historyCursorRequested',
+      cursor: previousCursor,
+    })
+    const cursorEffect = requested.effects[0]
+
+    assert(cursorEffect?.type === 'document.moveHistoryCursor', 'Timeline cursor requests should emit the document cursor effect.')
+    assert(
+      cursorEffect.mutationBasis.baseRevisionId === snapshot.revisionId
+        && cursorEffect.mutationBasis.baseRepositoryHeads?.[0] === 'head_a',
+      'Document cursor effects should carry the loaded snapshot repository basis.',
+    )
+    assert(
+      !getEditorHistoryAvailability(requested.state).canUndo && !getEditorHistoryAvailability(requested.state).canRedo,
+      'Document history actions should be unavailable while the cursor mutation is pending.',
+    )
+
+    const conflicted = transitionEditorState(requested.state, {
+      type: 'effect.documentCursorMoved',
+      requestId: cursorEffect.requestId,
+      documentId: snapshot.documentId,
+      baseRevisionId: snapshot.revisionId,
+      revisionId: 'rev_9999',
+      accepted: false,
+      actualRevisionId: 'rev_9999',
+      diagnostics: [{
+        code: 'repository-head-conflict',
+        severity: 'error',
+        message: 'The authored document changed after the current snapshot was loaded.',
+        target: null,
+        detail: null,
+      }],
+    })
+
+    assert(conflicted.effects[0]?.type === 'document.fetchSnapshot', 'Repository cursor conflicts should request a refresh.')
+    assert(conflicted.state.pendingHistoryCursorRequestId === null, 'Repository cursor conflicts should clear the pending cursor request.')
+    assert(conflicted.state.pendingSnapshotRequestId === conflicted.effects[0]?.requestId, 'Conflict refresh should be tracked as pending.')
+  }
+
   async function testXStateRuntimeBootstrapsAndLoadsSnapshot() {
     const snapshot = createSnapshot()
     let snapshotCallCount = 0
@@ -2706,6 +2769,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testSketchAbortRestoresTailCursor()
   await testFinishSketchRestoresNonTailCursor()
   await testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore()
+  await testDocumentCursorRequestUsesSnapshotBasisAndRefreshesOnConflict()
   await testXStateRuntimeBootstrapsAndLoadsSnapshot()
   await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
 })
