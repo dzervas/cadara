@@ -167,7 +167,7 @@ export interface SketchSessionState {
   plane: SketchPlaneDefinition
   planeTarget: SketchPlaneSupportRef
   planeKey: SketchPlaneKey | null
-  entities: SketchDraftEntity[]
+  toolStagedEntities: readonly SketchDraftEntity[]
   definition: SketchDefinition
   fullDefinition: SketchDefinition
   historyCursor: SketchHistoryCursor
@@ -573,9 +573,6 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
   const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
   const planeKey = sketch.planeKey ?? sketch.plane.key ?? null
-  const entities = definition.entities.flatMap((entity) =>
-    mapDefinitionEntityToDraftEntity(sketch.sketchId, definition.points, entity),
-  )
 
   return {
     sketchId: sketch.sketchId,
@@ -583,7 +580,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     plane: sketch.plane,
     planeTarget: sketch.planeTarget,
     planeKey,
-    entities,
+    toolStagedEntities: [],
     definition,
     fullDefinition,
     historyCursor,
@@ -632,7 +629,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     plane,
     planeTarget: plane.support,
     planeKey,
-    entities: [],
+    toolStagedEntities: [],
     definition,
     fullDefinition: cloneDefinition(definition),
     historyCursor: { kind: 'empty' },
@@ -775,6 +772,17 @@ function mapDefinitionEntityToDraftEntity(
       isConstruction: entity.isConstruction,
     },
   ]
+}
+
+export function deriveSketchDisplayEntities(session: SketchSessionState): readonly SketchDraftEntity[] {
+  const sketchId = getSessionSketchId(session)
+  const acceptedEntities = session.definition.entities.flatMap((entity) =>
+    mapDefinitionEntityToDraftEntity(sketchId, session.definition.points, entity),
+  )
+
+  return session.toolStagedEntities.length === 0
+    ? acceptedEntities
+    : [...acceptedEntities, ...session.toolStagedEntities]
 }
 
 function buildCommitRequest(input: {
@@ -994,16 +1002,13 @@ function rebuildSessionForDefinition(
 ): SketchSessionState {
   const definition = cloneDefinition(input.definition)
   const fullDefinition = cloneDefinition(input.fullDefinition)
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   return {
     ...session,
     historyCursor: input.historyCursor,
     definition,
     fullDefinition,
     historyOperations: [...input.historyOperations],
-    entities: definition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
-    ),
+    toolStagedEntities: [],
     activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
@@ -1330,7 +1335,7 @@ function activateSketchConstraintTool(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: buildConstraintToolPresentation(authoring),
     constraintAuthoring: authoring,
@@ -1496,7 +1501,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
       constructionModifierActive: false,
       pointerDownPoint: null,
       livePoint: null,
-      entities: session.entities.filter((entity) => entity.status === 'accepted'),
+      toolStagedEntities: [],
       validationMessage: null,
       toolPresentation: null,
       constraintAuthoring: null,
@@ -1520,7 +1525,7 @@ function beginSketchConstructionTool(session: SketchSessionState): SketchSession
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: buildConstructionTargetPresentation(),
     constraintAuthoring: null,
@@ -1549,7 +1554,7 @@ function beginSketchReferenceTool(session: SketchSessionState): SketchSessionSta
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: buildReferenceTargetPresentation(),
     constraintAuthoring: null,
@@ -1692,7 +1697,7 @@ function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditTool
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: buildSketchEditToolPresentation(activeEditTool),
     constraintAuthoring: null,
@@ -1742,7 +1747,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     pointerDownPoint: activation.state.pointerDownPoint,
     livePoint: activation.state.livePoint,
     toolPlacedPoints: activation.state.placedPoints ?? [],
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: activation.state.validationMessage,
     toolPresentation: activation.presentation,
     constraintAuthoring: null,
@@ -1776,7 +1781,7 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: null,
     constraintAuthoring: null,
@@ -1836,10 +1841,7 @@ export function updateSketchPointer(
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
     toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
-    entities: [
-      ...session.entities.filter((entity) => entity.status === 'accepted'),
-      ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
-    ],
+    toolStagedEntities: withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     validationMessage: result.state.validationMessage,
     toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
     activeSnap: snap.candidate,
@@ -1887,7 +1889,7 @@ export function focusSketchStyleTool(
     referenceTargetPicking: false,
     pointerDownPoint: null,
     livePoint: null,
-    entities: session.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: null,
     constraintAuthoring: null,
@@ -2116,9 +2118,7 @@ export function selectSketchEditToolTarget(
       definition: result.definition,
       fullDefinition: cloneDefinition(result.definition),
       historyCursor,
-      entities: result.definition.entities.flatMap((entity) =>
-        mapDefinitionEntityToDraftEntity(sketchId, result.definition.points, entity),
-      ),
+      toolStagedEntities: [],
       sequence: nextSequence,
       validationMessage: null,
       commitRequest: rebuildSessionCommitRequest(session, result.definition),
@@ -2146,10 +2146,7 @@ export function selectSketchEditToolTarget(
   return {
     ...session,
     activeEditTool: nextEditTool,
-    entities: [
-      ...session.entities.filter((entity) => entity.status === 'accepted'),
-      ...preview.previewEntities,
-    ],
+    toolStagedEntities: preview.previewEntities,
     validationMessage: preview.valid ? null : preview.message,
     toolPresentation: buildSketchEditToolPresentation(nextEditTool, preview.message, preview.previewEntities),
   }
@@ -2174,7 +2171,7 @@ export function patchSketchEditToolValue(
     return {
       ...session,
       activeEditTool: nextEditTool,
-      entities: session.entities.filter((entity) => entity.status === 'accepted'),
+      toolStagedEntities: [],
       validationMessage: null,
       toolPresentation: buildSketchEditToolPresentation(nextEditTool),
     }
@@ -2195,10 +2192,7 @@ export function patchSketchEditToolValue(
     return {
       ...session,
       activeEditTool: nextEditTool,
-      entities: [
-        ...session.entities.filter((entity) => entity.status === 'accepted'),
-        ...preview.previewEntities,
-      ],
+      toolStagedEntities: preview.previewEntities,
       validationMessage: preview.valid ? null : preview.message,
       toolPresentation: buildSketchEditToolPresentation(nextEditTool, preview.message, preview.previewEntities),
     }
@@ -2218,7 +2212,6 @@ export function patchSketchEditToolValue(
   }
 
   const nextSequence = session.sequence + 1
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const history = applySketchHistoryContribution(session, preview.contribution)
   const nextEditTool = {
     ...activeEditTool,
@@ -2229,9 +2222,7 @@ export function patchSketchEditToolValue(
   return {
     ...session,
     activeEditTool: nextEditTool,
-    entities: history.definition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, history.definition.points, entity),
-    ),
+    toolStagedEntities: [],
     definition: history.definition,
     fullDefinition: history.fullDefinition,
     historyCursor: history.historyCursor,
@@ -2275,7 +2266,7 @@ export function beginSketchGeometryDrag(
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
-    entities: selected.entities.filter((entity) => entity.status === 'accepted'),
+    toolStagedEntities: [],
     activeDrag: {
       target,
       startPoint: point,
@@ -2344,15 +2335,12 @@ function applySketchGeometryDrag(
 
   const definition = edit.definition
   const fullDefinition = applyPointPositionsToDefinition(session.fullDefinition, definition.points)
-  const sketchId = getSessionSketchId(session)
 
   return {
     ...session,
     definition,
     fullDefinition,
-    entities: definition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
-    ),
+    toolStagedEntities: [],
     activeDrag: complete
       ? null
       : {
@@ -2450,7 +2438,6 @@ export function toggleSketchConstructionTarget(
   }
 
   const definition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
-  const sketchId = getSessionSketchId(session)
 
   return {
     ...session,
@@ -2470,9 +2457,7 @@ export function toggleSketchConstructionTarget(
     activeDrag: null,
     fullDefinition: nextFullDefinition,
     definition,
-    entities: definition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, definition.points, entity),
-    ),
+    toolStagedEntities: [],
     commitRequest: rebuildSessionCommitRequest(session, definition),
     validationMessage: null,
   }
@@ -3185,10 +3170,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
     toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
-    entities: [
-      ...session.entities.filter((entity) => entity.status === 'accepted'),
-      ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
-    ],
+    toolStagedEntities: withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     validationMessage: result.state.validationMessage,
     toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
     activeSnap: snap.candidate,
@@ -3216,7 +3198,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
   if (result.state.validationMessage) {
     return {
       ...session,
-      entities: session.entities.filter((entity) => entity.status === 'accepted'),
+      toolStagedEntities: [],
       status: result.state.status,
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
@@ -3230,10 +3212,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
   if (result.state.status !== 'idle') {
     return {
       ...session,
-      entities: [
-        ...session.entities.filter((entity) => entity.status === 'accepted'),
-        ...withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
-      ],
+      toolStagedEntities: withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
       status: result.state.status,
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
@@ -3283,13 +3262,10 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   })
   const history = applySketchHistoryContribution(session, definitionPatch)
-  const acceptedEntities = history.definition.entities.flatMap((entity) =>
-    mapDefinitionEntityToDraftEntity(sketchId, history.definition.points, entity),
-  )
 
   return {
     ...session,
-    entities: acceptedEntities,
+    toolStagedEntities: [],
     definition: history.definition,
     fullDefinition: history.fullDefinition,
     historyCursor: history.historyCursor,
@@ -3973,15 +3949,12 @@ function commitSketchAnnotationEditValue(
 
   const nextFullDefinition = solved.definition
   const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
 
   return {
     ...session,
     fullDefinition: nextFullDefinition,
     definition: nextDefinition,
-    entities: nextDefinition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, nextDefinition.points, entity),
-    ),
+    toolStagedEntities: [],
     status: 'idle',
     toolPresentation: null,
     activeAnnotationEdit: null,
@@ -4259,13 +4232,10 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
   })
   const solvedDefinition = solveCommittedConstraintDefinition(history.definition, session.projectedReferences)
   const solvedFullDefinition = solveCommittedConstraintDefinition(history.fullDefinition, session.projectedReferences)
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
 
   return {
     ...session,
-    entities: solvedDefinition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, solvedDefinition.points, entity),
-    ),
+    toolStagedEntities: [],
     definition: solvedDefinition,
     fullDefinition: solvedFullDefinition,
     historyCursor: history.historyCursor,
@@ -4325,16 +4295,13 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
         }
   const historyCursor = createTailSketchHistoryCursor(nextFullDefinition)
   const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, historyCursor)
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
 
   return {
     ...session,
     fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     historyCursor,
-    entities: nextDefinition.entities.flatMap((entity) =>
-      mapDefinitionEntityToDraftEntity(sketchId, nextDefinition.points, entity),
-    ),
+    toolStagedEntities: [],
     activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
@@ -4788,7 +4755,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
         strokeStyle: style?.strokeStyle,
       }
     }),
-    ...session.entities.map((entity, index) =>
+    ...deriveSketchDisplayEntities(session).map((entity, index) =>
       createDisplayRenderableForEntity(
         session,
         entity,

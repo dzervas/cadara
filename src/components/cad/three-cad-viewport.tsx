@@ -75,6 +75,11 @@ import {
 } from '@/domain/workspace/sketch-plane-mapping'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
+import {
+  cancelCoalescedSketchGeometryDragMove,
+  createViewportBvhSceneKey,
+  scheduleCoalescedSketchGeometryDragMove,
+} from '@/components/cad/three-cad-viewport-helpers'
 
 const VIEW_CUBE_EDGE_SIZE = 1.24
 const VIEW_CUBE_FACE_FILL_SIZE = 1.1
@@ -83,6 +88,7 @@ const VIEW_CUBE_FACE_OUTLINE_SIZE = 0.78
 const VIEW_CUBE_FACE_HIT_SIZE = 0.72
 const VIEW_CUBE_CORNER_FACE_SIZE = 0.26
 const VIEW_CUBE_CORNER_HIT_SIZE = 0.34
+
 interface ThreeCadViewportProps {
   hoverTarget: PrimitiveRef | null
   renderables: ViewportRenderableRecord[]
@@ -159,6 +165,8 @@ export function ThreeCadViewport({
   const sketchHitPointRef = useRef(new THREE.Vector3())
   const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null)
+  const pendingSketchGeometryDragPointRef = useRef<readonly [number, number] | null>(null)
+  const pendingSketchGeometryDragFrameIdRef = useRef<number | null>(null)
   const pendingSketchGeometryDragRef = useRef<{
     target: PrimitiveRef
     startPoint: readonly [number, number]
@@ -211,6 +219,23 @@ export function ThreeCadViewport({
     nextControls.update()
     controlsInitializedRef.current = true
   }, [])
+  const scheduleSketchGeometryDragMove = useCallback((point: readonly [number, number]) => {
+    scheduleCoalescedSketchGeometryDragMove({
+      point,
+      pendingPointRef: pendingSketchGeometryDragPointRef,
+      pendingFrameIdRef: pendingSketchGeometryDragFrameIdRef,
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      isDragActive: () => sketchGeometryDragRef.current !== null,
+      onMove: (latestPoint) => sketchGeometryDragMoveRef.current(latestPoint),
+    })
+  }, [])
+  const cancelSketchGeometryDragMove = useCallback(() => {
+    cancelCoalescedSketchGeometryDragMove({
+      pendingPointRef: pendingSketchGeometryDragPointRef,
+      pendingFrameIdRef: pendingSketchGeometryDragFrameIdRef,
+      cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
+    })
+  }, [])
   const annotationHighlightTargets = useMemo(
     () => getAnnotationHighlightTargets(sketchAnnotations, selection, hoverTarget),
     [hoverTarget, selection, sketchAnnotations],
@@ -218,15 +243,7 @@ export function ThreeCadViewport({
   const selectionFilterRef = useRef(selectionFilter)
   const selectionCatalogRef = useRef(selectionCatalog)
   const bvhSceneKey = useMemo(
-    () => [
-      ...renderables.map(({ origin, renderable }) => {
-        return `${origin}:${renderable.id}:${renderable.binding.pickId}:${getGeometryToken(renderable.geometry)}`
-      }),
-      ...sketchDisplayRenderables.map((renderable) => {
-        return `sketch:${renderable.id}:${renderable.linePattern}:${renderable.target ? JSON.stringify(renderable.target) : 'none'}:${getGeometryToken(renderable.geometry)}`
-      }),
-    ]
-      .join('|'),
+    () => createViewportBvhSceneKey(renderables, sketchDisplayRenderables),
     [renderables, sketchDisplayRenderables],
   )
   const bvhSceneKeyRef = useRef(bvhSceneKey)
@@ -646,7 +663,7 @@ export function ThreeCadViewport({
         const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
 
         if (point) {
-          sketchGeometryDragMoveRef.current(point)
+          scheduleSketchGeometryDragMove(point)
         }
 
         return
@@ -670,7 +687,7 @@ export function ThreeCadViewport({
             sketchGeometryDragRef.current = { target: pendingSketchGeometryDrag.target }
             pendingSketchGeometryDragRef.current = null
             sketchGeometryDragStartRef.current(pendingSketchGeometryDrag.target, pendingSketchGeometryDrag.startPoint)
-            sketchGeometryDragMoveRef.current(point)
+            scheduleSketchGeometryDragMove(point)
           }
 
           return
@@ -751,6 +768,7 @@ export function ThreeCadViewport({
 
     const handlePointerUp = (event: PointerEvent) => {
       if (event.button !== 0) {
+        cancelSketchGeometryDragMove()
         primaryPointerDownRef.current = null
         sketchGeometryDragRef.current = null
         pendingSketchGeometryDragRef.current = null
@@ -762,6 +780,7 @@ export function ThreeCadViewport({
         const viewportRect = canvasElement.getBoundingClientRect()
         const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
 
+        cancelSketchGeometryDragMove()
         if (point) {
           sketchGeometryDragEndRef.current(point)
         }
@@ -813,6 +832,7 @@ export function ThreeCadViewport({
 
     const handlePointerLeave = () => {
       if (!sketchGeometryDragRef.current) {
+        cancelSketchGeometryDragMove()
         primaryPointerDownRef.current = null
         pendingSketchGeometryDragRef.current = null
       }
@@ -865,6 +885,7 @@ export function ThreeCadViewport({
     window.addEventListener('click', handleClick, true)
 
     return () => {
+      cancelSketchGeometryDragMove()
       canvasElement.removeEventListener('pointerdown', handlePointerDown, true)
       canvasElement.removeEventListener('pointermove', handlePointerMove)
       canvasElement.removeEventListener('pointerleave', handlePointerLeave)
@@ -872,7 +893,7 @@ export function ThreeCadViewport({
       window.removeEventListener('pointerup', handlePointerUp, true)
       window.removeEventListener('click', handleClick, true)
     }
-  }, [canvasReadyVersion, sketchSession])
+  }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSession])
 
   return (
     <div ref={viewportRef} data-testid="cad-viewport" className="relative h-full w-full">
@@ -1623,6 +1644,27 @@ function SketchDisplayMeshNode({
   )
 }
 
+function updatePolylineGeometryBuffer(
+  geometry: THREE.BufferGeometry,
+  geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
+) {
+  const points = geometryData.isClosed && geometryData.points.length > 0
+    ? [...geometryData.points, geometryData.points[0]!]
+    : geometryData.points
+  let position = geometry.getAttribute('position') as THREE.BufferAttribute | undefined
+
+  if (!position || position.count !== points.length) {
+    position = new THREE.BufferAttribute(new Float32Array(points.length * 3), 3)
+    geometry.setAttribute('position', position)
+  }
+
+  points.forEach((point, index) => {
+    position.setXYZ(index, point[0], point[1], point[2])
+  })
+  position.needsUpdate = true
+  geometry.computeBoundingSphere()
+}
+
 function SketchDisplayPolylineNode({
   renderable,
   applyStyles,
@@ -1631,48 +1673,44 @@ function SketchDisplayPolylineNode({
   applyStyles: boolean
 }) {
   const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
-  const line = useMemo(() => {
-    if (!geometryData) {
-      throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
-    }
+  if (!geometryData) {
+    throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
+  }
 
-    const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles)
-    const nextLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(
-        geometryData.isClosed && geometryData.points.length > 0
-          ? [
-              ...geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2])),
-              new THREE.Vector3(
-                geometryData.points[0]![0],
-                geometryData.points[0]![1],
-                geometryData.points[0]![2],
-              ),
-            ]
-          : geometryData.points.map((point) => new THREE.Vector3(point[0], point[1], point[2])),
-      ),
-      materialConfig.linePattern === 'dashed'
-        ? new THREE.LineDashedMaterial({
-            color: materialConfig.color,
-            transparent: true,
-            opacity: materialConfig.opacity,
-            depthTest: true,
-            depthWrite: false,
-            linewidth: materialConfig.lineWidth,
-            dashSize: materialConfig.dashSize,
-            gapSize: materialConfig.gapSize,
-          })
-        : new THREE.LineBasicMaterial({
-            color: materialConfig.color,
-            transparent: true,
-            opacity: materialConfig.opacity,
-            depthTest: true,
-            depthWrite: false,
-            linewidth: materialConfig.lineWidth,
-          }),
-    )
-    if (materialConfig.linePattern === 'dashed') {
-      nextLine.computeLineDistances()
-    }
+  const geometry = useMemo(() => new THREE.BufferGeometry(), [])
+  const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles)
+  const {
+    color,
+    dashSize,
+    gapSize,
+    linePattern,
+    lineWidth,
+    opacity,
+  } = materialConfig
+  const material = useMemo(
+    () => linePattern === 'dashed'
+      ? new THREE.LineDashedMaterial({
+          color,
+          transparent: true,
+          opacity,
+          depthTest: true,
+          depthWrite: false,
+          linewidth: lineWidth,
+          dashSize,
+          gapSize,
+        })
+      : new THREE.LineBasicMaterial({
+          color,
+          transparent: true,
+          opacity,
+          depthTest: true,
+          depthWrite: false,
+          linewidth: lineWidth,
+        }),
+    [color, dashSize, gapSize, linePattern, lineWidth, opacity],
+  )
+  const line = useMemo(() => {
+    const nextLine = new THREE.Line(geometry, material)
     nextLine.renderOrder = 3
 
     if (renderable.target) {
@@ -1686,18 +1724,22 @@ function SketchDisplayPolylineNode({
     }
 
     return nextLine
-  }, [applyStyles, geometryData, renderable])
+  }, [geometry, material, renderable.role, renderable.target])
+
+  useLayoutEffect(() => {
+    updatePolylineGeometryBuffer(geometry, geometryData)
+
+    if (linePattern === 'dashed') {
+      line.computeLineDistances()
+    }
+  }, [geometry, geometryData, line, linePattern])
 
   useEffect(() => {
     return () => {
-      line.geometry.dispose()
-      if (Array.isArray(line.material)) {
-        line.material.forEach((material) => material.dispose())
-      } else {
-        line.material.dispose()
-      }
+      geometry.dispose()
     }
-  }, [line])
+  }, [geometry])
+  useEffect(() => () => material.dispose(), [material])
 
   return <primitive object={line} />
 }
@@ -1710,6 +1752,10 @@ function SketchDisplayMarkerNode({
   applyStyles: boolean
 }) {
   const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+  if (!geometryData) {
+    throw new Error('Display renderable is missing marker geometry.')
+  }
+
   const defaultColor = renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchPoint
   const material = useMemo(() => new THREE.MeshStandardMaterial({
     color: applyStyles
@@ -1727,14 +1773,14 @@ function SketchDisplayMarkerNode({
     depthWrite: false,
   }), [applyStyles, defaultColor, renderable.paintStyle, renderable.role, renderable.strokeStyle])
   const pickProxy = useMemo(() => {
-    if (!geometryData) {
-      throw new Error('Display renderable is missing marker geometry.')
-    }
-
-    const proxy = createMarkerPickProxy(geometryData.position, geometryData.displayRadius)
+    const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius)
     proxy.userData.highlightExcluded = true
     return proxy
-  }, [geometryData])
+  }, [geometryData.displayRadius])
+
+  useLayoutEffect(() => {
+    pickProxy.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
+  }, [geometryData.position, pickProxy])
 
   useEffect(() => () => material.dispose(), [material])
   useEffect(() => {
@@ -1762,8 +1808,8 @@ function SketchDisplayMarkerNode({
       <mesh
         geometry={MARKER_SPHERE_GEOMETRY}
         material={material}
-        position={geometryData?.position}
-        scale={geometryData ? getVisibleMarkerRadius(geometryData.displayRadius) : 1}
+        position={geometryData.position}
+        scale={getVisibleMarkerRadius(geometryData.displayRadius)}
         renderOrder={4}
       />
       <primitive object={pickProxy} />
@@ -1945,32 +1991,6 @@ function updatePointerFromClientPoint(
 ) {
   pointer.x = ((clientX - viewportRect.left) / viewportRect.width) * 2 - 1
   pointer.y = -((clientY - viewportRect.top) / viewportRect.height) * 2 + 1
-}
-
-function getGeometryToken(
-  geometry: ViewportRenderableRecord['renderable']['geometry'] | SketchSessionDisplayRenderable['geometry'],
-) {
-  switch (geometry.kind) {
-    case 'mesh':
-      return [
-        'mesh',
-        geometry.vertexPositions.flat().join(','),
-        geometry.triangleIndices.flat().join(','),
-        geometry.vertexNormals ? geometry.vertexNormals.flat().join(',') : 'auto-normals',
-      ].join(':')
-    case 'polyline':
-      return [
-        'polyline',
-        geometry.points.flat().join(','),
-        geometry.isClosed ? 'closed' : 'open',
-      ].join(':')
-    case 'marker':
-      return [
-        'marker',
-        geometry.position.join(','),
-        geometry.displayRadius,
-      ].join(':')
-  }
 }
 
 function isAnnotationTarget(

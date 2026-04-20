@@ -9,6 +9,7 @@ import {
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
+  deriveSketchDisplayEntities,
   finishSketchGeometryDrag,
   getSketchSessionDisplayRenderables,
   patchSketchStyleValue,
@@ -266,6 +267,17 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
 
     const movedPoint = session.definition.points.find((entry) => entry.pointId === point.pointId)
     assertClosePoint(movedPoint?.position, [2, 3], 'Unconstrained drag should update the authored point.')
+    const movedDisplayLine = deriveSketchDisplayEntities(session).find((entity) => entity.kind === 'line')
+    assert(movedDisplayLine?.kind === 'line', 'Edited line should remain visible as a display line.')
+    const movedDisplayEndpoint = [movedDisplayLine.start, movedDisplayLine.end].find((endpoint) =>
+      Math.hypot(endpoint[0] - 2, endpoint[1] - 3) < 1e-4,
+    )
+    assertClosePoint(movedDisplayEndpoint, [2, 3], 'Edited line display should derive from the updated sketch definition.')
+    assert(
+      !(movedDisplayLine.start[0] === 0 && movedDisplayLine.start[1] === 0)
+        && !(movedDisplayLine.end[0] === 0 && movedDisplayLine.end[1] === 0),
+      'Edited line display should not include stale pre-drag point geometry.',
+    )
     assertClosePoint(
       session.commitRequest?.definition.points.find((entry) => entry.pointId === point.pointId)?.position,
       [2, 3],
@@ -392,6 +404,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       deleted.commitRequest?.definition.entityIds.includes('sketch_entity_circle') === false,
       'Entity deletion should rebuild the commit request without deleted geometry.',
     )
+    assert(
+      !deriveSketchDisplayEntities(deleted).some((entity) => entity.entityId === 'sketch_entity_circle'),
+      'Entity deletion should remove deleted accepted geometry from derived display entities.',
+    )
   }
 
   function testSelectedPointDeletionRemovesDependentGeometryAndAnnotations() {
@@ -435,6 +451,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
                 : remainingPointIds.has(entity.startPointId) && remainingPointIds.has(entity.endPointId),
       ),
       'Point deletion should not leave entities with dangling point references.',
+    )
+    assert(
+      !deriveSketchDisplayEntities(deleted).some((entity) => entity.entityId === 'sketch_entity_ab' || entity.entityId === 'sketch_entity_da'),
+      'Point deletion should remove dependent accepted geometry from derived display entities.',
     )
   }
 
@@ -679,7 +699,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
 
     session = beginSketchTool(session, 'offset')
     session = selectSketchEditToolTarget(session, lineTarget)
-    assert(session.entities.some((entity) => entity.status === 'preview'), 'Offset selection should stage preview geometry.')
+    assert(session.toolStagedEntities.some((entity) => entity.status === 'preview'), 'Offset selection should stage preview geometry.')
+    assert(
+      deriveSketchDisplayEntities(session).some((entity) => entity.status === 'preview'),
+      'Offset preview should appear in derived display entities while staged.',
+    )
 
     session = patchSketchEditToolValue(session, { value: 0 })
     const beforeInvalidCommit = session.definition.entityIds.length
@@ -693,6 +717,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
 
     assert(session.definition.entityIds.length === 2, 'Valid offset should add one offset line.')
     assert(session.commitRequest?.definition.entityIds.length === 2, 'Valid offset should rebuild the sketch commit request.')
+    assert(session.toolStagedEntities.length === 0, 'Committed offset should clear staged preview geometry.')
+    assert(
+      deriveSketchDisplayEntities(session).every((entity) => entity.status === 'accepted'),
+      'Committed offset display entities should be accepted definition-derived geometry only.',
+    )
   }
 
   function testOffsetCreatesContinuousOuterAndInnerSquares() {
@@ -705,7 +734,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
 
     assert(outerSession.activeEditTool?.selectedTargets.length === 4, 'Offset should collect multiple selected square edges.')
     assert(
-      outerSession.entities.filter((entity) => entity.status === 'preview' && entity.kind === 'line').length === 4,
+      outerSession.toolStagedEntities.filter((entity) => entity.status === 'preview' && entity.kind === 'line').length === 4,
       'Continuous square offset should preview one joined line per selected edge.',
     )
 
@@ -872,7 +901,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       geometryId: 'projected_geometry_circle',
       geometryKind: 'circle',
     })
-    assert(circleSession.entities.some((entity) => entity.status === 'preview' && entity.kind === 'circle'), 'Projected circle offset should preview a circle.')
+    assert(circleSession.toolStagedEntities.some((entity) => entity.status === 'preview' && entity.kind === 'circle'), 'Projected circle offset should preview a circle.')
     circleSession = patchSketchEditToolValue(circleSession, { value: 1 })
     circleSession = patchSketchEditToolValue(circleSession, { intent: 'commitOffset' })
     const offsetCircle = circleSession.definition.entities.find((entity) => entity.kind === 'circle')
@@ -888,7 +917,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       geometryId: 'projected_geometry_spline',
       geometryKind: 'spline',
     })
-    assert(splineSession.entities.some((entity) => entity.status === 'preview' && entity.kind === 'spline'), 'Projected spline offset should preview a spline.')
+    assert(splineSession.toolStagedEntities.some((entity) => entity.status === 'preview' && entity.kind === 'spline'), 'Projected spline offset should preview a spline.')
     splineSession = patchSketchEditToolValue(splineSession, { value: 1 })
     splineSession = patchSketchEditToolValue(splineSession, { intent: 'commitOffset' })
     assert(

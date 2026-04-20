@@ -3,6 +3,7 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
+  deriveSketchDisplayEntities,
   getSketchToolPresentation,
   startSketchDraw,
   updateSketchPointer,
@@ -129,7 +130,11 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(accepted.definition.entityIds.length === 4, 'Rectangle commit output should add four line entities.')
     assert(accepted.definition.constraintIds.length === 4, 'Rectangle commit output should add horizontal and vertical constraints.')
     assert(accepted.definition.dimensionIds.length === 2, 'Rectangle commit output should add width and height dimensions.')
-    assert(accepted.entities.every((entity) => entity.status === 'accepted'), 'Accepted rectangle geometry should replace preview entities.')
+    assert(accepted.toolStagedEntities.length === 0, 'Accepted rectangle geometry should clear preview entities.')
+    assert(
+      deriveSketchDisplayEntities(accepted).every((entity) => entity.status === 'accepted'),
+      'Accepted rectangle display geometry should derive from committed entities.',
+    )
   }
 
   function testSplineCollectsThreePointsAndCommitsDurableGeometry() {
@@ -143,7 +148,10 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
 
     assert(session.status === 'drawing', 'Spline should keep collecting after the second point.')
     assert(session.definition.entities.length === 0, 'Spline should not commit before it has enough points.')
-    assert(session.entities.some((entity) => entity.kind === 'spline' && entity.status === 'preview'), 'Spline should stage preview geometry while collecting points.')
+    assert(
+      session.toolStagedEntities.some((entity) => entity.kind === 'spline' && entity.status === 'preview'),
+      'Spline should stage preview geometry while collecting points.',
+    )
 
     session = acceptSketchDraw(session, [3, 0])
 
@@ -151,6 +159,7 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(session.definition.entities[0]?.kind === 'spline', 'Spline commit output should add a durable spline entity.')
     assert(session.definition.points.length === 3, 'Spline commit output should add its fit points.')
     assert(session.commitRequest?.definition.entities[0]?.kind === 'spline', 'Spline commit request should include durable spline geometry.')
+    assert(session.toolStagedEntities.length === 0, 'Spline commit should clear staged preview geometry.')
   }
 
   function testGenericPresentationAccessFromSession() {

@@ -6,6 +6,7 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
+  deriveSketchDisplayEntities,
   startSketchDraw,
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
@@ -79,7 +80,7 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {
     assert(session.activeSnap?.kind === 'horizontalAlignment', 'Line preview should snap horizontally from the snapped start.')
     assertClosePoint(session.livePoint, [3, 0], 'Line preview should use the snap-adjusted endpoint.')
 
-    const preview = session.entities.find((entity) => entity.status === 'preview')
+    const preview = deriveSketchDisplayEntities(session).find((entity) => entity.status === 'preview')
     assert(preview?.kind === 'line', 'Expected a transient preview line.')
     assertClosePoint(preview.start, [1, 0], 'Preview line should start at the snapped midpoint.')
     assertClosePoint(preview.end, [3, 0], 'Preview line should end at the snapped horizontal point.')
