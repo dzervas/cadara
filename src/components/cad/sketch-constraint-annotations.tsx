@@ -116,13 +116,23 @@ function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphK
     case 'constraintVertical':
       return '/icons/sketch-vertical.svg'
     case 'constraintFixed':
-      return '/icons/sketch-fix.svg'
+      return getToolbarToolIconSrc('constraintFix')
     case 'constraintAngle':
       return '/icons/drawing-angular-dim-line-to-line.svg'
     case 'constraintPerpendicular':
       return '/icons/sketch-perpendicular.svg'
     case 'constraintTangent':
       return '/icons/sketch-tangent.svg'
+    case 'constraintConcentric':
+      return getToolbarToolIconSrc('constraintConcentric')
+    case 'constraintMidpoint':
+      return getToolbarToolIconSrc('constraintMidpoint')
+    case 'constraintNormal':
+      return getToolbarToolIconSrc('constraintNormal')
+    case 'constraintPierce':
+      return getToolbarToolIconSrc('constraintPierce')
+    case 'constraintSymmetric':
+      return getToolbarToolIconSrc('constraintSymmetric')
     case 'dimensionDistance':
       return getToolbarToolIconSrc('dimension')
     case 'dimensionHorizontal':

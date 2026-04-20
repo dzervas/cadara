@@ -15,8 +15,12 @@ import {
   updateSketchReferenceProjection,
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
-import { selectPointToPointDimensionReference } from '@/domain/sketch-constraints/registry'
-import { getToolById } from '@/domain/tools/tool-registry'
+import { toolbarToolIconAssetMap } from '@/components/layout/toolbar-tool-icon-assets'
+import {
+  getRegisteredSketchConstraintDefinitions,
+  selectPointToPointDimensionReference,
+} from '@/domain/sketch-constraints/registry'
+import { getToolById, getToolbarSectionsForMode } from '@/domain/tools/tool-registry'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 
 test('src/domain/sketch-constraints/registry.spec.ts', async () => {
@@ -43,8 +47,42 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     return session
   }
 
+  function createSessionWithTwoCircles() {
+    let session = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [4, 0])
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [10, 0])
+    session = acceptSketchDraw(session, [12, 0])
+
+    return session
+  }
+
+  function createSessionWithLineAndCircle() {
+    let session = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [1, 4])
+    session = acceptSketchDraw(session, [5, 4])
+
+    session = beginSketchTool(session, 'circle')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [4, 0])
+
+    return session
+  }
+
   function addProjectedReference(
-    session: ReturnType<typeof createSessionWithTwoLines>,
+    session: ReturnType<typeof createNewSketchSessionFromSupport>,
     projectedReference: ProjectedSketchReferenceRecord,
   ) {
     const definitionWithReference = {
@@ -77,6 +115,318 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
         'dimensionRadius',
       ]),
       'Dimension dropdown should expose the supported dimensional authoring variants.',
+    )
+
+    const newConstraintTools = {
+      constraintConcentric: 'sketch-concentric.svg',
+      constraintMidpoint: 'sketch-midpoint.svg',
+      constraintNormal: 'sketch-normal.svg',
+      constraintPierce: 'sketch-pierce.svg',
+      constraintSymmetric: 'sketch-symmetric.svg',
+      constraintFix: 'sketch-fix.svg',
+    } as const
+    const sketchConstraintSection = getToolbarSectionsForMode('sketch').find((section) => section.id === 'constraints')
+    const partToolIds = getToolbarSectionsForMode('part').flatMap((section) => section.toolIds)
+    const registeredConstraintIds = new Set(
+      getRegisteredSketchConstraintDefinitions().map((definition) => definition.metadata.id),
+    )
+
+    for (const [toolId, asset] of Object.entries(newConstraintTools)) {
+      const tool = getToolById(toolId as keyof typeof newConstraintTools)
+      assert(tool.group === 'constraints', `${toolId} should register in the sketch constraint group.`)
+      assert(tool.modes.length === 1 && tool.modes[0] === 'sketch', `${toolId} should be sketch-only.`)
+      assert(tool.icon === toolId, `${toolId} should use a stable matching icon id.`)
+      assert(toolbarToolIconAssetMap[tool.icon] === asset, `${toolId} should map to ${asset}.`)
+      assert(sketchConstraintSection?.toolIds.includes(tool.id), `${toolId} should be exposed in the sketch toolbar.`)
+      assert(!partToolIds.includes(tool.id), `${toolId} should not be exposed in part mode.`)
+      assert(registeredConstraintIds.has(tool.id), `${toolId} should have sketch constraint behavior registered.`)
+    }
+  }
+
+  function testConcentricAuthoringCommitsLocalAndProjectedConstraints() {
+    let localSession = createSessionWithTwoCircles()
+    const [firstCircle, secondCircle] = localSession.definition.entities.filter((entity) => entity.kind === 'circle')
+    assert(firstCircle?.kind === 'circle' && secondCircle?.kind === 'circle', 'Expected two local circles.')
+
+    localSession = beginSketchTool(localSession, 'constraintConcentric')
+    localSession = selectSketchConstraintTarget(localSession, firstCircle.target)
+    localSession = selectSketchConstraintTarget(localSession, secondCircle.target)
+
+    assert(localSession.definition.constraints[0]?.kind === 'concentric', 'Concentric should commit a local durable constraint.')
+    const localAnnotation = getSketchAnnotationDescriptors(localSession).find((entry) => entry.target.kind === 'constraint')
+    assert(localAnnotation?.glyphKind === 'constraintConcentric', 'Concentric constraints should expose a concentric glyph.')
+
+    let projectedSession = createSessionWithTwoCircles()
+    const projectedCircle = projectedSession.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(projectedCircle?.kind === 'circle', 'Expected a local circle for projected concentric authoring.')
+    projectedSession = addProjectedReference(projectedSession, {
+      referenceId: 'ref_circle',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_circle',
+        kind: 'circle',
+        centerPosition: [6, 3],
+        radius: 2,
+      }],
+      diagnostics: [],
+    })
+
+    projectedSession = beginSketchTool(projectedSession, 'constraintConcentric')
+    projectedSession = selectSketchConstraintTarget(projectedSession, projectedCircle.target)
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_circle',
+      geometryId: 'projected_geometry_circle',
+      geometryKind: 'circle',
+    })
+
+    const projectedConstraint = projectedSession.definition.constraints[0]
+    assert(
+      projectedConstraint?.kind === 'concentricProjectedCurve',
+      'Concentric should commit a projected-curve durable constraint when one target is projected.',
+    )
+    const center = projectedSession.definition.points.find((point) => point.pointId === projectedCircle.centerPointId)
+    assert(center && Math.hypot(center.position[0] - 6, center.position[1] - 3) < 1e-4, 'Projected concentric should solve the local center onto the projected center.')
+  }
+
+  function testMidpointAuthoringCommitsLocalAndProjectedConstraints() {
+    let localSession = createSessionWithTwoLines()
+    const [lineId] = localSession.definition.entityIds
+    const pointId = localSession.definition.pointIds[2]
+
+    localSession = beginSketchTool(localSession, 'constraintMidpoint')
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointId!,
+    })
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId!,
+    })
+
+    assert(localSession.definition.constraints[0]?.kind === 'midpoint', 'Midpoint should commit a local midpoint constraint.')
+    assert(getSketchAnnotationDescriptors(localSession)[0]?.glyphKind === 'constraintMidpoint', 'Midpoint should expose a midpoint glyph.')
+
+    let projectedSession = createSessionWithTwoLines()
+    const projectedPointId = projectedSession.definition.pointIds[0]
+    projectedSession = addProjectedReference(projectedSession, {
+      referenceId: 'ref_line_midpoint',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_line_midpoint',
+        kind: 'lineSegment',
+        startPosition: [2, 2],
+        endPosition: [8, 2],
+      }],
+      diagnostics: [],
+    })
+
+    projectedSession = beginSketchTool(projectedSession, 'constraintMidpoint')
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_line_midpoint',
+      geometryId: 'projected_geometry_line_midpoint',
+      geometryKind: 'lineSegment',
+    })
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: projectedPointId!,
+    })
+
+    assert(
+      projectedSession.definition.constraints[0]?.kind === 'midpointProjectedLine',
+      'Midpoint should commit a projected-line midpoint constraint.',
+    )
+  }
+
+  function testPierceAuthoringCommitsLocalAndProjectedConstraints() {
+    let localSession = createSessionWithTwoLines()
+    const [lineId] = localSession.definition.entityIds
+    const pointId = localSession.definition.pointIds[2]
+
+    localSession = beginSketchTool(localSession, 'constraintPierce')
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId!,
+    })
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointId!,
+    })
+
+    assert(localSession.definition.constraints[0]?.kind === 'pointOnCurve', 'Pierce should commit a local point-on-curve constraint.')
+    assert(getSketchAnnotationDescriptors(localSession)[0]?.glyphKind === 'constraintPierce', 'Pierce should expose a pierce glyph.')
+
+    let projectedSession = createSessionWithTwoLines()
+    const projectedPointId = projectedSession.definition.pointIds[0]
+    projectedSession = addProjectedReference(projectedSession, {
+      referenceId: 'ref_pierce',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_pierce',
+        kind: 'circle',
+        centerPosition: [0, 0],
+        radius: 3,
+      }],
+      diagnostics: [],
+    })
+
+    projectedSession = beginSketchTool(projectedSession, 'constraintPierce')
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: projectedPointId!,
+    })
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_pierce',
+      geometryId: 'projected_geometry_pierce',
+      geometryKind: 'circle',
+    })
+
+    assert(
+      projectedSession.definition.constraints[0]?.kind === 'pointOnProjectedCurve',
+      'Pierce should commit a projected point-on-curve constraint.',
+    )
+  }
+
+  function testFixGeometryCommitsSupportedTargets() {
+    let pointSession = createSessionWithTwoLines()
+    const pointId = pointSession.definition.pointIds[0]
+    pointSession = beginSketchTool(pointSession, 'constraintFix')
+    pointSession = selectSketchConstraintTarget(pointSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointId!,
+    })
+    assert(pointSession.definition.constraints.length === 1, 'Fixing a point should commit one fix-point constraint.')
+    assert(pointSession.definition.constraints[0]?.kind === 'fixPoint', 'Point fix should use fixPoint.')
+    assert(getSketchAnnotationDescriptors(pointSession)[0]?.glyphKind === 'constraintFixed', 'Fix constraints should expose the fixed glyph.')
+
+    let lineSession = createSessionWithTwoLines()
+    const lineId = lineSession.definition.entityIds[0]
+    lineSession = beginSketchTool(lineSession, 'constraintFix')
+    lineSession = selectSketchConstraintTarget(lineSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId!,
+    })
+    assert(lineSession.definition.constraints.length === 2, 'Fixing a line should fix both endpoints.')
+    assert(lineSession.definition.constraints.every((constraint) => constraint.kind === 'fixPoint'), 'Line fix should use fixPoint constraints.')
+
+    let circleSession = createSessionWithTwoCircles()
+    const circle = circleSession.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(circle?.kind === 'circle', 'Expected a local circle.')
+    circleSession = beginSketchTool(circleSession, 'constraintFix')
+    circleSession = selectSketchConstraintTarget(circleSession, circle.target)
+    assert(circleSession.definition.constraints.length === 1, 'Fixing a circle should fix its center point.')
+    assert(circleSession.definition.dimensions[0]?.kind === 'circleRadius', 'Fixing a circle should add a radius dimension for the current size.')
+  }
+
+  function testNormalAuthoringCommitsValidTargetsAndRejectsInvalidTargets() {
+    let session = createSessionWithLineAndCircle()
+    const line = session.definition.entities.find((entity) => entity.kind === 'lineSegment')
+    const circle = session.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(line?.kind === 'lineSegment' && circle?.kind === 'circle', 'Expected a line and circle for normal authoring.')
+
+    session = beginSketchTool(session, 'constraintNormal')
+    session = selectSketchConstraintTarget(session, line.target)
+    session = selectSketchConstraintTarget(session, circle.target)
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: line.startPointId,
+    })
+
+    assert(
+      session.definition.constraints.some((constraint) => constraint.kind === 'normal'),
+      'Normal should commit a local normal constraint.',
+    )
+    assert(
+      getSketchAnnotationDescriptors(session).some((annotation) => annotation.glyphKind === 'constraintNormal'),
+      'Normal should expose a normal glyph.',
+    )
+
+    let invalidSession = createSessionWithTwoCircles()
+    const [firstCircle, secondCircle] = invalidSession.definition.entities.filter((entity) => entity.kind === 'circle')
+    assert(firstCircle?.kind === 'circle' && secondCircle?.kind === 'circle', 'Expected two circles for invalid normal authoring.')
+    invalidSession = beginSketchTool(invalidSession, 'constraintNormal')
+    invalidSession = selectSketchConstraintTarget(invalidSession, firstCircle.target)
+    invalidSession = selectSketchConstraintTarget(invalidSession, secondCircle.target)
+    invalidSession = selectSketchConstraintTarget(invalidSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: invalidSession.definition.pointIds[0]!,
+    })
+
+    assert(invalidSession.definition.constraints.length === 0, 'Invalid normal targets should not commit a partial constraint.')
+    assert(invalidSession.validationMessage?.includes('Normal needs'), 'Invalid normal targets should report validation feedback.')
+  }
+
+  function testSymmetricAuthoringCommitsLocalAndProjectedAxes() {
+    let localSession = createSessionWithTwoLines()
+    const [axisId] = localSession.definition.entityIds
+    const pointA = localSession.definition.pointIds[2]
+    const pointB = localSession.definition.pointIds[3]
+
+    localSession = beginSketchTool(localSession, 'constraintSymmetric')
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointA!,
+    })
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointB!,
+    })
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: axisId!,
+    })
+
+    assert(localSession.definition.constraints[0]?.kind === 'symmetric', 'Symmetric should commit a local-axis constraint.')
+    assert(getSketchAnnotationDescriptors(localSession)[0]?.glyphKind === 'constraintSymmetric', 'Symmetric should expose a symmetric glyph.')
+
+    let projectedSession = createSessionWithTwoLines()
+    projectedSession = addProjectedReference(projectedSession, {
+      referenceId: 'ref_axis',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_axis',
+        kind: 'lineSegment',
+        startPosition: [0, 0],
+        endPosition: [0, 10],
+      }],
+      diagnostics: [],
+    })
+    projectedSession = beginSketchTool(projectedSession, 'constraintSymmetric')
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_axis',
+      geometryId: 'projected_geometry_axis',
+      geometryKind: 'lineSegment',
+    })
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: projectedSession.definition.pointIds[0]!,
+    })
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: projectedSession.definition.pointIds[1]!,
+    })
+
+    assert(
+      projectedSession.definition.constraints[0]?.kind === 'symmetricProjectedLine',
+      'Symmetric should commit a projected-axis constraint.',
     )
   }
 
@@ -633,6 +983,12 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   }
 
   testToolbarDefinitionsExposeConstraintFamilies()
+  testConcentricAuthoringCommitsLocalAndProjectedConstraints()
+  testMidpointAuthoringCommitsLocalAndProjectedConstraints()
+  testPierceAuthoringCommitsLocalAndProjectedConstraints()
+  testFixGeometryCommitsSupportedTargets()
+  testNormalAuthoringCommitsValidTargetsAndRejectsInvalidTargets()
+  testSymmetricAuthoringCommitsLocalAndProjectedAxes()
   testGeometricConstraintAuthoringCommitsDurableRecord()
   testProjectedCoincidentAuthoringCommitsTypedOperand()
   testProjectedCoincidentAuthoringCanConstrainCircleCenter()

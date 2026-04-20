@@ -305,6 +305,36 @@ const constraintDefinitionSchema = z.discriminatedUnion('kind', [
     curve: localSketchEntityConstraintOperandSchema,
     projectedCurve: projectedSketchGeometryConstraintOperandSchema,
   }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('normal'),
+    label: z.string(),
+    line: localSketchEntityConstraintOperandSchema,
+    curve: localSketchEntityConstraintOperandSchema,
+    point: localSketchPointConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('normalProjectedCurve'),
+    label: z.string(),
+    line: localSketchEntityConstraintOperandSchema,
+    projectedCurve: projectedSketchGeometryConstraintOperandSchema,
+    point: localSketchPointConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('symmetric'),
+    label: z.string(),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
+    axis: localSketchEntityConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('symmetricProjectedLine'),
+    label: z.string(),
+    pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
+    projectedLine: projectedSketchGeometryConstraintOperandSchema,
+  }),
 ]).transform((value) => value as ConstraintDefinition)
 
 const dimensionDefinitionSchema = z.discriminatedUnion('kind', [

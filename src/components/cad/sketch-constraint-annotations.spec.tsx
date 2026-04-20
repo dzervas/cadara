@@ -72,15 +72,39 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
     label: 'Vertical',
     detail: 'Vertical line',
   }
+  const newGlyphAnnotations: SketchAnnotationDescriptor[] = [
+    ['constraintConcentric', 'Concentric'],
+    ['constraintMidpoint', 'Midpoint'],
+    ['constraintNormal', 'Normal'],
+    ['constraintPierce', 'Pierce'],
+    ['constraintSymmetric', 'Symmetric'],
+    ['constraintFixed', 'Fixed'],
+  ].map(([glyphKind, label], index) => ({
+    ...annotation,
+    id: `constraint_new_${index}`,
+    target: {
+      kind: 'constraint',
+      sketchId: 'sketch_draft',
+      constraintId: `constraint_new_${index}`,
+    },
+    glyphKind: glyphKind as SketchAnnotationDescriptor['glyphKind'],
+    label,
+    detail: `${label} constraint`,
+  }))
 
   const markup = renderToStaticMarkup(
     <SketchConstraintAnnotations
-      annotations={[annotation, dimensionAnnotation, horizontalAnnotation, verticalAnnotation]}
+      annotations={[annotation, dimensionAnnotation, horizontalAnnotation, verticalAnnotation, ...newGlyphAnnotations]}
       projections={[
         { id: getAnnotationProjectionId(annotation.id), x: 120, y: 80 },
         { id: getAnnotationProjectionId(dimensionAnnotation.id), x: 120, y: 80 },
         { id: getAnnotationProjectionId(horizontalAnnotation.id), x: 220, y: 80 },
         { id: getAnnotationProjectionId(verticalAnnotation.id), x: 260, y: 80 },
+        ...newGlyphAnnotations.map((entry, index) => ({
+          id: getAnnotationProjectionId(entry.id),
+          x: 300 + index * 36,
+          y: 80,
+        })),
       ]}
       hoveredAnnotation={annotation.target}
       selectedAnnotation={annotation.target}
@@ -102,6 +126,15 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
   assert(
     markup.includes('/icons/sketch-horizontal.svg') && markup.includes('/icons/sketch-vertical.svg'),
     'Horizontal and vertical constraint annotations should use visible public icon assets.',
+  )
+  assert(
+    markup.includes('/icons/sketch-concentric.svg') &&
+      markup.includes('/icons/sketch-midpoint.svg') &&
+      markup.includes('/icons/sketch-normal.svg') &&
+      markup.includes('/icons/sketch-pierce.svg') &&
+      markup.includes('/icons/sketch-symmetric.svg') &&
+      markup.includes('/icons/sketch-fix.svg'),
+    'New committed constraint glyphs should use their dedicated toolbar SVG assets.',
   )
   assert(
     markup.includes('left:120px') && markup.includes('left:158px') && markup.includes('top:80px'),

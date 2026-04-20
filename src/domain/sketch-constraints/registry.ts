@@ -114,6 +114,110 @@ function resolveCoincidentTarget(
     ?? resolveCurveTarget(definition, target, projectedReferences)
 }
 
+function resolvePointOrLineTarget(
+  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
+  target: PrimitiveRef,
+  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
+) {
+  return resolvePointTarget(definition, target, projectedReferences)
+    ?? resolveLineTarget(definition, target, projectedReferences)
+}
+
+function resolvePierceTarget(
+  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
+  target: PrimitiveRef,
+  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
+) {
+  return resolvePointTarget(definition, target, projectedReferences)
+    ?? resolveLineTarget(definition, target, projectedReferences)
+    ?? resolveCircleTarget(definition, target, projectedReferences)
+    ?? resolveCurveTarget(definition, target, projectedReferences)
+}
+
+function resolveNormalTarget(
+  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
+  target: PrimitiveRef,
+  projectedReferences?: Parameters<SketchConstraintDefinition['resolveTarget']>[2],
+) {
+  return resolvePointTarget(definition, target, projectedReferences)
+    ?? resolveLineTarget(definition, target, projectedReferences)
+    ?? resolveCircleTarget(definition, target, projectedReferences)
+}
+
+function resolveFixTarget(
+  definition: Parameters<SketchConstraintDefinition['resolveTarget']>[0],
+  target: PrimitiveRef,
+) {
+  if (target.kind === 'projectedReferenceGeometry') {
+    return null
+  }
+
+  return resolvePointTarget(definition, target)
+    ?? resolveLineTarget(definition, target)
+    ?? resolveCircleTarget(definition, target)
+    ?? resolveCurveTarget(definition, target)
+}
+
+function selectedLocalPoint(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) => target.point) ?? null
+}
+
+function selectedLocalLine(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) => target.entity?.kind === 'lineSegment') ?? null
+}
+
+function selectedLocalCircleLike(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) => target.entity?.kind === 'circle' || target.entity?.kind === 'arc') ?? null
+}
+
+function selectedProjectedLine(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) => target.projected?.geometry.kind === 'lineSegment')?.projected ?? null
+}
+
+function selectedProjectedCircleLike(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) =>
+    target.projected?.geometry.kind === 'circle' || target.projected?.geometry.kind === 'arc',
+  )?.projected ?? null
+}
+
+function selectedProjectedCurve(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) =>
+    target.projected
+    && (
+      target.projected.geometry.kind === 'lineSegment'
+      || target.projected.geometry.kind === 'circle'
+      || target.projected.geometry.kind === 'arc'
+      || target.projected.geometry.kind === 'spline'
+    ),
+  )?.projected ?? null
+}
+
+function selectedLocalCurve(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) =>
+    target.entity
+    && (
+      target.entity.kind === 'lineSegment'
+      || target.entity.kind === 'circle'
+      || target.entity.kind === 'arc'
+      || target.entity.kind === 'spline'
+    ),
+  ) ?? null
+}
+
+function buildRelationshipPreview(
+  input: SketchConstraintPreviewInput,
+  id: string,
+  label: string,
+  emptyDetail: string,
+) {
+  return buildSinglePreview(
+    id,
+    label,
+    input.selectedTargets.length > 0 ? formatSelectedLabels(input.selectedTargets) : emptyDetail,
+    input,
+  )
+}
+
 function pointLineDistance(
   point: readonly [number, number],
   start: readonly [number, number],
@@ -778,6 +882,351 @@ const sketchConstraintDefinitions = [
           },
         ],
       }
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintConcentric',
+      name: 'Concentric',
+      tooltip: 'Constrain circle and arc centers to coincide.',
+      icon: 'constraintConcentric',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'concentric-a', label: 'Select first circle or arc', acceptedKinds: ['circle'] },
+      { id: 'concentric-b', label: 'Select second circle or arc', acceptedKinds: ['circle'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolveCircleTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'concentric-preview', 'Concentric preview', 'Select two circles or arcs')
+    },
+    createCommitContribution(input) {
+      const [first, second] = input.selectedTargets
+
+      if (!first || !second) {
+        return {}
+      }
+
+      if (first.entity && second.entity) {
+        return {
+          constraints: [{
+            constraintId: input.createConstraintId('concentric'),
+            kind: 'concentric',
+            label: `Concentric ${input.sequence}`,
+            entityIds: [first.entity.entityId, second.entity.entityId],
+          }],
+        }
+      }
+
+      const local = selectedLocalCircleLike(input.selectedTargets)
+      const projected = selectedProjectedCircleLike(input.selectedTargets)
+      const curve = local ? localEntityOperand(local) : null
+
+      if (!curve || !projected) {
+        return {}
+      }
+
+      return {
+        constraints: [{
+          constraintId: input.createConstraintId('concentric-projected-curve'),
+          kind: 'concentricProjectedCurve',
+          label: `Concentric ${input.sequence}`,
+          curve,
+          projectedCurve: projectedOperand(projected),
+        }],
+      }
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintMidpoint',
+      name: 'Midpoint',
+      tooltip: 'Constrain a point to the midpoint of a line.',
+      icon: 'constraintMidpoint',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'midpoint-point-or-line-a', label: 'Select point or line', acceptedKinds: ['point', 'line'] },
+      { id: 'midpoint-point-or-line-b', label: 'Select remaining point or line', acceptedKinds: ['point', 'line'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolvePointOrLineTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'midpoint-preview', 'Midpoint preview', 'Select a point and a line')
+    },
+    createCommitContribution(input) {
+      const point = selectedLocalPoint(input.selectedTargets)
+      const localLine = selectedLocalLine(input.selectedTargets)
+      const projectedLine = selectedProjectedLine(input.selectedTargets)
+      const pointOperand = point ? localPointOperand(point) : null
+
+      if (!pointOperand) {
+        return {}
+      }
+
+      if (localLine) {
+        const line = localEntityOperand(localLine)
+
+        return line
+          ? {
+              constraints: [{
+                constraintId: input.createConstraintId('midpoint'),
+                kind: 'midpoint',
+                label: `Midpoint ${input.sequence}`,
+                point: pointOperand,
+                line,
+              }],
+            }
+          : {}
+      }
+
+      return projectedLine
+        ? {
+            constraints: [{
+              constraintId: input.createConstraintId('midpoint-projected-line'),
+              kind: 'midpointProjectedLine',
+              label: `Midpoint ${input.sequence}`,
+              point: pointOperand,
+              projectedLine: projectedOperand(projectedLine),
+            }],
+          }
+        : {}
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintNormal',
+      name: 'Normal',
+      tooltip: 'Constrain a line normal to a curve at a contact point.',
+      icon: 'constraintNormal',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'normal-line', label: 'Select line, curve, or contact point', acceptedKinds: ['line', 'circle', 'point'] },
+      { id: 'normal-curve', label: 'Select another normal target', acceptedKinds: ['line', 'circle', 'point'] },
+      { id: 'normal-point', label: 'Select remaining normal target', acceptedKinds: ['line', 'circle', 'point'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolveNormalTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'normal-preview', 'Normal preview', 'Select a line, curve, and contact point')
+    },
+    createCommitContribution(input) {
+      const point = selectedLocalPoint(input.selectedTargets)
+      const lineTarget = selectedLocalLine(input.selectedTargets)
+      const localCurveTarget = selectedLocalCircleLike(input.selectedTargets)
+      const projectedCurve = selectedProjectedCircleLike(input.selectedTargets)
+      const pointOperand = point ? localPointOperand(point) : null
+      const line = lineTarget ? localEntityOperand(lineTarget) : null
+
+      if (!pointOperand || !line) {
+        return {}
+      }
+
+      if (localCurveTarget) {
+        const curve = localEntityOperand(localCurveTarget)
+
+        return curve
+          ? {
+              constraints: [{
+                constraintId: input.createConstraintId('normal'),
+                kind: 'normal',
+                label: `Normal ${input.sequence}`,
+                line,
+                curve,
+                point: pointOperand,
+              }],
+            }
+          : {}
+      }
+
+      return projectedCurve
+        ? {
+            constraints: [{
+              constraintId: input.createConstraintId('normal-projected-curve'),
+              kind: 'normalProjectedCurve',
+              label: `Normal ${input.sequence}`,
+              line,
+              projectedCurve: projectedOperand(projectedCurve),
+              point: pointOperand,
+            }],
+          }
+        : {}
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintPierce',
+      name: 'Pierce',
+      tooltip: 'Constrain a point onto a selected curve.',
+      icon: 'constraintPierce',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'pierce-point-or-curve-a', label: 'Select point or curve', acceptedKinds: ['point', 'line', 'circle', 'spline'] },
+      { id: 'pierce-point-or-curve-b', label: 'Select remaining point or curve', acceptedKinds: ['point', 'line', 'circle', 'spline'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolvePierceTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'pierce-preview', 'Pierce preview', 'Select a point and a curve')
+    },
+    createCommitContribution(input) {
+      const point = selectedLocalPoint(input.selectedTargets)
+      const localCurve = selectedLocalCurve(input.selectedTargets)
+      const projectedCurve = selectedProjectedCurve(input.selectedTargets)
+      const pointOperand = point ? localPointOperand(point) : null
+
+      if (!pointOperand) {
+        return {}
+      }
+
+      if (localCurve) {
+        const curve = localEntityOperand(localCurve)
+
+        return curve
+          ? {
+              constraints: [{
+                constraintId: input.createConstraintId('point-on-curve'),
+                kind: 'pointOnCurve',
+                label: `Pierce ${input.sequence}`,
+                point: pointOperand,
+                curve,
+              }],
+            }
+          : {}
+      }
+
+      return projectedCurve
+        ? {
+            constraints: [{
+              constraintId: input.createConstraintId('point-on-projected-curve'),
+              kind: 'pointOnProjectedCurve',
+              label: `Pierce ${input.sequence}`,
+              point: pointOperand,
+              projectedCurve: projectedOperand(projectedCurve),
+            }],
+          }
+        : {}
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintSymmetric',
+      name: 'Symmetric',
+      tooltip: 'Constrain two points symmetric about a line.',
+      icon: 'constraintSymmetric',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'symmetric-a', label: 'Select point or symmetry axis', acceptedKinds: ['point', 'line'] },
+      { id: 'symmetric-b', label: 'Select second point or symmetry axis', acceptedKinds: ['point', 'line'] },
+      { id: 'symmetric-axis', label: 'Select remaining symmetric target', acceptedKinds: ['point', 'line'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolvePointOrLineTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'symmetric-preview', 'Symmetric preview', 'Select two points and a line axis')
+    },
+    createCommitContribution(input) {
+      const points = input.selectedTargets.filter((target) => target.point)
+      const localLine = selectedLocalLine(input.selectedTargets)
+      const projectedLine = selectedProjectedLine(input.selectedTargets)
+
+      if (points.length !== 2 || !points[0]?.point || !points[1]?.point) {
+        return {}
+      }
+
+      if (localLine) {
+        const axis = localEntityOperand(localLine)
+
+        return axis
+          ? {
+              constraints: [{
+                constraintId: input.createConstraintId('symmetric'),
+                kind: 'symmetric',
+                label: `Symmetric ${input.sequence}`,
+                pointIds: [points[0].point.pointId, points[1].point.pointId],
+                axis,
+              }],
+            }
+          : {}
+      }
+
+      return projectedLine
+        ? {
+            constraints: [{
+              constraintId: input.createConstraintId('symmetric-projected-line'),
+              kind: 'symmetricProjectedLine',
+              label: `Symmetric ${input.sequence}`,
+              pointIds: [points[0].point.pointId, points[1].point.pointId],
+              projectedLine: projectedOperand(projectedLine),
+            }],
+          }
+        : {}
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintFix',
+      name: 'Fix Geometry',
+      tooltip: 'Fix selected geometry at its current placement.',
+      icon: 'constraintFix',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [{ id: 'fix-target', label: 'Select geometry to fix', acceptedKinds: ['point', 'line', 'circle', 'spline'] }],
+    resolveTarget(definition, target) {
+      return resolveFixTarget(definition, target)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'fix-preview', 'Fix geometry preview', 'Select geometry to fix')
+    },
+    createCommitContribution(input) {
+      const [target] = input.selectedTargets
+
+      if (!target) {
+        return {}
+      }
+
+      const fixedPoints = target.point
+        ? [{ pointId: target.point.pointId, position: target.point.position }]
+        : target.entityPoints ?? []
+
+      if (fixedPoints.length === 0) {
+        return {}
+      }
+
+      const constraints = fixedPoints.map((point, index) => ({
+        constraintId: input.createConstraintId(`fix-${index}`),
+        kind: 'fixPoint' as const,
+        label: `Fix ${input.sequence}`,
+        pointId: point.pointId,
+        position: point.position,
+      }))
+
+      const dimensions = target.entity?.kind === 'circle'
+        ? [{
+            dimensionId: input.createDimensionId('fix-radius'),
+            kind: 'circleRadius' as const,
+            label: `Fixed radius ${input.sequence}`,
+            entityId: target.entity.entityId,
+            value: target.entity.radius,
+          }]
+        : []
+
+      return { constraints, dimensions }
     },
   },
   {

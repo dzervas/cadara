@@ -20,6 +20,12 @@ export type SketchConstraintToolId =
   | 'constraintPerpendicular'
   | 'constraintTangent'
   | 'constraintEqual'
+  | 'constraintConcentric'
+  | 'constraintMidpoint'
+  | 'constraintNormal'
+  | 'constraintPierce'
+  | 'constraintSymmetric'
+  | 'constraintFix'
   | 'dimensionDistance'
   | 'dimensionHorizontal'
   | 'dimensionVertical'
@@ -56,6 +62,7 @@ export interface SketchConstraintTargetRecord {
   anchor: SketchPoint2D
   point?: SketchPointDefinition
   entity?: SketchEntityDefinition
+  entityPoints?: readonly Pick<SketchPointDefinition, 'pointId' | 'position'>[]
   projected?: {
     reference: NonNullable<Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>>
     geometry: ProjectedSketchReferenceRecord['geometry'][number]
@@ -178,6 +185,11 @@ export function resolveLineTarget(
     kind: 'line',
     anchor: midpointForLine(definition, entity),
     entity,
+    entityPoints: [
+      findPoint(definition, entity.startPointId),
+      findPoint(definition, entity.endPointId),
+    ].filter((point): point is SketchPointDefinition => Boolean(point))
+      .map((point) => ({ pointId: point.pointId, position: point.position })),
     line: {
       start: findPoint(definition, entity.startPointId)?.position ?? [0, 0],
       end: findPoint(definition, entity.endPointId)?.position ?? [0, 0],
@@ -206,30 +218,66 @@ export function resolveCircleTarget(
 
   const entity = findEntity(definition, target.entityId)
 
-  if (!entity || entity.kind !== 'circle') {
+  if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
     return null
   }
+
+  const center = findPoint(definition, entity.centerPointId)?.position ?? [0, 0]
+  const radius = entity.kind === 'circle'
+    ? entity.radius
+    : Math.hypot(
+        (findPoint(definition, entity.startPointId)?.position ?? center)[0] - center[0],
+        (findPoint(definition, entity.startPointId)?.position ?? center)[1] - center[1],
+      )
 
   return {
     target,
     label: entity.label,
     kind: 'circle',
-    anchor: findPoint(definition, entity.centerPointId)?.position ?? [0, 0],
+    anchor: center,
     entity,
+    entityPoints: [
+      findPoint(definition, entity.centerPointId),
+      entity.kind === 'arc' ? findPoint(definition, entity.startPointId) : null,
+      entity.kind === 'arc' ? findPoint(definition, entity.endPointId) : null,
+    ].filter((point): point is SketchPointDefinition => Boolean(point))
+      .map((point) => ({ pointId: point.pointId, position: point.position })),
     circle: {
-      center: findPoint(definition, entity.centerPointId)?.position ?? [0, 0],
-      radius: entity.radius,
+      center,
+      radius,
     },
   }
 }
 
 export function resolveCurveTarget(
-  _definition: SketchDefinition,
+  definition: SketchDefinition,
   target: PrimitiveRef,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchConstraintTargetRecord | null {
   if (target.kind !== 'projectedReferenceGeometry') {
-    return null
+    if (target.kind !== 'sketchEntity') {
+      return null
+    }
+
+    const entity = findEntity(definition, target.entityId)
+
+    if (!entity || entity.kind !== 'spline') {
+      return null
+    }
+
+    const firstPoint = findPoint(definition, entity.fitPointIds[0])
+
+    return {
+      target,
+      label: entity.label,
+      kind: 'spline',
+      anchor: firstPoint?.position ?? [0, 0],
+      entity,
+      entityPoints: entity.fitPointIds.flatMap((pointId) => {
+        const point = findPoint(definition, pointId)
+        return point ? [{ pointId: point.pointId, position: point.position }] : []
+      }),
+    }
   }
 
   const projected = resolveProjectedGeometryTarget(target, projectedReferences)

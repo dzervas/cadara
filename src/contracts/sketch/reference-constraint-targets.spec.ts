@@ -90,6 +90,17 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     }],
     diagnostics: [],
   }
+  const projectedCircle: ProjectedSketchReferenceRecord = {
+    referenceId: 'ref_edge',
+    status: 'projected',
+    geometry: [{
+      geometryId: 'projected_geometry_circle',
+      kind: 'circle',
+      centerPosition: [0, 0],
+      radius: 2,
+    }],
+    diagnostics: [],
+  }
 
   const pointOnProjectedLine = makeBaseDefinition({
     constraintId: 'constraint_point_on_projected_geometry_line',
@@ -210,6 +221,97 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
   assert(
     Math.abs(solvedLine.endPosition[0] - solvedLine.startPosition[0]) < 1e-3,
     'Perpendicular-to-projected-line should solve the local line vertical against a horizontal projected line.',
+  )
+
+  const normalProjectedCircle = {
+    ...makeBaseDefinition({
+      constraintId: 'constraint_normal_projected_geometry_circle',
+      kind: 'normalProjectedCurve',
+      label: 'Normal projected circle',
+      line: { kind: 'localEntity', entityId: 'sketch_entity_line' },
+      projectedCurve: {
+        kind: 'projectedGeometry',
+        reference: {
+          kind: 'projectedCircle',
+          referenceId: 'ref_edge',
+          geometryId: 'projected_geometry_circle',
+        },
+      },
+      point: { kind: 'localPoint', pointId: 'sketch_point_a' },
+    }),
+    points: [
+      {
+        pointId: 'sketch_point_a',
+        label: 'A',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_a' },
+        position: [2, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_b',
+        label: 'B',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_b' },
+        position: [4, 0],
+        isConstruction: false,
+      },
+    ],
+  } satisfies SketchDefinition
+  const parsedNormal = sketchDefinitionSchema.safeParse(normalProjectedCircle)
+  assert(parsedNormal.success, 'Runtime schema should accept projected normal constraint payloads.')
+  const solvedNormal = solveSketchDefinitionCore({
+    definition: normalProjectedCircle,
+    projectedReferences: [projectedCircle],
+    tolerances,
+    partialSolvePolicy: 'bestEffort',
+  })
+  assert(
+    solvedNormal.solvedSnapshot.constraintStatuses[0]?.status === 'satisfied',
+    'Projected normal should report satisfied when line, contact point, and projected circle are aligned.',
+  )
+
+  const symmetricProjectedLine = {
+    ...makeBaseDefinition({
+      constraintId: 'constraint_symmetric_projected_geometry_line',
+      kind: 'symmetricProjectedLine',
+      label: 'Symmetric projected line',
+      pointIds: ['sketch_point_a', 'sketch_point_b'],
+      projectedLine: {
+        kind: 'projectedGeometry',
+        reference: {
+          kind: 'projectedLineSegment',
+          referenceId: 'ref_edge',
+          geometryId: 'projected_geometry_line',
+        },
+      },
+    }),
+    points: [
+      {
+        pointId: 'sketch_point_a',
+        label: 'A',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_a' },
+        position: [1, 2],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_b',
+        label: 'B',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_b' },
+        position: [1, -2],
+        isConstruction: false,
+      },
+    ],
+  } satisfies SketchDefinition
+  const parsedSymmetric = sketchDefinitionSchema.safeParse(symmetricProjectedLine)
+  assert(parsedSymmetric.success, 'Runtime schema should accept projected symmetric constraint payloads.')
+  const solvedSymmetric = solveSketchDefinitionCore({
+    definition: symmetricProjectedLine,
+    projectedReferences: [projectedLine],
+    tolerances,
+    partialSolvePolicy: 'bestEffort',
+  })
+  assert(
+    solvedSymmetric.solvedSnapshot.constraintStatuses[0]?.status === 'satisfied',
+    'Projected symmetric should report satisfied when points are mirrored about the projected line.',
   )
 
   const tangentOutsideArc = solveSketchDefinitionCore({

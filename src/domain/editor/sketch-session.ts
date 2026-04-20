@@ -138,6 +138,11 @@ export type SketchAnnotationGlyphKind =
   | 'constraintAngle'
   | 'constraintPerpendicular'
   | 'constraintTangent'
+  | 'constraintConcentric'
+  | 'constraintMidpoint'
+  | 'constraintNormal'
+  | 'constraintPierce'
+  | 'constraintSymmetric'
   | 'dimensionDistance'
   | 'dimensionHorizontal'
   | 'dimensionVertical'
@@ -1075,6 +1080,18 @@ export function constraintReferencesSketchGeometry(
       return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
     case 'pointOnCurve':
       return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.curve.entityId)
+    case 'normal':
+      return (
+        deletedPointIds.has(constraint.point.pointId) ||
+        deletedEntityIds.has(constraint.line.entityId) ||
+        deletedEntityIds.has(constraint.curve.entityId)
+      )
+    case 'normalProjectedCurve':
+      return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
+    case 'symmetric':
+      return constraint.pointIds.some((pointId) => deletedPointIds.has(pointId)) || deletedEntityIds.has(constraint.axis.entityId)
+    case 'symmetricProjectedLine':
+      return constraint.pointIds.some((pointId) => deletedPointIds.has(pointId))
     case 'parallelProjectedLine':
     case 'perpendicularProjectedLine':
       return deletedEntityIds.has(constraint.line.entityId)
@@ -1207,7 +1224,10 @@ function buildConstraintSelectionGuide(
   }
 }
 
-function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringState): SketchToolPresentationSchema {
+function buildConstraintToolPresentation(
+  authoring: SketchConstraintAuthoringState,
+  validationMessage: string | null = null,
+): SketchToolPresentationSchema {
   const definition = getSketchConstraintDefinition(authoring.toolId)
   const selectionGuide = buildConstraintSelectionGuide(
     authoring.toolId,
@@ -1261,6 +1281,13 @@ function buildConstraintToolPresentation(authoring: SketchConstraintAuthoringSta
     selectionGuide,
     overlays,
     floatingInput,
+    validation: validationMessage
+      ? [{
+          id: `${authoring.toolId}-validation`,
+          message: validationMessage,
+          severity: 'warning',
+        }]
+      : [],
     completionHints: [
       {
         id: `${authoring.toolId}-completion`,
@@ -4225,6 +4252,19 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     createConstraintId: (suffix) => createConstraintId(session.sequence + 1, suffix),
     createDimensionId: (suffix) => createDimensionId(session.sequence + 1, suffix),
   })
+  if (
+    (contribution.constraints?.length ?? 0) === 0
+    && (contribution.dimensions?.length ?? 0) === 0
+  ) {
+    const validationMessage = `${definition.metadata.name} needs the supported target combination.`
+
+    return {
+      ...session,
+      validationMessage,
+      toolPresentation: buildConstraintToolPresentation(authoring, validationMessage),
+    }
+  }
+
   const history = applySketchHistoryContribution(session, {
     points: [],
     entities: [],
@@ -4364,16 +4404,23 @@ function getConstraintGlyphKind(constraint: ConstraintDefinition): SketchAnnotat
       return 'constraintTangent'
     case 'midpoint':
     case 'midpointProjectedLine':
-      return 'constraintCoincident'
-    case 'coincidentProjectedPoint':
+      return 'constraintMidpoint'
+    case 'normal':
+    case 'normalProjectedCurve':
+      return 'constraintNormal'
+    case 'symmetric':
+    case 'symmetricProjectedLine':
+      return 'constraintSymmetric'
     case 'pointOnProjectedCurve':
     case 'pointOnCurve':
+      return 'constraintPierce'
+    case 'coincidentProjectedPoint':
       return 'constraintCoincident'
     case 'parallelProjectedLine':
       return 'constraintParallel'
     case 'concentric':
     case 'concentricProjectedCurve':
-      return 'constraintCoincident'
+      return 'constraintConcentric'
   }
 }
 
@@ -4434,6 +4481,28 @@ function getConstraintAffectedGeometryRefs(
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
         createSketchEntityRef(sketchId, constraint.curve.entityId),
+      ]
+    case 'normal':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createSketchEntityRef(sketchId, constraint.line.entityId),
+        createSketchEntityRef(sketchId, constraint.curve.entityId),
+      ]
+    case 'normalProjectedCurve':
+      return [
+        createSketchPointRef(sketchId, constraint.point.pointId),
+        createSketchEntityRef(sketchId, constraint.line.entityId),
+        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+      ]
+    case 'symmetric':
+      return [
+        ...constraint.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId)),
+        createSketchEntityRef(sketchId, constraint.axis.entityId),
+      ]
+    case 'symmetricProjectedLine':
+      return [
+        ...constraint.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId)),
+        createProjectedPrimitiveRef(constraint.projectedLine.reference),
       ]
     case 'coincidentProjectedPoint':
       return [
@@ -4518,6 +4587,28 @@ function createConstraintAnnotationAnchor(
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
         getEntityAnchor(definition, constraint.curve.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'normal':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getEntityAnchor(definition, constraint.line.entityId),
+        getEntityAnchor(definition, constraint.curve.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'normalProjectedCurve':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getPointPosition(definition, constraint.point.pointId),
+        getEntityAnchor(definition, constraint.line.entityId),
+        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'symmetric':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getAveragePointPosition(definition, constraint.pointIds),
+        getEntityAnchor(definition, constraint.axis.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'symmetricProjectedLine':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getAveragePointPosition(definition, constraint.pointIds),
+        getProjectedGeometryAnchor(session, constraint.projectedLine.reference),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'coincidentProjectedPoint':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
@@ -5322,6 +5413,14 @@ function describeConstraint(constraint: ConstraintDefinition) {
       return 'Concentric curves'
     case 'concentricProjectedCurve':
       return 'Concentric with projected curve'
+    case 'normal':
+      return 'Line normal to curve'
+    case 'normalProjectedCurve':
+      return 'Line normal to projected curve'
+    case 'symmetric':
+      return 'Symmetric points'
+    case 'symmetricProjectedLine':
+      return 'Symmetric points about projected line'
   }
 }
 

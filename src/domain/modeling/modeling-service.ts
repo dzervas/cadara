@@ -2302,6 +2302,70 @@ function normalizeConstraintDefinition(value: unknown): ConstraintDefinition {
     }
   }
 
+  if (value.kind === 'normal') {
+    if (!isRecord(value.line) || !isRecord(value.curve) || !isRecord(value.point)) {
+      throw new Error('Invalid normal constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'normal',
+      label: value.label,
+      line: normalizeLocalEntityConstraintOperand(value.line),
+      curve: normalizeLocalEntityConstraintOperand(value.curve),
+      point: normalizeLocalPointConstraintOperand(value.point),
+    }
+  }
+
+  if (value.kind === 'normalProjectedCurve') {
+    if (!isRecord(value.line) || !isRecord(value.projectedCurve) || !isRecord(value.point)) {
+      throw new Error('Invalid projected normal constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'normalProjectedCurve',
+      label: value.label,
+      line: normalizeLocalEntityConstraintOperand(value.line),
+      projectedCurve: normalizeProjectedGeometryConstraintOperand(value.projectedCurve),
+      point: normalizeLocalPointConstraintOperand(value.point),
+    }
+  }
+
+  if (value.kind === 'symmetric') {
+    if (!Array.isArray(value.pointIds) || value.pointIds.length !== 2 || !isRecord(value.axis)) {
+      throw new Error('Invalid symmetric constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'symmetric',
+      label: value.label,
+      pointIds: [
+        assertSketchPointId(value.pointIds[0]),
+        assertSketchPointId(value.pointIds[1]),
+      ],
+      axis: normalizeLocalEntityConstraintOperand(value.axis),
+    }
+  }
+
+  if (value.kind === 'symmetricProjectedLine') {
+    if (!Array.isArray(value.pointIds) || value.pointIds.length !== 2 || !isRecord(value.projectedLine)) {
+      throw new Error('Invalid projected symmetric constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'symmetricProjectedLine',
+      label: value.label,
+      pointIds: [
+        assertSketchPointId(value.pointIds[0]),
+        assertSketchPointId(value.pointIds[1]),
+      ],
+      projectedLine: normalizeProjectedGeometryConstraintOperand(value.projectedLine),
+    }
+  }
+
   throw new Error('Invalid constraint definition kind.')
 }
 

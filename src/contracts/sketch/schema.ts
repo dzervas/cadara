@@ -393,6 +393,50 @@ export type ConstraintDefinition =
     }
   | {
       constraintId: ConstraintId
+      kind: 'normal'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable line entity. */
+      line: LocalSketchEntityConstraintOperand
+      /** Local editable circle or arc target. */
+      curve: LocalSketchEntityConstraintOperand
+      /** Local editable contact point constrained onto the curve. */
+      point: LocalSketchPointConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'normalProjectedCurve'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable line entity. */
+      line: LocalSketchEntityConstraintOperand
+      /** Read-only projected circle or arc target. */
+      projectedCurve: ProjectedSketchGeometryConstraintOperand
+      /** Local editable contact point constrained onto the projected curve. */
+      point: LocalSketchPointConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'symmetric'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Two local editable points mirrored about the axis. */
+      pointIds: readonly [SketchPointId, SketchPointId]
+      /** Local editable line used as the symmetry axis. */
+      axis: LocalSketchEntityConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'symmetricProjectedLine'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Two local editable points mirrored about the projected axis. */
+      pointIds: readonly [SketchPointId, SketchPointId]
+      /** Read-only projected line used as the symmetry axis. */
+      projectedLine: ProjectedSketchGeometryConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
       kind: 'fixPoint'
       /** Human-readable label owned by the producer of the sketch definition. */
       label: string

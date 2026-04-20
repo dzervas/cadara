@@ -253,6 +253,141 @@ test('src/contracts/sketch/inferred-constraint-solver.spec.ts', () => {
     'Already satisfied tangent and concentric constraints should report satisfied statuses.',
   )
 
+  const normalAndSymmetric: SketchDefinition = {
+    schemaVersion: 'sketch-definition/v1alpha1',
+    referenceIds: [],
+    references: [],
+    pointIds: [
+      'sketch_point_normal_a',
+      'sketch_point_normal_b',
+      'sketch_point_normal_contact',
+      'sketch_point_normal_circle_center',
+      'sketch_point_sym_a',
+      'sketch_point_sym_b',
+      'sketch_point_axis_a',
+      'sketch_point_axis_b',
+    ],
+    points: [
+      {
+        pointId: 'sketch_point_normal_a',
+        label: 'Normal line A',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_normal_a' },
+        position: [0, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_normal_b',
+        label: 'Normal line B',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_normal_b' },
+        position: [4, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_normal_contact',
+        label: 'Contact',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_normal_contact' },
+        position: [2, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_normal_circle_center',
+        label: 'Normal circle center',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_normal_circle_center' },
+        position: [0, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_sym_a',
+        label: 'Sym A',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_sym_a' },
+        position: [-2, 3],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_sym_b',
+        label: 'Sym B',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_sym_b' },
+        position: [2, 3],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_axis_a',
+        label: 'Axis A',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_axis_a' },
+        position: [0, -2],
+        isConstruction: false,
+      },
+      {
+        pointId: 'sketch_point_axis_b',
+        label: 'Axis B',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_axis_b' },
+        position: [0, 4],
+        isConstruction: false,
+      },
+    ],
+    entityIds: ['sketch_entity_normal_line', 'sketch_entity_normal_circle', 'sketch_entity_sym_axis'],
+    entities: [
+      {
+        kind: 'lineSegment',
+        entityId: 'sketch_entity_normal_line',
+        label: 'Normal line',
+        target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_normal_line' },
+        isConstruction: false,
+        startPointId: 'sketch_point_normal_a',
+        endPointId: 'sketch_point_normal_b',
+      },
+      {
+        kind: 'circle',
+        entityId: 'sketch_entity_normal_circle',
+        label: 'Normal circle',
+        target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_normal_circle' },
+        isConstruction: false,
+        centerPointId: 'sketch_point_normal_circle_center',
+        radius: 2,
+      },
+      {
+        kind: 'lineSegment',
+        entityId: 'sketch_entity_sym_axis',
+        label: 'Symmetry axis',
+        target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_sym_axis' },
+        isConstruction: false,
+        startPointId: 'sketch_point_axis_a',
+        endPointId: 'sketch_point_axis_b',
+      },
+    ],
+    constraintIds: ['constraint_normal', 'constraint_symmetric'],
+    constraints: [
+      {
+        constraintId: 'constraint_normal',
+        kind: 'normal',
+        label: 'Normal',
+        line: { kind: 'localEntity', entityId: 'sketch_entity_normal_line' },
+        curve: { kind: 'localEntity', entityId: 'sketch_entity_normal_circle' },
+        point: { kind: 'localPoint', pointId: 'sketch_point_normal_contact' },
+      },
+      {
+        constraintId: 'constraint_symmetric',
+        kind: 'symmetric',
+        label: 'Symmetric',
+        pointIds: ['sketch_point_sym_a', 'sketch_point_sym_b'],
+        axis: { kind: 'localEntity', entityId: 'sketch_entity_sym_axis' },
+      },
+    ],
+    dimensionIds: [],
+    dimensions: [],
+  }
+  const parsedNormalAndSymmetric = sketchDefinitionSchema.safeParse(normalAndSymmetric)
+  assert(parsedNormalAndSymmetric.success, 'Runtime schema should accept normal and symmetric constraint payloads.')
+  const normalAndSymmetricSolved = solveSketchDefinitionCore({
+    definition: normalAndSymmetric,
+    tolerances,
+    partialSolvePolicy: 'bestEffort',
+  })
+  assert(
+    normalAndSymmetricSolved.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied'),
+    'Already satisfied normal and symmetric constraints should report satisfied statuses.',
+  )
+
   function solveConstraintStatus(definition: SketchDefinition, constraintId: string) {
     const solved = solveSketchDefinitionCore({
       definition,
