@@ -19,6 +19,7 @@ import type {
   AdvancedSolidFeatureParameters,
   AdvancedSolidOperationIntent,
   AuthoredFeatureKind,
+  SweepAdvancedOptions,
 } from '@/contracts/modeling/schema'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
 import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
@@ -77,9 +78,17 @@ export interface SweepFeatureParameterDraft {
   profileTargets: readonly Extract<PrimitiveRef, { kind: 'region' | 'face' }>[]
   pathTarget: Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }> | null
   guideCurveTargets: readonly Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }>[]
+  lockProfileFaceTargets: readonly Extract<PrimitiveRef, { kind: 'face' }>[]
+  lockProfileDirectionTarget: Extract<PrimitiveRef, { kind: 'edge' | 'construction' }> | null
   operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: 'body' }>[]
-  options: Record<string, unknown>
+  options: SweepAdvancedOptions & {
+    twist: SweepAdvancedOptions['twist'] & {
+      turns?: MaybeAuthoredValue<number>
+      angle?: MaybeAuthoredValue<number>
+      pitch?: MaybeAuthoredValue<number>
+    }
+  }
 }
 
 export interface LoftFeatureParameterDraft {

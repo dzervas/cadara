@@ -1308,6 +1308,106 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assert(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone sweep should produce non-empty solid geometry.')
   }
 
+  async function testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const pathBody = await makeBoxBody(
+      oc,
+      'body_phase4_sweep_advanced_path' as BodyId,
+      1,
+      1,
+      4,
+      'feature_phase4_sweep_advanced_path_seed' as FeatureId,
+      [0, 0, 0],
+    )
+    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
+    assert(pathEdgeId != null, 'Expected path body to expose a linear Z edge for advanced sweep.')
+    const lockFaceId = findFaceIdByDirection(oc, pathBody, [0, 0, 1])
+    assert(lockFaceId != null, 'Expected path body to expose a planar face for lock-profile-faces coverage.')
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase4_sweep_advanced' as SketchId, plane, {
+      origin: [-0.2, -0.2],
+      width: 0.4,
+      height: 0.4,
+    })
+    const context = await createContext({ sketches: [sketch], bodies: [pathBody] })()
+    const baseParticipants = [
+      { role: 'profile' as const, targets: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }] },
+      { role: 'path' as const, targets: [{ kind: 'edge' as const, bodyId: pathBody.bodyId, edgeId: pathEdgeId as EdgeId }] },
+    ]
+    const cases = [
+      { suffix: 'default', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'none' }, endScale: 1 } },
+      { suffix: 'keep_orientation', participants: baseParticipants, options: { profileControl: 'keepProfileOrientation', twist: { type: 'none' }, endScale: 1 } },
+      {
+        suffix: 'lock_faces',
+        participants: [
+          ...baseParticipants,
+          { role: 'lockProfileFace' as const, targets: [{ kind: 'face' as const, bodyId: pathBody.bodyId, faceId: lockFaceId }] },
+        ],
+        options: { profileControl: 'lockProfileFaces', twist: { type: 'none' }, endScale: 1 },
+      },
+      {
+        suffix: 'lock_direction',
+        participants: [
+          ...baseParticipants,
+          { role: 'lockProfileDirection' as const, targets: [{ kind: 'edge' as const, bodyId: pathBody.bodyId, edgeId: pathEdgeId as EdgeId }] },
+        ],
+        options: { profileControl: 'lockProfileDirection', twist: { type: 'none' }, endScale: 1 },
+      },
+      {
+        suffix: 'lock_direction_construction',
+        participants: [
+          ...baseParticipants,
+          { role: 'lockProfileDirection' as const, targets: [{ kind: 'construction' as const, constructionId: 'construction_plane-xy' as ConstructionId }] },
+        ],
+        options: { profileControl: 'lockProfileDirection', twist: { type: 'none' }, endScale: 1 },
+      },
+      { suffix: 'twist_turns', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'turns', turns: 0.25 }, endScale: 1 } },
+      { suffix: 'twist_angle', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'angle', angle: Math.PI / 2 }, endScale: 1 } },
+      { suffix: 'twist_pitch', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'pitch', pitch: 8 }, endScale: 1 } },
+      { suffix: 'end_scale', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'none' }, endScale: 1.5 } },
+    ]
+
+    for (const sweepCase of cases) {
+      const result = executeOccFeature(context, `feature_phase4_sweep_advanced_${sweepCase.suffix}` as FeatureId, {
+        kind: 'sweep',
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: 'create',
+          participants: sweepCase.participants,
+          options: sweepCase.options,
+        },
+      })
+      const bodyTarget = result.producedTargets[0]
+      assert(bodyTarget?.kind === 'body', `Advanced sweep ${sweepCase.suffix} must produce a new body target.`)
+      const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
+      assert(producedBody != null, `Advanced sweep ${sweepCase.suffix} must append a body.`)
+      assert(await bodyVolume(context.oc, producedBody.shape) > 0, `Advanced sweep ${sweepCase.suffix} should produce non-empty solid geometry.`)
+    }
+
+    let unsupportedCombinationError: string | null = null
+    try {
+      executeOccFeature(context, 'feature_phase4_sweep_advanced_lock_twist_reject' as FeatureId, {
+        kind: 'sweep',
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: 'create',
+          participants: [
+            ...baseParticipants,
+            { role: 'lockProfileFace', targets: [{ kind: 'face', bodyId: pathBody.bodyId, faceId: lockFaceId }] },
+          ],
+          options: { profileControl: 'lockProfileFaces', twist: { type: 'turns', turns: 0.25 }, endScale: 1 },
+        },
+      })
+    } catch (error) {
+      unsupportedCombinationError = error instanceof Error ? error.message : String(error)
+    }
+
+    assert(
+      unsupportedCombinationError?.includes('advanced-feature-unsupported-kernel-case') === true,
+      'OCC sweep should reject profile-control plus twist combinations explicitly instead of ignoring profile control.',
+    )
+  }
+
   async function testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition() {
     const oc = await getDefaultOpenCascadeInstance()
     const pathBody = await makeBoxBody(
@@ -1760,6 +1860,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testRevolveRejectsImpossibleUpToOffset()
   await testRevolveRejectsNonPlanarFaceProfilesExplicitly()
   await testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath()
+  await testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies()
   await testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition()
   await testLoftBuildsStandaloneBodyFromOrderedProfiles()
   await testLoftRejectsUnsupportedGuideCurvesAndBooleanComposition()

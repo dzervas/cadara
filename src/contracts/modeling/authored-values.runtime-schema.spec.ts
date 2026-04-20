@@ -95,6 +95,32 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
     'Runtime validation should preserve expression-authored positive integer advanced options.',
   )
 
+  const sweepAdvancedOptions = featureDefinitionSchema.parse({
+    kind: 'sweep',
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: 'create',
+      participants: [
+        { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' }] },
+        { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_a', edgeId: 'edge_path' }] },
+      ],
+      options: {
+        profileControl: 'lockProfileDirection',
+        twist: { type: 'turns', turns: { source: 'literal', value: 1.5 } },
+        endScale: { source: 'literal', value: 1.25 },
+      },
+    },
+  })
+  assert(
+    sweepAdvancedOptions.kind === 'sweep' &&
+      sweepAdvancedOptions.parameters.options?.twist &&
+      typeof sweepAdvancedOptions.parameters.options.twist === 'object' &&
+      'type' in sweepAdvancedOptions.parameters.options.twist &&
+      sweepAdvancedOptions.parameters.options.twist.type === 'turns' &&
+      !('angle' in sweepAdvancedOptions.parameters.options.twist),
+    'Runtime validation should preserve only the active sweep twist variant.',
+  )
+
   const advancedReferenceExpression = featureDefinitionSchema.safeParse({
     kind: 'loft',
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,

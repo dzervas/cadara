@@ -94,6 +94,8 @@ const advancedParticipantRoleSchema = z.union([
   z.literal('profile'),
   z.literal('path'),
   z.literal('guideCurve'),
+  z.literal('lockProfileFace'),
+  z.literal('lockProfileDirection'),
   z.literal('face'),
   z.literal('edge'),
   z.literal('body'),
@@ -364,6 +366,32 @@ const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional
   }
   if ('sectionCount' in next) {
     next.sectionCount = authoredPositiveIntegerSchema('Section count').parse(next.sectionCount)
+  }
+  if ('profileControl' in next) {
+    next.profileControl = authoredEnumValueSchema(
+      ['none', 'keepProfileOrientation', 'lockProfileFaces', 'lockProfileDirection'],
+      'Sweep profile control',
+    ).parse(next.profileControl)
+  }
+  if ('twist' in next) {
+    next.twist = z.discriminatedUnion('type', [
+      z.object({ type: z.literal('none') }).strict(),
+      z.object({
+        type: z.literal('turns'),
+        turns: authoredPositiveNumberSchema('Sweep twist turns must be positive.'),
+      }).strict(),
+      z.object({
+        type: z.literal('angle'),
+        angle: authoredNumberSchema('Sweep twist angle'),
+      }).strict(),
+      z.object({
+        type: z.literal('pitch'),
+        pitch: authoredPositiveNumberSchema('Sweep twist pitch must be positive.'),
+      }).strict(),
+    ]).parse(next.twist)
+  }
+  if ('endScale' in next) {
+    next.endScale = authoredPositiveNumberSchema('Sweep end scale must be positive.').parse(next.endScale)
   }
   if ('side' in next) {
     next.side = thickenSideAuthoredSchema.parse(next.side)

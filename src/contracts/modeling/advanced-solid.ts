@@ -14,6 +14,8 @@ export type AdvancedParticipantRole =
   | 'profile'
   | 'path'
   | 'guideCurve'
+  | 'lockProfileFace'
+  | 'lockProfileDirection'
   | 'face'
   | 'edge'
   | 'body'
@@ -172,6 +174,8 @@ const advancedParticipantRoles: readonly AdvancedParticipantRole[] = [
   'profile',
   'path',
   'guideCurve',
+  'lockProfileFace',
+  'lockProfileDirection',
   'face',
   'edge',
   'body',
@@ -190,6 +194,100 @@ export const LOFT_ADVANCED_OPTION_DESCRIPTORS = [
     required: true,
     valueKind: 'positiveInteger',
     patchTarget: { patchKey: 'options', valuePath: ['sectionCount'] },
+  },
+] as const satisfies readonly AdvancedFeatureOptionDescriptor[]
+
+export type SweepProfileControl =
+  | 'none'
+  | 'keepProfileOrientation'
+  | 'lockProfileFaces'
+  | 'lockProfileDirection'
+
+export type SweepTwistOption =
+  | { type: 'none' }
+  | { type: 'turns'; turns: MaybeAuthoredValue<number> }
+  | { type: 'angle'; angle: MaybeAuthoredValue<number> }
+  | { type: 'pitch'; pitch: MaybeAuthoredValue<number> }
+
+export interface SweepAdvancedOptions extends Record<string, unknown> {
+  profileControl: MaybeAuthoredValue<SweepProfileControl>
+  twist: SweepTwistOption
+  endScale: MaybeAuthoredValue<number>
+}
+
+export const SWEEP_ADVANCED_OPTION_DESCRIPTORS = [
+  {
+    key: 'profileControl',
+    label: 'Profile control',
+    required: false,
+    valueKind: 'enum',
+    enumValues: ['none', 'keepProfileOrientation', 'lockProfileFaces', 'lockProfileDirection'],
+    patchTarget: { patchKey: 'options', valuePath: ['profileControl'] },
+  },
+  {
+    key: 'twist',
+    label: 'Twist',
+    required: false,
+    valueKind: 'group',
+    options: [
+      {
+        key: 'twist',
+        label: 'Twist type',
+        required: true,
+        valueKind: 'discriminatedGroup',
+        discriminantKey: 'type',
+        patchTarget: { patchKey: 'options', valuePath: ['twist', 'type'] },
+        variants: [
+          { value: 'none', label: 'None', options: [] },
+          {
+            value: 'turns',
+            label: 'Turns',
+            options: [
+              {
+                key: 'turns',
+                label: 'Turns',
+                required: true,
+                valueKind: 'positiveNumber',
+                patchTarget: { patchKey: 'options', valuePath: ['twist', 'turns'] },
+              },
+            ],
+          },
+          {
+            value: 'angle',
+            label: 'Angle',
+            options: [
+              {
+                key: 'angle',
+                label: 'Angle',
+                required: true,
+                valueKind: 'angle',
+                patchTarget: { patchKey: 'options', valuePath: ['twist', 'angle'] },
+              },
+            ],
+          },
+          {
+            value: 'pitch',
+            label: 'Pitch',
+            options: [
+              {
+                key: 'pitch',
+                label: 'Pitch',
+                required: true,
+                valueKind: 'positiveNumber',
+                patchTarget: { patchKey: 'options', valuePath: ['twist', 'pitch'] },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'endScale',
+    label: 'End scale',
+    required: false,
+    valueKind: 'positiveNumber',
+    patchTarget: { patchKey: 'options', valuePath: ['endScale'] },
   },
 ] as const satisfies readonly AdvancedFeatureOptionDescriptor[]
 

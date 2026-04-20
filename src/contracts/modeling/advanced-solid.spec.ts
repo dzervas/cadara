@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   validateAdvancedFeatureOptions,
   validateAdvancedSolidFeatureDefinition,
   type AdvancedSolidFeatureAuthoringDescriptor,
@@ -45,6 +46,20 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
         cardinality: { min: 0, max: null },
         acceptedKinds: ['edge', 'sketchEntity'],
       },
+      {
+        role: 'lockProfileFace',
+        label: 'Lock profile face',
+        required: false,
+        cardinality: { min: 0, max: null },
+        acceptedKinds: ['face'],
+      },
+      {
+        role: 'lockProfileDirection',
+        label: 'Lock profile direction',
+        required: false,
+        cardinality: { min: 0, max: 1 },
+        acceptedKinds: ['edge', 'construction'],
+      },
     ],
     operationIntent: {
       supportedIntents: ['create', 'add', 'subtract'],
@@ -53,6 +68,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
         subtract: ['targetBody'],
       },
     },
+    options: SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   } satisfies AdvancedSolidFeatureAuthoringDescriptor
 
   const loftDescriptor = {
@@ -384,6 +400,67 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
     assert(validBoolean.length === 0, 'Boolean sweep validation should accept an explicit targetBody participant.')
   }
 
+  function testSweepAdvancedOptionsValidateActiveTwistAndScale() {
+    const valid = validateAdvancedSolidFeatureDefinition({
+      kind: 'sweep',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' }] },
+          { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_a', edgeId: 'edge_path' }] },
+        ],
+        options: {
+          profileControl: 'keepProfileOrientation',
+          twist: { type: 'angle', angle: Math.PI / 2 },
+          endScale: 1.25,
+        },
+      },
+    }, sweepDescriptor)
+    const invalidInactiveTwist = validateAdvancedSolidFeatureDefinition({
+      kind: 'sweep',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' }] },
+          { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_a', edgeId: 'edge_path' }] },
+        ],
+        options: {
+          profileControl: 'none',
+          twist: { type: 'turns', turns: 1, angle: Math.PI / 2 },
+          endScale: 1,
+        },
+      },
+    }, sweepDescriptor)
+    const invalidScale = validateAdvancedSolidFeatureDefinition({
+      kind: 'sweep',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: 'create',
+        participants: [
+          { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' }] },
+          { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_a', edgeId: 'edge_path' }] },
+        ],
+        options: {
+          profileControl: 'lockProfileDirection',
+          twist: { type: 'pitch', pitch: 2 },
+          endScale: 0,
+        },
+      },
+    }, sweepDescriptor)
+
+    assert(valid.length === 0, 'Sweep validation should accept profile control, active twist, and positive end scale options.')
+    assert(
+      invalidInactiveTwist.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
+      'Sweep validation should reject inactive twist values in durable options.',
+    )
+    assert(
+      invalidScale.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
+      'Sweep validation should reject non-positive end scale.',
+    )
+  }
+
   function testLoftValidationPreservesOrderedProfilesAndGuideCurves() {
     const valid = validateAdvancedSolidFeatureDefinition({
       kind: 'loft',
@@ -682,6 +759,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   testAdvancedParticipantValidationRejectsMissingAndWrongKinds()
   testAdvancedOperationIntentValidationRejectsUnsupportedModes()
   testSweepPathCardinalityAndBooleanTargetValidation()
+  testSweepAdvancedOptionsValidateActiveTwistAndScale()
   testLoftValidationPreservesOrderedProfilesAndGuideCurves()
   testLoftValidationRejectsMissingProfilesAndInvalidBooleanTargets()
   testSplitValidationAcceptsExplicitTargetAndToolBodies()

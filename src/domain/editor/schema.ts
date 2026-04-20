@@ -373,7 +373,7 @@ export const revolveSelectionFilter: SelectionFilter = {
 
 export const sweepSelectionFilter: SelectionFilter = {
   kind: 'sweepReferences',
-  allowedKinds: ['region', 'face', 'edge', 'sketchEntity', 'body'],
+  allowedKinds: ['region', 'face', 'edge', 'sketchEntity', 'construction', 'body'],
   label: 'Sweep references',
   requirements: [
     {
@@ -415,6 +415,34 @@ export const sweepSelectionFilter: SelectionFilter = {
           description: 'Select a durable edge or sketch entity guide curve.',
           acceptedKinds: ['edge', 'sketchEntity'],
           acceptedSemantics: ['edge', 'sketchEntity'],
+        },
+      ],
+    },
+    {
+      id: 'sweep-lock-profile-face',
+      label: 'Lock profile face',
+      description: 'Lock profile faces accepts one or more durable body faces.',
+      slots: [
+        {
+          id: 'sweep-lock-profile-face',
+          label: 'Lock profile face',
+          description: 'Select one or more durable body faces.',
+          acceptedKinds: ['face'],
+          acceptedSemantics: ['planarFace'],
+        },
+      ],
+    },
+    {
+      id: 'sweep-lock-profile-direction',
+      label: 'Lock profile direction',
+      description: 'Lock profile direction accepts one durable edge or construction target.',
+      slots: [
+        {
+          id: 'sweep-lock-profile-direction',
+          label: 'Lock profile direction',
+          description: 'Select one durable edge or construction target.',
+          acceptedKinds: ['edge', 'construction'],
+          acceptedSemantics: ['edge', 'constructionPlane'],
         },
       ],
     },

@@ -17,6 +17,7 @@ import {
 } from '@/domain/feature-authoring/form-events'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
+import type { FeatureEditorFormField } from '@/domain/feature-authoring/form-schema'
 
 test('src/domain/feature-authoring/registry.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -25,10 +26,37 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     }
   }
 
+  function findFormField(fields: readonly FeatureEditorFormField[], fieldId: string): FeatureEditorFormField | undefined {
+    for (const field of fields) {
+      if (field.id === fieldId) {
+        return field
+      }
+
+      if (field.kind === 'optionGroup') {
+        const nested = findFormField(field.fields, fieldId)
+        if (nested) {
+          return nested
+        }
+      }
+
+      if (field.kind === 'discriminatedOptionGroup') {
+        if (field.discriminant.id === fieldId) {
+          return field.discriminant
+        }
+
+        const nested = findFormField(field.variants.flatMap((variant) => variant.fields), fieldId)
+        if (nested) {
+          return nested
+        }
+      }
+    }
+  }
+
   function getFormField(session: Parameters<typeof getFeatureEditorFormSchema>[0], fieldId: string) {
-    return getFeatureEditorFormSchema(session)
-      .sections.flatMap((section) => section.fields)
-      .find((field) => field.id === fieldId)
+    return findFormField(
+      getFeatureEditorFormSchema(session).sections.flatMap((section) => section.fields),
+      fieldId,
+    )
   }
 
   function testRegistryContainsCurrentFeatureSet() {
@@ -174,6 +202,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   function testSweepDraftSelectionAndDefinitionBuilder() {
     const profile = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
     const path = { kind: 'edge' as const, bodyId: 'body_a' as const, edgeId: 'edge_path' as const }
+    const lockFace = { kind: 'face' as const, bodyId: 'body_a' as const, faceId: 'face_lock' as const }
+    const lockDirection = { kind: 'construction' as const, constructionId: 'construction_plane-xy' as const }
     const targetBody = { kind: 'body' as const, bodyId: 'body_a' as const }
     const initialSession = createFeatureEditSession({
       featureType: 'sweep',
@@ -195,13 +225,95 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       definition.parameters.participants.some((participant) => participant.role === 'path' && participant.targets[0] === path),
       'Sweep definitions should preserve the selected path participant role.',
     )
+    assert(
+      definition.parameters.options?.profileControl === 'none' &&
+        definition.parameters.options.twist &&
+        typeof definition.parameters.options.twist === 'object' &&
+        'type' in definition.parameters.options.twist &&
+        definition.parameters.options.twist.type === 'none' &&
+        definition.parameters.options.endScale === 1,
+      'Sweep definitions should include default advanced control options.',
+    )
 
     const schema = getFeatureEditorFormSchema(completedSession)
     const operationField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'sweep-operation-intent')
     assert(operationField?.kind === 'enum', 'Sweep form schema should expose operation intent as a generic enum field.')
+    const profileControlField = getFormField(completedSession, 'sweep-profile-control')
+    assert(profileControlField?.kind === 'enum', 'Sweep form schema should expose profile control as an enum field.')
+    const twistTypeField = getFormField(completedSession, 'sweep-twist-type')
+    assert(twistTypeField?.kind === 'enum', 'Sweep form schema should expose twist type as a discriminant enum.')
+    const twistTurnsField = getFormField(completedSession, 'sweep-twist-turns')
+    assert(twistTurnsField?.kind === 'numeric', 'Sweep form schema should expose turns twist as a numeric field.')
+    const endScaleField = getFormField(completedSession, 'sweep-end-scale')
+    assert(endScaleField?.kind === 'numeric', 'Sweep form schema should expose end scale as a numeric field.')
     const hiddenTargetBodiesField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'sweep-target-bodies')
     assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
     assert(hiddenTargetBodiesField.hidden === true, 'Sweep should hide target bodies for create operation.')
+
+    const keepOrientationSession = patchFeatureEditSession(
+      completedSession,
+      createFeatureEditorFieldPatch(profileControlField, 'keepProfileOrientation'),
+    )
+    const keepOrientationDefinition = buildFeatureDefinition(keepOrientationSession)
+    assert(
+      keepOrientationDefinition?.kind === 'sweep' &&
+        keepOrientationDefinition.parameters.options?.profileControl === 'keepProfileOrientation',
+      'Sweep authoring should preserve keep profile orientation control.',
+    )
+
+    const lockFacesSession = patchFeatureEditSession(
+      completedSession,
+      createFeatureEditorFieldPatch(profileControlField, 'lockProfileFaces'),
+    )
+    assert(buildFeatureDefinition(lockFacesSession) === null, 'Lock profile faces should require at least one face target.')
+    const lockFacesField = getFormField(lockFacesSession, 'sweep-lock-profile-faces')
+    assert(lockFacesField?.kind === 'referenceCollection' && lockFacesField.hidden !== true, 'Lock face picker should be visible for lockProfileFaces.')
+    const lockFacesCompletedSession = patchFeatureEditSession(
+      lockFacesSession,
+      createFeatureEditorReferenceSelectionPatch(lockFacesField, lockFace),
+    )
+    const lockFacesDefinition = buildFeatureDefinition(lockFacesCompletedSession)
+    assert(
+      lockFacesDefinition?.kind === 'sweep' &&
+        lockFacesDefinition.parameters.options?.profileControl === 'lockProfileFaces' &&
+        lockFacesDefinition.parameters.participants.some((participant) => participant.role === 'lockProfileFace'),
+      'Sweep authoring should build lock profile face participants.',
+    )
+
+    const lockDirectionSession = patchFeatureEditSession(
+      completedSession,
+      createFeatureEditorFieldPatch(profileControlField, 'lockProfileDirection'),
+    )
+    assert(buildFeatureDefinition(lockDirectionSession) === null, 'Lock profile direction should require one direction target.')
+    const lockDirectionField = getFormField(lockDirectionSession, 'sweep-lock-profile-direction')
+    assert(lockDirectionField?.kind === 'referencePicker' && lockDirectionField.hidden !== true, 'Lock direction picker should be visible for lockProfileDirection.')
+    const lockDirectionCompletedSession = patchFeatureEditSession(
+      lockDirectionSession,
+      createFeatureEditorReferenceSelectionPatch(lockDirectionField, lockDirection),
+    )
+    const lockDirectionDefinition = buildFeatureDefinition(lockDirectionCompletedSession)
+    assert(
+      lockDirectionDefinition?.kind === 'sweep' &&
+        lockDirectionDefinition.parameters.options?.profileControl === 'lockProfileDirection' &&
+        lockDirectionDefinition.parameters.participants.some((participant) => participant.role === 'lockProfileDirection'),
+      'Sweep authoring should build lock profile direction participants.',
+    )
+
+    const twistTurnsSession = patchFeatureEditSession(
+      patchFeatureEditSession(completedSession, createFeatureEditorFieldPatch(twistTypeField, 'turns')),
+      createFeatureEditorFieldPatch(twistTurnsField, 2),
+    )
+    const twistTurnsDefinition = buildFeatureDefinition(twistTurnsSession)
+    assert(
+      twistTurnsDefinition?.kind === 'sweep' &&
+        twistTurnsDefinition.parameters.options?.twist &&
+        typeof twistTurnsDefinition.parameters.options.twist === 'object' &&
+        'type' in twistTurnsDefinition.parameters.options.twist &&
+        twistTurnsDefinition.parameters.options.twist.type === 'turns' &&
+        'turns' in twistTurnsDefinition.parameters.options.twist &&
+        !('angle' in twistTurnsDefinition.parameters.options.twist),
+      'Sweep buildDefinition should persist only the active twist variant.',
+    )
 
     const subtractSession = patchFeatureEditSession(
       completedSession,
@@ -227,6 +339,78 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
         booleanDefinition.parameters.operationIntent === 'subtract' &&
         booleanDefinition.parameters.participants.some((participant) => participant.role === 'targetBody'),
       'Sweep boolean authoring should build operation intent and explicit targetBody participants.',
+    )
+  }
+
+  function testSweepHydrationPreservesAuthoredAdvancedOptionsForEditing() {
+    const hydrated = hydrateFeatureEditSession({
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_1',
+      ownerFeatureId: 'feature_sweep-1',
+      ownerSketchId: null,
+      ownerBodyId: null,
+      featureId: 'feature_sweep-1',
+      label: 'feature_sweep-1',
+      definition: {
+        kind: 'sweep',
+        featureTypeVersion: 'advanced-solid-feature/v0',
+        parameters: {
+          operationIntent: 'create',
+          participants: [
+            { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' }] },
+            { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
+            { role: 'lockProfileDirection', targets: [{ kind: 'construction', constructionId: 'construction_plane-xy' }] },
+          ],
+          options: {
+            profileControl: { source: 'literal', value: 'lockProfileDirection' },
+            twist: { type: 'angle', angle: { source: 'literal', value: Math.PI / 3 } },
+            endScale: { source: 'literal', value: 1.5 },
+          },
+        },
+      },
+      producedTargets: [{ kind: 'body', bodyId: 'body_sweep-1' }],
+    })
+
+    assert(hydrated?.featureType === 'sweep', 'Sweep snapshots should hydrate into sweep edit sessions.')
+
+    const profileControlField = getFormField(hydrated, 'sweep-profile-control')
+    assert(
+      profileControlField?.kind === 'enum' && profileControlField.value === 'lockProfileDirection',
+      'Sweep hydration should unwrap authored profile control values for editing.',
+    )
+
+    const lockDirectionField = getFormField(hydrated, 'sweep-lock-profile-direction')
+    assert(
+      lockDirectionField?.kind === 'referencePicker' &&
+        lockDirectionField.hidden !== true &&
+        lockDirectionField.value?.kind === 'construction',
+      'Sweep hydration should preserve lock profile direction participants for editing.',
+    )
+
+    const twistTypeField = getFormField(hydrated, 'sweep-twist-type')
+    assert(
+      twistTypeField?.kind === 'enum' && twistTypeField.value === 'angle',
+      'Sweep hydration should preserve authored twist variants for editing.',
+    )
+
+    const twistAngleField = getFormField(hydrated, 'sweep-twist-angle')
+    assert(
+      twistAngleField?.kind === 'numeric' && Math.abs(Number(twistAngleField.value) - 60) < 0.000001,
+      'Sweep hydration should display authored angle twist values in degrees.',
+    )
+
+    const definition = buildFeatureDefinition(hydrated)
+    assert(
+      definition?.kind === 'sweep' &&
+        definition.parameters.options?.profileControl === 'lockProfileDirection' &&
+        definition.parameters.options.twist &&
+        typeof definition.parameters.options.twist === 'object' &&
+        'type' in definition.parameters.options.twist &&
+        definition.parameters.options.twist.type === 'angle' &&
+        'angle' in definition.parameters.options.twist &&
+        Math.abs(Number(definition.parameters.options.twist.angle) - (Math.PI / 3)) < 0.000001 &&
+        definition.parameters.options.endScale === 1.5,
+      'Hydrated sweep authored advanced options should rebuild as durable definition values.',
     )
   }
 
@@ -1276,6 +1460,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testExtrudeBooleanTargetSelectorVisibilityAndScope()
   testRevolveBooleanTargetSelectorVisibilityAndScope()
   testSweepDraftSelectionAndDefinitionBuilder()
+  testSweepHydrationPreservesAuthoredAdvancedOptionsForEditing()
   testChamferDraftSelectionDistanceAndDefinitionBuilder()
   testLoftDraftSelectionReorderingAndDefinitionBuilder()
   testLoftHydrationPreservesOrderedProfilesForEditing()
