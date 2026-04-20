@@ -64,6 +64,7 @@ import {
 import { createDocumentHistoryItems } from '@/domain/modeling/document-history'
 import { extractPlanarFaceData } from '@/domain/modeling/occ/planes'
 import { buildRegionProfileFace } from '@/domain/modeling/occ/sketch-profile'
+import { deleteOccObject } from '@/domain/modeling/occ/memory'
 import {
   getOccDurableRefKey,
   type OccTrackedBody,
@@ -903,44 +904,54 @@ function buildRegionRenderRecords(state: OccAuthoringState) {
 
       try {
         profileFace = buildRegionProfileFace(state.oc, { plane: sketch.plane, sketch: sketch.sketch }, region)
-      } catch {
+      } catch (error) {
+        console.warn(
+          `[occ-snapshot] Skipping region render ${region.regionId}: failed to build profile face.`,
+          error,
+        )
         continue
       }
 
-      new state.oc.BRepMesh_IncrementalMesh_2(
-        profileFace.face,
-        Math.max(state.modelingTolerance * 10, DEFAULT_LINEAR_DEFLECTION),
-        false,
-        DEFAULT_ANGULAR_DEFLECTION,
-        false,
-      )
+      try {
+        const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
+          profileFace.face,
+          Math.max(state.modelingTolerance * 10, DEFAULT_LINEAR_DEFLECTION),
+          false,
+          DEFAULT_ANGULAR_DEFLECTION,
+          false,
+        )
+        deleteOccObject(mesher)
 
-      const geometry = buildMeshGeometryFromFace(state, profileFace.face)
+        const geometry = buildMeshGeometryFromFace(state, profileFace.face)
 
-      if (!geometry) {
-        continue
+        if (!geometry) {
+          console.warn(`[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`)
+          continue
+        }
+
+        const target = region.target as RegionRef
+        records.push({
+          id: createRenderableId(target),
+          label: region.label,
+          ownerBodyId: region.ownerBodyId,
+          ownerFeatureId: region.ownerFeatureId,
+          binding: {
+            pickId: createPickId(target),
+            pickPriority: REGION_PICK_PRIORITY,
+            target,
+            topology: null,
+            semanticClass: 'region',
+          },
+          geometry: {
+            kind: 'mesh',
+            vertexPositions: geometry.vertexPositions,
+            vertexNormals: geometry.vertexNormals,
+            triangleIndices: geometry.triangleIndices,
+          },
+        })
+      } finally {
+        deleteOccObject(profileFace.face)
       }
-
-      const target = region.target as RegionRef
-      records.push({
-        id: createRenderableId(target),
-        label: region.label,
-        ownerBodyId: region.ownerBodyId,
-        ownerFeatureId: region.ownerFeatureId,
-        binding: {
-          pickId: createPickId(target),
-          pickPriority: REGION_PICK_PRIORITY,
-          target,
-          topology: null,
-          semanticClass: 'region',
-        },
-        geometry: {
-          kind: 'mesh',
-          vertexPositions: geometry.vertexPositions,
-          vertexNormals: geometry.vertexNormals,
-          triangleIndices: geometry.triangleIndices,
-        },
-      })
     }
   }
 

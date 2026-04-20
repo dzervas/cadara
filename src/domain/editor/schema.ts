@@ -483,9 +483,23 @@ export const loftSelectionFilter: SelectionFilter = {
       ],
     },
     {
+      id: 'loft-path',
+      label: 'Path',
+      description: 'Loft accepts one optional path control separately from guide curves.',
+      slots: [
+        {
+          id: 'loft-path',
+          label: 'Loft path',
+          description: 'Select one durable edge or sketch entity path.',
+          acceptedKinds: ['edge', 'sketchEntity'],
+          acceptedSemantics: ['edge', 'sketchEntity'],
+        },
+      ],
+    },
+    {
       id: 'loft-guide-curve',
       label: 'Guide curve',
-      description: 'Guide curves are contract-visible but reported as unsupported until the kernel path supports them.',
+      description: 'Loft accepts optional guide curves separately from path controls.',
       slots: [
         {
           id: 'loft-guide-curve',

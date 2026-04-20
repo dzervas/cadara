@@ -74,6 +74,7 @@ export function createViewportBvhSceneKey(
         'sketch',
         renderable.id,
         renderable.linePattern,
+        renderable.semanticClass ?? 'default',
         renderable.target ? JSON.stringify(renderable.target) : 'none',
         getSketchStructuralGeometryToken(renderable.geometry),
       ].join(':')

@@ -29,6 +29,8 @@ import {
   getProjectedRegionLoopRejectionMessage,
   isProjectedRegionSegmentSourceSupported,
 } from '@/domain/modeling/occ/implementation-policy'
+import { getClosedCurveSampleCount } from '@/contracts/sketch/region-geometry'
+import { deleteOccObject } from '@/domain/modeling/occ/memory'
 
 export interface BuiltSketchProfileFace {
   face: InstanceType<OpenCascadeInstance['TopoDS_Face']>
@@ -58,7 +60,6 @@ interface ClosedPolylineBoundarySegmentGeometry {
 
 type BoundarySegmentGeometry = OpenBoundarySegmentGeometry | ClosedBoundarySegmentGeometry | ClosedPolylineBoundarySegmentGeometry
 
-const ADVANCED_PROFILE_SAMPLE_COUNT = 64
 const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 function getSolvedEntityGeometry(
@@ -152,11 +153,15 @@ function toBoundarySegmentGeometry(
         segmentId: geometry.entityId,
       }
     case 'ellipse': {
+      const majorRadius = Math.hypot(
+        geometry.majorAxisEndpointPosition[0] - geometry.centerPosition[0],
+        geometry.majorAxisEndpointPosition[1] - geometry.centerPosition[1],
+      )
       const points = sampleEllipsePoints(
         geometry.centerPosition,
         geometry.majorAxisEndpointPosition,
         geometry.minorRadius,
-        ADVANCED_PROFILE_SAMPLE_COUNT,
+        getClosedCurveSampleCount(Math.max(majorRadius, geometry.minorRadius)),
       )
       return {
         kind: 'closedPolyline',
@@ -319,7 +324,13 @@ function buildLineEdgeFromWorld(
   const start = toGpPnt(oc, startPosition)
   const end = toGpPnt(oc, endPosition)
   const builder = new oc.BRepBuilderAPI_MakeEdge_3(start, end)
-  return builder.Edge()
+  try {
+    return builder.Edge()
+  } finally {
+    deleteOccObject(builder)
+    deleteOccObject(start)
+    deleteOccObject(end)
+  }
 }
 
 function buildCircleEdge(
@@ -337,14 +348,22 @@ function buildCircleEdgeFromSketchGeometry(
   radius: number,
 ) {
   const center = mapSketchPointToWorld(plane, centerPosition)
-  const axis = new oc.gp_Ax2_2(
-    toGpPnt(oc, center),
-    toGpDir(oc, plane.frame.normal),
-    toGpDir(oc, plane.frame.xAxis),
-  )
+  const centerPoint = toGpPnt(oc, center)
+  const normalDirection = toGpDir(oc, plane.frame.normal)
+  const xDirection = toGpDir(oc, plane.frame.xAxis)
+  const axis = new oc.gp_Ax2_2(centerPoint, normalDirection, xDirection)
   const circle = new oc.gp_Circ_2(axis, radius)
   const builder = new oc.BRepBuilderAPI_MakeEdge_8(circle)
-  return builder.Edge()
+  try {
+    return builder.Edge()
+  } finally {
+    deleteOccObject(builder)
+    deleteOccObject(circle)
+    deleteOccObject(axis)
+    deleteOccObject(centerPoint)
+    deleteOccObject(normalDirection)
+    deleteOccObject(xDirection)
+  }
 }
 
 function buildArcEdge(
@@ -381,19 +400,40 @@ function buildArcEdgeFromSketchGeometry(
     plane.frame.normal,
     sweepDirection,
   )
+  const startPoint = toGpPnt(oc, start)
+  const midpointPoint = toGpPnt(oc, midpoint)
+  const endPoint = toGpPnt(oc, end)
   const arc = new oc.GC_MakeArcOfCircle_4(
-    toGpPnt(oc, start),
-    toGpPnt(oc, midpoint),
-    toGpPnt(oc, end),
+    startPoint,
+    midpointPoint,
+    endPoint,
   )
 
-  if (!arc.IsDone()) {
-    throw new Error(`Failed to build OCC arc for ${label}.`)
-  }
+  let curveHandle: { delete?: () => void } | null = null
+  let builder: { Edge(): InstanceType<OpenCascadeInstance['TopoDS_Edge']>; delete?: () => void } | null = null
+  try {
+    if (!arc.IsDone()) {
+      throw new Error(`Failed to build OCC arc for ${label}.`)
+    }
 
-  const curveHandle = new oc.Handle_Geom_Curve_2(arc.Value().get())
-  const builder = new oc.BRepBuilderAPI_MakeEdge_24(curveHandle)
-  return builder.Edge()
+    const arcValue = arc.Value()
+    let nextCurveHandle: InstanceType<OpenCascadeInstance['Handle_Geom_Curve']> | null = null
+    try {
+      nextCurveHandle = new oc.Handle_Geom_Curve_2(arcValue.get())
+      curveHandle = nextCurveHandle
+    } finally {
+      deleteOccObject(arcValue)
+    }
+    builder = new oc.BRepBuilderAPI_MakeEdge_24(nextCurveHandle)
+    return builder.Edge()
+  } finally {
+    deleteOccObject(builder)
+    deleteOccObject(curveHandle)
+    deleteOccObject(arc)
+    deleteOccObject(startPoint)
+    deleteOccObject(midpointPoint)
+    deleteOccObject(endPoint)
+  }
 }
 
 function addClosedPolylineEdges(
@@ -404,7 +444,12 @@ function addClosedPolylineEdges(
   for (let index = 0; index < geometry.points.length; index += 1) {
     const start = geometry.points[index]!
     const end = geometry.points[(index + 1) % geometry.points.length]!
-    wireBuilder.Add_1(buildLineEdgeFromWorld(oc, start, end))
+    const edge = buildLineEdgeFromWorld(oc, start, end)
+    try {
+      wireBuilder.Add_1(edge)
+    } finally {
+      deleteOccObject(edge)
+    }
   }
 }
 
@@ -588,18 +633,36 @@ function orientEdgeForLoop(
   const curve = new oc.BRepAdaptor_Curve_2(edge)
   const first = curve.Value(curve.FirstParameter())
   const last = curve.Value(curve.LastParameter())
-  const currentStart = toVec3FromGpPoint(first)
-  const currentEnd = toVec3FromGpPoint(last)
+  try {
+    const currentStart = toVec3FromGpPoint(first)
+    const currentEnd = toVec3FromGpPoint(last)
 
-  if (arePointsCoincident(currentStart, loopGeometry.start) && arePointsCoincident(currentEnd, loopGeometry.end)) {
-    return edge
-  }
+    if (arePointsCoincident(currentStart, loopGeometry.start) && arePointsCoincident(currentEnd, loopGeometry.end)) {
+      return edge
+    }
 
-  if (arePointsCoincident(currentStart, loopGeometry.end) && arePointsCoincident(currentEnd, loopGeometry.start)) {
-    return oc.TopoDS.Edge_1(edge.Reversed())
+    if (arePointsCoincident(currentStart, loopGeometry.end) && arePointsCoincident(currentEnd, loopGeometry.start)) {
+      return reverseEdge(oc, edge)
+    }
+  } finally {
+    deleteOccObject(first)
+    deleteOccObject(last)
+    deleteOccObject(curve)
   }
 
   throw new Error(`Built OCC edge for segment ${loopGeometry.segmentId} does not match loop traversal geometry.`)
+}
+
+function reverseEdge(
+  oc: OpenCascadeInstance,
+  edge: InstanceType<OpenCascadeInstance['TopoDS_Edge']>,
+) {
+  const reversed = edge.Reversed()
+  try {
+    return oc.TopoDS.Edge_1(reversed)
+  } finally {
+    deleteOccObject(reversed)
+  }
 }
 
 function buildProjectedBoundaryEdge(
@@ -619,9 +682,14 @@ function buildProjectedBoundaryEdge(
       return buildLineEdgeFromWorld(oc, loopGeometry.start, loopGeometry.end)
     case 'circle': {
       const edge = buildCircleEdgeFromSketchGeometry(oc, plane, geometry.centerPosition, geometry.radius)
-      return loopRole === 'inner'
-        ? oc.TopoDS.Edge_1(edge.Reversed())
-        : edge
+      if (loopRole !== 'inner') {
+        return edge
+      }
+      try {
+        return reverseEdge(oc, edge)
+      } finally {
+        deleteOccObject(edge)
+      }
     }
     case 'arc': {
       const edge = buildArcEdgeFromSketchGeometry(
@@ -633,9 +701,14 @@ function buildProjectedBoundaryEdge(
         geometry.sweepDirection,
         `projected geometry ${source.reference.geometryId}`,
       )
-      return traversalDirection === 'reverse'
-        ? oc.TopoDS.Edge_1(edge.Reversed())
-        : edge
+      if (traversalDirection !== 'reverse') {
+        return edge
+      }
+      try {
+        return reverseEdge(oc, edge)
+      } finally {
+        deleteOccObject(edge)
+      }
     }
     case 'point':
       throw new Error(`Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`)
@@ -654,83 +727,115 @@ function buildLoopWire(
   const loopGeometry: BoundarySegmentGeometry[] = []
   const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1()
 
-  for (const segment of loop.segments) {
-    if (!isProjectedRegionSegmentSourceSupported(segment.source)) {
-      throw new Error('Unsupported region segment source.')
-    }
+  try {
+    for (const segment of loop.segments) {
+      if (!isProjectedRegionSegmentSourceSupported(segment.source)) {
+        throw new Error('Unsupported region segment source.')
+      }
 
-    if (segment.source.kind === 'projectedGeometry') {
-      const projectedGeometry = resolveProjectedBoundaryGeometry(sketch, projectedReferences, segment.source)
-      const segmentGeometry = toProjectedBoundarySegmentGeometry(
-        plane,
-        segment.source,
-        projectedGeometry,
-        segment.traversalDirection,
-      )
-      loopGeometry.push(segmentGeometry)
-      wireBuilder.Add_1(buildProjectedBoundaryEdge(
-        oc,
-        plane,
-        segment.source,
-        projectedGeometry,
-        segmentGeometry,
-        loop.role,
-        segment.traversalDirection,
-      ))
-    } else {
-      const geometry = getSolvedEntityGeometry(sketch, segment.source.entityId)
-      assertLoopSegmentOwnership(sketch, geometry)
-      const segmentGeometry = getLoopSegmentTraversal(plane, sketch, segment, geometry)
-      loopGeometry.push(segmentGeometry)
+      if (segment.source.kind === 'projectedGeometry') {
+        const projectedGeometry = resolveProjectedBoundaryGeometry(sketch, projectedReferences, segment.source)
+        const segmentGeometry = toProjectedBoundarySegmentGeometry(
+          plane,
+          segment.source,
+          projectedGeometry,
+          segment.traversalDirection,
+        )
+        loopGeometry.push(segmentGeometry)
+        const edge = buildProjectedBoundaryEdge(
+          oc,
+          plane,
+          segment.source,
+          projectedGeometry,
+          segmentGeometry,
+          loop.role,
+          segment.traversalDirection,
+        )
+        try {
+          wireBuilder.Add_1(edge)
+        } finally {
+          deleteOccObject(edge)
+        }
+      } else {
+        const geometry = getSolvedEntityGeometry(sketch, segment.source.entityId)
+        assertLoopSegmentOwnership(sketch, geometry)
+        const segmentGeometry = getLoopSegmentTraversal(plane, sketch, segment, geometry)
+        loopGeometry.push(segmentGeometry)
 
-      switch (geometry.kind) {
-        case 'lineSegment': {
-          const edge = orientEdgeForLoop(oc, buildLineEdge(oc, plane, geometry), segmentGeometry, segment)
-          wireBuilder.Add_1(edge)
-          break
-        }
-        case 'circle': {
-          const edge = buildCircleEdge(oc, plane, geometry)
-          wireBuilder.Add_1(
-            loop.role === 'inner'
-              ? oc.TopoDS.Edge_1(edge.Reversed())
-              : edge,
-          )
-          break
-        }
-        case 'arc': {
-          const edge = orientEdgeForLoop(oc, buildArcEdge(oc, plane, geometry), segmentGeometry, segment)
-          wireBuilder.Add_1(edge)
-          break
-        }
-        case 'ellipse':
-        case 'profileText':
-          if (segmentGeometry.kind !== 'closedPolyline') {
-            throw new Error(`Advanced entity ${geometry.entityId} did not resolve to closed profile geometry.`)
+        switch (geometry.kind) {
+          case 'lineSegment': {
+            const baseEdge = buildLineEdge(oc, plane, geometry)
+            let edge = baseEdge
+            try {
+              edge = orientEdgeForLoop(oc, baseEdge, segmentGeometry, segment)
+              wireBuilder.Add_1(edge)
+            } finally {
+              if (edge !== baseEdge) {
+                deleteOccObject(edge)
+              }
+              deleteOccObject(baseEdge)
+            }
+            break
           }
-          addClosedPolylineEdges(oc, wireBuilder, segmentGeometry)
-          break
-        case 'point':
-          throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
-        case 'spline':
-          throw new Error(`Spline entity ${geometry.entityId} cannot define a profile boundary.`)
-        case 'ellipticalArc':
-          throw new Error(`Elliptical arc entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
-        case 'conic':
-          throw new Error(`Conic entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
-        case 'bezierCurve':
-          throw new Error(`Bezier curve entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+          case 'circle': {
+            const baseEdge = buildCircleEdge(oc, plane, geometry)
+            let edge = baseEdge
+            try {
+              edge = loop.role === 'inner' ? reverseEdge(oc, baseEdge) : baseEdge
+              wireBuilder.Add_1(edge)
+            } finally {
+              if (edge !== baseEdge) {
+                deleteOccObject(edge)
+              }
+              deleteOccObject(baseEdge)
+            }
+            break
+          }
+          case 'arc': {
+            const baseEdge = buildArcEdge(oc, plane, geometry)
+            let edge = baseEdge
+            try {
+              edge = orientEdgeForLoop(oc, baseEdge, segmentGeometry, segment)
+              wireBuilder.Add_1(edge)
+            } finally {
+              if (edge !== baseEdge) {
+                deleteOccObject(edge)
+              }
+              deleteOccObject(baseEdge)
+            }
+            break
+          }
+          case 'ellipse':
+          case 'profileText':
+            if (segmentGeometry.kind !== 'closedPolyline') {
+              throw new Error(`Advanced entity ${geometry.entityId} did not resolve to closed profile geometry.`)
+            }
+            addClosedPolylineEdges(oc, wireBuilder, segmentGeometry)
+            break
+          case 'point':
+            throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
+          case 'spline':
+            throw new Error(`Spline entity ${geometry.entityId} cannot define a profile boundary.`)
+          case 'ellipticalArc':
+            throw new Error(`Elliptical arc entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+          case 'conic':
+            throw new Error(`Conic entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+          case 'bezierCurve':
+            throw new Error(`Bezier curve entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+        }
       }
     }
+
+    assertLoopGeometryIsClosed(loop, loopGeometry)
+
+    if (!wireBuilder.IsDone()) {
+      throw new Error(`Failed to build OCC wire for region loop ${loop.loopId}.`)
+    }
+
+    return wireBuilder.Wire()
+  } finally {
+    deleteOccObject(wireBuilder)
   }
-
-  assertLoopGeometryIsClosed(loop, loopGeometry)
-
-  if (!wireBuilder.IsDone()) {
-    throw new Error(`Failed to build OCC wire for region loop ${loop.loopId}.`)
-  }
-
-  return wireBuilder.Wire()
 }
 
 export function buildRegionProfileFace(
@@ -753,22 +858,41 @@ export function buildRegionProfileFace(
   const plane = snapshotSketch.plane
   const projectedReferences = snapshotSketch.projectedReferences ?? snapshotSketch.sketch.projectedReferences ?? []
   const planeShape = toGpPlane(oc, plane)
-  const outerWire = buildLoopWire(oc, plane, snapshotSketch.sketch, outerLoop, projectedReferences)
-  const faceBuilder = new oc.BRepBuilderAPI_MakeFace_16(planeShape, outerWire, true)
+  let outerWire: ReturnType<typeof buildLoopWire> | null = null
+  let faceBuilder: {
+    Add(wire: unknown): void
+    Face(): InstanceType<OpenCascadeInstance['TopoDS_Face']>
+    IsDone(): boolean
+    delete?: () => void
+  } | null = null
 
-  for (const innerLoop of region.loops.filter((loop) => loop.role === 'inner')) {
-    assertLoopCanBuildProfile(snapshotSketch.sketch, region, innerLoop)
-    faceBuilder.Add(buildLoopWire(oc, plane, snapshotSketch.sketch, innerLoop, projectedReferences))
-  }
+  try {
+    outerWire = buildLoopWire(oc, plane, snapshotSketch.sketch, outerLoop, projectedReferences)
+    faceBuilder = new oc.BRepBuilderAPI_MakeFace_16(planeShape, outerWire, true)
 
-  if (!faceBuilder.IsDone()) {
-    throw new Error(`Failed to build OCC face for region ${region.regionId}.`)
-  }
+    for (const innerLoop of region.loops.filter((loop) => loop.role === 'inner')) {
+      assertLoopCanBuildProfile(snapshotSketch.sketch, region, innerLoop)
+      const innerWire = buildLoopWire(oc, plane, snapshotSketch.sketch, innerLoop, projectedReferences)
+      try {
+        faceBuilder.Add(innerWire)
+      } finally {
+        deleteOccObject(innerWire)
+      }
+    }
 
-  return {
-    face: faceBuilder.Face(),
-    plane,
-    normal: plane.frame.normal,
+    if (!faceBuilder.IsDone()) {
+      throw new Error(`Failed to build OCC face for region ${region.regionId}.`)
+    }
+
+    return {
+      face: faceBuilder.Face(),
+      plane,
+      normal: plane.frame.normal,
+    }
+  } finally {
+    deleteOccObject(faceBuilder)
+    deleteOccObject(outerWire)
+    deleteOccObject(planeShape)
   }
 }
 

@@ -17,6 +17,12 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     }
   }
 
+  function assertNear(actual: number, expected: number, message: string) {
+    if (Math.abs(actual - expected) > 1e-9) {
+      throw new Error(`${message}: expected ${expected}, received ${actual}`)
+    }
+  }
+
   function makePoint(pointId: string, label: string, x: number, y: number) {
     return {
       pointId: pointId as `sketch_point_${string}`,
@@ -221,6 +227,78 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     assert(found.rings[0]?.boundaryEntityIds.length === 4, 'The ring should contain four edges.')
   }
 
+  async function testJiggledRectangleRegionsStayStableAndPositioned() {
+    const baseDefinition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 4, 0),
+        makePoint('sketch_point_c', 'C', 4, 3),
+        makePoint('sketch_point_d', 'D', 0, 3),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_bc', 'sketch_entity_cd', 'sketch_entity_da'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_da', 'DA', 'sketch_point_d', 'sketch_point_a'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const translateDefinition = (dx: number, dy: number): SketchDefinition => ({
+      ...baseDefinition,
+      points: baseDefinition.points.map((point) => ({
+        ...point,
+        position: [point.position[0] + dx, point.position[1] + dy] as const,
+      })),
+    })
+
+    let expectedRegionId: string | null = null
+    let expectedLoopSignature: string | null = null
+
+    for (const [dx, dy] of [[0, 0], [0.125, -0.25], [-0.2, 0.3], [0.05, 0.05], [0, 0]] as const) {
+      const definition = translateDefinition(dx, dy)
+      const solvedSnapshot = makeSolvedSnapshot(definition)
+      const found = findSketchRings(definition, solvedSnapshot)
+      const derived = deriveSketchRegionsCore({
+        documentId: 'doc_workspace',
+        revisionId: 'rev_0001',
+        sketchId: 'sketch_primary',
+        definition,
+        solvedSnapshot,
+      })
+
+      assert(found.rings.length === 1, 'Jiggled rectangle should keep producing exactly one ring.')
+      assert(derived.regions.length === 1, 'Jiggled rectangle should keep producing exactly one region.')
+
+      const ring = found.rings[0]!
+      const region = derived.regions[0]!
+      const xs = ring.points.map((point) => point[0])
+      const ys = ring.points.map((point) => point[1])
+      const loopSignature = region.loops[0]!.segments.map((segment) =>
+        segment.source.kind === 'entity' ? segment.source.entityId : segment.source.reference.geometryId,
+      ).join('|')
+
+      expectedRegionId ??= region.regionId
+      expectedLoopSignature ??= loopSignature
+
+      assert(region.regionId === expectedRegionId, 'Region id should remain stable while the profile is jiggled.')
+      assert(loopSignature === expectedLoopSignature, 'Region boundary sources should remain stable while the profile is jiggled.')
+      assertNear(Math.min(...xs), dx, 'Jiggled region should keep the translated minimum x.')
+      assertNear(Math.max(...xs), dx + 4, 'Jiggled region should keep the translated maximum x.')
+      assertNear(Math.min(...ys), dy, 'Jiggled region should keep the translated minimum y.')
+      assertNear(Math.max(...ys), dy + 3, 'Jiggled region should keep the translated maximum y.')
+      assertNear(Math.abs(ring.signedArea), 12, 'Jiggled region should preserve its profile area.')
+    }
+  }
+
   async function testEndpointSelectionResidualsDeriveAdjacentProfiles() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -298,6 +376,66 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     )
   }
 
+  async function testRegionIdsSurviveSortOrderChanges() {
+    function makeDefinition(secondWidth: number): SketchDefinition {
+      const points = [
+        makePoint('sketch_point_a0', 'A0', 0, 0),
+        makePoint('sketch_point_a1', 'A1', 2, 0),
+        makePoint('sketch_point_a2', 'A2', 2, 2),
+        makePoint('sketch_point_a3', 'A3', 0, 2),
+        makePoint('sketch_point_b0', 'B0', 4, 0),
+        makePoint('sketch_point_b1', 'B1', 4 + secondWidth, 0),
+        makePoint('sketch_point_b2', 'B2', 4 + secondWidth, secondWidth),
+        makePoint('sketch_point_b3', 'B3', 4, secondWidth),
+      ]
+      const entities = [
+        makeLine('sketch_entity_a_bottom', 'A bottom', 'sketch_point_a0', 'sketch_point_a1'),
+        makeLine('sketch_entity_a_right', 'A right', 'sketch_point_a1', 'sketch_point_a2'),
+        makeLine('sketch_entity_a_top', 'A top', 'sketch_point_a2', 'sketch_point_a3'),
+        makeLine('sketch_entity_a_left', 'A left', 'sketch_point_a3', 'sketch_point_a0'),
+        makeLine('sketch_entity_b_bottom', 'B bottom', 'sketch_point_b0', 'sketch_point_b1'),
+        makeLine('sketch_entity_b_right', 'B right', 'sketch_point_b1', 'sketch_point_b2'),
+        makeLine('sketch_entity_b_top', 'B top', 'sketch_point_b2', 'sketch_point_b3'),
+        makeLine('sketch_entity_b_left', 'B left', 'sketch_point_b3', 'sketch_point_b0'),
+      ]
+      return {
+        schemaVersion: 'sketch-definition/v1alpha1',
+        referenceIds: [],
+        references: [],
+        pointIds: points.map((point) => point.pointId),
+        points,
+        entityIds: entities.map((entity) => entity.entityId),
+        entities,
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+      }
+    }
+
+    function regionIdForEntity(definition: SketchDefinition, entityId: string) {
+      const derived = deriveSketchRegionsCore({
+        documentId: 'doc_workspace',
+        revisionId: 'rev_0001',
+        sketchId: 'sketch_primary',
+        definition,
+        solvedSnapshot: makeSolvedSnapshot(definition),
+      })
+      const region = derived.regions.find((candidate) =>
+        candidate.loops[0]?.segments.some((segment) =>
+          segment.source.kind === 'entity' && segment.source.entityId === entityId,
+        ),
+      )
+      assert(region, `Expected a region containing ${entityId}.`)
+      return region.regionId
+    }
+
+    const stableRegionId = regionIdForEntity(makeDefinition(1), 'sketch_entity_a_bottom')
+    const resortedRegionId = regionIdForEntity(makeDefinition(4), 'sketch_entity_a_bottom')
+
+    assert(stableRegionId === resortedRegionId, 'Region ids should be based on boundary content, not sorted position.')
+  }
+
   async function testFindRingsMultipleAndDeriveRegions() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -362,12 +500,97 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     })
 
     assert(derived.diagnostics.length === 0, 'Region derivation should not emit diagnostics for solved nested rectangles.')
-    assert(derived.regions.length === 2, 'Nested rectangles should derive every bounded region.')
+    assert(derived.regions.length === 1, 'Nested rectangles should derive one even-parity solid region.')
     assert(derived.regions[0]?.loops.length === 2, 'Derived region should contain outer and inner loops.')
     assert(derived.regions[0]?.loops[0]?.role === 'outer', 'First loop should be outer.')
     assert(derived.regions[0]?.loops[1]?.role === 'inner', 'Second loop should be inner.')
-    assert(derived.regions[1]?.loops.length === 1, 'Inner rectangle should also be selectable as its own region.')
-    assert(derived.regions[1]?.loops[0]?.role === 'outer', 'Inner selectable region should expose its boundary as an outer loop.')
+  }
+
+  async function testThreeLevelNestingKeepsIslandSolid() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_a',
+        'sketch_point_b',
+        'sketch_point_c',
+        'sketch_point_d',
+        'sketch_point_e',
+        'sketch_point_f',
+        'sketch_point_g',
+        'sketch_point_h',
+        'sketch_point_i',
+        'sketch_point_j',
+        'sketch_point_k',
+        'sketch_point_l',
+      ],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 10, 0),
+        makePoint('sketch_point_c', 'C', 10, 10),
+        makePoint('sketch_point_d', 'D', 0, 10),
+        makePoint('sketch_point_e', 'E', 2, 2),
+        makePoint('sketch_point_f', 'F', 8, 2),
+        makePoint('sketch_point_g', 'G', 8, 8),
+        makePoint('sketch_point_h', 'H', 2, 8),
+        makePoint('sketch_point_i', 'I', 4, 4),
+        makePoint('sketch_point_j', 'J', 6, 4),
+        makePoint('sketch_point_k', 'K', 6, 6),
+        makePoint('sketch_point_l', 'L', 4, 6),
+      ],
+      entityIds: [
+        'sketch_entity_ab',
+        'sketch_entity_bc',
+        'sketch_entity_cd',
+        'sketch_entity_da',
+        'sketch_entity_ef',
+        'sketch_entity_fg',
+        'sketch_entity_gh',
+        'sketch_entity_he',
+        'sketch_entity_ij',
+        'sketch_entity_jk',
+        'sketch_entity_kl',
+        'sketch_entity_li',
+      ],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_da', 'DA', 'sketch_point_d', 'sketch_point_a'),
+        makeLine('sketch_entity_ef', 'EF', 'sketch_point_e', 'sketch_point_f'),
+        makeLine('sketch_entity_fg', 'FG', 'sketch_point_f', 'sketch_point_g'),
+        makeLine('sketch_entity_gh', 'GH', 'sketch_point_g', 'sketch_point_h'),
+        makeLine('sketch_entity_he', 'HE', 'sketch_point_h', 'sketch_point_e'),
+        makeLine('sketch_entity_ij', 'IJ', 'sketch_point_i', 'sketch_point_j'),
+        makeLine('sketch_entity_jk', 'JK', 'sketch_point_j', 'sketch_point_k'),
+        makeLine('sketch_entity_kl', 'KL', 'sketch_point_k', 'sketch_point_l'),
+        makeLine('sketch_entity_li', 'LI', 'sketch_point_l', 'sketch_point_i'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const solvedSnapshot = makeSolvedSnapshot(definition)
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot,
+    })
+
+    assert(derived.regions.length === 2, 'Outer/hole/island nesting should derive the outer solid and island solid.')
+    assert(derived.regions[0]?.loops.length === 2, 'Outer solid should use the middle loop as a hole.')
+    assert(derived.regions[1]?.loops.length === 1, 'Island solid should not be treated as an inner loop of the hole.')
+    assert(
+      derived.regions[1]?.loops[0]?.segments.some((segment) =>
+        segment.source.kind === 'entity' && segment.source.entityId === 'sketch_entity_ij',
+      ),
+      'Island region should be bounded by the innermost loop.',
+    )
   }
 
   async function testMixedLocalAndProjectedLoopPreservesProjectedIdentity() {
@@ -654,13 +877,12 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(derived.regions.length === 2, 'A square with an inner circle should derive outer-with-hole and inner disk regions.')
+    assert(derived.regions.length === 1, 'A square with an inner circle should derive one even-parity solid region.')
     assert(derived.regions[0]?.loops.length === 2, 'Outer cell should include the circle as an inner loop.')
-    assert(derived.regions[1]?.loops.length === 1, 'Inner disk should be independently selectable.')
     assert(
-      derived.regions[1]?.loops[0]?.segments[0]?.source.kind === 'entity'
-      && derived.regions[1]?.loops[0]?.segments[0]?.source.entityId === 'sketch_entity_circle',
-      'Inner disk should be bounded by the circle entity.',
+      derived.regions[0]?.loops[1]?.segments[0]?.source.kind === 'entity'
+      && derived.regions[0]?.loops[1]?.segments[0]?.source.entityId === 'sketch_entity_circle',
+      'The inner loop should be bounded by the circle entity.',
     )
   }
 
@@ -775,20 +997,109 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     assert(derived.regions.length === 0, 'Closed construction circles should not create selectable profile regions.')
   }
 
+  async function testSelfIntersectingProfileIsRejectedWithDiagnostic() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 2, 2),
+        makePoint('sketch_point_c', 'C', 0, 2),
+        makePoint('sketch_point_d', 'D', 2, 0),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_bc', 'sketch_entity_cd', 'sketch_entity_da'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_da', 'DA', 'sketch_point_d', 'sketch_point_a'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const solvedSnapshot = makeSolvedSnapshot(definition)
+    const found = findSketchRings(definition, solvedSnapshot)
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot,
+    })
+
+    assert(found.rings.length === 0, 'Self-intersecting profile loops should not produce valid rings.')
+    assert(derived.regions.length === 0, 'Self-intersecting profile loops should not become selectable regions.')
+    assert(
+      derived.diagnostics.some((diagnostic) => diagnostic.code === 'profile-invalid-ring'),
+      'Rejected self-intersections should emit a diagnostic before reaching OCC.',
+    )
+  }
+
+  async function testOpenAndDegenerateSegmentsAreSurfacedAsDiagnostics() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 2, 0),
+        makePoint('sketch_point_c', 'C', 2, 0),
+      ],
+      entityIds: ['sketch_entity_open', 'sketch_entity_zero'],
+      entities: [
+        makeLine('sketch_entity_open', 'Open', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_zero', 'Zero', 'sketch_point_b', 'sketch_point_c'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    })
+
+    assert(derived.regions.length === 0, 'Open and degenerate profile segments should not create regions.')
+    assert(
+      derived.diagnostics.some((diagnostic) => diagnostic.code === 'profile-open-segment'),
+      'Open profile segments should be reported as diagnostics.',
+    )
+    assert(
+      derived.diagnostics.some((diagnostic) => diagnostic.code === 'profile-degenerate-segment'),
+      'Degenerate profile segments should be reported as diagnostics.',
+    )
+  }
+
   async function run() {
     await testFindRingsNone()
     await testFindRingsOne()
+    await testJiggledRectangleRegionsStayStableAndPositioned()
     await testEndpointSelectionResidualsDeriveAdjacentProfiles()
-  await testFindRingsMultipleAndDeriveRegions()
-  await testMixedLocalAndProjectedLoopPreservesProjectedIdentity()
-  await testProjectedOnlyCircleLoopPreservesProjectedIdentity()
-  await testMissingProjectedReferencesReportDiagnosticsWithoutInventingGeometry()
-  await testUnauthoredProjectedReferencesReportDiagnosticsWithoutInventingGeometry()
-  await testProjectedReferenceMissingAuthoredRecordIsRejected()
+    await testRegionIdsSurviveSortOrderChanges()
+    await testFindRingsMultipleAndDeriveRegions()
+    await testThreeLevelNestingKeepsIslandSolid()
+    await testMixedLocalAndProjectedLoopPreservesProjectedIdentity()
+    await testProjectedOnlyCircleLoopPreservesProjectedIdentity()
+    await testMissingProjectedReferencesReportDiagnosticsWithoutInventingGeometry()
+    await testUnauthoredProjectedReferencesReportDiagnosticsWithoutInventingGeometry()
+    await testProjectedReferenceMissingAuthoredRecordIsRejected()
     await testFindCircleRegion()
     await testSquareWithInnerCircleDerivesAllBoundedCells()
     await testConstructionGeometryDoesNotSplitNormalProfile()
     await testClosedConstructionCircleDoesNotCreateRegion()
+    await testSelfIntersectingProfileIsRejectedWithDiagnostic()
+    await testOpenAndDegenerateSegmentsAreSurfacedAsDiagnostics()
   }
 
   run().catch((error: unknown) => {

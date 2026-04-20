@@ -1694,7 +1694,11 @@ function SketchDisplayMeshNode({
     () => getSketchDisplayMeshMaterialConfig(renderable, applyStyles),
     [applyStyles, renderable],
   )
-  const material = useMemo(() => new THREE.MeshStandardMaterial(materialConfig), [materialConfig])
+  const material = useMemo(() => {
+    const nextMaterial = new THREE.MeshStandardMaterial(materialConfig)
+    nextMaterial.depthWrite = false
+    return nextMaterial
+  }, [materialConfig])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
@@ -1706,7 +1710,7 @@ function SketchDisplayMeshNode({
             value,
             null,
             renderable.target,
-            renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve',
+            renderable.semanticClass ?? (renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve'),
             'document',
           )
         }

@@ -515,7 +515,14 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       sketches: [constructionSketch],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     })
-    const snapshot = buildOccWorkspaceSnapshot(initialState)
+    const originalWarn = console.warn
+    console.warn = () => {}
+    let snapshot: ReturnType<typeof buildOccWorkspaceSnapshot>
+    try {
+      snapshot = buildOccWorkspaceSnapshot(initialState)
+    } finally {
+      console.warn = originalWarn
+    }
 
     assert(
       !snapshot.document.render.records.some((record) =>
@@ -633,8 +640,8 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       && record.geometry.kind === 'mesh',
     )
 
-    assert(derived.regions.length === 2, 'Nested square/circle sketch should derive two bounded profile cells.')
-    assert(regionMeshes.length === 2, 'Render export must include one pickable mesh per bounded sketch region.')
+    assert(derived.regions.length === 1, 'Nested square/circle sketch should derive one even-parity bounded profile cell.')
+    assert(regionMeshes.length === 1, 'Render export must include one pickable mesh per bounded sketch region.')
     assert(
       derived.regions.every((region) =>
         regionMeshes.some((record) =>
@@ -775,12 +782,47 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testRegionRenderFailuresWarnAndSkipOnlyBadRegion() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase6_bad_region' as SketchId, plane)
+    sketch.sketch.solvedSnapshot = {
+      ...sketch.sketch.solvedSnapshot,
+      solvedEntities: [],
+    }
+    const state = createOccAuthoringState(oc, {
+      sketches: [sketch],
+    })
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(' '))
+    }
+    try {
+      const snapshot = buildOccWorkspaceSnapshot(state)
+      assert(
+        !snapshot.document.render.records.some((record) =>
+          record.binding.semanticClass === 'region' && record.binding.target.kind === 'region' && record.binding.target.regionId === region.regionId,
+        ),
+        'Bad region profiles should be skipped from render export.',
+      )
+    } finally {
+      console.warn = originalWarn
+    }
+
+    assert(
+      warnings.some((warning) => warning.includes(String(region.regionId)) && warning.includes('failed to build profile face')),
+      'Skipped region profile render failures should be surfaced as console warnings.',
+    )
+  }
+
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
   await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport()
   await testNestedSketchRegionsExportSeparateMeshes()
   await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
   await testOccSnapshotSurfacesSketchNavigationAndHistory()
+  await testRegionRenderFailuresWarnAndSkipOnlyBadRegion()
 
   console.log('OCC phase 6 snapshot/export tests passed.')
 })

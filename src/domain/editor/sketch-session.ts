@@ -2,15 +2,18 @@ import type {
   ConstraintDefinition,
   DimensionDefinition,
   ProjectedSketchGeometryRef,
+  RegionLoopRecord,
   RegionRecord,
   SketchDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
   SketchReferenceDefinition,
+  SolvedSketchSnapshot,
   SketchStyleDefinition,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
+import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import {
   solveSketchDefinitionCore,
   solveSketchDefinitionWithDraggedPointTarget,
@@ -25,8 +28,10 @@ import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/s
 import type {
   ConstraintId,
   DimensionId,
+  DocumentId,
   RenderableId,
   ReferenceId,
+  RevisionId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -41,6 +46,7 @@ import type {
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { primitiveRefEquals } from '@/domain/editor/schema'
+import { ShapeUtils, Vector2 } from 'three'
 import {
   buildSketchStyleControls,
   buildSketchStylePresentation,
@@ -223,6 +229,8 @@ const SKETCH_DIRECT_EDIT_TOLERANCES = {
 
 const CONSTRAINED_DRAG_BLOCKED_MESSAGE = 'Geometry is constrained and cannot move to that position.'
 const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE = 'Could not solve the edited constraint value.'
+const LIVE_REGION_DOCUMENT_ID = 'doc_live_sketch' as DocumentId
+const LIVE_REGION_REVISION_ID = 'rev_live_sketch' as RevisionId
 
 export interface SketchSessionDisplayRenderable {
   id: RenderableId
@@ -231,6 +239,7 @@ export interface SketchSessionDisplayRenderable {
   target: PrimitiveRef | null
   linePattern: 'solid' | 'dashed'
   role: 'local' | 'reference'
+  semanticClass?: RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
   paintStyle?: SketchDisplayPaintStyle
   strokeStyle?: SketchDisplayStrokeStyle
 }
@@ -378,6 +387,37 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
     styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
     styles: definition.styles ? [...definition.styles] : undefined,
     derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
+  }
+}
+
+function deriveSolvedRegionsForSession(
+  session: Pick<SketchSessionState, 'projectedReferences' | 'sketchId'>,
+  definition: SketchDefinition,
+  solvedSnapshot?: SolvedSketchSnapshot,
+): RegionRecord[] {
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const evaluatedDefinition = evaluateSketchDerivations(definition).definition
+  const usableSolvedSnapshot = solvedSnapshot ?? solveSketchDefinitionCore({
+    definition: evaluatedDefinition,
+    projectedReferences: session.projectedReferences,
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'bestEffort',
+  }).solvedSnapshot
+
+  return deriveSketchRegionsCore({
+    documentId: LIVE_REGION_DOCUMENT_ID,
+    revisionId: LIVE_REGION_REVISION_ID,
+    sketchId,
+    definition: evaluatedDefinition,
+    solvedSnapshot: usableSolvedSnapshot,
+    projectedReferences: session.projectedReferences,
+  }).regions
+}
+
+function withLiveSolvedRegions(session: SketchSessionState): SketchSessionState {
+  return {
+    ...session,
+    solvedRegions: deriveSolvedRegionsForSession(session, session.definition),
   }
 }
 
@@ -1461,6 +1501,7 @@ function rebuildSessionForDefinition(
     activeDrag: null,
     validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, definition),
+    solvedRegions: deriveSolvedRegionsForSession(session, definition),
   }
 }
 
@@ -2748,6 +2789,7 @@ function applySketchEditOperationResult(
       historyOperations: session.historyOperations,
       sequence: nextSequence,
       commitRequest: rebuildSessionCommitRequest(session, result.definition),
+      solvedRegions: deriveSolvedRegionsForSession(session, result.definition),
     }
   }
 
@@ -2760,6 +2802,7 @@ function applySketchEditOperationResult(
       historyOperations: history.historyOperations,
       sequence: nextSequence,
       commitRequest: rebuildSessionCommitRequest(session, history.definition),
+      solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
     }
   }
 
@@ -2845,6 +2888,7 @@ export function selectSketchEditToolTarget(
       sequence: nextSequence,
       validationMessage: null,
       commitRequest: rebuildSessionCommitRequest(session, result.definition),
+      solvedRegions: deriveSolvedRegionsForSession(session, result.definition),
       toolPresentation: buildSketchEditToolPresentation(activeEditTool),
       activeEditTarget: null,
       activeDrag: null,
@@ -3015,6 +3059,7 @@ export function patchSketchEditToolValue(
     historyOperations: history.historyOperations,
     sequence: nextSequence,
     commitRequest: rebuildSessionCommitRequest(session, history.definition),
+    solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
     validationMessage: null,
     toolPresentation: buildSketchEditToolPresentation(nextEditTool),
   }
@@ -3208,8 +3253,9 @@ function applySketchGeometryDrag(
           currentPoint: point,
           status: 'dragging',
           message: null,
-        },
+    },
     commitRequest: rebuildSessionCommitRequest(session, definition),
+    solvedRegions: deriveSolvedRegionsForSession(session, definition, edit.solvedSnapshot),
     validationMessage: null,
   }
 }
@@ -3219,7 +3265,7 @@ function solveDraggedPointEdit(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   pointId: SketchPointId,
   position: SketchPoint,
-): { kind: 'accepted'; definition: SketchDefinition } | { kind: 'blocked'; message: string } {
+): { kind: 'accepted'; definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } | { kind: 'blocked'; message: string } {
   if (!definition.points.some((point) => point.pointId === pointId)) {
     return { kind: 'blocked', message: 'Sketch point is no longer editable.' }
   }
@@ -3257,6 +3303,7 @@ function solveDraggedPointEdit(
         position: point.solvedPosition,
       })),
     ),
+    solvedSnapshot: solved.solvedSnapshot,
   }
 }
 
@@ -3322,6 +3369,7 @@ export function toggleSketchConstructionTarget(
     definition,
     toolStagedEntities: [],
     commitRequest: rebuildSessionCommitRequest(session, definition),
+    solvedRegions: deriveSolvedRegionsForSession(session, definition),
     validationMessage: null,
   }
 }
@@ -3462,6 +3510,7 @@ export function selectSketchReferenceTarget(
     definition,
     fullDefinition,
     commitRequest: rebuildSessionCommitRequest(session, definition),
+    solvedRegions: deriveSolvedRegionsForSession(session, definition),
     validationMessage: null,
   }
 }
@@ -3494,6 +3543,10 @@ export function deleteSketchReferenceTarget(
     projectedReferences: session.projectedReferences.filter((reference) => reference.referenceId !== target.referenceId),
     projectionDiagnostics: session.projectionDiagnostics,
     commitRequest: rebuildSessionCommitRequest(session, definition),
+    solvedRegions: deriveSolvedRegionsForSession({
+      ...session,
+      projectedReferences: session.projectedReferences.filter((reference) => reference.referenceId !== target.referenceId),
+    }, definition),
     validationMessage: null,
   }
 }
@@ -4228,6 +4281,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       planeKey: session.planeKey,
       definition: history.definition,
     }),
+    solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
     validationMessage: null,
     toolPresentation: result.presentation,
     activeAnnotationEdit: null,
@@ -4659,6 +4713,7 @@ export function patchSketchStyleValue(
     fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
   }
 }
 
@@ -4940,6 +4995,7 @@ function commitSketchAnnotationEditValue(
     activeDrag: null,
     validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition, solved.solvedSnapshot),
   }
 }
 
@@ -4976,13 +5032,14 @@ function solveEditedAnnotationDefinition(
         position: point.solvedPosition,
       })),
     ),
+    solvedSnapshot: solved.solvedSnapshot,
   }
 }
 
 function solveCommittedConstraintDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
-): SketchDefinition {
+): { definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } {
   const solved = solveSketchDefinitionCore({
     definition,
     projectedReferences,
@@ -4992,16 +5049,19 @@ function solveCommittedConstraintDefinition(
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
 
   if (solved.status.solveState !== 'solved' || !constraintsSatisfied) {
-    return definition
+    return { definition }
   }
 
-  return applyPointPositionsToDefinition(
-    definition,
-    solved.solvedSnapshot.solvedPoints.map((point) => ({
-      pointId: point.pointId,
-      position: point.solvedPosition,
-    })),
-  )
+  return {
+    definition: applyPointPositionsToDefinition(
+      definition,
+      solved.solvedSnapshot.solvedPoints.map((point) => ({
+        pointId: point.pointId,
+        position: point.solvedPosition,
+      })),
+    ),
+    solvedSnapshot: solved.solvedSnapshot,
+  }
 }
 
 function updateAnnotationValueInDefinition(
@@ -5227,15 +5287,16 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
   return {
     ...session,
     toolStagedEntities: [],
-    definition: solvedDefinition,
-    fullDefinition: solvedFullDefinition,
+    definition: solvedDefinition.definition,
+    fullDefinition: solvedFullDefinition.definition,
     historyCursor: history.historyCursor,
     historyOperations: history.historyOperations,
     sequence: session.sequence + 1,
     status: 'idle',
     constraintAuthoring: null,
     activeAnnotationEdit: null,
-    commitRequest: rebuildSessionCommitRequest(session, solvedDefinition),
+    commitRequest: rebuildSessionCommitRequest(session, solvedDefinition.definition),
+    solvedRegions: deriveSolvedRegionsForSession(session, solvedDefinition.definition, solvedDefinition.solvedSnapshot),
     selectedAnnotation: null,
     toolPresentation: null,
     activeTool: null,
@@ -5299,6 +5360,7 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
     activeDrag: null,
     validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
   }
 }
 
@@ -5797,8 +5859,13 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   const localStyleLookup = createSketchEntityStyleLookup(session)
   const pointStyleLookup = createSketchPointStyleLookup(session)
   const displayDefinition = evaluateSketchDerivations(session.definition).definition
+  const regionRenderables = session.solvedRegions.flatMap((region, index) => {
+    const renderable = createDisplayRenderableForRegion(session, displayDefinition, region, index)
+    return renderable ? [renderable] : []
+  })
 
   return [
+    ...regionRenderables,
     ...displayDefinition.points.map((point) => {
       const style = pointStyleLookup.get(point.pointId)
 
@@ -5839,6 +5906,170 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       ),
     ),
   ]
+}
+
+function createDisplayRenderableForRegion(
+  session: SketchSessionState,
+  definition: SketchDefinition,
+  region: RegionRecord,
+  index: number,
+): SketchSessionDisplayRenderable | null {
+  const triangulated = triangulateSketchRegionLoops(definition, region)
+  if (!triangulated) {
+    return null
+  }
+
+  return {
+    id: `renderable_sketch_region_${region.regionId}_${index}` as RenderableId,
+    label: region.label,
+    target: region.target,
+    geometry: {
+      kind: 'mesh',
+      vertexPositions: triangulated.points.map((point) => mapSketchPointToWorld(session.plane, point)),
+      vertexNormals: triangulated.points.map(() => session.plane.frame.normal),
+      triangleIndices: triangulated.triangleIndices,
+    },
+    linePattern: 'solid',
+    role: 'local',
+    semanticClass: 'region',
+  }
+}
+
+function triangulateSketchRegionLoops(
+  definition: SketchDefinition,
+  region: RegionRecord,
+): { points: SketchPoint[]; triangleIndices: Array<readonly [number, number, number]> } | null {
+  const outerLoop = region.loops.find((loop) => loop.role === 'outer')
+  if (!outerLoop) {
+    return null
+  }
+
+  const outerPoints = orientSketchLoopPoints(
+    normalizeClosedSketchLoopPoints(getRegionLoopSketchPoints(definition, outerLoop)),
+    'counterClockwise',
+  )
+  if (outerPoints.length < 3) {
+    return null
+  }
+
+  const innerLoops = region.loops.filter((loop) => loop.role === 'inner')
+  const innerPoints = innerLoops.map((loop) =>
+    orientSketchLoopPoints(
+      normalizeClosedSketchLoopPoints(getRegionLoopSketchPoints(definition, loop)),
+      'clockwise',
+    ),
+  )
+  if (innerPoints.some((points) => points.length < 3)) {
+    return null
+  }
+
+  const triangleIndices = ShapeUtils.triangulateShape(
+    outerPoints.map(pointToVector2),
+    innerPoints.map((loop) => loop.map(pointToVector2)),
+  ).map((triangle) => [triangle[0]!, triangle[1]!, triangle[2]!] as const)
+
+  if (triangleIndices.length === 0) {
+    return null
+  }
+
+  return {
+    points: [outerPoints, ...innerPoints].flat(),
+    triangleIndices,
+  }
+}
+
+function pointToVector2(point: SketchPoint) {
+  return new Vector2(point[0], point[1])
+}
+
+function orientSketchLoopPoints(points: SketchPoint[], orientation: 'clockwise' | 'counterClockwise') {
+  const isClockwise = getSketchLoopSignedArea(points) < 0
+  const shouldBeClockwise = orientation === 'clockwise'
+  return shouldBeClockwise === isClockwise ? points : [...points].reverse()
+}
+
+function normalizeClosedSketchLoopPoints(points: readonly SketchPoint[]): SketchPoint[] {
+  if (points.length < 2) {
+    return [...points]
+  }
+
+  const first = points[0]
+  const last = points[points.length - 1]
+  if (
+    first
+    && last
+    && Math.hypot(first[0] - last[0], first[1] - last[1]) <= 1e-9
+  ) {
+    return points.slice(0, -1)
+  }
+
+  return [...points]
+}
+
+function getRegionLoopSketchPoints(
+  definition: SketchDefinition,
+  loop: RegionLoopRecord,
+): SketchPoint[] {
+  if (loop.boundaryPointIds.length >= 3) {
+    const pointById = new Map(definition.points.map((point) => [point.pointId, point.position] as const))
+    return loop.boundaryPointIds.flatMap((pointId) => {
+      const position = pointById.get(pointId)
+      return position ? [position] : []
+    })
+  }
+
+  if (loop.segments.length !== 1) {
+    return []
+  }
+
+  const source = loop.segments[0]?.source
+  if (!source || source.kind !== 'entity') {
+    return []
+  }
+
+  return getClosedEntityLoopPoints(definition, source.entityId)
+}
+
+function getClosedEntityLoopPoints(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+): SketchPoint[] {
+  const entity = definition.entities.find((entry) => entry.entityId === entityId)
+  if (!entity) {
+    return []
+  }
+
+  const draftEntity = mapDefinitionEntityToDraftEntity(getDefinitionSketchId(definition), definition.points, entity)[0]
+  if (!draftEntity) {
+    return []
+  }
+
+  if (draftEntity.kind === 'circle') {
+    const pointCount = 48
+    return Array.from({ length: pointCount }, (_, pointIndex) => {
+      const angle = (Math.PI * 2 * pointIndex) / pointCount
+      return [
+        draftEntity.center[0] + Math.cos(angle) * draftEntity.radius,
+        draftEntity.center[1] + Math.sin(angle) * draftEntity.radius,
+      ] as const
+    })
+  }
+
+  if (draftEntity.kind === 'polyline' && draftEntity.isClosed) {
+    return [...draftEntity.points]
+  }
+
+  return []
+}
+
+function getSketchLoopSignedArea(points: readonly SketchPoint[]) {
+  let area = 0
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]!
+    const next = points[(index + 1) % points.length]!
+    area += current[0] * next[1] - next[0] * current[1]
+  }
+  return area / 2
 }
 
 function createDisplayRenderableForEntity(
@@ -6355,12 +6586,12 @@ export function updateSketchReferenceProjection(
   const projectionDiagnostics = [...diagnostics, ...referenceDiagnostics]
   const validationMessage = projectionDiagnostics.find((diagnostic) => diagnostic.severity !== 'info')?.message ?? null
 
-  return {
+  return withLiveSolvedRegions({
     ...session,
     projectedReferences,
     projectionDiagnostics,
     validationMessage,
-  }
+  })
 }
 
 function describeConstraint(constraint: ConstraintDefinition) {

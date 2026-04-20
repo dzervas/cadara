@@ -867,7 +867,7 @@ export function evaluateMockSketchDefinition(
     status: solvedState.status,
     solvedSnapshot: solvedState.solvedSnapshot,
     derivedRegions: derivedState.regions,
-    diagnostics: solvedState.diagnostics,
+    diagnostics: [...solvedState.diagnostics, ...derivedState.diagnostics],
   }
   const regions: DeriveSketchRegionsResponse = {
     ...makeResponseBase(solveRequest),
@@ -931,13 +931,14 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       request.sketchId,
       solved.solvedSnapshot,
       request.definition,
+      request.projectedReferences,
     )
     return {
       ...base,
       status: solved.status,
       solvedSnapshot: solved.solvedSnapshot,
       derivedRegions: derived.regions,
-      diagnostics: solved.diagnostics,
+      diagnostics: [...solved.diagnostics, ...derived.diagnostics],
     }
   }
 

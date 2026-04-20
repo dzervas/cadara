@@ -23,6 +23,11 @@ import type {
   SketchId,
   SketchPointId,
 } from '@/contracts/shared/ids'
+import {
+  getClosedCurveSampleCount,
+  MIN_REGION_AREA,
+  REGION_POINT_TOLERANCE,
+} from '@/contracts/sketch/region-geometry'
 
 export interface SketchRegionExtractionInput {
   documentId: DocumentId
@@ -66,8 +71,6 @@ type RingBoundarySegment = {
   traversalDirection: 'forward' | 'reverse'
 }
 
-const CIRCLE_REGION_SAMPLE_COUNT = 64
-const ADVANCED_REGION_SAMPLE_COUNT = 64
 const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 function projectedKindForGeometry(geometry: ProjectedSketchReferenceGeometry): NonNullable<RegionBoundarySegmentRecord['source'] extends infer Source
@@ -140,12 +143,12 @@ function filterAuthoredProjectedReferences(
   return projectedReferences.filter((reference) => authoredReferenceIds.has(reference.referenceId))
 }
 
-function pointKey(point: SketchPoint2D) {
-  return `${point[0].toFixed(6)},${point[1].toFixed(6)}`
+function distanceBetweenPoints(left: SketchPoint2D, right: SketchPoint2D) {
+  return Math.hypot(left[0] - right[0], left[1] - right[1])
 }
 
 function equalsPoint(left: SketchPoint2D, right: SketchPoint2D) {
-  return pointKey(left) === pointKey(right)
+  return distanceBetweenPoints(left, right) <= REGION_POINT_TOLERANCE
 }
 
 function angleDifference(a0: number, a1: number) {
@@ -312,6 +315,101 @@ function cross(
   return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 }
 
+function isDegenerateSegment(segment: SegmentRecord) {
+  return distanceBetweenPoints(segment.start, segment.end) <= REGION_POINT_TOLERANCE
+}
+
+function pointOnSegment(point: SketchPoint2D, start: SketchPoint2D, end: SketchPoint2D) {
+  const dx = end[0] - start[0]
+  const dy = end[1] - start[1]
+  const lengthSquared = dx * dx + dy * dy
+
+  if (lengthSquared <= REGION_POINT_TOLERANCE * REGION_POINT_TOLERANCE) {
+    return distanceBetweenPoints(point, start) <= REGION_POINT_TOLERANCE
+  }
+
+  const t = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared
+  const clamped = Math.max(0, Math.min(1, t))
+  const closest: SketchPoint2D = [start[0] + clamped * dx, start[1] + clamped * dy]
+  return distanceBetweenPoints(point, closest) <= REGION_POINT_TOLERANCE
+}
+
+function orientationSign(value: number, segmentLength: number) {
+  const tolerance = REGION_POINT_TOLERANCE * Math.max(segmentLength, 1)
+  if (value > tolerance) {
+    return 1
+  }
+  if (value < -tolerance) {
+    return -1
+  }
+  return 0
+}
+
+function segmentsIntersect(
+  leftStart: SketchPoint2D,
+  leftEnd: SketchPoint2D,
+  rightStart: SketchPoint2D,
+  rightEnd: SketchPoint2D,
+) {
+  const leftToRightStart = cross(leftStart, leftEnd, rightStart)
+  const leftToRightEnd = cross(leftStart, leftEnd, rightEnd)
+  const rightToLeftStart = cross(rightStart, rightEnd, leftStart)
+  const rightToLeftEnd = cross(rightStart, rightEnd, leftEnd)
+  const leftLength = distanceBetweenPoints(leftStart, leftEnd)
+  const rightLength = distanceBetweenPoints(rightStart, rightEnd)
+  const leftStartSign = orientationSign(leftToRightStart, leftLength)
+  const leftEndSign = orientationSign(leftToRightEnd, leftLength)
+  const rightStartSign = orientationSign(rightToLeftStart, rightLength)
+  const rightEndSign = orientationSign(rightToLeftEnd, rightLength)
+
+  if (
+    leftStartSign !== 0
+    && leftEndSign !== 0
+    && leftStartSign !== leftEndSign
+    && rightStartSign !== 0
+    && rightEndSign !== 0
+    && rightStartSign !== rightEndSign
+  ) {
+    return true
+  }
+
+  return pointOnSegment(rightStart, leftStart, leftEnd)
+    || pointOnSegment(rightEnd, leftStart, leftEnd)
+    || pointOnSegment(leftStart, rightStart, rightEnd)
+    || pointOnSegment(leftEnd, rightStart, rightEnd)
+}
+
+function areAdjacentRingEdges(leftIndex: number, rightIndex: number, edgeCount: number) {
+  return Math.abs(leftIndex - rightIndex) === 1 || Math.abs(leftIndex - rightIndex) === edgeCount - 1
+}
+
+function ringSelfIntersects(points: SketchPoint2D[]) {
+  for (let leftIndex = 0; leftIndex < points.length; leftIndex += 1) {
+    const leftStart = points[leftIndex]!
+    const leftEnd = points[(leftIndex + 1) % points.length]!
+
+    for (let rightIndex = leftIndex + 1; rightIndex < points.length; rightIndex += 1) {
+      if (areAdjacentRingEdges(leftIndex, rightIndex, points.length)) {
+        continue
+      }
+
+      const rightStart = points[rightIndex]!
+      const rightEnd = points[(rightIndex + 1) % points.length]!
+      if (segmentsIntersect(leftStart, leftEnd, rightStart, rightEnd)) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
+function isValidRing(points: SketchPoint2D[], area: number, options: { checkSelfIntersection?: boolean } = {}) {
+  return points.length >= 3
+    && Math.abs(area) > MIN_REGION_AREA
+    && (options.checkSelfIntersection === false || !ringSelfIntersects(points))
+}
+
 function buildSegments(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
@@ -465,11 +563,12 @@ function buildCircleRings(
       return []
     }
 
-    const points = Array.from({ length: CIRCLE_REGION_SAMPLE_COUNT }, (_, index) => {
-      const angle = (Math.PI * 2 * index) / CIRCLE_REGION_SAMPLE_COUNT
-      return [
-        solved.centerPosition[0] + Math.cos(angle) * solved.solvedRadius,
-        solved.centerPosition[1] + Math.sin(angle) * solved.solvedRadius,
+      const sampleCount = getClosedCurveSampleCount(solved.solvedRadius)
+      const points = Array.from({ length: sampleCount }, (_, index) => {
+        const angle = (Math.PI * 2 * index) / sampleCount
+        return [
+          solved.centerPosition[0] + Math.cos(angle) * solved.solvedRadius,
+          solved.centerPosition[1] + Math.sin(angle) * solved.solvedRadius,
       ] satisfies SketchPoint2D
     })
 
@@ -498,8 +597,9 @@ function buildCircleRings(
         return []
       }
 
-      const points = Array.from({ length: CIRCLE_REGION_SAMPLE_COUNT }, (_, index) => {
-        const angle = (Math.PI * 2 * index) / CIRCLE_REGION_SAMPLE_COUNT
+      const sampleCount = getClosedCurveSampleCount(geometry.radius)
+      const points = Array.from({ length: sampleCount }, (_, index) => {
+        const angle = (Math.PI * 2 * index) / sampleCount
         return [
           geometry.centerPosition[0] + Math.cos(angle) * geometry.radius,
           geometry.centerPosition[1] + Math.sin(angle) * geometry.radius,
@@ -522,7 +622,9 @@ function buildCircleRings(
     })
   })
 
-  return [...localCircleRings, ...projectedCircleRings]
+  return [...localCircleRings, ...projectedCircleRings].filter((ring) =>
+    isValidRing(ring.points, ring.signedArea, { checkSelfIntersection: false }),
+  )
 }
 
 function buildAdvancedClosedRings(
@@ -543,7 +645,13 @@ function buildAdvancedClosedRings(
         entity.centerPosition,
         entity.majorAxisEndpointPosition,
         entity.minorRadius,
-        ADVANCED_REGION_SAMPLE_COUNT,
+        getClosedCurveSampleCount(Math.max(
+          Math.hypot(
+            entity.majorAxisEndpointPosition[0] - entity.centerPosition[0],
+            entity.majorAxisEndpointPosition[1] - entity.centerPosition[1],
+          ),
+          entity.minorRadius,
+        )),
       )
     } else if (entity.kind === 'profileText') {
       points = getProfileTextOutlinePoints(entity)
@@ -555,7 +663,7 @@ function buildAdvancedClosedRings(
       return []
     }
 
-    return [{
+    const ring = {
       kind: 'segments' as const,
       boundarySegments: [{
         source: { kind: 'entity' as const, entityId: entity.entityId },
@@ -567,7 +675,9 @@ function buildAdvancedClosedRings(
       boundaryPointIds: [],
       points,
       signedArea: signedArea(points),
-    } satisfies SketchRingCandidate]
+    } satisfies SketchRingCandidate
+
+    return isValidRing(ring.points, ring.signedArea, { checkSelfIntersection: false }) ? [ring] : []
   })
 }
 
@@ -602,16 +712,20 @@ export function findSketchRings(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
-): { rings: SketchRingCandidate[]; unusedSegments: SegmentRecord[] } {
+): { rings: SketchRingCandidate[]; unusedSegments: SegmentRecord[]; degenerateSegments: SegmentRecord[]; rejectedRings: SketchRingCandidate[] } {
   const authoredProjectedReferences = filterAuthoredProjectedReferences(definition, projectedReferences)
-  const initialSegments = buildSegments(definition, solvedSnapshot, authoredProjectedReferences)
+  const builtSegments = buildSegments(definition, solvedSnapshot, authoredProjectedReferences)
+  const degenerateSegments = builtSegments.filter(isDegenerateSegment)
+  const initialSegments = builtSegments.filter((segment) => !isDegenerateSegment(segment))
   const allSegments = [...initialSegments, ...initialSegments.map(reverseSegment)]
 
   const used = new Set<number>()
+  const usedSourceKeys = new Set<string>()
   const rings: SketchRingCandidate[] = [
     ...buildCircleRings(definition, solvedSnapshot, authoredProjectedReferences),
     ...buildAdvancedClosedRings(definition, solvedSnapshot),
   ]
+  const rejectedRings: SketchRingCandidate[] = []
 
   for (const [segmentIndex, segment] of allSegments.entries()) {
     if (used.has(segmentIndex)) {
@@ -627,24 +741,28 @@ export function findSketchRings(
       ringIndices.push([nextIndex, nextSegment])
 
       if (equalsPoint(nextSegment.end, startPoint)) {
-        usedForRing(used, ringIndices)
         const ringSegments = ringIndices.map((entry) => entry[1])
         const points = ringSegments.map((entry) => entry.start)
         const area = signedArea(points)
-        if (area > 0) {
-          rings.push({
-            kind: 'segments',
-            boundarySegments: ringSegments.map((entry) => ({
-              source: entry.source,
-              startPointId: entry.startPointId,
-              endPointId: entry.endPointId,
-              traversalDirection: entry.traversalDirection,
-            })),
-            boundaryEntityIds: ringSegments.flatMap((entry) => entry.source.kind === 'entity' ? [entry.source.entityId] : []),
-            boundaryPointIds: ringSegments.flatMap((entry) => entry.startPointId ? [entry.startPointId] : []),
-            points,
-            signedArea: area,
-          })
+        const ring = {
+          kind: 'segments' as const,
+          boundarySegments: ringSegments.map((entry) => ({
+            source: entry.source,
+            startPointId: entry.startPointId,
+            endPointId: entry.endPointId,
+            traversalDirection: entry.traversalDirection,
+          })),
+          boundaryEntityIds: ringSegments.flatMap((entry) => entry.source.kind === 'entity' ? [entry.source.entityId] : []),
+          boundaryPointIds: ringSegments.flatMap((entry) => entry.startPointId ? [entry.startPointId] : []),
+          points,
+          signedArea: area,
+        } satisfies SketchRingCandidate
+        const selfIntersects = points.length >= 3 && ringSelfIntersects(points)
+        if (area > 0 && isValidRing(points, area, { checkSelfIntersection: false }) && !selfIntersects) {
+          usedForRing(used, usedSourceKeys, ringIndices)
+          rings.push(ring)
+        } else if (area > MIN_REGION_AREA || selfIntersects) {
+          rejectedRings.push(ring)
         }
         break
       }
@@ -658,8 +776,8 @@ export function findSketchRings(
   }
 
   rings.sort(compareRingsByAreaThenKey)
-  const unusedSegments = initialSegments.filter((_, index) => !used.has(index))
-  return { rings, unusedSegments }
+  const unusedSegments = initialSegments.filter((segment) => !usedSourceKeys.has(segment.sourceKey))
+  return { rings, unusedSegments, degenerateSegments, rejectedRings }
 }
 
 function compareRingsByAreaThenKey(left: SketchRingCandidate, right: SketchRingCandidate) {
@@ -676,15 +794,42 @@ function getRingStableKey(ring: SketchRingCandidate) {
   return ring.boundarySegments.map((segment) => getSegmentSourceKey(segment.source)).join('|')
 }
 
-function usedForRing(used: Set<number>, ringIndices: Array<[number, SegmentRecord]>) {
-  for (const [index] of ringIndices) {
+function getRegionStableKey(ring: SketchRingCandidate) {
+  return ring.boundarySegments.map((segment) => getSegmentSourceKey(segment.source)).sort().join('|')
+}
+
+function usedForRing(
+  used: Set<number>,
+  usedSourceKeys: Set<string>,
+  ringIndices: Array<[number, SegmentRecord]>,
+) {
+  for (const [index, segment] of ringIndices) {
     used.add(index)
+    usedSourceKeys.add(segment.sourceKey)
   }
 }
 
-function createRegionId(sketchId: SketchId, ordinal: number): RegionId {
+function sanitizeRegionIdPart(value: string) {
+  return value.replaceAll(/[^a-zA-Z0-9_-]/g, '-').replaceAll(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 64) || 'profile'
+}
+
+function hashStableString(value: string) {
+  let hash = 0xcbf29ce484222325n
+  const prime = 0x100000001b3n
+  const mask = 0xffffffffffffffffn
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index))
+    hash = (hash * prime) & mask
+  }
+  return hash.toString(36)
+}
+
+function createRegionId(sketchId: SketchId, ring: SketchRingCandidate): RegionId {
   const suffix = sketchId.startsWith('sketch_') ? sketchId.slice('sketch_'.length) : sketchId
-  return (ordinal === 0 ? `region_${suffix}-outer` : `region_${suffix}-loop-${ordinal + 1}`) as RegionId
+  const sourceLabel = ring.boundarySegments[0]
+    ? getSegmentSourceKey(ring.boundarySegments[0].source).split(':').at(-1) ?? 'profile'
+    : 'profile'
+  return `region_${sanitizeRegionIdPart(suffix)}-${sanitizeRegionIdPart(sourceLabel)}-${hashStableString(getRegionStableKey(ring))}` as RegionId
 }
 
 function createRegionLoopId(regionId: RegionId, ordinal: number): RegionLoopId {
@@ -722,7 +867,7 @@ export function deriveSketchRegionsCore(
 
   const projectedReferences = input.projectedReferences ?? []
   const authoredProjectedReferences = filterAuthoredProjectedReferences(input.definition, projectedReferences)
-  const { rings } = findSketchRings(input.definition, input.solvedSnapshot, authoredProjectedReferences)
+  const { rings, unusedSegments, degenerateSegments, rejectedRings } = findSketchRings(input.definition, input.solvedSnapshot, authoredProjectedReferences)
   const sorted = [...rings].sort(compareRingsByAreaThenKey)
   const childrenByParent = new Map<number, number[]>()
   const parentByRing = new Map<number, number | null>()
@@ -756,11 +901,28 @@ export function deriveSketchRegionsCore(
     }
   }
 
-  const regions = sorted.map((ring, index) => {
-    const regionId = createRegionId(input.sketchId, index)
+  const depthByRing = new Map<number, number>()
+  const getRingDepth = (index: number): number => {
+    const cached = depthByRing.get(index)
+    if (cached !== undefined) {
+      return cached
+    }
+
+    const parent = parentByRing.get(index)
+    const depth = parent === null || parent === undefined ? 0 : getRingDepth(parent) + 1
+    depthByRing.set(index, depth)
+    return depth
+  }
+
+  const solidRings = sorted
+    .map((ring, index) => ({ ring, index, depth: getRingDepth(index) }))
+    .filter((entry) => entry.depth % 2 === 0)
+
+  const regions = solidRings.map(({ ring, index }, regionIndex) => {
+    const regionId = createRegionId(input.sketchId, ring)
     const outerLoop = createLoopRecord(regionId, 0, 'outer', ring, false)
 
-    const innerLoops = (childrenByParent.get(index) ?? []).map((childIndex, loopOrdinal) => {
+    const innerLoops = (childrenByParent.get(index) ?? []).filter((childIndex) => getRingDepth(childIndex) % 2 === 1).map((childIndex, loopOrdinal) => {
       const child = sorted[childIndex]!
       return createLoopRecord(regionId, loopOrdinal + 1, 'inner', child, true)
     })
@@ -768,7 +930,7 @@ export function deriveSketchRegionsCore(
     return {
       ...createOwnershipRecord(input),
       regionId,
-      label: index === 0 ? 'Outer region' : `Loop region ${index + 1}`,
+      label: regionIndex === 0 ? 'Outer region' : `Loop region ${regionIndex + 1}`,
       target: { kind: 'region', sketchId: input.sketchId, regionId },
       sourceSketch: { kind: 'sketch', sketchId: input.sketchId },
       loops: [outerLoop, ...innerLoops],
@@ -781,8 +943,66 @@ export function deriveSketchRegionsCore(
     diagnostics: [
       ...createProjectedReferenceRegionDiagnostics(input.definition, projectedReferences),
       ...createUnsupportedAdvancedProfileDiagnostics(input.definition),
+      ...createUnusedSegmentRegionDiagnostics(unusedSegments),
+      ...createDegenerateSegmentRegionDiagnostics(degenerateSegments),
+      ...createRejectedRingRegionDiagnostics(rejectedRings),
     ],
   }
+}
+
+function createSegmentDiagnosticTarget(segment: SegmentRecord): SketchSolveDiagnostic['target'] {
+  return segment.source.kind === 'entity'
+    ? { kind: 'entity', entityId: segment.source.entityId }
+    : null
+}
+
+function createUnusedSegmentRegionDiagnostics(
+  unusedSegments: readonly SegmentRecord[],
+): SketchSolveDiagnostic[] {
+  const seen = new Set<string>()
+  return unusedSegments.flatMap((segment) => {
+    if (seen.has(segment.sourceKey)) {
+      return []
+    }
+    seen.add(segment.sourceKey)
+    return [makeDiagnostic(
+      'profile-open-segment',
+      'warning',
+      `Boundary segment ${segment.sourceKey} was not used in any closed sketch region.`,
+      createSegmentDiagnosticTarget(segment),
+    )]
+  })
+}
+
+function createDegenerateSegmentRegionDiagnostics(
+  degenerateSegments: readonly SegmentRecord[],
+): SketchSolveDiagnostic[] {
+  const seen = new Set<string>()
+  return degenerateSegments.flatMap((segment) => {
+    if (seen.has(segment.sourceKey)) {
+      return []
+    }
+    seen.add(segment.sourceKey)
+    return [makeDiagnostic(
+      'profile-degenerate-segment',
+      'warning',
+      `Boundary segment ${segment.sourceKey} is too short to participate in sketch region extraction.`,
+      createSegmentDiagnosticTarget(segment),
+    )]
+  })
+}
+
+function createRejectedRingRegionDiagnostics(
+  rejectedRings: readonly SketchRingCandidate[],
+): SketchSolveDiagnostic[] {
+  return rejectedRings.map((ring) => makeDiagnostic(
+    'profile-invalid-ring',
+    'warning',
+    `A closed profile ring was rejected because it is self-intersecting or below the minimum region area tolerance.`,
+    ring.boundarySegments[0]?.source.kind === 'entity'
+      ? { kind: 'entity', entityId: ring.boundarySegments[0].source.entityId }
+      : null,
+  ))
 }
 
 function createUnsupportedAdvancedProfileDiagnostics(

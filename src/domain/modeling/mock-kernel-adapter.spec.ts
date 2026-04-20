@@ -26,6 +26,13 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     }
   }
 
+  function getPrimaryRegionTarget(snapshot: DocumentSnapshot) {
+    const sketch = snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')
+    const region = sketch?.sketch.regions[0]
+    assert(sketch && region, 'Mock fixture should expose a primary sketch region.')
+    return { kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }
+  }
+
   async function addMockToolBody(adapter: MockKernelAdapter, bodyId: BodyId) {
     const snapshot = await (adapter as unknown as { getSnapshot(): Promise<DocumentSnapshot> }).getSnapshot()
     const sourceBody = snapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')
@@ -789,13 +796,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
+    const primaryRegion = getPrimaryRegionTarget(before.snapshot)
     const sweepDefinition = {
       kind: 'sweep',
       featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
       parameters: {
         operationIntent: 'create',
         participants: [
-          { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary-outer' }] },
+          { role: 'profile', targets: [primaryRegion] },
           { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-0' }] },
         ],
       },
@@ -836,13 +844,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
+    const primaryRegion = getPrimaryRegionTarget(before.snapshot)
     const guideCurveDefinition = {
       kind: 'sweep',
       featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
       parameters: {
         operationIntent: 'create',
         participants: [
-          { role: 'profile', targets: [{ kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary-outer' }] },
+          { role: 'profile', targets: [primaryRegion] },
           { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-0' }] },
           { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-1' }] },
         ],
@@ -853,7 +862,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       parameters: {
         operationIntent: 'subtract' as const,
         participants: [
-          { role: 'profile' as const, targets: [{ kind: 'region' as const, sketchId: 'sketch_primary' as const, regionId: 'region_primary-outer' as const }] },
+          { role: 'profile' as const, targets: [primaryRegion] },
           { role: 'path' as const, targets: [{ kind: 'edge' as const, bodyId: 'body_part-1' as const, edgeId: 'edge_outer-0' as const }] },
           { role: 'targetBody' as const, targets: [{ kind: 'body' as const, bodyId: 'body_part-1' as const }] },
         ],
@@ -893,6 +902,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
+    const primaryRegion = getPrimaryRegionTarget(before.snapshot)
     const loftDefinition = {
       kind: 'loft',
       featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
@@ -902,7 +912,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
           {
             role: 'profile',
             targets: [
-              { kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary-outer' },
+              primaryRegion,
               { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
             ],
           },
@@ -945,6 +955,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
+    const primaryRegion = getPrimaryRegionTarget(before.snapshot)
     const guideCurveDefinition = {
       kind: 'loft',
       featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
@@ -954,7 +965,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
           {
             role: 'profile',
             targets: [
-              { kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary-outer' },
+              primaryRegion,
               { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
             ],
           },
@@ -994,7 +1005,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
           {
             role: 'profile' as const,
             targets: [
-              { kind: 'region' as const, sketchId: 'sketch_primary' as const, regionId: 'region_primary-outer' as const },
+              primaryRegion,
               { kind: 'face' as const, bodyId: 'body_part-1' as const, faceId: 'face_top' as const },
             ],
           },

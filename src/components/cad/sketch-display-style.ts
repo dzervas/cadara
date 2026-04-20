@@ -35,8 +35,10 @@ export function getSketchDisplayMeshMaterialConfig(
   renderable: SketchSessionDisplayRenderable,
   applyStyles: boolean,
 ): SketchDisplayMeshMaterialConfig {
-  const defaultColor = renderable.role === 'reference' ? SURFACE_COLORS.sketchReference : SURFACE_COLORS.sketchCurve
-  const defaultOpacity = 0.24
+  const defaultColor = renderable.semanticClass === 'region'
+    ? SURFACE_COLORS.region
+    : renderable.role === 'reference' ? SURFACE_COLORS.sketchReference : SURFACE_COLORS.sketchCurve
+  const defaultOpacity = renderable.semanticClass === 'region' ? 0.22 : 0.24
   const color = applyStyles ? renderable.paintStyle?.color ?? defaultColor : defaultColor
   const opacity = applyStyles ? renderable.paintStyle?.opacity ?? defaultOpacity : defaultOpacity
 

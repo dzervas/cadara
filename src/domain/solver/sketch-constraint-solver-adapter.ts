@@ -206,7 +206,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       status: solved.status,
       solvedSnapshot: solved.solvedSnapshot,
       derivedRegions: derived.regions,
-      diagnostics: solved.diagnostics,
+      diagnostics: [...solved.diagnostics, ...derived.diagnostics],
     }
   }
 

@@ -20,6 +20,8 @@ import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-hi
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import type { ModelingCommitSketchResult } from '@/domain/modeling/modeling-service'
 import { createModelingService } from '@/domain/modeling/modeling-service'
+import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
+import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 
 test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -171,6 +173,33 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         },
       ],
     } satisfies CommitSketchRequest['definition']
+  }
+
+  function getFirstDerivedRegionId(
+    documentId: 'doc_workspace',
+    revisionId: `rev_${string}`,
+    sketchId: `sketch_${string}`,
+    definition: ReturnType<typeof createDraftSketchDefinition>,
+  ) {
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'failOnConflict',
+    })
+    const regions = deriveSketchRegionsCore({
+      documentId,
+      revisionId,
+      sketchId,
+      definition,
+      solvedSnapshot: solved.solvedSnapshot,
+    }).regions
+    const regionId = regions[0]?.regionId
+    assert(regionId, 'Draft sketch should derive a region for persisted feature replay.')
+    return regionId
   }
 
   function createLegacyCommitSketchHistory() {
@@ -666,6 +695,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
   }
 
   async function testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore() {
+    const draftDefinition = createDraftSketchDefinition('sketch_primary')
     const sketchRequest = {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
@@ -693,8 +723,9 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       },
       planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
       planeKey: 'xy',
-      definition: createDraftSketchDefinition('sketch_primary'),
+      definition: draftDefinition,
     } satisfies CommitSketchRequest
+    const replayRegionId = getFirstDerivedRegionId('doc_workspace', 'rev_0002', 'sketch_primary', draftDefinition)
     const extrudeRequest = {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
@@ -703,7 +734,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         kind: 'extrude',
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
-          profiles: [{ kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary-outer' }],
+          profiles: [{ kind: 'region', sketchId: 'sketch_primary', regionId: replayRegionId }],
           startExtent: { kind: 'profilePlane' },
           endExtent: { kind: 'blind', direction: 'positive', distance: 10 },
           operation: 'newBody',

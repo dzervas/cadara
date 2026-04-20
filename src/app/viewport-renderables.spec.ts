@@ -103,6 +103,39 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     },
   }
 
+  function createCommittedRegion(
+    sketchId: 'sketch_a' | 'sketch_b',
+    regionId: 'region_a' | 'region_b',
+  ): RenderableEntityRecord {
+    return {
+      id: `renderable_${regionId}`,
+      label: `Committed ${regionId}`,
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: `pick_${regionId}`,
+        pickPriority: 3,
+        target: { kind: 'region', sketchId, regionId },
+        topology: null,
+        semanticClass: 'region',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 0],
+        ],
+        vertexNormals: [
+          [0, 0, 1],
+          [0, 0, 1],
+          [0, 0, 1],
+        ],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+  }
+
   {
     const composed = composeViewportRenderables({
       snapshotRenderables: [committedFace, committedEdge],
@@ -149,6 +182,32 @@ test('src/app/viewport-renderables.spec.ts', async () => {
         { 'sketch:sketch_a': true },
       ),
       'Sketch-owned selection targets should be hidden when their owning committed sketch is hidden.',
+    )
+  }
+
+  {
+    const activeSession = {
+      ...createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      sketchId: 'sketch_a',
+    }
+    const activeSketchRegion = createCommittedRegion('sketch_a', 'region_a')
+    const otherSketchRegion = createCommittedRegion('sketch_b', 'region_b')
+
+    const composed = composeViewportRenderables({
+      snapshotRenderables: [committedFace, activeSketchRegion, otherSketchRegion],
+      previewRenderables: null,
+      sketchSession: activeSession,
+      hiddenTargetKeys: {},
+    })
+
+    assertEqual(composed.documentRenderables.length, 2)
+    assert(
+      composed.documentRenderables.every(({ renderable }) => renderable.id !== activeSketchRegion.id),
+      'Committed regions from the actively edited sketch should be hidden.',
+    )
+    assert(
+      composed.documentRenderables.some(({ renderable }) => renderable.id === otherSketchRegion.id),
+      'Committed regions from inactive sketches should remain visible.',
     )
   }
 

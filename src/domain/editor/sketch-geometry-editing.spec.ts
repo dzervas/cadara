@@ -255,6 +255,63 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     } satisfies SketchSnapshotRecord)
   }
 
+  function deriveRegionsForDefinition(definition: SketchDefinition) {
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+
+    return deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: solved.solvedSnapshot,
+    }).regions
+  }
+
+  function getRegionRenderableBounds(session: ReturnType<typeof createSessionFromDefinition>) {
+    const regionRenderable = getSketchSessionDisplayRenderables(session).find((renderable) =>
+      renderable.target?.kind === 'region',
+    )
+    assert(regionRenderable, 'Expected live region renderable.')
+    assert(regionRenderable.geometry.kind === 'mesh', 'Live region renderable should use mesh geometry.')
+
+    const xs = regionRenderable.geometry.vertexPositions.map((point) => point[0])
+    const ys = regionRenderable.geometry.vertexPositions.map((point) => point[1])
+    return {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+    }
+  }
+
+  function getLiveRegionMesh(session: ReturnType<typeof createSessionFromDefinition>) {
+    const regionRenderable = getSketchSessionDisplayRenderables(session).find((renderable) =>
+      renderable.target?.kind === 'region',
+    )
+    assert(regionRenderable, 'Expected live region renderable.')
+    assert(regionRenderable.geometry.kind === 'mesh', 'Live region renderable should use mesh geometry.')
+    return regionRenderable.geometry
+  }
+
+  function getTriangleArea(points: readonly [number, number, number][], triangle: readonly [number, number, number]) {
+    const a = points[triangle[0]]!
+    const b = points[triangle[1]]!
+    const c = points[triangle[2]]!
+    return Math.abs(((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2)
+  }
+
+  function getMeshArea(geometry: ReturnType<typeof getLiveRegionMesh>) {
+    return geometry.triangleIndices.reduce((area, triangle) => area + getTriangleArea(geometry.vertexPositions, triangle), 0)
+  }
+
   function testUnconstrainedPointDragUpdatesAuthoredDefinition() {
     let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
     session = beginSketchTool(session, 'line')
@@ -301,6 +358,135 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     assertClosePoint(points.get('sketch_point_c'), [4, 4], 'Dragging free square vertex should translate C.')
     assertClosePoint(points.get('sketch_point_d'), [3, 4], 'Dragging free square vertex should translate D.')
     assert(session.validationMessage === null, 'Valid constrained drag should not leave blocked feedback.')
+  }
+
+  function testLiveRegionRenderableTracksJiggledSketchDrag() {
+    let session = createSessionFromDefinition(createSquareDefinition(false))
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
+    const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
+    assert(target, 'Expected square vertex B.')
+
+    const initialBounds = getRegionRenderableBounds(session)
+    const initialRegionId = session.solvedRegions[0]?.regionId
+    assert(initialRegionId, 'Initial square should derive a live region id.')
+    assertClosePoint([initialBounds.minX, initialBounds.minY], [0, 0], 'Initial live region should start at the square origin.')
+    assertClosePoint([initialBounds.maxX, initialBounds.maxY], [1, 1], 'Initial live region should match the square extents.')
+
+    session = beginSketchGeometryDrag(session, target, [1, 0])
+    session = finishSketchGeometryDrag(session, [4, 3])
+
+    assert(session.solvedRegions.length === 1, 'Dragging the square should keep one live derived region.')
+    assert(
+      session.solvedRegions[0]?.regionId === initialRegionId,
+      'Dragging the square should keep the live region identity stable.',
+    )
+
+    const movedBounds = getRegionRenderableBounds(session)
+    assertClosePoint([movedBounds.minX, movedBounds.minY], [3, 3], 'Jiggled live region should move with the sketch.')
+    assertClosePoint([movedBounds.maxX, movedBounds.maxY], [4, 4], 'Jiggled live region should keep the solved square extents.')
+  }
+
+  function testLiveRegionRenderablePreservesInnerLoopHole() {
+    const definition = makeDefinition({
+      pointIds: [
+        'sketch_point_a',
+        'sketch_point_b',
+        'sketch_point_c',
+        'sketch_point_d',
+        'sketch_point_e',
+        'sketch_point_f',
+        'sketch_point_g',
+        'sketch_point_h',
+      ],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 8, 0),
+        makePoint('sketch_point_c', 'C', 8, 8),
+        makePoint('sketch_point_d', 'D', 0, 8),
+        makePoint('sketch_point_e', 'E', 2, 2),
+        makePoint('sketch_point_f', 'F', 6, 2),
+        makePoint('sketch_point_g', 'G', 6, 6),
+        makePoint('sketch_point_h', 'H', 2, 6),
+      ],
+      entityIds: [
+        'sketch_entity_ab',
+        'sketch_entity_bc',
+        'sketch_entity_cd',
+        'sketch_entity_da',
+        'sketch_entity_ef',
+        'sketch_entity_fg',
+        'sketch_entity_gh',
+        'sketch_entity_he',
+      ],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_da', 'DA', 'sketch_point_d', 'sketch_point_a'),
+        makeLine('sketch_entity_ef', 'EF', 'sketch_point_e', 'sketch_point_f'),
+        makeLine('sketch_entity_fg', 'FG', 'sketch_point_f', 'sketch_point_g'),
+        makeLine('sketch_entity_gh', 'GH', 'sketch_point_g', 'sketch_point_h'),
+        makeLine('sketch_entity_he', 'HE', 'sketch_point_h', 'sketch_point_e'),
+      ],
+    })
+    let session = createSessionFromDefinition(definition)
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
+
+    const geometry = getLiveRegionMesh(session)
+    assert(geometry.triangleIndices.length > 0, 'Holed live region should render a triangulated mesh.')
+    assert(Math.abs(getMeshArea(geometry) - 48) < 1e-6, 'Holed live region mesh should subtract the inner loop area.')
+  }
+
+  function testLiveRegionRenderableTriangulatesConcaveRegion() {
+    const definition = makeDefinition({
+      pointIds: [
+        'sketch_point_a',
+        'sketch_point_b',
+        'sketch_point_c',
+        'sketch_point_d',
+        'sketch_point_e',
+        'sketch_point_f',
+      ],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 4, 0),
+        makePoint('sketch_point_c', 'C', 4, 1),
+        makePoint('sketch_point_d', 'D', 1, 1),
+        makePoint('sketch_point_e', 'E', 1, 4),
+        makePoint('sketch_point_f', 'F', 0, 4),
+      ],
+      entityIds: [
+        'sketch_entity_ab',
+        'sketch_entity_bc',
+        'sketch_entity_cd',
+        'sketch_entity_de',
+        'sketch_entity_ef',
+        'sketch_entity_fa',
+      ],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_de', 'DE', 'sketch_point_d', 'sketch_point_e'),
+        makeLine('sketch_entity_ef', 'EF', 'sketch_point_e', 'sketch_point_f'),
+        makeLine('sketch_entity_fa', 'FA', 'sketch_point_f', 'sketch_point_a'),
+      ],
+    })
+    let session = createSessionFromDefinition(definition)
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
+
+    const geometry = getLiveRegionMesh(session)
+    assert(geometry.triangleIndices.length === 4, 'Six-point concave live region should triangulate into four triangles.')
+    assert(Math.abs(getMeshArea(geometry) - 7) < 1e-6, 'Concave live region mesh should preserve polygon area without fan overlap.')
   }
 
   function testRectangleToolDragTranslatesWholeRectangle() {
@@ -1156,6 +1342,9 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
 
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
+  testLiveRegionRenderableTracksJiggledSketchDrag()
+  testLiveRegionRenderablePreservesInnerLoopHole()
+  testLiveRegionRenderableTriangulatesConcaveRegion()
   testRectangleToolDragTranslatesWholeRectangle()
   testImmovableConstrainedDragBlocksWithoutChangingDraft()
   testSelectedEntityDeletionRemovesDependentAnnotations()
