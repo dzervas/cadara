@@ -4,6 +4,7 @@ import type {
   DocumentExportFormat,
   DocumentExportRequest,
   DocumentExportResult,
+  DocumentExportSuccessResult,
 } from '@/contracts/modeling/export'
 import type {
   BodyId,
@@ -108,7 +109,8 @@ import {
   updateFeatureResponseSchema,
   workspaceSnapshotSchema,
 } from '@/contracts/modeling/runtime-schema'
-import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
+import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import {
   createCommitSketchHistoryEntry,
   createAddDocumentVariableHistoryEntry,
@@ -191,6 +193,9 @@ export interface ModelingService {
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
+  createNewDocument(): Promise<ModelingDocumentFileMutationResult>
+  importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
+  exportCurrentDocument(): Promise<DocumentExportSuccessResult>
   commitSketch(input: ModelingCommitSketchInput): AppResultAsync<ModelingCommitSketchResult>
   projectSketchExternalReferences(
     input: ModelingProjectSketchExternalReferencesInput,
@@ -328,6 +333,15 @@ export type ModelingSetFeatureCursorInput =
   }
 export type ModelingExportDocumentInput = Omit<DocumentExportRequest, 'contractVersion' | 'documentId'>
 export type ModelingExportDocumentResult = DocumentExportResult
+
+export interface ModelingImportDocumentInput {
+  document: unknown
+}
+
+export type ModelingDocumentFileMutationResult =
+  | { ok: true; revisionId: RevisionId; diagnostics: ModelingDiagnostic[] }
+  | { ok: false; diagnostics: ModelingDiagnostic[] }
+
 export interface ModelingCommitSketchCorrelation {
   requestId: RequestId
   projectionRequestId: RequestId
@@ -3837,6 +3851,7 @@ export function createModelingService(
   }
   let currentRepositoryMetadata: DocumentRepositoryMetadata | null = null
   let snapshotRepositoryHeads: readonly string[] | null = null
+  let seedAuthoredDocument: AuthoredModelDocument | null = null
   let repositoryChangePromise = Promise.resolve()
   let isRestoringRepositoryDocument = documentRepository !== null
   const documentChangeListeners = new Set<(event: ModelingServiceDocumentChangeEvent) => void>()
@@ -3908,6 +3923,19 @@ export function createModelingService(
     await adapter.restoreAuthoredModelDocument?.(normalized.document, normalized.diagnostics)
   }
 
+  async function getSeedAuthoredDocument() {
+    if (seedAuthoredDocument) {
+      return structuredClone(seedAuthoredDocument)
+    }
+
+    const seedSnapshot = validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+      currentDocumentId,
+    )
+    seedAuthoredDocument = createAuthoredModelDocumentFromSnapshot(seedSnapshot)
+    return structuredClone(seedAuthoredDocument)
+  }
+
   async function exportAuthoredDocumentForRepository() {
     if (adapter.exportAuthoredModelDocument) {
       return adapter.exportAuthoredModelDocument(currentDocumentId)
@@ -3918,6 +3946,100 @@ export function createModelingService(
       currentDocumentId,
     )
     return createAuthoredModelDocumentFromSnapshot(snapshot)
+  }
+
+  function createDocumentFileDiagnostic(code: string, message: string): ModelingDiagnostic {
+    return {
+      code,
+      severity: 'error',
+      message,
+      target: null,
+      detail: null,
+    }
+  }
+
+  type AuthoredDocumentValidationResult =
+    | { ok: true; document: AuthoredModelDocument }
+    | { ok: false; diagnostics: ModelingDiagnostic[] }
+
+  function normalizeImportedDocument(value: unknown): AuthoredDocumentValidationResult {
+    const parsed = parseAuthoredModelDocument(structuredClone(value))
+
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            `document-import-${parsed.diagnostic.reasonCode}`,
+            parsed.diagnostic.message,
+          ),
+        ],
+      }
+    }
+
+    return {
+      ok: true,
+      document: {
+        ...parsed.document,
+        documentId: currentDocumentId,
+      },
+    }
+  }
+
+  async function replaceCurrentAuthoredDocument(document: AuthoredModelDocument): Promise<ModelingDocumentFileMutationResult> {
+    if (!adapter.restoreAuthoredModelDocument) {
+      return {
+        ok: false,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            'document-import-unsupported-adapter',
+            'The active modeling adapter cannot restore authored documents.',
+          ),
+        ],
+      }
+    }
+
+    const normalized = normalizeImportedDocument(document)
+    if (!normalized.ok) {
+      return normalized
+    }
+
+    const activeDocument = normalized.document
+    await restoreAuthoredRepositoryDocument(activeDocument)
+    operationHistoryStore?.clear()
+    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+    canPersistOperationHistory = true
+    canPersistAuthoredDocument = true
+    historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
+
+    if (documentRepository) {
+      await documentRepository.reset(currentDocumentId)
+      const writeResult = await documentRepository.mutate({
+        documentId: currentDocumentId,
+        document: activeDocument,
+      })
+
+      if (!writeResult.ok) {
+        canPersistAuthoredDocument = false
+        return {
+          ok: false,
+          diagnostics: [createDocumentRepositoryDiagnostic(writeResult.status)],
+        }
+      }
+
+      markRepositorySnapshotFresh(writeResult.metadata)
+    }
+
+    const snapshot = validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+      currentDocumentId,
+    )
+
+    return {
+      ok: true,
+      revisionId: snapshot.document.revisionId,
+      diagnostics: snapshot.document.diagnostics,
+    }
   }
 
   async function createRepositoryHeadConflictResult<
@@ -4060,6 +4182,7 @@ export function createModelingService(
   }
 
   async function restoreOperationHistoryCompatibility() {
+    await getSeedAuthoredDocument()
     const loadResult = loadOrCreateOperationHistory(operationHistoryStore, currentDocumentId)
 
     if (!loadResult.ok) {
@@ -4083,13 +4206,10 @@ export function createModelingService(
   }
 
   async function restoreRepositoryBackedDocument() {
-    const seedSnapshot = validateSnapshotResponse(
-      await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
-      currentDocumentId,
-    )
+    const seedDocument = await getSeedAuthoredDocument()
     const loadResult = await documentRepository!.load({
       documentId: currentDocumentId,
-      seedDocument: createAuthoredModelDocumentFromSnapshot(seedSnapshot),
+      seedDocument,
     })
 
     if (!loadResult.ok) {
@@ -4265,6 +4385,36 @@ export function createModelingService(
       await repositoryChangePromise
       const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId))
       return attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId))
+    },
+    async createNewDocument() {
+      await restorePromise
+      await repositoryChangePromise
+      return replaceCurrentAuthoredDocument(await getSeedAuthoredDocument())
+    },
+    async importDocument(input) {
+      await restorePromise
+      await repositoryChangePromise
+      const normalized = normalizeImportedDocument(input.document)
+      if (!normalized.ok) {
+        return normalized
+      }
+
+      return replaceCurrentAuthoredDocument(normalized.document)
+    },
+    async exportCurrentDocument() {
+      await restorePromise
+      await repositoryChangePromise
+      const document = await exportAuthoredDocumentForRepository()
+
+      return {
+        ok: true,
+        format: 'cadara',
+        filename: 'document.cadara',
+        extension: getDocumentExportExtension('cadara'),
+        mimeType: getDocumentExportMimeType('cadara'),
+        payload: JSON.stringify(stableJsonValue(document), null, 2),
+        diagnostics: [],
+      }
     },
     commitSketch(input) {
       return runModelingMutationBoundary({

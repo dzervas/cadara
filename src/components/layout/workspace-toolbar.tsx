@@ -3,6 +3,7 @@ import { ActionIcon, Divider, Paper, ScrollArea, Text, TextInput, Tooltip } from
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { ShortcutSettingsButton } from '@/components/shortcuts/shortcut-settings'
+import { DocumentFileMenu } from '@/components/layout/document-file-menu'
 import { ToolButton } from '@/components/layout/tool-button'
 import { ToolDropdownButton } from '@/components/layout/tool-dropdown-button'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
@@ -26,10 +27,19 @@ const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
+  onNewDocument?: () => void
+  onImportDocument?: (file: File) => void
+  onExportDocument?: () => void
   onReportBug?: () => void
 }
 
-export function WorkspaceToolbar({ historyAvailability, onReportBug }: WorkspaceToolbarProps = {}) {
+export function WorkspaceToolbar({
+  historyAvailability,
+  onNewDocument = () => undefined,
+  onImportDocument = () => undefined,
+  onExportDocument = () => undefined,
+  onReportBug,
+}: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
     state: { activeCommand, history, mode, selection, sketchSession },
@@ -95,6 +105,11 @@ export function WorkspaceToolbar({ historyAvailability, onReportBug }: Workspace
       }}
     >
       <div className="flex min-w-0 items-center gap-3">
+        <DocumentFileMenu
+          onNewDocument={onNewDocument}
+          onImportDocument={onImportDocument}
+          onExportDocument={onExportDocument}
+        />
         <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex w-max items-center gap-3">
             {visibleSections.map((section, index) => (

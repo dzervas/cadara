@@ -1033,10 +1033,88 @@ export function CadWorkbench() {
     }
   }
 
+  const refreshAfterDocumentFileAction = (message: string) => {
+    setHiddenTargetKeys({})
+    setObjectLabelOverrides({})
+    setUndoStack([])
+    setRedoStack([])
+    dispatch({ type: 'document.refreshRequested' })
+    setWorkbenchStatusMessage(message)
+  }
+
+  const reportDocumentFileActionFailure = (source: string, message: string, error: unknown) => {
+    setWorkbenchStatusMessage(message)
+    errorReporter.report(
+      createAppError({
+        code: 'workbench/action-failed',
+        message,
+        context: errorContext('reason', error instanceof Error ? error.message : 'Unknown failure'),
+        cause: error,
+      }),
+      {
+        source,
+        visibility: 'user',
+      },
+    )
+  }
+
+  const handleNewDocument = async () => {
+    try {
+      const result = await modelingService.createNewDocument()
+      if (!result.ok) {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'New document could not be created.')
+        return
+      }
+
+      refreshAfterDocumentFileAction('Created a new document.')
+    } catch (error) {
+      reportDocumentFileActionFailure('workbench.file.new', 'New document failed.', error)
+    }
+  }
+
+  const handleImportDocument = async (file: File) => {
+    let payload: unknown
+
+    try {
+      payload = JSON.parse(await file.text()) as unknown
+    } catch {
+      setWorkbenchStatusMessage('Import failed. Select a valid cadara JSON document.')
+      return
+    }
+
+    try {
+      const result = await modelingService.importDocument({ document: payload })
+      if (!result.ok) {
+        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Import failed.')
+        return
+      }
+
+      refreshAfterDocumentFileAction(`Imported ${file.name}.`)
+    } catch (error) {
+      reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
+    }
+  }
+
+  const handleExportDocument = async () => {
+    try {
+      const result = await modelingService.exportCurrentDocument()
+      downloadDocumentExportResult(result)
+      setWorkbenchStatusMessage(`Exported ${result.filename}.`)
+    } catch (error) {
+      reportDocumentFileActionFailure('workbench.file.export', 'Export failed.', error)
+    }
+  }
+
   return (
     <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
-      <WorkspaceToolbar historyAvailability={toolbarHistoryAvailability} onReportBug={handleReportBug} />
+      <WorkspaceToolbar
+        historyAvailability={toolbarHistoryAvailability}
+        onNewDocument={handleNewDocument}
+        onImportDocument={handleImportDocument}
+        onExportDocument={handleExportDocument}
+        onReportBug={handleReportBug}
+      />
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar

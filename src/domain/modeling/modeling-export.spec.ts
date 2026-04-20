@@ -1,6 +1,9 @@
 import { test } from 'bun:test'
 
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
+import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 
@@ -79,7 +82,71 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     )
   }
 
+  async function testFileMenuExportImportsAuthoredDocumentJson() {
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository: createMemoryDocumentRepository(),
+    })
+    const exportResult = await service.exportCurrentDocument()
+
+    assert(exportResult.filename === 'document.cadara', 'Current document export should use a document-level cadara filename.')
+    assert(exportResult.mimeType === 'application/vnd.cadara+json', 'Current document export should use the cadara JSON MIME type.')
+    assert(typeof exportResult.payload === 'string', 'Current document export should return authored JSON text.')
+
+    const exported = JSON.parse(exportResult.payload) as AuthoredModelDocument
+    assert(
+      exported.schemaVersion === AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
+      'Current document export should use the authored document schema.',
+    )
+    assert(!('presentation' in exported), 'Current document export should exclude presentation-only state.')
+
+    const importedDocument: AuthoredModelDocument = {
+      ...exported,
+      bodyLabels: exported.bodyLabels.map((label) => ({
+        ...label,
+        label: 'Imported Body',
+      })),
+    }
+    const importResult = await service.importDocument({ document: importedDocument })
+    assert(importResult.ok, 'Valid authored document import should succeed.')
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    assert(
+      snapshot.document.bodies.some((body) => body.label === 'Imported Body'),
+      'Imported authored body labels should appear in the refreshed snapshot.',
+    )
+
+    const newResult = await service.createNewDocument()
+    assert(newResult.ok, 'New document reset should restore the seeded authored document.')
+    const resetSnapshot = await service.getCurrentDocumentSnapshot()
+    assert(
+      resetSnapshot.document.bodies.every((body) => body.label !== 'Imported Body'),
+      'New document reset should remove imported authored body labels.',
+    )
+  }
+
+  async function testFileMenuImportRejectsInvalidDocumentJson() {
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+    })
+
+    const result = await service.importDocument({
+      document: {
+        contractVersion: 'modeling-contract/v1alpha1',
+        schemaVersion: 'authored-model-document/v999',
+      },
+    })
+
+    assert(!result.ok, 'Invalid authored document import should be rejected.')
+    assert(
+      result.diagnostics.some((diagnostic) => diagnostic.code === 'document-import-unsupported-schema-version'),
+      'Invalid import should report a structured schema diagnostic.',
+    )
+  }
+
   await testCadaraExportsDurableDocumentJson()
   await testGeometryExportPayloadMetadata()
   await testUnexportableGeometryTargetReportsDiagnostic()
+  await testFileMenuExportImportsAuthoredDocumentJson()
+  await testFileMenuImportRejectsInvalidDocumentJson()
 })

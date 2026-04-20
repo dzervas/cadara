@@ -56,6 +56,11 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
 
   assert(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')
   assert(
+    toolbarMarkup.includes('aria-label="File"') &&
+      toolbarMarkup.indexOf('aria-label="File"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
+    'Toolbar should render the document file menu before the CAD tool sections.',
+  )
+  assert(
     toolbarMarkup.includes('overflow-x-auto') &&
       toolbarMarkup.includes('w-max') &&
       toolbarMarkup.includes('shrink-0'),

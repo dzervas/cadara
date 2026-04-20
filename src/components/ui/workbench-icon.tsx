@@ -12,13 +12,16 @@ export type WorkbenchIconName =
   | 'edit'
   | 'eyeClosed'
   | 'eyeOpen'
+  | 'file'
   | 'flipDirection'
   | 'github'
   | 'history'
   | 'info'
+  | 'import'
   | 'keyboard'
   | 'layers'
   | 'mousePointer'
+  | 'newDocument'
   | 'pencilRuler'
   | 'plus'
   | 'reportBug'
@@ -41,13 +44,16 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   edit: 'edit.svg',
   eyeClosed: 'eye_closed.svg',
   eyeOpen: 'eye_open.svg',
+  file: 'document.svg',
   flipDirection: 'flip-direction.svg',
   github: 'GitHub-logo.svg',
   history: 'revision-history.svg',
   info: 'info.svg',
+  import: 'document-upload.svg',
   keyboard: 'keyboard-search-empty.svg',
   layers: 'structure-view.svg',
   mousePointer: 'Select.svg',
+  newDocument: 'add-new.svg',
   pencilRuler: 'sketch.svg',
   plus: 'plus.svg',
   reportBug: 'bug.svg',
