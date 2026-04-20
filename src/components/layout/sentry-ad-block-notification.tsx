@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react'
 
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
+import { WorkbenchNotification } from '@/components/layout/workbench-notification'
 import {
   getSentryDsnBlockedSnapshot,
   subscribeToSentryDsnBlocked,
@@ -22,19 +22,20 @@ export function SentryAdBlockNotification() {
   }
 
   return (
-    <div
-      role="alert"
-      className="fixed left-1/2 top-3 z-50 flex w-[min(720px,calc(100vw-24px))] -translate-x-1/2 items-start gap-3 rounded-lg border border-amber-400/60 bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
-    >
-      <div className="min-w-0 flex-1 leading-5">{sentryAdBlockMessage}</div>
-      <button
-        aria-label="Dismiss ad-block notification"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-[var(--cad-border-strong)] text-[var(--cad-muted-foreground)] hover:bg-[var(--cad-surface)] hover:text-[var(--cad-foreground)]"
-        type="button"
-        onClick={() => setIsDismissed(true)}
-      >
-        <WorkbenchIcon name="close" size={12} />
-      </button>
-    </div>
+    <SentryAdBlockNotificationView onDismiss={() => setIsDismissed(true)} />
+  )
+}
+
+export function SentryAdBlockNotificationView({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <WorkbenchNotification
+      type="warning"
+      title="Error reporting blocked"
+      message={sentryAdBlockMessage}
+      onDismiss={onDismiss}
+      dismissLabel="Dismiss ad-block notification"
+      placement={{ kind: 'app-top-center' }}
+      className="z-50 max-w-none"
+    />
   )
 }

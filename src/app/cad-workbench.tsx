@@ -10,6 +10,8 @@ import { DocumentExportModal } from '@/components/layout/document-export-modal'
 import { WorkbenchInspectorOverlay } from '@/components/layout/workbench-inspector-overlay'
 import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
 import { WorkbenchStateDebugger, type WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
+import { WorkbenchNotification } from '@/components/layout/workbench-notification'
+import type { WorkbenchNotificationModel } from '@/components/layout/workbench-notification-model'
 import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
 import {
   createObjectDeletePlaceholderMessage,
@@ -127,7 +129,8 @@ export function CadWorkbench() {
   const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
   const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null)
-  const [workbenchStatusMessage, setWorkbenchStatusMessage] = useState<string | null>(null)
+  const [workbenchStatusNotification, setWorkbenchStatusNotification] =
+    useState<WorkbenchNotificationModel | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -293,6 +296,7 @@ export function CadWorkbench() {
       delete window.__cadSelectTarget
     }
   }, [dispatch, selection, selectionCatalog, selectionFilter, snapshot])
+
   const toolbarHistoryAvailability: EditorHistoryAvailability = sketchSession
     ? history
     : getWorkbenchHistoryAvailability({
@@ -354,8 +358,24 @@ export function CadWorkbench() {
     }
   }
 
+  const showWorkbenchInfo = (message: string) => {
+    setWorkbenchStatusNotification({
+      type: 'info',
+      title: 'Workbench action',
+      message,
+    })
+  }
+
+  const showWorkbenchError = (message: string) => {
+    setWorkbenchStatusNotification({
+      type: 'error',
+      title: 'Workbench action failed',
+      message,
+    })
+  }
+
   const showPlaceholderStatus = (message: string) => {
-    setWorkbenchStatusMessage(message)
+    showWorkbenchInfo(message)
   }
 
   const setVariableFailure = (
@@ -366,7 +386,7 @@ export function CadWorkbench() {
       ...current,
       [variableId]: error.message,
     }))
-    setWorkbenchStatusMessage(error.message)
+    showWorkbenchError(error.message)
   }
 
   const handleObjectDeletePlaceholder = (_target: PrimitiveRef, label: string) => {
@@ -379,7 +399,7 @@ export function CadWorkbench() {
       return
     }
 
-    setWorkbenchStatusMessage(null)
+    setWorkbenchStatusNotification(null)
     setObjectExportModal(nextModalState)
   }
 
@@ -410,7 +430,7 @@ export function CadWorkbench() {
         fallbackMessage: 'Add variable failed.',
         context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
       }),
-      onError: (error) => setWorkbenchStatusMessage(error.message),
+      onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isOk()) {
         dispatch({ type: 'document.refreshRequested' })
@@ -637,13 +657,13 @@ export function CadWorkbench() {
           { key: 'featureId', value: item.featureId },
         ],
       }),
-      onError: (error) => setWorkbenchStatusMessage(error.message),
+      onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
         return
       }
 
-      setWorkbenchStatusMessage(`Deleted ${item.label}.`)
+      showWorkbenchInfo(`Deleted ${item.label}.`)
       dispatch({ type: 'document.refreshRequested' })
     })
   }
@@ -656,7 +676,7 @@ export function CadWorkbench() {
     }
 
     if (!nextLabel) {
-      setWorkbenchStatusMessage('Name cannot be empty.')
+      showWorkbenchError('Name cannot be empty.')
       return null
     }
 
@@ -679,7 +699,7 @@ export function CadWorkbench() {
 
     const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === item.sketchId)
     if (!sketch) {
-      setWorkbenchStatusMessage(`Could not find ${item.label}.`)
+      showWorkbenchError(`Could not find ${item.label}.`)
       return
     }
 
@@ -708,13 +728,13 @@ export function CadWorkbench() {
           { key: 'sketchId', value: sketch.sketchId },
         ],
       }),
-      onError: (error) => setWorkbenchStatusMessage(error.message),
+      onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
         return
       }
 
-      setWorkbenchStatusMessage(`Renamed ${item.label} to ${nextLabel}.`)
+      showWorkbenchInfo(`Renamed ${item.label} to ${nextLabel}.`)
       dispatch({ type: 'document.refreshRequested' })
     })
   }
@@ -731,7 +751,7 @@ export function CadWorkbench() {
 
     const feature = snapshot.document.features.find((entry) => entry.featureId === item.featureId)
     if (!feature) {
-      setWorkbenchStatusMessage(`Could not find ${item.label}.`)
+      showWorkbenchError(`Could not find ${item.label}.`)
       return
     }
 
@@ -756,13 +776,13 @@ export function CadWorkbench() {
           { key: 'featureId', value: feature.featureId },
         ],
       }),
-      onError: (error) => setWorkbenchStatusMessage(error.message),
+      onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
         return
       }
 
-      setWorkbenchStatusMessage(`Renamed ${item.label} to ${nextLabel}.`)
+      showWorkbenchInfo(`Renamed ${item.label} to ${nextLabel}.`)
       dispatch({ type: 'document.refreshRequested' })
     })
   }
@@ -817,7 +837,7 @@ export function CadWorkbench() {
             { key: 'bodyId', value: target.bodyId },
           ],
         }),
-        onError: (error) => setWorkbenchStatusMessage(error.message),
+        onError: (error) => showWorkbenchError(error.message),
       }).then((result) => {
         if (result.isErr()) {
           return
@@ -828,7 +848,7 @@ export function CadWorkbench() {
           delete next[getPrimitiveRefKey(target)]
           return next
         })
-        setWorkbenchStatusMessage(`Renamed ${label} to ${nextLabel}.`)
+        showWorkbenchInfo(`Renamed ${label} to ${nextLabel}.`)
         dispatch({ type: 'document.refreshRequested' })
       })
       return
@@ -843,7 +863,7 @@ export function CadWorkbench() {
       ...current,
       [getPrimitiveRefKey(target)]: nextLabel,
     }))
-    setWorkbenchStatusMessage(`Renamed ${label} to ${nextLabel}.`)
+    showWorkbenchInfo(`Renamed ${label} to ${nextLabel}.`)
   }
 
   const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
@@ -1016,7 +1036,7 @@ export function CadWorkbench() {
       const issueDraft = createBugReportIssueDraft(result, { artifactStatus })
       const opened = window.open(issueDraft.url, '_blank', 'noopener,noreferrer')
       if (!opened) {
-        setWorkbenchStatusMessage('GitHub bug report could not be opened. Check popup blocking for this site.')
+        showWorkbenchError('GitHub bug report could not be opened. Check popup blocking for this site.')
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Bug-report payload generation failed.'
@@ -1035,7 +1055,7 @@ export function CadWorkbench() {
 
       const opened = window.open(createFallbackBugReportIssueUrl(error), '_blank', 'noopener,noreferrer')
       if (!opened) {
-        setWorkbenchStatusMessage('GitHub bug report could not be opened. Check popup blocking for this site.')
+        showWorkbenchError('GitHub bug report could not be opened. Check popup blocking for this site.')
       }
     }
   }
@@ -1046,11 +1066,11 @@ export function CadWorkbench() {
     setUndoStack([])
     setRedoStack([])
     dispatch({ type: 'document.refreshRequested' })
-    setWorkbenchStatusMessage(message)
+    showWorkbenchInfo(message)
   }
 
   const reportDocumentFileActionFailure = (source: string, message: string, error: unknown) => {
-    setWorkbenchStatusMessage(message)
+    showWorkbenchError(message)
     errorReporter.report(
       createAppError({
         code: 'workbench/action-failed',
@@ -1069,7 +1089,7 @@ export function CadWorkbench() {
     try {
       const result = await modelingService.createNewDocument()
       if (!result.ok) {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'New document could not be created.')
+        showWorkbenchError(result.diagnostics[0]?.message ?? 'New document could not be created.')
         return
       }
 
@@ -1085,14 +1105,14 @@ export function CadWorkbench() {
     try {
       payload = JSON.parse(await file.text()) as unknown
     } catch {
-      setWorkbenchStatusMessage('Import failed. Select a valid cadara JSON document.')
+      showWorkbenchError('Import failed. Select a valid cadara JSON document.')
       return
     }
 
     try {
       const result = await modelingService.importDocument({ document: payload })
       if (!result.ok) {
-        setWorkbenchStatusMessage(result.diagnostics[0]?.message ?? 'Import failed.')
+        showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
         return
       }
 
@@ -1106,7 +1126,7 @@ export function CadWorkbench() {
     try {
       const result = await modelingService.exportCurrentDocument()
       downloadDocumentExportResult(result)
-      setWorkbenchStatusMessage(`Exported ${result.filename}.`)
+      showWorkbenchInfo(`Exported ${result.filename}.`)
     } catch (error) {
       reportDocumentFileActionFailure('workbench.file.export', 'Export failed.', error)
     }
@@ -1176,43 +1196,35 @@ export function CadWorkbench() {
               onPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
             />
             {restoreMessage ? (
-              <div
-                className="absolute top-4 z-30 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
-                style={{ right: notificationRightOffset }}
-              >
-                <div className="font-medium">History restore failed</div>
-                <div className="mt-1 text-[var(--cad-muted-foreground)]">{restoreMessage}</div>
-                <button
-                  className="mt-3 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface)] px-2 py-1 text-[var(--cad-foreground)]"
-                  type="button"
-                  onClick={() => {
+              <WorkbenchNotification
+                type="error"
+                title="History restore failed"
+                message={restoreMessage}
+                placement={{
+                  kind: 'viewport',
+                  right: notificationRightOffset,
+                  top: WORKBENCH_STATUS_TOP_PX,
+                }}
+                action={{
+                  label: 'Reset stored history',
+                  onClick: () => {
                     modelingService.resetOperationHistory()
                     setRestoreMessage(null)
-                  }}
-                >
-                  Reset stored history
-                </button>
-              </div>
+                  },
+                }}
+                onDismiss={() => setRestoreMessage(null)}
+              />
             ) : null}
-            {workbenchStatusMessage ? (
-              <div
-                role="status"
-                className="absolute z-30 max-w-sm rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
-                style={{
+            {workbenchStatusNotification ? (
+              <WorkbenchNotification
+                {...workbenchStatusNotification}
+                placement={{
+                  kind: 'viewport',
                   right: notificationRightOffset,
                   top: restoreMessage ? WORKBENCH_STATUS_TOP_WITH_RESTORE_PX : WORKBENCH_STATUS_TOP_PX,
                 }}
-              >
-                <div className="font-medium">Workbench action</div>
-                <div className="mt-1 text-[var(--cad-muted-foreground)]">{workbenchStatusMessage}</div>
-                <button
-                  className="mt-3 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface)] px-2 py-1 text-[var(--cad-foreground)]"
-                  type="button"
-                  onClick={() => setWorkbenchStatusMessage(null)}
-                >
-                  Dismiss
-                </button>
-              </div>
+                onDismiss={() => setWorkbenchStatusNotification(null)}
+              />
             ) : null}
             {sketchSession?.validationMessage ? (
               <div

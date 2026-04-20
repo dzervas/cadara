@@ -10,6 +10,7 @@ export type WorkbenchIconName =
   | 'component'
   | 'download'
   | 'edit'
+  | 'error'
   | 'eyeClosed'
   | 'eyeOpen'
   | 'file'
@@ -31,6 +32,7 @@ export type WorkbenchIconName =
   | 'target'
   | 'trash'
   | 'type'
+  | 'warning'
 
 const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   ban: 'cancel.svg',
@@ -42,6 +44,7 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   component: 'composite-part.svg',
   download: 'export.svg',
   edit: 'edit.svg',
+  error: 'error.svg',
   eyeClosed: 'eye_closed.svg',
   eyeOpen: 'eye_open.svg',
   file: 'document.svg',
@@ -63,6 +66,7 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   target: 'dimension-origin.svg',
   trash: 'trash.svg',
   type: 'markup-text.svg',
+  warning: 'warning-overlay.svg',
 }
 
 interface WorkbenchIconProps {

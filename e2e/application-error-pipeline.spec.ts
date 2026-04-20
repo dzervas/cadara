@@ -6,7 +6,7 @@ import { captureActionableErrorRecords } from './helpers/error-reporting'
 test.setTimeout(90_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
-test('invalid variable edit reports a UI status and actionable console error', async ({ page }) => {
+test('invalid variable edit reports a UI error notification and actionable console error', async ({ page }) => {
   const consoleErrors = captureActionableErrorRecords(page)
   const workbench = new FeatureWorkbenchHarness(page)
 
@@ -17,6 +17,6 @@ test('invalid variable edit reports a UI status and actionable console error', a
   await valueInput.fill('missing + 1')
   await valueInput.press('Enter')
 
-  await expect(page.getByRole('status').filter({ hasText: /missing/i })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('alert').filter({ hasText: /missing/i })).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => consoleErrors.length, { timeout: 30_000 }).toBeGreaterThan(0)
 })
