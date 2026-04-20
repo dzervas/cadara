@@ -13,6 +13,7 @@ import {
   getSketchToolDefinition,
   isRegisteredSketchToolId,
 } from '@/domain/sketch-tools/registry'
+import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/domain/tools/tool-registry'
 
 test('src/domain/sketch-tools/registry.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -27,11 +28,61 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
       .sort()
 
     assert(
-      JSON.stringify(registeredToolIds) === JSON.stringify(['circle', 'line', 'rectangle', 'spline']),
+      JSON.stringify(registeredToolIds) === JSON.stringify([
+        'alignedRectangle',
+        'centerPointArc',
+        'centerPointRectangle',
+        'circle',
+        'circumscribedPolygon',
+        'inscribedPolygon',
+        'line',
+        'midpointLine',
+        'point',
+        'rectangle',
+        'spline',
+        'tangentArc',
+        'threePointArc',
+        'threePointCircle',
+      ]),
       'The sketch tool registry should contain every current drawing tool.',
     )
     assert(isRegisteredSketchToolId('line'), 'Line should resolve as a registered sketch tool.')
+    assert(isRegisteredSketchToolId('midpointLine'), 'Midpoint Line should resolve as a registered sketch tool.')
     assert(isRegisteredSketchToolId('spline'), 'Spline should resolve as a registered sketch tool.')
+  }
+
+  function testToolFamiliesAndDiscoveryExposePrimitiveConstructors() {
+    assert(
+      getToolById('line').dropdown?.variantIds.includes('midpointLine'),
+      'Line family should expose the midpoint-line constructor.',
+    )
+    assert(
+      getToolById('rectangle').dropdown?.variantIds.includes('centerPointRectangle')
+        && getToolById('rectangle').dropdown?.variantIds.includes('alignedRectangle'),
+      'Rectangle family should expose center-point and aligned rectangle constructors.',
+    )
+    assert(
+      getToolById('circle').dropdown?.variantIds.includes('threePointCircle'),
+      'Circle family should expose the 3-point circle constructor.',
+    )
+    assert(
+      getToolById('centerPointArc').dropdown?.variantIds.includes('threePointArc')
+        && getToolById('centerPointArc').dropdown?.variantIds.includes('tangentArc'),
+      'Arc family should expose center, 3-point, and tangent arc constructors.',
+    )
+    assert(
+      getToolById('inscribedPolygon').dropdown?.variantIds.includes('circumscribedPolygon'),
+      'Polygon family should expose inscribed and circumscribed constructors.',
+    )
+
+    const sketchDrawingSection = getToolbarSectionsForMode('sketch').find((section) => section.id === 'drawing')
+    assert(sketchDrawingSection?.toolIds.includes('centerPointArc'), 'Sketch toolbar should include an arc family trigger.')
+    assert(sketchDrawingSection?.toolIds.includes('inscribedPolygon'), 'Sketch toolbar should include a polygon family trigger.')
+    assert(
+      searchToolDefinitions('tangent').some((tool) => tool.id === 'tangentArc')
+        && searchToolDefinitions('polygon').some((tool) => tool.id === 'circumscribedPolygon'),
+      'Tool search should discover sketch constructor dropdown variants.',
+    )
   }
 
   function testLinePointerLifecycleProducesStagedGeometry() {
@@ -137,6 +188,85 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     )
   }
 
+  function drawSketchTool(toolId: Parameters<typeof beginSketchTool>[1], points: readonly [number, number][]) {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      toolId,
+    )
+    session = startSketchDraw(session, points[0]!)
+    for (const point of points.slice(1)) {
+      session = acceptSketchDraw(session, point)
+    }
+
+    return session
+  }
+
+  function testPointAndMidpointLineConstructorsCommitDurableIntent() {
+    const pointSession = drawSketchTool('point', [[1, 2], [1, 2]])
+    assert(pointSession.definition.entities[0]?.kind === 'point', 'Point constructor should commit a durable point entity.')
+    assert(pointSession.commitRequest?.definition.entities[0]?.kind === 'point', 'Point commit request should include durable point geometry.')
+
+    const midpointSession = drawSketchTool('midpointLine', [[1, 1], [3, 1]])
+    const line = midpointSession.definition.entities.find((entity) => entity.kind === 'lineSegment')
+    const midpointConstraint = midpointSession.definition.constraints.find((constraint) => constraint.kind === 'midpoint')
+    assert(line?.kind === 'lineSegment', 'Midpoint line should commit a durable line segment.')
+    assert(midpointConstraint?.kind === 'midpoint', 'Midpoint line should commit midpoint intent.')
+  }
+
+  function testRectangleConstructorsCommitDurableIntent() {
+    const centerRectangle = drawSketchTool('centerPointRectangle', [[0, 0], [2, 1]])
+    assert(centerRectangle.definition.entities.filter((entity) => entity.kind === 'lineSegment').length === 6, 'Center rectangle should commit four edges and two construction diagonals.')
+    assert(
+      centerRectangle.definition.constraints.filter((constraint) => constraint.kind === 'midpoint').length === 2,
+      'Center rectangle should preserve center intent through midpoint constraints.',
+    )
+
+    const alignedRectangle = drawSketchTool('alignedRectangle', [[0, 0], [4, 0], [4, 3]])
+    assert(alignedRectangle.definition.entities.length === 4, 'Aligned rectangle should commit four line entities.')
+    assert(
+      alignedRectangle.definition.constraints.some((constraint) => constraint.kind === 'parallel')
+        && alignedRectangle.definition.constraints.some((constraint) => constraint.kind === 'perpendicular')
+        && alignedRectangle.definition.constraints.some((constraint) => constraint.kind === 'equalLength'),
+      'Aligned rectangle should preserve parallel, perpendicular, and equal-length intent.',
+    )
+  }
+
+  function testCircleArcAndPolygonConstructorsCommitDurableIntent() {
+    const threePointCircle = drawSketchTool('threePointCircle', [[0, 1], [1, 0], [0, -1]])
+    assert(threePointCircle.definition.entities[0]?.kind === 'circle', '3-point circle should commit a durable circle.')
+    assert(
+      threePointCircle.definition.constraints.filter((constraint) => constraint.kind === 'pointOnCurve').length === 3,
+      '3-point circle should preserve its defining perimeter points.',
+    )
+
+    const centerArc = drawSketchTool('centerPointArc', [[0, 0], [1, 0], [0, 1]])
+    assert(centerArc.definition.entities[0]?.kind === 'arc', 'Center-point arc should commit a durable arc.')
+
+    const threePointArc = drawSketchTool('threePointArc', [[1, 0], [0, 1], [-1, 0]])
+    assert(threePointArc.definition.entities[0]?.kind === 'arc', '3-point arc should commit a durable arc.')
+    assert(
+      threePointArc.definition.constraints.some((constraint) => constraint.kind === 'pointOnCurve'),
+      '3-point arc should preserve its through-point relationship.',
+    )
+
+    const tangentArc = drawSketchTool('tangentArc', [[0, 0], [1, 0], [1, 1]])
+    assert(tangentArc.definition.entities[0]?.kind === 'arc', 'Tangent arc should commit a durable arc.')
+
+    const inscribedPolygon = drawSketchTool('inscribedPolygon', [[0, 0], [0, 2]])
+    assert(inscribedPolygon.definition.entities.filter((entity) => entity.kind === 'lineSegment').length === 6, 'Inscribed polygon should commit a closed line loop.')
+    assert(
+      inscribedPolygon.definition.constraints.some((constraint) => constraint.kind === 'pointOnCurve'),
+      'Inscribed polygon should constrain vertices to its construction circle.',
+    )
+
+    const circumscribedPolygon = drawSketchTool('circumscribedPolygon', [[0, 0], [0, 2]])
+    assert(circumscribedPolygon.definition.entities.filter((entity) => entity.kind === 'lineSegment').length === 6, 'Circumscribed polygon should commit a closed line loop.')
+    assert(
+      circumscribedPolygon.definition.constraints.some((constraint) => constraint.kind === 'tangent'),
+      'Circumscribed polygon should constrain sides tangent to its construction circle.',
+    )
+  }
+
   function testSplineCollectsThreePointsAndCommitsDurableGeometry() {
     let session = beginSketchTool(
       createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
@@ -177,10 +307,14 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
   }
 
   testRegistryContainsCurrentSketchToolSet()
+  testToolFamiliesAndDiscoveryExposePrimitiveConstructors()
   testLinePointerLifecycleProducesStagedGeometry()
   testCirclePresentationSchemaExposesPromptControlAndDiameterOverlay()
   testRectanglePresentationSchemaExposesAnchoredWidthAndHeightOverlays()
   testSessionRuntimeDelegatesCommitOutputToToolModule()
+  testPointAndMidpointLineConstructorsCommitDurableIntent()
+  testRectangleConstructorsCommitDurableIntent()
+  testCircleArcAndPolygonConstructorsCommitDurableIntent()
   testSplineCollectsThreePointsAndCommitsDurableGeometry()
   testGenericPresentationAccessFromSession()
 })

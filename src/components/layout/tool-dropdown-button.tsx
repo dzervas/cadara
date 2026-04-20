@@ -7,11 +7,11 @@ import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
 import { getToolbarToolCommandId } from '@/domain/shortcuts/commands'
-import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
+import type { DropdownToolDefinition, RegisteredToolDefinition } from '@/domain/tools/tool-registry'
 import { useToolActions } from '@/hooks/use-tool-actions'
 
 interface ToolDropdownButtonProps {
-  tool: RegisteredToolDefinition
+  tool: DropdownToolDefinition
   variantTools: RegisteredToolDefinition[]
   active?: boolean
   disabled?: boolean
@@ -26,6 +26,7 @@ export function ToolDropdownButton({
   const { triggerTool } = useToolActions()
   const [opened, setOpened] = useState(false)
   const commandId = getToolbarToolCommandId(tool.id)
+  const hasPrimaryVariant = (tool.dropdown.variantIds as readonly string[]).includes(tool.id)
   const controlBackground = disabled
     ? 'var(--workbench-shell-control-surface)'
     : active
@@ -39,6 +40,115 @@ export function ToolDropdownButton({
   const controlColor = disabled
     ? 'var(--workbench-shell-text-dim)'
     : 'var(--workbench-shell-text)'
+  const handlePrimaryClick = () => {
+    if (disabled) {
+      return
+    }
+
+    triggerTool(tool.id, {
+      source: 'toolbar',
+    })
+  }
+
+  const dropdownItems = variantTools.map((variant) => {
+    return (
+      <Menu.Item
+        key={variant.id}
+        onClick={() => {
+          if (disabled) {
+            return
+          }
+
+          flushSync(() => setOpened(false))
+          triggerTool(variant.id, {
+            source: 'dropdown',
+          })
+        }}
+        disabled={disabled}
+        data-tool-id={variant.id}
+        data-tool-tooltip={variant.tooltip}
+        data-disabled={disabled || undefined}
+        leftSection={<ToolbarToolIcon icon={variant.icon} />}
+      >
+        <div className="flex min-w-0 flex-col">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <Text size="sm" style={{ color: 'var(--workbench-shell-text)' }}>
+              {variant.name}
+            </Text>
+            <ShortcutHint commandId={getToolbarToolCommandId(variant.id)} />
+          </div>
+          <Text size="xs" style={{ color: 'var(--workbench-shell-text-muted)' }}>
+            {variant.tooltip}
+          </Text>
+        </div>
+      </Menu.Item>
+    )
+  })
+  const dropdown = (
+    <Menu.Dropdown
+      style={{
+        backgroundColor: 'var(--workbench-shell-overlay-strong)',
+        borderColor: 'var(--workbench-shell-border)',
+        boxShadow: 'var(--workbench-panel-shadow)',
+      }}
+    >
+      {dropdownItems}
+    </Menu.Dropdown>
+  )
+
+  if (hasPrimaryVariant) {
+    return (
+      <div
+        className="flex h-10 items-stretch overflow-hidden rounded-md border"
+        style={{
+          backgroundColor: controlBackground,
+          borderColor: controlBorder,
+          opacity: disabled ? 0.46 : 1,
+        }}
+      >
+        <Tooltip
+          label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} commandId={commandId} />}
+        >
+          <UnstyledButton
+            type="button"
+            onClick={handlePrimaryClick}
+            aria-label={tool.name}
+            aria-pressed={active}
+            disabled={disabled}
+            data-tool-id={tool.id}
+            data-tool-source="toolbar"
+            data-tool-tooltip={tool.tooltip}
+            data-disabled={disabled || undefined}
+            className="flex items-center px-2.5"
+            style={{ color: controlColor }}
+          >
+            <ToolbarToolIcon icon={tool.icon} />
+          </UnstyledButton>
+        </Tooltip>
+
+        <Menu width={224} opened={opened} onChange={setOpened} transitionProps={{ duration: 0 }}>
+          <Menu.Target>
+            <UnstyledButton
+              type="button"
+              aria-label={`${tool.name} variants`}
+              disabled={disabled}
+              data-tool-dropdown-trigger={tool.id}
+              data-disabled={disabled || undefined}
+              className="flex items-center px-1.5"
+              style={{
+                borderLeft: `1px solid ${active ? 'var(--workbench-shell-accent)' : 'var(--workbench-shell-border)'}`,
+                color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text-muted)',
+              }}
+            >
+              <WorkbenchIcon name="chevronDown" className="h-3.5 w-3.5" />
+            </UnstyledButton>
+          </Menu.Target>
+
+          {dropdown}
+        </Menu>
+      </div>
+    )
+  }
 
   return (
     <Menu width={224} opened={opened} onChange={setOpened} transitionProps={{ duration: 0 }}>
@@ -82,48 +192,7 @@ export function ToolDropdownButton({
         </Tooltip>
       </Menu.Target>
 
-      <Menu.Dropdown
-        style={{
-          backgroundColor: 'var(--workbench-shell-overlay-strong)',
-          borderColor: 'var(--workbench-shell-border)',
-          boxShadow: 'var(--workbench-panel-shadow)',
-        }}
-      >
-        {variantTools.map((variant) => {
-          return (
-            <Menu.Item
-              key={variant.id}
-              onClick={() => {
-                if (disabled) {
-                  return
-                }
-
-                flushSync(() => setOpened(false))
-                triggerTool(variant.id, {
-                  source: 'dropdown',
-                })
-              }}
-              disabled={disabled}
-              data-tool-id={variant.id}
-              data-tool-tooltip={variant.tooltip}
-              data-disabled={disabled || undefined}
-              leftSection={<ToolbarToolIcon icon={variant.icon} />}
-            >
-              <div className="flex min-w-0 flex-col">
-                <div className="flex min-w-0 items-center justify-between gap-3">
-                  <Text size="sm" style={{ color: 'var(--workbench-shell-text)' }}>
-                    {variant.name}
-                  </Text>
-                  <ShortcutHint commandId={getToolbarToolCommandId(variant.id)} />
-                </div>
-                <Text size="xs" style={{ color: 'var(--workbench-shell-text-muted)' }}>
-                  {variant.tooltip}
-                </Text>
-              </div>
-            </Menu.Item>
-          )
-        })}
-      </Menu.Dropdown>
+      {dropdown}
     </Menu>
   )
 }

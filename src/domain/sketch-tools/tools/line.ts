@@ -114,6 +114,10 @@ export const lineSketchToolDefinition: SketchToolDefinition<'line'> = {
     tooltip: 'Create line geometry.',
     icon: 'line',
     modes: ['sketch'],
+    dropdown: {
+      familyId: 'line-family',
+      variantIds: ['line', 'midpointLine'],
+    },
   },
   activate() {
     const state = createIdleState()

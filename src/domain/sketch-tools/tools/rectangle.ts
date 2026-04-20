@@ -187,6 +187,10 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<'rectangle'> = 
     tooltip: 'Create rectangle geometry.',
     icon: 'rectangle',
     modes: ['sketch'],
+    dropdown: {
+      familyId: 'rectangle-family',
+      variantIds: ['rectangle', 'centerPointRectangle', 'alignedRectangle'],
+    },
   },
   activate() {
     const state = createIdleState()

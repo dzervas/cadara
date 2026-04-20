@@ -10,7 +10,21 @@ import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 
-export type SketchToolId = 'line' | 'rectangle' | 'circle' | 'spline'
+export type SketchToolId =
+  | 'point'
+  | 'line'
+  | 'midpointLine'
+  | 'rectangle'
+  | 'centerPointRectangle'
+  | 'alignedRectangle'
+  | 'circle'
+  | 'threePointCircle'
+  | 'centerPointArc'
+  | 'threePointArc'
+  | 'tangentArc'
+  | 'inscribedPolygon'
+  | 'circumscribedPolygon'
+  | 'spline'
 
 export type SketchDraftEntity =
   | {
@@ -60,6 +74,10 @@ export interface SketchToolMetadata<TToolId extends SketchToolId = SketchToolId>
   icon: ToolIconId
   group: 'drawing'
   modes: readonly ToolbarMode[]
+  dropdown?: {
+    familyId: string
+    variantIds: readonly SketchToolId[]
+  }
 }
 
 export interface SketchToolRuntimeState {
@@ -103,6 +121,11 @@ export interface SketchToolCommitFactories {
     entityId: SketchEntityId,
     startPointId: SketchPointId,
     endPointId: SketchPointId,
+  ): SketchEntityDefinition
+  createPointEntity(
+    label: string,
+    entityId: SketchEntityId,
+    pointId: SketchPointId,
   ): SketchEntityDefinition
   createCircleEntity(
     label: string,

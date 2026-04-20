@@ -95,6 +95,7 @@ const sketchToolDefinitions = getRegisteredSketchToolDefinitions().map(({ metada
   tooltip: metadata.tooltip,
   icon: metadata.icon,
   modes: metadata.modes,
+  ...(metadata.dropdown ? { dropdown: metadata.dropdown } : {}),
 })) satisfies readonly ToolDefinition[]
 
 const sketchEditToolDefinitions = getRegisteredSketchEditToolDefinitions().map(({ metadata }) => ({
@@ -503,7 +504,7 @@ const toolbarSections = [
     label: 'Draw',
     align: 'center',
     modes: ['sketch'],
-    toolIds: ['line', 'rectangle', 'circle', 'spline'],
+    toolIds: ['point', 'line', 'rectangle', 'circle', 'centerPointArc', 'inscribedPolygon', 'spline'],
   },
   {
     id: 'constraints',

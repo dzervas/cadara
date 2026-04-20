@@ -81,6 +81,7 @@ import type {
   SketchToolCommitContribution,
   SketchToolId,
 } from '@/domain/sketch-tools/definition'
+import { sampleArcPoints } from '@/domain/sketch-tools/geometry'
 import { getSketchToolDefinition } from '@/domain/sketch-tools/registry'
 import type { SketchEditToolId } from '@/domain/sketch-edit-tools/definition'
 import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
@@ -900,6 +901,29 @@ function mapDefinitionEntityToDraftEntity(
     ]
   }
 
+  if (entity.kind === 'arc') {
+    const center = pointById.get(entity.centerPointId)
+    const start = pointById.get(entity.startPointId)
+    const end = pointById.get(entity.endPointId)
+
+    if (!center || !start || !end) {
+      return []
+    }
+
+    return [
+      {
+        id: entity.entityId,
+        kind: 'polyline',
+        points: sampleArcPoints(center, start, end, entity.sweepDirection),
+        isClosed: false,
+        entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
+        status: 'accepted',
+        label: entity.label,
+        isConstruction: entity.isConstruction,
+      },
+    ]
+  }
+
   if (entity.kind === 'spline') {
     const splinePoints = entity.fitPointIds.flatMap((pointId) => {
       const point = pointById.get(pointId)
@@ -1024,25 +1048,7 @@ function mapDefinitionEntityToDraftEntity(
       : []
   }
 
-  const start = pointById.get(entity.startPointId)
-  const end = pointById.get(entity.endPointId)
-
-  if (!start || !end) {
-    return []
-  }
-
-  return [
-    {
-      id: entity.entityId,
-      kind: 'line',
-      start,
-      end,
-      entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
-      status: 'accepted',
-      label: entity.label,
-      isConstruction: entity.isConstruction,
-    },
-  ]
+  return []
 }
 
 export function deriveSketchDisplayEntities(session: SketchSessionState): readonly SketchDraftEntity[] {
@@ -1121,6 +1127,23 @@ function createLineEntityDefinition(
     isConstruction,
     startPointId,
     endPointId,
+  }
+}
+
+function createPointEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  pointId: SketchPointId,
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'point',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    pointId,
   }
 }
 
@@ -3432,12 +3455,75 @@ function appendInferredSnapConstraints(input: {
     }))
   }
 
-  return constraints.length === (input.patch.constraints ?? []).length
+  const uniqueConstraints = dedupeConstraints(constraints)
+
+  return uniqueConstraints.length === (input.patch.constraints ?? []).length
     ? input.patch
     : {
         ...input.patch,
-        constraints,
+        constraints: uniqueConstraints,
       }
+}
+
+function dedupeConstraints(constraints: ConstraintDefinition[]) {
+  const seen = new Set<string>()
+  const uniqueConstraints: ConstraintDefinition[] = []
+
+  for (const constraint of constraints) {
+    const key = getConstraintDedupeKey(constraint)
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    uniqueConstraints.push(constraint)
+  }
+
+  return uniqueConstraints
+}
+
+function getConstraintDedupeKey(constraint: ConstraintDefinition): string {
+  switch (constraint.kind) {
+    case 'coincident':
+      return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}`
+    case 'parallel':
+    case 'perpendicular':
+    case 'equalLength':
+    case 'tangent':
+    case 'concentric':
+      return `${constraint.kind}:${[...constraint.entityIds].sort().join(':')}`
+    case 'horizontal':
+    case 'vertical':
+      return `${constraint.kind}:${constraint.entityId}`
+    case 'midpoint':
+      return `${constraint.kind}:${constraint.point.pointId}:${constraint.line.entityId}`
+    case 'pointOnCurve':
+      return `${constraint.kind}:${constraint.point.pointId}:${constraint.curve.entityId}`
+    case 'fixPoint':
+      return `${constraint.kind}:${constraint.pointId}:${constraint.position.join(':')}`
+    case 'angle':
+      return `${constraint.kind}:${constraint.pointIds.join(':')}:${constraint.valueRadians}`
+    case 'coincidentProjectedPoint':
+      return `${constraint.kind}:${constraint.point.pointId}:${constraint.projectedPoint.reference.referenceId}:${constraint.projectedPoint.reference.geometryId}`
+    case 'pointOnProjectedCurve':
+      return `${constraint.kind}:${constraint.point.pointId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}`
+    case 'midpointProjectedLine':
+      return `${constraint.kind}:${constraint.point.pointId}:${constraint.projectedLine.reference.referenceId}:${constraint.projectedLine.reference.geometryId}`
+    case 'parallelProjectedLine':
+    case 'perpendicularProjectedLine':
+      return `${constraint.kind}:${constraint.line.entityId}:${constraint.projectedLine.reference.referenceId}:${constraint.projectedLine.reference.geometryId}`
+    case 'tangentProjectedCurve':
+    case 'concentricProjectedCurve':
+      return `${constraint.kind}:${constraint.curve.entityId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}`
+    case 'normal':
+      return `${constraint.kind}:${constraint.line.entityId}:${constraint.curve.entityId}:${constraint.point.pointId}`
+    case 'normalProjectedCurve':
+      return `${constraint.kind}:${constraint.line.entityId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}:${constraint.point.pointId}`
+    case 'symmetric':
+      return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}:${constraint.axis.entityId}`
+    case 'symmetricProjectedLine':
+      return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}:${constraint.projectedLine.reference.referenceId}:${constraint.projectedLine.reference.geometryId}`
+  }
 }
 
 export function startSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {
@@ -3537,6 +3623,8 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
         createPointDefinition(sketchId, pointId, label, position, session.constructionModifierActive),
       createLineEntity: (label, entityId, startPointId, endPointId) =>
         createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId, session.constructionModifierActive),
+      createPointEntity: (label, entityId, pointId) =>
+        createPointEntityDefinition(sketchId, entityId, label, pointId, session.constructionModifierActive),
       createCircleEntity: (label, entityId, centerPointId, radius) =>
         createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, session.constructionModifierActive),
       createArcEntity: (label, entityId, centerPointId, startPointId, endPointId, sweepDirection) =>

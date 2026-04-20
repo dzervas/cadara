@@ -114,6 +114,10 @@ export const circleSketchToolDefinition: SketchToolDefinition<'circle'> = {
     tooltip: 'Create circular geometry.',
     icon: 'circle',
     modes: ['sketch'],
+    dropdown: {
+      familyId: 'circle-family',
+      variantIds: ['circle', 'threePointCircle'],
+    },
   },
   activate() {
     const state = createIdleState()
