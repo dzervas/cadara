@@ -43,6 +43,6 @@
 
 ## Verification
 
-- After any code or documentation change, always run `bun run test`.
-- After any code or documentation change, always run `bun run lint`.
-- After any code or documentation change, always run `bun run build`.
+- After any code change, always run `bun run test`.
+- After any code change, always run `bun run lint`.
+- After any code change, always run `bun run build`.
