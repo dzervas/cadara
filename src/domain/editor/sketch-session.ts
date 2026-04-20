@@ -70,6 +70,7 @@ import {
 } from '@/domain/modeling/opencascade-kernel-seed'
 import type {
   SketchToolAnchorDescriptor,
+  SketchToolControlValue,
   SketchToolFloatingInputDescriptor,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
@@ -195,6 +196,7 @@ export interface SketchSessionState {
   pointerDownPoint: SketchPoint | null
   livePoint: SketchPoint | null
   toolPlacedPoints: readonly SketchPoint[]
+  toolSettings: Record<string, SketchToolControlValue>
   toolPresentation: SketchToolPresentationSchema | null
   constraintAuthoring: SketchConstraintAuthoringState | null
   activeAnnotationEdit: SketchAnnotationEditState | null
@@ -632,6 +634,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -681,6 +684,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -1219,6 +1223,7 @@ function createSplineEntityDefinition(
   label: string,
   fitPointIds: readonly SketchPointId[],
   isConstruction = false,
+  degree: 2 | 3 = 2,
 ): SketchEntityDefinition {
   return {
     kind: 'spline',
@@ -1227,7 +1232,124 @@ function createSplineEntityDefinition(
     target: createSketchEntityRef(sketchId, entityId),
     isConstruction,
     fitPointIds,
-    degree: 2,
+    degree,
+  }
+}
+
+function createEllipseEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  centerPointId: SketchPointId,
+  majorAxisPointId: SketchPointId,
+  minorRadius: number,
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'ellipse',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    centerPointId,
+    majorAxisPointId,
+    minorRadius,
+  }
+}
+
+function createEllipticalArcEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  centerPointId: SketchPointId,
+  majorAxisPointId: SketchPointId,
+  startPointId: SketchPointId,
+  endPointId: SketchPointId,
+  minorRadius: number,
+  sweepDirection: 'clockwise' | 'counterClockwise',
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'ellipticalArc',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    centerPointId,
+    majorAxisPointId,
+    startPointId,
+    endPointId,
+    minorRadius,
+    sweepDirection,
+  }
+}
+
+function createConicEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  startPointId: SketchPointId,
+  controlPointId: SketchPointId,
+  endPointId: SketchPointId,
+  rho: number,
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'conic',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    startPointId,
+    controlPointId,
+    endPointId,
+    rho,
+  }
+}
+
+function createBezierCurveEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  controlPointIds: readonly SketchPointId[],
+  degree: 2 | 3,
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'bezierCurve',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    controlPointIds,
+    degree,
+  }
+}
+
+function createProfileTextEntityDefinition(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+  label: string,
+  anchorPointId: SketchPointId,
+  text: string,
+  height: number,
+  rotationRadians: number,
+  horizontalAlign: 'left' | 'center' | 'right',
+  verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom',
+  isConstruction = false,
+): SketchEntityDefinition {
+  return {
+    kind: 'profileText',
+    entityId,
+    label,
+    target: createSketchEntityRef(sketchId, entityId),
+    isConstruction,
+    anchorPointId,
+    text,
+    height,
+    rotationRadians,
+    horizontalAlign,
+    verticalAlign,
   }
 }
 
@@ -1515,6 +1637,7 @@ export function deleteSelectedSketchGeometry(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: null,
     constraintAuthoring: null,
     activeEditTool: null,
@@ -1681,6 +1804,7 @@ function activateSketchConstraintTool(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: buildConstraintToolPresentation(authoring),
@@ -2176,6 +2300,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
     pointerDownPoint: activation.state.pointerDownPoint,
     livePoint: activation.state.livePoint,
     toolPlacedPoints: activation.state.placedPoints ?? [],
+    toolSettings: activation.state.settings ?? {},
     toolStagedEntities: [],
     validationMessage: activation.state.validationMessage,
     toolPresentation: activation.presentation,
@@ -2210,6 +2335,8 @@ export function clearActiveSketchTool(session: SketchSessionState): SketchSessio
     constructionModifierActive: false,
     pointerDownPoint: null,
     livePoint: null,
+    toolPlacedPoints: [],
+    toolSettings: {},
     toolStagedEntities: [],
     validationMessage: null,
     toolPresentation: null,
@@ -2270,6 +2397,7 @@ export function updateSketchPointer(
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
     toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
+    toolSettings: result.state.settings ?? session.toolSettings,
     toolStagedEntities: withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     validationMessage: result.state.validationMessage,
     toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
@@ -2420,8 +2548,36 @@ function createSessionCommitFactories(
       sweepDirection: 'clockwise' | 'counterClockwise',
     ) =>
       createArcEntityDefinition(sketchId, entityId, label, centerPointId, startPointId, endPointId, sweepDirection, false),
-    createSplineEntity: (label: string, entityId: SketchEntityId, fitPointIds: readonly SketchPointId[]) =>
-      createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, false),
+    createSplineEntity: (label: string, entityId: SketchEntityId, fitPointIds: readonly SketchPointId[], degree?: 2 | 3) =>
+      createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, false, degree),
+    createEllipseEntity: (label: string, entityId: SketchEntityId, centerPointId: SketchPointId, majorAxisPointId: SketchPointId, minorRadius: number) =>
+      createEllipseEntityDefinition(sketchId, entityId, label, centerPointId, majorAxisPointId, minorRadius, false),
+    createEllipticalArcEntity: (
+      label: string,
+      entityId: SketchEntityId,
+      centerPointId: SketchPointId,
+      majorAxisPointId: SketchPointId,
+      startPointId: SketchPointId,
+      endPointId: SketchPointId,
+      minorRadius: number,
+      sweepDirection: 'clockwise' | 'counterClockwise',
+    ) =>
+      createEllipticalArcEntityDefinition(sketchId, entityId, label, centerPointId, majorAxisPointId, startPointId, endPointId, minorRadius, sweepDirection, false),
+    createConicEntity: (label: string, entityId: SketchEntityId, startPointId: SketchPointId, controlPointId: SketchPointId, endPointId: SketchPointId, rho: number) =>
+      createConicEntityDefinition(sketchId, entityId, label, startPointId, controlPointId, endPointId, rho, false),
+    createBezierCurveEntity: (label: string, entityId: SketchEntityId, controlPointIds: readonly SketchPointId[], degree: 2 | 3) =>
+      createBezierCurveEntityDefinition(sketchId, entityId, label, controlPointIds, degree, false),
+    createProfileTextEntity: (
+      label: string,
+      entityId: SketchEntityId,
+      anchorPointId: SketchPointId,
+      text: string,
+      height: number,
+      rotationRadians: number,
+      horizontalAlign: 'left' | 'center' | 'right',
+      verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom',
+    ) =>
+      createProfileTextEntityDefinition(sketchId, entityId, label, anchorPointId, text, height, rotationRadians, horizontalAlign, verticalAlign, false),
   }
 }
 
@@ -2966,6 +3122,7 @@ export function beginSketchGeometryDrag(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -3154,6 +3311,7 @@ export function toggleSketchConstructionTarget(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -3293,6 +3451,7 @@ export function selectSketchReferenceTarget(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -3927,6 +4086,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
       pointerDownPoint: null,
       livePoint: null,
       placedPoints: [],
+      settings: session.toolSettings,
       validationMessage: null,
     } satisfies import('@/domain/sketch-tools/definition').SketchToolRuntimeState,
     point: snap.point,
@@ -3938,6 +4098,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
     toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
+    toolSettings: result.state.settings ?? session.toolSettings,
     toolStagedEntities: withConstructionFlag(result.stagedEntities, session.constructionModifierActive),
     validationMessage: result.state.validationMessage,
     toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
@@ -3971,6 +4132,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
       toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
+      toolSettings: result.state.settings ?? session.toolSettings,
       validationMessage: result.state.validationMessage,
       toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
       activeSnap: snap.candidate,
@@ -3985,6 +4147,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
       toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
+      toolSettings: result.state.settings ?? session.toolSettings,
       validationMessage: null,
       toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
       activeSnap: snap.candidate,
@@ -3998,6 +4161,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     start: startPoint,
     end: endPoint,
     points: result.state.placedPoints ?? [startPoint, endPoint],
+    settings: result.state.settings ?? session.toolSettings,
     isConstruction: session.constructionModifierActive,
     acceptedSnaps: {
       start: session.drawStartSnap,
@@ -4018,8 +4182,18 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
         createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, session.constructionModifierActive),
       createArcEntity: (label, entityId, centerPointId, startPointId, endPointId, sweepDirection) =>
         createArcEntityDefinition(sketchId, entityId, label, centerPointId, startPointId, endPointId, sweepDirection, session.constructionModifierActive),
-      createSplineEntity: (label, entityId, fitPointIds) =>
-        createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, session.constructionModifierActive),
+      createSplineEntity: (label, entityId, fitPointIds, degree) =>
+        createSplineEntityDefinition(sketchId, entityId, label, fitPointIds, session.constructionModifierActive, degree),
+      createEllipseEntity: (label, entityId, centerPointId, majorAxisPointId, minorRadius) =>
+        createEllipseEntityDefinition(sketchId, entityId, label, centerPointId, majorAxisPointId, minorRadius, session.constructionModifierActive),
+      createEllipticalArcEntity: (label, entityId, centerPointId, majorAxisPointId, startPointId, endPointId, minorRadius, sweepDirection) =>
+        createEllipticalArcEntityDefinition(sketchId, entityId, label, centerPointId, majorAxisPointId, startPointId, endPointId, minorRadius, sweepDirection, session.constructionModifierActive),
+      createConicEntity: (label, entityId, startPointId, controlPointId, endPointId, rho) =>
+        createConicEntityDefinition(sketchId, entityId, label, startPointId, controlPointId, endPointId, rho, session.constructionModifierActive),
+      createBezierCurveEntity: (label, entityId, controlPointIds, degree) =>
+        createBezierCurveEntityDefinition(sketchId, entityId, label, controlPointIds, degree, session.constructionModifierActive),
+      createProfileTextEntity: (label, entityId, anchorPointId, text, height, rotationRadians, horizontalAlign, verticalAlign) =>
+        createProfileTextEntityDefinition(sketchId, entityId, label, anchorPointId, text, height, rotationRadians, horizontalAlign, verticalAlign, session.constructionModifierActive),
     },
   })
   const definitionPatch = appendInferredSnapConstraints({
@@ -4044,6 +4218,7 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
     toolPlacedPoints: result.state.status === 'idle' ? [] : result.state.placedPoints ?? session.toolPlacedPoints,
+    toolSettings: result.state.status === 'idle' ? {} : result.state.settings ?? session.toolSettings,
     sequence: nextSequence,
     commitRequest: buildCommitRequest({
       sketchId: session.sketchId,
@@ -4162,6 +4337,7 @@ function getToolRuntimeState(session: SketchSessionState): import('@/domain/sket
     pointerDownPoint: session.pointerDownPoint,
     livePoint: session.livePoint,
     placedPoints: session.toolPlacedPoints,
+    settings: session.toolSettings,
     validationMessage: session.validationMessage,
   }
 }
@@ -4381,6 +4557,37 @@ export function pinSketchConstraintPreview(
   }
 }
 
+export function patchSketchDrawingToolValue(
+  session: SketchSessionState,
+  patch: Record<string, unknown>,
+): SketchSessionState {
+  if (!isDrawingSketchTool(session.activeTool) || patch.intent !== 'setToolSetting') {
+    return session
+  }
+
+  const key = typeof patch.key === 'string' ? patch.key : null
+  if (!key) {
+    return session
+  }
+
+  const nextSettings = {
+    ...session.toolSettings,
+    [key]: (patch.value ?? null) as SketchToolControlValue,
+  }
+  const toolDefinition = getSketchToolDefinition(session.activeTool)
+  const runtimeState = {
+    ...getToolRuntimeState(session),
+    settings: nextSettings,
+  }
+
+  return {
+    ...session,
+    toolSettings: nextSettings,
+    toolStagedEntities: withConstructionFlag(toolDefinition.getStagedEntities(runtimeState), session.constructionModifierActive),
+    toolPresentation: toolDefinition.getPresentation(runtimeState),
+  }
+}
+
 export function patchSketchConstraintValue(
   session: SketchSessionState,
   patch: Record<string, unknown>,
@@ -4486,6 +4693,7 @@ export function beginSketchAnnotationEdit(
     pointerDownPoint: null,
     livePoint: null,
     toolPlacedPoints: [],
+    toolSettings: {},
     toolPresentation: buildAnnotationEditPresentation(session, edit),
     constraintAuthoring: null,
     activeAnnotationEdit: edit,

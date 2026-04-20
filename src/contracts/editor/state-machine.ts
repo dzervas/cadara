@@ -37,6 +37,7 @@ import {
   isEditableSketchGeometrySelection,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
+  patchSketchDrawingToolValue,
   patchSketchEditToolValue,
   patchSketchStyleValue,
   pinSketchConstraintPreview,
@@ -2851,6 +2852,27 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (state.session.activeEditTool) {
         const session = patchSketchEditToolValue(state.session, event.patch)
+
+        return {
+          state: {
+            ...state,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      if (
+        event.patch.intent === 'setToolSetting'
+        && state.session.activeTool
+        && isRegisteredSketchToolId(state.session.activeTool)
+      ) {
+        const session = patchSketchDrawingToolValue(state.session, event.patch)
 
         return {
           state: {

@@ -8,7 +8,7 @@ import type {
 import type { SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPoint } from '@/contracts/modeling/schema'
 import type { ToolIconId, ToolbarMode } from '@/domain/tools/schema'
-import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type { SketchToolControlValue, SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 
 export type SketchToolId =
@@ -23,9 +23,15 @@ export type SketchToolId =
   | 'centerPointArc'
   | 'threePointArc'
   | 'tangentArc'
+  | 'ellipse'
+  | 'ellipticalArc'
+  | 'conic'
+  | 'bezierCurve'
   | 'inscribedPolygon'
   | 'circumscribedPolygon'
   | 'spline'
+  | 'controlPointSpline'
+  | 'profileText'
 
 export type SketchDraftEntity =
   | {
@@ -86,6 +92,7 @@ export interface SketchToolRuntimeState {
   pointerDownPoint: SketchPoint | null
   livePoint: SketchPoint | null
   placedPoints?: readonly SketchPoint[]
+  settings?: Record<string, SketchToolControlValue>
   validationMessage: string | null
 }
 
@@ -146,6 +153,48 @@ export interface SketchToolCommitFactories {
     label: string,
     entityId: SketchEntityId,
     fitPointIds: readonly SketchPointId[],
+    degree?: 2 | 3,
+  ): SketchEntityDefinition
+  createEllipseEntity(
+    label: string,
+    entityId: SketchEntityId,
+    centerPointId: SketchPointId,
+    majorAxisPointId: SketchPointId,
+    minorRadius: number,
+  ): SketchEntityDefinition
+  createEllipticalArcEntity(
+    label: string,
+    entityId: SketchEntityId,
+    centerPointId: SketchPointId,
+    majorAxisPointId: SketchPointId,
+    startPointId: SketchPointId,
+    endPointId: SketchPointId,
+    minorRadius: number,
+    sweepDirection: 'clockwise' | 'counterClockwise',
+  ): SketchEntityDefinition
+  createConicEntity(
+    label: string,
+    entityId: SketchEntityId,
+    startPointId: SketchPointId,
+    controlPointId: SketchPointId,
+    endPointId: SketchPointId,
+    rho: number,
+  ): SketchEntityDefinition
+  createBezierCurveEntity(
+    label: string,
+    entityId: SketchEntityId,
+    controlPointIds: readonly SketchPointId[],
+    degree: 2 | 3,
+  ): SketchEntityDefinition
+  createProfileTextEntity(
+    label: string,
+    entityId: SketchEntityId,
+    anchorPointId: SketchPointId,
+    text: string,
+    height: number,
+    rotationRadians: number,
+    horizontalAlign: 'left' | 'center' | 'right',
+    verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom',
   ): SketchEntityDefinition
 }
 
@@ -154,6 +203,7 @@ export interface SketchToolCommitInput {
   start: SketchPoint
   end: SketchPoint
   points?: readonly SketchPoint[]
+  settings?: Record<string, SketchToolControlValue>
   isConstruction: boolean
   acceptedSnaps?: {
     start: SketchSnapCandidate | null

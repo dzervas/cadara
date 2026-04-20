@@ -124,6 +124,10 @@ export const splineSketchToolDefinition: SketchToolDefinition<'spline'> = {
     tooltip: 'Create spline geometry.',
     icon: 'spline',
     modes: ['sketch'],
+    dropdown: {
+      familyId: 'spline-family',
+      variantIds: ['spline', 'controlPointSpline'],
+    },
   },
   activate() {
     const state = createIdleState()

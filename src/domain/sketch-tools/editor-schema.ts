@@ -60,6 +60,15 @@ export interface SketchToolSelectionGuideDescriptor {
 export type SketchToolControlDescriptor =
   | {
       id: string
+      kind: 'text'
+      label: string
+      value: string
+      placeholder?: string
+      disabled?: boolean
+      action: SketchToolActionDescriptor
+    }
+  | {
+      id: string
       kind: 'numeric'
       label: string
       value: number | null

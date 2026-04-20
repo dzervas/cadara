@@ -1,10 +1,14 @@
 import { test } from 'bun:test'
+import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
+import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
 import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
   deriveSketchDisplayEntities,
+  getSketchSessionDisplayRenderables,
   getSketchToolPresentation,
+  patchSketchDrawingToolValue,
   startSketchDraw,
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
@@ -37,14 +41,20 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(
       JSON.stringify(registeredToolIds) === JSON.stringify([
         'alignedRectangle',
+        'bezierCurve',
         'centerPointArc',
         'centerPointRectangle',
         'circle',
         'circumscribedPolygon',
+        'conic',
+        'controlPointSpline',
+        'ellipse',
+        'ellipticalArc',
         'inscribedPolygon',
         'line',
         'midpointLine',
         'point',
+        'profileText',
         'rectangle',
         'spline',
         'tangentArc',
@@ -99,10 +109,22 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
       getToolById('inscribedPolygon').dropdown?.variantIds.includes('circumscribedPolygon'),
       'Polygon family should expose inscribed and circumscribed constructors.',
     )
+    assert(
+      getToolById('ellipse').dropdown?.variantIds.includes('ellipticalArc')
+        && getToolById('ellipse').dropdown?.variantIds.includes('conic')
+        && getToolById('ellipse').dropdown?.variantIds.includes('bezierCurve'),
+      'Advanced curve family should expose ellipse, elliptical arc, conic, and Bezier constructors.',
+    )
+    assert(
+      getToolById('spline').dropdown?.variantIds.includes('controlPointSpline'),
+      'Spline family should expose fit-point and control-point spline constructors.',
+    )
 
     const sketchDrawingSection = getToolbarSectionsForMode('sketch').find((section) => section.id === 'drawing')
     assert(sketchDrawingSection?.toolIds.includes('centerPointArc'), 'Sketch toolbar should include an arc family trigger.')
+    assert(sketchDrawingSection?.toolIds.includes('ellipse'), 'Sketch toolbar should include an advanced curve family trigger.')
     assert(sketchDrawingSection?.toolIds.includes('inscribedPolygon'), 'Sketch toolbar should include a polygon family trigger.')
+    assert(sketchDrawingSection?.toolIds.includes('profileText'), 'Sketch toolbar should include profile text.')
     assert(
       getToolbarSectionsForMode('sketch').some((section) =>
         section.id === 'sketchOps'
@@ -123,6 +145,11 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
       searchToolDefinitions('fillet').some((tool) => tool.id === 'sketchFillet')
         && searchToolDefinitions('fillet').some((tool) => tool.id === 'fillet'),
       'Tool search should expose sketch and part fillet tools separately.',
+    )
+    assert(
+      searchToolDefinitions('bezier').some((tool) => tool.id === 'bezierCurve')
+        && searchToolDefinitions('text').some((tool) => tool.id === 'profileText'),
+      'Tool search should discover advanced curve and text constructors.',
     )
   }
 
@@ -333,6 +360,136 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(session.toolStagedEntities.length === 0, 'Spline commit should clear staged preview geometry.')
   }
 
+  function testAdvancedCurveConstructorsCommitDurableIntent() {
+    const ellipse = drawSketchTool('ellipse', [[0, 0], [2, 0], [0, 1]])
+    assert(ellipse.definition.entities[0]?.kind === 'ellipse', 'Ellipse tool should commit a durable ellipse entity.')
+    assert(ellipse.definition.points.length === 2, 'Ellipse tool should persist center and major-axis defining points.')
+    assert(
+      getSketchSessionDisplayRenderables(ellipse).some((renderable) =>
+        renderable.target?.kind === 'sketchEntity'
+        && renderable.target.entityId === ellipse.definition.entities[0]?.entityId
+        && renderable.geometry.kind === 'polyline',
+      ),
+      'Committed ellipse should render with a stable sketch entity target.',
+    )
+
+    const ellipticalArc = drawSketchTool('ellipticalArc', [[0, 0], [3, 0], [0, 1], [3, 0], [0, 1]])
+    assert(ellipticalArc.definition.entities[0]?.kind === 'ellipticalArc', 'Elliptical arc tool should commit durable elliptical arc geometry.')
+
+    const conic = drawSketchTool('conic', [[0, 0], [1, 2], [2, 0]])
+    assert(conic.definition.entities[0]?.kind === 'conic', 'Conic tool should commit durable conic geometry.')
+    const solvedConic = solveSketchDefinitionCore({
+      definition: conic.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    const conicRegions = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_draft',
+      definition: conic.definition,
+      solvedSnapshot: solvedConic.solvedSnapshot,
+    })
+    assert(
+      conicRegions.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-profile-entity'),
+      'Valid advanced curves that are not profile-capable yet should emit unsupported-case diagnostics.',
+    )
+
+    const bezier = drawSketchTool('bezierCurve', [[0, 0], [1, 2], [2, 2], [3, 0]])
+    assert(bezier.definition.entities[0]?.kind === 'bezierCurve', 'Bezier tool should commit durable Bezier geometry.')
+    assert(bezier.definition.entities[0]?.kind === 'bezierCurve' && bezier.definition.entities[0].degree === 3, 'Bezier tool should preserve cubic degree.')
+
+    const controlSpline = drawSketchTool('controlPointSpline', [[0, 0], [1, 2], [2, 2], [3, 0]])
+    assert(controlSpline.definition.entities[0]?.kind === 'spline', 'Control-point spline should still commit durable spline geometry.')
+    assert(controlSpline.definition.entities[0]?.kind === 'spline' && controlSpline.definition.entities[0].degree === 3, 'Control-point spline should stay distinct from fit-point spline degree.')
+
+    const fitSpline = drawSketchTool('spline', [[0, 0], [1, 2], [2, 0]])
+    assert(fitSpline.definition.entities[0]?.kind === 'spline' && fitSpline.definition.entities[0].degree === 2, 'Fit-point spline behavior should remain unchanged.')
+  }
+
+  function testAdvancedToolValidationRejectsDegenerateInput() {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      'ellipse',
+    )
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [1, 0])
+    session = acceptSketchDraw(session, [2, 0])
+
+    assert(session.definition.entities.length === 0, 'Invalid ellipse input should not mutate the authored sketch definition.')
+    assert(session.validationMessage === 'Ellipse requires non-zero major and minor radii.', 'Invalid ellipse input should report validation feedback.')
+  }
+
+  function testProfileTextCommitsEditableTextAndDerivedProfile() {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      'profileText',
+    )
+    session = patchSketchDrawingToolValue(session, { intent: 'setToolSetting', key: 'text', value: 'CUT' })
+    session = patchSketchDrawingToolValue(session, { intent: 'setToolSetting', key: 'horizontalAlign', value: 'center' })
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [0, 2])
+
+    const textEntity = session.definition.entities[0]
+    assert(textEntity?.kind === 'profileText', 'Text tool should commit a durable profileText entity.')
+    assert(textEntity.kind === 'profileText' && textEntity.text === 'CUT', 'Text tool should preserve editable text content.')
+    assert(textEntity.kind === 'profileText' && textEntity.horizontalAlign === 'center', 'Text tool should persist placement options.')
+    assert(
+      getSketchSessionDisplayRenderables(session).some((renderable) =>
+        renderable.target?.kind === 'sketchEntity'
+        && renderable.target.entityId === textEntity.entityId
+        && renderable.geometry.kind === 'polyline',
+      ),
+      'Committed text should render with a stable sketch entity target.',
+    )
+
+    const solved = solveSketchDefinitionCore({
+      definition: session.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    const regions = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_draft',
+      definition: session.definition,
+      solvedSnapshot: solved.solvedSnapshot,
+    })
+
+    assert(regions.regions.length >= 1, 'Supported profile-generating text should expose downstream profile regions.')
+    assert(
+      regions.regions.some((region) =>
+        region.loops.some((loop) =>
+          loop.segments.some((segment) =>
+            segment.source.kind === 'entity' && segment.source.entityId === textEntity.entityId,
+          ),
+        ),
+      ),
+      'Derived text profile should preserve the text entity as its selectable boundary source.',
+    )
+  }
+
+  function testInvalidProfileTextDoesNotCommitPartialEntity() {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      'profileText',
+    )
+    session = patchSketchDrawingToolValue(session, { intent: 'setToolSetting', key: 'text', value: '   ' })
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [0, 2])
+
+    assert(session.definition.entities.length === 0, 'Invalid text input should not commit a partial profileText entity.')
+    assert(session.validationMessage === 'Text content is required.', 'Invalid text should report validation feedback.')
+  }
+
   function testGenericPresentationAccessFromSession() {
     const session = beginSketchTool(
       createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
@@ -357,5 +514,9 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
   testRectangleConstructorsCommitDurableIntent()
   testCircleArcAndPolygonConstructorsCommitDurableIntent()
   testSplineCollectsThreePointsAndCommitsDurableGeometry()
+  testAdvancedCurveConstructorsCommitDurableIntent()
+  testAdvancedToolValidationRejectsDegenerateInput()
+  testProfileTextCommitsEditableTextAndDerivedProfile()
+  testInvalidProfileTextDoesNotCommitPartialEntity()
   testGenericPresentationAccessFromSession()
 })

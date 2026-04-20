@@ -117,7 +117,21 @@ function SketchToolControlField({
   return (
     <label className="grid gap-1">
       <span>{control.label}</span>
-      {control.kind === 'numeric' ? (
+      {control.kind === 'text' ? (
+        <input
+          className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
+          disabled={control.disabled}
+          placeholder={control.placeholder}
+          type="text"
+          value={control.value}
+          onChange={(event) => {
+            onPatch({
+              ...control.action.patch,
+              value: event.currentTarget.value,
+            })
+          }}
+        />
+      ) : control.kind === 'numeric' ? (
         <input
           className="h-8 rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 text-[var(--cad-foreground)] outline-none"
           disabled={control.disabled}

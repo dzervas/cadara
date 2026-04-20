@@ -1,4 +1,12 @@
 import type { SketchToolDefinition, SketchToolId } from '@/domain/sketch-tools/definition'
+import {
+  bezierCurveSketchToolDefinition,
+  conicSketchToolDefinition,
+  controlPointSplineSketchToolDefinition,
+  ellipseSketchToolDefinition,
+  ellipticalArcSketchToolDefinition,
+  profileTextSketchToolDefinition,
+} from '@/domain/sketch-tools/tools/advanced-curves'
 import { alignedRectangleSketchToolDefinition } from '@/domain/sketch-tools/tools/aligned-rectangle'
 import { circleSketchToolDefinition } from '@/domain/sketch-tools/tools/circle'
 import { centerPointArcSketchToolDefinition } from '@/domain/sketch-tools/tools/center-point-arc'
@@ -26,9 +34,15 @@ export const sketchToolDefinitions = [
   centerPointArcSketchToolDefinition,
   threePointArcSketchToolDefinition,
   tangentArcSketchToolDefinition,
+  ellipseSketchToolDefinition,
+  ellipticalArcSketchToolDefinition,
+  conicSketchToolDefinition,
+  bezierCurveSketchToolDefinition,
   inscribedPolygonSketchToolDefinition,
   circumscribedPolygonSketchToolDefinition,
   splineSketchToolDefinition,
+  controlPointSplineSketchToolDefinition,
+  profileTextSketchToolDefinition,
 ] as const satisfies readonly SketchToolDefinition[]
 
 const sketchToolMap = new Map<SketchToolId, SketchToolDefinition>(
