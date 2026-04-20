@@ -138,6 +138,7 @@ import type {
   SketchReferenceDefinition,
   SketchSolveDiagnostic,
   SketchDefinition,
+  SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
   SketchRecord,
@@ -1895,7 +1896,99 @@ function normalizeSketchDefinition(value: unknown): SketchDefinition {
     constraints: value.constraints.map((constraint) => normalizeConstraintDefinition(constraint)),
     dimensionIds: value.dimensionIds.map((dimensionId) => assertDimensionId(dimensionId)),
     dimensions: value.dimensions.map((dimension) => normalizeDimensionDefinition(dimension)),
+    derivedRelationships: Array.isArray(value.derivedRelationships)
+      ? value.derivedRelationships.map((relationship) => normalizeSketchDerivationDefinition(relationship))
+      : [],
   }
+}
+
+function normalizeSketchDerivationOutput(value: unknown): SketchDerivationDefinition['outputs'][number] {
+  if (
+    !isRecord(value) ||
+    !isString(value.seedEntityId) ||
+    !isString(value.outputEntityId) ||
+    typeof value.instanceIndex !== 'number' ||
+    !Array.isArray(value.seedPointIds) ||
+    !Array.isArray(value.outputPointIds)
+  ) {
+    throw new Error('Invalid sketch derivation output payload.')
+  }
+
+  return {
+    seedEntityId: assertSketchEntityId(value.seedEntityId),
+    outputEntityId: assertSketchEntityId(value.outputEntityId),
+    instanceIndex: value.instanceIndex,
+    seedPointIds: value.seedPointIds.map((pointId) => assertSketchPointId(pointId)),
+    outputPointIds: value.outputPointIds.map((pointId) => assertSketchPointId(pointId)),
+  }
+}
+
+function normalizeSketchDerivationDefinition(value: unknown): SketchDerivationDefinition {
+  if (
+    !isRecord(value) ||
+    !isString(value.derivationId) ||
+    !value.derivationId.startsWith('sketch_derivation_') ||
+    !isString(value.label) ||
+    !isString(value.kind) ||
+    !Array.isArray(value.seedEntityIds) ||
+    !Array.isArray(value.outputs)
+  ) {
+    throw new Error('Invalid sketch derivation definition payload.')
+  }
+
+  const base = {
+    derivationId: value.derivationId,
+    label: value.label,
+    seedEntityIds: value.seedEntityIds.map((entityId) => assertSketchEntityId(entityId)),
+    outputs: value.outputs.map((output) => normalizeSketchDerivationOutput(output)),
+  }
+
+  if (value.kind === 'mirror') {
+    if (!isRecord(value.mirrorReference) || value.mirrorReference.kind !== 'lineEntity') {
+      throw new Error('Invalid sketch mirror derivation payload.')
+    }
+
+    return {
+      ...base,
+      kind: 'mirror',
+      mirrorReference: {
+        kind: 'lineEntity',
+        entityId: assertSketchEntityId(value.mirrorReference.entityId),
+      },
+    }
+  }
+
+  if (value.kind === 'linearPattern') {
+    return {
+      ...base,
+      kind: 'linearPattern',
+      vector: normalizePoint2D(value.vector, 'Invalid sketch linear pattern vector payload.'),
+      instanceCount: typeof value.instanceCount === 'number' ? value.instanceCount : 0,
+    }
+  }
+
+  if (value.kind === 'circularPattern') {
+    return {
+      ...base,
+      kind: 'circularPattern',
+      center: normalizePoint2D(value.center, 'Invalid sketch circular pattern center payload.'),
+      angleRadians: typeof value.angleRadians === 'number' ? value.angleRadians : Number.NaN,
+      instanceCount: typeof value.instanceCount === 'number' ? value.instanceCount : 0,
+    }
+  }
+
+  if (value.kind === 'transform') {
+    return {
+      ...base,
+      kind: 'transform',
+      origin: normalizePoint2D(value.origin, 'Invalid sketch transform origin payload.'),
+      translation: normalizePoint2D(value.translation, 'Invalid sketch transform translation payload.'),
+      rotationRadians: typeof value.rotationRadians === 'number' ? value.rotationRadians : Number.NaN,
+      scale: typeof value.scale === 'number' ? value.scale : Number.NaN,
+    }
+  }
+
+  throw new Error('Invalid sketch derivation kind payload.')
 }
 
 function normalizeSketchReferenceDefinition(value: unknown): SketchReferenceDefinition {

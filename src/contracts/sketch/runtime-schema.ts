@@ -6,6 +6,7 @@ import type {
   ProjectedSketchGeometryRef,
   RegionRecord,
   SketchDefinition,
+  SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
   SketchRecord,
@@ -502,6 +503,53 @@ const sketchStyleRecordSchema = z.object({
   stroke: sketchStyleStrokeSchema,
 }).transform((value) => value as SketchStyleRecord)
 
+const sketchDerivedEntityOutputSchema = z.object({
+  seedEntityId: sketchEntityIdSchema,
+  outputEntityId: sketchEntityIdSchema,
+  instanceIndex: z.number().int().min(1),
+  seedPointIds: z.array(sketchPointIdSchema),
+  outputPointIds: z.array(sketchPointIdSchema),
+})
+
+const sketchDerivationBaseSchema = {
+  derivationId: z.string().regex(/^sketch_derivation_.+$/, 'Sketch derivation ID is invalid.'),
+  label: z.string(),
+  seedEntityIds: z.array(sketchEntityIdSchema),
+  outputs: z.array(sketchDerivedEntityOutputSchema),
+} as const
+
+const sketchDerivationDefinitionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...sketchDerivationBaseSchema,
+    kind: z.literal('mirror'),
+    mirrorReference: z.object({
+      kind: z.literal('lineEntity'),
+      entityId: sketchEntityIdSchema,
+    }),
+  }),
+  z.object({
+    ...sketchDerivationBaseSchema,
+    kind: z.literal('linearPattern'),
+    vector: point2dSchema,
+    instanceCount: z.number().int().min(2),
+  }),
+  z.object({
+    ...sketchDerivationBaseSchema,
+    kind: z.literal('circularPattern'),
+    center: point2dSchema,
+    angleRadians: z.number(),
+    instanceCount: z.number().int().min(2),
+  }),
+  z.object({
+    ...sketchDerivationBaseSchema,
+    kind: z.literal('transform'),
+    origin: point2dSchema,
+    translation: point2dSchema,
+    rotationRadians: z.number(),
+    scale: positiveNumberSchema('Sketch transform scale must be positive.'),
+  }),
+]).transform((value) => value as SketchDerivationDefinition)
+
 export const sketchDefinitionSchema = z.object({
   schemaVersion: sketchSchemaVersionSchema,
   referenceIds: z.array(referenceIdSchema),
@@ -516,6 +564,7 @@ export const sketchDefinitionSchema = z.object({
   dimensions: z.array(dimensionDefinitionSchema),
   styleIds: z.array(sketchStyleIdSchema).default([]),
   styles: z.array(sketchStyleRecordSchema).default([]),
+  derivedRelationships: z.array(sketchDerivationDefinitionSchema).default([]),
 }).transform((value) => value as SketchDefinition)
 
 const regionRecordSchema = z.object({

@@ -14,6 +14,7 @@ import type {
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
 } from '@/contracts/sketch/schema'
+import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
 import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
@@ -3167,8 +3168,10 @@ export function solveSketchDefinitionCore(input: {
   strategy?: SketchSolveStrategy
 }): SketchCoreSolveResult {
   const projectedReferences = input.projectedReferences ?? []
-  const validation = validateDefinition(input.definition, input.tolerances, projectedReferences)
-  const system = buildSystem(input.definition, { dragTarget: null, projectedReferences })
+  const derived = evaluateSketchDerivations(input.definition)
+  const definition = derived.definition
+  const validation = validateDefinition(definition, input.tolerances, projectedReferences)
+  const system = buildSystem(definition, { dragTarget: null, projectedReferences })
   const strategy = input.strategy ?? 'bfgs'
   const solved =
     strategy === 'gradientDescent'
@@ -3191,14 +3194,14 @@ export function solveSketchDefinitionCore(input: {
             })
           : solveBfgs(system.initialValues, system.scalarConstraints)
 
-  const diagnostics = [...validation.diagnostics]
+  const diagnostics = [...derived.diagnostics, ...validation.diagnostics]
   const solvedEntities = buildSolvedEntities(
-    input.definition,
+    definition,
     system.pointRecords,
     system.entityStates,
     solved.values,
   )
-  const solvedPoints = input.definition.points.flatMap((point) => {
+  const solvedPoints = definition.points.flatMap((point) => {
     const record = system.pointRecords.get(point.pointId)
     return record
       ? [{
@@ -3217,8 +3220,8 @@ export function solveSketchDefinitionCore(input: {
     }
   } else if (system.scalarConstraints.length === 0) {
     status = {
-      solveState: input.definition.entities.length === 0 ? 'notEvaluated' : 'solved',
-      constraintState: input.definition.entities.length === 0 ? 'unknown' : 'underConstrained',
+      solveState: definition.entities.length === 0 ? 'notEvaluated' : 'solved',
+      constraintState: definition.entities.length === 0 ? 'unknown' : 'underConstrained',
     }
   } else if (solved.loss < 1e-8) {
     status = {
@@ -3246,7 +3249,7 @@ export function solveSketchDefinitionCore(input: {
     solvedEntities,
     solvedPoints,
     constraintStatuses: buildConstraintStatuses(
-      input.definition,
+      definition,
       system.pointRecords,
       solved.values,
       input.tolerances,
@@ -3254,7 +3257,7 @@ export function solveSketchDefinitionCore(input: {
       projectedReferences,
     ),
     dimensionStatuses: buildDimensionStatuses(
-      input.definition,
+      definition,
       system.pointRecords,
       system.entityStates,
       solved.values,
@@ -3296,8 +3299,10 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
   }
 
   const projectedReferences = input.projectedReferences ?? []
-  const validation = validateDefinition(input.definition, input.tolerances, projectedReferences)
-  const system = buildSystem(input.definition, { dragTarget: input.dragTarget, projectedReferences })
+  const derived = evaluateSketchDerivations(input.definition)
+  const definition = derived.definition
+  const validation = validateDefinition(definition, input.tolerances, projectedReferences)
+  const system = buildSystem(definition, { dragTarget: input.dragTarget, projectedReferences })
   const strategy = input.strategy ?? 'bfgs'
   const solved =
     strategy === 'gradientDescent'
@@ -3320,7 +3325,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
             })
           : solveBfgs(system.initialValues, system.scalarConstraints)
 
-  const diagnostics = [...validation.diagnostics]
+  const diagnostics = [...derived.diagnostics, ...validation.diagnostics]
   const solvedSnapshot: SolvedSketchSnapshot = {
     schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
     status:
@@ -3334,12 +3339,12 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
             constraintState: validation.isValid ? 'underConstrained' : 'inconsistent',
           },
     solvedEntities: buildSolvedEntities(
-      input.definition,
+      definition,
       system.pointRecords,
       system.entityStates,
       solved.values,
     ),
-    solvedPoints: input.definition.points.flatMap((point) => {
+    solvedPoints: definition.points.flatMap((point) => {
       const record = system.pointRecords.get(point.pointId)
       return record
         ? [{
@@ -3350,7 +3355,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
         : []
     }),
     constraintStatuses: buildConstraintStatuses(
-      input.definition,
+      definition,
       system.pointRecords,
       solved.values,
       input.tolerances,
@@ -3358,7 +3363,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
       projectedReferences,
     ),
     dimensionStatuses: buildDimensionStatuses(
-      input.definition,
+      definition,
       system.pointRecords,
       system.entityStates,
       solved.values,
@@ -3389,7 +3394,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
   }
 
   const translated = trySolveDraggedPointAsComponentTranslation({
-    definition: input.definition,
+    definition,
     projectedReferences,
     dragTarget: input.dragTarget,
     tolerances: input.tolerances,
@@ -3424,7 +3429,12 @@ export function validateSketchDefinitionCore(input: {
   projectedReferences?: readonly ProjectedSketchReferenceRecord[]
   tolerances: SketchSolveTolerancePolicy
 }): SketchCoreValidationResult {
-  return validateDefinition(input.definition, input.tolerances, input.projectedReferences ?? [])
+  const derived = evaluateSketchDerivations(input.definition)
+  const validation = validateDefinition(derived.definition, input.tolerances, input.projectedReferences ?? [])
+  return {
+    isValid: derived.diagnostics.every((entry) => entry.severity !== 'error') && validation.isValid,
+    diagnostics: [...derived.diagnostics, ...validation.diagnostics],
+  }
 }
 
 export function getSketchSolveInitialValuesForTest(definition: SketchDefinition) {

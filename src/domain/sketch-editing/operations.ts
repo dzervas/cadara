@@ -1,8 +1,11 @@
 import type {
   SketchDefinition,
+  SketchDerivationDefinition,
+  SketchDerivedEntityOutput,
   SketchEntityDefinition,
   SketchPointDefinition,
 } from '@/contracts/sketch/schema'
+import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
 import type { ProjectedSketchReferenceGeometry } from '@/contracts/solver/schema'
 import type { SketchPoint } from '@/contracts/modeling/schema'
 import type { SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
@@ -41,6 +44,7 @@ export type SketchEditOperationFactories = Pick<
   | 'createEntityId'
   | 'createPoint'
   | 'createLineEntity'
+  | 'createPointEntity'
   | 'createCircleEntity'
   | 'createArcEntity'
   | 'createSplineEntity'
@@ -96,6 +100,21 @@ export type OffsetCurveDescriptor =
   | Omit<Extract<CurveDescriptor, { kind: 'circle' }>, 'entity'>
   | Omit<Extract<CurveDescriptor, { kind: 'arc' }>, 'entity'>
   | Omit<Extract<CurveDescriptor, { kind: 'spline' }>, 'entity'>
+
+export type SketchDerivedTransformOperatorKind =
+  | 'mirror'
+  | 'linearPattern'
+  | 'circularPattern'
+  | 'transform'
+
+export interface SketchDerivedTransformContributionInput {
+  definition: SketchDefinition
+  operatorKind: SketchDerivedTransformOperatorKind
+  entityIds: readonly SketchEntityId[]
+  value: number | null
+  sequence: number
+  factories: SketchEditOperationFactories
+}
 
 type TrimIntersection = {
   point: SketchPoint
@@ -1983,5 +2002,416 @@ export function createOffsetContribution(input: {
         },
       ],
     },
+  }
+}
+
+function safeSuffix(value: string) {
+  return value.replaceAll(/[^a-zA-Z0-9_-]/g, '-')
+}
+
+function getPointIdsForSupportedDerivedEntity(entity: SketchEntityDefinition): readonly SketchPointId[] | null {
+  switch (entity.kind) {
+    case 'lineSegment':
+      return [entity.startPointId, entity.endPointId]
+    case 'point':
+      return [entity.pointId]
+    case 'circle':
+      return [entity.centerPointId]
+    case 'arc':
+      return [entity.centerPointId, entity.startPointId, entity.endPointId]
+    case 'spline':
+      return entity.fitPointIds
+    case 'ellipse':
+    case 'ellipticalArc':
+    case 'conic':
+    case 'bezierCurve':
+    case 'profileText':
+      return null
+  }
+}
+
+function createDerivedEntity(
+  entity: SketchEntityDefinition,
+  outputEntityId: SketchEntityId,
+  outputPointIds: readonly SketchPointId[],
+  factories: SketchEditOperationFactories,
+): SketchEntityDefinition | null {
+  if (entity.kind === 'lineSegment') {
+    return {
+      ...factories.createLineEntity(entity.label, outputEntityId, outputPointIds[0]!, outputPointIds[1]!),
+      isConstruction: entity.isConstruction,
+      style: entity.style,
+    }
+  }
+
+  if (entity.kind === 'point') {
+    return {
+      ...factories.createPointEntity(entity.label, outputEntityId, outputPointIds[0]!),
+      isConstruction: entity.isConstruction,
+      style: entity.style,
+    }
+  }
+
+  if (entity.kind === 'circle') {
+    return {
+      ...factories.createCircleEntity(entity.label, outputEntityId, outputPointIds[0]!, entity.radius),
+      isConstruction: entity.isConstruction,
+      style: entity.style,
+    }
+  }
+
+  if (entity.kind === 'arc') {
+    return {
+      ...factories.createArcEntity(
+        entity.label,
+        outputEntityId,
+        outputPointIds[0]!,
+        outputPointIds[1]!,
+        outputPointIds[2]!,
+        entity.sweepDirection,
+      ),
+      isConstruction: entity.isConstruction,
+      style: entity.style,
+    }
+  }
+
+  if (entity.kind === 'spline') {
+    return {
+      ...factories.createSplineEntity(entity.label, outputEntityId, outputPointIds),
+      isConstruction: entity.isConstruction,
+      style: entity.style,
+    }
+  }
+
+  return null
+}
+
+function appendDerivedContribution(
+  definition: SketchDefinition,
+  contribution: SketchToolCommitContribution,
+): SketchDefinition {
+  return {
+    ...definition,
+    pointIds: [...definition.pointIds, ...contribution.points.map((point) => point.pointId)],
+    points: [...definition.points, ...contribution.points],
+    entityIds: [...definition.entityIds, ...contribution.entities.map((entity) => entity.entityId)],
+    entities: [...definition.entities, ...contribution.entities],
+    derivedRelationships: [
+      ...(definition.derivedRelationships ?? []),
+      ...(contribution.derivedRelationships ?? []),
+    ],
+  }
+}
+
+function createPreviewEntitiesFromContribution(
+  definition: SketchDefinition,
+  contribution: SketchToolCommitContribution,
+): readonly SketchDraftEntity[] {
+  const outputEntityIds = new Set(contribution.entities.map((entity) => entity.entityId))
+  const evaluated = evaluateSketchDerivations(appendDerivedContribution(definition, contribution)).definition
+  const pointById = new Map(evaluated.points.map((point) => [point.pointId, point.position] as const))
+
+  return evaluated.entities
+    .filter((entity) => outputEntityIds.has(entity.entityId))
+    .flatMap((entity): SketchDraftEntity[] => {
+      if (entity.kind === 'lineSegment') {
+        const start = pointById.get(entity.startPointId)
+        const end = pointById.get(entity.endPointId)
+        return start && end
+          ? [{
+              id: `preview-${entity.entityId}`,
+              kind: 'line',
+              start,
+              end,
+              entityId: null,
+              status: 'preview',
+              label: entity.label,
+              isConstruction: entity.isConstruction,
+            }]
+          : []
+      }
+
+      if (entity.kind === 'circle') {
+        const center = pointById.get(entity.centerPointId)
+        return center
+          ? [{
+              id: `preview-${entity.entityId}`,
+              kind: 'circle',
+              center,
+              radius: entity.radius,
+              entityId: null,
+              status: 'preview',
+              label: entity.label,
+              isConstruction: entity.isConstruction,
+            }]
+          : []
+      }
+
+      if (entity.kind === 'arc') {
+        const center = pointById.get(entity.centerPointId)
+        const start = pointById.get(entity.startPointId)
+        const end = pointById.get(entity.endPointId)
+        return center && start && end
+          ? [makePreviewSpline(`preview-${entity.entityId}`, sampleArcPreview(center, start, end, entity.sweepDirection), entity.isConstruction)]
+          : []
+      }
+
+      if (entity.kind === 'spline') {
+        const points = entity.fitPointIds.flatMap((pointId) => {
+          const point = pointById.get(pointId)
+          return point ? [point] : []
+        })
+        return points.length === entity.fitPointIds.length
+          ? [makePreviewSpline(`preview-${entity.entityId}`, points, entity.isConstruction)]
+          : []
+      }
+
+      if (entity.kind === 'point') {
+        const point = pointById.get(entity.pointId)
+        return point
+          ? [{
+              id: `preview-${entity.entityId}`,
+              kind: 'circle',
+              center: point,
+              radius: 0.1,
+              entityId: null,
+              status: 'preview',
+              label: entity.label,
+              isConstruction: entity.isConstruction,
+            }]
+          : []
+      }
+
+      return []
+    })
+}
+
+function sampleArcPreview(
+  center: SketchPoint,
+  start: SketchPoint,
+  end: SketchPoint,
+  sweepDirection: 'clockwise' | 'counterClockwise',
+): readonly SketchPoint[] {
+  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0])
+  const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0])
+  const fullTurn = Math.PI * 2
+  const normalizedStart = ((startAngle % fullTurn) + fullTurn) % fullTurn
+  const normalizedEnd = ((endAngle % fullTurn) + fullTurn) % fullTurn
+  const sweep = sweepDirection === 'counterClockwise'
+    ? normalizedEnd >= normalizedStart ? normalizedEnd - normalizedStart : normalizedEnd + fullTurn - normalizedStart
+    : normalizedEnd <= normalizedStart ? normalizedStart - normalizedEnd : normalizedStart + fullTurn - normalizedEnd
+  const radius = distanceBetween(center, start)
+
+  return Array.from({ length: 33 }, (_, index) => {
+    const t = index / 32
+    const angle = sweepDirection === 'counterClockwise'
+      ? normalizedStart + sweep * t
+      : normalizedStart - sweep * t
+    return [
+      center[0] + Math.cos(angle) * radius,
+      center[1] + Math.sin(angle) * radius,
+    ] as const
+  })
+}
+
+function getDerivedOperatorSeeds(input: SketchDerivedTransformContributionInput) {
+  if (input.operatorKind !== 'mirror') {
+    return {
+      seedEntityIds: [...input.entityIds],
+      mirrorAxisId: null,
+    }
+  }
+
+  return {
+    seedEntityIds: input.entityIds.slice(0, -1),
+    mirrorAxisId: input.entityIds.at(-1) ?? null,
+  }
+}
+
+function createRelationship(
+  input: SketchDerivedTransformContributionInput,
+  seedEntityIds: readonly SketchEntityId[],
+  outputs: SketchDerivationDefinition['outputs'],
+  mirrorAxisId: SketchEntityId | null,
+): SketchDerivationDefinition | null {
+  const derivationId = `sketch_derivation_${input.sequence}_${input.operatorKind}` as const
+  const label = `${input.operatorKind} ${input.sequence}`
+
+  if (input.operatorKind === 'mirror') {
+    return mirrorAxisId
+      ? {
+          derivationId,
+          label,
+          kind: 'mirror',
+          seedEntityIds,
+          mirrorReference: { kind: 'lineEntity', entityId: mirrorAxisId },
+          outputs,
+        }
+      : null
+  }
+
+  if (input.operatorKind === 'linearPattern') {
+    const spacing = input.value && input.value > 0 ? input.value : 1
+    return {
+      derivationId,
+      label,
+      kind: 'linearPattern',
+      seedEntityIds,
+      vector: [spacing, 0],
+      instanceCount: 2,
+      outputs,
+    }
+  }
+
+  if (input.operatorKind === 'circularPattern') {
+    return {
+      derivationId,
+      label,
+      kind: 'circularPattern',
+      seedEntityIds,
+      center: [0, 0],
+      angleRadians: input.value && input.value > 0 ? input.value : Math.PI / 2,
+      instanceCount: 2,
+      outputs,
+    }
+  }
+
+  const distance = input.value && input.value > 0 ? input.value : 1
+  return {
+    derivationId,
+    label,
+    kind: 'transform',
+    seedEntityIds,
+    origin: [0, 0],
+    translation: [distance, 0],
+    rotationRadians: 0,
+    scale: 1,
+    outputs,
+  }
+}
+
+export function createSketchDerivedTransformContribution(
+  input: SketchDerivedTransformContributionInput,
+): SketchEditOperationResult {
+  const { seedEntityIds, mirrorAxisId } = getDerivedOperatorSeeds(input)
+  if (seedEntityIds.length === 0) {
+    return {
+      valid: false,
+      message: input.operatorKind === 'mirror'
+        ? 'Select seed sketch entities, then a mirror axis line.'
+        : 'Select sketch entities to derive.',
+      definition: null,
+      contribution: null,
+      previewEntities: [],
+    }
+  }
+
+  if (input.operatorKind === 'mirror') {
+    const axis = mirrorAxisId
+      ? input.definition.entities.find((entity) => entity.entityId === mirrorAxisId)
+      : null
+    if (!axis || axis.kind !== 'lineSegment') {
+      return {
+        valid: false,
+        message: 'Sketch mirror needs a line segment as the final selected mirror axis.',
+        definition: null,
+        contribution: null,
+        previewEntities: [],
+      }
+    }
+  }
+
+  const pointsById = new Map(input.definition.points.map((point) => [point.pointId, point] as const))
+  const pointIdBySeedAndInstance = new Map<string, SketchPointId>()
+  const points: SketchPointDefinition[] = []
+  const entities: SketchEntityDefinition[] = []
+  const outputs: SketchDerivedEntityOutput[] = []
+
+  for (const seedEntityId of seedEntityIds) {
+    const seed = input.definition.entities.find((entity) => entity.entityId === seedEntityId) ?? null
+    const seedPointIds = seed ? getPointIdsForSupportedDerivedEntity(seed) : null
+    if (!seed || !seedPointIds) {
+      return {
+        valid: false,
+        message: 'Derived sketch operators currently support points, lines, circles, arcs, and splines.',
+        definition: null,
+        contribution: null,
+        previewEntities: [],
+      }
+    }
+
+    const outputPointIds = seedPointIds.map((seedPointId) => {
+      const key = `${seedPointId}:1`
+      const existing = pointIdBySeedAndInstance.get(key)
+      if (existing) {
+        return existing
+      }
+
+      const seedPoint = pointsById.get(seedPointId)
+      const outputPointId = input.factories.createPointId(`${input.operatorKind}-${safeSuffix(seedPointId)}`)
+      pointIdBySeedAndInstance.set(key, outputPointId)
+      points.push(input.factories.createPoint(
+        `${input.operatorKind} ${seedPoint?.label ?? seedPointId}`,
+        outputPointId,
+        seedPoint?.position ?? [0, 0],
+      ))
+      return outputPointId
+    })
+    const outputEntityId = input.factories.createEntityId(`${input.operatorKind}-${safeSuffix(seedEntityId)}`)
+    const entity = createDerivedEntity(seed, outputEntityId, outputPointIds, input.factories)
+    if (!entity) {
+      return {
+        valid: false,
+        message: 'Derived sketch operator could not create supported output geometry.',
+        definition: null,
+        contribution: null,
+        previewEntities: [],
+      }
+    }
+
+    entities.push({
+      ...entity,
+      label: `${seed.label} ${input.operatorKind}`,
+    })
+    outputs.push({
+      seedEntityId,
+      outputEntityId,
+      instanceIndex: 1,
+      seedPointIds,
+      outputPointIds,
+    })
+  }
+
+  const relationship = createRelationship(input, seedEntityIds, outputs, mirrorAxisId)
+  if (!relationship) {
+    return {
+      valid: false,
+      message: 'Derived sketch operator is missing required relationship references.',
+      definition: null,
+      contribution: null,
+      previewEntities: [],
+    }
+  }
+
+  const contribution: SketchToolCommitContribution = {
+    points,
+    entities,
+    derivedRelationships: [relationship],
+  }
+  const evaluated = evaluateSketchDerivations(appendDerivedContribution(input.definition, contribution)).definition
+  const outputPointIds = new Set(points.map((point) => point.pointId))
+  const outputEntityIds = new Set(entities.map((entity) => entity.entityId))
+  const evaluatedContribution: SketchToolCommitContribution = {
+    points: evaluated.points.filter((point) => outputPointIds.has(point.pointId)),
+    entities: evaluated.entities.filter((entity) => outputEntityIds.has(entity.entityId)),
+    derivedRelationships: [relationship],
+  }
+
+  return {
+    valid: true,
+    message: null,
+    definition: null,
+    contribution: evaluatedContribution,
+    previewEntities: createPreviewEntitiesFromContribution(input.definition, evaluatedContribution),
   }
 }

@@ -10,6 +10,7 @@ import type {
   SketchStyleDefinition,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
+import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
 import {
   solveSketchDefinitionCore,
   solveSketchDefinitionWithDraggedPointTarget,
@@ -56,6 +57,7 @@ import {
   createSketchFilletMutation,
   createSketchSlotContribution,
   createSketchSplitMutation,
+  createSketchDerivedTransformContribution,
   createOffsetContribution,
   offsetCurveDescriptorFromProjectedGeometry,
   trimLineSegmentAtIntersections,
@@ -353,6 +355,7 @@ function createEmptyDefinition(): SketchDefinition {
     constraints: [],
     dimensionIds: [],
     dimensions: [],
+    derivedRelationships: [],
   }
 }
 
@@ -370,6 +373,9 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
     constraints: [...definition.constraints],
     dimensionIds: [...definition.dimensionIds],
     dimensions: [...definition.dimensions],
+    styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
+    styles: definition.styles ? [...definition.styles] : undefined,
+    derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
   }
 }
 
@@ -554,6 +560,15 @@ export function filterSketchDefinitionThroughCursor(
   const points = definition.points.filter((point) => visiblePointIds.has(point.pointId))
   const constraints = definition.constraints.filter((constraint) => visibleItemIds.has(constraint.constraintId))
   const dimensions = definition.dimensions.filter((dimension) => visibleItemIds.has(dimension.dimensionId))
+  const derivedRelationships = (definition.derivedRelationships ?? []).filter((relationship) => {
+    const outputEntityIds = new Set(relationship.outputs.map((output) => output.outputEntityId))
+    const seedEntityIds = new Set(relationship.seedEntityIds)
+    const mirrorAxisId = relationship.kind === 'mirror' ? relationship.mirrorReference.entityId : null
+
+    return [...outputEntityIds].every((entityId) => visibleItemIds.has(entityId))
+      && [...seedEntityIds].every((entityId) => visibleItemIds.has(entityId))
+      && (mirrorAxisId === null || visibleItemIds.has(mirrorAxisId))
+  })
 
   return {
     ...definition,
@@ -565,6 +580,7 @@ export function filterSketchDefinitionThroughCursor(
     constraints,
     dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
     dimensions,
+    derivedRelationships,
   }
 }
 
@@ -1060,8 +1076,9 @@ function mapDefinitionEntityToDraftEntity(
 
 export function deriveSketchDisplayEntities(session: SketchSessionState): readonly SketchDraftEntity[] {
   const sketchId = getSessionSketchId(session)
-  const acceptedEntities = session.definition.entities.flatMap((entity) =>
-    mapDefinitionEntityToDraftEntity(sketchId, session.definition.points, entity),
+  const displayDefinition = evaluateSketchDerivations(session.definition).definition
+  const acceptedEntities = displayDefinition.entities.flatMap((entity) =>
+    mapDefinitionEntityToDraftEntity(sketchId, displayDefinition.points, entity),
   )
 
   return session.toolStagedEntities.length === 0
@@ -1227,6 +1244,12 @@ function appendDefinition(definition: SketchDefinition, patch: SketchToolCommitC
     constraints: [...definition.constraints, ...(patch.constraints ?? [])],
     dimensionIds: [...definition.dimensionIds, ...(patch.dimensions ?? []).map((dimension) => dimension.dimensionId)],
     dimensions: [...definition.dimensions, ...(patch.dimensions ?? [])],
+    styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
+    styles: definition.styles ? [...definition.styles] : undefined,
+    derivedRelationships: [
+      ...(definition.derivedRelationships ?? []),
+      ...(patch.derivedRelationships ?? []),
+    ],
   }
 }
 
@@ -1674,13 +1697,14 @@ function activateSketchConstraintTool(
 }
 
 function rebuildSessionCommitRequest(session: SketchSessionState, definition: SketchDefinition) {
+  const evaluatedDefinition = evaluateSketchDerivations(definition).definition
   return buildCommitRequest({
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,
     plane: session.plane,
     planeTarget: session.planeTarget,
     planeKey: session.planeKey,
-    definition,
+    definition: evaluatedDefinition,
   })
 }
 
@@ -1908,11 +1932,19 @@ function buildSketchEditToolPresentation(
     state.toolId === 'sketchFillet'
     || state.toolId === 'sketchChamfer'
     || state.toolId === 'sketchSlot'
+    || state.toolId === 'sketchLinearPattern'
+    || state.toolId === 'sketchCircularPattern'
+    || state.toolId === 'sketchTransform'
   const numericLabel = state.toolId === 'sketchFillet'
     ? 'Radius'
     : state.toolId === 'sketchChamfer'
       ? 'Distance'
-      : 'Width'
+      : state.toolId === 'sketchSlot'
+        ? 'Width'
+        : state.toolId === 'sketchCircularPattern'
+          ? 'Angle'
+          : 'Distance'
+  const numericUnit = state.toolId === 'sketchCircularPattern' ? 'rad' : 'mm'
   const isReady = hasSelection && previewEntities.length > 0 && validationMessage === null
   const promptText = isOffset
     ? hasSelection ? 'Set offset distance' : metadata.validationMessages.emptySelection
@@ -1971,7 +2003,7 @@ function buildSketchEditToolPresentation(
             kind: 'numeric' as const,
             label: numericLabel,
             value: state.toolValue,
-            unit: 'mm',
+            unit: numericUnit,
             disabled: !hasSelection,
             action: { type: 'patch' as const, patch: { intent: 'setSketchEditValue' } },
           }]
@@ -2014,7 +2046,7 @@ function buildSketchEditToolPresentation(
             id: `${state.toolId}-value-input`,
             label: numericLabel,
             value: state.toolValue,
-            unit: 'mm',
+            unit: numericUnit,
             min: 0,
             confirmLabel: 'Create',
             cancelLabel: 'Cancel',
@@ -2375,6 +2407,8 @@ function createSessionCommitFactories(
       createPointDefinition(sketchId, pointId, label, position, false),
     createLineEntity: (label: string, entityId: SketchEntityId, startPointId: SketchPointId, endPointId: SketchPointId) =>
       createLineEntityDefinition(sketchId, entityId, label, startPointId, endPointId, false),
+    createPointEntity: (label: string, entityId: SketchEntityId, pointId: SketchPointId) =>
+      createPointEntityDefinition(sketchId, entityId, label, pointId, false),
     createCircleEntity: (label: string, entityId: SketchEntityId, centerPointId: SketchPointId, radius: number) =>
       createCircleEntityDefinition(sketchId, entityId, label, centerPointId, radius, false),
     createArcEntity: (
@@ -2493,6 +2527,42 @@ function getSketchEditOperatorResult(
         definition: session.definition,
         entityIds,
         width: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchMirror':
+      return createSketchDerivedTransformContribution({
+        definition: session.definition,
+        operatorKind: 'mirror',
+        entityIds,
+        value: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchLinearPattern':
+      return createSketchDerivedTransformContribution({
+        definition: session.definition,
+        operatorKind: 'linearPattern',
+        entityIds,
+        value: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchCircularPattern':
+      return createSketchDerivedTransformContribution({
+        definition: session.definition,
+        operatorKind: 'circularPattern',
+        entityIds,
+        value: activeEditTool.toolValue,
+        sequence: nextSequence,
+        factories,
+      })
+    case 'sketchTransform':
+      return createSketchDerivedTransformContribution({
+        definition: session.definition,
+        operatorKind: 'transform',
+        entityIds,
+        value: activeEditTool.toolValue,
         sequence: nextSequence,
         factories,
       })
@@ -2675,7 +2745,7 @@ export function selectSketchEditToolTarget(
   const preview = getSketchEditOperatorResult(session, nextEditTool)
 
   if (
-    (nextEditTool.toolId === 'sketchExtend' || nextEditTool.toolId === 'sketchSplit')
+    (nextEditTool.toolId === 'sketchExtend' || nextEditTool.toolId === 'sketchSplit' || nextEditTool.toolId === 'sketchMirror')
     && nextSelectedTargets.length >= metadata.selection.requiredCount
     && preview.valid
   ) {
@@ -3043,13 +3113,15 @@ function applyPointPositionsToDefinition(
     return definition
   }
 
-  return {
+  const nextDefinition = {
     ...definition,
     points: definition.points.map((point) => {
       const position = positionMap.get(point.pointId)
       return position ? { ...point, position } : point
     }),
   }
+
+  return evaluateSketchDerivations(nextDefinition).definition
 }
 
 export function toggleSketchConstructionTarget(
@@ -5516,9 +5588,10 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const localStyleLookup = createSketchEntityStyleLookup(session)
   const pointStyleLookup = createSketchPointStyleLookup(session)
+  const displayDefinition = evaluateSketchDerivations(session.definition).definition
 
   return [
-    ...session.definition.points.map((point) => {
+    ...displayDefinition.points.map((point) => {
       const style = pointStyleLookup.get(point.pointId)
 
       return {
@@ -5544,7 +5617,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
         entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
       ),
     ),
-    ...session.definition.references.flatMap((reference, index) => {
+    ...displayDefinition.references.flatMap((reference, index) => {
       const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
       if (projectedReference && projectedReference.status === 'projected' && projectedReference.geometry.length > 0) {
         return []

@@ -53,6 +53,59 @@ export type SketchFillMode = 'none' | 'solid' | 'gradient'
 export type SketchStrokeCap = 'butt' | 'round' | 'square'
 export type SketchStrokeJoin = 'miter' | 'round' | 'bevel'
 
+export type SketchDerivedTransformKind = 'mirror' | 'linearPattern' | 'circularPattern' | 'transform'
+
+export interface SketchDerivedEntityOutput {
+  /** Seed entity driving this derived output. */
+  seedEntityId: SketchEntityId
+  /** Stable derived entity that remains selectable and renderable. */
+  outputEntityId: SketchEntityId
+  /** Pattern or transform instance index; seed geometry is instance 0. */
+  instanceIndex: number
+  /** Seed points used by `seedEntityId` in entity-defining order. */
+  seedPointIds: readonly SketchPointId[]
+  /** Stable derived output points corresponding to `seedPointIds`. */
+  outputPointIds: readonly SketchPointId[]
+}
+
+interface SketchDerivationDefinitionBase {
+  /** Durable relationship identity scoped to the containing sketch definition. */
+  derivationId: string
+  /** Human-readable relationship label. */
+  label: string
+  /** Seed entities selected by the user. */
+  seedEntityIds: readonly SketchEntityId[]
+  /** Stable output entity and point mapping produced by this relationship. */
+  outputs: readonly SketchDerivedEntityOutput[]
+}
+
+export type SketchDerivationDefinition =
+  | (SketchDerivationDefinitionBase & {
+      kind: 'mirror'
+      mirrorReference: {
+        kind: 'lineEntity'
+        entityId: SketchEntityId
+      }
+    })
+  | (SketchDerivationDefinitionBase & {
+      kind: 'linearPattern'
+      vector: SketchPoint2D
+      instanceCount: number
+    })
+  | (SketchDerivationDefinitionBase & {
+      kind: 'circularPattern'
+      center: SketchPoint2D
+      angleRadians: number
+      instanceCount: number
+    })
+  | (SketchDerivationDefinitionBase & {
+      kind: 'transform'
+      origin: SketchPoint2D
+      translation: SketchPoint2D
+      rotationRadians: number
+      scale: number
+    })
+
 export interface SketchStyleDefinition {
   fillMode?: SketchFillMode
   fillColor?: string
@@ -733,6 +786,8 @@ export interface SketchDefinition {
   styleIds?: SketchStyleId[]
   /** Authored visual styles scoped to sketch entities and optional derived regions. */
   styles?: SketchStyleRecord[]
+  /** Durable sketch-local mirror, pattern, and transform relationships. */
+  derivedRelationships?: SketchDerivationDefinition[]
 }
 
 /**
@@ -751,6 +806,8 @@ export const SKETCH_DEFINITION_INVARIANTS = {
   constructionGeometryExcludedFromRegions: true,
   /** Derived regions are solver/kernel outputs only and never authored input. */
   regionsAreDerivedOnly: true,
+  /** Derived transform outputs must keep their authored relationship instead of becoming detached copies. */
+  derivedTransformOutputsRetainRelationship: true,
 } as const
 
 /**

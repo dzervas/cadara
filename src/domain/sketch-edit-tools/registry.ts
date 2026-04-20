@@ -150,6 +150,94 @@ export const sketchEditToolDefinitions = [
       mutationContract: 'createSlotBoundary',
     },
   },
+  {
+    metadata: {
+      id: 'sketchMirror',
+      group: 'sketchOps',
+      name: 'Sketch Mirror',
+      tooltip: 'Mirror sketch geometry with a durable sketch relationship.',
+      icon: 'mirror',
+      modes: ['sketch'],
+      selection: {
+        label: 'Seed entities and mirror axis',
+        acceptedKinds: ['point', 'line', 'circle', 'arc', 'spline'],
+        requiredCount: 2,
+        allowsMultiple: true,
+      },
+      previewLabel: 'Mirror preview',
+      validationMessages: {
+        emptySelection: 'Select seed geometry, then a line as the mirror axis.',
+        unsupportedTarget: 'Sketch mirror supports sketch entities and needs a line as the final mirror axis.',
+      },
+      mutationContract: 'createDerivedMirror',
+    },
+  },
+  {
+    metadata: {
+      id: 'sketchLinearPattern',
+      group: 'sketchOps',
+      name: 'Sketch Linear Pattern',
+      tooltip: 'Create a durable linear pattern of sketch geometry.',
+      icon: 'linearPattern',
+      modes: ['sketch'],
+      selection: {
+        label: 'Pattern seed entities',
+        acceptedKinds: ['point', 'line', 'circle', 'arc', 'spline'],
+        requiredCount: 1,
+        allowsMultiple: true,
+      },
+      previewLabel: 'Linear pattern preview',
+      validationMessages: {
+        emptySelection: 'Select sketch geometry to pattern.',
+        unsupportedTarget: 'Sketch linear pattern supports point, line, circle, arc, and spline entities.',
+      },
+      mutationContract: 'createDerivedLinearPattern',
+    },
+  },
+  {
+    metadata: {
+      id: 'sketchCircularPattern',
+      group: 'sketchOps',
+      name: 'Sketch Circular Pattern',
+      tooltip: 'Create a durable circular pattern of sketch geometry.',
+      icon: 'circularPattern',
+      modes: ['sketch'],
+      selection: {
+        label: 'Pattern seed entities',
+        acceptedKinds: ['point', 'line', 'circle', 'arc', 'spline'],
+        requiredCount: 1,
+        allowsMultiple: true,
+      },
+      previewLabel: 'Circular pattern preview',
+      validationMessages: {
+        emptySelection: 'Select sketch geometry to pattern.',
+        unsupportedTarget: 'Sketch circular pattern supports point, line, circle, arc, and spline entities.',
+      },
+      mutationContract: 'createDerivedCircularPattern',
+    },
+  },
+  {
+    metadata: {
+      id: 'sketchTransform',
+      group: 'sketchOps',
+      name: 'Sketch Transform',
+      tooltip: 'Transform sketch geometry with a durable sketch relationship.',
+      icon: 'transform',
+      modes: ['sketch'],
+      selection: {
+        label: 'Transform seed entities',
+        acceptedKinds: ['point', 'line', 'circle', 'arc', 'spline'],
+        requiredCount: 1,
+        allowsMultiple: true,
+      },
+      previewLabel: 'Transform preview',
+      validationMessages: {
+        emptySelection: 'Select sketch geometry to transform.',
+        unsupportedTarget: 'Sketch transform supports point, line, circle, arc, and spline entities.',
+      },
+      mutationContract: 'createDerivedTransform',
+    },
+  },
 ] as const satisfies readonly SketchEditToolDefinition[]
 
 const sketchEditToolMap = new Map<SketchEditToolId, SketchEditToolDefinition>(

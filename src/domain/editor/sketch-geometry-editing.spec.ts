@@ -20,6 +20,8 @@ import {
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
+import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
+import { toolDefinitions } from '@/domain/tools/tool-registry'
 
 test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -1031,6 +1033,127 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     assert(unsupportedSession.definition.entities.length === splitDefinition.entities.length, 'Unsupported fillet should not change the sketch definition.')
   }
 
+  function testSketchDerivedTransformOperatorsCreateDurableRelationships() {
+    const definition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_axis_a', 'sketch_point_axis_b'],
+      points: [
+        makePoint('sketch_point_a', 'A', 1, 1),
+        makePoint('sketch_point_b', 'B', 2, 1),
+        makePoint('sketch_point_axis_a', 'Axis A', -1, 0),
+        makePoint('sketch_point_axis_b', 'Axis B', 3, 0),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_axis'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_axis', 'Axis', 'sketch_point_axis_a', 'sketch_point_axis_b'),
+      ],
+    })
+
+    let mirrorSession = beginSketchTool(createSessionFromDefinition(definition), 'sketchMirror')
+    assert(mirrorSession.activeTool === 'sketchMirror', 'Sketch mirror should activate a sketch-local edit workflow.')
+    mirrorSession = selectSketchEditToolTarget(mirrorSession, definition.entities[0]!.target)
+    mirrorSession = selectSketchEditToolTarget(mirrorSession, definition.entities[1]!.target)
+
+    const mirrorRelationship = mirrorSession.definition.derivedRelationships?.[0]
+    assert(mirrorRelationship?.kind === 'mirror', 'Sketch mirror should persist a mirror relationship.')
+    assert(mirrorRelationship.seedEntityIds[0] === 'sketch_entity_ab', 'Mirror relationship should keep the selected seed entity.')
+    const mirroredPointId = mirrorRelationship.outputs[0]?.outputPointIds[0]
+    const mirroredPoint = mirrorSession.definition.points.find((point) => point.pointId === mirroredPointId)
+    assertClosePoint(mirroredPoint?.position, [1, -1], 'Mirror relationship should evaluate output points from the mirror axis.')
+
+    const editedSeed = {
+      ...mirrorSession.definition,
+      points: mirrorSession.definition.points.map((point) =>
+        point.pointId === 'sketch_point_a' ? { ...point, position: [1, 2] as const } : point,
+      ),
+    }
+    const solvedEdited = solveSketchDefinitionCore({
+      definition: editedSeed,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    const updatedDerivedPoint = solvedEdited.solvedSnapshot.solvedPoints.find((point) => point.pointId === mirroredPointId)
+    assertClosePoint(updatedDerivedPoint?.solvedPosition, [1, -2], 'Derived output should update when a supported seed point changes.')
+
+    const renderable = getSketchSessionDisplayRenderables(mirrorSession).find((entry) =>
+      entry.target?.kind === 'sketchEntity' && entry.target.entityId === mirrorRelationship.outputs[0]?.outputEntityId
+    )
+    assert(renderable, 'Derived sketch geometry should render with a stable sketch entity target.')
+  }
+
+  function testSketchPatternAndTransformOperatorsCommitWithoutPartFeatureSessions() {
+    const definition = createSquareDefinition(false)
+    const sketchToolIds = ['sketchLinearPattern', 'sketchCircularPattern', 'sketchTransform'] as const
+
+    for (const toolId of sketchToolIds) {
+      assert(
+        toolDefinitions.some((tool) => tool.id === toolId && tool.modes.includes('sketch')),
+        `${toolId} should be registered as a sketch-mode toolbar tool.`,
+      )
+      assert(
+        !toolDefinitions.some((tool) => tool.id === toolId && tool.modes.includes('part')),
+        `${toolId} should remain distinct from part-mode feature tools.`,
+      )
+
+      let session = beginSketchTool(createSessionFromDefinition(definition), toolId)
+      assert(session.activeTool === toolId, `${toolId} should keep the active sketch session open.`)
+      for (const entity of definition.entities) {
+        session = selectSketchEditToolTarget(session, entity.target)
+      }
+      session = patchSketchEditToolValue(session, { value: toolId === 'sketchCircularPattern' ? Math.PI : 2 })
+      session = patchSketchEditToolValue(session, { intent: 'commitSketchEditOperator' })
+
+      const relationship = session.definition.derivedRelationships?.[0]
+      assert(relationship, `${toolId} should persist a derived relationship.`)
+      assert(session.definition.entities.length === definition.entities.length * 2, `${toolId} should add addressable derived output entities.`)
+      assert(session.commitRequest?.definition.derivedRelationships?.length === 1, `${toolId} commit payload should persist the relationship.`)
+    }
+  }
+
+  function testDerivedLinearPatternGeometryParticipatesInProfiles() {
+    const definition = createSquareDefinition(false)
+    let session = beginSketchTool(createSessionFromDefinition(definition), 'sketchLinearPattern')
+    for (const entity of definition.entities) {
+      session = selectSketchEditToolTarget(session, entity.target)
+    }
+    session = patchSketchEditToolValue(session, { value: 3 })
+    session = patchSketchEditToolValue(session, { intent: 'commitSketchEditOperator' })
+
+    const solved = solveSketchDefinitionCore({
+      definition: session.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    const regions = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition: session.definition,
+      solvedSnapshot: solved.solvedSnapshot,
+    })
+
+    assert(regions.regions.length >= 2, 'Derived pattern output should participate in profile extraction when it forms a closed loop.')
+    assert(
+      regions.regions.some((region) =>
+        region.loops.some((loop) =>
+          loop.segments.some((segment) =>
+            segment.source.kind === 'entity'
+            && (session.definition.derivedRelationships?.[0]?.outputs.some((output) => output.outputEntityId === segment.source.entityId) ?? false)
+          )
+        )
+      ),
+      'At least one extracted profile should reference derived output entities without detaching them.',
+    )
+  }
+
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
   testRectangleToolDragTranslatesWholeRectangle()
@@ -1047,4 +1170,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testOffsetAddsProjectedCircleAndSplineCopies()
   testSketchFilletChamferAndSlotUseSessionPreviewAndCommit()
   testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState()
+  testSketchDerivedTransformOperatorsCreateDurableRelationships()
+  testSketchPatternAndTransformOperatorsCommitWithoutPartFeatureSessions()
+  testDerivedLinearPatternGeometryParticipatesInProfiles()
 })

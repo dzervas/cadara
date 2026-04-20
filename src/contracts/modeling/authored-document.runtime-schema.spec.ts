@@ -65,6 +65,28 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   assert(withStyles.ok, 'Authored documents should persist sketch style records.')
   assert(withStyles.document.sketches[0]?.definition.styles?.length === 1, 'Parsed authored documents should preserve style records.')
 
+  authoredSketch.definition.derivedRelationships = [{
+    derivationId: 'sketch_derivation_seed_linear',
+    label: 'Seed linear pattern',
+    kind: 'linearPattern',
+    seedEntityIds: [authoredSketch.definition.entityIds[0]!],
+    vector: [2, 0],
+    instanceCount: 2,
+    outputs: [{
+      seedEntityId: authoredSketch.definition.entityIds[0]!,
+      outputEntityId: authoredSketch.definition.entityIds[0]!,
+      instanceIndex: 1,
+      seedPointIds: authoredSketch.definition.pointIds.slice(0, 1),
+      outputPointIds: authoredSketch.definition.pointIds.slice(0, 1),
+    }],
+  }]
+  const withDerivedRelationships = parseAuthoredModelDocument(authoredDocument)
+  assert(withDerivedRelationships.ok, 'Authored documents should persist sketch derived relationship records.')
+  assert(
+    withDerivedRelationships.document.sketches[0]?.definition.derivedRelationships?.[0]?.kind === 'linearPattern',
+    'Parsed authored documents should preserve derived sketch relationship records.',
+  )
+
   const withoutStylesField = parseAuthoredModelDocument({
     ...authoredDocument,
     sketches: authoredDocument.sketches.map((sketch) => ({

@@ -133,6 +133,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
     constraints: [],
     dimensionIds: [],
     dimensions: [],
+    derivedRelationships: [],
   }
 
   const solveSketchProjectionRequest: ProjectSketchExternalReferencesRequest = {

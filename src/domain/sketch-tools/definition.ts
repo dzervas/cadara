@@ -1,6 +1,7 @@
 import type {
   ConstraintDefinition,
   DimensionDefinition,
+  SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
 } from '@/contracts/sketch/schema'
@@ -166,6 +167,7 @@ export interface SketchToolCommitContribution {
   entities: SketchEntityDefinition[]
   constraints?: ConstraintDefinition[]
   dimensions?: DimensionDefinition[]
+  derivedRelationships?: SketchDerivationDefinition[]
 }
 
 export interface SketchToolDefinition<TToolId extends SketchToolId = SketchToolId> {

@@ -944,6 +944,95 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime calculation state.')
   }
 
+  function testPreservesDerivedSketchRelationshipsInCommitHistory() {
+    const derivedCommit = createCommitSketchHistoryEntry({
+      ...commitSketchRequest,
+      definition: {
+        ...sketchDefinition,
+        pointIds: ['sketch_point_seed_a', 'sketch_point_seed_b', 'sketch_point_out_a', 'sketch_point_out_b'],
+        points: [
+          {
+            pointId: 'sketch_point_seed_a',
+            label: 'Seed A',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_seed_a' },
+            position: [0, 0],
+            isConstruction: false,
+          },
+          {
+            pointId: 'sketch_point_seed_b',
+            label: 'Seed B',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_seed_b' },
+            position: [1, 0],
+            isConstruction: false,
+          },
+          {
+            pointId: 'sketch_point_out_a',
+            label: 'Output A',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_out_a' },
+            position: [2, 0],
+            isConstruction: false,
+          },
+          {
+            pointId: 'sketch_point_out_b',
+            label: 'Output B',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_out_b' },
+            position: [3, 0],
+            isConstruction: false,
+          },
+        ],
+        entityIds: ['sketch_entity_seed', 'sketch_entity_output'],
+        entities: [
+          {
+            kind: 'lineSegment',
+            entityId: 'sketch_entity_seed',
+            label: 'Seed',
+            target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_seed' },
+            isConstruction: false,
+            startPointId: 'sketch_point_seed_a',
+            endPointId: 'sketch_point_seed_b',
+          },
+          {
+            kind: 'lineSegment',
+            entityId: 'sketch_entity_output',
+            label: 'Output',
+            target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_output' },
+            isConstruction: false,
+            startPointId: 'sketch_point_out_a',
+            endPointId: 'sketch_point_out_b',
+          },
+        ],
+        derivedRelationships: [{
+          derivationId: 'sketch_derivation_1_linear',
+          label: 'Linear pattern',
+          kind: 'linearPattern',
+          seedEntityIds: ['sketch_entity_seed'],
+          vector: [2, 0],
+          instanceCount: 2,
+          outputs: [{
+            seedEntityId: 'sketch_entity_seed',
+            outputEntityId: 'sketch_entity_output',
+            instanceIndex: 1,
+            seedPointIds: ['sketch_point_seed_a', 'sketch_point_seed_b'],
+            outputPointIds: ['sketch_point_out_a', 'sketch_point_out_b'],
+          }],
+        }],
+      },
+    }, 'sketch_profile')
+
+    const result = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [derivedCommit],
+    })
+
+    assert(result.ok, 'Operation history should validate commitSketch entries with derived sketch relationships.')
+    assert(
+      result.ok
+        && result.payload.entries[0]?.kind === 'commitSketch'
+        && result.payload.entries[0].payload.definition.derivedRelationships?.[0]?.kind === 'linearPattern',
+      'Operation history should preserve durable derived sketch relationship payloads.',
+    )
+  }
+
   testValidatesRepresentativeHistory()
   testNormalizesCommittedCommitSketchTargets()
   testAcceptsLegacyDraftCommitSketchTargets()
@@ -964,4 +1053,5 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   testPreservesMirrorParticipantsAndCopyOptionAcrossCreateAndUpdateEntries()
   testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdateEntries()
   testValidatesDocumentVariableHistoryWithoutRuntimeState()
+  testPreservesDerivedSketchRelationshipsInCommitHistory()
 })

@@ -8,6 +8,10 @@ export type SketchEditToolId =
   | 'sketchExtend'
   | 'sketchSplit'
   | 'sketchSlot'
+  | 'sketchMirror'
+  | 'sketchLinearPattern'
+  | 'sketchCircularPattern'
+  | 'sketchTransform'
 
 export type SketchEditMutationContract =
   | 'trimAtIntersections'
@@ -17,10 +21,14 @@ export type SketchEditMutationContract =
   | 'extendCurveToBoundary'
   | 'splitCurveAtBoundary'
   | 'createSlotBoundary'
+  | 'createDerivedMirror'
+  | 'createDerivedLinearPattern'
+  | 'createDerivedCircularPattern'
+  | 'createDerivedTransform'
 
 export interface SketchEditToolSelectionRequirement {
   label: string
-  acceptedKinds: readonly ('line' | 'circle' | 'arc' | 'spline')[]
+  acceptedKinds: readonly ('point' | 'line' | 'circle' | 'arc' | 'spline')[]
   requiredCount: number
   allowsMultiple?: boolean
 }
