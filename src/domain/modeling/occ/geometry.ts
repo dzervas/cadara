@@ -6,6 +6,7 @@ export {
   negate,
   normalize,
   scale,
+  subtract,
   type Vec3,
 } from '@/domain/modeling/occ/math'
 

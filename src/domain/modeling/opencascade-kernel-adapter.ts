@@ -97,6 +97,7 @@ import {
   getOccDurableRefKey,
   resolveOccReference,
 } from '@/domain/modeling/occ/topology'
+import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import { exportOccGeometryDocument } from '@/domain/modeling/occ/geometry-export'
 import {
   OCC_KERNEL_DOCUMENT_ID,
@@ -748,6 +749,13 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
   switch (definition.kind) {
     case 'extrude': {
       const targets: NonNullable<ModelingDiagnostic['target']>[] = [...definition.parameters.profiles]
+      const extent = getExtrudeFeatureExtent(definition.parameters)
+      const ends = extent.mode === 'twoSide' ? [extent.firstEnd, extent.secondEnd] : [extent.end]
+      for (const end of ends) {
+        if ('target' in end) {
+          targets.push(end.target)
+        }
+      }
       const scope = definition.parameters.booleanScope
       if (scope.kind === 'targetBody') {
         targets.push({ kind: 'body', bodyId: scope.bodyId })
@@ -766,6 +774,13 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
         ...definition.parameters.profiles,
         definition.parameters.axis,
       ]
+      const extent = getRevolveFeatureExtent(definition.parameters)
+      const ends = extent.mode === 'twoSide' ? [extent.firstEnd, extent.secondEnd] : [extent.end]
+      for (const end of ends) {
+        if ('target' in end) {
+          targets.push(end.target)
+        }
+      }
       const scope = definition.parameters.booleanScope
       if (scope.kind === 'targetBody') {
         targets.push({ kind: 'body', bodyId: scope.bodyId })

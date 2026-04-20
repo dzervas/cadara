@@ -895,7 +895,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     assert(extrudeDepthField?.kind === 'numeric' && extrudeDepthField.directionToggle, 'Extrude depth should expose a direction flip toggle.')
     const flippedExtrude = patchFeatureEditSession(extrudeSession, { [extrudeDepthField.directionToggle.patch.patchKey]: extrudeDepthField.directionToggle.reverseValue })
     const extrudeDefinition = buildFeatureDefinition(flippedExtrude)
-    assert(extrudeDefinition?.kind === 'extrude' && extrudeDefinition.parameters.endExtent.direction === 'negative', 'Extrude direction flip should reverse the blind extent normal.')
+    assert(
+      extrudeDefinition?.kind === 'extrude' &&
+        extrudeDefinition.parameters.extent?.mode === 'oneSide' &&
+        extrudeDefinition.parameters.extent.end.kind === 'blind' &&
+        extrudeDefinition.parameters.extent.end.direction === 'negative',
+      'Extrude direction flip should reverse the blind extent normal.',
+    )
 
     const revolveSession = applySelectionToFeatureEditSession(
       createFeatureEditSession({ featureType: 'revolve', selectedTarget: profile }),
@@ -905,7 +911,14 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     assert(revolveAngleField?.kind === 'numeric' && revolveAngleField.directionToggle, 'Revolve angle should expose a sweep direction flip toggle.')
     const flippedRevolve = patchFeatureEditSession(revolveSession, { [revolveAngleField.directionToggle.patch.patchKey]: revolveAngleField.directionToggle.reverseValue })
     const revolveDefinition = buildFeatureDefinition(flippedRevolve)
-    assert(revolveDefinition?.kind === 'revolve' && revolveDefinition.parameters.extent.direction === 'clockwise', 'Revolve direction flip should reverse the angular sweep direction.')
+    assert(
+      revolveDefinition?.kind === 'revolve' &&
+        revolveDefinition.parameters.extent.kind !== 'angle' &&
+        revolveDefinition.parameters.extent.mode === 'oneSide' &&
+        revolveDefinition.parameters.extent.end.kind === 'blind' &&
+        revolveDefinition.parameters.extent.end.direction === 'clockwise',
+      'Revolve direction flip should reverse the angular sweep direction.',
+    )
 
     const shellSession = createFeatureEditSession({ featureType: 'shell', selectedTarget: face })
     const shellThicknessField = getFormField(shellSession, 'shell-thickness')
@@ -938,6 +951,123 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const chamferSession = createFeatureEditSession({ featureType: 'chamfer', selectedTarget: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } })
     const chamferDistanceField = getFormField(chamferSession, 'chamfer-distance')
     assert(chamferDistanceField?.kind === 'numeric' && !chamferDistanceField.directionToggle, 'Chamfer distance should not expose an ambiguous direction toggle.')
+  }
+
+  function testAdvancedExtrudeAndRevolveExtentAuthoring() {
+    const profile = { kind: 'region' as const, sketchId: 'sketch_extent' as const, regionId: 'region_extent' as const }
+    const axis = { kind: 'edge' as const, bodyId: 'body_axis' as const, edgeId: 'edge_axis' as const }
+
+    const symmetricExtrude = buildFeatureDefinition(
+      patchFeatureEditSession(
+        createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile }),
+        { extentMode: 'symmetric', depth: 8, draftAngle: Math.PI / 18 },
+      ),
+    )
+    assert(
+      symmetricExtrude?.kind === 'extrude' &&
+        symmetricExtrude.parameters.extent?.mode === 'symmetric' &&
+        symmetricExtrude.parameters.extent.end.kind === 'blind' &&
+        symmetricExtrude.parameters.extent.end.distance === 8,
+      'Symmetric extrude drafts should build one mirrored blind authored end.',
+    )
+
+    const twoSideExtrude = buildFeatureDefinition(
+      patchFeatureEditSession(
+        createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile }),
+        { extentMode: 'twoSide', depth: 6, secondDepth: 3, secondDirection: 'negative' },
+      ),
+    )
+    assert(
+      twoSideExtrude?.kind === 'extrude' &&
+        twoSideExtrude.parameters.extent?.mode === 'twoSide' &&
+        twoSideExtrude.parameters.extent.firstEnd.kind === 'blind' &&
+        twoSideExtrude.parameters.extent.secondEnd.kind === 'blind' &&
+        twoSideExtrude.parameters.extent.secondEnd.distance === 3,
+      'Two-side extrude drafts should preserve independent first and second ends.',
+    )
+    const hydratedTwoSideExtrude = twoSideExtrude
+      ? hydrateFeatureEditSession({ featureId: 'feature_two_side_extrude', definition: twoSideExtrude })
+      : null
+    assert(
+      hydratedTwoSideExtrude?.featureType === 'extrude' &&
+        hydratedTwoSideExtrude.draft.extentMode === 'twoSide' &&
+        hydratedTwoSideExtrude.draft.secondEnd.kind === 'blind' &&
+        hydratedTwoSideExtrude.draft.secondEnd.distance === 3,
+      'Advanced extrude snapshot hydration should preserve two-side end controls.',
+    )
+
+    const upToNextExtrude = buildFeatureDefinition(
+      patchFeatureEditSession(
+        createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile }),
+        { endCondition: 'upToNext', upToOffsetDistance: 0.25, upToOffsetDirection: 'shorten' },
+      ),
+    )
+    assert(
+      upToNextExtrude?.kind === 'extrude' &&
+        upToNextExtrude.parameters.extent?.mode === 'oneSide' &&
+        upToNextExtrude.parameters.extent.end.kind === 'upToNext' &&
+        !('target' in upToNextExtrude.parameters.extent.end),
+      'Up-to-next extrude drafts should remain targetless while preserving offsets.',
+    )
+
+    const throughAllExtrude = buildFeatureDefinition(
+      patchFeatureEditSession(
+        createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile }),
+        { endCondition: 'throughAll' },
+      ),
+    )
+    assert(
+      throughAllExtrude?.kind === 'extrude' &&
+        throughAllExtrude.parameters.extent?.mode === 'oneSide' &&
+        throughAllExtrude.parameters.extent.end.kind === 'throughAll',
+      'Through-all extrude drafts should build without a depth.',
+    )
+
+    const fullRevolve = buildFeatureDefinition(
+      applySelectionToFeatureEditSession(
+        patchFeatureEditSession(
+          createFeatureEditSession({ featureType: 'revolve', selectedTarget: profile }),
+          { endCondition: 'full' },
+        ),
+        axis,
+      ),
+    )
+    assert(
+      fullRevolve?.kind === 'revolve' &&
+        fullRevolve.parameters.extent.kind !== 'angle' &&
+        fullRevolve.parameters.extent.mode === 'oneSide' &&
+        fullRevolve.parameters.extent.end.kind === 'full',
+      'Full revolve drafts should build without an angle value.',
+    )
+
+    const missingTargetExtrude = patchFeatureEditSession(
+      createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile }),
+      { endCondition: 'upToFace' },
+    )
+    const extrudeTargetField = getFeatureEditorFormSchema(missingTargetExtrude)
+      .sections.flatMap((section) => section.fields)
+      .find((field) => field.id === 'extrude-up-to-target')
+    assert(
+      extrudeTargetField?.kind === 'referencePicker' &&
+        extrudeTargetField.picker.selectionFilter.allowedKinds.length === 1 &&
+        extrudeTargetField.picker.selectionFilter.allowedKinds[0] === 'face',
+      'Up-to-face extrude target picker should only accept face targets.',
+    )
+    assert(buildFeatureDefinition(missingTargetExtrude) === null, 'Targeted up-to extrudes should not build without a required target.')
+
+    const upToVertexRevolve = patchFeatureEditSession(
+      createFeatureEditSession({ featureType: 'revolve', selectedTarget: profile }),
+      { endCondition: 'upToVertex' },
+    )
+    const revolveTargetField = getFeatureEditorFormSchema(upToVertexRevolve)
+      .sections.flatMap((section) => section.fields)
+      .find((field) => field.id === 'revolve-up-to-target')
+    assert(
+      revolveTargetField?.kind === 'referencePicker' &&
+        revolveTargetField.picker.selectionFilter.allowedKinds.length === 1 &&
+        revolveTargetField.picker.selectionFilter.allowedKinds[0] === 'vertex',
+      'Up-to-vertex revolve target picker should only accept vertex targets.',
+    )
   }
 
   function testAdvancedParticipantDescriptorsAreMachineReadable() {
@@ -1028,7 +1158,9 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
 
     assert(
-      patchedRevolve.featureType === 'revolve' && Math.abs(patchedRevolve.draft.angle - Math.PI) < 0.000001,
+      patchedRevolve.featureType === 'revolve' &&
+        patchedRevolve.draft.firstEnd.kind === 'blind' &&
+        Math.abs(patchedRevolve.draft.firstEnd.angle - Math.PI) < 0.000001,
       'Generic numeric form events should convert revolve angle degrees to draft radians.',
     )
 
@@ -1158,6 +1290,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testShellOwnsFaceSelectionDefaultsAndFormSchema()
   testShellBooleanTargetSelectorVisibilityAndScope()
   testDirectionFlipTogglesPatchFeatureDirections()
+  testAdvancedExtrudeAndRevolveExtentAuthoring()
   testAdvancedParticipantDescriptorsAreMachineReadable()
   testAdvancedAuthoringAndInspectorDoNotImportKernelModules()
   testGenericFormEventsPatchRevolveAndShellDrafts()

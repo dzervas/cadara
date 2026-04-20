@@ -60,3 +60,6 @@ export function isPositiveAuthoredNumber(value: MaybeAuthoredValue<number>) {
   return isExpressionAuthoredValue(value) || (literal !== null && literal > 0)
 }
 
+export function isFiniteAuthoredNumber(value: MaybeAuthoredValue<number>) {
+  return isExpressionAuthoredValue(value) || authoredNumberLiteral(value) !== null
+}

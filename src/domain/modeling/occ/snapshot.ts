@@ -68,6 +68,7 @@ import {
   getOccDurableRefKey,
   type OccTrackedBody,
 } from '@/domain/modeling/occ/topology'
+import { getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 
 const FACE_PICK_PRIORITY = 20
 const SKETCH_CURVE_PICK_PRIORITY = 12
@@ -269,6 +270,7 @@ function createSnapshotFeatureDefinition(
         parameters: {
           profiles: definition.parameters.profiles,
           startExtent: { kind: 'profilePlane' },
+          ...(definition.parameters.extent ? { extent: definition.parameters.extent } : {}),
           endExtent: definition.parameters.endExtent,
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
@@ -292,7 +294,9 @@ function createSnapshotFeatureDefinition(
           reference: definition.parameters.reference,
         },
       }
-    case 'revolve':
+    case 'revolve': {
+      const revolveExtent = getRevolveFeatureExtent(definition.parameters)
+      const firstRevolveEnd = revolveExtent.mode === 'twoSide' ? revolveExtent.firstEnd : revolveExtent.end
       return {
         kind: 'revolve',
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
@@ -301,11 +305,12 @@ function createSnapshotFeatureDefinition(
           axis: definition.parameters.axis,
           startAngle: definition.parameters.startAngle,
           extent: definition.parameters.extent,
-          angle: definition.parameters.extent.radians,
+          angle: firstRevolveEnd.kind === 'blind' ? firstRevolveEnd.angle : definition.parameters.angle,
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
       }
+    }
     case 'shell':
       return {
         kind: 'shell',

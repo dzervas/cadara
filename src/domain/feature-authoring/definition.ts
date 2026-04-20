@@ -1,6 +1,7 @@
 import type {
   ExtrudeFeatureParameters,
   ExtrudeProfileRef,
+  ExtrudeEndCondition,
   FeatureBooleanOperation,
   FeatureBooleanScope,
   FeatureDefinition,
@@ -9,6 +10,7 @@ import type {
   PlaneFeatureParameters,
   PreviewId,
   RevolveAxisRef,
+  RevolveEndCondition,
   RevolveFeatureParameters,
   ShellFeatureParameters,
   AdvancedOperationIntentDescriptor,
@@ -35,8 +37,9 @@ import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-sc
 
 export interface ExtrudeFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[]
-  depth: MaybeAuthoredValue<number>
-  direction: 'positive' | 'negative'
+  extentMode: 'oneSide' | 'symmetric' | 'twoSide'
+  firstEnd: ExtrudeEndCondition
+  secondEnd: ExtrudeEndCondition
   operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }
@@ -45,8 +48,9 @@ export interface RevolveFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[]
   axisTarget: RevolveAxisRef | null
   startAngle: MaybeAuthoredValue<number>
-  angle: MaybeAuthoredValue<number>
-  direction: 'clockwise' | 'counterClockwise'
+  extentMode: 'oneSide' | 'symmetric' | 'twoSide'
+  firstEnd: RevolveEndCondition
+  secondEnd: Exclude<RevolveEndCondition, { kind: 'full' }>
   operation: MaybeAuthoredValue<FeatureBooleanOperation>
   booleanScope: FeatureBooleanScope
 }

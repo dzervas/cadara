@@ -117,7 +117,9 @@ test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
     createFeatureEditorPatchFromFormValue(revolveAngleField, '180') ?? {},
   )
   assert(
-    patchedRevolve.featureType === 'revolve' && Math.abs(patchedRevolve.draft.angle - Math.PI) < 0.000001,
+    patchedRevolve.featureType === 'revolve' &&
+      patchedRevolve.draft.firstEnd.kind === 'blind' &&
+      Math.abs(patchedRevolve.draft.firstEnd.angle - Math.PI) < 0.000001,
     'Adapter angle values should preserve the degree-to-radian patch translation owned by the feature domain.',
   )
 

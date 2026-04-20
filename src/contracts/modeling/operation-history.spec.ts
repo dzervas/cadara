@@ -10,7 +10,7 @@ import {
   type ModelingOperationHistoryPayload,
 } from '@/contracts/modeling/operation-history'
 import type { AddDocumentVariableRequest, CommitSketchRequest, CreateFeatureRequest, FeatureDefinition, ReorderFeatureRequest, UpdateDocumentVariableRequest } from '@/contracts/modeling/schema'
-import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import { EXTRUDE_FEATURE_SCHEMA_VERSION, REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
   chamferAdvancedFeatureExample,
@@ -412,7 +412,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         parameters: {
           ...createExtrudeDefinition.parameters,
           endExtent: {
-            ...createExtrudeDefinition.parameters.endExtent,
+            ...createExtrudeDefinition.parameters.endExtent!,
             distance: createExpressionAuthoredValue('depth + 3'),
           },
         },
@@ -428,7 +428,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(result.payload.entries[0]?.kind === 'createFeature', 'Feature expression history entry kind should be preserved.')
     const definition = result.payload.entries[0].payload.definition
     assert(definition.kind === 'extrude', 'Feature expression history entry should preserve the extrude definition.')
-    const distance = definition.parameters.endExtent.distance
+    const distance = definition.parameters.endExtent?.distance
     assert(isExpressionAuthoredValue(distance), 'Feature expression history should preserve authored expression text.')
     assert(distance.valueText === 'depth + 3', 'Feature expression history should not persist resolved runtime values.')
   }
@@ -488,6 +488,76 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(!legacyPayload.ok && legacyPayload.reasonCode === 'legacy-profile-parameter', 'Legacy singular profile history payloads should be rejected.')
     assert(!emptyPayload.ok && emptyPayload.reasonCode === 'invalid-profile-collection', 'Empty profile collection history payloads should be rejected.')
     assert(!duplicatePayload.ok && duplicatePayload.reasonCode === 'duplicate-profile-reference', 'Duplicate profile collection history payloads should be rejected.')
+  }
+
+  function testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes() {
+    const advancedExtrudeResult = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        createCreateFeatureHistoryEntry({
+          ...createFeatureRequest,
+          definition: {
+            kind: 'extrude',
+            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
+              startExtent: { kind: 'profilePlane' },
+              extent: {
+                mode: 'twoSide',
+                firstEnd: { kind: 'blind', direction: 'positive', distance: 10, draftAngle: 0.1 },
+                secondEnd: { kind: 'upToNext', direction: 'negative', offset: { distance: 0.5, direction: 'shorten' } },
+              },
+              operation: 'newBody',
+              booleanScope: { kind: 'standalone' },
+            },
+          },
+        }),
+      ],
+    })
+    assert(advancedExtrudeResult.ok, 'Operation history should preserve advanced two-side extrude extent contracts.')
+
+    const invalidSymmetricExtrude = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        createCreateFeatureHistoryEntry({
+          ...createFeatureRequest,
+          definition: {
+            kind: 'extrude',
+            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
+              startExtent: { kind: 'profilePlane' },
+              extent: { mode: 'symmetric', end: { kind: 'upToNext', direction: 'positive' } },
+              operation: 'newBody',
+              booleanScope: { kind: 'standalone' },
+            },
+          },
+        }),
+      ],
+    })
+    assert(!invalidSymmetricExtrude.ok, 'Symmetric extrudes should reject non-blind/non-throughAll end conditions.')
+
+    const invalidSymmetricRevolve = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        createCreateFeatureHistoryEntry({
+          ...createFeatureRequest,
+          definition: {
+            kind: 'revolve',
+            featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
+              axis: { kind: 'edge', bodyId: 'body_axis', edgeId: 'edge_axis' },
+              startAngle: 0,
+              extent: { mode: 'symmetric', end: { kind: 'full' } },
+              operation: 'newBody',
+              booleanScope: { kind: 'standalone' },
+            },
+          },
+        }),
+      ],
+    })
+    assert(!invalidSymmetricRevolve.ok, 'Symmetric revolve should reject full and up-to end conditions.')
   }
 
   function testPreservesAdvancedParticipantsAndOperationIntent() {
@@ -1042,6 +1112,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   testValidatesProfileCollectionFeaturePayloads()
   testPreservesFeatureExpressionAuthoredValues()
   testRejectsLegacyAndInvalidProfileCollections()
+  testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes()
   testPreservesAdvancedParticipantsAndOperationIntent()
   testPreservesChamferParticipantsAndDistanceOptions()
   testPreservesSplitParticipantsAcrossCreateAndUpdateEntries()

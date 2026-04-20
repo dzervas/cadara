@@ -38,6 +38,15 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
   switch (definition.kind) {
     case 'extrude':
       return [
+        { path: ['parameters', 'extent', 'end', 'distance'], label: 'Extrude depth', valueKind: { kind: 'positiveNumber' } },
+        { path: ['parameters', 'extent', 'end', 'draftAngle'], label: 'Extrude draft angle', valueKind: { kind: 'angle' } },
+        { path: ['parameters', 'extent', 'end', 'offset', 'distance'], label: 'Extrude up-to offset', valueKind: { kind: 'finiteNumber' } },
+        { path: ['parameters', 'extent', 'firstEnd', 'distance'], label: 'Extrude first depth', valueKind: { kind: 'positiveNumber' } },
+        { path: ['parameters', 'extent', 'firstEnd', 'draftAngle'], label: 'Extrude first draft angle', valueKind: { kind: 'angle' } },
+        { path: ['parameters', 'extent', 'firstEnd', 'offset', 'distance'], label: 'Extrude first up-to offset', valueKind: { kind: 'finiteNumber' } },
+        { path: ['parameters', 'extent', 'secondEnd', 'distance'], label: 'Extrude second depth', valueKind: { kind: 'positiveNumber' } },
+        { path: ['parameters', 'extent', 'secondEnd', 'draftAngle'], label: 'Extrude second draft angle', valueKind: { kind: 'angle' } },
+        { path: ['parameters', 'extent', 'secondEnd', 'offset', 'distance'], label: 'Extrude second up-to offset', valueKind: { kind: 'finiteNumber' } },
         { path: ['parameters', 'endExtent', 'distance'], label: 'Extrude depth', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'operation'], label: 'Extrude operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },
       ]
@@ -48,6 +57,12 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
     case 'revolve':
       return [
         { path: ['parameters', 'startAngle'], label: 'Revolve start angle', valueKind: { kind: 'angle' } },
+        { path: ['parameters', 'extent', 'end', 'angle'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
+        { path: ['parameters', 'extent', 'end', 'offset', 'angle'], label: 'Revolve up-to offset', valueKind: { kind: 'angle' } },
+        { path: ['parameters', 'extent', 'firstEnd', 'angle'], label: 'Revolve first angle', valueKind: { kind: 'positiveNumber' } },
+        { path: ['parameters', 'extent', 'firstEnd', 'offset', 'angle'], label: 'Revolve first up-to offset', valueKind: { kind: 'angle' } },
+        { path: ['parameters', 'extent', 'secondEnd', 'angle'], label: 'Revolve second angle', valueKind: { kind: 'positiveNumber' } },
+        { path: ['parameters', 'extent', 'secondEnd', 'offset', 'angle'], label: 'Revolve second up-to offset', valueKind: { kind: 'angle' } },
         { path: ['parameters', 'extent', 'radians'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'angle'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'operation'], label: 'Revolve operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },

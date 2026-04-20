@@ -37,6 +37,7 @@ import type {
   SnapshotSchemaVersion,
 } from '@/contracts/shared/versioning'
 import type { AdvancedFeatureValidationDiagnostic, AdvancedSolidFeatureDefinition, AdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
+import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 
 export interface DocumentSnapshotProvenance {
   repositoryHeads: readonly string[]
@@ -179,6 +180,123 @@ export type FeatureBooleanScope =
       bodyIds: readonly BodyId[]
     }
 
+export type LinearExtentDirection = 'positive' | 'negative'
+export type AngularExtentDirection = 'clockwise' | 'counterClockwise'
+export type UpToOffsetDirection = 'shorten' | 'extend'
+
+export interface LinearUpToOffset {
+  distance: MaybeAuthoredValue<number>
+  direction: UpToOffsetDirection
+}
+
+export interface AngularUpToOffset {
+  angle: MaybeAuthoredValue<number>
+  direction: UpToOffsetDirection
+}
+
+export type ExtrudeEndCondition =
+  | {
+      kind: 'blind'
+      direction: LinearExtentDirection
+      distance: MaybeAuthoredValue<number>
+      draftAngle?: MaybeAuthoredValue<number>
+    }
+  | {
+      kind: 'upToNext'
+      direction: LinearExtentDirection
+      offset?: LinearUpToOffset
+      draftAngle?: MaybeAuthoredValue<number>
+    }
+  | {
+      kind: 'upToFace'
+      direction: LinearExtentDirection
+      target: { kind: 'face'; bodyId: BodyId; faceId: FaceId }
+      offset?: LinearUpToOffset
+      draftAngle?: MaybeAuthoredValue<number>
+    }
+  | {
+      kind: 'upToPart'
+      direction: LinearExtentDirection
+      target: { kind: 'body'; bodyId: BodyId }
+      offset?: LinearUpToOffset
+      draftAngle?: MaybeAuthoredValue<number>
+    }
+  | {
+      kind: 'upToVertex'
+      direction: LinearExtentDirection
+      target: { kind: 'vertex'; bodyId: BodyId; vertexId: VertexId }
+      offset?: LinearUpToOffset
+      draftAngle?: MaybeAuthoredValue<number>
+    }
+  | {
+      kind: 'throughAll'
+      direction: LinearExtentDirection
+      draftAngle?: MaybeAuthoredValue<number>
+    }
+
+export type ExtrudeFeatureExtent =
+  | {
+      mode: 'oneSide'
+      end: ExtrudeEndCondition
+    }
+  | {
+      mode: 'symmetric'
+      end: Extract<ExtrudeEndCondition, { kind: 'blind' | 'throughAll' }>
+    }
+  | {
+      mode: 'twoSide'
+      firstEnd: ExtrudeEndCondition
+      secondEnd: ExtrudeEndCondition
+    }
+
+export type RevolveEndCondition =
+  | {
+      kind: 'full'
+    }
+  | {
+      kind: 'blind'
+      direction: AngularExtentDirection
+      angle: MaybeAuthoredValue<number>
+    }
+  | {
+      kind: 'upToNext'
+      direction: AngularExtentDirection
+      offset?: AngularUpToOffset
+    }
+  | {
+      kind: 'upToFace'
+      direction: AngularExtentDirection
+      target: { kind: 'face'; bodyId: BodyId; faceId: FaceId }
+      offset?: AngularUpToOffset
+    }
+  | {
+      kind: 'upToPart'
+      direction: AngularExtentDirection
+      target: { kind: 'body'; bodyId: BodyId }
+      offset?: AngularUpToOffset
+    }
+  | {
+      kind: 'upToVertex'
+      direction: AngularExtentDirection
+      target: { kind: 'vertex'; bodyId: BodyId; vertexId: VertexId }
+      offset?: AngularUpToOffset
+    }
+
+export type RevolveFeatureExtent =
+  | {
+      mode: 'oneSide'
+      end: RevolveEndCondition
+    }
+  | {
+      mode: 'symmetric'
+      end: Extract<RevolveEndCondition, { kind: 'blind' }>
+    }
+  | {
+      mode: 'twoSide'
+      firstEnd: Exclude<RevolveEndCondition, { kind: 'full' }>
+      secondEnd: Exclude<RevolveEndCondition, { kind: 'full' }>
+    }
+
 /**
  * Fully typed extrude parameters.
  * `profiles` is the single authoritative ordered profile seed collection;
@@ -190,8 +308,10 @@ export interface ExtrudeFeatureParameters {
   profiles: NonEmptyReadonlyArray<ExtrudeProfileRef>
   /** Explicit start condition for the extrusion path. */
   startExtent: { kind: 'profilePlane' }
-  /** Explicit end condition with signed side selection and positive distance. */
-  endExtent: { kind: 'blind'; direction: 'positive' | 'negative'; distance: number }
+  /** Explicit end controls for all active extrude sides. */
+  extent?: ExtrudeFeatureExtent
+  /** Deprecated compatibility alias for legacy blind one-side extents. */
+  endExtent?: { kind: 'blind'; direction: LinearExtentDirection; distance: MaybeAuthoredValue<number> }
   /** Boolean behavior applied to the extrude result. */
   operation: FeatureBooleanOperation
   /** Explicit participant scope for non-standalone boolean operations. */
@@ -269,10 +389,10 @@ export interface RevolveFeatureParameters {
   axis: RevolveAxisRef
   /** Explicit start angle in radians from the profile's zero-angle pose. */
   startAngle: number
-  /** Explicit angular extent in radians with declared sweep direction. */
-  extent: { kind: 'angle'; direction: 'clockwise' | 'counterClockwise'; radians: number }
-  /** Deprecated alias for `extent.radians`. */
-  angle?: number
+  /** Explicit angular end controls for all active revolve sides. */
+  extent: RevolveFeatureExtent | { kind: 'angle'; direction: AngularExtentDirection; radians: MaybeAuthoredValue<number> }
+  /** Deprecated alias for legacy one-side blind angular extents. */
+  angle?: MaybeAuthoredValue<number>
   /** Boolean behavior applied to the revolve result. */
   operation: FeatureBooleanOperation
   /** Explicit participant scope for non-standalone boolean operations. */

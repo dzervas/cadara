@@ -1,5 +1,5 @@
 import type { ExtrudeProfileRef, RevolveAxisRef } from '@/contracts/modeling/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef, SelectionFilter, SelectionSemantic } from '@/domain/editor/schema'
 import { primitiveRefEquals } from '@/domain/editor/schema'
 
 export {
@@ -16,6 +16,7 @@ export {
   authoredNumberLiteral,
   authoredStringLiteral,
   expressionCapableAuthoredValue,
+  isFiniteAuthoredNumber,
   isPositiveAuthoredNumber,
 } from '@/domain/feature-authoring/features/authored-value-helpers'
 export {
@@ -64,6 +65,47 @@ export function asEdgeRef(value: PrimitiveRef | null): Extract<PrimitiveRef, { k
   return value?.kind === 'edge' ? value : null
 }
 
+export function asUpToTargetRef(value: PrimitiveRef | null): Extract<PrimitiveRef, { kind: 'face' | 'body' | 'vertex' }> | null {
+  return value?.kind === 'face' || value?.kind === 'body' || value?.kind === 'vertex' ? value : null
+}
+
+export function createSingleTargetSelectionFilter(
+  baseFilter: SelectionFilter,
+  input: {
+    id: string
+    label: string
+    targetKind: 'face' | 'body' | 'vertex'
+  },
+): SelectionFilter {
+  const acceptedSemantics: Record<'face' | 'body' | 'vertex', readonly SelectionSemantic[]> = {
+    face: ['face'],
+    body: ['body'],
+    vertex: ['vertex'],
+  }
+
+  return {
+    ...baseFilter,
+    allowedKinds: [input.targetKind],
+    label: input.label,
+    requirements: [
+      {
+        id: input.id,
+        label: input.label,
+        description: `Select one ${input.targetKind} target.`,
+        slots: [
+          {
+            id: input.id,
+            label: input.label,
+            description: `Select one ${input.targetKind} target.`,
+            acceptedKinds: [input.targetKind],
+            acceptedSemantics: acceptedSemantics[input.targetKind],
+          },
+        ],
+      },
+    ],
+  }
+}
+
 export function asSweepPathRef(value: PrimitiveRef | null): Extract<PrimitiveRef, { kind: 'edge' | 'sketchEntity' }> | null {
   return value?.kind === 'edge' || value?.kind === 'sketchEntity' ? value : null
 }
@@ -104,4 +146,3 @@ export function createMissingInputDiagnostic(input: {
     detail: null,
   }
 }
-

@@ -45,6 +45,8 @@ import type {
   DocumentHistoryItemRecord,
   EvaluatePreviewRequest,
   EvaluatePreviewResponse,
+  ExtrudeEndCondition,
+  ExtrudeFeatureExtent,
   ExtrudeFeatureParameters,
   ExtrudeProfileRef,
   FeatureDefinition,
@@ -82,10 +84,12 @@ import type {
   UpdateDocumentVariableResponse,
   WorkspaceSnapshot,
   PlaneFeatureParameters,
+  RevolveEndCondition,
   RevolveAxisRef,
   RevolveFeatureParameters,
   ShellFeatureParameters,
   AdvancedSolidFeatureParameters,
+  UpToOffsetDirection,
 } from '@/contracts/modeling/schema'
 import {
   documentExportRequestSchema,
@@ -722,42 +726,165 @@ function assertRevolveAxisRef(value: unknown): RevolveAxisRef {
   return target
 }
 
+function assertUpToTargetForKind(kind: 'upToFace' | 'upToPart' | 'upToVertex', value: unknown) {
+  const target = assertPrimitiveRef(value)
+  if (kind === 'upToFace' && target.kind === 'face') {
+    return target
+  }
+  if (kind === 'upToPart' && target.kind === 'body') {
+    return target
+  }
+  if (kind === 'upToVertex' && target.kind === 'vertex') {
+    return target
+  }
+
+  throw new Error(`Invalid ${kind} target payload.`)
+}
+
+function normalizeUpToOffset(value: unknown, field: 'distance' | 'angle') {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (!isRecord(value) || !isAuthoredNumberLike(value[field])) {
+    throw new Error('Invalid up-to offset payload.')
+  }
+
+  if (value.direction !== 'shorten' && value.direction !== 'extend') {
+    throw new Error('Invalid up-to offset direction payload.')
+  }
+
+  return field === 'distance'
+    ? { distance: value.distance as MaybeAuthoredValue<number>, direction: value.direction as UpToOffsetDirection }
+    : { angle: value.angle as MaybeAuthoredValue<number>, direction: value.direction as UpToOffsetDirection }
+}
+
+function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    throw new Error('Invalid extrude end condition payload.')
+  }
+
+  const direction = value.direction
+  if (direction !== 'positive' && direction !== 'negative') {
+    throw new Error('Invalid extrude end condition direction payload.')
+  }
+
+  const draftAngle = value.draftAngle
+  if (draftAngle !== undefined && !isAuthoredNumberLike(draftAngle)) {
+    throw new Error('Invalid extrude draft angle payload.')
+  }
+
+  switch (value.kind) {
+    case 'blind': {
+      if (!isAuthoredNumberLike(value.distance)) {
+        throw new Error('Invalid extrude blind distance payload.')
+      }
+      const literalDistance = getAuthoredLiteralValue(value.distance as MaybeAuthoredValue<number>)
+      if (literalDistance !== null && literalDistance <= 0) {
+        throw new Error('Extrude depth must be positive.')
+      }
+      return {
+        kind: 'blind',
+        direction,
+        distance: value.distance as MaybeAuthoredValue<number>,
+        ...(draftAngle !== undefined ? { draftAngle: draftAngle as MaybeAuthoredValue<number> } : {}),
+      }
+    }
+    case 'throughAll':
+      return {
+        kind: 'throughAll',
+        direction,
+        ...(draftAngle !== undefined ? { draftAngle: draftAngle as MaybeAuthoredValue<number> } : {}),
+    }
+    case 'upToNext': {
+      const offset = normalizeUpToOffset(value.offset, 'distance')
+      const linearOffset = (offset && 'distance' in offset ? offset : undefined) as Extract<ExtrudeEndCondition, { kind: 'upToNext' }>['offset']
+      return {
+        kind: 'upToNext',
+        direction,
+        ...(linearOffset ? { offset: linearOffset } : {}),
+        ...(draftAngle !== undefined ? { draftAngle: draftAngle as MaybeAuthoredValue<number> } : {}),
+      }
+    }
+    case 'upToFace':
+    case 'upToPart':
+    case 'upToVertex': {
+      const offset = normalizeUpToOffset(value.offset, 'distance')
+      return {
+        kind: value.kind,
+        direction,
+        target: assertUpToTargetForKind(value.kind, value.target),
+        ...(offset && 'distance' in offset ? { offset } : {}),
+        ...(draftAngle !== undefined ? { draftAngle: draftAngle as MaybeAuthoredValue<number> } : {}),
+      } as ExtrudeEndCondition
+    }
+    default:
+      throw new Error('Invalid extrude end condition payload.')
+  }
+}
+
+function normalizeExtrudeExtent(value: unknown, legacyEndExtent: unknown): ExtrudeFeatureExtent {
+  if (value === undefined && isRecord(legacyEndExtent)) {
+    return {
+      mode: 'oneSide',
+      end: normalizeExtrudeEnd(legacyEndExtent),
+    }
+  }
+
+  if (!isRecord(value)) {
+    throw new Error('Invalid extrude extent payload.')
+  }
+
+  if (value.mode === 'oneSide') {
+    return { mode: 'oneSide', end: normalizeExtrudeEnd(value.end) }
+  }
+
+  if (value.mode === 'symmetric') {
+    const end = normalizeExtrudeEnd(value.end)
+    if (end.kind !== 'blind' && end.kind !== 'throughAll') {
+      throw new Error('Symmetric extrude extents only support blind or throughAll end conditions.')
+    }
+    return { mode: 'symmetric', end }
+  }
+
+  if (value.mode === 'twoSide') {
+    return {
+      mode: 'twoSide',
+      firstEnd: normalizeExtrudeEnd(value.firstEnd),
+      secondEnd: normalizeExtrudeEnd(value.secondEnd),
+    }
+  }
+
+  throw new Error('Invalid extrude extent mode payload.')
+}
+
 function normalizeExtrudeFeatureParameters(value: unknown): ExtrudeFeatureParameters {
   if (!isRecord(value)) {
     throw new Error('Invalid extrude feature parameters payload.')
   }
 
   if ('profile' in value || 'depth' in value || 'direction' in value) {
-    throw new Error('Legacy extrude profile, depth, and direction aliases are not supported; use profiles and endExtent.')
-  }
-
-  if (!isRecord(value.endExtent) || value.endExtent.kind !== 'blind' || !isAuthoredNumberLike(value.endExtent.distance)) {
-    throw new Error('Invalid extrude feature parameters payload.')
-  }
-
-  const distance = value.endExtent.distance as ExtrudeFeatureParameters['endExtent']['distance']
-  const literalDistance = getAuthoredLiteralValue(distance)
-
-  if (value.endExtent.direction !== 'positive' && value.endExtent.direction !== 'negative') {
-    throw new Error('Invalid extrude end extent direction payload.')
-  }
-
-  if (literalDistance !== null && literalDistance <= 0) {
-    throw new Error('Extrude depth must be positive.')
+    throw new Error('Legacy extrude profile, depth, and direction aliases are not supported; use profiles and extent.')
   }
 
   if (!isAuthoredEnumLike(value.operation, ['newBody', 'join', 'cut', 'intersect'])) {
     throw new Error('Invalid extrude operation payload.')
   }
 
+  const extent = normalizeExtrudeExtent(value.extent, value.endExtent)
+  const firstEnd = extent.mode === 'twoSide' ? extent.firstEnd : extent.end
+
   return {
     profiles: assertExtrudeProfileRefs(value.profiles, 'Extrude'),
     startExtent: { kind: 'profilePlane' },
-    endExtent: {
-      kind: 'blind',
-      direction: value.endExtent.direction,
-      distance,
-    },
+    extent,
+    endExtent: firstEnd.kind === 'blind'
+      ? {
+          kind: 'blind',
+          direction: firstEnd.direction,
+          distance: firstEnd.distance,
+        }
+      : undefined,
     operation: value.operation as ExtrudeFeatureParameters['operation'],
     booleanScope:
       isRecord(value.booleanScope) && value.booleanScope.kind === 'targetBody' && isString(value.booleanScope.bodyId)
@@ -816,6 +943,125 @@ function normalizePlaneFeatureParameters(value: unknown): PlaneFeatureParameters
   }
 }
 
+function normalizeRevolveEnd(value: unknown): RevolveEndCondition {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    throw new Error('Invalid revolve end condition payload.')
+  }
+
+  if (value.kind === 'full') {
+    return { kind: 'full' }
+  }
+
+  const direction = value.direction
+  if (direction !== 'clockwise' && direction !== 'counterClockwise') {
+    throw new Error('Invalid revolve end direction payload.')
+  }
+
+  switch (value.kind) {
+    case 'blind': {
+      if (!isAuthoredNumberLike(value.angle)) {
+        throw new Error('Invalid revolve blind angle payload.')
+      }
+      const literalAngle = getAuthoredLiteralValue(value.angle as MaybeAuthoredValue<number>)
+      if (literalAngle !== null && literalAngle <= 0) {
+        throw new Error('Revolve angle must be positive.')
+      }
+      return {
+        kind: 'blind',
+        direction,
+        angle: value.angle as Extract<RevolveEndCondition, { kind: 'blind' }>['angle'],
+      }
+    }
+    case 'upToNext': {
+      const offset = normalizeUpToOffset(value.offset, 'angle')
+      const angularOffset = (offset && 'angle' in offset ? offset : undefined) as Extract<RevolveEndCondition, { kind: 'upToNext' }>['offset']
+      return {
+        kind: 'upToNext',
+        direction,
+        ...(angularOffset ? { offset: angularOffset } : {}),
+      }
+    }
+    case 'upToFace':
+    case 'upToPart':
+    case 'upToVertex': {
+      const offset = normalizeUpToOffset(value.offset, 'angle')
+      return {
+        kind: value.kind,
+        direction,
+        target: assertUpToTargetForKind(value.kind, value.target),
+        ...(offset && 'angle' in offset ? { offset } : {}),
+      } as RevolveEndCondition
+    }
+    default:
+      throw new Error('Invalid revolve end condition payload.')
+  }
+}
+
+function normalizeRevolveExtent(value: unknown, angleAlias: unknown): RevolveFeatureParameters['extent'] {
+  if (isRecord(value) && value.kind === 'angle') {
+    if (!isAuthoredNumberLike(value.radians)) {
+      throw new Error('Invalid revolve angular extent payload.')
+    }
+    const literalAngle = getAuthoredLiteralValue(value.radians as MaybeAuthoredValue<number>)
+    if (literalAngle !== null && literalAngle <= 0) {
+      throw new Error('Revolve angle must be positive.')
+    }
+    const direction = value.direction === 'clockwise' || value.direction === 'counterClockwise'
+      ? value.direction
+      : 'counterClockwise'
+
+    return {
+      kind: 'angle',
+      direction,
+      radians: value.radians as MaybeAuthoredValue<number>,
+    }
+  }
+
+  if (!isRecord(value) && isAuthoredNumberLike(angleAlias)) {
+    return {
+      mode: 'oneSide',
+      end: {
+        kind: 'blind',
+        direction: 'counterClockwise',
+        angle: angleAlias as MaybeAuthoredValue<number>,
+      },
+    }
+  }
+
+  if (!isRecord(value)) {
+    throw new Error('Invalid revolve extent payload.')
+  }
+
+  if (value.mode === 'oneSide') {
+    return { mode: 'oneSide', end: normalizeRevolveEnd(value.end) }
+  }
+
+  if (value.mode === 'symmetric') {
+    const end = normalizeRevolveEnd(value.end)
+    if (end.kind !== 'blind') {
+      throw new Error('Symmetric revolve extents only support blind angular end conditions.')
+    }
+    return { mode: 'symmetric', end }
+  }
+
+  if (value.mode === 'twoSide') {
+    const firstEnd = normalizeRevolveEnd(value.firstEnd)
+    const secondEnd = normalizeRevolveEnd(value.secondEnd)
+    if (firstEnd.kind === 'full' || secondEnd.kind === 'full') {
+      throw new Error('Two-side revolve extents cannot use full end conditions.')
+    }
+    return { mode: 'twoSide', firstEnd, secondEnd }
+  }
+
+  throw new Error('Invalid revolve extent mode payload.')
+}
+
+function isLegacyRevolveAngleExtent(
+  extent: RevolveFeatureParameters['extent'],
+): extent is Extract<RevolveFeatureParameters['extent'], { kind: 'angle' }> {
+  return 'kind' in extent && extent.kind === 'angle'
+}
+
 function normalizeRevolveFeatureParameters(value: unknown): RevolveFeatureParameters {
   if (!isRecord(value)) {
     throw new Error('Invalid revolve feature parameters payload.')
@@ -825,35 +1071,27 @@ function normalizeRevolveFeatureParameters(value: unknown): RevolveFeatureParame
     throw new Error('Legacy revolve profile alias is not supported; use profiles.')
   }
 
-  const radians =
-    isRecord(value.extent) && value.extent.kind === 'angle' && typeof value.extent.radians === 'number'
-      ? value.extent.radians
-      : typeof value.angle === 'number'
-        ? value.angle
-        : null
-
-  if (radians === null) {
-    throw new Error('Invalid revolve feature parameters payload.')
+  if (!isAuthoredEnumLike(value.operation, ['newBody', 'join', 'cut', 'intersect'])) {
+    throw new Error('Invalid revolve operation payload.')
   }
 
-  if (value.operation !== 'newBody' && value.operation !== 'join' && value.operation !== 'cut' && value.operation !== 'intersect') {
-    throw new Error('Invalid revolve operation payload.')
+  const extent = normalizeRevolveExtent(value.extent, value.angle)
+  let firstEnd: RevolveEndCondition
+  if (isLegacyRevolveAngleExtent(extent)) {
+    firstEnd = { kind: 'blind', direction: extent.direction, angle: extent.radians }
+  } else if (extent.mode === 'twoSide') {
+    firstEnd = extent.firstEnd
+  } else {
+    firstEnd = extent.end
   }
 
   return {
     profiles: assertExtrudeProfileRefs(value.profiles, 'Revolve'),
     axis: assertRevolveAxisRef(value.axis),
-    startAngle: typeof value.startAngle === 'number' ? value.startAngle : 0,
-    extent: {
-      kind: 'angle',
-      direction:
-        isRecord(value.extent) && (value.extent.direction === 'clockwise' || value.extent.direction === 'counterClockwise')
-          ? value.extent.direction
-          : 'counterClockwise',
-      radians,
-    },
-    angle: radians,
-    operation: value.operation,
+    startAngle: isAuthoredNumberLike(value.startAngle) ? value.startAngle as RevolveFeatureParameters['startAngle'] : 0,
+    extent,
+    angle: firstEnd.kind === 'blind' ? firstEnd.angle : undefined,
+    operation: value.operation as RevolveFeatureParameters['operation'],
     booleanScope:
       isRecord(value.booleanScope) && value.booleanScope.kind === 'targetBody' && isString(value.booleanScope.bodyId)
         ? { kind: 'targetBody', bodyId: value.booleanScope.bodyId as BodyId }

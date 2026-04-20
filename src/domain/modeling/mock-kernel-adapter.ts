@@ -36,6 +36,7 @@ import {
   evaluateDocumentVariableExpressions,
 } from '@/domain/modeling/document-variable-expressions'
 import { resolveFeatureDefinitionValues } from '@/domain/modeling/feature-value-expressions'
+import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
   DocumentExportDiagnostic,
@@ -297,16 +298,35 @@ function getFeatureDefinitionLabel(definition: FeatureDefinition) {
   return definition.kind
 }
 
+function getExtrudeEndTargets(definition: Extract<FeatureDefinition, { kind: 'extrude' }>) {
+  const extent = getExtrudeFeatureExtent(definition.parameters)
+  const ends = extent.mode === 'twoSide' ? [extent.firstEnd, extent.secondEnd] : [extent.end]
+  return ends.flatMap((end) => 'target' in end ? [end.target] : [])
+}
+
+function getRevolveEndTargets(definition: Extract<FeatureDefinition, { kind: 'revolve' }>) {
+  const extent = getRevolveFeatureExtent(definition.parameters)
+  const ends = extent.mode === 'twoSide' ? [extent.firstEnd, extent.secondEnd] : [extent.end]
+  return ends.flatMap((end) => 'target' in end ? [end.target] : [])
+}
+
 function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
   switch (definition.kind) {
     case 'extrude':
-      return [...definition.parameters.profiles]
+      return [
+        ...definition.parameters.profiles,
+        ...getExtrudeEndTargets(definition),
+      ]
     case 'fillet':
       return [...definition.parameters.edgeTargets]
     case 'plane':
       return [definition.parameters.reference.target]
     case 'revolve':
-      return [...definition.parameters.profiles, definition.parameters.axis]
+      return [
+        ...definition.parameters.profiles,
+        definition.parameters.axis,
+        ...getRevolveEndTargets(definition),
+      ]
     case 'shell':
       return [definition.parameters.bodyTarget, ...definition.parameters.faceTargets]
     default:
@@ -581,7 +601,9 @@ function validateFeatureDefinitionAgainstSnapshot(
 ) {
   switch (definition.kind) {
     case 'extrude': {
-      const distance = definition.parameters.endExtent.distance
+      const extent = getExtrudeFeatureExtent(definition.parameters)
+      const firstEnd = extent.mode === 'twoSide' ? extent.firstEnd : extent.end
+      const distance = firstEnd.kind === 'blind' ? firstEnd.distance as number : 1
       const firstProfile = definition.parameters.profiles[0]
 
       if (distance <= 0) {

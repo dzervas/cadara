@@ -13,7 +13,7 @@ import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
 } from '@/domain/modeling/occ/authoring-state'
-import { buildConstructionPlaneFromPlanarFace } from '@/domain/modeling/occ/sketch-profile'
+import { buildConstructionPlaneFromPlanarFace, getExtrusionNormalForPlanarFace } from '@/domain/modeling/occ/sketch-profile'
 import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 import {
   getOccDurableRefKey,
@@ -365,6 +365,25 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     return props.Mass()
   }
 
+  async function producedBodyVolume(
+    context: OccFeatureExecutionContext,
+    result: ReturnType<typeof executeOccFeature>,
+  ) {
+    let total = 0
+
+    for (const target of result.producedTargets) {
+      if (target.kind !== 'body') {
+        continue
+      }
+
+      const body = result.bodies.find((entry) => entry.bodyId === target.bodyId)
+      assert(body != null, 'Produced body target should resolve to a tracked body.')
+      total += await bodyVolume(context.oc, body.shape)
+    }
+
+    return total
+  }
+
   function findFaceIdByDirection(
     oc: Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>,
     body: Awaited<ReturnType<typeof makeBoxBody>>,
@@ -499,6 +518,108 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     const producedBody = result.bodies.find((entry) => entry.bodyId === bodyTarget.bodyId)
     assert(producedBody != null, 'Standalone extrude must append the produced body.')
     assertClose(await bodyVolume(context.oc, producedBody.shape), 60, 1e-6, '4x3 rectangle extruded by 5 should produce the expected prism volume.')
+  }
+
+  async function testExtrudeUpToNextSkipsCoplanarStartFace() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const sourceBody = await makeBoxBody(
+      oc,
+      'body_phase4_extrude_up_to_next_source' as BodyId,
+      4,
+      3,
+      5,
+      'feature_phase4_up_to_next_source' as FeatureId,
+    )
+    const startFaceId = sourceBody.topology.faceIds.find((faceId) => {
+      const face = sourceBody.facesById.get(faceId)
+      if (!face) {
+        return false
+      }
+      const facePlane = extractPlanarFaceData(oc, face)
+      const normal = getExtrusionNormalForPlanarFace(oc, face, 'positive')
+      return Math.abs(facePlane.frame.origin[2]) < 0.001 && dot(normal, [0, 0, 1]) > 0.999
+    })
+    assert(startFaceId != null, 'Expected the source box to expose a lower face whose positive normal points into the body.')
+    const context = await createContext({ bodies: [sourceBody] })()
+
+    const result = executeOccFeature(context, 'feature_phase4_extrude_up_to_next_face' as FeatureId, {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [{ kind: 'face', bodyId: sourceBody.bodyId, faceId: startFaceId }],
+        startExtent: { kind: 'profilePlane' },
+        extent: {
+          mode: 'oneSide',
+          end: { kind: 'upToNext', direction: 'positive' },
+        },
+        operation: 'newBody',
+        booleanScope: { kind: 'standalone' },
+      },
+    })
+    const producedTarget = result.producedTargets[0]
+    assert(producedTarget?.kind === 'body', 'Up-to-next extrude from a face should produce a body.')
+    const producedBody = result.bodies.find((body) => body.bodyId === producedTarget.bodyId)
+    assert(producedBody != null, 'Up-to-next extrude should append the produced body.')
+    assertClose(
+      await bodyVolume(context.oc, producedBody.shape),
+      60,
+      1e-6,
+      'Up-to-next from a face must skip the coplanar start face and terminate at the next parallel face.',
+    )
+  }
+
+  async function testExtrudeDraftsOneSideSymmetricAndTwoSideEnds() {
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase4_extrude_draft' as SketchId, plane, {
+      width: 3,
+      height: 2,
+    })
+    const context = await createContext({ sketches: [sketch] })()
+    const baseParameters = {
+      profiles: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }],
+      startExtent: { kind: 'profilePlane' as const },
+      operation: 'newBody' as const,
+      booleanScope: { kind: 'standalone' as const },
+    }
+
+    const oneSide = executeOccFeature(context, 'feature_phase4_extrude_draft_one_side' as FeatureId, {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        ...baseParameters,
+        extent: {
+          mode: 'oneSide',
+          end: { kind: 'blind', direction: 'positive', distance: 3, draftAngle: 0.05 },
+        },
+      },
+    })
+    const symmetric = executeOccFeature(context, 'feature_phase4_extrude_draft_symmetric' as FeatureId, {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        ...baseParameters,
+        extent: {
+          mode: 'symmetric',
+          end: { kind: 'blind', direction: 'positive', distance: 2, draftAngle: 0.04 },
+        },
+      },
+    })
+    const twoSide = executeOccFeature(context, 'feature_phase4_extrude_draft_two_side' as FeatureId, {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        ...baseParameters,
+        extent: {
+          mode: 'twoSide',
+          firstEnd: { kind: 'blind', direction: 'positive', distance: 2, draftAngle: 0.03 },
+          secondEnd: { kind: 'blind', direction: 'negative', distance: 1, draftAngle: -0.02 },
+        },
+      },
+    })
+
+    assert(await producedBodyVolume(context, oneSide) > 0, 'One-side drafted extrude should produce solid volume.')
+    assert(await producedBodyVolume(context, symmetric) > 0, 'Symmetric drafted extrude should produce solid volume.')
+    assert(await producedBodyVolume(context, twoSide) > 0, 'Two-side drafted extrude should produce solid volume.')
   }
 
   async function testExtrudeFeatureCreatesBodiesFromMultipleRegions() {
@@ -680,6 +801,59 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     assert(invalidDistance === 'Extrude endExtent.distance must be positive.', 'Extrude should reject non-positive blind distances.')
     assert(invalidScope === 'Boolean operation join requires explicit target bodies.', 'Extrude should reject standalone scope for boolean operations that need explicit participants.')
     assert(invalidNewBodyScope === 'Boolean operation newBody requires standalone scope.', 'Extrude should reject non-standalone scope for new-body operations.')
+  }
+
+  async function testAdvancedEndConditionDiagnostics() {
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase4_end_diagnostics' as SketchId, plane)
+    const oc = await getDefaultOpenCascadeInstance()
+    const targetA = await makeBoxBody(oc, 'body_phase4_end_diagnostics_a' as BodyId, 1, 1, 1, 'feature_phase4_end_diagnostics_a' as FeatureId, [0, 0, 2])
+    const targetB = await makeBoxBody(oc, 'body_phase4_end_diagnostics_b' as BodyId, 1, 1, 1, 'feature_phase4_end_diagnostics_b' as FeatureId, [4, 0, 2])
+    const ambiguousContext = await createContext({ sketches: [sketch], bodies: [targetA, targetB] })()
+    const noTargetContext = await createContext({ sketches: [sketch] })()
+    const baseExtrudeParameters = {
+      profiles: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }],
+      startExtent: { kind: 'profilePlane' as const },
+      operation: 'newBody' as const,
+      booleanScope: { kind: 'standalone' as const },
+    }
+
+    let ambiguousExtrude: string | null = null
+    try {
+      executeOccFeature(ambiguousContext, 'feature_phase4_extrude_ambiguous_up_to_next' as FeatureId, {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseExtrudeParameters,
+          extent: {
+            mode: 'oneSide',
+            end: { kind: 'upToNext', direction: 'positive' },
+          },
+        },
+      })
+    } catch (error) {
+      ambiguousExtrude = error instanceof Error ? error.message : String(error)
+    }
+
+    let missingExtrudeTarget: string | null = null
+    try {
+      executeOccFeature(noTargetContext, 'feature_phase4_extrude_missing_up_to_next' as FeatureId, {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseExtrudeParameters,
+          extent: {
+            mode: 'oneSide',
+            end: { kind: 'upToNext', direction: 'positive' },
+          },
+        },
+      })
+    } catch (error) {
+      missingExtrudeTarget = error instanceof Error ? error.message : String(error)
+    }
+
+    assert(ambiguousExtrude?.includes('advanced-feature-unsupported-kernel-case') === true && ambiguousExtrude.includes('ambiguous'), 'Extrude up-to-next should diagnose ambiguous nearest bodies.')
+    assert(missingExtrudeTarget?.includes('advanced-feature-unsupported-kernel-case') === true && missingExtrudeTarget.includes('no terminating geometry'), 'Extrude up-to-next should diagnose missing termination.')
   }
 
   async function testCutAndIntersectApplyPerTargetPolicy() {
@@ -893,6 +1067,149 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
 
     assert(constructionAxisError?.includes('occ-contract-gap-revolve-construction-axis') === true, 'Construction-backed revolve axes must reject explicitly with the contract-gap code.')
     assert(result.producedTargets[0]?.kind === 'body', 'Edge-backed revolve should produce a solid body.')
+  }
+
+  async function testRevolveBuildsFullAndUpToPartWithOffsets() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const profilePlane = createStandardPlaneDefinition('xz')
+    const axisBody = await makeBoxBody(
+      oc,
+      'body_phase4_revolve_advanced_axis' as BodyId,
+      1,
+      1,
+      4,
+      'feature_phase4_revolve_advanced_axis_seed' as FeatureId,
+      [0, 0, 0],
+    )
+    const targetBody = await makeBoxBody(
+      oc,
+      'body_phase4_revolve_advanced_target' as BodyId,
+      2,
+      1,
+      2,
+      'feature_phase4_revolve_advanced_target_seed' as FeatureId,
+      [2, 8, 0],
+    )
+    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
+    assert(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
+    const { sketch, region } = createRectangleSketch('sketch_phase4_revolve_advanced' as SketchId, profilePlane, {
+      origin: [1.25, 0.25],
+      width: 1,
+      height: 1.5,
+    })
+    const context = await createContext({ sketches: [sketch], bodies: [axisBody, targetBody] })()
+    const baseParameters = {
+      profiles: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }],
+      axis: { kind: 'edge' as const, bodyId: axisBody.bodyId, edgeId: axisEdgeId as EdgeId },
+      startAngle: 0,
+      operation: 'newBody' as const,
+      booleanScope: { kind: 'standalone' as const },
+    }
+
+    const full = executeOccFeature(context, 'feature_phase4_revolve_full' as FeatureId, {
+      kind: 'revolve',
+      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        ...baseParameters,
+        extent: { mode: 'oneSide', end: { kind: 'full' } },
+      },
+    })
+    const upToPart = executeOccFeature(context, 'feature_phase4_revolve_up_to_part' as FeatureId, {
+      kind: 'revolve',
+      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        ...baseParameters,
+        extent: {
+          mode: 'oneSide',
+          end: {
+            kind: 'upToPart',
+            direction: 'counterClockwise',
+            target: { kind: 'body', bodyId: targetBody.bodyId },
+          },
+        },
+      },
+    })
+    const shortened = executeOccFeature(context, 'feature_phase4_revolve_up_to_part_shortened' as FeatureId, {
+      kind: 'revolve',
+      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        ...baseParameters,
+        extent: {
+          mode: 'oneSide',
+          end: {
+            kind: 'upToPart',
+            direction: 'counterClockwise',
+            target: { kind: 'body', bodyId: targetBody.bodyId },
+            offset: { angle: 0.2, direction: 'shorten' },
+          },
+        },
+      },
+    })
+
+    const fullVolume = await producedBodyVolume(context, full)
+    const upToVolume = await producedBodyVolume(context, upToPart)
+    const shortenedVolume = await producedBodyVolume(context, shortened)
+    assert(fullVolume > 0, 'Full revolve should produce solid volume.')
+    assert(upToVolume > 0 && upToVolume < fullVolume, 'Up-to-part revolve should terminate before a full turn.')
+    assert(shortenedVolume > 0 && shortenedVolume < upToVolume, 'Shortened up-to-part revolve should reduce the swept volume.')
+  }
+
+  async function testRevolveRejectsImpossibleUpToOffset() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const profilePlane = createStandardPlaneDefinition('xz')
+    const axisBody = await makeBoxBody(
+      oc,
+      'body_phase4_revolve_offset_axis' as BodyId,
+      1,
+      1,
+      4,
+      'feature_phase4_revolve_offset_axis_seed' as FeatureId,
+    )
+    const targetBody = await makeBoxBody(
+      oc,
+      'body_phase4_revolve_offset_target' as BodyId,
+      2,
+      1,
+      2,
+      'feature_phase4_revolve_offset_target_seed' as FeatureId,
+      [2, 8, 0],
+    )
+    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
+    assert(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
+    const { sketch, region } = createRectangleSketch('sketch_phase4_revolve_offset' as SketchId, profilePlane, {
+      origin: [1.25, 0.25],
+      width: 1,
+      height: 1.5,
+    })
+    const context = await createContext({ sketches: [sketch], bodies: [axisBody, targetBody] })()
+
+    let thrownMessage: string | null = null
+    try {
+      executeOccFeature(context, 'feature_phase4_revolve_impossible_offset' as FeatureId, {
+        kind: 'revolve',
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
+          axis: { kind: 'edge', bodyId: axisBody.bodyId, edgeId: axisEdgeId as EdgeId },
+          startAngle: 0,
+          extent: {
+            mode: 'oneSide',
+            end: {
+              kind: 'upToPart',
+              direction: 'counterClockwise',
+              target: { kind: 'body', bodyId: targetBody.bodyId },
+              offset: { angle: Math.PI, direction: 'shorten' },
+            },
+          },
+          operation: 'newBody',
+          booleanScope: { kind: 'standalone' },
+        },
+      })
+    } catch (error) {
+      thrownMessage = error instanceof Error ? error.message : String(error)
+    }
+
+    assert(thrownMessage?.includes('advanced-feature-unsupported-kernel-case') === true && thrownMessage.includes('impossible'), 'Revolve up-to offsets that pass the target should reject explicitly.')
   }
 
   async function testRevolveRejectsNonPlanarFaceProfilesExplicitly() {
@@ -1427,15 +1744,20 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts()
   await testPlaneFeatureBuildsFaceBackedConstructionPlane()
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion()
+  await testExtrudeUpToNextSkipsCoplanarStartFace()
+  await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds()
   await testExtrudeFeatureCreatesBodiesFromMultipleRegions()
   await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy()
   await testExtrudeJoinRefinesSameDomainTopology()
   await testExtrudeJoinRejectsMultiSolidResultShapes()
   await testExtrudeRejectsInvalidExtentAndBooleanScope()
+  await testAdvancedEndConditionDiagnostics()
   await testCutAndIntersectApplyPerTargetPolicy()
   await testCombineExecutesBodyBooleansAndConsumesTools()
   await testCombineRejectsEmptyAndMalformedBodyRoles()
   await testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid()
+  await testRevolveBuildsFullAndUpToPartWithOffsets()
+  await testRevolveRejectsImpossibleUpToOffset()
   await testRevolveRejectsNonPlanarFaceProfilesExplicitly()
   await testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath()
   await testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition()

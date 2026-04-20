@@ -50,6 +50,7 @@ import {
   revisionIdSchema,
   sketchIdSchema,
   stringSchema,
+  vertexIdSchema,
 } from '@/contracts/shared/runtime-schema'
 import type {
   ExtrudeFeatureSchemaVersion,
@@ -143,6 +144,138 @@ const authoredBooleanSchema = (label: string) => authoredValueSchema(z.boolean()
 const booleanOperationAuthoredSchema = authoredEnumValueSchema(['newBody', 'join', 'cut', 'intersect'], 'Boolean operation')
 const advancedOperationIntentAuthoredSchema = authoredEnumValueSchema(['create', 'add', 'subtract', 'intersect'], 'Advanced operation intent')
 const thickenSideAuthoredSchema = authoredEnumValueSchema(['oneSide', 'symmetric'], 'Thicken side')
+const linearDirectionSchema = z.union([z.literal('positive'), z.literal('negative')])
+const angularDirectionSchema = z.union([z.literal('clockwise'), z.literal('counterClockwise')])
+const upToOffsetDirectionSchema = z.union([z.literal('shorten'), z.literal('extend')])
+const linearUpToOffsetSchema = z.object({
+  distance: authoredNumberSchema('Up-to offset'),
+  direction: upToOffsetDirectionSchema,
+}).strict()
+const angularUpToOffsetSchema = z.object({
+  angle: authoredNumberSchema('Up-to offset angle'),
+  direction: upToOffsetDirectionSchema,
+}).strict()
+const extrudeBlindEndSchema = z.object({
+  kind: z.literal('blind'),
+  direction: linearDirectionSchema,
+  distance: authoredPositiveNumberSchema('Extrude distance must be positive.'),
+  draftAngle: authoredNumberSchema('Extrude draft angle').optional(),
+}).strict()
+const extrudeThroughAllEndSchema = z.object({
+  kind: z.literal('throughAll'),
+  direction: linearDirectionSchema,
+  draftAngle: authoredNumberSchema('Extrude draft angle').optional(),
+}).strict()
+const extrudeEndSchema = z.discriminatedUnion('kind', [
+  extrudeBlindEndSchema,
+  z.object({
+    kind: z.literal('upToNext'),
+    direction: linearDirectionSchema,
+    offset: linearUpToOffsetSchema.optional(),
+    draftAngle: authoredNumberSchema('Extrude draft angle').optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('upToFace'),
+    direction: linearDirectionSchema,
+    target: z.object({ kind: z.literal('face'), bodyId: bodyIdSchema, faceId: faceIdSchema }),
+    offset: linearUpToOffsetSchema.optional(),
+    draftAngle: authoredNumberSchema('Extrude draft angle').optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('upToPart'),
+    direction: linearDirectionSchema,
+    target: z.object({ kind: z.literal('body'), bodyId: bodyIdSchema }),
+    offset: linearUpToOffsetSchema.optional(),
+    draftAngle: authoredNumberSchema('Extrude draft angle').optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('upToVertex'),
+    direction: linearDirectionSchema,
+    target: z.object({ kind: z.literal('vertex'), bodyId: bodyIdSchema, vertexId: vertexIdSchema }),
+    offset: linearUpToOffsetSchema.optional(),
+    draftAngle: authoredNumberSchema('Extrude draft angle').optional(),
+  }).strict(),
+  extrudeThroughAllEndSchema,
+])
+const extrudeExtentSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('oneSide'),
+    end: extrudeEndSchema,
+  }).strict(),
+  z.object({
+    mode: z.literal('symmetric'),
+    end: z.union([extrudeBlindEndSchema, extrudeThroughAllEndSchema]),
+  }).strict(),
+  z.object({
+    mode: z.literal('twoSide'),
+    firstEnd: extrudeEndSchema,
+    secondEnd: extrudeEndSchema,
+  }).strict(),
+])
+const legacyExtrudeEndExtentSchema = extrudeBlindEndSchema.transform((value) => ({
+  kind: value.kind,
+  direction: value.direction,
+  distance: value.distance,
+}))
+const revolveBlindEndSchema = z.object({
+  kind: z.literal('blind'),
+  direction: angularDirectionSchema,
+  angle: authoredPositiveNumberSchema('Revolve angle must be positive.'),
+}).strict()
+const revolveUpToEndSchemas = [
+  z.object({
+    kind: z.literal('upToNext'),
+    direction: angularDirectionSchema,
+    offset: angularUpToOffsetSchema.optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('upToFace'),
+    direction: angularDirectionSchema,
+    target: z.object({ kind: z.literal('face'), bodyId: bodyIdSchema, faceId: faceIdSchema }),
+    offset: angularUpToOffsetSchema.optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('upToPart'),
+    direction: angularDirectionSchema,
+    target: z.object({ kind: z.literal('body'), bodyId: bodyIdSchema }),
+    offset: angularUpToOffsetSchema.optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('upToVertex'),
+    direction: angularDirectionSchema,
+    target: z.object({ kind: z.literal('vertex'), bodyId: bodyIdSchema, vertexId: vertexIdSchema }),
+    offset: angularUpToOffsetSchema.optional(),
+  }).strict(),
+] as const
+const revolveEndSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('full') }).strict(),
+  revolveBlindEndSchema,
+  ...revolveUpToEndSchemas,
+])
+const nonFullRevolveEndSchema = z.discriminatedUnion('kind', [
+  revolveBlindEndSchema,
+  ...revolveUpToEndSchemas,
+])
+const revolveExplicitExtentSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('oneSide'),
+    end: revolveEndSchema,
+  }).strict(),
+  z.object({
+    mode: z.literal('symmetric'),
+    end: revolveBlindEndSchema,
+  }).strict(),
+  z.object({
+    mode: z.literal('twoSide'),
+    firstEnd: nonFullRevolveEndSchema,
+    secondEnd: nonFullRevolveEndSchema,
+  }).strict(),
+])
+const legacyRevolveAngleExtentSchema = z.object({
+  kind: z.literal('angle'),
+  direction: angularDirectionSchema,
+  radians: authoredPositiveNumberSchema('Revolve angle must be positive.'),
+}).passthrough()
 
 const extrudeDefinitionSchema = z.object({
   kind: z.literal('extrude'),
@@ -153,14 +286,18 @@ const extrudeDefinitionSchema = z.object({
       z.object({ kind: z.literal('face'), bodyId: z.string(), faceId: z.string() }),
     ])).nonempty('Extrude profiles must be non-empty.'),
     startExtent: z.object({ kind: z.string() }).passthrough(),
-    endExtent: z.object({
-      kind: z.literal('blind'),
-      direction: z.union([z.literal('positive'), z.literal('negative')]),
-      distance: authoredPositiveNumberSchema('Extrude distance must be positive.'),
-    }).passthrough(),
+    extent: extrudeExtentSchema.optional(),
+    endExtent: legacyExtrudeEndExtentSchema.optional(),
     operation: booleanOperationAuthoredSchema,
     booleanScope: z.object({ kind: z.string() }).passthrough(),
-  }).passthrough(),
+  }).passthrough().superRefine((value, ctx) => {
+    if (!value.extent && !value.endExtent) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Extrude parameters must include extent or legacy endExtent.',
+      })
+    }
+  }),
 })
 
 const revolveDefinitionSchema = z.object({
@@ -170,11 +307,7 @@ const revolveDefinitionSchema = z.object({
     profiles: z.array(z.unknown()).nonempty('Revolve profiles must be non-empty.'),
     axis: z.unknown(),
     startAngle: authoredNumberSchema('Revolve start angle'),
-    extent: z.object({
-      kind: z.literal('angle'),
-      direction: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
-      radians: authoredPositiveNumberSchema('Revolve angle must be positive.'),
-    }).passthrough(),
+    extent: z.union([revolveExplicitExtentSchema, legacyRevolveAngleExtentSchema]),
     angle: authoredPositiveNumberSchema('Revolve angle must be positive.').optional(),
     operation: booleanOperationAuthoredSchema,
     booleanScope: z.object({ kind: z.string() }).passthrough(),

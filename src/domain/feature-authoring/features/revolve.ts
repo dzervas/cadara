@@ -1,11 +1,280 @@
+import type {
+  AngularExtentDirection,
+  RevolveEndCondition,
+  RevolveFeatureExtent,
+  UpToOffsetDirection,
+} from '@/contracts/modeling/schema'
 import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
+import { getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import { getBooleanScopeBodyTargets, hasBooleanTargetScope, isBooleanOperation, toBooleanScope } from '@/domain/feature-authoring/definition'
 import { createSelectionFilterForRequirement, revolveSelectionFilter } from '@/domain/editor/schema'
 import { REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createBooleanOperationFields, createMissingInputDiagnostic, expressionCapableAuthoredValue, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import { acceptAuthoredPatch, appendUniqueTarget, asBodyRef, asExtrudeProfileRef, asRevolveAxisRef, asUpToTargetRef, authoredDefinitionValue, authoredNumberFormValue, authoredStringLiteral, createBooleanOperationFields, createMissingInputDiagnostic, createSingleTargetSelectionFilter, expressionCapableAuthoredValue, isFiniteAuthoredNumber, isPositiveAuthoredNumber } from '@/domain/feature-authoring/features/shared'
+import type { FeatureEditorFormField } from '@/domain/feature-authoring/form-schema'
 
-function isRevolveDirection(value: unknown): value is 'clockwise' | 'counterClockwise' {
+const DEFAULT_FIRST_END: RevolveEndCondition = {
+  kind: 'blind',
+  direction: 'counterClockwise',
+  angle: Math.PI * 2,
+}
+
+const DEFAULT_SECOND_END: Exclude<RevolveEndCondition, { kind: 'full' }> = {
+  kind: 'blind',
+  direction: 'clockwise',
+  angle: Math.PI,
+}
+
+function isRevolveDirection(value: unknown): value is AngularExtentDirection {
   return value === 'clockwise' || value === 'counterClockwise'
+}
+
+function isExtentMode(value: unknown): value is 'oneSide' | 'symmetric' | 'twoSide' {
+  return value === 'oneSide' || value === 'symmetric' || value === 'twoSide'
+}
+
+function isEndConditionKind(value: unknown): value is RevolveEndCondition['kind'] {
+  return value === 'full' || value === 'blind' || value === 'upToNext' || value === 'upToFace' || value === 'upToPart' || value === 'upToVertex'
+}
+
+function isOffsetDirection(value: unknown): value is UpToOffsetDirection {
+  return value === 'shorten' || value === 'extend'
+}
+
+function ensureEndSupportsMode(mode: 'oneSide' | 'symmetric' | 'twoSide', end: RevolveEndCondition): RevolveEndCondition {
+  if (mode === 'symmetric' && end.kind !== 'blind') {
+    return DEFAULT_FIRST_END
+  }
+
+  if (mode === 'twoSide' && end.kind === 'full') {
+    return DEFAULT_FIRST_END
+  }
+
+  return end
+}
+
+function coerceTargetForEnd(kind: RevolveEndCondition['kind'], value: unknown) {
+  const target = asUpToTargetRef(value as Parameters<typeof asUpToTargetRef>[0])
+  if (kind === 'upToFace') {
+    return target?.kind === 'face' ? target : null
+  }
+  if (kind === 'upToPart') {
+    return target?.kind === 'body' ? target : null
+  }
+  if (kind === 'upToVertex') {
+    return target?.kind === 'vertex' ? target : null
+  }
+  return null
+}
+
+function patchEnd(end: RevolveEndCondition, patch: Record<string, unknown>, prefix: 'first' | 'second'): RevolveEndCondition {
+  const conditionKey = prefix === 'first' ? 'endCondition' : 'secondEndCondition'
+  const directionKey = prefix === 'first' ? 'direction' : 'secondDirection'
+  const angleKey = prefix === 'first' ? 'angle' : 'secondAngle'
+  const targetKey = prefix === 'first' ? 'upToTarget' : 'secondUpToTarget'
+  const offsetAngleKey = prefix === 'first' ? 'upToOffsetAngle' : 'secondUpToOffsetAngle'
+  const offsetDirectionKey = prefix === 'first' ? 'upToOffsetDirection' : 'secondUpToOffsetDirection'
+  const nextKind = isEndConditionKind(patch[conditionKey]) ? patch[conditionKey] : end.kind
+  const direction = isRevolveDirection(patch[directionKey]) ? patch[directionKey] : 'direction' in end ? end.direction : 'counterClockwise'
+  const offsetAngle = acceptAuthoredPatch(
+    patch[offsetAngleKey],
+    'offset' in end ? end.offset?.angle ?? 0 : 0,
+    (value): value is number => typeof value === 'number',
+  )
+  const offsetDirection = isOffsetDirection(patch[offsetDirectionKey])
+    ? patch[offsetDirectionKey]
+    : 'offset' in end ? end.offset?.direction ?? 'shorten' : 'shorten'
+  const offset = isFiniteAuthoredNumber(offsetAngle) ? { angle: offsetAngle, direction: offsetDirection } : undefined
+
+  if (nextKind === 'full') {
+    return { kind: 'full' }
+  }
+
+  if (nextKind === 'blind') {
+    return {
+      kind: 'blind',
+      direction,
+      angle: acceptAuthoredPatch(patch[angleKey], end.kind === 'blind' ? end.angle : Math.PI * 2, (value): value is number => typeof value === 'number'),
+    }
+  }
+
+  if (nextKind === 'upToNext') {
+    return offset ? { kind: 'upToNext', direction, offset } : { kind: 'upToNext', direction }
+  }
+
+  const target = coerceTargetForEnd(nextKind, patch[targetKey]) ?? ('target' in end ? coerceTargetForEnd(nextKind, end.target) : null)
+  if (nextKind === 'upToFace') {
+    return { kind: 'upToFace', direction, ...(offset ? { offset } : {}), target: target?.kind === 'face' ? target : { kind: 'face', bodyId: '' as never, faceId: '' as never } }
+  }
+  if (nextKind === 'upToPart') {
+    return { kind: 'upToPart', direction, ...(offset ? { offset } : {}), target: target?.kind === 'body' ? target : { kind: 'body', bodyId: '' as never } }
+  }
+  return { kind: 'upToVertex', direction, ...(offset ? { offset } : {}), target: target?.kind === 'vertex' ? target : { kind: 'vertex', bodyId: '' as never, vertexId: '' as never } }
+}
+
+function endHasRequiredTarget(end: RevolveEndCondition) {
+  if (end.kind === 'upToFace') {
+    return end.target.bodyId.length > 0 && end.target.faceId.length > 0
+  }
+  if (end.kind === 'upToPart') {
+    return end.target.bodyId.length > 0
+  }
+  if (end.kind === 'upToVertex') {
+    return end.target.bodyId.length > 0 && end.target.vertexId.length > 0
+  }
+  return true
+}
+
+function endHasValidScalars(end: RevolveEndCondition) {
+  return (end.kind !== 'blind' || isPositiveAuthoredNumber(end.angle))
+    && (!('offset' in end) || end.offset === undefined || isFiniteAuthoredNumber(end.offset.angle))
+}
+
+function definitionEnd(end: RevolveEndCondition): RevolveEndCondition {
+  switch (end.kind) {
+    case 'blind':
+      return { ...end, angle: authoredDefinitionValue(end.angle, Math.PI * 2) }
+    case 'upToNext':
+    case 'upToFace':
+    case 'upToPart':
+    case 'upToVertex':
+      return {
+        ...end,
+        ...(end.offset ? { offset: { ...end.offset, angle: authoredDefinitionValue(end.offset.angle, 0) } } : {}),
+      } as RevolveEndCondition
+    case 'full':
+      return end
+  }
+}
+
+function endConditionLabel(kind: RevolveEndCondition['kind']) {
+  switch (kind) {
+    case 'full':
+      return 'Full'
+    case 'blind':
+      return 'Blind'
+    case 'upToNext':
+      return 'Up to next'
+    case 'upToFace':
+      return 'Up to face'
+    case 'upToPart':
+      return 'Up to part'
+    case 'upToVertex':
+      return 'Up to vertex'
+  }
+}
+
+function endFields(prefix: 'first' | 'second', end: RevolveEndCondition): FeatureEditorFormField[] {
+  const idPrefix = prefix === 'first' ? 'revolve' : 'revolve-second'
+  const labelPrefix = prefix === 'first' ? '' : 'Second '
+  const conditionKey = prefix === 'first' ? 'endCondition' : 'secondEndCondition'
+  const directionKey = prefix === 'first' ? 'direction' : 'secondDirection'
+  const angleKey = prefix === 'first' ? 'angle' : 'secondAngle'
+  const targetKey = prefix === 'first' ? 'upToTarget' : 'secondUpToTarget'
+  const offsetAngleKey = prefix === 'first' ? 'upToOffsetAngle' : 'secondUpToOffsetAngle'
+  const offsetDirectionKey = prefix === 'first' ? 'upToOffsetDirection' : 'secondUpToOffsetDirection'
+  const options = prefix === 'second'
+    ? ['blind', 'upToNext', 'upToFace', 'upToPart', 'upToVertex']
+    : ['full', 'blind', 'upToNext', 'upToFace', 'upToPart', 'upToVertex']
+  const fields: FeatureEditorFormField[] = [
+    {
+      kind: 'enum',
+      id: `${idPrefix}-end-condition`,
+      label: `${labelPrefix}End condition`,
+      value: end.kind,
+      options: options.map((value) => ({ value, label: endConditionLabel(value as RevolveEndCondition['kind']) })),
+      patch: { patchKey: conditionKey },
+    },
+  ]
+
+  if (end.kind === 'full') {
+    return fields
+  }
+
+  if (end.kind === 'blind') {
+    fields.push({
+      kind: 'numeric',
+      id: `${idPrefix}-angle`,
+      label: `${labelPrefix}Angle (degrees)`,
+      value: authoredNumberFormValue(end.angle, (value) => value * (180 / Math.PI)),
+      input: 'angleDegrees',
+      step: 1,
+      directionToggle: {
+        patch: { patchKey: directionKey },
+        value: end.direction,
+        forwardValue: 'counterClockwise',
+        reverseValue: 'clockwise',
+        forwardLabel: 'Counter-clockwise',
+        reverseLabel: 'Clockwise',
+      },
+      authoredValue: expressionCapableAuthoredValue(end.angle, { kind: 'positiveNumber' }),
+      error: isPositiveAuthoredNumber(end.angle) ? null : { message: 'Angle must be greater than zero.' },
+      patch: { patchKey: angleKey },
+    })
+  } else {
+    fields.push({
+      kind: 'enum',
+      id: `${idPrefix}-direction`,
+      label: `${labelPrefix}Direction`,
+      value: end.direction,
+      options: [
+        { value: 'counterClockwise', label: 'Counter-clockwise' },
+        { value: 'clockwise', label: 'Clockwise' },
+      ],
+      patch: { patchKey: directionKey },
+    })
+  }
+
+  if (end.kind === 'upToFace' || end.kind === 'upToPart' || end.kind === 'upToVertex') {
+    const targetKind = end.kind === 'upToFace' ? 'face' : end.kind === 'upToPart' ? 'body' : 'vertex'
+    fields.push({
+      kind: 'referencePicker',
+      id: `${idPrefix}-up-to-target`,
+      label: `${labelPrefix}${endConditionLabel(end.kind)} target`,
+      value: endHasRequiredTarget(end) ? end.target : null,
+      emptyLabel: 'None selected',
+      helper: `Accepted target: one ${targetKind}.`,
+      error: endHasRequiredTarget(end) ? null : { message: `Select one ${targetKind} target.` },
+      picker: {
+        mode: 'replace',
+        allowsMultiple: false,
+        selectionFilter: createSingleTargetSelectionFilter(revolveSelectionFilter, {
+          id: `${idPrefix}-up-to-target`,
+          label: `${labelPrefix}${endConditionLabel(end.kind)} target`,
+          targetKind,
+        }),
+      },
+      patch: { patchKey: targetKey },
+    })
+  }
+
+  if (end.kind === 'upToNext' || end.kind === 'upToFace' || end.kind === 'upToPart' || end.kind === 'upToVertex') {
+    fields.push(
+      {
+        kind: 'numeric',
+        id: `${idPrefix}-up-to-offset`,
+        label: `${labelPrefix}Offset angle (degrees)`,
+        value: authoredNumberFormValue(end.offset?.angle ?? 0, (value) => value * (180 / Math.PI)),
+        input: 'angleDegrees',
+        step: 1,
+        authoredValue: expressionCapableAuthoredValue(end.offset?.angle ?? 0, { kind: 'angle' }),
+        error: end.offset?.angle === undefined || isFiniteAuthoredNumber(end.offset.angle) ? null : { message: 'Offset angle must be finite.' },
+        patch: { patchKey: offsetAngleKey },
+      },
+      {
+        kind: 'enum',
+        id: `${idPrefix}-up-to-offset-direction`,
+        label: `${labelPrefix}Offset direction`,
+        value: end.offset?.direction ?? 'shorten',
+        options: [
+          { value: 'shorten', label: 'Shorten' },
+          { value: 'extend', label: 'Extend' },
+        ],
+        patch: { patchKey: offsetDirectionKey },
+      },
+    )
+  }
+
+  return fields
 }
 
 export const revolveAuthoringDefinition = {
@@ -57,24 +326,28 @@ export const revolveAuthoringDefinition = {
       profileTargets: profileTarget ? [profileTarget] : [],
       axisTarget: asRevolveAxisRef(input.selectedTarget),
       startAngle: 0,
-      angle: Math.PI * 2,
-      direction: 'counterClockwise',
+      extentMode: 'oneSide',
+      firstEnd: DEFAULT_FIRST_END,
+      secondEnd: DEFAULT_SECOND_END,
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     }
   },
   hydrateDraft(feature) {
+    const extent = getRevolveFeatureExtent(feature.parameters)
     return {
       profileTargets: [...feature.parameters.profiles],
       axisTarget: feature.parameters.axis,
       startAngle: feature.parameters.startAngle,
-      angle: feature.parameters.extent.radians,
-      direction: feature.parameters.extent.direction,
+      extentMode: extent.mode,
+      firstEnd: extent.mode === 'twoSide' ? extent.firstEnd : extent.end,
+      secondEnd: extent.mode === 'twoSide' ? extent.secondEnd : DEFAULT_SECOND_END,
       operation: feature.parameters.operation,
       booleanScope: feature.parameters.booleanScope,
     }
   },
   applyPatch(draft, patch) {
+    const extentMode = isExtentMode(patch.extentMode) ? patch.extentMode : draft.extentMode
     return {
       ...draft,
       profileTargets:
@@ -88,8 +361,9 @@ export const revolveAuthoringDefinition = {
       axisTarget:
         patch.axisTarget === undefined ? draft.axisTarget : asRevolveAxisRef(patch.axisTarget as Parameters<typeof asRevolveAxisRef>[0]),
       startAngle: acceptAuthoredPatch(patch.startAngle, draft.startAngle, (value): value is number => typeof value === 'number'),
-      angle: acceptAuthoredPatch(patch.angle, draft.angle, (value): value is number => typeof value === 'number'),
-      direction: isRevolveDirection(patch.direction) ? patch.direction : draft.direction,
+      extentMode,
+      firstEnd: ensureEndSupportsMode(extentMode, patchEnd(draft.firstEnd, patch, 'first')),
+      secondEnd: ensureEndSupportsMode('twoSide', patchEnd(draft.secondEnd, patch, 'second')) as Exclude<RevolveEndCondition, { kind: 'full' }>,
       operation: acceptAuthoredPatch(patch.operation, draft.operation, isBooleanOperation),
       booleanScope: toBooleanScope(patch, draft.booleanScope),
     }
@@ -134,6 +408,27 @@ export const revolveAuthoringDefinition = {
       }))
     }
 
+    if (!endHasValidScalars(input.draft.firstEnd) || !endHasRequiredTarget(input.draft.firstEnd)) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'revolve',
+        phase: input.phase,
+        suffix: 'end-condition',
+        message: 'Complete the active revolve end condition before previewing revolve.',
+      }))
+    }
+
+    if (
+      input.draft.extentMode === 'twoSide'
+      && (!endHasValidScalars(input.draft.secondEnd) || !endHasRequiredTarget(input.draft.secondEnd))
+    ) {
+      diagnostics.push(createMissingInputDiagnostic({
+        feature: 'revolve',
+        phase: input.phase,
+        suffix: 'second-end-condition',
+        message: 'Complete the second revolve end condition before previewing revolve.',
+      }))
+    }
+
     if (!hasBooleanTargetScope(authoredStringLiteral(input.draft.operation, 'newBody'), input.draft.booleanScope)) {
       diagnostics.push(createMissingInputDiagnostic({
         feature: 'revolve',
@@ -147,7 +442,20 @@ export const revolveAuthoringDefinition = {
   },
   buildDefinition(draft) {
     const operation = authoredStringLiteral(draft.operation, 'newBody')
-    return draft.profileTargets.length > 0 && draft.axisTarget && hasBooleanTargetScope(operation, draft.booleanScope)
+    const firstEnd = ensureEndSupportsMode(draft.extentMode, draft.firstEnd)
+    const extent: RevolveFeatureExtent = draft.extentMode === 'twoSide'
+      ? { mode: 'twoSide', firstEnd: definitionEnd(firstEnd) as Exclude<RevolveEndCondition, { kind: 'full' }>, secondEnd: definitionEnd(draft.secondEnd) as Exclude<RevolveEndCondition, { kind: 'full' }> }
+      : draft.extentMode === 'symmetric'
+        ? { mode: 'symmetric', end: definitionEnd(firstEnd) as Extract<RevolveEndCondition, { kind: 'blind' }> }
+        : { mode: 'oneSide', end: definitionEnd(firstEnd) }
+    const legacyAngle = firstEnd.kind === 'blind' ? authoredDefinitionValue(firstEnd.angle, Math.PI * 2) : undefined
+
+    return draft.profileTargets.length > 0
+      && draft.axisTarget
+      && hasBooleanTargetScope(operation, draft.booleanScope)
+      && endHasValidScalars(firstEnd)
+      && endHasRequiredTarget(firstEnd)
+      && (draft.extentMode !== 'twoSide' || (endHasValidScalars(draft.secondEnd) && endHasRequiredTarget(draft.secondEnd)))
       ? {
           kind: 'revolve',
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
@@ -155,12 +463,8 @@ export const revolveAuthoringDefinition = {
             profiles: draft.profileTargets as readonly [typeof draft.profileTargets[number], ...typeof draft.profileTargets[number][]],
             axis: draft.axisTarget,
             startAngle: authoredDefinitionValue(draft.startAngle, 0) as number,
-            extent: {
-              kind: 'angle',
-              direction: draft.direction,
-              radians: authoredDefinitionValue(draft.angle, Math.PI * 2) as number,
-            },
-            angle: authoredDefinitionValue(draft.angle, Math.PI * 2) as number,
+            extent,
+            angle: legacyAngle,
             operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
             booleanScope: draft.booleanScope,
           },
@@ -225,8 +529,21 @@ export const revolveAuthoringDefinition = {
           id: 'parameters',
           title: 'Parameters',
           fields: [
-            { kind: 'numeric', id: 'revolve-angle', label: 'Angle (degrees)', value: authoredNumberFormValue(session.draft.angle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, directionToggle: { patch: { patchKey: 'direction' }, value: session.draft.direction, forwardValue: 'counterClockwise', reverseValue: 'clockwise', forwardLabel: 'Counter-clockwise', reverseLabel: 'Clockwise' }, authoredValue: expressionCapableAuthoredValue(session.draft.angle, { kind: 'positiveNumber' }), error: isPositiveAuthoredNumber(session.draft.angle) ? null : { message: 'Angle must be greater than zero.' }, patch: { patchKey: 'angle' } },
-            { kind: 'numeric', id: 'revolve-start-angle', label: 'Start Angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.startAngle, { kind: 'angle' }), patch: { patchKey: 'startAngle' } },
+            {
+              kind: 'enum',
+              id: 'revolve-extent-mode',
+              label: 'Extent mode',
+              value: session.draft.extentMode,
+              options: [
+                { value: 'oneSide', label: 'One side' },
+                { value: 'symmetric', label: 'Symmetric' },
+                { value: 'twoSide', label: 'Two side' },
+              ],
+              patch: { patchKey: 'extentMode' },
+            },
+            ...endFields('first', ensureEndSupportsMode(session.draft.extentMode, session.draft.firstEnd)),
+            ...(session.draft.extentMode === 'twoSide' ? endFields('second', session.draft.secondEnd) : []),
+            { kind: 'numeric', id: 'revolve-start-angle', label: 'Start angle (degrees)', value: authoredNumberFormValue(session.draft.startAngle, (value) => value * (180 / Math.PI)), input: 'angleDegrees', step: 1, authoredValue: expressionCapableAuthoredValue(session.draft.startAngle, { kind: 'angle' }), patch: { patchKey: 'startAngle' } },
             ...createBooleanOperationFields({
               prefix: 'revolve',
               operation,
