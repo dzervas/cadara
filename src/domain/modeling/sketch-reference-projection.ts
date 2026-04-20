@@ -533,6 +533,12 @@ function projectSketchEntityGeometry(input: {
           }]
         : null
     }
+    case 'ellipse':
+    case 'ellipticalArc':
+    case 'conic':
+    case 'bezierCurve':
+    case 'profileText':
+      return null
   }
 }
 

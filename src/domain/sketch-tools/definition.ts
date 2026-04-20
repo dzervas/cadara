@@ -42,6 +42,16 @@ export type SketchDraftEntity =
       label: string
       isConstruction: boolean
     }
+  | {
+      id: string
+      kind: 'polyline'
+      points: readonly SketchPoint[]
+      isClosed: boolean
+      entityId: SketchEntityId | null
+      status: 'preview' | 'accepted'
+      label: string
+      isConstruction: boolean
+    }
 
 export interface SketchToolMetadata<TToolId extends SketchToolId = SketchToolId> {
   id: TToolId

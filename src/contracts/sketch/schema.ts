@@ -180,6 +180,113 @@ export type SketchEntityDefinition =
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition
     }
+  | {
+      kind: 'ellipse'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** True when the curve is construction-only and should not generate derived regions. */
+      isConstruction: boolean
+      /** Ellipse center-point reference. Must exist in `SketchDefinition.pointIds`. */
+      centerPointId: SketchPointId
+      /** Endpoint of the major-axis radius vector. Must exist in `SketchDefinition.pointIds`. */
+      majorAxisPointId: SketchPointId
+      /** Authored minor radius in sketch-plane units. Must be greater than zero. */
+      minorRadius: number
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
+  | {
+      kind: 'ellipticalArc'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** True when the curve is construction-only and should not generate derived regions. */
+      isConstruction: boolean
+      /** Ellipse center-point reference. Must exist in `SketchDefinition.pointIds`. */
+      centerPointId: SketchPointId
+      /** Endpoint of the major-axis radius vector. Must exist in `SketchDefinition.pointIds`. */
+      majorAxisPointId: SketchPointId
+      /** Arc start-point reference. Must exist in `SketchDefinition.pointIds`. */
+      startPointId: SketchPointId
+      /** Arc end-point reference. Must exist in `SketchDefinition.pointIds`. */
+      endPointId: SketchPointId
+      /** Authored minor radius in sketch-plane units. Must be greater than zero. */
+      minorRadius: number
+      /** Sweep direction from start to end around `centerPointId`. */
+      sweepDirection: 'clockwise' | 'counterClockwise'
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
+  | {
+      kind: 'conic'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** True when the curve is construction-only and should not generate derived regions. */
+      isConstruction: boolean
+      /** Conic start-point reference. Must exist in `SketchDefinition.pointIds`. */
+      startPointId: SketchPointId
+      /** Conic control-point reference. Must exist in `SketchDefinition.pointIds`. */
+      controlPointId: SketchPointId
+      /** Conic end-point reference. Must exist in `SketchDefinition.pointIds`. */
+      endPointId: SketchPointId
+      /** Positive conic weight/rho preserving the authored conic family. */
+      rho: number
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
+  | {
+      kind: 'bezierCurve'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** True when the curve is construction-only and should not generate derived regions. */
+      isConstruction: boolean
+      /** Ordered Bezier control points. Quadratic curves use 3 points; cubic curves use 4. */
+      controlPointIds: readonly SketchPointId[]
+      /** Polynomial degree for this Bezier representation. */
+      degree: 2 | 3
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
+  | {
+      kind: 'profileText'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** True when the text is construction-only and should not generate derived regions. */
+      isConstruction: boolean
+      /** Text baseline anchor. Must exist in `SketchDefinition.pointIds`. */
+      anchorPointId: SketchPointId
+      /** Authored text content. Must contain at least one non-whitespace character. */
+      text: string
+      /** Text cap-height in sketch-plane units. Must be greater than zero. */
+      height: number
+      /** Baseline rotation in sketch-plane radians. */
+      rotationRadians: number
+      /** Horizontal placement of the generated outline relative to `anchorPointId`. */
+      horizontalAlign: 'left' | 'center' | 'right'
+      /** Vertical placement of the generated outline relative to `anchorPointId`. */
+      verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom'
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
 
 export type LocalSketchPointConstraintOperand = {
   kind: 'localPoint'
@@ -741,6 +848,78 @@ export type SolvedSketchEntityGeometryRecord =
       fitPoints: readonly SketchPoint2D[]
       /** Polynomial degree reported for the solved spline representation. */
       degree: 2 | 3
+    }
+  | {
+      /** Authored entity identity whose solved geometry is being reported. */
+      entityId: SketchEntityId
+      /** Stable discriminant for solved ellipse geometry. */
+      kind: 'ellipse'
+      /** Solver-computed center point in sketch-plane units. */
+      centerPosition: SketchPoint2D
+      /** Solver-computed endpoint of the major-axis radius vector. */
+      majorAxisEndpointPosition: SketchPoint2D
+      /** Solver-computed minor radius in sketch-plane units. */
+      minorRadius: number
+    }
+  | {
+      /** Authored entity identity whose solved geometry is being reported. */
+      entityId: SketchEntityId
+      /** Stable discriminant for solved elliptical arc geometry. */
+      kind: 'ellipticalArc'
+      /** Solver-computed center point in sketch-plane units. */
+      centerPosition: SketchPoint2D
+      /** Solver-computed endpoint of the major-axis radius vector. */
+      majorAxisEndpointPosition: SketchPoint2D
+      /** Solver-computed arc start point in sketch-plane units. */
+      startPosition: SketchPoint2D
+      /** Solver-computed arc end point in sketch-plane units. */
+      endPosition: SketchPoint2D
+      /** Solver-computed minor radius in sketch-plane units. */
+      minorRadius: number
+      /** Solver-computed sweep direction from start to end. */
+      sweepDirection: 'clockwise' | 'counterClockwise'
+    }
+  | {
+      /** Authored entity identity whose solved geometry is being reported. */
+      entityId: SketchEntityId
+      /** Stable discriminant for solved conic geometry. */
+      kind: 'conic'
+      /** Solver-computed start point in sketch-plane units. */
+      startPosition: SketchPoint2D
+      /** Solver-computed control point in sketch-plane units. */
+      controlPosition: SketchPoint2D
+      /** Solver-computed end point in sketch-plane units. */
+      endPosition: SketchPoint2D
+      /** Positive conic weight/rho preserving the authored conic family. */
+      rho: number
+    }
+  | {
+      /** Authored entity identity whose solved geometry is being reported. */
+      entityId: SketchEntityId
+      /** Stable discriminant for solved Bezier geometry. */
+      kind: 'bezierCurve'
+      /** Solver-computed Bezier control points in sketch-plane units. */
+      controlPoints: readonly SketchPoint2D[]
+      /** Polynomial degree reported for this Bezier representation. */
+      degree: 2 | 3
+    }
+  | {
+      /** Authored entity identity whose solved geometry is being reported. */
+      entityId: SketchEntityId
+      /** Stable discriminant for solved profile text geometry. */
+      kind: 'profileText'
+      /** Solver-computed text anchor in sketch-plane units. */
+      anchorPosition: SketchPoint2D
+      /** Authored text content preserved for deterministic outline generation. */
+      text: string
+      /** Text cap-height in sketch-plane units. */
+      height: number
+      /** Baseline rotation in sketch-plane radians. */
+      rotationRadians: number
+      /** Horizontal placement of the generated outline relative to `anchorPosition`. */
+      horizontalAlign: 'left' | 'center' | 'right'
+      /** Vertical placement of the generated outline relative to `anchorPosition`. */
+      verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom'
     }
 
 /**

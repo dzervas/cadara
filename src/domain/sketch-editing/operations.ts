@@ -202,6 +202,12 @@ function getCurveDescriptor(
           }
         : null
     }
+    case 'ellipse':
+    case 'ellipticalArc':
+    case 'conic':
+    case 'bezierCurve':
+    case 'profileText':
+      return null
   }
 }
 

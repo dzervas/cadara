@@ -16,6 +16,7 @@ import type {
   RenderPoint3D,
   RenderableEntityRecord,
 } from '@/contracts/render/schema'
+import type { SolvedSketchEntityGeometryRecord } from '@/contracts/sketch/schema'
 import type {
   BodyId,
   EdgeId,
@@ -79,9 +80,11 @@ const CONSTRUCTION_PICK_PRIORITY = 40
 const DEFAULT_EDGE_SAMPLE_COUNT = 33
 const DEFAULT_CIRCLE_SAMPLE_COUNT = 64
 const DEFAULT_ARC_SAMPLE_COUNT = 33
+const DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT = 64
 const DEFAULT_POINT_DISPLAY_RADIUS = 0.25
 const DEFAULT_LINEAR_DEFLECTION = 0.1
 const DEFAULT_ANGULAR_DEFLECTION = 0.5
+const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 function sanitizeIdSegment(value: string) {
   return value
@@ -1187,6 +1190,148 @@ function sampleCirclePoints(
   return points
 }
 
+function sampleEllipsePoints(
+  center: readonly [number, number],
+  majorAxisEndpoint: readonly [number, number],
+  minorRadius: number,
+  sampleCount: number,
+) {
+  const majorVector = [
+    majorAxisEndpoint[0] - center[0],
+    majorAxisEndpoint[1] - center[1],
+  ] as const
+  const majorRadius = Math.hypot(majorVector[0], majorVector[1])
+  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
+    return []
+  }
+
+  const majorUnit = [majorVector[0] / majorRadius, majorVector[1] / majorRadius] as const
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / sampleCount
+    return [
+      center[0] + Math.cos(angle) * majorRadius * majorUnit[0] + Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] + Math.cos(angle) * majorRadius * majorUnit[1] + Math.sin(angle) * minorRadius * minorUnit[1],
+    ] as const
+  })
+}
+
+function sampleEllipticalArcPoints(
+  center: readonly [number, number],
+  majorAxisEndpoint: readonly [number, number],
+  start: readonly [number, number],
+  end: readonly [number, number],
+  minorRadius: number,
+  sweepDirection: 'clockwise' | 'counterClockwise',
+  sampleCount: number,
+) {
+  const majorVector = [
+    majorAxisEndpoint[0] - center[0],
+    majorAxisEndpoint[1] - center[1],
+  ] as const
+  const majorRadius = Math.hypot(majorVector[0], majorVector[1])
+  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
+    return []
+  }
+
+  const majorUnit = [majorVector[0] / majorRadius, majorVector[1] / majorRadius] as const
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const
+  const ellipseAngle = (point: readonly [number, number]) => {
+    const delta = [point[0] - center[0], point[1] - center[1]] as const
+    return Math.atan2(
+      (delta[0] * minorUnit[0] + delta[1] * minorUnit[1]) / minorRadius,
+      (delta[0] * majorUnit[0] + delta[1] * majorUnit[1]) / majorRadius,
+    )
+  }
+  const startAngle = ellipseAngle(start)
+  const endAngle = ellipseAngle(end)
+  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection)
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1)
+    const angle = sweepDirection === 'counterClockwise'
+      ? startAngle + sweep * alpha
+      : startAngle - sweep * alpha
+    return [
+      center[0] + Math.cos(angle) * majorRadius * majorUnit[0] + Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] + Math.cos(angle) * majorRadius * majorUnit[1] + Math.sin(angle) * minorRadius * minorUnit[1],
+    ] as const
+  })
+}
+
+function sampleConicPoints(
+  start: readonly [number, number],
+  control: readonly [number, number],
+  end: readonly [number, number],
+  rho: number,
+  sampleCount: number,
+) {
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
+    const oneMinusT = 1 - t
+    const startWeight = oneMinusT * oneMinusT
+    const controlWeight = 2 * rho * oneMinusT * t
+    const endWeight = t * t
+    const weight = startWeight + controlWeight + endWeight
+    return [
+      (startWeight * start[0] + controlWeight * control[0] + endWeight * end[0]) / weight,
+      (startWeight * start[1] + controlWeight * control[1] + endWeight * end[1]) / weight,
+    ] as const
+  })
+}
+
+function sampleBezierPoints(
+  controlPoints: readonly (readonly [number, number])[],
+  sampleCount: number,
+) {
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
+    const oneMinusT = 1 - t
+    if (controlPoints.length === 3) {
+      const [p0, p1, p2] = controlPoints
+      return [
+        oneMinusT * oneMinusT * p0![0] + 2 * oneMinusT * t * p1![0] + t * t * p2![0],
+        oneMinusT * oneMinusT * p0![1] + 2 * oneMinusT * t * p1![1] + t * t * p2![1],
+      ] as const
+    }
+
+    const [p0, p1, p2, p3] = controlPoints
+    return [
+      oneMinusT ** 3 * p0![0] + 3 * oneMinusT * oneMinusT * t * p1![0] + 3 * oneMinusT * t * t * p2![0] + t ** 3 * p3![0],
+      oneMinusT ** 3 * p0![1] + 3 * oneMinusT * oneMinusT * t * p1![1] + 3 * oneMinusT * t * t * p2![1] + t ** 3 * p3![1],
+    ] as const
+  })
+}
+
+function sampleProfileTextOutlinePoints(entity: Extract<SolvedSketchEntityGeometryRecord, { kind: 'profileText' }>) {
+  const width = Math.max(entity.height * PROFILE_TEXT_WIDTH_FACTOR, entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR)
+  const x = entity.horizontalAlign === 'center'
+    ? -width / 2
+    : entity.horizontalAlign === 'right'
+      ? -width
+      : 0
+  const y = entity.verticalAlign === 'middle'
+    ? -entity.height / 2
+    : entity.verticalAlign === 'top'
+      ? -entity.height
+      : entity.verticalAlign === 'baseline'
+        ? -entity.height * 0.2
+        : 0
+  const cos = Math.cos(entity.rotationRadians)
+  const sin = Math.sin(entity.rotationRadians)
+
+  return [
+    [x, y],
+    [x + width, y],
+    [x + width, y + entity.height],
+    [x, y + entity.height],
+  ].map((point) => [
+    entity.anchorPosition[0] + point[0]! * cos - point[1]! * sin,
+    entity.anchorPosition[1] + point[0]! * sin + point[1]! * cos,
+  ] as const)
+}
+
 function normalizeAngle(angle: number) {
   while (angle < 0) {
     angle += Math.PI * 2
@@ -1292,6 +1437,42 @@ function buildSketchCurveRenderRecords(
         break
       case 'spline':
         points2D = entity.fitPoints
+        break
+      case 'ellipse':
+        points2D = sampleEllipsePoints(
+          entity.centerPosition,
+          entity.majorAxisEndpointPosition,
+          entity.minorRadius,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        )
+        isClosed = true
+        break
+      case 'ellipticalArc':
+        points2D = sampleEllipticalArcPoints(
+          entity.centerPosition,
+          entity.majorAxisEndpointPosition,
+          entity.startPosition,
+          entity.endPosition,
+          entity.minorRadius,
+          entity.sweepDirection,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        )
+        break
+      case 'conic':
+        points2D = sampleConicPoints(
+          entity.startPosition,
+          entity.controlPosition,
+          entity.endPosition,
+          entity.rho,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        )
+        break
+      case 'bezierCurve':
+        points2D = sampleBezierPoints(entity.controlPoints, DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT)
+        break
+      case 'profileText':
+        points2D = sampleProfileTextOutlinePoints(entity)
+        isClosed = true
         break
     }
 

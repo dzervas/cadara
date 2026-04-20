@@ -67,6 +67,8 @@ type RingBoundarySegment = {
 }
 
 const CIRCLE_REGION_SAMPLE_COUNT = 64
+const ADVANCED_REGION_SAMPLE_COUNT = 64
+const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 function projectedKindForGeometry(geometry: ProjectedSketchReferenceGeometry): NonNullable<RegionBoundarySegmentRecord['source'] extends infer Source
   ? Source extends { kind: 'projectedGeometry'; reference: infer Reference }
@@ -177,6 +179,73 @@ function signedArea(points: SketchPoint2D[]) {
     area += start[0] * end[1] - end[0] * start[1]
   }
   return area / 2
+}
+
+function rotatePoint(point: SketchPoint2D, angle: number): SketchPoint2D {
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  return [
+    point[0] * cos - point[1] * sin,
+    point[0] * sin + point[1] * cos,
+  ]
+}
+
+function addPoint(left: SketchPoint2D, right: SketchPoint2D): SketchPoint2D {
+  return [left[0] + right[0], left[1] + right[1]]
+}
+
+function subtractPoint(left: SketchPoint2D, right: SketchPoint2D): SketchPoint2D {
+  return [left[0] - right[0], left[1] - right[1]]
+}
+
+function sampleEllipsePoints(
+  center: SketchPoint2D,
+  majorAxisEndpoint: SketchPoint2D,
+  minorRadius: number,
+  count: number,
+): SketchPoint2D[] {
+  const major = subtractPoint(majorAxisEndpoint, center)
+  const majorRadius = Math.hypot(major[0], major[1])
+  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
+    return []
+  }
+
+  const majorUnit: SketchPoint2D = [major[0] / majorRadius, major[1] / majorRadius]
+  const minorUnit: SketchPoint2D = [-majorUnit[1], majorUnit[0]]
+
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / count
+    return [
+      center[0] + Math.cos(angle) * majorRadius * majorUnit[0] + Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] + Math.cos(angle) * majorRadius * majorUnit[1] + Math.sin(angle) * minorRadius * minorUnit[1],
+    ]
+  })
+}
+
+function getProfileTextOutlinePoints(
+  entity: Extract<SolvedSketchEntityGeometryRecord, { kind: 'profileText' }>,
+): SketchPoint2D[] {
+  const width = Math.max(entity.height * PROFILE_TEXT_WIDTH_FACTOR, entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR)
+  const x = entity.horizontalAlign === 'center'
+    ? -width / 2
+    : entity.horizontalAlign === 'right'
+      ? -width
+      : 0
+  const y = entity.verticalAlign === 'middle'
+    ? -entity.height / 2
+    : entity.verticalAlign === 'top'
+      ? -entity.height
+      : entity.verticalAlign === 'baseline'
+        ? -entity.height * 0.2
+        : 0
+  const local: SketchPoint2D[] = [
+    [x, y],
+    [x + width, y],
+    [x + width, y + entity.height],
+    [x, y + entity.height],
+  ]
+
+  return local.map((point) => addPoint(entity.anchorPosition, rotatePoint(point, entity.rotationRadians)))
 }
 
 function pointInPolygon(point: SketchPoint2D, polygon: SketchPoint2D[]) {
@@ -456,6 +525,52 @@ function buildCircleRings(
   return [...localCircleRings, ...projectedCircleRings]
 }
 
+function buildAdvancedClosedRings(
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+) {
+  const authoredById = new Map(definition.entities.map((entity) => [entity.entityId, entity]))
+
+  return solvedSnapshot.solvedEntities.flatMap((entity) => {
+    const authored = authoredById.get(entity.entityId)
+    if (!authored || authored.isConstruction) {
+      return []
+    }
+
+    let points: SketchPoint2D[]
+    if (entity.kind === 'ellipse') {
+      points = sampleEllipsePoints(
+        entity.centerPosition,
+        entity.majorAxisEndpointPosition,
+        entity.minorRadius,
+        ADVANCED_REGION_SAMPLE_COUNT,
+      )
+    } else if (entity.kind === 'profileText') {
+      points = getProfileTextOutlinePoints(entity)
+    } else {
+      return []
+    }
+
+    if (points.length < 3) {
+      return []
+    }
+
+    return [{
+      kind: 'segments' as const,
+      boundarySegments: [{
+        source: { kind: 'entity' as const, entityId: entity.entityId },
+        startPointId: null,
+        endPointId: null,
+        traversalDirection: 'forward' as const,
+      }],
+      boundaryEntityIds: [entity.entityId],
+      boundaryPointIds: [],
+      points,
+      signedArea: signedArea(points),
+    } satisfies SketchRingCandidate]
+  })
+}
+
 function findNextSegment(
   segments: SegmentRecord[],
   current: SegmentRecord,
@@ -493,7 +608,10 @@ export function findSketchRings(
   const allSegments = [...initialSegments, ...initialSegments.map(reverseSegment)]
 
   const used = new Set<number>()
-  const rings: SketchRingCandidate[] = buildCircleRings(definition, solvedSnapshot, authoredProjectedReferences)
+  const rings: SketchRingCandidate[] = [
+    ...buildCircleRings(definition, solvedSnapshot, authoredProjectedReferences),
+    ...buildAdvancedClosedRings(definition, solvedSnapshot),
+  ]
 
   for (const [segmentIndex, segment] of allSegments.entries()) {
     if (used.has(segmentIndex)) {
@@ -660,8 +778,32 @@ export function deriveSketchRegionsCore(
 
   return {
     regions,
-    diagnostics: createProjectedReferenceRegionDiagnostics(input.definition, projectedReferences),
+    diagnostics: [
+      ...createProjectedReferenceRegionDiagnostics(input.definition, projectedReferences),
+      ...createUnsupportedAdvancedProfileDiagnostics(input.definition),
+    ],
   }
+}
+
+function createUnsupportedAdvancedProfileDiagnostics(
+  definition: SketchDefinition,
+): SketchSolveDiagnostic[] {
+  return definition.entities.flatMap((entity) => {
+    if (entity.isConstruction || entity.kind === 'ellipse' || entity.kind === 'profileText') {
+      return []
+    }
+
+    if (entity.kind !== 'ellipticalArc' && entity.kind !== 'conic' && entity.kind !== 'bezierCurve') {
+      return []
+    }
+
+    return [makeDiagnostic(
+      'unsupported-profile-entity',
+      'warning',
+      `${entity.kind} ${entity.entityId} is valid sketch geometry, but profile extraction does not yet convert it into selectable boundaries.`,
+      { kind: 'entity', entityId: entity.entityId },
+    )]
+  })
 }
 
 function createProjectedReferenceRegionDiagnostics(

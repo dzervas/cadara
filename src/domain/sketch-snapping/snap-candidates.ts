@@ -151,7 +151,7 @@ export function collectSketchSnapGeometries(input: {
     const source: SketchSnapSourceRef = {
       kind: 'localEntity',
       entityId: entity.entityId,
-      geometryKind: entity.kind,
+      geometryKind: entity.kind as Extract<SketchSnapSourceRef, { kind: 'localEntity' }>['geometryKind'],
     }
 
     switch (entity.kind) {
@@ -222,6 +222,12 @@ export function collectSketchSnapGeometries(input: {
             }]
           : []
       }
+      case 'ellipse':
+      case 'ellipticalArc':
+      case 'conic':
+      case 'bezierCurve':
+      case 'profileText':
+        return []
     }
   })
   const projectedGeometries = (input.projectedReferences ?? []).flatMap((reference): SketchSnapGeometry[] => {

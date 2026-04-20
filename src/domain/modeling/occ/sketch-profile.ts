@@ -3,6 +3,7 @@ import type {
   RegionBoundarySegmentRecord,
   SolvedSketchEntityGeometryRecord,
   SketchRecord,
+  SketchPoint2D,
 } from '@/contracts/sketch/schema'
 import type {
   ProjectedSketchReferenceGeometry,
@@ -49,7 +50,16 @@ interface ClosedBoundarySegmentGeometry {
   segmentId: string
 }
 
-type BoundarySegmentGeometry = OpenBoundarySegmentGeometry | ClosedBoundarySegmentGeometry
+interface ClosedPolylineBoundarySegmentGeometry {
+  kind: 'closedPolyline'
+  segmentId: string
+  points: Vec3[]
+}
+
+type BoundarySegmentGeometry = OpenBoundarySegmentGeometry | ClosedBoundarySegmentGeometry | ClosedPolylineBoundarySegmentGeometry
+
+const ADVANCED_PROFILE_SAMPLE_COUNT = 64
+const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 function getSolvedEntityGeometry(
   sketch: SketchRecord,
@@ -141,11 +151,90 @@ function toBoundarySegmentGeometry(
         kind: 'closed',
         segmentId: geometry.entityId,
       }
+    case 'ellipse': {
+      const points = sampleEllipsePoints(
+        geometry.centerPosition,
+        geometry.majorAxisEndpointPosition,
+        geometry.minorRadius,
+        ADVANCED_PROFILE_SAMPLE_COUNT,
+      )
+      return {
+        kind: 'closedPolyline',
+        segmentId: geometry.entityId,
+        points: points.map((point) => mapSketchPointToWorld(plane, point)),
+      }
+    }
+    case 'profileText':
+      return {
+        kind: 'closedPolyline',
+        segmentId: geometry.entityId,
+        points: getProfileTextOutlinePoints(geometry).map((point) => mapSketchPointToWorld(plane, point)),
+      }
     case 'point':
       throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
     case 'spline':
       throw new Error(`Spline entity ${geometry.entityId} cannot define a profile boundary.`)
+    case 'ellipticalArc':
+      throw new Error(`Elliptical arc entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+    case 'conic':
+      throw new Error(`Conic entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+    case 'bezierCurve':
+      throw new Error(`Bezier curve entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
   }
+}
+
+function sampleEllipsePoints(
+  center: SketchPoint2D,
+  majorAxisEndpoint: SketchPoint2D,
+  minorRadius: number,
+  sampleCount: number,
+): SketchPoint2D[] {
+  const major = [majorAxisEndpoint[0] - center[0], majorAxisEndpoint[1] - center[1]] as const
+  const majorRadius = Math.hypot(major[0], major[1])
+  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
+    return []
+  }
+
+  const majorUnit = [major[0] / majorRadius, major[1] / majorRadius] as const
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / sampleCount
+    return [
+      center[0] + Math.cos(angle) * majorRadius * majorUnit[0] + Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] + Math.cos(angle) * majorRadius * majorUnit[1] + Math.sin(angle) * minorRadius * minorUnit[1],
+    ]
+  })
+}
+
+function getProfileTextOutlinePoints(
+  entity: Extract<SolvedSketchEntityGeometryRecord, { kind: 'profileText' }>,
+): SketchPoint2D[] {
+  const width = Math.max(entity.height * PROFILE_TEXT_WIDTH_FACTOR, entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR)
+  const x = entity.horizontalAlign === 'center'
+    ? -width / 2
+    : entity.horizontalAlign === 'right'
+      ? -width
+      : 0
+  const y = entity.verticalAlign === 'middle'
+    ? -entity.height / 2
+    : entity.verticalAlign === 'top'
+      ? -entity.height
+      : entity.verticalAlign === 'baseline'
+        ? -entity.height * 0.2
+        : 0
+  const cos = Math.cos(entity.rotationRadians)
+  const sin = Math.sin(entity.rotationRadians)
+
+  return [
+    [x, y],
+    [x + width, y],
+    [x + width, y + entity.height],
+    [x, y + entity.height],
+  ].map((point) => [
+    entity.anchorPosition[0] + point[0]! * cos - point[1]! * sin,
+    entity.anchorPosition[1] + point[0]! * sin + point[1]! * cos,
+  ])
 }
 
 function arePointsCoincident(left: Vec3, right: Vec3) {
@@ -165,6 +254,13 @@ function assertLoopGeometryIsClosed(
       return
     }
 
+    if (onlySegment.kind === 'closedPolyline') {
+      if (onlySegment.points.length >= 3) {
+        return
+      }
+      throw new Error(`Region loop ${loop.loopId} does not contain enough sampled profile points.`)
+    }
+
     if (arePointsCoincident(onlySegment.start, onlySegment.end)) {
       return
     }
@@ -173,7 +269,7 @@ function assertLoopGeometryIsClosed(
   }
 
   for (const segment of segments) {
-    if (segment.kind === 'closed') {
+    if (segment.kind === 'closed' || segment.kind === 'closedPolyline') {
       throw new Error(`Closed curve segment ${segment.segmentId} cannot participate in multi-segment loop ${loop.loopId}.`)
     }
   }
@@ -300,6 +396,18 @@ function buildArcEdgeFromSketchGeometry(
   return builder.Edge()
 }
 
+function addClosedPolylineEdges(
+  oc: OpenCascadeInstance,
+  wireBuilder: { Add_1(edge: unknown): void },
+  geometry: ClosedPolylineBoundarySegmentGeometry,
+) {
+  for (let index = 0; index < geometry.points.length; index += 1) {
+    const start = geometry.points[index]!
+    const end = geometry.points[(index + 1) % geometry.points.length]!
+    wireBuilder.Add_1(buildLineEdgeFromWorld(oc, start, end))
+  }
+}
+
 function getProjectedSegmentId(source: Extract<RegionBoundarySegmentRecord['source'], { kind: 'projectedGeometry' }>) {
   return `${source.reference.referenceId}/${source.reference.geometryId}`
 }
@@ -417,6 +525,10 @@ function getLoopSegmentTraversal(
   const baseGeometry = toBoundarySegmentGeometry(plane, geometry)
 
   if (baseGeometry.kind === 'closed') {
+    return baseGeometry
+  }
+
+  if (baseGeometry.kind === 'closedPolyline') {
     return baseGeometry
   }
 
@@ -591,8 +703,23 @@ function buildLoopWire(
           wireBuilder.Add_1(edge)
           break
         }
+        case 'ellipse':
+        case 'profileText':
+          if (segmentGeometry.kind !== 'closedPolyline') {
+            throw new Error(`Advanced entity ${geometry.entityId} did not resolve to closed profile geometry.`)
+          }
+          addClosedPolylineEdges(oc, wireBuilder, segmentGeometry)
+          break
         case 'point':
           throw new Error(`Point entity ${geometry.entityId} cannot define a profile boundary.`)
+        case 'spline':
+          throw new Error(`Spline entity ${geometry.entityId} cannot define a profile boundary.`)
+        case 'ellipticalArc':
+          throw new Error(`Elliptical arc entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+        case 'conic':
+          throw new Error(`Conic entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
+        case 'bezierCurve':
+          throw new Error(`Bezier curve entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`)
       }
     }
   }

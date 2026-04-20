@@ -160,6 +160,75 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     degree: z.union([z.literal(2), z.literal(3)]),
     style: sketchStyleDefinitionSchema.optional(),
   }),
+  z.object({
+    kind: z.literal('ellipse'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    centerPointId: sketchPointIdSchema,
+    majorAxisPointId: sketchPointIdSchema,
+    minorRadius: positiveNumberSchema('Ellipse minor radius must be positive.'),
+    style: sketchStyleDefinitionSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal('ellipticalArc'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    centerPointId: sketchPointIdSchema,
+    majorAxisPointId: sketchPointIdSchema,
+    startPointId: sketchPointIdSchema,
+    endPointId: sketchPointIdSchema,
+    minorRadius: positiveNumberSchema('Elliptical arc minor radius must be positive.'),
+    sweepDirection: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
+    style: sketchStyleDefinitionSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal('conic'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    startPointId: sketchPointIdSchema,
+    controlPointId: sketchPointIdSchema,
+    endPointId: sketchPointIdSchema,
+    rho: positiveNumberSchema('Conic rho must be positive.'),
+    style: sketchStyleDefinitionSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal('bezierCurve'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    controlPointIds: z.array(sketchPointIdSchema).min(3).max(4),
+    degree: z.union([z.literal(2), z.literal(3)]),
+    style: sketchStyleDefinitionSchema.optional(),
+  }).superRefine((value, ctx) => {
+    if (value.controlPointIds.length !== value.degree + 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Bezier control point count must equal degree + 1.',
+        path: ['controlPointIds'],
+      })
+    }
+  }),
+  z.object({
+    kind: z.literal('profileText'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.boolean(),
+    anchorPointId: sketchPointIdSchema,
+    text: z.string().trim().min(1, 'Profile text content must not be empty.'),
+    height: positiveNumberSchema('Profile text height must be positive.'),
+    rotationRadians: z.number(),
+    horizontalAlign: z.union([z.literal('left'), z.literal('center'), z.literal('right')]),
+    verticalAlign: z.union([z.literal('baseline'), z.literal('middle'), z.literal('top'), z.literal('bottom')]),
+    style: sketchStyleDefinitionSchema.optional(),
+  }),
 ]).transform((value) => value as SketchEntityDefinition)
 
 const localSketchPointConstraintOperandSchema = z.object({
@@ -456,6 +525,89 @@ const regionRecordSchema = z.object({
   sourceSketch: z.object({ kind: z.literal('sketch'), sketchId: sketchIdSchema }),
 }).passthrough().transform((value) => value as unknown as RegionRecord)
 
+const solvedSketchEntityGeometrySchema = z.discriminatedUnion('kind', [
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('point'),
+    solvedPosition: point2dSchema,
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('lineSegment'),
+    startPosition: point2dSchema,
+    endPosition: point2dSchema,
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('circle'),
+    centerPosition: point2dSchema,
+    solvedRadius: positiveNumberSchema('Solved circle radius must be positive.'),
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('arc'),
+    centerPosition: point2dSchema,
+    startPosition: point2dSchema,
+    endPosition: point2dSchema,
+    sweepDirection: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('spline'),
+    fitPoints: z.array(point2dSchema).min(3),
+    degree: z.union([z.literal(2), z.literal(3)]),
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('ellipse'),
+    centerPosition: point2dSchema,
+    majorAxisEndpointPosition: point2dSchema,
+    minorRadius: positiveNumberSchema('Solved ellipse minor radius must be positive.'),
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('ellipticalArc'),
+    centerPosition: point2dSchema,
+    majorAxisEndpointPosition: point2dSchema,
+    startPosition: point2dSchema,
+    endPosition: point2dSchema,
+    minorRadius: positiveNumberSchema('Solved elliptical arc minor radius must be positive.'),
+    sweepDirection: z.union([z.literal('clockwise'), z.literal('counterClockwise')]),
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('conic'),
+    startPosition: point2dSchema,
+    controlPosition: point2dSchema,
+    endPosition: point2dSchema,
+    rho: positiveNumberSchema('Solved conic rho must be positive.'),
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('bezierCurve'),
+    controlPoints: z.array(point2dSchema).min(3).max(4),
+    degree: z.union([z.literal(2), z.literal(3)]),
+  }).superRefine((value, ctx) => {
+    if (value.controlPoints.length !== value.degree + 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Solved Bezier control point count must equal degree + 1.',
+        path: ['controlPoints'],
+      })
+    }
+  }),
+  z.object({
+    entityId: sketchEntityIdSchema,
+    kind: z.literal('profileText'),
+    anchorPosition: point2dSchema,
+    text: z.string().trim().min(1, 'Solved profile text content must not be empty.'),
+    height: positiveNumberSchema('Solved profile text height must be positive.'),
+    rotationRadians: z.number(),
+    horizontalAlign: z.union([z.literal('left'), z.literal('center'), z.literal('right')]),
+    verticalAlign: z.union([z.literal('baseline'), z.literal('middle'), z.literal('top'), z.literal('bottom')]),
+  }),
+])
+
 export const sketchRecordSchema = z.object({
   sketchId: sketchIdSchema,
   sketchLabel: z.string(),
@@ -470,20 +622,36 @@ export const sketchRecordSchema = z.object({
 
 export const solvedSketchSnapshotSchema = z.object({
   schemaVersion: solvedSketchSchemaVersionSchema,
-  points: z.array(z.object({
+  status: z.object({
+    solveState: z.union([z.literal('notEvaluated'), z.literal('solved'), z.literal('partiallySolved'), z.literal('failed')]),
+    constraintState: z.union([
+      z.literal('unknown'),
+      z.literal('underConstrained'),
+      z.literal('wellConstrained'),
+      z.literal('overConstrained'),
+      z.literal('inconsistent'),
+    ]),
+  }),
+  solvedPoints: z.array(z.object({
     pointId: sketchPointIdSchema,
     target: sketchPointRefSchema,
     solvedPosition: point2dSchema,
   }).passthrough()),
-  entities: z.array(z.object({
-    entityId: sketchEntityIdSchema,
-    target: sketchEntityRefSchema,
-  }).passthrough()),
-  constraints: z.array(z.object({
+  solvedEntities: z.array(solvedSketchEntityGeometrySchema),
+  constraintStatuses: z.array(z.object({
     constraintId: constraintIdSchema,
+    status: z.union([z.literal('satisfied'), z.literal('unsatisfied'), z.literal('conflicting')]),
   }).passthrough()),
-  dimensions: z.array(z.object({
+  dimensionStatuses: z.array(z.object({
     dimensionId: dimensionIdSchema,
+    status: z.union([z.literal('driving'), z.literal('driven'), z.literal('unsatisfied')]),
+    solvedValue: z.number().nullable(),
+  }).passthrough()),
+  diagnostics: z.array(z.object({
+    code: z.string(),
+    severity: z.union([z.literal('info'), z.literal('warning'), z.literal('error')]),
+    message: z.string(),
+    target: z.unknown().nullable(),
   }).passthrough()),
 }).passthrough().transform((value) => value as unknown as SolvedSketchSnapshot)
 

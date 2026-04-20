@@ -569,6 +569,81 @@ function solvedGeometryForEntity(
           }
         : null
     }
+    case 'ellipse': {
+      const center = points.get(entity.centerPointId)
+      const major = points.get(entity.majorAxisPointId)
+      return center && major
+        ? {
+            entityId: entity.entityId,
+            kind: 'ellipse',
+            centerPosition: center.position,
+            majorAxisEndpointPosition: major.position,
+            minorRadius: entity.minorRadius,
+          }
+        : null
+    }
+    case 'ellipticalArc': {
+      const center = points.get(entity.centerPointId)
+      const major = points.get(entity.majorAxisPointId)
+      const start = points.get(entity.startPointId)
+      const end = points.get(entity.endPointId)
+      return center && major && start && end
+        ? {
+            entityId: entity.entityId,
+            kind: 'ellipticalArc',
+            centerPosition: center.position,
+            majorAxisEndpointPosition: major.position,
+            startPosition: start.position,
+            endPosition: end.position,
+            minorRadius: entity.minorRadius,
+            sweepDirection: entity.sweepDirection,
+          }
+        : null
+    }
+    case 'conic': {
+      const start = points.get(entity.startPointId)
+      const control = points.get(entity.controlPointId)
+      const end = points.get(entity.endPointId)
+      return start && control && end
+        ? {
+            entityId: entity.entityId,
+            kind: 'conic',
+            startPosition: start.position,
+            controlPosition: control.position,
+            endPosition: end.position,
+            rho: entity.rho,
+          }
+        : null
+    }
+    case 'bezierCurve': {
+      const controlPoints = entity.controlPointIds.flatMap((pointId) => {
+        const point = points.get(pointId)
+        return point ? [point.position] : []
+      })
+      return controlPoints.length === entity.controlPointIds.length
+        ? {
+            entityId: entity.entityId,
+            kind: 'bezierCurve',
+            controlPoints,
+            degree: entity.degree,
+          }
+        : null
+    }
+    case 'profileText': {
+      const anchor = points.get(entity.anchorPointId)
+      return anchor
+        ? {
+            entityId: entity.entityId,
+            kind: 'profileText',
+            anchorPosition: anchor.position,
+            text: entity.text,
+            height: entity.height,
+            rotationRadians: entity.rotationRadians,
+            horizontalAlign: entity.horizontalAlign,
+            verticalAlign: entity.verticalAlign,
+          }
+        : null
+    }
   }
 }
 

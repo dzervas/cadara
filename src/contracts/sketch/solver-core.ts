@@ -420,6 +420,14 @@ function midpoint(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {
   return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
 }
 
+function isAdvancedSketchEntity(entity: SketchEntityDefinition) {
+  return entity.kind === 'ellipse'
+    || entity.kind === 'ellipticalArc'
+    || entity.kind === 'conic'
+    || entity.kind === 'bezierCurve'
+    || entity.kind === 'profileText'
+}
+
 function localArcData(input: {
   center: SketchPoint2D
   radius: number
@@ -1804,6 +1812,74 @@ function validateDefinition(
         diagnostics.push(makeDiagnostic('missing-spline-fit-point', 'error', `Spline ${entity.entityId} references a missing fit point.`, { kind: 'entity', entityId: entity.entityId }))
       }
     }
+
+    if (entity.kind === 'ellipse') {
+      const center = pointMap.get(entity.centerPointId)
+      const major = pointMap.get(entity.majorAxisPointId)
+      if (!center || !major) {
+        diagnostics.push(makeDiagnostic('missing-ellipse-defining-point', 'error', `Ellipse ${entity.entityId} references a missing defining point.`, { kind: 'entity', entityId: entity.entityId }))
+      } else if (length(subtract(center.position, major.position)) < tolerances.minimumSegmentLength) {
+        diagnostics.push(makeDiagnostic('degenerate-ellipse-major-axis', 'error', `Ellipse ${entity.entityId} major radius is shorter than the minimum segment length tolerance.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+      if (entity.minorRadius <= 0) {
+        diagnostics.push(makeDiagnostic('invalid-ellipse-minor-radius', 'error', `Ellipse ${entity.entityId} minor radius must be greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
+
+    if (entity.kind === 'ellipticalArc') {
+      const center = pointMap.get(entity.centerPointId)
+      const major = pointMap.get(entity.majorAxisPointId)
+      const start = pointMap.get(entity.startPointId)
+      const end = pointMap.get(entity.endPointId)
+      if (!center || !major || !start || !end) {
+        diagnostics.push(makeDiagnostic('missing-elliptical-arc-defining-point', 'error', `Elliptical arc ${entity.entityId} references a missing defining point.`, { kind: 'entity', entityId: entity.entityId }))
+      } else {
+        if (length(subtract(center.position, major.position)) < tolerances.minimumSegmentLength) {
+          diagnostics.push(makeDiagnostic('degenerate-elliptical-arc-major-axis', 'error', `Elliptical arc ${entity.entityId} major radius is shorter than the minimum segment length tolerance.`, { kind: 'entity', entityId: entity.entityId }))
+        }
+        if (length(subtract(start.position, end.position)) < tolerances.minimumSegmentLength) {
+          diagnostics.push(makeDiagnostic('degenerate-elliptical-arc-endpoints', 'error', `Elliptical arc ${entity.entityId} start and end points are coincident.`, { kind: 'entity', entityId: entity.entityId }))
+        }
+      }
+      if (entity.minorRadius <= 0) {
+        diagnostics.push(makeDiagnostic('invalid-elliptical-arc-minor-radius', 'error', `Elliptical arc ${entity.entityId} minor radius must be greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
+
+    if (entity.kind === 'conic') {
+      const pointIds = [entity.startPointId, entity.controlPointId, entity.endPointId]
+      const uniquePointIds = new Set(pointIds)
+      if (uniquePointIds.size !== pointIds.length) {
+        diagnostics.push(makeDiagnostic('invalid-conic-defining-points', 'error', `Conic ${entity.entityId} requires three distinct defining points.`, { kind: 'entity', entityId: entity.entityId }))
+      } else if (pointIds.some((pointId) => !pointMap.has(pointId))) {
+        diagnostics.push(makeDiagnostic('missing-conic-defining-point', 'error', `Conic ${entity.entityId} references a missing defining point.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+      if (entity.rho <= 0) {
+        diagnostics.push(makeDiagnostic('invalid-conic-rho', 'error', `Conic ${entity.entityId} rho must be greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
+
+    if (entity.kind === 'bezierCurve') {
+      const expectedPointCount = entity.degree + 1
+      const uniquePointIds = new Set(entity.controlPointIds)
+      if (entity.controlPointIds.length !== expectedPointCount || uniquePointIds.size !== entity.controlPointIds.length) {
+        diagnostics.push(makeDiagnostic('invalid-bezier-control-points', 'error', `Bezier curve ${entity.entityId} requires ${expectedPointCount} distinct control points.`, { kind: 'entity', entityId: entity.entityId }))
+      } else if (entity.controlPointIds.some((pointId) => !pointMap.has(pointId))) {
+        diagnostics.push(makeDiagnostic('missing-bezier-control-point', 'error', `Bezier curve ${entity.entityId} references a missing control point.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
+
+    if (entity.kind === 'profileText') {
+      if (!pointMap.has(entity.anchorPointId)) {
+        diagnostics.push(makeDiagnostic('missing-profile-text-anchor', 'error', `Profile text ${entity.entityId} references a missing anchor point.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+      if (entity.text.trim().length === 0) {
+        diagnostics.push(makeDiagnostic('invalid-profile-text-content', 'error', `Profile text ${entity.entityId} must contain text.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+      if (entity.height <= 0) {
+        diagnostics.push(makeDiagnostic('invalid-profile-text-height', 'error', `Profile text ${entity.entityId} height must be greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
   }
 
   for (const point of definition.points) {
@@ -1880,7 +1956,11 @@ function validateDefinition(
         break
       case 'pointOnCurve': {
         const entity = entityMap.get(constraint.curve.entityId)
-        if (!pointMap.has(constraint.point.pointId) || !entity || (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc' && entity.kind !== 'spline')) {
+        if (!pointMap.has(constraint.point.pointId) || !entity) {
+          diagnostics.push(makeDiagnostic('missing-point-on-curve-target', 'error', `Constraint ${constraint.constraintId} references a missing point or curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (isAdvancedSketchEntity(entity)) {
+          diagnostics.push(makeDiagnostic('unsupported-solver-entity-constraint', 'error', `Constraint ${constraint.constraintId} targets ${entity.kind}, which is valid sketch geometry but is not supported by the current solver constraint set.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc' && entity.kind !== 'spline') {
           diagnostics.push(makeDiagnostic('missing-point-on-curve-target', 'error', `Constraint ${constraint.constraintId} references a missing point or curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
@@ -1907,7 +1987,11 @@ function validateDefinition(
       }
       case 'tangentProjectedCurve': {
         const entity = entityMap.get(constraint.curve.entityId)
-        if (!entity || (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc')) {
+        if (!entity) {
+          diagnostics.push(makeDiagnostic('missing-projected-tangent-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (isAdvancedSketchEntity(entity)) {
+          diagnostics.push(makeDiagnostic('unsupported-solver-entity-constraint', 'error', `Constraint ${constraint.constraintId} targets ${entity.kind}, which is valid sketch geometry but is not supported by the current solver constraint set.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (entity.kind !== 'lineSegment' && entity.kind !== 'circle' && entity.kind !== 'arc') {
           diagnostics.push(makeDiagnostic('missing-projected-tangent-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
@@ -1918,21 +2002,29 @@ function validateDefinition(
       }
       case 'tangent': {
         const entities = constraint.entityIds.map((entityId) => entityMap.get(entityId))
-        if (!entities.every((entity) => entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc'))) {
+        if (entities.some((entity) => entity && isAdvancedSketchEntity(entity))) {
+          diagnostics.push(makeDiagnostic('unsupported-solver-entity-constraint', 'error', `Constraint ${constraint.constraintId} targets an advanced sketch entity that is not supported by the current solver constraint set.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (!entities.every((entity) => entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc'))) {
           diagnostics.push(makeDiagnostic('missing-tangent-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported curve.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
       }
       case 'concentric': {
         const entities = constraint.entityIds.map((entityId) => entityMap.get(entityId))
-        if (!entities.every((entity) => entity && (entity.kind === 'circle' || entity.kind === 'arc'))) {
+        if (entities.some((entity) => entity && isAdvancedSketchEntity(entity))) {
+          diagnostics.push(makeDiagnostic('unsupported-solver-entity-constraint', 'error', `Constraint ${constraint.constraintId} targets an advanced sketch entity that is not supported by the current solver constraint set.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (!entities.every((entity) => entity && (entity.kind === 'circle' || entity.kind === 'arc'))) {
           diagnostics.push(makeDiagnostic('missing-concentric-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported circle/arc.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
       }
       case 'concentricProjectedCurve': {
         const entity = entityMap.get(constraint.curve.entityId)
-        if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
+        if (!entity) {
+          diagnostics.push(makeDiagnostic('missing-projected-concentric-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local circle/arc.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (isAdvancedSketchEntity(entity)) {
+          diagnostics.push(makeDiagnostic('unsupported-solver-entity-constraint', 'error', `Constraint ${constraint.constraintId} targets ${entity.kind}, which is valid sketch geometry but is not supported by the current solver constraint set.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        } else if (entity.kind !== 'circle' && entity.kind !== 'arc') {
           diagnostics.push(makeDiagnostic('missing-projected-concentric-local-curve', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local circle/arc.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
@@ -1949,9 +2041,16 @@ function validateDefinition(
           !line ||
           line.kind !== 'lineSegment' ||
           !curve ||
-          (curve.kind !== 'circle' && curve.kind !== 'arc')
+          (isAdvancedSketchEntity(curve) || (curve.kind !== 'circle' && curve.kind !== 'arc'))
         ) {
-          diagnostics.push(makeDiagnostic('missing-normal-target', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported normal target.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+          diagnostics.push(makeDiagnostic(
+            curve && isAdvancedSketchEntity(curve) ? 'unsupported-solver-entity-constraint' : 'missing-normal-target',
+            'error',
+            curve && isAdvancedSketchEntity(curve)
+              ? `Constraint ${constraint.constraintId} targets ${curve.kind}, which is valid sketch geometry but is not supported by the current solver constraint set.`
+              : `Constraint ${constraint.constraintId} references a missing or unsupported normal target.`,
+            { kind: 'constraint', constraintId: constraint.constraintId },
+          ))
         }
         break
       }
@@ -2459,6 +2558,91 @@ function buildSolvedEntities(
       continue
     }
 
+    if (entity.kind === 'ellipse') {
+      const center = pointRecords.get(entity.centerPointId)
+      const major = pointRecords.get(entity.majorAxisPointId)
+      if (center && major) {
+        solved.push({
+          entityId: entity.entityId,
+          kind: 'ellipse',
+          centerPosition: getPoint(values, center),
+          majorAxisEndpointPosition: getPoint(values, major),
+          minorRadius: entity.minorRadius,
+        })
+      }
+      continue
+    }
+
+    if (entity.kind === 'ellipticalArc') {
+      const center = pointRecords.get(entity.centerPointId)
+      const major = pointRecords.get(entity.majorAxisPointId)
+      const start = pointRecords.get(entity.startPointId)
+      const end = pointRecords.get(entity.endPointId)
+      if (center && major && start && end) {
+        solved.push({
+          entityId: entity.entityId,
+          kind: 'ellipticalArc',
+          centerPosition: getPoint(values, center),
+          majorAxisEndpointPosition: getPoint(values, major),
+          startPosition: getPoint(values, start),
+          endPosition: getPoint(values, end),
+          minorRadius: entity.minorRadius,
+          sweepDirection: entity.sweepDirection,
+        })
+      }
+      continue
+    }
+
+    if (entity.kind === 'conic') {
+      const start = pointRecords.get(entity.startPointId)
+      const control = pointRecords.get(entity.controlPointId)
+      const end = pointRecords.get(entity.endPointId)
+      if (start && control && end) {
+        solved.push({
+          entityId: entity.entityId,
+          kind: 'conic',
+          startPosition: getPoint(values, start),
+          controlPosition: getPoint(values, control),
+          endPosition: getPoint(values, end),
+          rho: entity.rho,
+        })
+      }
+      continue
+    }
+
+    if (entity.kind === 'bezierCurve') {
+      const controlPoints = entity.controlPointIds.flatMap((pointId) => {
+        const point = pointRecords.get(pointId)
+        return point ? [getPoint(values, point)] : []
+      })
+      if (controlPoints.length === entity.controlPointIds.length) {
+        solved.push({
+          entityId: entity.entityId,
+          kind: 'bezierCurve',
+          controlPoints,
+          degree: entity.degree,
+        })
+      }
+      continue
+    }
+
+    if (entity.kind === 'profileText') {
+      const anchor = pointRecords.get(entity.anchorPointId)
+      if (anchor) {
+        solved.push({
+          entityId: entity.entityId,
+          kind: 'profileText',
+          anchorPosition: getPoint(values, anchor),
+          text: entity.text,
+          height: entity.height,
+          rotationRadians: entity.rotationRadians,
+          horizontalAlign: entity.horizontalAlign,
+          verticalAlign: entity.verticalAlign,
+        })
+      }
+      continue
+    }
+
     const center = pointRecords.get(entity.centerPointId)
     const arcState = entityStates.get(entity.entityId)
     if (!center || !arcState || arcState.kind !== 'arc') {
@@ -2526,7 +2710,7 @@ function buildConstraintStatuses(
     } else if (constraint.kind === 'pointOnCurve') {
       const point = pointRecords.get(constraint.point.pointId)
       const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
-      status = point && entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc')
+      status = point && entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc' || entity.kind === 'spline')
         ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'coincidentProjectedPoint') {
@@ -2690,6 +2874,16 @@ function getEntityPoints(entity: SketchEntityDefinition): readonly SketchPointId
       return [entity.centerPointId, entity.startPointId, entity.endPointId]
     case 'spline':
       return entity.fitPointIds
+    case 'ellipse':
+      return [entity.centerPointId, entity.majorAxisPointId]
+    case 'ellipticalArc':
+      return [entity.centerPointId, entity.majorAxisPointId, entity.startPointId, entity.endPointId]
+    case 'conic':
+      return [entity.startPointId, entity.controlPointId, entity.endPointId]
+    case 'bezierCurve':
+      return entity.controlPointIds
+    case 'profileText':
+      return [entity.anchorPointId]
   }
 }
 

@@ -78,6 +78,12 @@ function getSketchEntityToolIcon(entity: SketchEntityDefinition): ToolIconId | n
       return 'circle'
     case 'spline':
       return 'spline'
+    case 'ellipse':
+    case 'ellipticalArc':
+    case 'conic':
+    case 'bezierCurve':
+    case 'profileText':
+      return 'spline'
     case 'point':
       return null
   }
