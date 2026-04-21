@@ -71,6 +71,18 @@ type RingBoundarySegment = {
   traversalDirection: 'forward' | 'reverse'
 }
 
+type SegmentGraphNode = {
+  id: number
+  point: SketchPoint2D
+}
+
+type DirectedSegmentRecord = SegmentRecord & {
+  directedId: number
+  reverseDirectedId: number
+  startNodeId: number
+  endNodeId: number
+}
+
 const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 function projectedKindForGeometry(geometry: ProjectedSketchReferenceGeometry): NonNullable<RegionBoundarySegmentRecord['source'] extends infer Source
@@ -151,27 +163,10 @@ function equalsPoint(left: SketchPoint2D, right: SketchPoint2D) {
   return distanceBetweenPoints(left, right) <= REGION_POINT_TOLERANCE
 }
 
-function angleDifference(a0: number, a1: number) {
+function normalizeAngle(angle: number) {
   const tau = Math.PI * 2
-  let left = a0 % tau
-  let right = a1 % tau
-
-  if (left < 0) {
-    left += tau
-  }
-  if (right < 0) {
-    right += tau
-  }
-
-  let diff = right - left
-  if (diff > tau) {
-    diff -= tau
-  }
-  if (diff < 0) {
-    diff += tau
-  }
-
-  return diff
+  const normalized = angle % tau
+  return normalized < 0 ? normalized + tau : normalized
 }
 
 function signedArea(points: SketchPoint2D[]) {
@@ -293,18 +288,6 @@ function reverseSegment(segment: SegmentRecord): SegmentRecord {
     endAngle: (segment.startAngle + Math.PI) % (Math.PI * 2),
     traversalDirection: segment.traversalDirection === 'forward' ? 'reverse' : 'forward',
   }
-}
-
-function equalsOrReverseEquals(left: SegmentRecord, right: SegmentRecord) {
-  return (
-    left.sourceKey === right.sourceKey
-    && ((equalsPoint(left.start, right.start) && equalsPoint(left.end, right.end))
-      || (equalsPoint(left.start, right.end) && equalsPoint(left.end, right.start)))
-  )
-}
-
-function continues(next: SegmentRecord, prior: SegmentRecord) {
-  return equalsPoint(prior.end, next.start)
 }
 
 function cross(
@@ -681,33 +664,6 @@ function buildAdvancedClosedRings(
   })
 }
 
-function findNextSegment(
-  segments: SegmentRecord[],
-  current: SegmentRecord,
-  used: Set<number>,
-): [number, SegmentRecord] | null {
-  let best: [number, SegmentRecord] | null = null
-  let bestScore = Number.NEGATIVE_INFINITY
-
-  for (const [index, candidate] of segments.entries()) {
-    if (used.has(index)) {
-      continue
-    }
-    if (!continues(candidate, current) || equalsOrReverseEquals(candidate, current)) {
-      continue
-    }
-    const turn = cross(current.start, current.end, candidate.end)
-    const diff = angleDifference(current.endAngle, candidate.startAngle)
-    const score = turn * 1e6 + diff
-    if (score > bestScore) {
-      best = [index, candidate]
-      bestScore = score
-    }
-  }
-
-  return best
-}
-
 export function findSketchRings(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
@@ -717,67 +673,178 @@ export function findSketchRings(
   const builtSegments = buildSegments(definition, solvedSnapshot, authoredProjectedReferences)
   const degenerateSegments = builtSegments.filter(isDegenerateSegment)
   const initialSegments = builtSegments.filter((segment) => !isDegenerateSegment(segment))
-  const allSegments = [...initialSegments, ...initialSegments.map(reverseSegment)]
-
-  const used = new Set<number>()
-  const usedSourceKeys = new Set<string>()
   const rings: SketchRingCandidate[] = [
     ...buildCircleRings(definition, solvedSnapshot, authoredProjectedReferences),
     ...buildAdvancedClosedRings(definition, solvedSnapshot),
   ]
+  const segmentFaceExtraction = extractSegmentGraphRings(initialSegments)
+  rings.push(...segmentFaceExtraction.rings)
+
+  rings.sort(compareRingsByAreaThenKey)
+  const unusedSegments = initialSegments.filter((segment) => !segmentFaceExtraction.usedSourceKeys.has(segment.sourceKey))
+  return { rings, unusedSegments, degenerateSegments, rejectedRings: segmentFaceExtraction.rejectedRings }
+}
+
+function extractSegmentGraphRings(segments: readonly SegmentRecord[]) {
+  const graph = buildSegmentGraph(segments)
+  const visited = new Set<number>()
+  const usedSourceKeys = new Set<string>()
+  const rings: SketchRingCandidate[] = []
   const rejectedRings: SketchRingCandidate[] = []
 
-  for (const [segmentIndex, segment] of allSegments.entries()) {
-    if (used.has(segmentIndex)) {
+  for (const edge of graph.directedSegments) {
+    if (visited.has(edge.directedId)) {
       continue
     }
 
-    const ringIndices: Array<[number, SegmentRecord]> = []
-    const startPoint = segment.start
-    let nextIndex = segmentIndex
-    let nextSegment = segment
+    const faceEdges = walkSegmentGraphFace(edge, graph.outgoingByNodeId, visited, graph.directedSegments.length)
+    if (!faceEdges) {
+      continue
+    }
 
-    for (let count = 1; count < allSegments.length; count += 1) {
-      ringIndices.push([nextIndex, nextSegment])
-
-      if (equalsPoint(nextSegment.end, startPoint)) {
-        const ringSegments = ringIndices.map((entry) => entry[1])
-        const points = ringSegments.map((entry) => entry.start)
-        const area = signedArea(points)
-        const ring = {
-          kind: 'segments' as const,
-          boundarySegments: ringSegments.map((entry) => ({
-            source: entry.source,
-            startPointId: entry.startPointId,
-            endPointId: entry.endPointId,
-            traversalDirection: entry.traversalDirection,
-          })),
-          boundaryEntityIds: ringSegments.flatMap((entry) => entry.source.kind === 'entity' ? [entry.source.entityId] : []),
-          boundaryPointIds: ringSegments.flatMap((entry) => entry.startPointId ? [entry.startPointId] : []),
-          points,
-          signedArea: area,
-        } satisfies SketchRingCandidate
-        const selfIntersects = points.length >= 3 && ringSelfIntersects(points)
-        if (area > 0 && isValidRing(points, area, { checkSelfIntersection: false }) && !selfIntersects) {
-          usedForRing(used, usedSourceKeys, ringIndices)
-          rings.push(ring)
-        } else if (area > MIN_REGION_AREA || selfIntersects) {
-          rejectedRings.push(ring)
-        }
-        break
+    const ring = createRingFromGraphFace(faceEdges)
+    const selfIntersects = ring.points.length >= 3 && ringSelfIntersects(ring.points)
+    if (ring.signedArea > 0 && isValidRing(ring.points, ring.signedArea, { checkSelfIntersection: false }) && !selfIntersects) {
+      rings.push(ring)
+      for (const segment of ring.boundarySegments) {
+        usedSourceKeys.add(getSegmentSourceKey(segment.source))
       }
-
-      const found = findNextSegment(allSegments, nextSegment, used)
-      if (!found) {
-        break
-      }
-      ;[nextIndex, nextSegment] = found
+    } else if (ring.signedArea > MIN_REGION_AREA || (Math.abs(ring.signedArea) <= MIN_REGION_AREA && selfIntersects)) {
+      rejectedRings.push(ring)
     }
   }
 
-  rings.sort(compareRingsByAreaThenKey)
-  const unusedSegments = initialSegments.filter((segment) => !usedSourceKeys.has(segment.sourceKey))
-  return { rings, unusedSegments, degenerateSegments, rejectedRings }
+  return { rings, rejectedRings, usedSourceKeys }
+}
+
+function buildSegmentGraph(segments: readonly SegmentRecord[]) {
+  const nodes: SegmentGraphNode[] = []
+  const bucketedNodes = new Map<string, SegmentGraphNode[]>()
+  const directedSegments: DirectedSegmentRecord[] = []
+
+  for (const segment of segments) {
+    const startNode = getOrCreateGraphNode(segment.start, nodes, bucketedNodes)
+    const endNode = getOrCreateGraphNode(segment.end, nodes, bucketedNodes)
+    const forwardId = directedSegments.length
+    const reverseId = forwardId + 1
+    const forward = {
+      ...segment,
+      directedId: forwardId,
+      reverseDirectedId: reverseId,
+      startNodeId: startNode.id,
+      endNodeId: endNode.id,
+    } satisfies DirectedSegmentRecord
+    const reversedSegment = reverseSegment(segment)
+    const reverse = {
+      ...reversedSegment,
+      directedId: reverseId,
+      reverseDirectedId: forwardId,
+      startNodeId: endNode.id,
+      endNodeId: startNode.id,
+    } satisfies DirectedSegmentRecord
+    directedSegments.push(forward, reverse)
+  }
+
+  const outgoingByNodeId = new Map<number, DirectedSegmentRecord[]>()
+  for (const segment of directedSegments) {
+    const outgoing = outgoingByNodeId.get(segment.startNodeId) ?? []
+    outgoing.push(segment)
+    outgoingByNodeId.set(segment.startNodeId, outgoing)
+  }
+
+  for (const outgoing of outgoingByNodeId.values()) {
+    outgoing.sort((left, right) => normalizeAngle(left.startAngle) - normalizeAngle(right.startAngle) || left.sourceKey.localeCompare(right.sourceKey))
+  }
+
+  return { directedSegments, outgoingByNodeId }
+}
+
+function getOrCreateGraphNode(
+  point: SketchPoint2D,
+  nodes: SegmentGraphNode[],
+  bucketedNodes: Map<string, SegmentGraphNode[]>,
+) {
+  for (const key of getNeighborPointBucketKeys(point)) {
+    for (const node of bucketedNodes.get(key) ?? []) {
+      if (equalsPoint(node.point, point)) {
+        return node
+      }
+    }
+  }
+
+  const node = { id: nodes.length, point } satisfies SegmentGraphNode
+  nodes.push(node)
+  const bucketKey = getPointBucketKey(point)
+  const bucket = bucketedNodes.get(bucketKey) ?? []
+  bucket.push(node)
+  bucketedNodes.set(bucketKey, bucket)
+  return node
+}
+
+function getPointBucketKey(point: SketchPoint2D) {
+  return `${Math.round(point[0] / REGION_POINT_TOLERANCE)},${Math.round(point[1] / REGION_POINT_TOLERANCE)}`
+}
+
+function getNeighborPointBucketKeys(point: SketchPoint2D) {
+  const x = Math.round(point[0] / REGION_POINT_TOLERANCE)
+  const y = Math.round(point[1] / REGION_POINT_TOLERANCE)
+  const keys: string[] = []
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      keys.push(`${x + dx},${y + dy}`)
+    }
+  }
+  return keys
+}
+
+function walkSegmentGraphFace(
+  startEdge: DirectedSegmentRecord,
+  outgoingByNodeId: ReadonlyMap<number, readonly DirectedSegmentRecord[]>,
+  visited: Set<number>,
+  maxSteps: number,
+) {
+  const faceEdges: DirectedSegmentRecord[] = []
+  let edge = startEdge
+
+  for (let count = 0; count <= maxSteps; count += 1) {
+    if (visited.has(edge.directedId)) {
+      return edge.directedId === startEdge.directedId ? faceEdges : null
+    }
+
+    visited.add(edge.directedId)
+    faceEdges.push(edge)
+
+    const outgoing = outgoingByNodeId.get(edge.endNodeId)
+    if (!outgoing || outgoing.length === 0) {
+      return null
+    }
+
+    const reverseIndex = outgoing.findIndex((candidate) => candidate.directedId === edge.reverseDirectedId)
+    if (reverseIndex < 0) {
+      return null
+    }
+
+    edge = outgoing[(reverseIndex - 1 + outgoing.length) % outgoing.length]!
+  }
+
+  return null
+}
+
+function createRingFromGraphFace(faceEdges: readonly DirectedSegmentRecord[]): SketchRingCandidate {
+  const points = faceEdges.map((entry) => entry.start)
+  return {
+    kind: 'segments',
+    boundarySegments: faceEdges.map((entry) => ({
+      source: entry.source,
+      startPointId: entry.startPointId,
+      endPointId: entry.endPointId,
+      traversalDirection: entry.traversalDirection,
+    })),
+    boundaryEntityIds: faceEdges.flatMap((entry) => entry.source.kind === 'entity' ? [entry.source.entityId] : []),
+    boundaryPointIds: faceEdges.flatMap((entry) => entry.startPointId ? [entry.startPointId] : []),
+    points,
+    signedArea: signedArea(points),
+  }
 }
 
 function compareRingsByAreaThenKey(left: SketchRingCandidate, right: SketchRingCandidate) {
@@ -796,17 +863,6 @@ function getRingStableKey(ring: SketchRingCandidate) {
 
 function getRegionStableKey(ring: SketchRingCandidate) {
   return ring.boundarySegments.map((segment) => getSegmentSourceKey(segment.source)).sort().join('|')
-}
-
-function usedForRing(
-  used: Set<number>,
-  usedSourceKeys: Set<string>,
-  ringIndices: Array<[number, SegmentRecord]>,
-) {
-  for (const [index, segment] of ringIndices) {
-    used.add(index)
-    usedSourceKeys.add(segment.sourceKey)
-  }
 }
 
 function sanitizeRegionIdPart(value: string) {

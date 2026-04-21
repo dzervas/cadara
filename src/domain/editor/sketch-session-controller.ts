@@ -234,7 +234,7 @@ export function mergeSketchRenderables<T extends RenderableEntityRecord | Viewpo
 
   const activeSketchId = session.sketchId
   const visibleDocumentRenderables = activeSketchId
-    ? documentRenderables.filter((entry) => !isActiveSketchRegionRenderable(entry, activeSketchId))
+    ? documentRenderables.filter((entry) => !isActiveSketchRenderable(entry, activeSketchId))
     : documentRenderables
 
   return {
@@ -248,13 +248,14 @@ export type MergedSketchRenderables = {
   sketchDisplayRenderables: SketchSessionDisplayRenderable[]
 }
 
-function isActiveSketchRegionRenderable(
+function isActiveSketchRenderable(
   entry: RenderableEntityRecord | ViewportRenderableRecord,
   sketchId: NonNullable<SketchSessionState['sketchId']>,
 ) {
   const renderable = 'renderable' in entry ? entry.renderable : entry
+  const target = renderable.binding.target
 
-  return renderable.binding.semanticClass === 'region'
-    && renderable.binding.target.kind === 'region'
-    && renderable.binding.target.sketchId === sketchId
+  return (target.kind === 'region' && target.sketchId === sketchId)
+    || (target.kind === 'sketchEntity' && target.sketchId === sketchId)
+    || (target.kind === 'sketchPoint' && target.sketchId === sketchId)
 }

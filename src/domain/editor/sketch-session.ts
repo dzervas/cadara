@@ -231,6 +231,7 @@ const CONSTRAINED_DRAG_BLOCKED_MESSAGE = 'Geometry is constrained and cannot mov
 const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE = 'Could not solve the edited constraint value.'
 const LIVE_REGION_DOCUMENT_ID = 'doc_live_sketch' as DocumentId
 const LIVE_REGION_REVISION_ID = 'rev_live_sketch' as RevisionId
+const liveRegionDiagnosticsByRegions = new WeakMap<RegionRecord[], ReturnType<typeof deriveSketchRegionsCore>['diagnostics']>()
 
 export interface SketchSessionDisplayRenderable {
   id: RenderableId
@@ -404,14 +405,20 @@ function deriveSolvedRegionsForSession(
     partialSolvePolicy: 'bestEffort',
   }).solvedSnapshot
 
-  return deriveSketchRegionsCore({
+  const derived = deriveSketchRegionsCore({
     documentId: LIVE_REGION_DOCUMENT_ID,
     revisionId: LIVE_REGION_REVISION_ID,
     sketchId,
     definition: evaluatedDefinition,
     solvedSnapshot: usableSolvedSnapshot,
     projectedReferences: session.projectedReferences,
-  }).regions
+  })
+  liveRegionDiagnosticsByRegions.set(derived.regions, derived.diagnostics)
+  return derived.regions
+}
+
+export function getSketchSessionRegionDiagnostics(session: SketchSessionState) {
+  return liveRegionDiagnosticsByRegions.get(session.solvedRegions) ?? []
 }
 
 function withLiveSolvedRegions(session: SketchSessionState): SketchSessionState {
@@ -4432,6 +4439,11 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
 
   if (session.projectionDiagnostics.length > 0) {
     return session.projectionDiagnostics[0]?.message ?? 'Sketch reference projection has diagnostics'
+  }
+
+  const regionDiagnostic = getSketchSessionRegionDiagnostics(session).find((diagnostic) => diagnostic.severity !== 'info')
+  if (regionDiagnostic) {
+    return regionDiagnostic.message
   }
 
   if (session.activeDrag?.status === 'dragging') {

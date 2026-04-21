@@ -194,7 +194,7 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     const otherSketchRegion = createCommittedRegion('sketch_b', 'region_b')
 
     const composed = composeViewportRenderables({
-      snapshotRenderables: [committedFace, activeSketchRegion, otherSketchRegion],
+      snapshotRenderables: [committedFace, committedSketchCurve, activeSketchRegion, otherSketchRegion],
       previewRenderables: null,
       sketchSession: activeSession,
       hiddenTargetKeys: {},
@@ -204,6 +204,10 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     assert(
       composed.documentRenderables.every(({ renderable }) => renderable.id !== activeSketchRegion.id),
       'Committed regions from the actively edited sketch should be hidden.',
+    )
+    assert(
+      composed.documentRenderables.every(({ renderable }) => renderable.id !== committedSketchCurve.id),
+      'Committed sketch curves from the actively edited sketch should be hidden.',
     )
     assert(
       composed.documentRenderables.some(({ renderable }) => renderable.id === otherSketchRegion.id),

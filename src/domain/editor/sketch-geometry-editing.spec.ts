@@ -11,11 +11,13 @@ import {
   deleteSelectedSketchGeometry,
   deriveSketchDisplayEntities,
   finishSketchGeometryDrag,
+  getSketchSessionRegionDiagnostics,
   getSketchSessionDisplayRenderables,
   patchSketchStyleValue,
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
   startSketchDraw,
+  updateSketchGeometryDrag,
   acceptSketchDraw,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
@@ -487,6 +489,55 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const geometry = getLiveRegionMesh(session)
     assert(geometry.triangleIndices.length === 4, 'Six-point concave live region should triangulate into four triangles.')
     assert(Math.abs(getMeshArea(geometry) - 7) < 1e-6, 'Concave live region mesh should preserve polygon area without fan overlap.')
+  }
+
+  function testLiveRegionDiagnosticsAreAvailableDuringEditing() {
+    const definition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 2, 0),
+      ],
+      entityIds: ['sketch_entity_open'],
+      entities: [
+        makeLine('sketch_entity_open', 'Open', 'sketch_point_a', 'sketch_point_b'),
+      ],
+    })
+    let session = createSessionFromDefinition(definition)
+    const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
+    assert(target, 'Expected open segment endpoint.')
+    session = beginSketchGeometryDrag(session, target, [2, 0])
+    session = updateSketchGeometryDrag(session, [2.25, 0])
+
+    assert(
+      getSketchSessionRegionDiagnostics(session).some((diagnostic) => diagnostic.code === 'profile-open-segment'),
+      'Live region diagnostics should be available to viewport feedback while editing.',
+    )
+  }
+
+  function testConstrainedDragRegionDerivationBenchmark() {
+    const definition = createSquareDefinition(false)
+    let session = createSessionFromDefinition(definition)
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
+    const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
+    assert(target, 'Expected square vertex B.')
+
+    session = beginSketchGeometryDrag(session, target, [1, 0])
+    const frameCount = 30
+    const startedAt = performance.now()
+    for (let index = 0; index < frameCount; index += 1) {
+      const t = index / (frameCount - 1)
+      session = updateSketchGeometryDrag(session, [1 + t * 3, t * 2])
+      assert(session.solvedRegions.length === 1, 'Drag-frame region derivation should keep the constrained square profile live.')
+    }
+    const elapsed = performance.now() - startedAt
+    assert(
+      elapsed < 1_500,
+      `Constrained drag live-region benchmark should stay responsive; ${frameCount} frames took ${elapsed.toFixed(1)}ms.`,
+    )
   }
 
   function testRectangleToolDragTranslatesWholeRectangle() {
@@ -1345,6 +1396,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testLiveRegionRenderableTracksJiggledSketchDrag()
   testLiveRegionRenderablePreservesInnerLoopHole()
   testLiveRegionRenderableTriangulatesConcaveRegion()
+  testLiveRegionDiagnosticsAreAvailableDuringEditing()
+  testConstrainedDragRegionDerivationBenchmark()
   testRectangleToolDragTranslatesWholeRectangle()
   testImmovableConstrainedDragBlocksWithoutChangingDraft()
   testSelectedEntityDeletionRemovesDependentAnnotations()

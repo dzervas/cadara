@@ -37,6 +37,7 @@ import { createAppError, errorContext, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
   getSketchAnnotationDescriptors,
+  getSketchSessionRegionDiagnostics,
   getSketchToolPresentation,
 } from '@/domain/editor/sketch-session'
 import {
@@ -227,6 +228,9 @@ export function CadWorkbench() {
   )
   const sketchToolPresentation = sketchSession ? getSketchToolPresentation(sketchSession) : null
   const sketchAnnotations = sketchSession ? getSketchAnnotationDescriptors(sketchSession) : []
+  const sketchRegionDiagnosticMessage = sketchSession
+    ? getSketchSessionRegionDiagnostics(sketchSession).find((diagnostic) => diagnostic.severity !== 'info')?.message ?? null
+    : null
   const debuggerState: WorkbenchStateDebuggerModel = {
     activeMode: mode,
     machineState: machineState.kind,
@@ -1226,12 +1230,12 @@ export function CadWorkbench() {
                 onDismiss={() => setWorkbenchStatusNotification(null)}
               />
             ) : null}
-            {sketchSession?.validationMessage ? (
+            {sketchSession?.validationMessage || sketchRegionDiagnosticMessage ? (
               <div
                 role="status"
                 className="absolute left-4 top-4 z-20 max-w-sm rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)]"
               >
-                {sketchSession.validationMessage}
+                {sketchSession?.validationMessage ?? sketchRegionDiagnosticMessage}
               </div>
             ) : null}
             <WorkbenchStateDebugger state={debuggerState} />
