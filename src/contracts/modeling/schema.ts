@@ -1183,6 +1183,32 @@ export interface ReorderFeatureResponse extends ModelingOperationResult {
   beforeFeatureId: FeatureId | null
 }
 
+export type DocumentHistoryOrderEntry =
+  | { kind: 'sketch'; sketchId: SketchId }
+  | { kind: 'feature'; featureId: FeatureId }
+
+/**
+ * Document history reorder request.
+ * `beforeItem` inserts the moved sketch or feature before another durable
+ * document-history item. Null appends the item to the end of authored history.
+ */
+export interface ReorderDocumentHistoryRequest extends DocumentMutationRequest {
+  /** Durable sketch or feature identity being moved in authored document history. */
+  item: DocumentHistoryOrderEntry
+  /** Null appends to the tail; otherwise insert immediately before this item. */
+  beforeItem: DocumentHistoryOrderEntry | null
+}
+
+/**
+ * Document history reorder response.
+ */
+export interface ReorderDocumentHistoryResponse extends ModelingOperationResult {
+  /** Durable sketch or feature identity that was reordered. */
+  item: DocumentHistoryOrderEntry
+  /** Final insertion anchor accepted by the kernel for this reorder request. */
+  beforeItem: DocumentHistoryOrderEntry | null
+}
+
 /**
  * Feature cursor request.
  * Moves the document rollback cursor without deleting feature records.

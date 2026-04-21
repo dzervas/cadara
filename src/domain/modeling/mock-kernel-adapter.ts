@@ -25,11 +25,16 @@ import type {
 import { getPrimitiveRefKey } from '@/domain/editor/schema'
 import {
   createDocumentHistoryItems,
+  createDocumentHistoryOrder,
+  findDocumentHistoryOrderDependencyViolations,
+  getDocumentHistoryOrderEntryKey,
   insertDocumentHistoryOrderEntryAfterCursor,
   createTailDocumentCursor,
   getAppliedFeatureIdsForDocumentCursor,
   getFeatureInsertionIndexForDocumentCursor,
   isValidDocumentHistoryCursor,
+  reorderDocumentHistoryOrder,
+  type DocumentHistoryOrderEntry,
 } from '@/domain/modeling/document-history'
 import {
   createDocumentVariableExpressionDiagnostics,
@@ -63,6 +68,8 @@ import type {
   ModelingDiagnostic,
   RenameBodyRequest,
   RenameBodyResponse,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   ResolveReferenceRequest,
@@ -396,6 +403,73 @@ function createMissingFeatureAnchorDiagnostic(featureId: FeatureId) {
       },
     },
   }
+}
+
+function createMissingDocumentHistoryItemDiagnostic(item: ReorderDocumentHistoryRequest['item']) {
+  return {
+    code: 'mock-missing-document-history-item',
+    severity: 'error' as const,
+    message: `Document history item ${getDocumentHistoryOrderEntryKey(item)} does not exist in the mock document.`,
+    target: item.kind === 'sketch'
+      ? { kind: 'sketch' as const, sketchId: item.sketchId }
+      : { kind: 'feature' as const, featureId: item.featureId },
+    detail: null,
+  }
+}
+
+function createMissingDocumentHistoryAnchorDiagnostic(item: ReorderDocumentHistoryRequest['beforeItem']) {
+  return {
+    code: 'mock-missing-document-history-anchor',
+    severity: 'error' as const,
+    message: `Document history anchor ${item === null ? 'tail' : getDocumentHistoryOrderEntryKey(item)} does not exist in the mock document.`,
+    target: item === null
+      ? null
+      : item.kind === 'sketch'
+        ? { kind: 'sketch' as const, sketchId: item.sketchId }
+        : { kind: 'feature' as const, featureId: item.featureId },
+    detail: null,
+  }
+}
+
+function createDocumentHistoryDependencyOrderDiagnostic(
+  violation: ReturnType<typeof findDocumentHistoryOrderDependencyViolations>[number],
+) {
+  return {
+    code: 'mock-document-history-dependency-order',
+    severity: 'error' as const,
+    message: `Document history places ${violation.featureKey} before its dependency ${violation.dependencyKey}.`,
+    target: { kind: 'feature' as const, featureId: violation.featureId },
+    detail: null,
+  }
+}
+
+function reorderFeaturesByDocumentHistory<TFeature extends { featureId: FeatureId }>(
+  features: readonly TFeature[],
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+): TFeature[] {
+  const featuresById = new Map(features.map((feature) => [feature.featureId, feature]))
+  const seen = new Set<FeatureId>()
+  const ordered: TFeature[] = []
+
+  for (const item of historyOrder) {
+    if (item.kind !== 'feature') {
+      continue
+    }
+
+    const feature = featuresById.get(item.featureId)
+    if (feature && !seen.has(feature.featureId)) {
+      ordered.push(feature)
+      seen.add(feature.featureId)
+    }
+  }
+
+  for (const feature of features) {
+    if (!seen.has(feature.featureId)) {
+      ordered.push(feature)
+    }
+  }
+
+  return ordered
 }
 
 function createExportDiagnostic(
@@ -3667,6 +3741,163 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           diagnostics,
         }),
         changedTargets: [{ kind: 'feature', featureId: request.featureId }],
+        diagnostics,
+      }
+    })
+  }
+
+  async reorderDocumentHistory(request: ReorderDocumentHistoryRequest): Promise<ReorderDocumentHistoryResponse> {
+    assertSupportedModelingRequest(request)
+    const snapshot = await this.getSnapshot()
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [createRevisionConflictDiagnostic(request.baseRevisionId, this.currentRevisionId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        revisionState: {
+          kind: 'conflict',
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'revisionConflict',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    const currentOrder = createDocumentHistoryOrder(snapshot.presentation.documentHistory)
+    const itemKey = getDocumentHistoryOrderEntryKey(request.item)
+    const beforeKey = request.beforeItem === null ? null : getDocumentHistoryOrderEntryKey(request.beforeItem)
+    if (!currentOrder.some((entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey)) {
+      const diagnostics = [createMissingDocumentHistoryItemDiagnostic(request.item)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'mock-missing-document-history-item',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    if (
+      beforeKey !== null
+      && !currentOrder.some((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)
+    ) {
+      const diagnostics = [createMissingDocumentHistoryAnchorDiagnostic(request.beforeItem)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'mock-missing-document-history-anchor',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    const historyOrder = reorderDocumentHistoryOrder(currentOrder, request.item, request.beforeItem)
+
+    if (historyOrder === null) {
+      throw new Error('Document history order changed during mock reorder preparation.')
+    }
+
+    const orderedFeatures = reorderFeaturesByDocumentHistory(snapshot.document.features, historyOrder)
+    const dependencyDiagnostics = findDocumentHistoryOrderDependencyViolations(orderedFeatures, historyOrder)
+      .map(createDocumentHistoryDependencyOrderDiagnostic)
+
+    if (dependencyDiagnostics.length > 0) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'mock-document-history-dependency-order',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics: dependencyDiagnostics,
+        }),
+        changedTargets: [],
+        diagnostics: dependencyDiagnostics,
+      }
+    }
+
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      mutableSnapshot.document.features = reorderFeaturesByDocumentHistory(mutableSnapshot.document.features, historyOrder)
+      mutableSnapshot.features = mutableSnapshot.document.features
+      mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+        featureTree: mutableSnapshot.presentation.featureTree,
+        features: mutableSnapshot.document.features,
+        sketches: mutableSnapshot.document.sketches,
+        historyOrder,
+      })
+      mutableSnapshot.documentHistory = mutableSnapshot.presentation.documentHistory
+      rebuildFeatureTree(mutableSnapshot)
+
+      const diagnostics: ReorderDocumentHistoryResponse['diagnostics'] = [
+        {
+          code: 'mock-reorder-document-history',
+          severity: 'info',
+          message: 'Mock kernel committed the document history reorder into the current revision.',
+          target: request.item.kind === 'sketch'
+            ? { kind: 'sketch', sketchId: request.item.sketchId }
+            : { kind: 'feature', featureId: request.item.featureId },
+          detail: null,
+        },
+      ]
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        revisionState: {
+          kind: 'accepted',
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'rebuilt',
+          revisionId: nextRevisionId,
+          diagnostics,
+        }),
+        changedTargets: [request.item.kind === 'sketch'
+          ? { kind: 'sketch', sketchId: request.item.sketchId }
+          : { kind: 'feature', featureId: request.item.featureId }],
         diagnostics,
       }
     })

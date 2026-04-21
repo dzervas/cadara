@@ -3,7 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
-import type { DocumentFeatureCursor, DocumentHistoryItemRecord, DocumentSnapshot } from '@/contracts/modeling/schema'
+import type {
+  DocumentFeatureCursor,
+  DocumentHistoryItemRecord,
+  DocumentHistoryOrderEntry,
+  DocumentSnapshot,
+} from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import {
   getPrimitiveRefKey,
@@ -12,11 +17,14 @@ import {
 import { useEditorState } from '@/hooks/use-editor-state'
 import {
   getNearestTimelineAnchorIndex,
+  resolveTimelineReorderDrop,
   getTimelineCursorAriaLabel,
   getTimelineCursorIndex,
   TIMELINE_CURSOR_GLYPH,
 } from '@/components/layout/feature-timeline-bar.helpers'
-import { getDocumentHistoryCursorForIndex } from '@/domain/modeling/document-history'
+import {
+  getDocumentHistoryCursorForIndex,
+} from '@/domain/modeling/document-history'
 import { getDocumentHistoryItemToolIcon } from '@/domain/tools/tool-icon-resolvers'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
@@ -27,6 +35,8 @@ interface FeatureTimelineBarProps {
   onReopenTarget: (target: PrimitiveRef) => void
   onCursorRequested?: (cursor: DocumentFeatureCursor) => void
   cursorDisabled?: boolean
+  onReorderItem?: (item: DocumentHistoryOrderEntry, beforeItem: DocumentHistoryOrderEntry | null) => void
+  reorderDisabled?: boolean
   onDeleteFeature: (item: FeatureHistoryItem) => void
   onRenameItem: (item: DocumentHistoryItemRecord) => void
   onSuppressFeature: (item: FeatureHistoryItem) => void
@@ -37,12 +47,25 @@ function getHistoryItemDescription(item: DocumentHistoryItemRecord) {
   return item.description
 }
 
+const ITEM_REORDER_DRAG_THRESHOLD_PX = 6
+
+interface ItemDragState {
+  item: DocumentHistoryItemRecord
+  pointerId: number
+  startX: number
+  startY: number
+  dropCursorIndex: number
+  active: boolean
+}
+
 export function FeatureTimelineBar({
   snapshot,
   onSelectTarget,
   onReopenTarget,
   onCursorRequested,
   cursorDisabled = false,
+  onReorderItem,
+  reorderDisabled = false,
   onDeleteFeature,
   onRenameItem,
   onSuppressFeature,
@@ -58,6 +81,8 @@ export function FeatureTimelineBar({
   const handleRef = useRef<HTMLButtonElement | null>(null)
   const anchorRefs = useRef<Array<HTMLDivElement | null>>([])
   const [dragCursorIndex, setDragCursorIndex] = useState<number | null>(null)
+  const [itemDragState, setItemDragState] = useState<ItemDragState | null>(null)
+  const suppressNextItemClickRef = useRef(false)
   const activeCursorIndex = dragCursorIndex ?? cursorIndex
   const anchorElements = useMemo(
     () => Array.from({ length: historyItems.length + 1 }, (_, index) => index),
@@ -66,6 +91,77 @@ export function FeatureTimelineBar({
   const getPositionCursor = useCallback((index: number): DocumentFeatureCursor => {
     return getDocumentHistoryCursorForIndex(historyItems, index)
   }, [historyItems])
+
+  useEffect(() => {
+    if (!itemDragState) {
+      return
+    }
+
+    const getAnchorCenterXs = () => anchorRefs.current
+      .map((anchor) => {
+        if (!anchor) {
+          return null
+        }
+
+        const rect = anchor.getBoundingClientRect()
+        return rect.left + rect.width / 2
+      })
+      .filter((value): value is number => value !== null)
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== itemDragState.pointerId || reorderDisabled) {
+        return
+      }
+
+      const distance = Math.hypot(event.clientX - itemDragState.startX, event.clientY - itemDragState.startY)
+      const active = itemDragState.active || distance >= ITEM_REORDER_DRAG_THRESHOLD_PX
+      if (!active) {
+        return
+      }
+
+      const nearestIndex = getNearestTimelineAnchorIndex(getAnchorCenterXs(), event.clientX)
+      setItemDragState((current) => current && current.pointerId === event.pointerId
+        ? {
+            ...current,
+            active: true,
+            dropCursorIndex: nearestIndex >= -1 ? nearestIndex : current.dropCursorIndex,
+          }
+        : current)
+    }
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (event.pointerId !== itemDragState.pointerId) {
+        return
+      }
+
+      setItemDragState((current) => {
+        if (!current) {
+          return null
+        }
+
+        if (current.active) {
+          suppressNextItemClickRef.current = true
+        }
+
+        if (current.active && !reorderDisabled) {
+          const drop = resolveTimelineReorderDrop(historyItems, current.item, current.dropCursorIndex)
+          if (drop) {
+            onReorderItem?.(drop.item, drop.beforeItem)
+          }
+        }
+
+        return null
+      })
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [historyItems, itemDragState, onReorderItem, reorderDisabled])
 
   useEffect(() => {
     if (dragCursorIndex === null) {
@@ -165,6 +261,25 @@ export function FeatureTimelineBar({
     setDragCursorIndex(nearestIndex >= -1 ? nearestIndex : cursorIndex)
   }
 
+  const handleItemPointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: DocumentHistoryItemRecord,
+    anchorIndex: number,
+  ) => {
+    if (event.button !== 0 || reorderDisabled) {
+      return
+    }
+
+    setItemDragState({
+      item,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dropCursorIndex: anchorIndex - 1,
+      active: false,
+    })
+  }
+
   return (
     <section
       className="flex min-h-[56px] shrink-0 items-center gap-3 border-t px-3 py-2"
@@ -173,6 +288,7 @@ export function FeatureTimelineBar({
         borderColor: 'var(--workbench-shell-border)',
       }}
       aria-label="Feature timeline"
+      data-reorder-disabled={reorderDisabled ? 'true' : undefined}
     >
       <div className="min-w-0 flex-1 overflow-hidden">
         <div className="overflow-x-auto overflow-y-hidden">
@@ -252,6 +368,7 @@ export function FeatureTimelineBar({
                       ? selectionFilterAllowsTarget(selectionFilter, selection, target, selectionCatalog)
                       : false
                   const isAfterCursor = item ? anchorIndex > cursorIndex : false
+                  const isDraggingItem = itemDragState?.active && itemDragState.item.id === item?.id
                   const menuItems: WorkbenchContextMenuEntry[] = item ? [
                     {
                       kind: 'item',
@@ -323,7 +440,13 @@ export function FeatureTimelineBar({
                         <WorkbenchContextMenu label={`${item.label} actions`} items={menuItems}>
                           <button
                             type="button"
+                            onPointerDown={(event) => handleItemPointerDown(event, item, anchorIndex)}
                             onClick={() => {
+                              if (suppressNextItemClickRef.current) {
+                                suppressNextItemClickRef.current = false
+                                return
+                              }
+
                               if (!isAllowed) {
                                 return
                               }
@@ -333,6 +456,7 @@ export function FeatureTimelineBar({
                             onDoubleClick={() => onReopenTarget(target!)}
                             className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${
                               isAfterCursor ? 'opacity-45' : ''
+                            } ${isDraggingItem ? 'opacity-70' : ''
                             } ${!isAllowed ? 'cursor-not-allowed' : ''}`}
                             style={{
                               backgroundColor: isSelected
@@ -345,6 +469,7 @@ export function FeatureTimelineBar({
                             }}
                             aria-label={`Select ${item.label}. Double-click to reopen.`}
                             aria-disabled={!isAllowed}
+                            aria-grabbed={isDraggingItem}
                             title={`${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
                           >
                             {itemToolIcon ? (

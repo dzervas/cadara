@@ -20,6 +20,7 @@ import type {
   RenameBodyResponse,
   ResolvedReferenceRecord,
   ResolveReferenceResponse,
+  ReorderDocumentHistoryResponse,
   ReorderFeatureResponse,
   SetFeatureCursorResponse,
   UpdateDocumentVariableResponse,
@@ -89,6 +90,17 @@ const documentFeatureCursorSchema = z.discriminatedUnion('kind', [
     featureId: featureIdSchema,
   }),
 ]).transform((value) => value as DocumentFeatureCursor)
+
+const documentHistoryOrderEntrySchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('sketch'),
+    sketchId: sketchIdSchema,
+  }),
+  z.object({
+    kind: z.literal('feature'),
+    featureId: featureIdSchema,
+  }),
+])
 
 const advancedParticipantRoleSchema = z.union([
   z.literal('profile'),
@@ -674,6 +686,11 @@ export const reorderFeatureResponseSchema = modelingOperationResponseBaseSchema.
   featureId: featureIdSchema,
   beforeFeatureId: featureIdSchema.nullable(),
 }).transform((value) => value as ReorderFeatureResponse)
+
+export const reorderDocumentHistoryResponseSchema = modelingOperationResponseBaseSchema.extend({
+  item: documentHistoryOrderEntrySchema,
+  beforeItem: documentHistoryOrderEntrySchema.nullable(),
+}).transform((value) => value as ReorderDocumentHistoryResponse)
 
 export const setFeatureCursorResponseSchema = modelingOperationResponseBaseSchema.extend({
   cursor: documentFeatureCursorSchema,

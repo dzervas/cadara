@@ -4,12 +4,21 @@ import {
   createCommitSketchHistoryEntry,
   createCreateFeatureHistoryEntry,
   createEmptyOperationHistory,
+  createReorderDocumentHistoryEntry,
   createReorderFeatureHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
   validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
 } from '@/contracts/modeling/operation-history'
-import type { AddDocumentVariableRequest, CommitSketchRequest, CreateFeatureRequest, FeatureDefinition, ReorderFeatureRequest, UpdateDocumentVariableRequest } from '@/contracts/modeling/schema'
+import type {
+  AddDocumentVariableRequest,
+  CommitSketchRequest,
+  CreateFeatureRequest,
+  FeatureDefinition,
+  ReorderDocumentHistoryRequest,
+  ReorderFeatureRequest,
+  UpdateDocumentVariableRequest,
+} from '@/contracts/modeling/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION, REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import {
@@ -101,6 +110,14 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     baseRevisionId: 'rev_0003',
     featureId: 'feature_extrude-2',
     beforeFeatureId: 'feature_extrude-1',
+  }
+
+  const reorderDocumentHistoryRequest: ReorderDocumentHistoryRequest = {
+    contractVersion: 'modeling-contract/v1alpha1',
+    documentId: 'doc_workspace',
+    baseRevisionId: 'rev_0004',
+    item: { kind: 'sketch', sketchId: 'sketch_profile' },
+    beforeItem: { kind: 'feature', featureId: 'feature_extrude-1' },
   }
 
   function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
@@ -249,6 +266,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         createCommitSketchHistoryEntry(commitSketchRequest, commitSketchRequest.sketchId!),
         createCreateFeatureHistoryEntry(createFeatureRequest),
         createReorderFeatureHistoryEntry(reorderFeatureRequest),
+        createReorderDocumentHistoryEntry(reorderDocumentHistoryRequest),
       ],
     }
 
@@ -264,6 +282,38 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       !('baseRevisionId' in result.payload.entries[1]!.payload),
       'Persisted feature entries must omit replay-derived base revision metadata.',
     )
+    assert(
+      result.payload.entries[3]?.kind === 'reorderDocumentHistory'
+        && result.payload.entries[3].payload.item.kind === 'sketch'
+        && result.payload.entries[3].payload.beforeItem?.kind === 'feature',
+      'Persisted document history reorder entries must preserve mixed sketch/feature identities.',
+    )
+  }
+
+  function testRejectsInvalidDocumentHistoryReorderEntries() {
+    const missingItem = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [{
+        kind: 'reorderDocumentHistory',
+        payload: {
+          beforeItem: { kind: 'feature', featureId: 'feature_extrude-1' },
+        },
+      }],
+    })
+
+    const missingAnchorShape = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [{
+        kind: 'reorderDocumentHistory',
+        payload: {
+          item: { kind: 'sketch', sketchId: 'sketch_profile' },
+          beforeItem: { kind: 'feature' },
+        },
+      }],
+    })
+
+    assert(!missingItem.ok, 'Document history reorder entries missing the moved item should be rejected.')
+    assert(!missingAnchorShape.ok, 'Document history reorder entries with malformed anchors should be rejected.')
   }
 
   function testNormalizesCommittedCommitSketchTargets() {
@@ -1116,6 +1166,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   }
 
   testValidatesRepresentativeHistory()
+  testRejectsInvalidDocumentHistoryReorderEntries()
   testNormalizesCommittedCommitSketchTargets()
   testAcceptsLegacyDraftCommitSketchTargets()
   testRejectsUnsupportedVersion()

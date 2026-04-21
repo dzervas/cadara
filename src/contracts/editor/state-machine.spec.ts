@@ -1280,6 +1280,31 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testDirectSnapshotLoadUpdatesDocumentWithoutFetch() {
+    const initialSnapshot = createSnapshot()
+    const loadedState = {
+      ...initialEditorState,
+      document: {
+        documentId: initialSnapshot.documentId,
+        revisionId: initialSnapshot.revisionId,
+      },
+      snapshot: initialSnapshot,
+      selectionCatalog: buildSelectionTargetCatalog(initialSnapshot),
+    }
+    const nextSnapshot = structuredClone(initialSnapshot)
+    nextSnapshot.revisionId = 'rev_2'
+    nextSnapshot.document.revisionId = 'rev_2'
+
+    const loaded = transitionEditorState(loadedState, {
+      type: 'document.snapshotLoaded',
+      snapshot: nextSnapshot,
+    })
+
+    assert(loaded.effects.length === 0, 'Direct snapshot loads should not request another snapshot fetch.')
+    assert(loaded.state.snapshot?.revisionId === 'rev_2', 'Direct snapshot loads should update visible snapshot state immediately.')
+    assert(loaded.state.document.revisionId === 'rev_2', 'Direct snapshot loads should update the editor document revision.')
+  }
+
   function testSelectionKeyUsesDurableRefs() {
     const key = getEditorSelectionKey({ kind: 'feature', featureId: 'feature_alpha' })
     assert(key === 'feature:feature_alpha', 'Selection key derivation should remain deterministic.')
@@ -2755,6 +2780,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testRejectedSketchCommitShowsValidationMessage()
   await testModelingServiceRuntimePreservesResultRejections()
   testReplayIsDeterministic()
+  testDirectSnapshotLoadUpdatesDocumentWithoutFetch()
   testSelectionKeyUsesDurableRefs()
   await testRuntimeLoopProcessesSketchOpen()
   await testRuntimeLoopOpensSketchFromPlanarFace()

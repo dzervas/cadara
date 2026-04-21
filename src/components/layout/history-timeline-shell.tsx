@@ -9,7 +9,7 @@ import {
   type SketchHistoryCursor,
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
-import type { DocumentFeatureCursor, DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { DocumentFeatureCursor, DocumentHistoryOrderEntry, DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { DocumentHistoryItemRecord } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getPrimitiveRefKey, selectionFilterAllowsTarget } from '@/domain/editor/schema'
@@ -23,6 +23,8 @@ interface HistoryTimelineShellProps {
   onReopenTarget: (target: PrimitiveRef) => void
   onDocumentCursorRequested?: (cursor: DocumentFeatureCursor) => void
   documentCursorDisabled?: boolean
+  onDocumentHistoryReorder?: (item: DocumentHistoryOrderEntry, beforeItem: DocumentHistoryOrderEntry | null) => void
+  documentHistoryReorderDisabled?: boolean
   onSketchCursorRequested?: (cursor: SketchHistoryCursor) => void
   onDeleteFeature: (item: Extract<DocumentHistoryItemRecord, { kind: 'feature' }>) => void
   onRenameDocumentItem: (item: DocumentHistoryItemRecord) => void
@@ -37,6 +39,8 @@ export function HistoryTimelineShell({
   onReopenTarget,
   onDocumentCursorRequested,
   documentCursorDisabled = false,
+  onDocumentHistoryReorder,
+  documentHistoryReorderDisabled = false,
   onSketchCursorRequested,
   onDeleteFeature,
   onRenameDocumentItem,
@@ -69,6 +73,8 @@ export function HistoryTimelineShell({
           onReopenTarget={onReopenTarget}
           onCursorRequested={onDocumentCursorRequested}
           cursorDisabled={documentCursorDisabled}
+          onReorderItem={onDocumentHistoryReorder}
+          reorderDisabled={documentHistoryReorderDisabled}
           onDeleteFeature={onDeleteFeature}
           onRenameItem={onRenameDocumentItem}
           onSuppressFeature={onSuppressFeature}

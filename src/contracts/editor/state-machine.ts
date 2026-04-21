@@ -301,6 +301,13 @@ export interface DocumentRefreshRequestedEvent {
   type: 'document.refreshRequested'
 }
 
+/** Applies a snapshot already accepted by a modeling action without another fetch round-trip. */
+export interface DocumentSnapshotLoadedEvent {
+  type: 'document.snapshotLoaded'
+  /** Full typed snapshot payload to load into the editor runtime. */
+  snapshot: DocumentSnapshot
+}
+
 /** Reports a viewport hover on a durable selectable target. */
 export interface ViewportHoveredEvent {
   type: 'viewport.hovered'
@@ -469,6 +476,7 @@ export type EditorEvent =
   | CommandCancelledEvent
   | CommandCommitRequestedEvent
   | DocumentRefreshRequestedEvent
+  | DocumentSnapshotLoadedEvent
   | ViewportHoveredEvent
   | ViewportHoverClearedEvent
   | ViewportSelectionRequestedEvent
@@ -1721,6 +1729,19 @@ function updateStateDocument(state: EditorState, payload: SnapshotLoadedPayload)
     selectionCatalog: payload.selectionCatalog,
     pendingSnapshotRequestId:
       state.pendingSnapshotRequestId === payload.requestId ? null : state.pendingSnapshotRequestId,
+  }
+}
+
+function updateStateDocumentSnapshot(state: EditorState, snapshot: DocumentSnapshot): EditorState {
+  return {
+    ...state,
+    document: {
+      documentId: snapshot.documentId,
+      revisionId: snapshot.revisionId,
+    },
+    snapshot,
+    selectionCatalog: buildSelectionTargetCatalog(snapshot),
+    pendingSnapshotRequestId: null,
   }
 }
 
@@ -3117,6 +3138,11 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     }
     case 'document.refreshRequested':
       return emitSnapshotFetch(state, null)
+    case 'document.snapshotLoaded':
+      return {
+        state: updateStateDocumentSnapshot(state, event.snapshot),
+        effects: [],
+      }
     case 'effect.documentCursorMoved': {
       if (
         state.pendingHistoryCursorRequestId !== event.requestId ||

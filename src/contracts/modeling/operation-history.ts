@@ -4,6 +4,7 @@ import type {
   CreateFeatureRequest,
   DeleteFeatureRequest,
   RenameBodyRequest,
+  ReorderDocumentHistoryRequest,
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
   UpdateDocumentVariableRequest,
@@ -43,6 +44,10 @@ export type PersistedReorderFeaturePayload = Omit<
   ReorderFeatureRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
 >
+export type PersistedReorderDocumentHistoryPayload = Omit<
+  ReorderDocumentHistoryRequest,
+  'contractVersion' | 'documentId' | 'baseRevisionId'
+>
 export type PersistedSetFeatureCursorPayload = Omit<
   SetFeatureCursorRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
@@ -63,6 +68,7 @@ export type ModelingOperationHistoryEntry =
   | { kind: 'deleteFeature'; payload: PersistedDeleteFeaturePayload }
   | { kind: 'renameBody'; payload: PersistedRenameBodyPayload }
   | { kind: 'reorderFeature'; payload: PersistedReorderFeaturePayload }
+  | { kind: 'reorderDocumentHistory'; payload: PersistedReorderDocumentHistoryPayload }
   | { kind: 'setFeatureCursor'; payload: PersistedSetFeatureCursorPayload }
   | { kind: 'addDocumentVariable'; payload: PersistedAddDocumentVariablePayload }
   | { kind: 'updateDocumentVariable'; payload: PersistedUpdateDocumentVariablePayload }
@@ -183,6 +189,18 @@ export function createReorderFeatureHistoryEntry(
     payload: {
       featureId: payload.featureId,
       beforeFeatureId: payload.beforeFeatureId,
+    },
+  }
+}
+
+export function createReorderDocumentHistoryEntry(
+  payload: ReorderDocumentHistoryRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: 'reorderDocumentHistory',
+    payload: {
+      item: payload.item,
+      beforeItem: payload.beforeItem,
     },
   }
 }

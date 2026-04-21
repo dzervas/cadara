@@ -7,6 +7,7 @@ import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
 import {
   getNearestTimelineAnchorIndex,
+  resolveTimelineReorderDrop,
   TIMELINE_CURSOR_GLYPH,
 } from '@/components/layout/feature-timeline-bar.helpers'
 import {
@@ -271,6 +272,56 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(
     getNearestTimelineAnchorIndex([100, 160, 220, 280], 266) === 2,
     'Timeline cursor dragging should snap to the nearest later valid anchor when dragged near it.',
+  )
+  const featureItem = snapshot.presentation.documentHistory.find((item) => item.kind === 'feature')
+  const sketchItem = snapshot.presentation.documentHistory.find((item) => item.kind === 'sketch')
+  assert(featureItem, 'Timeline reorder tests need a feature history item.')
+  assert(sketchItem, 'Timeline reorder tests need a sketch history item.')
+  const moveFeatureBeforeSketch = resolveTimelineReorderDrop(snapshot.presentation.documentHistory, featureItem, -1)
+  assert(
+    moveFeatureBeforeSketch?.item.kind === 'feature'
+      && moveFeatureBeforeSketch.beforeItem?.kind === 'sketch',
+    'Timeline feature drops should resolve to durable document history anchors.',
+  )
+  const moveSketchAfterFeature = resolveTimelineReorderDrop(
+    snapshot.presentation.documentHistory,
+    sketchItem,
+    snapshot.presentation.documentHistory.length - 1,
+  )
+  assert(
+    moveSketchAfterFeature?.item.kind === 'sketch'
+      && moveSketchAfterFeature.beforeItem === null,
+    'Timeline sketch drops should support tail insertion after feature items.',
+  )
+  assert(
+    resolveTimelineReorderDrop(
+      snapshot.presentation.documentHistory,
+      sketchItem,
+      snapshot.presentation.documentHistory.indexOf(sketchItem) - 1,
+    ) === null,
+    'Timeline drops at the existing effective position should be ignored.',
+  )
+
+  const reorderDisabledMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureTimelineBar
+          snapshot={snapshot}
+          visibleSelection={[]}
+          onSelectTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onCursorRequested={() => undefined}
+          reorderDisabled
+          onDeleteFeature={() => undefined}
+          onRenameItem={() => undefined}
+          onSuppressFeature={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+  assert(
+    reorderDisabledMarkup.includes('data-reorder-disabled="true"'),
+    'Timeline should expose pending-state reorder disablement.',
   )
 
   const sketchCursorSnapshot = {

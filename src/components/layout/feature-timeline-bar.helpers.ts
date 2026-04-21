@@ -1,6 +1,9 @@
-import type { DocumentFeatureCursor, DocumentHistoryItemRecord } from '@/contracts/modeling/schema'
+import type { DocumentFeatureCursor, DocumentHistoryItemRecord, DocumentHistoryOrderEntry } from '@/contracts/modeling/schema'
 import {
+  createDocumentHistoryOrder,
   getDocumentHistoryCursorIndex,
+  getDocumentHistoryOrderEntryKey,
+  reorderDocumentHistoryOrder,
 } from '@/domain/modeling/document-history'
 
 export const TIMELINE_CURSOR_GLYPH = '↕'
@@ -50,4 +53,38 @@ export function getTimelineCursorAriaLabel(
   return item
     ? `Timeline cursor after ${item.label}`
     : 'Timeline cursor before first history item'
+}
+
+export function getHistoryItemOrderEntry(item: DocumentHistoryItemRecord): DocumentHistoryOrderEntry {
+  return item.kind === 'sketch'
+    ? { kind: 'sketch', sketchId: item.sketchId }
+    : { kind: 'feature', featureId: item.featureId }
+}
+
+function historyOrdersEqual(
+  left: readonly DocumentHistoryOrderEntry[],
+  right: readonly DocumentHistoryOrderEntry[],
+) {
+  return left.length === right.length
+    && left.every((entry, index) => getDocumentHistoryOrderEntryKey(entry) === getDocumentHistoryOrderEntryKey(right[index]!))
+}
+
+export function resolveTimelineReorderDrop(
+  items: readonly DocumentHistoryItemRecord[],
+  movedItem: DocumentHistoryItemRecord,
+  dropCursorIndex: number,
+): { item: DocumentHistoryOrderEntry; beforeItem: DocumentHistoryOrderEntry | null } | null {
+  const item = getHistoryItemOrderEntry(movedItem)
+  const beforeItemRecord = items[dropCursorIndex + 1] ?? null
+  const beforeItem = beforeItemRecord ? getHistoryItemOrderEntry(beforeItemRecord) : null
+  if (beforeItem && getDocumentHistoryOrderEntryKey(beforeItem) === getDocumentHistoryOrderEntryKey(item)) {
+    return null
+  }
+
+  const currentOrder = createDocumentHistoryOrder(items)
+  const nextOrder = reorderDocumentHistoryOrder(currentOrder, item, beforeItem)
+
+  return nextOrder && !historyOrdersEqual(currentOrder, nextOrder)
+    ? { item, beforeItem }
+    : null
 }

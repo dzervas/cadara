@@ -31,6 +31,8 @@ import type {
   ModelingDiagnosticDetail,
   RenameBodyRequest,
   RenameBodyResponse,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   ResolveReferenceRequest,
@@ -86,7 +88,10 @@ import {
 } from '@/domain/modeling/occ/snapshot'
 import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
 import {
+  findDocumentHistoryOrderDependencyViolations,
+  getDocumentHistoryOrderEntryKey,
   insertDocumentHistoryOrderEntryAfterCursor,
+  reorderDocumentHistoryOrder,
   type DocumentHistoryOrderEntry,
 } from '@/domain/modeling/document-history'
 import {
@@ -226,6 +231,43 @@ function createMissingReorderAnchorDiagnostic(featureId: FeatureId): ModelingDia
     'error',
     `Feature reorder anchor ${featureId} does not resolve in the current OCC authoring state.`,
     { kind: 'feature', featureId },
+  )
+}
+
+function createMissingDocumentHistoryItemDiagnostic(item: ReorderDocumentHistoryRequest['item']): ModelingDiagnostic {
+  return createDiagnostic(
+    'occ-missing-document-history-item',
+    'error',
+    `Document history item ${getDocumentHistoryOrderEntryKey(item)} does not resolve in the current OCC authoring state.`,
+    item.kind === 'sketch'
+      ? { kind: 'sketch', sketchId: item.sketchId }
+      : { kind: 'feature', featureId: item.featureId },
+  )
+}
+
+function createMissingDocumentHistoryAnchorDiagnostic(
+  item: ReorderDocumentHistoryRequest['beforeItem'],
+): ModelingDiagnostic {
+  return createDiagnostic(
+    'occ-missing-document-history-anchor',
+    'error',
+    `Document history anchor ${item === null ? 'tail' : getDocumentHistoryOrderEntryKey(item)} does not resolve in the current OCC authoring state.`,
+    item === null
+      ? null
+      : item.kind === 'sketch'
+        ? { kind: 'sketch', sketchId: item.sketchId }
+        : { kind: 'feature', featureId: item.featureId },
+  )
+}
+
+function createDocumentHistoryDependencyOrderDiagnostic(
+  violation: ReturnType<typeof findDocumentHistoryOrderDependencyViolations>[number],
+): ModelingDiagnostic {
+  return createDiagnostic(
+    'occ-document-history-dependency-order',
+    'error',
+    `Document history places ${violation.featureKey} before its dependency ${violation.dependencyKey}.`,
+    { kind: 'feature', featureId: violation.featureId },
   )
 }
 
@@ -632,6 +674,35 @@ function getAppliedFeatures(
       .map((item) => item.featureId),
   )
   return features.filter((feature) => appliedFeatureIds.has(feature.featureId))
+}
+
+function reorderFeaturesByDocumentHistory(
+  features: readonly OccAuthoringFeatureRecord[],
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+) {
+  const featuresById = new Map(features.map((feature) => [feature.featureId, feature]))
+  const seen = new Set<FeatureId>()
+  const ordered: OccAuthoringFeatureRecord[] = []
+
+  for (const item of historyOrder) {
+    if (item.kind !== 'feature') {
+      continue
+    }
+
+    const feature = featuresById.get(item.featureId)
+    if (feature && !seen.has(feature.featureId)) {
+      ordered.push(feature)
+      seen.add(feature.featureId)
+    }
+  }
+
+  for (const feature of features) {
+    if (!seen.has(feature.featureId)) {
+      ordered.push(feature)
+    }
+  }
+
+  return ordered
 }
 
 function uniqueTargets(targets: readonly NonNullable<ModelingDiagnostic['target']>[]) {
@@ -2080,6 +2151,140 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ...accepted,
       }),
     }
+  }
+
+  async reorderDocumentHistory(request: ReorderDocumentHistoryRequest): Promise<ReorderDocumentHistoryResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(request.baseRevisionId, currentRevisionId)
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        changedTargets: [],
+        ...conflict,
+      }
+    }
+
+    const currentOrder = runtimeState.authoringState.historyOrder
+    const itemKey = getDocumentHistoryOrderEntryKey(request.item)
+    const beforeKey = request.beforeItem === null ? null : getDocumentHistoryOrderEntryKey(request.beforeItem)
+
+    if (!currentOrder.some((entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey)) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        [createMissingDocumentHistoryItemDiagnostic(request.item)],
+        'occ-missing-document-history-item',
+      )
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        changedTargets: [],
+        ...rejected,
+      }
+    }
+
+    if (
+      beforeKey !== null
+      && !currentOrder.some((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)
+    ) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        [createMissingDocumentHistoryAnchorDiagnostic(request.beforeItem)],
+        'occ-missing-document-history-anchor',
+      )
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        item: request.item,
+        beforeItem: request.beforeItem,
+        changedTargets: [],
+        ...rejected,
+      }
+    }
+
+    const nextHistoryOrder = reorderDocumentHistoryOrder(currentOrder, request.item, request.beforeItem)
+
+    if (nextHistoryOrder === null) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        [createMissingDocumentHistoryItemDiagnostic(request.item)],
+        'occ-missing-document-history-item',
+      )
+
+      return this.withOperationEnvelope({
+        item: request.item,
+        beforeItem: request.beforeItem,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    const nextFeatures = reorderFeaturesByDocumentHistory(runtimeState.authoringState.features, nextHistoryOrder)
+    const dependencyDiagnostics = findDocumentHistoryOrderDependencyViolations(nextFeatures, nextHistoryOrder)
+      .map(createDocumentHistoryDependencyOrderDiagnostic)
+
+    if (dependencyDiagnostics.length > 0) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        dependencyDiagnostics,
+        'occ-document-history-dependency-order',
+      )
+
+      return this.withOperationEnvelope({
+        item: request.item,
+        beforeItem: request.beforeItem,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1
+    const nextRevisionId = createRevisionId(nextSequence)
+
+    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+      revisionId: nextRevisionId,
+      features: nextFeatures,
+      historyOrder: nextHistoryOrder,
+    })
+    if (!nextAuthoringState.ok) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        nextAuthoringState.diagnostics,
+        nextAuthoringState.reasonCode,
+      )
+
+      return this.withOperationEnvelope({
+        item: request.item,
+        beforeItem: request.beforeItem,
+        changedTargets: [],
+        ...rejected,
+      })
+    }
+
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState.state,
+      revisionSequence: nextSequence,
+    })
+
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+
+    return this.withOperationEnvelope({
+      item: request.item,
+      beforeItem: request.beforeItem,
+      changedTargets: [request.item.kind === 'sketch'
+        ? { kind: 'sketch', sketchId: request.item.sketchId }
+        : { kind: 'feature', featureId: request.item.featureId }],
+      ...accepted,
+    })
   }
 
   async setFeatureCursor(request: SetFeatureCursorRequest): Promise<SetFeatureCursorResponse> {

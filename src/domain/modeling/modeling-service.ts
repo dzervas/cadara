@@ -71,6 +71,8 @@ import type {
   ResolvedReferenceRecord,
   ResolveReferenceRequest,
   ResolveReferenceResponse,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   SketchSnapshotRecord,
@@ -107,6 +109,7 @@ import {
   getDocumentSnapshotResponseSchema,
   kernelDocumentSnapshotSchema,
   renameBodyResponseSchema,
+  reorderDocumentHistoryResponseSchema,
   reorderFeatureResponseSchema,
   resolveReferenceResponseSchema,
   setFeatureCursorResponseSchema,
@@ -123,6 +126,7 @@ import {
   createDeleteFeatureHistoryEntry,
   createEmptyOperationHistory,
   createRenameBodyHistoryEntry,
+  createReorderDocumentHistoryEntry,
   createReorderFeatureHistoryEntry,
   createSetFeatureCursorHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
@@ -213,6 +217,7 @@ export interface ModelingService {
   deleteFeature(input: ModelingDeleteFeatureInput): AppResultAsync<ModelingDeleteFeatureResult>
   renameBody(input: ModelingRenameBodyInput): AppResultAsync<ModelingRenameBodyResult>
   reorderFeature(input: ModelingReorderFeatureInput): AppResultAsync<ModelingReorderFeatureResult>
+  reorderDocumentHistory(input: ModelingReorderDocumentHistoryInput): AppResultAsync<ModelingReorderDocumentHistoryResult>
   setFeatureCursor(input: ModelingSetFeatureCursorInput): AppResultAsync<ModelingSetFeatureCursorResult>
   evaluatePreview(input: ModelingEvaluatePreviewInput): Promise<ModelingPreviewResult>
   exportDocument(input: ModelingExportDocumentInput): Promise<ModelingExportDocumentResult>
@@ -299,6 +304,16 @@ export interface ModelingReorderFeatureResult {
   diagnostics: ModelingDiagnostic[]
 }
 
+export interface ModelingReorderDocumentHistoryResult {
+  revisionId: DocumentSnapshot['revisionId']
+  item: ReorderDocumentHistoryResponse['item']
+  beforeItem: ReorderDocumentHistoryResponse['beforeItem']
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
 export interface ModelingSetFeatureCursorResult {
   revisionId: DocumentSnapshot['revisionId']
   cursor: DocumentFeatureCursor
@@ -335,6 +350,8 @@ export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableReq
 export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingReorderDocumentHistoryInput =
+  Omit<ReorderDocumentHistoryRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingSetFeatureCursorInput =
   Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'> & {
     persistHistory?: boolean
@@ -3639,6 +3656,24 @@ function mapReorderFeatureResponse(
   }
 }
 
+function mapReorderDocumentHistoryResponse(
+  response: ReorderDocumentHistoryResponse,
+  expectedDocumentId: DocumentId,
+): ModelingReorderDocumentHistoryResult {
+  const parsed = reorderDocumentHistoryResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Reorder document history')
+  return {
+    revisionId: parsed.revisionId,
+    item: parsed.item,
+    beforeItem: parsed.beforeItem,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
+  }
+}
+
 function mapSetFeatureCursorResponse(
   response: SetFeatureCursorResponse,
   expectedDocumentId: DocumentId,
@@ -3793,6 +3828,20 @@ function normalizeReorderFeatureInput(
   input: ModelingReorderFeatureInput,
   documentId: DocumentId,
 ): ReorderFeatureRequest {
+  assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
+
+  return {
+    ...requestInput,
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  }
+}
+
+function normalizeReorderDocumentHistoryInput(
+  input: ModelingReorderDocumentHistoryInput,
+  documentId: DocumentId,
+): ReorderDocumentHistoryRequest {
   assertMutationBase(input)
   const requestInput = stripRepositoryMutationBasis(input)
 
@@ -4196,6 +4245,19 @@ async function replayHistoryEntry(input: {
     }
     case 'reorderFeature': {
       const response = await input.adapter.reorderFeature({
+        ...input.entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      })
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      }
+    }
+    case 'reorderDocumentHistory': {
+      const response = await input.adapter.reorderDocumentHistory({
         ...input.entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
@@ -5006,6 +5068,28 @@ export function createModelingService(
             mapReorderFeatureResponse(response, currentDocumentId),
             input,
             () => createReorderFeatureHistoryEntry(request),
+          )
+        },
+      })
+    },
+    reorderDocumentHistory(input) {
+      return runModelingMutationBoundary({
+        operation: 'Reorder document history',
+        fallbackMessage: 'Reorder document history failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'item', value: input.item.kind === 'sketch' ? input.item.sketchId : input.item.featureId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeReorderDocumentHistoryInput(input, currentDocumentId)
+          const response = await adapter.reorderDocumentHistory(request)
+          return finalizeMutationResult(
+            response,
+            mapReorderDocumentHistoryResponse(response, currentDocumentId),
+            input,
+            () => createReorderDocumentHistoryEntry(request),
           )
         },
       })

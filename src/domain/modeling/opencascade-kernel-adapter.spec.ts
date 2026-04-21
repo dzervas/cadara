@@ -2536,6 +2536,41 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       'Feature reorder must persist the new feature order in later snapshots.',
     )
 
+    const documentHistoryReordered = await adapter.reorderDocumentHistory({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: reordered.revisionId,
+      item: { kind: 'feature', featureId: firstPlane.featureId },
+      beforeItem: { kind: 'sketch', sketchId: committed.sketchId },
+    })
+
+    assert(documentHistoryReordered.revisionState.kind === 'accepted', 'Mixed document history reorder must be accepted.')
+    assert(documentHistoryReordered.rebuildResult.kind === 'rebuilt', 'Accepted document history reorders must rebuild the OCC snapshot.')
+
+    const reorderedDocumentHistory = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    assert(
+      reorderedDocumentHistory.snapshot.presentation.documentHistory[0]?.kind === 'feature'
+        && reorderedDocumentHistory.snapshot.presentation.documentHistory[0].featureId === firstPlane.featureId,
+      'Document history reorder must persist mixed feature/sketch order in later snapshots.',
+    )
+    assert(
+      reorderedDocumentHistory.snapshot.features[0]?.featureId === firstPlane.featureId
+        && reorderedDocumentHistory.snapshot.features[1]?.featureId === secondPlane.featureId,
+      'Document history feature reorders must update OCC feature execution order.',
+    )
+
+    const missingAnchor = await adapter.reorderDocumentHistory({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: documentHistoryReordered.revisionId,
+      item: { kind: 'feature', featureId: firstPlane.featureId },
+      beforeItem: { kind: 'sketch', sketchId: 'sketch_missing' },
+    })
+    assert(missingAnchor.revisionState.kind === 'rejected', 'Missing document history anchors must reject.')
+
     const conflict = await adapter.createFeature({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -2547,6 +2582,44 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(
       conflict.rebuildResult.kind === 'skipped' && conflict.rebuildResult.reasonCode === 'revisionConflict',
       'Conflicts must skip rebuilds explicitly.',
+    )
+  }
+
+  async function testDocumentHistoryReorderRejectsFeatureBeforeSketchDependency() {
+    const adapter = createAdapter()
+    const committed = await commitSeedSketch(adapter)
+
+    if (committed.revisionState.kind !== 'accepted') {
+      throw new Error('Seed sketch commit must succeed before dependency-order reorder coverage.')
+    }
+
+    const snapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = snapshot.snapshot.sketches.find((entry) => entry.sketchId === committed.sketchId)
+    assert(sketch, 'Committed sketch snapshot must be available for dependency-order reorder coverage.')
+
+    const extrude = await adapter.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: committed.revisionId,
+      definition: createExtrudeDefinition(sketch, 12),
+    })
+    assert(extrude.revisionState.kind === 'accepted', 'Extrude create must be accepted before dependency-order reorder coverage.')
+
+    const invalidReorder = await adapter.reorderDocumentHistory({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: extrude.revisionId,
+      item: { kind: 'feature', featureId: extrude.featureId },
+      beforeItem: { kind: 'sketch', sketchId: committed.sketchId },
+    })
+
+    assert(invalidReorder.revisionState.kind === 'rejected', 'Document history reorder must reject a feature before its sketch dependency.')
+    assert(
+      invalidReorder.diagnostics.some((diagnostic) => diagnostic.code === 'occ-document-history-dependency-order'),
+      'Rejected dependency-order reorders must return a visible diagnostic.',
     )
   }
 
@@ -3931,6 +4004,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testTransformPreviewCreateAndReplaceBody()
   await testDeleteFeatureRebuildsSnapshotAndResolveReferenceInvalidatesMissingRefs()
   await testReorderFeatureAndConflictHandling()
+  await testDocumentHistoryReorderRejectsFeatureBeforeSketchDependency()
   await testPreviewFreshness()
   await testConstructionPlaneSnapshotsSurfaceTheDocumentedGap()
   await testCommitSketchRejectsUnknownExplicitSketchId()

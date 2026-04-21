@@ -680,6 +680,103 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(missingReorder.revisionState.kind === 'rejected', 'Reorders targeting missing anchors must be rejected.')
   }
 
+  async function testDocumentHistoryReorderAcceptsRejectsAndConflicts() {
+    const adapter = new MockKernelAdapter()
+    const initial = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const sketch = initial.snapshot.presentation.documentHistory.find((item) => item.kind === 'sketch')
+    const feature = initial.snapshot.presentation.documentHistory.find((item) => item.kind === 'feature')
+    assert(sketch?.kind === 'sketch', 'Mock fixture should expose a sketch history item.')
+    assert(feature?.kind === 'feature', 'Mock fixture should expose a feature history item.')
+    const seedFeature = initial.snapshot.features.find((entry) => entry.featureId === feature.featureId)
+    assert(seedFeature?.definition.kind === 'extrude', 'Mock fixture should expose the seeded extrude definition.')
+
+    const secondFeature = await adapter.createFeature({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: initial.snapshot.revisionId,
+      definition: {
+        ...seedFeature.definition,
+        parameters: {
+          ...seedFeature.definition.parameters,
+          endExtent: { kind: 'blind', direction: 'positive', distance: 14 },
+        },
+      },
+    })
+    assert(secondFeature.revisionState.kind === 'accepted', 'Mock fixture should accept a second feature for reorder coverage.')
+
+    const featureReorder = await adapter.reorderDocumentHistory({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: secondFeature.revisionId,
+      item: { kind: 'feature', featureId: secondFeature.featureId },
+      beforeItem: { kind: 'feature', featureId: feature.featureId },
+    })
+    assert(featureReorder.revisionState.kind === 'accepted', 'Mock document history reorder should accept valid feature moves.')
+
+    const featureReordered = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      featureReordered.snapshot.features[0]?.featureId === secondFeature.featureId
+        && featureReordered.snapshot.features[1]?.featureId === feature.featureId,
+      'Mock document history feature reorders should update feature execution order.',
+    )
+    const cursorBeforeSketchReorder = featureReordered.snapshot.document.cursor
+
+    const invalidSketchMove = await adapter.reorderDocumentHistory({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: featureReorder.revisionId,
+      item: { kind: 'sketch', sketchId: sketch.sketchId },
+      beforeItem: null,
+    })
+    assert(invalidSketchMove.revisionState.kind === 'rejected', 'Mock document history reorder should reject features before their sketch dependencies.')
+    assert(
+      invalidSketchMove.diagnostics.some((diagnostic) => diagnostic.code === 'mock-document-history-dependency-order'),
+      'Rejected dependency-order reorders should return a visible diagnostic.',
+    )
+
+    const reordered = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      JSON.stringify(reordered.snapshot.document.cursor) === JSON.stringify(cursorBeforeSketchReorder),
+      'Rejected document history reorder should preserve the durable cursor target.',
+    )
+
+    const missingItem = await adapter.reorderDocumentHistory({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: featureReorder.revisionId,
+      item: { kind: 'sketch', sketchId: 'sketch_missing' },
+      beforeItem: { kind: 'feature', featureId: feature.featureId },
+    })
+    assert(missingItem.revisionState.kind === 'rejected', 'Missing moved document history items should be rejected.')
+
+    const missingAnchor = await adapter.reorderDocumentHistory({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: featureReorder.revisionId,
+      item: { kind: 'feature', featureId: feature.featureId },
+      beforeItem: { kind: 'sketch', sketchId: 'sketch_missing' },
+    })
+    assert(missingAnchor.revisionState.kind === 'rejected', 'Missing document history anchors should be rejected.')
+
+    const conflict = await adapter.reorderDocumentHistory({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: initial.snapshot.revisionId,
+      item: { kind: 'feature', featureId: feature.featureId },
+      beforeItem: null,
+    })
+    assert(conflict.revisionState.kind === 'conflict', 'Stale document history reorders should report conflicts.')
+  }
+
   async function testPreviewStalenessReportsObservedRevision() {
     const adapter = new MockKernelAdapter()
 
@@ -1896,6 +1993,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testAcceptedSketchCommitMutatesCommittedSnapshot()
   await testAcceptedSketchCommitPersistsActiveProjectionData()
   await testMissingMutationTargetsAreRejected()
+  await testDocumentHistoryReorderAcceptsRejectsAndConflicts()
   await testPreviewStalenessReportsObservedRevision()
   await testResolveReferenceReportsMissingTargetsExplicitly()
   await testMockKernelRejectsUnsupportedContractEnvelope()

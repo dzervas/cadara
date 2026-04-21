@@ -21,6 +21,8 @@ import type {
   GetDocumentSnapshotResponse,
   RenameBodyRequest,
   RenameBodyResponse,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
   ReorderFeatureResponse,
   ResolveReferenceRequest,
@@ -64,6 +66,8 @@ export interface ModelingKernelAdapter {
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>
   /** Reorders an existing durable feature within the document feature list. */
   reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse>
+  /** Reorders an existing durable sketch or feature within authored document history. */
+  reorderDocumentHistory(request: ReorderDocumentHistoryRequest): Promise<ReorderDocumentHistoryResponse>
   /** Moves the document feature cursor without deleting durable feature records. */
   setFeatureCursor(request: SetFeatureCursorRequest): Promise<SetFeatureCursorResponse>
   /** Adds a durable document variable record after validating its raw expression text. */

@@ -172,8 +172,18 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     }))
     assert(reordered.revisionState.kind === 'accepted', 'Feature reorder should be stored for replay.')
 
-    const cursor = await unwrapModelingResult(service.setFeatureCursor({
+    const documentHistoryReordered = await unwrapModelingResult(service.reorderDocumentHistory({
       baseRevisionId: reordered.revisionId,
+      item: { kind: 'feature', featureId: created.featureId },
+      beforeItem: { kind: 'sketch', sketchId: 'sketch_history' },
+    }))
+    assert(
+      documentHistoryReordered.revisionState.kind === 'accepted',
+      'Mixed document history reorder should be stored for replay.',
+    )
+
+    const cursor = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: documentHistoryReordered.revisionId,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
     assert(cursor.revisionState.kind === 'accepted', 'Feature cursor rollback should be stored for replay.')
@@ -207,6 +217,15 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       restoredSnapshot.features.map((feature) => feature.featureId).join(',')
         === originalSnapshot.features.map((feature) => feature.featureId).join(','),
       'Replay should preserve feature order.',
+    )
+    assert(
+      finalHistory.entries.some((entry) => entry.kind === 'reorderDocumentHistory'),
+      'Accepted mixed document history reorders should be persisted.',
+    )
+    assert(
+      restoredSnapshot.presentation.documentHistory.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join(',')
+        === originalSnapshot.presentation.documentHistory.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join(','),
+      'Replay should preserve mixed sketch and feature document history order.',
     )
     assert(
       restoredSnapshot.features.find((feature) => feature.featureId === created.featureId)?.definition.kind === 'extrude',

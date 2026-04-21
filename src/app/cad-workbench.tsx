@@ -26,10 +26,16 @@ import {
   requireAcceptedModelingResult,
   runWorkbenchAction,
 } from '@/app/workbench-action'
-import { getWorkbenchHistoryAvailability } from '@/app/workbench-history'
+import {
+  documentHistoryOrdersEqual,
+  getDocumentHistoryOrderRestoreMoves,
+  getWorkbenchHistoryAvailability,
+} from '@/app/workbench-history'
 import type {
   DocumentFeatureCursor,
+  DocumentHistoryOrderEntry,
   DocumentHistoryItemRecord,
+  DocumentSnapshot,
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
@@ -54,6 +60,7 @@ import {
   getSelectionDetail,
 } from '@/domain/modeling/document-snapshot-view'
 import {
+  createDocumentHistoryOrder,
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
@@ -101,6 +108,12 @@ type WorkbenchUndoEntry =
       after: DocumentVariablePatch
       label: string
     }
+  | {
+      kind: 'reorderDocumentHistory'
+      before: DocumentHistoryOrderEntry[]
+      after: DocumentHistoryOrderEntry[]
+      label: string
+    }
 
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
@@ -137,12 +150,18 @@ export function CadWorkbench() {
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
   const [redoStack, setRedoStack] = useState<WorkbenchUndoEntry[]>([])
   const [isUndoRedoRunning, setIsUndoRedoRunning] = useState(false)
+  const [isDocumentHistoryReorderRunning, setIsDocumentHistoryReorderRunning] = useState(false)
   const shellFrameRef = useRef<HTMLDivElement | null>(null)
   const snapshotRef = useRef(snapshot)
   const undoStackRef = useRef(undoStack)
   const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
+
+  const applyLoadedSnapshot = (nextSnapshot: DocumentSnapshot) => {
+    snapshotRef.current = nextSnapshot
+    dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })
+  }
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
 
@@ -489,11 +508,71 @@ export function CadWorkbench() {
     return false
   }
 
+  const applyDocumentHistoryOrder = async (
+    nextOrder: DocumentHistoryOrderEntry[],
+    failureLabel: string,
+  ) => {
+    const currentSnapshot = snapshotRef.current
+    if (!currentSnapshot) {
+      return false
+    }
+
+    const currentOrder = createDocumentHistoryOrder(currentSnapshot.presentation.documentHistory)
+    const moves = getDocumentHistoryOrderRestoreMoves(currentOrder, nextOrder)
+    if (!moves) {
+      return false
+    }
+
+    let accepted = true
+
+    for (const move of moves) {
+      const latestSnapshot = snapshotRef.current
+      if (!latestSnapshot) {
+        return false
+      }
+
+      const result = await runWorkbenchAction({
+        operation: failureLabel,
+        reporter: errorReporter,
+        context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
+        action: () => modelingService.reorderDocumentHistory({
+          baseRevisionId: latestSnapshot.document.revisionId,
+          item: move.item,
+          beforeItem: move.beforeItem,
+        }),
+        mapSuccess: (result) => requireAcceptedModelingResult(result, {
+          operation: failureLabel,
+          fallbackMessage: `${failureLabel} failed.`,
+          context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
+        }),
+        onError: (error) => showWorkbenchError(error.message),
+      })
+
+      if (result.isErr()) {
+        accepted = false
+        break
+      }
+
+      const refreshedSnapshot = await modelingService.getCurrentDocumentSnapshot()
+      applyLoadedSnapshot(refreshedSnapshot)
+    }
+
+    const finalOrder = snapshotRef.current
+      ? createDocumentHistoryOrder(snapshotRef.current.presentation.documentHistory)
+      : currentOrder
+    return accepted && documentHistoryOrdersEqual(nextOrder, finalOrder)
+  }
+
   const applyUndoEntry = (entry: WorkbenchUndoEntry, direction: 'undo' | 'redo') => {
     switch (entry.kind) {
       case 'updateVariable':
         return applyVariablePatch(
           entry.variableId,
+          direction === 'undo' ? entry.before : entry.after,
+          direction === 'undo' ? `Undo ${entry.label}` : `Redo ${entry.label}`,
+        )
+      case 'reorderDocumentHistory':
+        return applyDocumentHistoryOrder(
           direction === 'undo' ? entry.before : entry.after,
           direction === 'undo' ? `Undo ${entry.label}` : `Redo ${entry.label}`,
         )
@@ -872,6 +951,57 @@ export function CadWorkbench() {
 
   const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
     dispatch({ type: 'document.historyCursorRequested', cursor })
+  }
+
+  const handleDocumentHistoryReorder = (
+    item: DocumentHistoryOrderEntry,
+    beforeItem: DocumentHistoryOrderEntry | null,
+  ) => {
+    if (!snapshot || isDocumentHistoryReorderRunning) {
+      return
+    }
+
+    const beforeOrder = createDocumentHistoryOrder(snapshot.presentation.documentHistory)
+    setIsDocumentHistoryReorderRunning(true)
+    void runWorkbenchAction({
+      operation: 'Reorder document history',
+      reporter: errorReporter,
+      context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
+      action: () => modelingService.reorderDocumentHistory({
+        baseRevisionId: snapshot.document.revisionId,
+        item,
+        beforeItem,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: 'Reorder document history',
+        fallbackMessage: 'Reorder document history failed.',
+        context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
+      }),
+      onError: (error) => showWorkbenchError(error.message),
+    }).then((result) => {
+      if (result.isErr()) {
+        return
+      }
+
+      return modelingService.getCurrentDocumentSnapshot().then((nextSnapshot) => {
+        applyLoadedSnapshot(nextSnapshot)
+        const afterOrder = createDocumentHistoryOrder(nextSnapshot.presentation.documentHistory)
+        if (!documentHistoryOrdersEqual(beforeOrder, afterOrder)) {
+          setUndoStack((current) => [
+            ...current,
+            {
+              kind: 'reorderDocumentHistory',
+              before: beforeOrder,
+              after: afterOrder,
+              label: 'document history reorder',
+            },
+          ])
+          setRedoStack([])
+        }
+      })
+    }).finally(() => {
+      setIsDocumentHistoryReorderRunning(false)
+    })
   }
 
   const handleSketchMove = (point: readonly [number, number]) => {
@@ -1268,6 +1398,8 @@ export function CadWorkbench() {
             onReopenTarget={handleNavigationReopen}
             onDocumentCursorRequested={handleTimelineCursorRequested}
             documentCursorDisabled={!history.canUndo && !history.canRedo}
+            onDocumentHistoryReorder={handleDocumentHistoryReorder}
+            documentHistoryReorderDisabled={Boolean(sketchSession) || isDocumentHistoryReorderRunning || isUndoRedoRunning || (!history.canUndo && !history.canRedo)}
             onSketchCursorRequested={(cursor) => dispatch({ type: 'sketch.historyCursorRequested', cursor })}
             onDeleteFeature={handleFeatureDelete}
             onRenameDocumentItem={handleDocumentHistoryRename}

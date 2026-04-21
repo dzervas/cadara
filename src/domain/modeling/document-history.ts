@@ -2,15 +2,35 @@ import type {
   DocumentSnapshot,
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
+  FeatureDefinition,
   FeatureSnapshotRecord,
   FeatureTreeNodeRecord,
   SketchSnapshotRecord,
 } from '@/contracts/modeling/schema'
-import type { DocumentHistoryItemId } from '@/contracts/shared/ids'
+import type { DocumentHistoryItemId, FeatureId } from '@/contracts/shared/ids'
 
 export type DocumentHistoryOrderEntry =
   | { kind: 'sketch'; sketchId: NonNullable<DocumentHistoryItemRecord['sketchId']> }
   | { kind: 'feature'; featureId: NonNullable<DocumentHistoryItemRecord['featureId']> }
+
+export interface DocumentHistoryDependencyOrderViolation {
+  featureId: FeatureId
+  featureKey: string
+  dependencyKey: string
+}
+
+export function getDocumentHistoryOrderEntryKey(entry: DocumentHistoryOrderEntry) {
+  return entry.kind === 'sketch'
+    ? `sketch:${entry.sketchId}`
+    : `feature:${entry.featureId}`
+}
+
+export function documentHistoryOrderEntriesEqual(
+  left: DocumentHistoryOrderEntry,
+  right: DocumentHistoryOrderEntry,
+) {
+  return getDocumentHistoryOrderEntryKey(left) === getDocumentHistoryOrderEntryKey(right)
+}
 
 function createDocumentHistoryItemId(kind: DocumentHistoryItemRecord['kind'], id: string) {
   return `document_history_item_${kind}_${id}` as DocumentHistoryItemId
@@ -132,6 +152,99 @@ export function insertDocumentHistoryOrderEntryAfterCursor(
   const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
   order.splice(cursorIndex < 0 ? order.length : cursorIndex + 1, 0, entry)
   return order
+}
+
+export function reorderDocumentHistoryOrder(
+  order: readonly DocumentHistoryOrderEntry[],
+  item: DocumentHistoryOrderEntry,
+  beforeItem: DocumentHistoryOrderEntry | null,
+): DocumentHistoryOrderEntry[] | null {
+  const itemKey = getDocumentHistoryOrderEntryKey(item)
+  const beforeKey = beforeItem === null ? null : getDocumentHistoryOrderEntryKey(beforeItem)
+  const currentIndex = order.findIndex((entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey)
+
+  if (currentIndex < 0) {
+    return null
+  }
+
+  if (beforeKey !== null && !order.some((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)) {
+    return null
+  }
+
+  const nextOrder = order.filter((entry) => getDocumentHistoryOrderEntryKey(entry) !== itemKey)
+  const insertIndex = beforeKey === null
+    ? nextOrder.length
+    : nextOrder.findIndex((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)
+  nextOrder.splice(insertIndex < 0 ? nextOrder.length : insertIndex, 0, item)
+  return nextOrder
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function collectFeatureDefinitionDependencyKeys(value: unknown, dependencyKeys: Set<string>) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectFeatureDefinitionDependencyKeys(item, dependencyKeys)
+    }
+    return
+  }
+
+  if (!isRecord(value)) {
+    return
+  }
+
+  if (typeof value.sketchId === 'string') {
+    dependencyKeys.add(`sketch:${value.sketchId}`)
+  }
+
+  if (typeof value.featureId === 'string') {
+    dependencyKeys.add(`feature:${value.featureId}`)
+  }
+
+  for (const child of Object.values(value)) {
+    collectFeatureDefinitionDependencyKeys(child, dependencyKeys)
+  }
+}
+
+export function findDocumentHistoryOrderDependencyViolations(
+  features: readonly { featureId: FeatureId; definition: FeatureDefinition }[],
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+): DocumentHistoryDependencyOrderViolation[] {
+  const indexByKey = new Map(
+    historyOrder.map((entry, index) => [getDocumentHistoryOrderEntryKey(entry), index]),
+  )
+  const violations: DocumentHistoryDependencyOrderViolation[] = []
+
+  for (const feature of features) {
+    const featureKey = getDocumentHistoryOrderEntryKey({ kind: 'feature', featureId: feature.featureId })
+    const featureIndex = indexByKey.get(featureKey)
+
+    if (featureIndex === undefined) {
+      continue
+    }
+
+    const dependencyKeys = new Set<string>()
+    collectFeatureDefinitionDependencyKeys(feature.definition, dependencyKeys)
+
+    for (const dependencyKey of dependencyKeys) {
+      if (dependencyKey === featureKey) {
+        continue
+      }
+
+      const dependencyIndex = indexByKey.get(dependencyKey)
+      if (dependencyIndex !== undefined && dependencyIndex > featureIndex) {
+        violations.push({
+          featureId: feature.featureId,
+          featureKey,
+          dependencyKey,
+        })
+      }
+    }
+  }
+
+  return violations
 }
 
 export function createTailDocumentCursor(items: readonly DocumentHistoryItemRecord[]): DocumentFeatureCursor {
