@@ -10,7 +10,15 @@ import type {
   GetDocumentSnapshotResponse,
   SketchSnapshotRecord,
 } from '@/contracts/modeling/schema'
-import type { BodyId, FeatureId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
+import type {
+  BodyId,
+  FeatureId,
+  ProjectedGeometryId,
+  ReferenceId,
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -816,6 +824,71 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testProjectedRegionContractGapSkipsRegionRenderWithoutWarning() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const sketchId = 'sketch_phase6_projected_region_gap' as SketchId
+    const referenceId = 'ref_phase6_projected_region_gap' as ReferenceId
+    const geometryId = 'projected_geometry_phase6_projected_region_gap' as ProjectedGeometryId
+    const definition: SketchDefinition = {
+      ...createSketchDefinition(sketchId, [], []),
+      referenceIds: [referenceId],
+      references: [{
+        referenceId,
+        kind: 'constructionPlane',
+        label: 'Projected region source',
+        source: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        projectionMode: 'coplanar',
+      }],
+    }
+    const regionId = 'region_phase6_projected_region_gap' as const
+    const region: RegionRecord = {
+      ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
+      ownerRevisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      ownerFeatureId: null,
+      ownerSketchId: sketchId,
+      ownerBodyId: null,
+      regionId,
+      label: regionId,
+      target: { kind: 'region', sketchId, regionId },
+      sourceSketch: { kind: 'sketch', sketchId },
+      loops: [{
+        loopId: 'region_loop_phase6_projected_region_gap' as const,
+        role: 'outer',
+        orientation: 'counterClockwise',
+        segments: [{
+          source: { kind: 'projectedGeometry', reference: { kind: 'projectedLineSegment', referenceId, geometryId } },
+          startPointId: null,
+          endPointId: null,
+        }],
+        boundaryPointIds: [],
+        isClosed: true,
+      }],
+      isClosed: true,
+    }
+    const state = createOccAuthoringState(oc, {
+      sketches: [createSketchRecord(sketchId, plane, definition, [], [region])],
+    })
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(' '))
+    }
+    try {
+      const snapshot = buildOccWorkspaceSnapshot(state)
+      assert(
+        !snapshot.document.render.records.some((record) =>
+          record.binding.semanticClass === 'region' && record.binding.target.kind === 'region' && record.binding.target.regionId === region.regionId,
+        ),
+        'Projected-region contract gaps should skip unsupported region render records.',
+      )
+    } finally {
+      console.warn = originalWarn
+    }
+
+    assert(warnings.length === 0, 'Projected-region contract gaps should not be logged as snapshot render warnings.')
+  }
+
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
   await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport()
   await testNestedSketchRegionsExportSeparateMeshes()
@@ -823,6 +896,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
   await testOccSnapshotSurfacesSketchNavigationAndHistory()
   await testRegionRenderFailuresWarnAndSkipOnlyBadRegion()
+  await testProjectedRegionContractGapSkipsRegionRenderWithoutWarning()
 
   console.log('OCC phase 6 snapshot/export tests passed.')
 })

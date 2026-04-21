@@ -905,10 +905,12 @@ function buildRegionRenderRecords(state: OccAuthoringState) {
       try {
         profileFace = buildRegionProfileFace(state.oc, { plane: sketch.plane, sketch: sketch.sketch }, region)
       } catch (error) {
-        console.warn(
-          `[occ-snapshot] Skipping region render ${region.regionId}: failed to build profile face.`,
-          error,
-        )
+        if (!isProjectedRegionContractGap(error)) {
+          console.warn(
+            `[occ-snapshot] Skipping region render ${region.regionId}: failed to build profile face.`,
+            error,
+          )
+        }
         continue
       }
 
@@ -956,6 +958,13 @@ function buildRegionRenderRecords(state: OccAuthoringState) {
   }
 
   return records
+}
+
+function isProjectedRegionContractGap(error: unknown) {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable
 }
 
 function sampleCurveByParameters(

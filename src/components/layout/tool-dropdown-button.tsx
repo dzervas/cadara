@@ -40,6 +40,20 @@ export function ToolDropdownButton({
     ? 'var(--workbench-shell-text-dim)'
     : 'var(--workbench-shell-text)'
 
+  const handleTriggerClick = () => {
+    if (disabled) {
+      return
+    }
+
+    setOpened(true)
+
+    if (variantTools.some((variant) => variant.id === tool.id)) {
+      triggerTool(tool.id, {
+        source: 'toolbar',
+      })
+    }
+  }
+
   const dropdownItems = variantTools.map((variant) => {
     return (
       <Menu.Item
@@ -95,6 +109,7 @@ export function ToolDropdownButton({
         >
           <UnstyledButton
             type="button"
+            onClick={handleTriggerClick}
             aria-label={tool.name}
             aria-pressed={active}
             disabled={disabled}
