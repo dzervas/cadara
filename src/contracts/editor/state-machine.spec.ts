@@ -2369,15 +2369,6 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const passiveSketchToolIds = [
       'fill',
       'stroke',
-      'fillType',
-      'fillSolid',
-      'fillGradient',
-      'strokeOptions',
-      'strokeWidth',
-      'strokeCap',
-      'strokeJoin',
-      'strokeMiter',
-      'strokeDash',
     ] as const satisfies readonly ToolId[]
 
     for (const toolId of passiveSketchToolIds) {
@@ -2446,11 +2437,19 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
       assert(result.state.kind === 'editingSketch', `${toolId} with a target should keep sketch editing.`)
       assert(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should become the active style focus.`)
-      assert(result.state.session.activeStyleFocus.target?.kind === 'sketchEntity', `${toolId} should bind the selected style target.`)
-      assert(
-        (getSketchToolPresentation(result.state.session)?.controlGroups?.[0]?.controls.length ?? 0) > 0,
-        `${toolId} should expose focused style controls for the selected target.`,
-      )
+      if (toolId === 'stroke') {
+        assert(result.state.session.activeStyleFocus.target?.kind === 'sketchEntity', `${toolId} should bind the selected style target.`)
+        assert(
+          (getSketchToolPresentation(result.state.session)?.controlGroups?.[0]?.controls.length ?? 0) > 0,
+          `${toolId} should expose focused style controls for the selected target.`,
+        )
+      } else {
+        assert(result.state.session.activeStyleFocus.target === null, `${toolId} should reject a non-region style target.`)
+        assert(
+          getSketchToolPresentation(result.state.session)?.selectionGuide?.acceptedKinds.includes('region'),
+          `${toolId} should request an enclosed region target.`,
+        )
+      }
     }
   }
 

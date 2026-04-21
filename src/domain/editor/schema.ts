@@ -156,7 +156,7 @@ export const defaultSelectionFilter: SelectionFilter = {
 
 export const sketchSelectionFilter: SelectionFilter = {
   kind: 'sketchSession',
-  allowedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference'],
+  allowedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
   label: 'Sketch references',
   requirements: [
     {
@@ -168,8 +168,8 @@ export const sketchSelectionFilter: SelectionFilter = {
           id: 'sketch-reference',
           label: 'Sketch reference',
           description: 'Select the sketch plane, sketch, or sketch primitive.',
-          acceptedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference'],
-          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchExternalReference'],
+          acceptedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
+          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchExternalReference', 'regionProfile'],
         },
       ],
     },

@@ -51,7 +51,7 @@ export interface SketchToolCursorDescriptor {
 export interface SketchToolSelectionGuideDescriptor {
   id: string
   label: string
-  acceptedKinds: readonly ('point' | 'line' | 'circle' | 'arc' | 'spline' | 'annotation')[]
+  acceptedKinds: readonly ('point' | 'line' | 'circle' | 'arc' | 'spline' | 'annotation' | 'region')[]
   selectedCount: number
   requiredCount: number
   hoverLabel?: string | null

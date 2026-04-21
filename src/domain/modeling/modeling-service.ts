@@ -150,6 +150,8 @@ import type {
   SketchEntityDefinition,
   SketchPointDefinition,
   SketchRecord,
+  SketchStyleDefinition,
+  SketchStyleRecord,
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
 import type {
@@ -2157,9 +2159,131 @@ function normalizeSketchDefinition(value: unknown): SketchDefinition {
     constraints: value.constraints.map((constraint) => normalizeConstraintDefinition(constraint)),
     dimensionIds: value.dimensionIds.map((dimensionId) => assertDimensionId(dimensionId)),
     dimensions: value.dimensions.map((dimension) => normalizeDimensionDefinition(dimension)),
+    styleIds: Array.isArray(value.styleIds)
+      ? value.styleIds.map((styleId) => {
+          if (!isString(styleId)) {
+            throw new Error('Invalid sketch style ID payload.')
+          }
+
+          return styleId as import('@/contracts/shared/ids').SketchStyleId
+        })
+      : [],
+    styles: Array.isArray(value.styles)
+      ? value.styles.map((style) => normalizeSketchStyleRecord(style))
+      : [],
+    svgRenderingEnabled: typeof value.svgRenderingEnabled === 'boolean' ? value.svgRenderingEnabled : true,
     derivedRelationships: Array.isArray(value.derivedRelationships)
       ? value.derivedRelationships.map((relationship) => normalizeSketchDerivationDefinition(relationship))
       : [],
+  }
+}
+
+function normalizeSketchStyleDefinition(value: unknown): SketchStyleDefinition | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (!isRecord(value)) {
+    throw new Error('Invalid sketch style definition payload.')
+  }
+
+  return {
+    ...(value.fillMode === 'none' || value.fillMode === 'solid' || value.fillMode === 'gradient' ? { fillMode: value.fillMode } : {}),
+    ...(isString(value.fillColor) ? { fillColor: value.fillColor } : {}),
+    ...(isString(value.gradientStartColor) ? { gradientStartColor: value.gradientStartColor } : {}),
+    ...(isString(value.gradientEndColor) ? { gradientEndColor: value.gradientEndColor } : {}),
+    ...(typeof value.strokeEnabled === 'boolean' ? { strokeEnabled: value.strokeEnabled } : {}),
+    ...(isString(value.strokeColor) ? { strokeColor: value.strokeColor } : {}),
+    ...(typeof value.strokeWidth === 'number' ? { strokeWidth: value.strokeWidth } : {}),
+    ...(value.strokeCap === 'butt' || value.strokeCap === 'round' || value.strokeCap === 'square' ? { strokeCap: value.strokeCap } : {}),
+    ...(value.strokeJoin === 'miter' || value.strokeJoin === 'round' || value.strokeJoin === 'bevel' ? { strokeJoin: value.strokeJoin } : {}),
+    ...(typeof value.strokeMiterLimit === 'number' ? { strokeMiterLimit: value.strokeMiterLimit } : {}),
+    ...(typeof value.strokeDashSize === 'number' ? { strokeDashSize: value.strokeDashSize } : {}),
+    ...(typeof value.strokeGapSize === 'number' ? { strokeGapSize: value.strokeGapSize } : {}),
+  }
+}
+
+function normalizeSketchStyleRecord(value: unknown): SketchStyleRecord {
+  if (!isRecord(value) || !isString(value.styleId) || !isString(value.label) || !isRecord(value.target)) {
+    throw new Error('Invalid sketch style record payload.')
+  }
+
+  const target = value.target.kind === 'entity' && isString(value.target.entityId)
+    ? { kind: 'entity' as const, entityId: assertSketchEntityId(value.target.entityId) }
+    : value.target.kind === 'region' && isString(value.target.regionId)
+      ? { kind: 'region' as const, regionId: value.target.regionId as RegionId }
+      : null
+
+  if (!target || !isRecord(value.fill) || !isRecord(value.stroke)) {
+    throw new Error('Invalid sketch style record payload.')
+  }
+
+  return {
+    styleId: value.styleId as import('@/contracts/shared/ids').SketchStyleId,
+    label: value.label,
+    target,
+    fill: normalizeSketchStyleFill(value.fill),
+    stroke: normalizeSketchStyleStroke(value.stroke),
+  }
+}
+
+function normalizeSketchStyleFill(value: Record<string, unknown>): SketchStyleRecord['fill'] {
+  if (value.kind === 'none') {
+    return { kind: 'none' }
+  }
+
+  if (value.kind === 'solid' && isString(value.color) && typeof value.opacity === 'number') {
+    return { kind: 'solid', color: value.color, opacity: value.opacity }
+  }
+
+  if (value.kind === 'gradient' && isRecord(value.gradient)) {
+    const gradient = value.gradient
+    if (
+      gradient.kind === 'linear'
+      && typeof gradient.angleRadians === 'number'
+      && isString(gradient.startColor)
+      && typeof gradient.startOpacity === 'number'
+      && isString(gradient.endColor)
+      && typeof gradient.endOpacity === 'number'
+    ) {
+      return {
+        kind: 'gradient',
+        gradient: {
+          kind: 'linear',
+          angleRadians: gradient.angleRadians,
+          startColor: gradient.startColor,
+          startOpacity: gradient.startOpacity,
+          endColor: gradient.endColor,
+          endOpacity: gradient.endOpacity,
+        },
+      }
+    }
+  }
+
+  throw new Error('Invalid sketch style fill payload.')
+}
+
+function normalizeSketchStyleStroke(value: Record<string, unknown>): SketchStyleRecord['stroke'] {
+  if (
+    !isString(value.color)
+    || typeof value.opacity !== 'number'
+    || typeof value.width !== 'number'
+    || (value.lineCap !== 'butt' && value.lineCap !== 'round' && value.lineCap !== 'square')
+    || (value.lineJoin !== 'miter' && value.lineJoin !== 'round' && value.lineJoin !== 'bevel')
+    || typeof value.miterLimit !== 'number'
+  ) {
+    throw new Error('Invalid sketch style stroke payload.')
+  }
+
+  return {
+    color: value.color,
+    opacity: value.opacity,
+    width: value.width,
+    lineCap: value.lineCap,
+    lineJoin: value.lineJoin,
+    miterLimit: value.miterLimit,
+    ...(typeof value.dashSize === 'number' ? { dashSize: value.dashSize } : {}),
+    ...(typeof value.gapSize === 'number' ? { gapSize: value.gapSize } : {}),
   }
 }
 
@@ -2324,6 +2448,7 @@ function normalizeSketchPointDefinition(value: unknown): SketchPointDefinition {
     target: assertPrimitiveRef(value.target) as SketchPointDefinition['target'],
     position: value.position as unknown as SketchPointDefinition['position'],
     isConstruction: value.isConstruction,
+    style: normalizeSketchStyleDefinition(value.style),
   }
 }
 
@@ -2350,6 +2475,7 @@ function normalizeSketchEntityDefinition(value: unknown): SketchEntityDefinition
       isConstruction: value.isConstruction,
       startPointId: assertSketchPointId(value.startPointId),
       endPointId: assertSketchPointId(value.endPointId),
+      style: normalizeSketchStyleDefinition(value.style),
     }
   }
 
@@ -2371,6 +2497,7 @@ function normalizeSketchEntityDefinition(value: unknown): SketchEntityDefinition
       isConstruction: value.isConstruction,
       centerPointId: assertSketchPointId(value.centerPointId),
       radius: value.radius,
+      style: normalizeSketchStyleDefinition(value.style),
     }
   }
 
@@ -2390,6 +2517,7 @@ function normalizeSketchEntityDefinition(value: unknown): SketchEntityDefinition
       target: assertPrimitiveRef(value.target) as SketchEntityDefinition['target'],
       isConstruction: value.isConstruction,
       pointId: assertSketchPointId(value.pointId),
+      style: normalizeSketchStyleDefinition(value.style),
     }
   }
 
@@ -2415,6 +2543,7 @@ function normalizeSketchEntityDefinition(value: unknown): SketchEntityDefinition
       startPointId: assertSketchPointId(value.startPointId),
       endPointId: assertSketchPointId(value.endPointId),
       sweepDirection: value.sweepDirection,
+      style: normalizeSketchStyleDefinition(value.style),
     }
   }
 

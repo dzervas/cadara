@@ -42,6 +42,7 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   assert(!('runtimeState' in authoredDocument), 'Authored document should exclude runtime state.')
 
   authoredSketch.definition.styleIds = ['sketch_style_seed']
+  authoredSketch.definition.svgRenderingEnabled = false
   authoredSketch.definition.styles = [
     {
       styleId: 'sketch_style_seed',
@@ -65,6 +66,7 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   const withStyles = parseAuthoredModelDocument(authoredDocument)
   assert(withStyles.ok, 'Authored documents should persist sketch style records.')
   assert(withStyles.document.sketches[0]?.definition.styles?.length === 1, 'Parsed authored documents should preserve style records.')
+  assert(withStyles.document.sketches[0]?.definition.svgRenderingEnabled === false, 'Parsed authored documents should preserve per-sketch SVG rendering state.')
 
   authoredSketch.definition.derivedRelationships = [{
     derivationId: 'sketch_derivation_seed_linear',
@@ -123,6 +125,7 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
         ...sketch.definition,
         styleIds: undefined,
         styles: undefined,
+        svgRenderingEnabled: undefined,
       },
     })),
   })
@@ -134,6 +137,10 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   assert(
     withoutStylesField.document.sketches.every((sketch) => sketch.definition.styles?.length === 0),
     'Older sketches should migrate with an empty styles list.',
+  )
+  assert(
+    withoutStylesField.document.sketches.every((sketch) => sketch.definition.svgRenderingEnabled === true),
+    'Older sketches should migrate with SVG rendering enabled.',
   )
 
   const withDerivedField = {

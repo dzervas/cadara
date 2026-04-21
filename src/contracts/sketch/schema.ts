@@ -786,6 +786,8 @@ export interface SketchDefinition {
   styleIds?: SketchStyleId[]
   /** Authored visual styles scoped to sketch entities and optional derived regions. */
   styles?: SketchStyleRecord[]
+  /** Enables authored SVG fill/stroke rendering for this sketch. Missing values default to enabled. */
+  svgRenderingEnabled?: boolean
   /** Durable sketch-local mirror, pattern, and transform relationships. */
   derivedRelationships?: SketchDerivationDefinition[]
 }

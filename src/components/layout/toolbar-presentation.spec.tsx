@@ -141,6 +141,7 @@ test('tool icon assets stay centralized outside toolbar, sidebar, and history co
     plane: 'c-plane.svg',
     combine: 'boolean-bodies.svg',
     history: 'change-history.svg',
+    svgRendering: 'eye_open.svg',
     svgFill: 'svg-fill.svg',
     svgStroke: 'svg-stroke.svg',
     svgStrokeCap: 'svg-stroke-cap.svg',

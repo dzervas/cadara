@@ -13,10 +13,12 @@ import {
   finishSketchGeometryDrag,
   getSketchSessionRegionDiagnostics,
   getSketchSessionDisplayRenderables,
+  isSketchSvgRenderingEnabled,
   patchSketchStyleValue,
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
   startSketchDraw,
+  toggleSketchSvgRendering,
   updateSketchGeometryDrag,
   acceptSketchDraw,
 } from '@/domain/editor/sketch-session'
@@ -698,14 +700,16 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   }
 
   function testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets() {
-    let session = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
-    session = beginSketchTool(session, 'line')
-    session = startSketchDraw(session, [0, 0])
-    session = acceptSketchDraw(session, [3, 0])
-
+    let session = createSessionFromDefinition(createSquareDefinition(false))
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
     const entityTarget = session.definition.entities[0]?.target
-    assert(entityTarget, 'Style patch fixture should create a local sketch entity target.')
-    const before = session.commitRequest?.definition.entities[0]
+    const pointTarget = session.definition.points[0]?.target
+    const regionTarget = session.solvedRegions[0]?.target
+    assert(entityTarget && pointTarget && regionTarget, 'Style patch fixture should create local edge, point, and region targets.')
+    const before = structuredClone(session.commitRequest?.definition)
 
     session = patchSketchStyleValue(
       session,
@@ -714,8 +718,57 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
 
     assert(
-      session.commitRequest?.definition.entities[0] === before,
+      JSON.stringify(session.commitRequest?.definition) === JSON.stringify(before),
       'Style patch should ignore non-local targets such as external model geometry refs.',
+    )
+
+    session = patchSketchStyleValue(
+      session,
+      [entityTarget],
+      { intent: 'patchSketchStyle', field: 'fillMode', value: 'solid' },
+    )
+    assert(
+      (session.definition.styles?.length ?? 0) === 0,
+      'Fill style patch should reject sketch edge/entity targets without mutating style records.',
+    )
+
+    session = patchSketchStyleValue(
+      session,
+      [regionTarget],
+      { intent: 'patchSketchStyle', field: 'fillMode', value: 'gradient' },
+    )
+    session = patchSketchStyleValue(
+      session,
+      [regionTarget],
+      { intent: 'patchSketchStyle', field: 'gradientStartColor', value: '#00ffff' },
+    )
+    const regionStyle = session.definition.styles?.find((style) =>
+      style.target.kind === 'region' && style.target.regionId === regionTarget.regionId,
+    )
+    assert(
+      regionStyle?.fill.kind === 'gradient' &&
+        regionStyle.fill.gradient.startColor === '#00ffff',
+      'Fill style patch should author a region-scoped style record for selected live regions.',
+    )
+
+    session = patchSketchStyleValue(
+      session,
+      [regionTarget],
+      { intent: 'patchSketchStyle', field: 'strokeWidth', value: 4 },
+    )
+    assert(
+      session.definition.entities[0]?.style === undefined,
+      'Stroke style patch should reject region targets without mutating entity stroke fields.',
+    )
+
+    session = patchSketchStyleValue(
+      session,
+      [pointTarget],
+      { intent: 'patchSketchStyle', field: 'strokeWidth', value: 4 },
+    )
+    assert(
+      session.definition.entities[0]?.style === undefined,
+      'Stroke style patch should reject point targets without mutating entity stroke fields.',
     )
 
     session = patchSketchStyleValue(
@@ -733,16 +786,6 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       session,
       [entityTarget],
       { intent: 'patchSketchStyle', field: 'strokeEnabled', value: true },
-    )
-    session = patchSketchStyleValue(
-      session,
-      [entityTarget],
-      { intent: 'patchSketchStyle', field: 'fillMode', value: 'gradient' },
-    )
-    session = patchSketchStyleValue(
-      session,
-      [entityTarget],
-      { intent: 'patchSketchStyle', field: 'gradientStartColor', value: '#00ffff' },
     )
     session = patchSketchStyleValue(
       session,
@@ -771,8 +814,12 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       'Explicitly enabled local stroke fields should render through sketch display metadata.',
     )
     assert(
-      session.definition.entities[0]?.style?.fillMode === 'gradient',
-      'Local style patch should update fill mode in session definition.',
+      session.commitRequest?.definition.styles?.some((style) =>
+        style.target.kind === 'region' &&
+          style.target.regionId === regionTarget.regionId &&
+          style.fill.kind === 'gradient',
+      ),
+      'Region fill style patch should rebuild the durable commit request payload.',
     )
     assert(
       session.definition.entities[0]?.style?.strokeMiterLimit === 7,
@@ -788,6 +835,65 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
         session.commitRequest.definition.entities[0]?.style?.strokeEnabled === true &&
         session.commitRequest.definition.entities[0]?.style?.strokeDashSize === 0.6,
       'Local style patch should rebuild commit request using the updated sketch definition.',
+    )
+  }
+
+  function testSvgRenderingToggleSuppressesAuthoredStylesWithoutDeletingThem() {
+    let session = createSessionFromDefinition(createSquareDefinition(false))
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
+    const entityTarget = session.definition.entities[0]?.target
+    const regionTarget = session.solvedRegions[0]?.target
+    assert(entityTarget && regionTarget, 'SVG rendering fixture should expose edge and region targets.')
+
+    session = patchSketchStyleValue(session, [regionTarget], {
+      intent: 'patchSketchStyle',
+      field: 'fillMode',
+      value: 'solid',
+    })
+    session = patchSketchStyleValue(session, [regionTarget], {
+      intent: 'patchSketchStyle',
+      field: 'fillColor',
+      value: '#00ffff',
+    })
+    session = patchSketchStyleValue(session, [entityTarget], {
+      intent: 'patchSketchStyle',
+      field: 'strokeEnabled',
+      value: true,
+    })
+    session = patchSketchStyleValue(session, [entityTarget], {
+      intent: 'patchSketchStyle',
+      field: 'strokeWidth',
+      value: 2,
+    })
+
+    const styledRenderables = getSketchSessionDisplayRenderables(session)
+    assert(
+      styledRenderables.some((entry) => entry.target?.kind === 'region' && entry.paintStyle) &&
+        styledRenderables.some((entry) => entry.target?.kind === 'sketchEntity' && entry.strokeStyle?.width === 2),
+      'SVG rendering enabled should expose authored fill and stroke display metadata.',
+    )
+
+    const disabled = toggleSketchSvgRendering(session)
+    assert(!isSketchSvgRenderingEnabled(disabled), 'SVG rendering toggle should persist disabled state on the sketch.')
+    assert(
+      disabled.definition.styles?.length === session.definition.styles?.length &&
+        disabled.definition.entities[0]?.style?.strokeWidth === 2,
+      'Disabling SVG rendering should not delete authored region or edge style data.',
+    )
+    assert(
+      getSketchSessionDisplayRenderables(disabled).every((entry) => !entry.paintStyle && !entry.strokeStyle),
+      'SVG rendering disabled should suppress authored fill and stroke display metadata.',
+    )
+
+    const restored = toggleSketchSvgRendering(disabled)
+    const restoredRenderables = getSketchSessionDisplayRenderables(restored)
+    assert(
+      restoredRenderables.some((entry) => entry.target?.kind === 'region' && entry.paintStyle) &&
+        restoredRenderables.some((entry) => entry.target?.kind === 'sketchEntity' && entry.strokeStyle?.width === 2),
+      'Re-enabling SVG rendering should restore visuals from persisted style data.',
     )
   }
 
@@ -1403,6 +1509,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testSelectedEntityDeletionRemovesDependentAnnotations()
   testSelectedPointDeletionRemovesDependentGeometryAndAnnotations()
   testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets()
+  testSvgRenderingToggleSuppressesAuthoredStylesWithoutDeletingThem()
   testTrimSplitsLineAtClearIntersections()
   testTrimHandlesCircleArcAndSplineTargets()
   testOffsetAddsLineCopyAndRejectsInvalidDistance()

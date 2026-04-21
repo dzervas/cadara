@@ -53,21 +53,23 @@ test('src/domain/sketch-styles/definition.spec.ts', () => {
     'Style patch parser should accept miter fields.',
   )
 
-  const strokeDashPresentation = buildSketchStylePresentation({
-    toolId: 'strokeDash',
+  const strokePresentation = buildSketchStylePresentation({
+    toolId: 'stroke',
     target: { kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_1' },
   }, undefined)
   assert(
-    strokeDashPresentation.controlGroups?.[0]?.controls.some((control) => control.id === 'sketch-style-stroke-enabled') &&
-      strokeDashPresentation.controlGroups[0]?.controls.some((control) => control.id === 'sketch-style-stroke-dash-size') &&
-      strokeDashPresentation.controlGroups[0]?.controls.some((control) => control.id === 'sketch-style-stroke-gap-size'),
-    'Focused stroke dash presentation should expose stroke enablement and dash controls.',
+    strokePresentation.controlGroups?.[0]?.controls.some((control) => control.id === 'sketch-style-stroke-enabled') &&
+      strokePresentation.controlGroups[0]?.controls.some((control) => control.id === 'sketch-style-stroke-dash-size') &&
+      strokePresentation.controlGroups[0]?.controls.some((control) => control.id === 'sketch-style-stroke-gap-size'),
+    'Focused stroke presentation should expose stroke enablement and dash controls.',
   )
 
   const guidancePresentation = buildSketchStylePresentation({ toolId: 'fill', target: null }, undefined)
   assert(
-    guidancePresentation.selectionGuide?.requiredCount === 1 && guidancePresentation.controls?.length === 0,
-    'Style presentation should show target guidance when no local sketch target is selected.',
+    guidancePresentation.selectionGuide?.requiredCount === 1 &&
+      guidancePresentation.selectionGuide.acceptedKinds.includes('region') &&
+      guidancePresentation.controls?.length === 0,
+    'Fill presentation should request an enclosed region target when no compatible target is selected.',
   )
 
   const rejected = parseSketchStylePatch({

@@ -45,20 +45,11 @@ export type SketchStyleToolId = Extract<
   ToolId,
   | 'fill'
   | 'stroke'
-  | 'fillType'
-  | 'fillSolid'
-  | 'fillGradient'
-  | 'strokeOptions'
-  | 'strokeWidth'
-  | 'strokeCap'
-  | 'strokeJoin'
-  | 'strokeMiter'
-  | 'strokeDash'
 >
 
 export interface SketchStyleFocus {
   toolId: SketchStyleToolId
-  target: Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }> | null
+  target: Extract<PrimitiveRef, { kind: 'region' | 'sketchEntity' }> | null
 }
 
 interface SketchStyleFocusDefinition {
@@ -202,22 +193,27 @@ export function buildSketchStyleControls(style: SketchStyleDefinition | undefine
   ]
 }
 
-export function isSketchStyleTarget(target: PrimitiveRef, sketchId: string): target is Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }> {
-  return (target.kind === 'sketchEntity' || target.kind === 'sketchPoint') && target.sketchId === sketchId
+export function isSketchStyleTarget(
+  target: PrimitiveRef,
+  sketchId: string,
+  toolId: SketchStyleToolId,
+): target is Extract<PrimitiveRef, { kind: 'region' | 'sketchEntity' }> {
+  if (target.kind !== 'region' && target.kind !== 'sketchEntity') {
+    return false
+  }
+
+  if (target.sketchId !== sketchId) {
+    return false
+  }
+
+  return toolId === 'fill'
+    ? target.kind === 'region'
+    : target.kind === 'sketchEntity'
 }
 
 export function isSketchStyleToolId(toolId: ToolId): toolId is SketchStyleToolId {
   return toolId === 'fill'
     || toolId === 'stroke'
-    || toolId === 'fillType'
-    || toolId === 'fillSolid'
-    || toolId === 'fillGradient'
-    || toolId === 'strokeOptions'
-    || toolId === 'strokeWidth'
-    || toolId === 'strokeCap'
-    || toolId === 'strokeJoin'
-    || toolId === 'strokeMiter'
-    || toolId === 'strokeDash'
 }
 
 export function buildSketchStylePresentation(
@@ -227,12 +223,14 @@ export function buildSketchStylePresentation(
   const definition = getSketchStyleFocusDefinition(focus.toolId)
 
   if (!focus.target) {
+    const isFill = focus.toolId === 'fill'
+
     return {
-      prompts: [{ id: 'sketch-style-target-prompt', text: `${definition.label}: select local sketch geometry` }],
+      prompts: [{ id: 'sketch-style-target-prompt', text: `${definition.label}: ${isFill ? 'select an enclosed region' : 'select a sketch edge'}` }],
       selectionGuide: {
         id: 'sketch-style-target-guide',
-        label: 'Select a sketch point or entity',
-        acceptedKinds: ['point', 'line', 'circle', 'arc', 'spline'],
+        label: isFill ? 'Select an enclosed region' : 'Select a sketch edge',
+        acceptedKinds: isFill ? ['region'] : ['line', 'circle', 'arc', 'spline'],
         selectedCount: 0,
         requiredCount: 1,
       },
@@ -337,18 +335,6 @@ function getSketchStyleFocusDefinition(toolId: SketchStyleToolId): SketchStyleFo
           'sketch-style-gradient-end',
         ],
       }
-    case 'fillType':
-    case 'fillSolid':
-    case 'fillGradient':
-      return {
-        label: 'Fill Type',
-        controlIds: [
-          'sketch-style-fill-mode',
-          'sketch-style-fill-color',
-          'sketch-style-gradient-start',
-          'sketch-style-gradient-end',
-        ],
-      }
     case 'stroke':
       return {
         label: 'Stroke',
@@ -362,35 +348,6 @@ function getSketchStyleFocusDefinition(toolId: SketchStyleToolId): SketchStyleFo
           'sketch-style-stroke-dash-size',
           'sketch-style-stroke-gap-size',
         ],
-      }
-    case 'strokeOptions':
-      return {
-        label: 'Stroke Options',
-        controlIds: [
-          'sketch-style-stroke-enabled',
-          'sketch-style-stroke-width',
-          'sketch-style-stroke-cap',
-          'sketch-style-stroke-join',
-          'sketch-style-stroke-miter-limit',
-          'sketch-style-stroke-dash-size',
-          'sketch-style-stroke-gap-size',
-        ],
-      }
-    case 'strokeWidth':
-      return { label: 'Stroke Width', controlIds: ['sketch-style-stroke-enabled', 'sketch-style-stroke-width'] }
-    case 'strokeCap':
-      return { label: 'Stroke Cap', controlIds: ['sketch-style-stroke-enabled', 'sketch-style-stroke-cap'] }
-    case 'strokeJoin':
-      return { label: 'Stroke Join', controlIds: ['sketch-style-stroke-enabled', 'sketch-style-stroke-join'] }
-    case 'strokeMiter':
-      return {
-        label: 'Stroke Miter',
-        controlIds: ['sketch-style-stroke-enabled', 'sketch-style-stroke-join', 'sketch-style-stroke-miter-limit'],
-      }
-    case 'strokeDash':
-      return {
-        label: 'Stroke Dash',
-        controlIds: ['sketch-style-stroke-enabled', 'sketch-style-stroke-dash-size', 'sketch-style-stroke-gap-size'],
       }
   }
 }

@@ -48,6 +48,7 @@ import {
   selectSketchReferenceTarget,
   startSketchDraw,
   toggleSketchConstructionTarget,
+  toggleSketchSvgRendering,
   updateSketchGeometryDrag,
   updateSketchConstraintHover,
   updateSketchEditToolHover,
@@ -1833,18 +1834,9 @@ function isFeatureTool(toolId: ToolId): toolId is Extract<ToolId, 'extrude' | 'r
     || toolId === 'transform'
 }
 
-function isPassiveSketchTool(toolId: ToolId): toolId is Extract<ToolId, 'fill' | 'stroke' | 'fillType' | 'fillSolid' | 'fillGradient' | 'strokeOptions' | 'strokeWidth' | 'strokeCap' | 'strokeJoin' | 'strokeMiter' | 'strokeDash'> {
+function isPassiveSketchTool(toolId: ToolId): toolId is Extract<ToolId, 'fill' | 'stroke'> {
   return toolId === 'fill'
     || toolId === 'stroke'
-    || toolId === 'fillType'
-    || toolId === 'fillSolid'
-    || toolId === 'fillGradient'
-    || toolId === 'strokeOptions'
-    || toolId === 'strokeWidth'
-    || toolId === 'strokeCap'
-    || toolId === 'strokeJoin'
-    || toolId === 'strokeMiter'
-    || toolId === 'strokeDash'
 }
 
 /**
@@ -1866,6 +1858,24 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (event.toolId === 'finishSketch' && state.kind === 'editingSketch') {
         return emitSketchCommit(state)
+      }
+
+      if (event.toolId === 'svgRendering' && state.kind === 'editingSketch') {
+        const session = toggleSketchSvgRendering(state.session)
+
+        return {
+          state: {
+            ...state,
+            mode: 'sketch',
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
       }
 
       if (

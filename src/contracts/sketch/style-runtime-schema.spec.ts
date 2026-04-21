@@ -60,9 +60,11 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
   assert(Array.isArray(migrated.data.styles), 'Older payloads should migrate with styles present.')
   assert(migrated.data.styleIds.length === 0, 'Older payloads should default styleIds to an empty list.')
   assert(migrated.data.styles.length === 0, 'Older payloads should default styles to an empty list.')
+  assert(migrated.data.svgRenderingEnabled === true, 'Older payloads should default SVG rendering to enabled.')
 
   const withStyles: SketchDefinition = {
     ...baseDefinition,
+    svgRenderingEnabled: false,
     styleIds: ['sketch_style_line', 'sketch_style_region'],
     styles: [
       {
@@ -114,6 +116,7 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
   const serialized = JSON.parse(JSON.stringify(parsed.data)) as unknown
   const roundTrip = sketchDefinitionSchema.safeParse(serialized)
   assert(roundTrip.success, 'Style payloads should survive serialize/parse round-trips.')
+  assert(roundTrip.data.svgRenderingEnabled === false, 'Round-tripped definitions should preserve SVG rendering state.')
   assert(roundTrip.data.styles?.length === 2, 'Round-tripped style records should be preserved.')
   assert(roundTrip.data.styles?.[1]?.fill.kind === 'gradient', 'Round-tripped gradient fill should be preserved.')
   assert(roundTrip.data.styles?.[0]?.stroke.dashSize === 0.6, 'Round-tripped style records should preserve dash size.')

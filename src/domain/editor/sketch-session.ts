@@ -10,6 +10,7 @@ import type {
   SketchReferenceDefinition,
   SolvedSketchSnapshot,
   SketchStyleDefinition,
+  SketchStyleRecord,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
@@ -35,6 +36,7 @@ import type {
   SketchEntityId,
   SketchId,
   SketchPointId,
+  SketchStyleId,
 } from '@/contracts/shared/ids'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type {
@@ -367,6 +369,7 @@ function createEmptyDefinition(): SketchDefinition {
     constraints: [],
     dimensionIds: [],
     dimensions: [],
+    svgRenderingEnabled: true,
     derivedRelationships: [],
   }
 }
@@ -387,6 +390,7 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
     dimensions: [...definition.dimensions],
     styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
     styles: definition.styles ? [...definition.styles] : undefined,
+    svgRenderingEnabled: definition.svgRenderingEnabled ?? true,
     derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
   }
 }
@@ -1415,6 +1419,7 @@ function appendDefinition(definition: SketchDefinition, patch: SketchToolCommitC
     dimensions: [...definition.dimensions, ...(patch.dimensions ?? [])],
     styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
     styles: definition.styles ? [...definition.styles] : undefined,
+    svgRenderingEnabled: definition.svgRenderingEnabled ?? true,
     derivedRelationships: [
       ...(definition.derivedRelationships ?? []),
       ...(patch.derivedRelationships ?? []),
@@ -2484,7 +2489,7 @@ export function focusSketchStyleTool(
   selectedTargets: readonly PrimitiveRef[],
   toolId: SketchStyleToolId,
 ): SketchSessionState {
-  const target = getFirstSketchStyleTarget(session, selectedTargets)
+  const target = getFirstSketchStyleTarget(session, selectedTargets, toolId)
 
   return {
     ...session,
@@ -2501,7 +2506,7 @@ export function focusSketchStyleTool(
     activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTool: null,
-    activeEditTarget: target?.kind === 'sketchPoint' ? target : null,
+    activeEditTarget: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -2516,7 +2521,7 @@ export function updateSketchStyleFocusTarget(
     return session
   }
 
-  const target = getFirstSketchStyleTarget(session, selectedTargets)
+  const target = getFirstSketchStyleTarget(session, selectedTargets, session.activeStyleFocus.toolId)
 
   if (
     (target === null && session.activeStyleFocus.target === null)
@@ -2531,7 +2536,7 @@ export function updateSketchStyleFocusTarget(
       ...session.activeStyleFocus,
       target,
     },
-    activeEditTarget: target?.kind === 'sketchPoint' ? target : null,
+    activeEditTarget: null,
     validationMessage: null,
   }
 }
@@ -2543,28 +2548,71 @@ export function getActiveSketchStyleToolId(session: SketchSessionState): SketchS
 export function hasSketchStyleTarget(
   session: SketchSessionState,
   selectedTargets: readonly PrimitiveRef[],
+  toolId: SketchStyleToolId,
 ): boolean {
-  return getFirstSketchStyleTarget(session, selectedTargets) !== null
+  return getFirstSketchStyleTarget(session, selectedTargets, toolId) !== null
+}
+
+export function isSketchSvgRenderingEnabled(session: SketchSessionState): boolean {
+  return session.fullDefinition.svgRenderingEnabled ?? true
+}
+
+export function toggleSketchSvgRendering(session: SketchSessionState): SketchSessionState {
+  const enabled = !isSketchSvgRenderingEnabled(session)
+  const nextFullDefinition: SketchDefinition = {
+    ...session.fullDefinition,
+    svgRenderingEnabled: enabled,
+  }
+  const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
+
+  return {
+    ...session,
+    fullDefinition: nextFullDefinition,
+    definition: nextDefinition,
+    activeStyleFocus: enabled ? session.activeStyleFocus : null,
+    activeEditTarget: null,
+    validationMessage: null,
+    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+  }
 }
 
 function getFirstSketchStyleTarget(
   session: SketchSessionState,
   selectedTargets: readonly PrimitiveRef[],
-): Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }> | null {
+  toolId: SketchStyleToolId,
+): Extract<PrimitiveRef, { kind: 'region' | 'sketchEntity' }> | null {
   const sketchId = getSessionSketchId(session)
-  return selectedTargets.find((target) => isSketchStyleTarget(target, sketchId)) ?? null
+  const target = selectedTargets.find((candidate) => isSketchStyleTarget(candidate, sketchId, toolId)) ?? null
+
+  if (!target) {
+    return null
+  }
+
+  if (toolId === 'fill') {
+    return target.kind === 'region' && session.solvedRegions.some((region) => region.target.regionId === target.regionId)
+      ? target
+      : null
+  }
+
+  return target.kind === 'sketchEntity' && session.definition.entities.some((entity) => entity.entityId === target.entityId)
+    ? target
+    : null
 }
 
 function getSketchStyleTargetDefinition(
   session: SketchSessionState,
-  target: Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }> | null,
+  target: Extract<PrimitiveRef, { kind: 'region' | 'sketchEntity' }> | null,
 ): { style?: SketchStyleDefinition } | null {
   if (!target) {
     return null
   }
 
-  if (target.kind === 'sketchPoint') {
-    return session.definition.points.find((point) => point.pointId === target.pointId) ?? null
+  if (target.kind === 'region') {
+    const styleRecord = session.fullDefinition.styles?.find((record) =>
+      record.target.kind === 'region' && record.target.regionId === target.regionId,
+    )
+
+    return { style: sketchStyleRecordToDefinition(styleRecord) }
   }
 
   return session.definition.entities.find((entity) => entity.entityId === target.entityId) ?? null
@@ -4706,13 +4754,14 @@ export function patchSketchStyleValue(
   }
 
   const sketchId = getSessionSketchId(session)
-  const localTargets = selectedTargets.filter((target) => isSketchStyleTarget(target, sketchId))
+  const toolId = session.activeStyleFocus?.toolId ?? (isFillStylePatch(parsedPatch) ? 'fill' : 'stroke')
+  const localTargets = selectedTargets.filter((target) => isSketchStyleTarget(target, sketchId, toolId))
 
   if (localTargets.length === 0) {
     return session
   }
 
-  const nextFullDefinition = applyStylePatchToDefinition(session.fullDefinition, localTargets, parsedPatch)
+  const nextFullDefinition = applyStylePatchToDefinition(session.fullDefinition, session.solvedRegions, localTargets, parsedPatch, toolId)
 
   if (nextFullDefinition === session.fullDefinition) {
     return session
@@ -4819,14 +4868,19 @@ function patchSketchAnnotationEditValue(
 
 function applyStylePatchToDefinition(
   definition: SketchDefinition,
-  targets: readonly Extract<PrimitiveRef, { kind: 'sketchEntity' | 'sketchPoint' }>[],
+  solvedRegions: readonly RegionRecord[],
+  targets: readonly Extract<PrimitiveRef, { kind: 'region' | 'sketchEntity' }>[],
   patch: SketchStylePatch,
+  toolId: SketchStyleToolId,
 ): SketchDefinition {
-  const pointIds = new Set(
-    targets
-      .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchPoint' }> => target.kind === 'sketchPoint')
-      .map((target) => target.pointId),
-  )
+  if (toolId === 'fill') {
+    return applyFillStylePatchToDefinition(definition, solvedRegions, targets, patch)
+  }
+
+  if (isFillStylePatch(patch)) {
+    return definition
+  }
+
   const entityIds = new Set(
     targets
       .filter((target): target is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => target.kind === 'sketchEntity')
@@ -4834,20 +4888,6 @@ function applyStylePatchToDefinition(
   )
 
   let didChange = false
-
-  const points = definition.points.map((point) => {
-    if (!pointIds.has(point.pointId)) {
-      return point
-    }
-
-    const nextStyle = applySketchStyleDefinitionPatch(point.style, patch)
-    if (nextStyle === point.style) {
-      return point
-    }
-
-    didChange = true
-    return { ...point, style: nextStyle }
-  })
 
   const entities = definition.entities.map((entity) => {
     if (!entityIds.has(entity.entityId)) {
@@ -4869,8 +4909,103 @@ function applyStylePatchToDefinition(
 
   return {
     ...definition,
-    points,
     entities,
+  }
+}
+
+function applyFillStylePatchToDefinition(
+  definition: SketchDefinition,
+  solvedRegions: readonly RegionRecord[],
+  targets: readonly Extract<PrimitiveRef, { kind: 'region' | 'sketchEntity' }>[],
+  patch: SketchStylePatch,
+): SketchDefinition {
+  if (!isFillStylePatch(patch)) {
+    return definition
+  }
+
+  const liveRegionIds = new Set(solvedRegions.map((region) => region.regionId))
+  const regionIds = targets.flatMap((target) =>
+    target.kind === 'region' && liveRegionIds.has(target.regionId) ? [target.regionId] : [],
+  )
+
+  if (regionIds.length === 0) {
+    return definition
+  }
+
+  const styles = [...(definition.styles ?? [])]
+  const styleIds = [...(definition.styleIds ?? [])]
+  let didChange = false
+
+  for (const regionId of regionIds) {
+    const index = styles.findIndex((style) => style.target.kind === 'region' && style.target.regionId === regionId)
+    const current = index >= 0 ? styles[index]! : createDefaultRegionStyleRecord(regionId)
+    const next = applyRegionFillPatch(current, patch)
+    if (next === current) {
+      continue
+    }
+
+    if (!styleIds.includes(next.styleId)) {
+      styleIds.push(next.styleId)
+    }
+
+    if (index >= 0) {
+      styles[index] = next
+    } else {
+      styles.push(next)
+    }
+    didChange = true
+  }
+
+  return didChange
+    ? {
+        ...definition,
+        styleIds,
+        styles,
+      }
+    : definition
+}
+
+function isFillStylePatch(
+  patch: SketchStylePatch,
+): patch is Extract<SketchStylePatch, { field: 'fillMode' | 'fillColor' | 'gradientStartColor' | 'gradientEndColor' }> {
+  return patch.field === 'fillMode'
+    || patch.field === 'fillColor'
+    || patch.field === 'gradientStartColor'
+    || patch.field === 'gradientEndColor'
+}
+
+function createDefaultRegionStyleRecord(regionId: RegionRecord['regionId']): SketchStyleRecord {
+  return {
+    styleId: `sketch_style_${regionId}` as SketchStyleId,
+    label: `Region ${regionId} style`,
+    target: { kind: 'region', regionId },
+    fill: { kind: 'none' },
+    stroke: {
+      color: 'var(--cad-foreground)',
+      opacity: 0,
+      width: 0,
+      lineCap: 'round',
+      lineJoin: 'round',
+      miterLimit: 4,
+    },
+  }
+}
+
+function applyRegionFillPatch(
+  style: SketchStyleRecord,
+  patch: Extract<SketchStylePatch, { field: 'fillMode' | 'fillColor' | 'gradientStartColor' | 'gradientEndColor' }>,
+): SketchStyleRecord {
+  const current = sketchStyleRecordToDefinition(style)
+  const nextDefinition = applySketchStyleDefinitionPatch(current, patch)
+  const nextFill = sketchStyleDefinitionToFill(nextDefinition)
+
+  if (JSON.stringify(style.fill) === JSON.stringify(nextFill)) {
+    return style
+  }
+
+  return {
+    ...style,
+    fill: nextFill,
   }
 }
 
@@ -4956,6 +5091,69 @@ function applySketchStyleDefinitionPatch(
   }
 
   return next
+}
+
+function sketchStyleRecordToDefinition(style: SketchStyleRecord | undefined): SketchStyleDefinition | undefined {
+  if (!style) {
+    return undefined
+  }
+
+  return {
+    ...sketchStyleFillToDefinition(style.fill),
+    strokeEnabled: style.stroke.opacity > 0 && style.stroke.width > 0,
+    strokeColor: style.stroke.color,
+    strokeWidth: style.stroke.width,
+    strokeCap: style.stroke.lineCap,
+    strokeJoin: style.stroke.lineJoin,
+    strokeMiterLimit: style.stroke.miterLimit,
+    strokeDashSize: style.stroke.dashSize,
+    strokeGapSize: style.stroke.gapSize,
+  }
+}
+
+function sketchStyleFillToDefinition(fill: SketchStyleRecord['fill']): SketchStyleDefinition {
+  if (fill.kind === 'none') {
+    return { fillMode: 'none' }
+  }
+
+  if (fill.kind === 'solid') {
+    return {
+      fillMode: 'solid',
+      fillColor: fill.color,
+    }
+  }
+
+  return {
+    fillMode: 'gradient',
+    gradientStartColor: fill.gradient.startColor,
+    gradientEndColor: fill.gradient.endColor,
+  }
+}
+
+function sketchStyleDefinitionToFill(style: SketchStyleDefinition): SketchStyleRecord['fill'] {
+  if (style.fillMode === 'none' || style.fillMode === undefined) {
+    return { kind: 'none' }
+  }
+
+  if (style.fillMode === 'gradient') {
+    return {
+      kind: 'gradient',
+      gradient: {
+        kind: 'linear',
+        angleRadians: 0,
+        startColor: style.gradientStartColor ?? style.fillColor ?? 'var(--cad-accent)',
+        startOpacity: 0.42,
+        endColor: style.gradientEndColor ?? 'var(--cad-surface)',
+        endOpacity: 0.28,
+      },
+    }
+  }
+
+  return {
+    kind: 'solid',
+    color: style.fillColor ?? 'var(--cad-accent)',
+    opacity: 0.42,
+  }
 }
 
 function clearSketchAnnotationEdit(session: SketchSessionState): SketchSessionState {
@@ -5868,11 +6066,13 @@ function sampleSplinePoints(points: readonly SketchPoint[]): SketchPoint[] {
 
 export function getSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
-  const localStyleLookup = createSketchEntityStyleLookup(session)
-  const pointStyleLookup = createSketchPointStyleLookup(session)
+  const svgRenderingEnabled = isSketchSvgRenderingEnabled(session)
+  const localStyleLookup = svgRenderingEnabled ? createSketchEntityStyleLookup(session) : new Map<SketchEntityId, SketchEntityDisplayStyle>()
+  const pointStyleLookup = svgRenderingEnabled ? createSketchPointStyleLookup(session) : new Map<SketchPointId, SketchEntityDisplayStyle>()
+  const regionStyleLookup = svgRenderingEnabled ? createSketchRegionStyleLookup(session) : new Map<RegionRecord['regionId'], SketchEntityDisplayStyle>()
   const displayDefinition = evaluateSketchDerivations(session.definition).definition
   const regionRenderables = session.solvedRegions.flatMap((region, index) => {
-    const renderable = createDisplayRenderableForRegion(session, displayDefinition, region, index)
+    const renderable = createDisplayRenderableForRegion(session, displayDefinition, region, index, regionStyleLookup.get(region.regionId))
     return renderable ? [renderable] : []
   })
 
@@ -5925,6 +6125,7 @@ function createDisplayRenderableForRegion(
   definition: SketchDefinition,
   region: RegionRecord,
   index: number,
+  style: SketchEntityDisplayStyle | undefined,
 ): SketchSessionDisplayRenderable | null {
   const triangulated = triangulateSketchRegionLoops(definition, region)
   if (!triangulated) {
@@ -5944,6 +6145,8 @@ function createDisplayRenderableForRegion(
     linePattern: 'solid',
     role: 'local',
     semanticClass: 'region',
+    paintStyle: style?.paintStyle,
+    strokeStyle: style?.strokeStyle,
   }
 }
 
@@ -6215,6 +6418,25 @@ function createSketchPointStyleLookup(session: SketchSessionState): Map<SketchPo
   return pointStyleById
 }
 
+function createSketchRegionStyleLookup(session: SketchSessionState): Map<RegionRecord['regionId'], SketchEntityDisplayStyle> {
+  const regionStyleById = new Map<RegionRecord['regionId'], SketchEntityDisplayStyle>()
+
+  for (const styleRecord of session.fullDefinition.styles ?? []) {
+    if (!styleRecord.target || styleRecord.target.kind !== 'region') {
+      continue
+    }
+
+    const style = parseSketchStyleRecord(styleRecord)
+    if (!style) {
+      continue
+    }
+
+    regionStyleById.set(styleRecord.target.regionId, style)
+  }
+
+  return regionStyleById
+}
+
 function mergeSketchEntityDisplayStyle(
   base: SketchEntityDisplayStyle | undefined,
   override: SketchEntityDisplayStyle | undefined,
@@ -6246,6 +6468,52 @@ function parseSketchStyleDefinition(style: SketchStyleDefinition | undefined): S
   }
 
   return { paintStyle, strokeStyle }
+}
+
+function parseSketchStyleRecord(style: SketchStyleRecord): SketchEntityDisplayStyle | undefined {
+  const paintStyle = parseSketchStyleRecordFill(style.fill)
+  const strokeStyle = parseSketchStyleRecordStroke(style.stroke)
+
+  if (!paintStyle && !strokeStyle) {
+    return undefined
+  }
+
+  return { paintStyle, strokeStyle }
+}
+
+function parseSketchStyleRecordFill(fill: SketchStyleRecord['fill']): SketchDisplayPaintStyle | undefined {
+  if (fill.kind === 'none') {
+    return undefined
+  }
+
+  if (fill.kind === 'solid') {
+    return {
+      color: parseColorValue(fill.color) ?? 0x48b6ff,
+      opacity: fill.opacity,
+    }
+  }
+
+  return {
+    color: parseColorValue(fill.gradient.startColor) ?? 0x48b6ff,
+    opacity: fill.gradient.startOpacity,
+  }
+}
+
+function parseSketchStyleRecordStroke(stroke: SketchStyleRecord['stroke']): SketchDisplayStrokeStyle | undefined {
+  if (stroke.opacity <= 0 || stroke.width <= 0) {
+    return undefined
+  }
+
+  return {
+    color: parseColorValue(stroke.color) ?? 0xdde7f0,
+    opacity: stroke.opacity,
+    width: stroke.width,
+    lineCap: stroke.lineCap,
+    lineJoin: stroke.lineJoin,
+    miterLimit: stroke.miterLimit,
+    dashSize: stroke.dashSize,
+    gapSize: stroke.gapSize,
+  }
 }
 
 function parseLocalPaintStyle(style: SketchStyleDefinition): SketchDisplayPaintStyle | undefined {

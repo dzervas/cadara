@@ -168,25 +168,27 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     sketchToolbarMarkup.includes('/icons/sketch-line-segment.svg') &&
       sketchToolbarMarkup.includes('/icons/sketch-dimension.svg') &&
       sketchToolbarMarkup.includes('/icons/sketch-construction.svg') &&
+      sketchToolbarMarkup.includes('/icons/eye_open.svg') &&
       sketchToolbarMarkup.includes('/icons/svg-fill.svg') &&
       sketchToolbarMarkup.includes('/icons/svg-stroke.svg'),
     'Sketch toolbar buttons and dropdown triggers should keep local SVG icons.',
   )
   assert(
+    sketchToolbarMarkup.includes('data-tool-id="svgRendering"') &&
     sketchToolbarMarkup.includes('data-tool-id="fill"') &&
       sketchToolbarMarkup.includes('data-tool-id="stroke"') &&
-      sketchToolbarMarkup.includes('data-tool-id="fillType"') &&
-      sketchToolbarMarkup.includes('data-tool-id="strokeOptions"'),
-    'Sketch toolbar should include the dedicated SVG style subsection tools.',
+      !sketchToolbarMarkup.includes('data-tool-id="fillType"') &&
+      !sketchToolbarMarkup.includes('data-tool-id="strokeOptions"'),
+    'Sketch toolbar should include the SVG rendering toggle and only Fill/Stroke SVG style tools.',
   )
   assert(
     !getDropdownTriggerMarkup(sketchToolbarMarkup, 'line').includes('border-left'),
     'Sketch dropdown tools should not render a divider between the tool icon and dropdown affordance.',
   )
   assert(
-    getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"') &&
-      getToolMarkup(sketchToolbarMarkup, 'strokeOptions').includes('data-disabled="true"'),
-    'SVG style toolbar controls should render disabled until a local sketch style target is selected.',
+    !getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"') &&
+      !getToolMarkup(sketchToolbarMarkup, 'stroke').includes('data-disabled="true"'),
+    'SVG style toolbar controls should stay available without a target so activation can show target guidance.',
   )
   assert(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)') &&
@@ -200,7 +202,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   styledSession = acceptSketchDraw(styledSession, [4, 0])
   const styleTarget = styledSession.definition.entities[0]?.target
   assert(styleTarget, 'Toolbar style availability fixture should create a local sketch entity.')
-  styledSession = focusSketchStyleTool(styledSession, [styleTarget], 'strokeDash')
+  styledSession = focusSketchStyleTool(styledSession, [styleTarget], 'stroke')
 
   const styleTargetToolbarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -230,8 +232,53 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
 
   assert(
     !getToolMarkup(styleTargetToolbarMarkup, 'fill').includes('data-disabled="true"') &&
-      getToolMarkup(styleTargetToolbarMarkup, 'strokeOptions').includes('aria-pressed="true"'),
-    'SVG style toolbar controls should become available and active when a focused style target exists.',
+      !getToolMarkup(styleTargetToolbarMarkup, 'stroke').includes('data-disabled="true"') &&
+      getToolMarkup(styleTargetToolbarMarkup, 'stroke').includes('aria-pressed="true"'),
+    'Fill and Stroke should remain available while Stroke shows active for a selected sketch entity.',
+  )
+
+  const baseSvgDisabledSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+  const svgDisabledSession = {
+    ...baseSvgDisabledSession,
+    fullDefinition: {
+      ...baseSvgDisabledSession.fullDefinition,
+      svgRenderingEnabled: false,
+    },
+    definition: {
+      ...baseSvgDisabledSession.definition,
+      svgRenderingEnabled: false,
+    },
+  }
+  const svgDisabledToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: {
+            ...getEditorViewState(initialEditorState),
+            mode: 'sketch',
+            activeCommand: {
+              commandSessionId: 'command_sketch-1',
+              toolId: 'line',
+              phase: 'editing',
+            },
+            sketchSession: svgDisabledSession,
+          },
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    getToolMarkup(svgDisabledToolbarMarkup, 'fill').includes('data-disabled="true"') &&
+      getToolMarkup(svgDisabledToolbarMarkup, 'stroke').includes('data-disabled="true"') &&
+      !getToolMarkup(svgDisabledToolbarMarkup, 'svgRendering').includes('aria-pressed="true"'),
+    'Fill and Stroke should only disable when SVG rendering is off.',
   )
 
   const constructionSession = {

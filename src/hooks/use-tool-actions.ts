@@ -51,6 +51,7 @@ export function useToolActions() {
             || toolId === 'dimension'
             || toolId === 'construction'
             || toolId === 'projectReference'
+            || toolId === 'svgRendering'
             || toolId === 'finishSketch'
             ? 'sketch'
             : machineState.mode

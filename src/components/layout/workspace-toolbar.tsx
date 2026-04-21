@@ -16,7 +16,7 @@ import {
 } from '@/domain/tools/tool-registry'
 import {
   getActiveSketchStyleToolId,
-  hasSketchStyleTarget,
+  isSketchSvgRenderingEnabled,
   isSketchConstructionSelected,
 } from '@/domain/editor/sketch-session'
 import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
@@ -42,7 +42,7 @@ export function WorkspaceToolbar({
 }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
-    state: { activeCommand, history, mode, selection, sketchSession },
+    state: { activeCommand, history, mode, sketchSession },
   } = useEditorState()
   const visibleHistory = historyAvailability ?? history
   const visibleSections = useMemo(() => getToolbarSectionsForMode(mode), [mode])
@@ -50,12 +50,12 @@ export function WorkspaceToolbar({
   const hasActiveSketchSession = sketchSession !== null
 
   const activeSketchStyleToolId = sketchSession ? getActiveSketchStyleToolId(sketchSession) : null
-  const hasStyleTarget = sketchSession ? hasSketchStyleTarget(sketchSession, selection) : false
+  const svgRenderingEnabled = sketchSession ? isSketchSvgRenderingEnabled(sketchSession) : false
 
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
     (tool.id === 'undo' && !visibleHistory.canUndo)
     || (tool.id === 'redo' && !visibleHistory.canRedo)
-    || (isSketchStyleToolId(tool.id) && !hasStyleTarget)
+    || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
 
   const renderTool = (tool: RegisteredToolDefinition) => {
     if (tool.id === 'sketch' && hasActiveSketchSession) {
@@ -68,11 +68,12 @@ export function WorkspaceToolbar({
 
     const isActive =
       (tool.id === 'construction' && sketchSession !== null && isSketchConstructionSelected(sketchSession)) ||
+      (tool.id === 'svgRendering' && svgRenderingEnabled) ||
       activeSketchStyleToolId === tool.id ||
       activeCommand?.toolId === tool.id ||
       (isDropdownTool(tool) &&
         tool.dropdown.variantIds.some((variantId) =>
-          variantId === activeCommand?.toolId || variantId === activeSketchStyleToolId,
+          variantId === activeCommand?.toolId,
         ))
 
     const disabled = isToolDisabled(tool)
