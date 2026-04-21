@@ -5,6 +5,7 @@ import {
   createRenderIdleTracker,
   createViewportBvhSceneKey,
   projectSceneTargetCentroidToViewport,
+  resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
 import { bindRenderableObject } from '@/domain/workspace/render-picking'
@@ -191,9 +192,31 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     assert(sceneChanged === false, 'Render idle should clear when the scene changes.')
   }
 
+  function testViewCubeResizeUpdatesCanvasCssSize() {
+    const setSizeCalls: Array<{ width: number, height: number, updateStyle?: boolean }> = []
+    const cubeSize = resizeViewCubeRenderer({
+      cubeElement: { clientWidth: 120, clientHeight: 96 },
+      renderer: {
+        setSize: (width, height, updateStyle) => {
+          setSizeCalls.push({ width, height, updateStyle })
+        },
+      },
+    })
+
+    assert(cubeSize === 96, 'View cube renderer should fit within the smaller cube container dimension.')
+    assert(setSizeCalls.length === 1, 'View cube resize should issue one renderer size update.')
+    assert(setSizeCalls[0]?.width === 96, 'View cube renderer width should match the computed CSS size.')
+    assert(setSizeCalls[0]?.height === 96, 'View cube renderer height should match the computed CSS size.')
+    assert(
+      setSizeCalls[0]?.updateStyle === true,
+      'View cube renderer should update canvas CSS size so devicePixelRatio does not enlarge the visible overlay.',
+    )
+  }
+
   testDragMovesCoalesceToLatestPoint()
   testDragMoveCancellationDropsPendingFrame()
   testSketchBvhKeyIgnoresPositionalPolylineUpdates()
   testProjectionBridgeResolvesKnownTarget()
   testRenderIdleTrackerRequiresStableIdleFrames()
+  testViewCubeResizeUpdatesCanvasCssSize()
 })

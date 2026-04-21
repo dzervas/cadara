@@ -82,6 +82,7 @@ import {
   createRenderIdleTracker,
   createViewportBvhSceneKey,
   projectSceneTargetCentroidToViewport,
+  resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
 
@@ -459,8 +460,7 @@ export function ThreeCadViewport({
     }
 
     const resizeRenderer = () => {
-      const cubeSize = Math.max(1, Math.floor(Math.min(cubeElement.clientWidth, cubeElement.clientHeight)))
-      renderer.setSize(cubeSize, cubeSize, false)
+      resizeViewCubeRenderer({ cubeElement, renderer })
 
       if (attachedControls) {
         requestRender()
@@ -1431,17 +1431,6 @@ function createViewCubePlaneQuaternion(normal: THREE.Vector3, up: THREE.Vector3)
   return new THREE.Quaternion().setFromRotationMatrix(
     new THREE.Matrix4().makeBasis(right, labelUp, normalizedNormal),
   )
-}
-
-function resolveViewCubePlaneUp(normal: THREE.Vector3) {
-  const normalizedNormal = normal.clone().normalize()
-  const preferredUp = Math.abs(normalizedNormal.z) < 0.92
-    ? new THREE.Vector3(0, 0, 1)
-    : new THREE.Vector3(0, 1, 0)
-
-  return preferredUp
-    .sub(normalizedNormal.clone().multiplyScalar(preferredUp.dot(normalizedNormal)))
-    .normalize()
 }
 
 function updateViewCubeVisibility(

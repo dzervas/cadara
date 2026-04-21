@@ -23,6 +23,10 @@ interface RenderIdleSample {
   sceneKey: string
 }
 
+interface ViewCubeRenderer {
+  setSize: (width: number, height: number, updateStyle?: boolean) => void
+}
+
 export function scheduleCoalescedSketchGeometryDragMove(input: {
   point: readonly [number, number]
   pendingPointRef: MutableRef<readonly [number, number] | null>
@@ -59,6 +63,20 @@ export function cancelCoalescedSketchGeometryDragMove(input: {
 
   input.pendingFrameIdRef.current = null
   input.pendingPointRef.current = null
+}
+
+export function getViewCubeRenderSizePx(cubeElement: Pick<HTMLElement, 'clientWidth' | 'clientHeight'>) {
+  return Math.max(1, Math.floor(Math.min(cubeElement.clientWidth, cubeElement.clientHeight)))
+}
+
+export function resizeViewCubeRenderer(input: {
+  cubeElement: Pick<HTMLElement, 'clientWidth' | 'clientHeight'>
+  renderer: ViewCubeRenderer
+}) {
+  const cubeSize = getViewCubeRenderSizePx(input.cubeElement)
+  input.renderer.setSize(cubeSize, cubeSize, true)
+
+  return cubeSize
 }
 
 export function createViewportBvhSceneKey(
