@@ -12,6 +12,7 @@ import type {
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
 } from '@/contracts/modeling/schema'
+import type { BodyId } from '@/contracts/shared/ids'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import type { AppResultAsync } from '@/contracts/errors'
@@ -338,6 +339,50 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(
       restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Restored Body',
       'Repository-authored state should hydrate the kernel snapshot before exposure.',
+    )
+  }
+
+  async function testRepositoryRestorePreservesRepairableBrokenAuthoredDocument() {
+    const repositoryDocument = await createSeedAuthoredDocument()
+    const brokenExtrude = repositoryDocument.features.find((feature) => feature.definition.kind === 'extrude')
+    assert(brokenExtrude?.definition.kind === 'extrude', 'Repository restore fixture should include an extrude feature.')
+    repositoryDocument.features = repositoryDocument.features.map((feature) =>
+      feature.featureId === brokenExtrude.featureId && feature.definition.kind === 'extrude'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                operation: 'join',
+                booleanScope: { kind: 'targetBody', bodyId: 'body_missing_for_repair' as BodyId },
+              },
+            },
+          }
+        : feature,
+    )
+
+    const documentRepository = createMemoryDocumentRepository([repositoryDocument])
+    const reset = documentRepository.reset.bind(documentRepository)
+    let resetCount = 0
+    documentRepository.reset = async (documentId) => {
+      resetCount += 1
+      return reset(documentId)
+    }
+
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const restoreState = await service.getHistoryRestoreState()
+    const restoredSnapshot = await service.getCurrentDocumentSnapshot()
+
+    assert(restoreState.kind === 'restored', 'Repairable broken authored documents should restore as authored state.')
+    assert(resetCount === 0, 'Repairable broken authored documents should not trigger repository reset.')
+    assert(documentRepository.savedDocuments.length === 0, 'Repairable broken restore should not seed an empty replacement document.')
+    assert(
+      restoredSnapshot.features.some((feature) => feature.featureId === brokenExtrude.featureId),
+      'Repairable broken features should remain available in restored authored history.',
     )
   }
 
@@ -681,6 +726,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
   await testRepositoryCursorMovesUseRefreshedHeadsAcrossRollbackRedoLoop()
   await testRepositoryRestoreHydratesFreshModelingService()
+  await testRepositoryRestorePreservesRepairableBrokenAuthoredDocument()
   await testRepositoryRestoreIgnoresStaleOperationHistory()
   await testSeededRepositoryClearsInvalidOperationHistory()
   await testRestoredRepositoryLeavesInvalidOperationHistoryAlone()

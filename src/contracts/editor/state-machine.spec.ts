@@ -25,6 +25,10 @@ import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/mod
 import type {
   ConstructionId,
   DocumentId,
+  FeatureId,
+  PickId,
+  RegionId,
+  RenderableId,
   RevisionId,
   SketchId,
   SnapshotEntityId,
@@ -275,6 +279,27 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         ...snapshot.document,
         revisionId,
         cursor: structuredClone(cursor),
+      },
+    }
+  }
+
+  function createRenderRecord(id: string, featureId: FeatureId): DocumentSnapshot['document']['render']['records'][number] {
+    return {
+      id: id as RenderableId,
+      label: id,
+      ownerBodyId: null,
+      ownerFeatureId: featureId,
+      binding: {
+        pickId: `pick_${id}` as PickId,
+        pickPriority: 10,
+        target: { kind: 'construction', constructionId: 'construction_plane-xy' as ConstructionId },
+        topology: null,
+        semanticClass: 'construction',
+      },
+      geometry: {
+        kind: 'marker',
+        position: [0, 0, 0],
+        displayRadius: 1,
       },
     }
   }
@@ -1986,6 +2011,102 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(conflicted.state.pendingSnapshotRequestId === conflicted.effects[0]?.requestId, 'Conflict refresh should be tracked as pending.')
   }
 
+  function testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics() {
+    const previous = createSnapshot()
+    const featureId = 'feature_broken' as FeatureId
+    const previousRender = createRenderRecord('render_previous', featureId)
+    previous.document.render.records = [previousRender]
+    previous.render = previous.document.render
+
+    const loaded = transitionEditorState(initialEditorState, {
+      type: 'document.snapshotLoaded',
+      snapshot: previous,
+    })
+    const refresh = transitionEditorState(loaded.state, { type: 'document.refreshRequested' })
+    const effect = refresh.effects[0]
+    assert(effect?.type === 'document.fetchSnapshot', 'Refresh should request a document snapshot.')
+
+    const next = structuredClone(previous)
+    next.revisionId = 'rev_2'
+    next.document.revisionId = 'rev_2'
+    next.document.render = {
+      ...next.document.render,
+      records: [createRenderRecord('render_failed_rebuild', featureId)],
+    }
+    next.render = next.document.render
+    next.document.diagnostics = [{
+      code: 'occ-missing-reference',
+      severity: 'error',
+      message: 'Extrude profile selection is incorrect.',
+      featureId,
+      fieldId: 'profiles',
+      fieldPath: ['parameters', 'profiles'],
+      repairGuidance: 'Edit Extrude and choose a valid profile selection.',
+      target: { kind: 'region', sketchId: 'sketch_missing' as SketchId, regionId: 'region_missing' as RegionId },
+      detail: null,
+    }]
+    next.diagnostics = next.document.diagnostics
+
+    const failedRefresh = transitionEditorState(refresh.state, {
+      type: 'effect.snapshotLoaded',
+      payload: {
+        requestId: effect.requestId,
+        documentId: next.documentId,
+        revisionId: next.revisionId,
+        snapshot: next,
+        selectionCatalog: buildSelectionTargetCatalog(next),
+        preserveRenderRecordsOnFeatureDiagnostics: true,
+      },
+    })
+
+    assert(
+      failedRefresh.state.snapshot?.document.render.records[0]?.id === previousRender.id,
+      'Feature-scoped failed refreshes should preserve previous viewport render records.',
+    )
+    assert(
+      failedRefresh.state.snapshot?.document.diagnostics[0]?.featureId === featureId,
+      'Feature-scoped failed refreshes should still expose the new repair diagnostic.',
+    )
+    assert(
+      failedRefresh.state.snapshot?.revisionId === 'rev_2',
+      'Render preservation should not roll back the authored snapshot revision.',
+    )
+
+    const fixed = structuredClone(next)
+    fixed.revisionId = 'rev_3'
+    fixed.document.revisionId = 'rev_3'
+    fixed.document.diagnostics = []
+    fixed.diagnostics = []
+    fixed.document.render = {
+      ...fixed.document.render,
+      records: [createRenderRecord('render_fixed', featureId)],
+    }
+    fixed.render = fixed.document.render
+    const secondRefresh = transitionEditorState(failedRefresh.state, { type: 'document.refreshRequested' })
+    const secondEffect = secondRefresh.effects[0]
+    assert(secondEffect?.type === 'document.fetchSnapshot', 'Second refresh should request a document snapshot.')
+    const fixedRefresh = transitionEditorState(secondRefresh.state, {
+      type: 'effect.snapshotLoaded',
+      payload: {
+        requestId: secondEffect.requestId,
+        documentId: fixed.documentId,
+        revisionId: fixed.revisionId,
+        snapshot: fixed,
+        selectionCatalog: buildSelectionTargetCatalog(fixed),
+        preserveRenderRecordsOnFeatureDiagnostics: true,
+      },
+    })
+
+    assert(
+      fixedRefresh.state.snapshot?.document.render.records[0]?.id === 'render_fixed',
+      'Successful corrected refreshes should swap in the new render records.',
+    )
+    assert(
+      fixedRefresh.state.snapshot?.document.diagnostics.length === 0,
+      'Corrected refreshes should clear feature diagnostics.',
+    )
+  }
+
   async function testXStateRuntimeBootstrapsAndLoadsSnapshot() {
     const snapshot = createSnapshot()
     let snapshotCallCount = 0
@@ -2796,6 +2917,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testFinishSketchRestoresNonTailCursor()
   await testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore()
   await testDocumentCursorRequestUsesSnapshotBasisAndRefreshesOnConflict()
+  testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics()
   await testXStateRuntimeBootstrapsAndLoadsSnapshot()
   await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
 })

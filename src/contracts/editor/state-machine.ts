@@ -90,6 +90,7 @@ import type {
   ModelingDiagnostic,
   SnapshotMutationBasis,
 } from '@/contracts/modeling/schema'
+import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
@@ -268,6 +269,8 @@ export interface SnapshotLoadedPayload {
   snapshot: DocumentSnapshot
   /** Derived selection catalog built from `snapshot` for command filtering. */
   selectionCatalog: SelectionTargetCatalog
+  /** Keep prior viewport render records when this snapshot contains repairable feature errors. */
+  preserveRenderRecordsOnFeatureDiagnostics?: boolean
 }
 
 /** Bootstraps the editor runtime and requests the initial snapshot load. */
@@ -717,6 +720,8 @@ export type EditorEffect =
       revisionId: RevisionId | null
       /** Command session that triggered the fetch, or null for background/session bootstraps. */
       commandSessionId: CommandSessionId | null
+      /** Keep prior viewport render records when this snapshot contains repairable feature errors. */
+      preserveRenderRecordsOnFeatureDiagnostics?: boolean
     }
   | {
       type: 'sketch.openSession'
@@ -1257,6 +1262,7 @@ function getDurableDiagnosticTarget(target: PrimitiveRef | null): DurableRef | n
 function emitSnapshotFetch(
   state: EditorState,
   commandSessionId: CommandSessionId | null,
+  options: { preserveRenderRecordsOnFeatureDiagnostics?: boolean } = {},
 ): EditorTransitionResult {
   const requestId = nextRequestId(state, 'snapshot')
 
@@ -1273,6 +1279,7 @@ function emitSnapshotFetch(
         documentId: state.document.documentId,
         revisionId: state.document.revisionId,
         commandSessionId,
+        preserveRenderRecordsOnFeatureDiagnostics: options.preserveRenderRecordsOnFeatureDiagnostics,
       },
     ],
   }
@@ -1719,16 +1726,52 @@ function assertSketchPlaneSupport(target: PrimitiveRef): SketchPlaneSupportRef {
 }
 
 function updateStateDocument(state: EditorState, payload: SnapshotLoadedPayload): EditorState {
+  const snapshot = applyRenderPreservationForFeatureDiagnostics(
+    state.snapshot,
+    payload.snapshot,
+    payload.preserveRenderRecordsOnFeatureDiagnostics === true,
+  )
+
   return {
     ...state,
     document: {
       documentId: payload.documentId,
       revisionId: payload.revisionId,
     },
-    snapshot: payload.snapshot,
+    snapshot,
     selectionCatalog: payload.selectionCatalog,
     pendingSnapshotRequestId:
       state.pendingSnapshotRequestId === payload.requestId ? null : state.pendingSnapshotRequestId,
+  }
+}
+
+function hasFeatureScopedError(snapshot: DocumentSnapshot) {
+  return snapshot.document.diagnostics.some((diagnostic) =>
+    diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
+  )
+}
+
+function applyRenderPreservationForFeatureDiagnostics(
+  previousSnapshot: DocumentSnapshot | null,
+  nextSnapshot: DocumentSnapshot,
+  shouldPreserve: boolean,
+): DocumentSnapshot {
+  if (!shouldPreserve || !previousSnapshot || !hasFeatureScopedError(nextSnapshot)) {
+    return nextSnapshot
+  }
+
+  const render = {
+    ...nextSnapshot.document.render,
+    records: previousSnapshot.document.render.records,
+  }
+
+  return {
+    ...nextSnapshot,
+    document: {
+      ...nextSnapshot.document,
+      render,
+    },
+    render,
   }
 }
 
@@ -3560,6 +3603,11 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
               },
             },
             state.command.commandSessionId,
+            {
+              preserveRenderRecordsOnFeatureDiagnostics: event.diagnostics.some((diagnostic) =>
+                diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
+              ),
+            },
           )
         }
 
@@ -3573,6 +3621,11 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
             },
           ),
           state.command.commandSessionId,
+          {
+            preserveRenderRecordsOnFeatureDiagnostics: event.diagnostics.some((diagnostic) =>
+              diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
+            ),
+          },
         )
 
         return {
@@ -3819,6 +3872,7 @@ export async function runEditorEffect(
             revisionId: snapshot.revisionId,
             snapshot,
             selectionCatalog: buildSelectionTargetCatalog(snapshot),
+            preserveRenderRecordsOnFeatureDiagnostics: effect.preserveRenderRecordsOnFeatureDiagnostics,
           },
         }
       } catch (error: unknown) {

@@ -67,6 +67,7 @@ import {
   RENDER_EXPORT_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
+import type { DurableRef } from '@/contracts/shared/references'
 import type {
   RegionRecord,
   SketchDefinition,
@@ -98,6 +99,10 @@ import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
 } from '@/domain/modeling/document-variable-expressions'
+import {
+  createDependencyBlockedDiagnostic,
+  createFeatureFieldDiagnostic,
+} from '@/domain/modeling/feature-diagnostic-mapping'
 import {
   getOccDurableRefKey,
   resolveOccReference,
@@ -280,8 +285,9 @@ function createValidationDiagnostic(
 
 function createInvalidReferenceDiagnostic(
   resolution: ResolveReferenceResponse['resolution'],
+  feature?: OccAuthoringFeatureRecord,
 ): ModelingDiagnostic {
-  return createDiagnostic(
+  const diagnostic = createDiagnostic(
     resolution.invalidation?.reason ?? 'occ-invalid-reference',
     'error',
     'Requested durable reference does not resolve in the current OCC authoring state.',
@@ -293,6 +299,15 @@ function createInvalidReferenceDiagnostic(
           reference: resolution.invalidation,
         },
   )
+
+  return feature
+    ? createFeatureFieldDiagnostic({
+        code: diagnostic.code,
+        feature,
+        target: diagnostic.target,
+        detail: diagnostic.detail,
+      })
+    : diagnostic
 }
 
 function createRebuildFailureDiagnostic(
@@ -300,8 +315,9 @@ function createRebuildFailureDiagnostic(
   message: string,
   affectedFeatureIds: FeatureId[],
   affectedTargets: NonNullable<ModelingDiagnostic['target']>[],
+  feature?: OccAuthoringFeatureRecord,
 ): ModelingDiagnostic {
-  return createDiagnostic(
+  const diagnostic = createDiagnostic(
     code,
     'error',
     message,
@@ -312,6 +328,15 @@ function createRebuildFailureDiagnostic(
       affectedTargets,
     },
   )
+
+  return feature
+    ? createFeatureFieldDiagnostic({
+        code: diagnostic.code,
+        feature,
+        target: diagnostic.target,
+        detail: diagnostic.detail,
+      })
+    : diagnostic
 }
 
 function createAdvancedUnsupportedDiagnostic(
@@ -723,6 +748,75 @@ function uniqueTargets(targets: readonly NonNullable<ModelingDiagnostic['target'
   return result
 }
 
+function bodyIdLooksOwnedByFeature(bodyId: BodyId, featureId: FeatureId) {
+  return bodyId === `body_${featureId}` || bodyId.startsWith(`body_${featureId}_`)
+}
+
+function targetLooksOwnedByFeature(target: DurableRef, featureId: FeatureId) {
+  switch (target.kind) {
+    case 'feature':
+      return target.featureId === featureId
+    case 'body':
+    case 'face':
+    case 'edge':
+    case 'vertex':
+    case 'loop':
+      return bodyIdLooksOwnedByFeature(target.bodyId, featureId)
+    default:
+      return false
+  }
+}
+
+interface FailedFeatureRecord {
+  featureId: FeatureId
+  featureLabel: string
+  affectedTargets: readonly DurableRef[]
+}
+
+function targetsOverlap(left: DurableRef, right: DurableRef) {
+  if (getOccDurableRefKey(left) === getOccDurableRefKey(right)) {
+    return true
+  }
+
+  if ('bodyId' in left && 'bodyId' in right) {
+    return left.bodyId === right.bodyId
+  }
+
+  return false
+}
+
+function targetBlockedByFailedFeature(target: DurableRef, failedFeature: FailedFeatureRecord) {
+  return targetLooksOwnedByFeature(target, failedFeature.featureId)
+    || failedFeature.affectedTargets.some((affectedTarget) => targetsOverlap(affectedTarget, target))
+}
+
+function findBlockingFeature(
+  failedFeatures: readonly FailedFeatureRecord[],
+  feature: OccAuthoringFeatureRecord,
+) {
+  for (const target of getFeatureConsumedTargets(feature.definition)) {
+    for (const failedFeature of failedFeatures) {
+      if (targetBlockedByFailedFeature(target, failedFeature)) {
+        return failedFeature
+      }
+    }
+  }
+
+  return null
+}
+
+function createFailedFeatureRecord(feature: OccAuthoringFeatureRecord): FailedFeatureRecord {
+  return {
+    featureId: feature.featureId,
+    featureLabel: feature.label ?? feature.featureId,
+    affectedTargets: uniqueTargets(getFeatureConsumedTargets(feature.definition)),
+  }
+}
+
+function getPersistentAuthoringDiagnostics(diagnostics: readonly ModelingDiagnostic[]) {
+  return diagnostics.filter((diagnostic) => diagnostic.featureId == null)
+}
+
 function getNewInvalidatedTargets(
   previous: OccAuthoringState,
   next: OccAuthoringState,
@@ -883,17 +977,20 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
   }
 }
 
-type RebuildAttempt =
-  | { ok: true; state: OccAuthoringState }
-  | { ok: false; reasonCode: string; diagnostics: ModelingDiagnostic[] }
+type RebuildAttempt = {
+  ok: true
+  state: OccAuthoringState
+  partial: boolean
+  diagnostics: ModelingDiagnostic[]
+}
 
 function collectInvalidConsumedTargetDiagnostics(
   state: Pick<OccAuthoringState, 'documentId' | 'revisionId' | 'referenceState'>,
-  definition: FeatureDefinition,
+  feature: OccAuthoringFeatureRecord,
 ) {
   const diagnostics: ModelingDiagnostic[] = []
 
-  for (const target of getFeatureConsumedTargets(definition)) {
+  for (const target of getFeatureConsumedTargets(feature.definition)) {
     const resolved = resolveOccReference({
       documentId: state.documentId,
       revisionId: state.revisionId,
@@ -901,11 +998,27 @@ function collectInvalidConsumedTargetDiagnostics(
     }, target)
 
     if (resolved.resolution.invalidation !== null) {
-      diagnostics.push(createInvalidReferenceDiagnostic(resolved.resolution))
+      diagnostics.push(createInvalidReferenceDiagnostic(resolved.resolution, feature))
     }
   }
 
   return diagnostics
+}
+
+function isRepairableFeatureDiagnostic(diagnostic: ModelingDiagnostic) {
+  return diagnostic.detail?.kind === 'invalidReference'
+    || diagnostic.code === 'feature-dependency-blocked'
+}
+
+function getNonRepairableFeatureDiagnostics(
+  diagnostics: readonly ModelingDiagnostic[],
+  featureIds: ReadonlySet<FeatureId>,
+) {
+  return diagnostics.filter((diagnostic) =>
+    diagnostic.featureId
+    && featureIds.has(diagnostic.featureId)
+    && !isRepairableFeatureDiagnostic(diagnostic),
+  )
 }
 
 export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
@@ -1085,6 +1198,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor: { kind: 'empty' },
     })
     const pendingProjectionFeatures: OccAuthoringFeatureRecord[] = []
+    const failedProjectionFeatures: FailedFeatureRecord[] = []
 
     for (const item of historyOrder) {
       if (item.kind === 'sketch') {
@@ -1094,7 +1208,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         }
 
         for (const feature of pendingProjectionFeatures.splice(0)) {
-          projectionState = applyOccFeatureToAuthoringState(projectionState, feature)
+          if (findBlockingFeature(failedProjectionFeatures, feature)) {
+            failedProjectionFeatures.push(createFailedFeatureRecord(feature))
+            continue
+          }
+
+          try {
+            projectionState = applyOccFeatureToAuthoringState(projectionState, feature)
+          } catch {
+            failedProjectionFeatures.push(createFailedFeatureRecord(feature))
+          }
         }
 
         const rebuiltSketch = await this.rebuildAuthoredSketchRecord(document, authoredSketch, projectionState)
@@ -1124,16 +1247,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor: { kind: 'empty' },
     })
 
-    for (const feature of getAppliedFeatures(features, document.cursor, historyOrder)) {
-      authoringState = applyOccFeatureToAuthoringState(authoringState, feature)
-    }
-
-    const rebuiltFeatures = new Map(authoringState.features.map((feature) => [feature.featureId, feature]))
-    authoringState = {
-      ...authoringState,
-      features: features.map((feature) => rebuiltFeatures.get(feature.featureId) ?? feature),
-      cursor: document.cursor,
-    }
+    authoringState = this.tryBuildNextAuthoringState(
+      {
+        authoringState,
+        revisionSequence: parseRevisionSequence(document.revisionId),
+      },
+      {
+        revisionId: document.revisionId,
+        features,
+        cursor: document.cursor,
+      },
+    ).state
     this.replaceRuntimeState({
       authoringState,
       revisionSequence: parseRevisionSequence(document.revisionId),
@@ -1192,6 +1316,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
+      diagnostics: getPersistentAuthoringDiagnostics(runtimeState.authoringState.diagnostics),
     })
 
     let current = baseState
@@ -1378,6 +1503,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     previousState: OccAuthoringState,
     nextState: OccAuthoringState,
     extraDiagnostics: readonly ModelingDiagnostic[],
+    rebuildFailed = false,
   ) {
     const invalidatedTargets = getNewInvalidatedTargets(previousState, nextState)
     const diagnostics = buildOccSnapshotDiagnostics(nextState, extraDiagnostics)
@@ -1388,12 +1514,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         kind: 'accepted' as const,
         baseRevisionId: previousState.revisionId,
       },
-      rebuildResult: {
-        kind: 'rebuilt' as const,
-        revisionId: nextState.revisionId,
-        invalidatedTargets,
-        diagnostics,
-      },
+      rebuildResult: rebuildFailed
+        ? {
+            kind: 'failed' as const,
+            revisionId: nextState.revisionId,
+            reasonCode: diagnostics[0]?.code ?? OCC_REBUILD_FAILURE_CODE,
+            invalidatedTargets,
+            diagnostics,
+          }
+        : {
+            kind: 'rebuilt' as const,
+            revisionId: nextState.revisionId,
+            invalidatedTargets,
+            diagnostics,
+          },
       diagnostics,
     }
   }
@@ -1424,23 +1558,36 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
       previousReferenceState: runtimeState.authoringState.referenceState,
+      diagnostics: getPersistentAuthoringDiagnostics(runtimeState.authoringState.diagnostics),
       cursor: { kind: 'empty' },
     })
 
     let current = baseState
+    const failedFeatures: FailedFeatureRecord[] = []
+    const diagnostics: ModelingDiagnostic[] = []
 
     for (const feature of getAppliedFeatures(features, cursor, baseState.historyOrder)) {
+      const blockingFeature = findBlockingFeature(failedFeatures, feature)
+      if (blockingFeature) {
+        diagnostics.push(createDependencyBlockedDiagnostic({
+          featureId: feature.featureId,
+          featureLabel: feature.label ?? feature.featureId,
+          blockingFeatureId: blockingFeature.featureId,
+          blockingFeatureLabel: blockingFeature.featureLabel,
+        }))
+        failedFeatures.push(createFailedFeatureRecord(feature))
+        continue
+      }
+
       const invalidConsumedTargetDiagnostics = collectInvalidConsumedTargetDiagnostics(
         current,
-        feature.definition,
+        feature,
       )
 
       if (invalidConsumedTargetDiagnostics.length > 0) {
-        return {
-          ok: false,
-          reasonCode: invalidConsumedTargetDiagnostics[0]!.code,
-          diagnostics: invalidConsumedTargetDiagnostics,
-        }
+        diagnostics.push(...invalidConsumedTargetDiagnostics)
+        failedFeatures.push(createFailedFeatureRecord(feature))
+        continue
       }
 
       try {
@@ -1456,41 +1603,39 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
           return resolved.resolution.invalidation === null
             ? []
-            : [createInvalidReferenceDiagnostic(resolved.resolution)]
+            : [createInvalidReferenceDiagnostic(resolved.resolution, feature)]
         })
 
         if (invalidDiagnostics.length > 0) {
-          return {
-            ok: false,
-            reasonCode: invalidDiagnostics[0]!.code,
-            diagnostics: invalidDiagnostics,
-          }
+          diagnostics.push(...invalidDiagnostics)
+          failedFeatures.push(createFailedFeatureRecord(feature))
+          continue
         }
 
-        return {
-          ok: false,
-          reasonCode: deriveRebuildFailureCode(error),
-          diagnostics: [
-            createRebuildFailureDiagnostic(
-              deriveRebuildFailureCode(error),
-              error instanceof Error ? error.message : 'OCC rebuild failed.',
-              [feature.featureId],
-              uniqueTargets(consumedTargets),
-            ),
-          ],
-        }
+        diagnostics.push(createRebuildFailureDiagnostic(
+          deriveRebuildFailureCode(error),
+          error instanceof Error ? error.message : 'OCC rebuild failed.',
+          [feature.featureId],
+          uniqueTargets(consumedTargets),
+          feature,
+        ))
+        failedFeatures.push(createFailedFeatureRecord(feature))
       }
     }
 
     const rebuiltFeatures = new Map(current.features.map((feature) => [feature.featureId, feature]))
+    const state = {
+      ...current,
+      features: features.map((feature) => rebuiltFeatures.get(feature.featureId) ?? feature),
+      cursor,
+      diagnostics: [...current.diagnostics, ...diagnostics],
+    }
 
     return {
       ok: true,
-      state: {
-        ...current,
-        features: features.map((feature) => rebuiltFeatures.get(feature.featureId) ?? feature),
-        cursor,
-      },
+      state,
+      partial: diagnostics.length > 0,
+      diagnostics,
     }
   }
 
@@ -1679,20 +1824,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder: nextHistoryOrder,
       cursor: isNewSketch ? { kind: 'sketch', sketchId } : runtimeState.authoringState.cursor,
     })
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        sketchId,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
@@ -1702,6 +1833,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       runtimeState.authoringState,
       nextAuthoringState.state,
       solverDiagnostics,
+      nextAuthoringState.partial,
     )
 
     return {
@@ -1755,18 +1887,24 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       ),
       cursor: { kind: 'feature', featureId },
     })
-    if (!nextAuthoringState.ok) {
+    const nonRepairableDiagnostics = getNonRepairableFeatureDiagnostics(
+      nextAuthoringState.diagnostics,
+      new Set([featureId]),
+    )
+    if (nonRepairableDiagnostics.length > 0) {
       const rejected = this.buildRejectedResult(
         request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
+        nonRepairableDiagnostics,
+        nonRepairableDiagnostics[0]!.code,
       )
 
-      return this.withOperationEnvelope({
-        featureId,
-        changedTargets: [],
-        ...rejected,
-      })
+      return {
+        ...this.withOperationEnvelope({
+          featureId,
+          changedTargets: [],
+          ...rejected,
+        }),
+      }
     }
 
     this.replaceRuntimeState({
@@ -1775,7 +1913,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     })
 
     const featureSnapshot = nextAuthoringState.state.features[insertionIndex]
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return {
       ...this.withOperationEnvelope({
@@ -1843,18 +1981,24 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: nextRevisionId,
       features: nextFeatures,
     })
-    if (!nextAuthoringState.ok) {
+    const nonRepairableDiagnostics = getNonRepairableFeatureDiagnostics(
+      nextAuthoringState.diagnostics,
+      new Set([request.featureId]),
+    )
+    if (nonRepairableDiagnostics.length > 0) {
       const rejected = this.buildRejectedResult(
         request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
+        nonRepairableDiagnostics,
+        nonRepairableDiagnostics[0]!.code,
       )
 
-      return this.withOperationEnvelope({
-        featureId: request.featureId,
-        changedTargets: [],
-        ...rejected,
-      })
+      return {
+        ...this.withOperationEnvelope({
+          featureId: request.featureId,
+          changedTargets: [],
+          ...rejected,
+        }),
+      }
     }
 
     this.replaceRuntimeState({
@@ -1863,7 +2007,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     })
 
     const updated = nextAuthoringState.state.features[featureIndex]
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return {
       ...this.withOperationEnvelope({
@@ -1940,26 +2084,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       features: nextFeatures,
       cursor: nextCursor,
     })
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        deletedFeatureId: request.featureId,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return {
       ...this.withOperationEnvelope({
@@ -2014,27 +2144,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: nextBodyLabels,
     })
 
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        bodyId: request.bodyId,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
     const bodyTarget = { kind: 'body' as const, bodyId: request.bodyId }
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return this.withOperationEnvelope({
       bodyId: request.bodyId,
@@ -2121,27 +2237,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: nextRevisionId,
       features: nextFeatures,
     })
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        featureId: request.featureId,
-        beforeFeatureId: request.beforeFeatureId,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return {
       ...this.withOperationEnvelope({
@@ -2255,27 +2356,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       features: nextFeatures,
       historyOrder: nextHistoryOrder,
     })
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        item: request.item,
-        beforeItem: request.beforeItem,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return this.withOperationEnvelope({
       item: request.item,
@@ -2336,26 +2422,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor: request.cursor,
     })
 
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        cursor: runtimeState.authoringState.cursor,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return this.withOperationEnvelope({
       cursor: request.cursor,
@@ -2415,26 +2487,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: candidateVariables,
     })
 
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        variableId,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return this.withOperationEnvelope({
       variableId,
@@ -2508,26 +2566,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: candidateVariables,
     })
 
-    if (!nextAuthoringState.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        nextAuthoringState.diagnostics,
-        nextAuthoringState.reasonCode,
-      )
-
-      return this.withOperationEnvelope({
-        variableId: request.variableId,
-        changedTargets: [],
-        ...rejected,
-      })
-    }
-
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
     })
 
-    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [])
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
 
     return this.withOperationEnvelope({
       variableId: request.variableId,

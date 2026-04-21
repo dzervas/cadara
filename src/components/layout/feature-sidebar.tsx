@@ -54,6 +54,10 @@ function formatDocumentDiagnosticDetail(diagnostic: ModelingDiagnostic) {
       return `Affected features: ${detail.affectedFeatureIds.join(', ') || 'none'} | Targets: ${
         detail.affectedTargets.map((target) => getPrimitiveRefLabel(target)).join(', ') || 'none'
       }`
+    case 'advancedFeatureValidation':
+      return detail.diagnostic.role
+        ? `${detail.diagnostic.role}: ${detail.diagnostic.message}`
+        : detail.diagnostic.message
   }
 }
 

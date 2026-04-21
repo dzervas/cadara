@@ -486,6 +486,10 @@ export const modelingDiagnosticSchema = z.object({
   code: stringSchema,
   severity: z.union([z.literal('info'), z.literal('warning'), z.literal('error')]),
   message: stringSchema,
+  featureId: featureIdSchema.nullable().optional(),
+  fieldId: stringSchema.nullable().optional(),
+  fieldPath: z.array(z.union([stringSchema, z.number().int().nonnegative()])).optional(),
+  repairGuidance: stringSchema.nullable().optional(),
   target: durableRefSchema.nullable(),
   detail: z.object({
     kind: stringSchema,

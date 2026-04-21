@@ -19,6 +19,7 @@ import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createSketchSessionFromSnapshot } from '@/domain/editor/sketch-session'
 import { EditorContext } from '@/hooks/editor-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
+import type { FeatureId, RegionId, SketchId } from '@/contracts/shared/ids'
 
 test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -265,6 +266,84 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   )
   assert(timelineMarkup.includes('aria-haspopup="menu"'), 'Timeline history items should expose custom context menu affordances.')
   assert(!timelineMarkup.includes('Hide Fillet 1') && !timelineMarkup.includes('Show Fillet 1'), 'Timeline should not render per-feature hide controls.')
+
+  const erroredTimelineSnapshot = structuredClone(snapshot)
+  erroredTimelineSnapshot.document.diagnostics = [
+    {
+      code: 'occ-missing-reference',
+      severity: 'error',
+      message: 'Extrude 1 profile selection is incorrect.',
+      featureId: 'feature_extrude-1' as FeatureId,
+      fieldId: 'profiles',
+      fieldPath: ['parameters', 'profiles'],
+      repairGuidance: 'Edit Extrude 1 and choose a valid profile selection.',
+      target: {
+        kind: 'region',
+        sketchId: 'sketch_deleted' as SketchId,
+        regionId: 'region_deleted' as RegionId,
+      },
+      detail: null,
+    },
+    {
+      code: 'feature-dependency-blocked',
+      severity: 'error',
+      message: 'Fillet 1 is blocked by an earlier feature error.',
+      featureId: 'feature_fillet-1' as FeatureId,
+      fieldId: 'dependency',
+      fieldPath: ['dependency'],
+      repairGuidance: 'Repair Extrude 1, then rebuild Fillet 1.',
+      target: { kind: 'feature', featureId: 'feature_fillet-1' as FeatureId },
+      detail: null,
+    },
+  ]
+  erroredTimelineSnapshot.diagnostics = erroredTimelineSnapshot.document.diagnostics
+  const erroredTimelineMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureTimelineBar
+          snapshot={erroredTimelineSnapshot}
+          visibleSelection={[]}
+          onSelectTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onCursorRequested={() => undefined}
+          onDeleteFeature={() => undefined}
+          onRenameItem={() => undefined}
+          onSuppressFeature={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    erroredTimelineMarkup.match(/data-feature-error="true"/g)?.length === 2,
+    'Timeline should mark every feature with a feature-scoped diagnostic as errored.',
+  )
+  assert(
+    erroredTimelineMarkup.includes('aria-label="Repair Extrude 1. Edit Extrude 1 and choose a valid profile selection."'),
+    'Erroneous feature items should activate the repair context instead of normal selection.',
+  )
+  assert(
+    erroredTimelineMarkup.includes('Repair Extrude 1, then rebuild Fillet 1.'),
+    'Multiple feature errors should keep repair guidance available from the timeline control.',
+  )
+  assert(
+    erroredTimelineMarkup.includes('data-repair-guidance='),
+    'Timeline repair guidance should be available for hover and focus tooltips.',
+  )
+  assert(
+    erroredTimelineMarkup.includes('overflow-x-auto overflow-y-hidden'),
+    'Timeline repair guidance should not expand the horizontal scroller height.',
+  )
+  assert(
+    !erroredTimelineMarkup.includes('role="tooltip"'),
+    'Timeline repair guidance should not render inside the bar until hover or focus.',
+  )
+  assert(
+    !erroredTimelineMarkup.includes('region_deleted'),
+    'Timeline error copy should not expose raw durable ids.',
+  )
+  assert(!erroredTimelineMarkup.includes('>Delete<'), 'Recoverable feature errors should not offer destructive recovery actions.')
+
   assert(
     getNearestTimelineAnchorIndex([100, 160, 220, 280], 208) === 1,
     'Timeline cursor dragging should snap to the nearest earlier valid anchor when dragged near it.',

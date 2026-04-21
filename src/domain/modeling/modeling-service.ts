@@ -1269,6 +1269,12 @@ function normalizeDiagnostics(value: unknown): ModelingDiagnostic[] {
       code: entry.code,
       severity: entry.severity,
       message: entry.message,
+      featureId: entry.featureId == null ? null : assertFeatureId(entry.featureId),
+      fieldId: entry.fieldId == null ? null : String(entry.fieldId),
+      fieldPath: Array.isArray(entry.fieldPath)
+        ? entry.fieldPath.map((segment) => typeof segment === 'number' ? segment : String(segment))
+        : undefined,
+      repairGuidance: entry.repairGuidance == null ? null : String(entry.repairGuidance),
       target: entry.target == null ? null : assertDurableRef(entry.target),
       detail: entry.detail == null ? null : normalizeDiagnosticDetail(entry.detail),
     }

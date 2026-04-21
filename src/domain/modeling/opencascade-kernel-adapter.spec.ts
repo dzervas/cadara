@@ -32,6 +32,7 @@ import type {
   EdgeId,
   DocumentId,
   FaceId,
+  FeatureId,
   ProjectedGeometryId,
   ReferenceId,
   RegionId,
@@ -2237,12 +2238,6 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(after.bodies.some((body) => body.bodyId === disjointToolBody.bodyId), 'Combine create should preserve unrelated bodies.')
     assert(afterTargetSignature !== beforeTargetSignature, 'Combine create should change the surviving target body geometry.')
 
-    const staleTool = await expectModelingError(service.createFeature({
-      baseRevisionId: created.revisionId,
-      definition: createCombineDefinition([targetBody.bodyId], [toolBody.bodyId], 'add'),
-    }))
-    assert(staleTool.code === 'modeling/diagnostic', 'Combine with a consumed tool body should reject stale references.')
-
     const emptyIntersection = await expectModelingError(service.createFeature({
       baseRevisionId: created.revisionId,
       definition: createCombineDefinition([targetBody.bodyId], [disjointToolBody.bodyId], 'intersect'),
@@ -2251,6 +2246,19 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
 
     const afterRejected = await service.getCurrentDocumentSnapshot()
     assert(afterRejected.revisionId === after.revisionId, 'Rejected combine requests must not mutate committed document state.')
+
+    const staleTool = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: afterRejected.revisionId,
+      definition: createCombineDefinition([targetBody.bodyId], [toolBody.bodyId], 'add'),
+    }))
+    assert(
+      staleTool.revisionState.kind === 'accepted' && staleTool.rebuildResult.kind === 'failed',
+      'Combine with a consumed tool body should keep repairable authored history.',
+    )
+    assert(
+      staleTool.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'invalidReference'),
+      'Combine with a consumed tool body should surface repairable stale-reference diagnostics.',
+    )
 
     const restoredService = createModelingService(createAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -2814,7 +2822,8 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       },
     })
 
-    assert(consumer.revisionState.kind === 'rejected', 'Features referencing deleted body targets must reject.')
+    assert(consumer.revisionState.kind === 'accepted', 'Features referencing deleted body targets should keep repairable authored history.')
+    assert(consumer.rebuildResult.kind === 'failed', 'Repairable downstream invalid body refs should report a failed partial rebuild.')
     assert(
       consumer.diagnostics.some((diagnostic) => diagnostic.detail?.kind === 'invalidReference'),
       'Downstream invalid body refs must surface structured invalidReference diagnostics.',
@@ -3818,6 +3827,485 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testRepairableFeatureUpdateClearsFeatureDiagnostics() {
+    const adapter = createAdapter()
+    const committedSketch = await commitSeedSketch(adapter)
+    assert(committedSketch.revisionState.kind === 'accepted', 'Seed sketch should commit before repair setup.')
+
+    const sketchSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(sketchSnapshot.snapshot)
+    const broken = await adapter.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: committedSketch.revisionId,
+      featureLabel: 'Repairable Profile',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [{
+            kind: 'region',
+            sketchId: 'sketch_deleted' as SketchId,
+            regionId: 'region_deleted' as RegionId,
+          }],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+          operation: 'newBody',
+          booleanScope: { kind: 'standalone' },
+        },
+      },
+    })
+    assert(
+      broken.revisionState.kind === 'accepted' && broken.rebuildResult.kind === 'failed',
+      'Repairable feature setup should commit with failed rebuild diagnostics.',
+    )
+    assert(
+      broken.diagnostics.some((diagnostic) => diagnostic.featureId === broken.featureId),
+      'Repairable feature setup should expose a feature-scoped diagnostic.',
+    )
+
+    const repaired = await adapter.updateFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: broken.revisionId,
+      featureId: broken.featureId,
+      featureLabel: 'Repairable Profile',
+      definition: createExtrudeDefinition(sketch, 4),
+    })
+    const repairedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+
+    assert(repaired.revisionState.kind === 'accepted', 'Repair update should be accepted.')
+    assert(repaired.rebuildResult.kind === 'rebuilt', 'Repair update should produce a successful rebuild.')
+    assert(
+      !repaired.diagnostics.some((diagnostic) => diagnostic.featureId === broken.featureId)
+        && !repairedSnapshot.snapshot.diagnostics.some((diagnostic) => diagnostic.featureId === broken.featureId),
+      'Repair update should clear stale feature-scoped diagnostics from the result and snapshot.',
+    )
+  }
+
+  async function testFailedBooleanBlocksLaterConsumersOfSameBody() {
+    const adapter = createAdapter()
+    const committedSketch = await commitSeedSketch(adapter)
+    assert(committedSketch.revisionState.kind === 'accepted', 'Seed sketch should commit before dependency setup.')
+
+    const sketchSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(sketchSnapshot.snapshot)
+    const base = await adapter.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: committedSketch.revisionId,
+      featureLabel: 'Base Body',
+      definition: createExtrudeDefinition(sketch, 5),
+    })
+    const baseBodyTarget = base.changedTargets.find((target) => target.kind === 'body')
+    assert(baseBodyTarget?.kind === 'body', 'Dependency setup should create a base body target.')
+
+    const brokenCut = await adapter.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: base.revisionId,
+      featureLabel: 'Broken Cut',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [{
+            kind: 'region',
+            sketchId: 'sketch_deleted' as SketchId,
+            regionId: 'region_deleted' as RegionId,
+          }],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 2 },
+          operation: 'cut',
+          booleanScope: { kind: 'targetBody', bodyId: baseBodyTarget.bodyId },
+        },
+      },
+    })
+    assert(
+      brokenCut.revisionState.kind === 'accepted' && brokenCut.rebuildResult.kind === 'failed',
+      'Broken boolean setup should remain repairable authored history.',
+    )
+
+    const blockedJoin = await adapter.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: brokenCut.revisionId,
+      featureLabel: 'Blocked Join',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [sketch.sketch.regions[0]!.target],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 2 },
+          operation: 'join',
+          booleanScope: { kind: 'targetBody', bodyId: baseBodyTarget.bodyId },
+        },
+      },
+    })
+
+    assert(
+      blockedJoin.revisionState.kind === 'accepted' && blockedJoin.rebuildResult.kind === 'failed',
+      'Later consumers of a failed body-modifying feature should commit only as blocked authored history.',
+    )
+    assert(
+      blockedJoin.diagnostics.some((diagnostic) =>
+        diagnostic.featureId === blockedJoin.featureId && diagnostic.code === 'feature-dependency-blocked',
+      ),
+      'Later consumers of the same modified body should be marked dependency-blocked.',
+    )
+  }
+
+  async function testAuthoredRestoreSkipsBrokenProjectionFeaturesBeforeLaterSketches() {
+    const source = createAdapter()
+    const committedSketch = await commitSeedSketch(source)
+    assert(committedSketch.revisionState.kind === 'accepted', 'Seed sketch should commit before projection restore setup.')
+
+    const secondSketch = await commitOffsetSketch(source, committedSketch.revisionId, {
+      sketchLabel: 'Sketch After Broken Feature',
+      offsetX: 8,
+      offsetY: 0,
+    })
+    assert(secondSketch.revisionState.kind === 'accepted', 'Second sketch should commit before projection restore setup.')
+
+    const sourceSnapshot = (await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const authoredDocument = createAuthoredModelDocumentFromSnapshot(sourceSnapshot)
+    const brokenFeatureId = 'feature_restore-broken-profile' as FeatureId
+    const repositoryDocument: AuthoredModelDocument = {
+      ...authoredDocument,
+      features: [{
+        featureId: brokenFeatureId,
+        label: 'Restore Broken Profile',
+        definition: {
+          kind: 'extrude',
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [{
+              kind: 'region',
+              sketchId: 'sketch_deleted' as SketchId,
+              regionId: 'region_deleted' as RegionId,
+            }],
+            startExtent: { kind: 'profilePlane' },
+            endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+            operation: 'newBody',
+            booleanScope: { kind: 'standalone' },
+          },
+        },
+      }],
+      featureOrder: [brokenFeatureId],
+      historyOrder: [
+        { kind: 'sketch', sketchId: committedSketch.sketchId },
+        { kind: 'feature', featureId: brokenFeatureId },
+        { kind: 'sketch', sketchId: secondSketch.sketchId },
+      ],
+      cursor: { kind: 'sketch', sketchId: secondSketch.sketchId },
+    }
+    const target = createAdapter()
+    await target.restoreAuthoredModelDocument(repositoryDocument)
+    const restored = (await target.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+
+    assert(
+      restored.sketches.some((sketch) => sketch.sketchId === secondSketch.sketchId),
+      'Authored restore should keep later sketches after a repairable broken feature.',
+    )
+    assert(
+      restored.diagnostics.some((diagnostic) => diagnostic.featureId === brokenFeatureId),
+      'Authored restore should still report the broken feature after skipping it for projection context.',
+    )
+  }
+
+  async function testAuthoredRestoreReportsPartialFeatureErrorsWithoutDroppingHistory() {
+    const source = createAdapter()
+    const committedSketch = await commitSeedSketch(source)
+    assert(committedSketch.revisionState.kind === 'accepted', 'Seed sketch should commit before partial restore setup.')
+
+    const sketchSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(sketchSnapshot.snapshot)
+    const safeFeature = await source.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: committedSketch.revisionId,
+      definition: createExtrudeDefinition(sketch, 5),
+      featureLabel: 'Safe Extrude',
+    })
+    assert(safeFeature.revisionState.kind === 'accepted', 'Safe restore setup feature should commit.')
+
+    const safeSnapshot = await source.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const authoredDocument = createAuthoredModelDocumentFromSnapshot(safeSnapshot.snapshot)
+    const profile = sketch.sketch.regions[0]?.target
+    assert(profile, 'Partial restore setup needs a valid authored profile.')
+
+    const brokenProfileFeatureId = 'feature_broken-profile' as FeatureId
+    const brokenBooleanFeatureId = 'feature_broken-boolean' as FeatureId
+    const dependentFeatureId = 'feature_blocked-dependent' as FeatureId
+    const missingProfile = {
+      kind: 'region' as const,
+      sketchId: 'sketch_deleted' as SketchId,
+      regionId: 'region_deleted' as RegionId,
+    }
+    const brokenProfileDefinition: FeatureDefinition = {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [missingProfile],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+        operation: 'newBody',
+        booleanScope: { kind: 'standalone' },
+      },
+    }
+    const brokenBooleanDefinition: FeatureDefinition = {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [profile],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 2 },
+        operation: 'join',
+        booleanScope: { kind: 'targetBody', bodyId: 'body_deleted_boolean' as BodyId },
+      },
+    }
+    const blockedDependentDefinition: FeatureDefinition = {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [profile],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 2 },
+        operation: 'join',
+        booleanScope: { kind: 'targetBody', bodyId: `body_${brokenProfileFeatureId}` as BodyId },
+      },
+    }
+    const repositoryDocument: AuthoredModelDocument = {
+      ...authoredDocument,
+      features: [
+        ...authoredDocument.features,
+        {
+          featureId: brokenProfileFeatureId,
+          label: 'Broken Profile',
+          definition: brokenProfileDefinition,
+        },
+        {
+          featureId: brokenBooleanFeatureId,
+          label: 'Broken Boolean',
+          definition: brokenBooleanDefinition,
+        },
+        {
+          featureId: dependentFeatureId,
+          label: 'Blocked Join',
+          definition: blockedDependentDefinition,
+        },
+      ],
+      featureOrder: [
+        ...authoredDocument.featureOrder,
+        brokenProfileFeatureId,
+        brokenBooleanFeatureId,
+        dependentFeatureId,
+      ],
+      historyOrder: [
+        ...(authoredDocument.historyOrder ?? []),
+        { kind: 'feature', featureId: brokenProfileFeatureId },
+        { kind: 'feature', featureId: brokenBooleanFeatureId },
+        { kind: 'feature', featureId: dependentFeatureId },
+      ],
+      cursor: { kind: 'feature', featureId: dependentFeatureId },
+    }
+    const target = createAdapter()
+    await target.restoreAuthoredModelDocument(repositoryDocument)
+    const restored = (await target.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const diagnosticsByFeatureId = new Map(
+      restored.diagnostics
+        .filter((diagnostic) => diagnostic.featureId)
+        .map((diagnostic) => [diagnostic.featureId, diagnostic]),
+    )
+    const brokenProfileDiagnostic = diagnosticsByFeatureId.get(brokenProfileFeatureId)
+    const brokenBooleanDiagnostic = diagnosticsByFeatureId.get(brokenBooleanFeatureId)
+    const blockedDiagnostic = diagnosticsByFeatureId.get(dependentFeatureId)
+
+    assert(
+      restored.features.map((feature) => feature.featureId).join('|')
+        === repositoryDocument.featureOrder.join('|'),
+      'Partial restore should retain the complete authored feature history.',
+    )
+    assert(
+      restored.render.records.some((record) => record.ownerFeatureId === safeFeature.featureId),
+      'Partial restore should render safely evaluable earlier features.',
+    )
+    assert(
+      restored.render.records.every((record) =>
+        record.ownerFeatureId !== brokenProfileFeatureId
+        && record.ownerFeatureId !== brokenBooleanFeatureId
+        && record.ownerFeatureId !== dependentFeatureId,
+      ),
+      'Partial restore should not fabricate render records for failed or blocked features.',
+    )
+    assert(
+      brokenProfileDiagnostic?.fieldId === 'profiles'
+        && brokenBooleanDiagnostic?.fieldId === 'booleanScope',
+      'Independent broken features should report separate authored fields in one pass.',
+    )
+    assert(
+      blockedDiagnostic?.code === 'feature-dependency-blocked',
+      'Features consuming a failed feature result should be reported as dependency-blocked.',
+    )
+    assert(
+      brokenProfileDiagnostic?.detail?.kind === 'invalidReference'
+        && brokenProfileDiagnostic.detail.reference.target.kind === 'region'
+        && brokenProfileDiagnostic.detail.reference.target.regionId === 'region_deleted',
+      'Raw invalid durable ids should remain structured debug context after restore.',
+    )
+    assert(
+      !restored.diagnostics.some((diagnostic) =>
+        diagnostic.message.includes('region_deleted')
+        || diagnostic.repairGuidance?.includes('region_deleted')
+        || diagnostic.message.includes(brokenProfileFeatureId)
+        || diagnostic.repairGuidance?.includes(brokenProfileFeatureId),
+      ),
+      'Partial restore user-facing diagnostics should avoid raw durable ids.',
+    )
+  }
+
+  async function testOperationHistoryReplayKeepsPartialFeatureFailuresRepairable() {
+    const store = createMemoryOperationHistoryStore()
+    const service = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: store,
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+    const sketch = await unwrapModelingResult(service.commitSketch(
+      createServiceSketchCommitInput(createSketchCommitRequest(initial.revisionId)),
+    ))
+    assert(sketch.revisionState.kind === 'accepted', 'Replay setup sketch should commit.')
+
+    const sketchSnapshot = await service.getCurrentDocumentSnapshot()
+    const primarySketch = requirePrimarySketch(sketchSnapshot)
+    const safeFeature = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: sketch.revisionId,
+      definition: createExtrudeDefinition(primarySketch, 5),
+      featureLabel: 'Replay Safe Extrude',
+    }))
+    assert(safeFeature.revisionState.kind === 'accepted', 'Replay setup safe feature should commit.')
+
+    const profile = primarySketch.sketch.regions[0]?.target
+    assert(profile, 'Replay setup needs a valid profile.')
+
+    const brokenProfileFeature = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: safeFeature.revisionId,
+      featureLabel: 'Replay Broken Profile',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [{
+            kind: 'region',
+            sketchId: 'sketch_deleted' as SketchId,
+            regionId: 'region_deleted' as RegionId,
+          }],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+          operation: 'newBody',
+          booleanScope: { kind: 'standalone' },
+        },
+      },
+    }))
+    assert(
+      brokenProfileFeature.revisionState.kind === 'accepted'
+        && brokenProfileFeature.rebuildResult.kind === 'failed',
+      'Repairable replay setup feature errors should still commit authored history.',
+    )
+
+    const brokenBooleanFeature = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: brokenProfileFeature.revisionId,
+      featureLabel: 'Replay Broken Boolean',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [profile],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 2 },
+          operation: 'join',
+          booleanScope: { kind: 'targetBody', bodyId: 'body_deleted_boolean' as BodyId },
+        },
+      },
+    }))
+    assert(brokenBooleanFeature.revisionState.kind === 'accepted', 'Second independent repairable feature error should commit.')
+
+    const blockedFeature = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: brokenBooleanFeature.revisionId,
+      featureLabel: 'Replay Blocked Join',
+      definition: {
+        kind: 'extrude',
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [profile],
+          startExtent: { kind: 'profilePlane' },
+          endExtent: { kind: 'blind', direction: 'positive', distance: 2 },
+          operation: 'join',
+          booleanScope: { kind: 'targetBody', bodyId: `body_${brokenProfileFeature.featureId}` as BodyId },
+        },
+      },
+    }))
+    assert(blockedFeature.revisionState.kind === 'accepted', 'Dependent blocked feature should commit authored history.')
+
+    const finalHistory = store.savedPayloads.at(-1)
+    assert(finalHistory, 'Partial feature commits should persist operation history.')
+
+    const replayedService = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(finalHistory),
+    })
+    const restoreState = await replayedService.getHistoryRestoreState()
+    const restoredSnapshot = await replayedService.getCurrentDocumentSnapshot()
+    const diagnosticsByFeatureId = new Map(
+      restoredSnapshot.diagnostics
+        .filter((diagnostic) => diagnostic.featureId)
+        .map((diagnostic) => [diagnostic.featureId, diagnostic]),
+    )
+
+    assert(restoreState.kind === 'restored', 'Operation history with repairable feature errors should replay.')
+    assert(restoreState.entriesReplayed === finalHistory.entries.length, 'Replay should preserve every authored operation entry.')
+    assert(
+      restoredSnapshot.features.map((feature) => feature.label).join('|')
+        === 'Replay Safe Extrude|Replay Broken Profile|Replay Broken Boolean|Replay Blocked Join',
+      'Replay should preserve full authored feature history including failed and blocked features.',
+    )
+    assert(
+      restoredSnapshot.render.records.some((record) => record.ownerFeatureId === safeFeature.featureId),
+      'Replay should keep render records for safely rebuilt features.',
+    )
+    assert(
+      diagnosticsByFeatureId.get(brokenProfileFeature.featureId)?.fieldId === 'profiles'
+        && diagnosticsByFeatureId.get(brokenBooleanFeature.featureId)?.fieldId === 'booleanScope'
+        && diagnosticsByFeatureId.get(blockedFeature.featureId)?.code === 'feature-dependency-blocked',
+      'Replay should report multiple independent feature errors plus dependent blocked features.',
+    )
+  }
+
   async function testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures() {
     const createReferenceSolver = () =>
       new SketchConstraintSolverAdapter({
@@ -4018,9 +4506,14 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRestoredYzMultiProfileExtrudePreservesBodiesAndRegions()
   await testRestoredOverlappingRectangleCircleSketchKeepsRegionsRenderable()
   await testDocumentVariableExpressionsValidateBeforeOccMutation()
-        await testAuthoredRestoreAppliesOnlyFeaturesThroughCursor()
-        await testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures()
-        await testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore()
+  await testAuthoredRestoreAppliesOnlyFeaturesThroughCursor()
+  await testRepairableFeatureUpdateClearsFeatureDiagnostics()
+  await testFailedBooleanBlocksLaterConsumersOfSameBody()
+  await testAuthoredRestoreSkipsBrokenProjectionFeaturesBeforeLaterSketches()
+  await testAuthoredRestoreReportsPartialFeatureErrorsWithoutDroppingHistory()
+  await testOperationHistoryReplayKeepsPartialFeatureFailuresRepairable()
+  await testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures()
+  await testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
   await testOccGeometryExportsRejectInvalidTargets()
 

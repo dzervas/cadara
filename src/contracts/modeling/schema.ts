@@ -564,6 +564,14 @@ export interface ModelingDiagnostic {
   severity: 'info' | 'warning' | 'error'
   /** Human-readable summary for logs and UI presentation. */
   message: string
+  /** Owning authored feature for repairable feature-scoped failures. */
+  featureId?: FeatureId | null
+  /** Stable authored field id the user can repair, when available. */
+  fieldId?: string | null
+  /** Authored definition path the user can repair, when a field id is not enough. */
+  fieldPath?: readonly (string | number)[]
+  /** User-facing repair guidance for recoverable feature failures. */
+  repairGuidance?: string | null
   /** Exact durable target implicated by this diagnostic, when known. */
   target: PrimitiveRef | null
   /** Machine-readable detail payload for structured handling, when available. */

@@ -5,6 +5,7 @@ import {
 } from '@/contracts/modeling/authored-document'
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import type { BodyId } from '@/contracts/shared/ids'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async () => {
@@ -85,6 +86,33 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   assert(
     withDerivedRelationships.document.sketches[0]?.definition.derivedRelationships?.[0]?.kind === 'linearPattern',
     'Parsed authored documents should preserve derived sketch relationship records.',
+  )
+
+  const extrudeFeature = authoredDocument.features.find((feature) => feature.definition.kind === 'extrude')
+  assert(extrudeFeature?.definition.kind === 'extrude', 'Seed document should include an extrude for repairable reference validation.')
+  const repairableBrokenDocument = parseAuthoredModelDocument({
+    ...authoredDocument,
+    features: authoredDocument.features.map((feature) =>
+      feature.featureId === extrudeFeature.featureId && feature.definition.kind === 'extrude'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                operation: 'join',
+                booleanScope: { kind: 'targetBody', bodyId: 'body_missing_for_repair' as BodyId },
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(repairableBrokenDocument.ok, 'Authored validation should accept structurally valid features with repairable broken references.')
+  assert(
+    repairableBrokenDocument.ok
+      && repairableBrokenDocument.document.features.some((feature) => feature.featureId === extrudeFeature.featureId),
+    'Repairable broken features should remain in authored history for editing.',
   )
 
   const withoutStylesField = parseAuthoredModelDocument({
