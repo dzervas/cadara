@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import type { ViewportCamera } from '@/domain/workspace/viewport-projection'
 
 export type ViewNavigationFacePresetId =
   | 'front'
@@ -28,13 +29,13 @@ interface ViewNavigationPreset {
 }
 
 interface SnapCameraToVectorOptions {
-  camera: THREE.PerspectiveCamera
+  camera: ViewportCamera
   controls: ViewportCameraControls
   direction: THREE.Vector3
 }
 
 interface SnapCameraToPresetOptions {
-  camera: THREE.PerspectiveCamera
+  camera: ViewportCamera
   controls: ViewportCameraControls
   presetId: ViewNavigationPresetId
 }

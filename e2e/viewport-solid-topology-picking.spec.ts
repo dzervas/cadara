@@ -6,9 +6,9 @@ import { createBaseExtrudeOperationHistory } from './helpers/modeling-fixtures'
 test.setTimeout(90_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
-const FACE_POINT = { x: 254, y: 65 }
-const EDGE_POINT = { x: 190, y: 65 }
-const VERTEX_POINT = { x: 50, y: 95 }
+const FACE_POINT = { x: 230, y: 130 }
+const EDGE_POINT = { x: 227, y: 119 }
+const VERTEX_POINT = { x: 145, y: 190 }
 const BLANK_POINT = { x: 1000, y: 200 }
 
 const FACE_TARGET = 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'

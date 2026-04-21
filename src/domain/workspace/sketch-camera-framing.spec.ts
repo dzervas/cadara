@@ -38,6 +38,12 @@ test('src/domain/workspace/sketch-camera-framing.spec.ts', async () => {
     return new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 1000)
   }
 
+  function createOrthographicCamera() {
+    const camera = new THREE.OrthographicCamera(-16, 16, 9, -9, 0.1, 1000)
+    camera.position.set(0, 0, 24)
+    return camera
+  }
+
   function approx(actual: number, expected: number, epsilon = 1e-6) {
     assert(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`)
   }
@@ -115,7 +121,31 @@ test('src/domain/workspace/sketch-camera-framing.spec.ts', async () => {
     approx(frame.position.z, frame.target.z)
   }
 
+  function testOrthographicSketchFitsBoundsWithZoom() {
+    const camera = createOrthographicCamera()
+    const renderables = [
+      createPolylineRenderable([
+        [-20, -5, 0],
+        [20, -5, 0],
+        [20, 5, 0],
+        [-20, 5, 0],
+      ]),
+    ]
+
+    const frame = computeSketchCameraFrame({
+      camera,
+      plane: xyPlane,
+      renderables,
+    })
+
+    approxVector(frame.target, new THREE.Vector3(0, 0, 0))
+    assert(frame.orthographicZoom !== undefined, 'Orthographic sketch framing should return a zoom value.')
+    approx(frame.orthographicZoom, 16 / 23)
+    assert(frame.position.z > frame.target.z, 'Orthographic framing should keep a plane-normal camera position.')
+  }
+
   testExistingSketchFitsBoundsAndKeepsPlaneParallelView()
   testEmptySketchFallsBackToDefaultPlaneExtent()
   testNonXyPlaneUsesStoredAxesForOrientation()
+  testOrthographicSketchFitsBoundsWithZoom()
 })

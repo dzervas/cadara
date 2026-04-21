@@ -10,6 +10,7 @@ import {
   snapCameraToVector,
 } from '@/domain/workspace/view-navigation'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import { getViewportCameraProjectionMode } from '@/domain/workspace/viewport-projection'
 
 test('src/domain/workspace/view-navigation.spec.ts', async () => {
   function approx(actual: number, expected: number, epsilon = 1e-6) {
@@ -84,7 +85,7 @@ test('src/domain/workspace/view-navigation.spec.ts', async () => {
   }
 
   {
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
+    const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000)
     camera.position.set(18, -4, 20)
 
     let updateCalls = 0
@@ -104,6 +105,7 @@ test('src/domain/workspace/view-navigation.spec.ts', async () => {
       presetId: 'frontRightTop',
     })
 
+    assert.equal(getViewportCameraProjectionMode(camera), 'orthographic')
     approxVector(camera.position, controls.target.clone().add(expectedDirection))
     assert.equal(updateCalls, 1, 'Corner presets should snap through the same shared helper.')
   }

@@ -1,4 +1,5 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { ActionIcon, Menu, Tooltip } from '@mantine/core'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
@@ -59,6 +60,18 @@ import {
   shouldViewportStartSketchGeometryDrag,
 } from '@/domain/editor/workbench-interactions'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import {
+  DEFAULT_VIEWPORT_PROJECTION_MODE,
+  applyViewportCameraFrame,
+  applyViewportCameraFrameToCamera,
+  captureViewportCameraFrame,
+  createViewportCamera,
+  getDefaultViewportCameraFrame,
+  updateViewportCameraAspect,
+  type ViewportCamera,
+  type ViewportCameraFrame,
+  type ViewportProjectionMode,
+} from '@/domain/workspace/viewport-projection'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import {
   type ViewNavigationCornerPresetId,
@@ -90,6 +103,10 @@ const VIEW_CUBE_BODY_HALF_SIZE = 0.58
 const VIEW_CUBE_SURFACE_OFFSET = 0.002
 const VIEW_CUBE_LABEL_OFFSET = 0.03
 const VIEW_CUBE_CORNER_CUT_SIZE = 0.30
+const VIEWPORT_PROJECTION_OPTIONS: Array<{ mode: ViewportProjectionMode, label: string }> = [
+  { mode: 'orthographic', label: 'Orthographic' },
+  { mode: 'perspective', label: 'Perspective' },
+]
 
 interface ThreeCadViewportProps {
   hoverTarget: PrimitiveRef | null
@@ -109,12 +126,6 @@ interface ThreeCadViewportProps {
   onSketchToolPatch: (patch: Record<string, unknown>) => void
   selection: PrimitiveRef[]
   sketchToolPresentation: SketchToolPresentationSchema | null
-}
-
-interface ViewportCameraFrame {
-  position: THREE.Vector3
-  target: THREE.Vector3
-  up: THREE.Vector3
 }
 
 interface ViewCubeFaceVisual {
@@ -164,11 +175,13 @@ export function ThreeCadViewport({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const viewCubeRef = useRef<HTMLDivElement | null>(null)
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null)
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const cameraRef = useRef<ViewportCamera | null>(null)
   const controlsRef = useRef<ViewportCameraControls | null>(null)
   const controlsInitializedRef = useRef(false)
+  const pendingProjectionFrameRef = useRef<ViewportCameraFrame | null>(null)
   const [canvasReadyVersion, setCanvasReadyVersion] = useState(0)
   const [controlsReadyVersion, setControlsReadyVersion] = useState(0)
+  const [projectionMode, setProjectionMode] = useState<ViewportProjectionMode>(DEFAULT_VIEWPORT_PROJECTION_MODE)
   const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const [sketchAnnotationProjections, setSketchAnnotationProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const raycasterRef = useRef(new THREE.Raycaster())
@@ -217,7 +230,15 @@ export function ThreeCadViewport({
       setControlsReadyVersion((current) => current + 1)
     }
 
-    if (!nextControls || !cameraRef.current) {
+    const camera = cameraRef.current
+
+    if (!nextControls || !camera) {
+      return
+    }
+
+    if (pendingProjectionFrameRef.current) {
+      applyViewportCameraFrame(camera, nextControls, pendingProjectionFrameRef.current)
+      pendingProjectionFrameRef.current = null
       return
     }
 
@@ -225,13 +246,20 @@ export function ThreeCadViewport({
       return
     }
 
-    cameraRef.current.position.set(14, -16, 28)
-    cameraRef.current.up.set(0, 0, 1)
-    nextControls.target.set(0, 0, 4)
-    cameraRef.current.lookAt(nextControls.target)
-    nextControls.update()
+    applyViewportCameraFrame(camera, nextControls, getDefaultViewportCameraFrame())
     controlsInitializedRef.current = true
   }, [])
+  const handleProjectionModeChange = useCallback((nextMode: ViewportProjectionMode) => {
+    if (nextMode === projectionMode) {
+      return
+    }
+
+    if (cameraRef.current && controlsRef.current) {
+      pendingProjectionFrameRef.current = captureViewportCameraFrame(cameraRef.current, controlsRef.current)
+    }
+
+    setProjectionMode(nextMode)
+  }, [projectionMode])
   const scheduleSketchGeometryDragMove = useCallback((point: readonly [number, number]) => {
     scheduleCoalescedSketchGeometryDragMove({
       point,
@@ -488,6 +516,9 @@ export function ThreeCadViewport({
     resizeObserver.observe(cubeElement)
     resizeRenderer()
     animationFrameId = window.requestAnimationFrame(attachControls)
+    if (controlsReadyVersion > 0) {
+      requestRender()
+    }
 
     return () => {
       window.cancelAnimationFrame(animationFrameId)
@@ -500,7 +531,7 @@ export function ThreeCadViewport({
       renderer.dispose()
       cubeElement.removeChild(renderer.domElement)
     }
-  }, [])
+  }, [controlsReadyVersion])
 
   useLayoutEffect(() => {
     bindingsRef.current = collectBindings(pickRootRef.current)
@@ -974,20 +1005,27 @@ export function ThreeCadViewport({
         className="h-full w-full"
         frameloop="always"
         gl={{ antialias: true, alpha: true }}
-        camera={{ fov: 45, near: 0.1, far: 1000, position: [14, -16, 28] }}
+        orthographic
+        camera={{ near: 0.1, far: 1000, position: [14, -16, 28] }}
         onCreated={({ camera, gl, raycaster }) => {
-          const perspectiveCamera = camera instanceof THREE.PerspectiveCamera
+          const viewportCamera = camera instanceof THREE.OrthographicCamera || camera instanceof THREE.PerspectiveCamera
             ? camera
-            : new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
-          perspectiveCamera.up.set(0, 0, 1)
-          perspectiveCamera.lookAt(0, 0, 4)
-          cameraRef.current = perspectiveCamera
+            : createViewportCamera(DEFAULT_VIEWPORT_PROJECTION_MODE, 1)
+          applyViewportCameraFrameToCamera(viewportCamera, getDefaultViewportCameraFrame())
+          cameraRef.current = viewportCamera
           canvasElementRef.current = gl.domElement
           setCanvasReadyVersion((current) => current + 1)
           gl.setClearColor(0x000000, 0)
           raycaster.params.Line.threshold = 0.75
         }}
       >
+        <ViewportProjectionCameraController
+          projectionMode={projectionMode}
+          cameraRef={cameraRef}
+          controlsRef={controlsRef}
+          pendingFrameRef={pendingProjectionFrameRef}
+          controlsReadyVersion={controlsReadyVersion}
+        />
         <ambientLight color={0xd7dfe9} intensity={0.56} />
         <hemisphereLight args={[0xe8edf5, 0x253447, 0.62]} position={[0, 0, 1]} />
         <directionalLight args={[0xf5eee2, 1.45]} position={[14, -16, 28]} />
@@ -1032,14 +1070,22 @@ export function ThreeCadViewport({
         />
       </Canvas>
       <div
-        ref={viewCubeRef}
-        data-testid="view-cube"
-        className="pointer-events-auto absolute right-4 top-4 z-20"
+        className="pointer-events-none absolute right-4 top-4 z-20 flex flex-col items-end gap-1"
         style={{
-          aspectRatio: '1 / 1',
           width: `min(${VIEW_CUBE_SIZE_PX}px, calc(100% - 32px))`,
         }}
-      />
+      >
+        <div
+          ref={viewCubeRef}
+          data-testid="view-cube"
+          className="pointer-events-auto w-full"
+          style={{ aspectRatio: '1 / 1' }}
+        />
+        <ViewportProjectionSelector
+          projectionMode={projectionMode}
+          onProjectionModeChange={handleProjectionModeChange}
+        />
+      </div>
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}
         projections={sketchFeedbackProjections}
@@ -1067,6 +1113,122 @@ export function ThreeCadViewport({
       />
     </div>
   )
+}
+
+function ViewportProjectionCameraController({
+  projectionMode,
+  cameraRef,
+  controlsRef,
+  pendingFrameRef,
+  controlsReadyVersion,
+}: {
+  projectionMode: ViewportProjectionMode
+  cameraRef: RefObject<ViewportCamera | null>
+  controlsRef: RefObject<ViewportCameraControls | null>
+  pendingFrameRef: RefObject<ViewportCameraFrame | null>
+  controlsReadyVersion: number
+}) {
+  const set = useThree((state) => state.set)
+  const size = useThree((state) => state.size)
+  const cameras = useMemo(() => ({
+    orthographic: createViewportCamera('orthographic', 1),
+    perspective: createViewportCamera('perspective', 1),
+  }), [])
+  const aspect = size.height > 0 ? size.width / size.height : 1
+
+  useLayoutEffect(() => {
+    updateViewportCameraAspect(cameras.orthographic, aspect)
+    updateViewportCameraAspect(cameras.perspective, aspect)
+  }, [aspect, cameras])
+
+  useLayoutEffect(() => {
+    const nextCamera = cameras[projectionMode]
+    const frame = pendingFrameRef.current
+      ?? (cameraRef.current && controlsRef.current
+        ? captureViewportCameraFrame(cameraRef.current, controlsRef.current)
+        : getDefaultViewportCameraFrame())
+
+    updateViewportCameraAspect(nextCamera, aspect)
+    applyViewportCameraFrameToCamera(nextCamera, frame)
+    cameraRef.current = nextCamera
+    set({ camera: nextCamera })
+  }, [aspect, cameraRef, cameras, controlsRef, pendingFrameRef, projectionMode, set])
+
+  useLayoutEffect(() => {
+    const camera = cameraRef.current
+    const controls = controlsRef.current
+    const frame = pendingFrameRef.current
+
+    if (!camera || !controls || !frame) {
+      return
+    }
+
+    applyViewportCameraFrame(camera, controls, frame)
+    pendingFrameRef.current = null
+  }, [cameraRef, controlsReadyVersion, controlsRef, pendingFrameRef])
+
+  return null
+}
+
+function ViewportProjectionSelector({
+  projectionMode,
+  onProjectionModeChange,
+}: {
+  projectionMode: ViewportProjectionMode
+  onProjectionModeChange: (mode: ViewportProjectionMode) => void
+}) {
+  const projectionLabel = getProjectionModeLabel(projectionMode)
+
+  return (
+    <div
+      className="pointer-events-auto"
+      data-testid="viewport-projection-selector"
+      data-projection-mode={projectionMode}
+    >
+      <Menu position="bottom-end" width={160} transitionProps={{ duration: 0 }}>
+        <Menu.Target>
+          <Tooltip label={`Viewport projection: ${projectionLabel}`} position="left" withArrow>
+            <ActionIcon
+              type="button"
+              aria-label={`Viewport projection: ${projectionLabel}`}
+              variant="filled"
+              size={28}
+              style={{
+                backgroundColor: 'var(--workbench-shell-overlay-strong)',
+                border: '1px solid var(--workbench-shell-border)',
+                color: 'var(--workbench-shell-text)',
+              }}
+            >
+              <img src="/icons/view-cube.svg" alt="" aria-hidden="true" className="h-4 w-4" />
+            </ActionIcon>
+          </Tooltip>
+        </Menu.Target>
+        <Menu.Dropdown
+          aria-label="Viewport projection menu"
+          style={{
+            backgroundColor: 'var(--workbench-shell-overlay-strong)',
+            borderColor: 'var(--workbench-shell-border)',
+            boxShadow: 'var(--workbench-panel-shadow)',
+          }}
+        >
+          {VIEWPORT_PROJECTION_OPTIONS.map((option) => (
+            <Menu.Item
+              key={option.mode}
+              onClick={() => onProjectionModeChange(option.mode)}
+              aria-current={projectionMode === option.mode ? 'true' : undefined}
+              rightSection={projectionMode === option.mode ? 'Active' : undefined}
+            >
+              {option.label}
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu>
+    </div>
+  )
+}
+
+function getProjectionModeLabel(mode: ViewportProjectionMode) {
+  return VIEWPORT_PROJECTION_OPTIONS.find((option) => option.mode === mode)?.label ?? 'Orthographic'
 }
 
 function SketchProjectionFrameWatcher({
@@ -1466,29 +1628,6 @@ function resolveViewCubePresetId(object: THREE.Object3D | undefined) {
   const presetId = object?.userData.presetId
 
   return typeof presetId === 'string' ? presetId as ViewNavigationPresetId : null
-}
-
-function captureViewportCameraFrame(
-  camera: THREE.PerspectiveCamera,
-  controls: ViewportCameraControls,
-): ViewportCameraFrame {
-  return {
-    position: camera.position.clone(),
-    target: controls.target.clone(),
-    up: camera.up.clone(),
-  }
-}
-
-function applyViewportCameraFrame(
-  camera: THREE.PerspectiveCamera,
-  controls: ViewportCameraControls,
-  frame: ViewportCameraFrame,
-) {
-  camera.up.copy(frame.up)
-  camera.position.copy(frame.position)
-  controls.target.copy(frame.target)
-  camera.lookAt(frame.target)
-  controls.update()
 }
 
 function WorkspaceSceneScaffold() {
@@ -1971,7 +2110,7 @@ function SketchDisplayMarkerNode({
 
 function snapView(
   presetId: ViewNavigationPresetId,
-  camera: THREE.PerspectiveCamera | null,
+  camera: ViewportCamera | null,
   controls: ViewportCameraControls | null,
 ) {
   if (!camera || !controls) {
@@ -1996,7 +2135,7 @@ function collectProjectedVertexCandidates({
 }: {
   clientX: number
   clientY: number
-  camera: THREE.PerspectiveCamera
+  camera: ViewportCamera
   viewportRect: DOMRectReadOnly
   renderables: ViewportRenderableRecord[]
   acceptsTarget: (target: PrimitiveRef) => boolean
@@ -2068,7 +2207,7 @@ function collectProjectedSketchDisplayPointCandidates({
 }: {
   clientX: number
   clientY: number
-  camera: THREE.PerspectiveCamera
+  camera: ViewportCamera
   viewportRect: DOMRectReadOnly
   sketchDisplayRenderables: SketchSessionDisplayRenderable[]
   acceptsTarget: (target: PrimitiveRef) => boolean

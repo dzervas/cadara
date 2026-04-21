@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import type { ViewportCamera } from '@/domain/workspace/viewport-projection'
 
 const DEFAULT_HALF_EXTENT = 10
 const MIN_HALF_EXTENT = 1
@@ -13,10 +14,11 @@ interface SketchCameraFrame {
   target: THREE.Vector3
   position: THREE.Vector3
   up: THREE.Vector3
+  orthographicZoom?: number
 }
 
 interface ComputeSketchCameraFrameInput {
-  camera: THREE.PerspectiveCamera
+  camera: ViewportCamera
   plane: SketchPlaneDefinition
   renderables: SketchSessionDisplayRenderable[]
 }
@@ -39,6 +41,10 @@ export function applySketchCameraFrame({
 
   camera.up.copy(frame.up)
   camera.position.copy(frame.position)
+  if (camera instanceof THREE.OrthographicCamera && frame.orthographicZoom) {
+    camera.zoom = frame.orthographicZoom
+    camera.updateProjectionMatrix()
+  }
   controls.target.copy(frame.target)
   camera.lookAt(frame.target)
   controls.update()
@@ -93,6 +99,23 @@ export function computeSketchCameraFrame({
     .clone()
     .addScaledVector(xAxis, centerX)
     .addScaledVector(yAxis, centerY)
+
+  if (camera instanceof THREE.OrthographicCamera) {
+    const halfFrustumWidth = Math.max((camera.right - camera.left) / 2, MIN_HALF_EXTENT)
+    const halfFrustumHeight = Math.max((camera.top - camera.bottom) / 2, MIN_HALF_EXTENT)
+    const orthographicZoom = Math.max(
+      Math.min(halfFrustumWidth / halfWidth, halfFrustumHeight / halfHeight),
+      0.01,
+    )
+    const distance = Math.max(camera.position.distanceTo(target), MIN_CAMERA_DISTANCE)
+
+    return {
+      target,
+      position: target.clone().addScaledVector(normal, distance),
+      up: yAxis,
+      orthographicZoom,
+    }
+  }
 
   const fovRadians = THREE.MathUtils.degToRad(camera.fov)
   const safeAspect = camera.aspect > 0 ? camera.aspect : 1
