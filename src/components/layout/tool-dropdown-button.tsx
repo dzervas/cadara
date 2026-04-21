@@ -26,7 +26,6 @@ export function ToolDropdownButton({
   const { triggerTool } = useToolActions()
   const [opened, setOpened] = useState(false)
   const commandId = getToolbarToolCommandId(tool.id)
-  const hasPrimaryVariant = (tool.dropdown.variantIds as readonly string[]).includes(tool.id)
   const controlBackground = disabled
     ? 'var(--workbench-shell-control-surface)'
     : active
@@ -40,15 +39,6 @@ export function ToolDropdownButton({
   const controlColor = disabled
     ? 'var(--workbench-shell-text-dim)'
     : 'var(--workbench-shell-text)'
-  const handlePrimaryClick = () => {
-    if (disabled) {
-      return
-    }
-
-    triggerTool(tool.id, {
-      source: 'toolbar',
-    })
-  }
 
   const dropdownItems = variantTools.map((variant) => {
     return (
@@ -96,59 +86,6 @@ export function ToolDropdownButton({
     </Menu.Dropdown>
   )
 
-  if (hasPrimaryVariant) {
-    return (
-      <div
-        className="flex h-10 items-stretch overflow-hidden rounded-md border"
-        style={{
-          backgroundColor: controlBackground,
-          borderColor: controlBorder,
-          opacity: disabled ? 0.46 : 1,
-        }}
-      >
-        <Tooltip
-          label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} commandId={commandId} />}
-        >
-          <UnstyledButton
-            type="button"
-            onClick={handlePrimaryClick}
-            aria-label={tool.name}
-            aria-pressed={active}
-            disabled={disabled}
-            data-tool-id={tool.id}
-            data-tool-source="toolbar"
-            data-tool-tooltip={tool.tooltip}
-            data-disabled={disabled || undefined}
-            className="flex items-center px-2.5"
-            style={{ color: controlColor }}
-          >
-            <ToolbarToolIcon icon={tool.icon} />
-          </UnstyledButton>
-        </Tooltip>
-
-        <Menu width={224} opened={opened} onChange={setOpened} transitionProps={{ duration: 0 }}>
-          <Menu.Target>
-            <UnstyledButton
-              type="button"
-              aria-label={`${tool.name} variants`}
-              disabled={disabled}
-              data-tool-dropdown-trigger={tool.id}
-              data-disabled={disabled || undefined}
-              className="flex items-center px-1.5"
-              style={{
-                color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text-muted)',
-              }}
-            >
-              <WorkbenchIcon name="chevronDown" className="h-3.5 w-3.5" />
-            </UnstyledButton>
-          </Menu.Target>
-
-          {dropdown}
-        </Menu>
-      </div>
-    )
-  }
-
   return (
     <Menu width={224} opened={opened} onChange={setOpened} transitionProps={{ duration: 0 }}>
       <Menu.Target>
@@ -162,6 +99,7 @@ export function ToolDropdownButton({
             aria-pressed={active}
             disabled={disabled}
             data-tool-id={tool.id}
+            data-tool-dropdown-trigger={tool.id}
             data-tool-tooltip={tool.tooltip}
             data-disabled={disabled || undefined}
           >
