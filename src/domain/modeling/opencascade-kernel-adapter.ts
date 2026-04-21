@@ -46,7 +46,6 @@ import type {
   UpdateFeatureResponse,
 } from '@/contracts/modeling/schema'
 import {
-  createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
 import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
@@ -63,6 +62,7 @@ import type {
   SketchPointId,
 } from '@/contracts/shared/ids'
 import {
+  AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
   RENDER_EXPORT_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
@@ -87,6 +87,8 @@ import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
+import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+import type { OccWorkerSnapshotClient } from '@/domain/modeling/occ/worker-client'
 import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
 import {
   findDocumentHistoryOrderDependencyViolations,
@@ -120,6 +122,8 @@ interface OpenCascadeKernelAdapterOptions {
   solverAdapter: SketchSolverAdapter
   solverAdapterFactory?: (revisionId: RevisionId) => SketchSolverAdapter
   getOpenCascadeInstance?: () => Promise<OpenCascadeInstance>
+  initialSnapshotRequiresRuntime?: boolean
+  workerSnapshotClient?: OccWorkerSnapshotClient | null
   documentId?: DocumentId
   tolerances?: SolverTolerancePolicy
 }
@@ -177,6 +181,43 @@ function parseRevisionSequence(revisionId: RevisionId) {
 
 function createRevisionId(sequence: number) {
   return `rev_${String(sequence).padStart(4, '0')}` as RevisionId
+}
+
+function createAuthoredModelDocumentFromAuthoringState(
+  state: OccAuthoringState,
+): AuthoredModelDocument {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
+    documentId: state.documentId,
+    revisionId: state.revisionId,
+    settings: {
+      linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
+      modelingTolerance: state.modelingTolerance,
+      angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+    },
+    variables: structuredClone([...state.variables]),
+    sketches: state.sketches.map((sketch) => ({
+      sketchId: sketch.sketchId,
+      label: sketch.label,
+      plane: structuredClone(sketch.plane),
+      planeTarget: structuredClone(sketch.planeTarget),
+      planeKey: sketch.planeKey,
+      definition: structuredClone(sketch.sketch.definition),
+    })),
+    features: state.features.map((feature) => ({
+      featureId: feature.featureId,
+      label: feature.label ?? feature.featureId,
+      definition: structuredClone(feature.definition),
+    })),
+    featureOrder: state.features.map((feature) => feature.featureId),
+    historyOrder: state.historyOrder.map((item) => ({ ...item })),
+    cursor: structuredClone(state.cursor),
+    bodyLabels: state.bodies.map((body) => ({
+      bodyId: body.bodyId,
+      label: body.label,
+    })),
+  }
 }
 
 function createRevisionConflictDiagnostic(
@@ -1025,18 +1066,40 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly solverAdapter: SketchSolverAdapter
   private readonly solverAdapterFactory?: (revisionId: RevisionId) => SketchSolverAdapter
   private readonly loadOpenCascadeInstance: () => Promise<OpenCascadeInstance>
+  private readonly initialSnapshotRequiresRuntime: boolean
+  private readonly workerSnapshotClient: OccWorkerSnapshotClient | null
   private readonly documentId: DocumentId
   private readonly tolerances: SolverTolerancePolicy
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null
   private runtimeState: OccKernelRuntimeState | null = null
+  private snapshotLodTierId: OccTessellationTierId = 'startup'
 
   constructor(options: OpenCascadeKernelAdapterOptions) {
     this.solverAdapter = options.solverAdapter
     this.solverAdapterFactory = options.solverAdapterFactory
     this.loadOpenCascadeInstance = options.getOpenCascadeInstance ?? getOpenCascadeInstance
+    this.initialSnapshotRequiresRuntime = options.initialSnapshotRequiresRuntime ?? false
+    this.workerSnapshotClient = options.workerSnapshotClient ?? null
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID
     this.tolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES
+  }
+
+  preloadRuntime(): Promise<void> {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.preload()
+    }
+
+    return this.getRuntimeState().then(() => undefined)
+  }
+
+  setSnapshotLodTier(tierId: OccTessellationTierId) {
+    if (this.snapshotLodTierId === tierId) {
+      return false
+    }
+
+    this.snapshotLodTierId = tierId
+    return true
   }
 
   private getSolverAdapter(revisionId: RevisionId) {
@@ -1271,7 +1334,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       throw new Error(`OCC authored export requested document ${documentId}, but active document is ${runtimeState.authoringState.documentId}.`)
     }
 
-    return createAuthoredModelDocumentFromSnapshot(buildOccWorkspaceSnapshot(runtimeState.authoringState))
+    return createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState)
   }
 
   private buildInitialSnapshotWithoutRuntime() {
@@ -1282,6 +1345,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     })
 
     return buildOccWorkspaceSnapshot(authoringState)
+  }
+
+  private buildInitialAuthoredDocumentWithoutRuntime() {
+    const authoringState = createOccAuthoringState({} as OpenCascadeInstance, {
+      documentId: this.documentId,
+      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+
+    return createAuthoredModelDocumentFromAuthoringState(authoringState)
   }
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
@@ -1650,7 +1723,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId)
 
-    if (!this.runtimeState && !this.initializationPromise) {
+    if (this.workerSnapshotClient && !this.runtimeState && !this.initializationPromise) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        snapshot: await this.workerSnapshotClient.buildWorkspaceSnapshot(
+          this.buildInitialAuthoredDocumentWithoutRuntime(),
+          this.snapshotLodTierId,
+        ),
+      }
+    }
+
+    if (!this.initialSnapshotRequiresRuntime && !this.runtimeState && !this.initializationPromise) {
       return {
         contractVersion: CONTRACT_VERSION,
         snapshot: this.buildInitialSnapshotWithoutRuntime(),
@@ -1661,7 +1744,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     return {
       contractVersion: CONTRACT_VERSION,
-      snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState),
+      snapshot: this.workerSnapshotClient
+        ? await this.workerSnapshotClient.buildWorkspaceSnapshot(
+            createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState),
+            this.snapshotLodTierId,
+          )
+        : buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
+            lodTierId: this.snapshotLodTierId,
+          }),
     }
   }
 

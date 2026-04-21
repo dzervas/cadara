@@ -1,7 +1,10 @@
 import { test } from 'bun:test'
 import type { UserConfig } from 'vite'
 
-import viteConfig, { shouldUseCloudflareOpenCascadeCdn } from '../vite.config'
+import viteConfig, {
+  getOpenCascadeAssetHeaders,
+  shouldUseCloudflareOpenCascadeCdn,
+} from '../vite.config'
 
 test('src/build-config.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -36,5 +39,17 @@ test('src/build-config.spec.ts', async () => {
   assert(
     shouldUseCloudflareOpenCascadeCdn({}) === false,
     'Regular local builds should keep the package-provided OpenCascade wasm asset.',
+  )
+  assert(
+    getOpenCascadeAssetHeaders('/assets/opencascade.full.wasm')['Content-Type'] === 'application/wasm',
+    'App-served OpenCascade wasm responses should preserve streaming-compatible MIME type.',
+  )
+  assert(
+    getOpenCascadeAssetHeaders('/assets/opencascade.full.wasm')['Cache-Control']?.includes('immutable'),
+    'OpenCascade wasm assets should be eligible for immutable repeat-load caching.',
+  )
+  assert(
+    getOpenCascadeAssetHeaders('/assets/opencascade.full.worker.js')['Cache-Control']?.includes('immutable'),
+    'OpenCascade worker assets should be eligible for immutable repeat-load caching.',
   )
 })

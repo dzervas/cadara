@@ -70,6 +70,10 @@ import {
   type OccTrackedBody,
 } from '@/domain/modeling/occ/topology'
 import { getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
+import {
+  getOccTessellationTier,
+  type OccTessellationTierId,
+} from '@/domain/modeling/occ/tessellation'
 
 const FACE_PICK_PRIORITY = 20
 const SKETCH_CURVE_PICK_PRIORITY = 12
@@ -84,9 +88,11 @@ const DEFAULT_CIRCLE_SAMPLE_COUNT = 64
 const DEFAULT_ARC_SAMPLE_COUNT = 33
 const DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT = 64
 const DEFAULT_POINT_DISPLAY_RADIUS = 0.25
-const DEFAULT_LINEAR_DEFLECTION = 0.1
-const DEFAULT_ANGULAR_DEFLECTION = 0.5
 const PROFILE_TEXT_WIDTH_FACTOR = 0.6
+
+interface OccSnapshotBuildOptions {
+  lodTierId?: OccTessellationTierId
+}
 
 function sanitizeIdSegment(value: string) {
   return value
@@ -895,8 +901,9 @@ function buildFaceRenderRecord(
   }
 }
 
-function buildRegionRenderRecords(state: OccAuthoringState) {
+function buildRegionRenderRecords(state: OccAuthoringState, options: OccSnapshotBuildOptions = {}) {
   const records: RenderableEntityRecord[] = []
+  const tessellationTier = getOccTessellationTier(options.lodTierId)
 
   for (const sketch of state.sketches) {
     for (const region of sketch.sketch.regions) {
@@ -917,9 +924,9 @@ function buildRegionRenderRecords(state: OccAuthoringState) {
       try {
         const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
           profileFace.face,
-          Math.max(state.modelingTolerance * 10, DEFAULT_LINEAR_DEFLECTION),
+          Math.max(state.modelingTolerance * 10, tessellationTier.linearDeflectionModelUnits),
           false,
-          DEFAULT_ANGULAR_DEFLECTION,
+          tessellationTier.angularDeflectionRadians,
           false,
         )
         deleteOccObject(mesher)
@@ -1147,14 +1154,16 @@ function buildBodyRenderRecords(
   state: OccAuthoringState,
   body: OccTrackedBody,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+  options: OccSnapshotBuildOptions = {},
 ) {
   const records: RenderableEntityRecord[] = []
+  const tessellationTier = getOccTessellationTier(options.lodTierId)
 
   new state.oc.BRepMesh_IncrementalMesh_2(
     body.shape,
-    Math.max(state.modelingTolerance * 10, DEFAULT_LINEAR_DEFLECTION),
+    Math.max(state.modelingTolerance * 10, tessellationTier.linearDeflectionModelUnits),
     false,
-    DEFAULT_ANGULAR_DEFLECTION,
+    tessellationTier.angularDeflectionRadians,
     false,
   )
 
@@ -1563,9 +1572,9 @@ function buildSketchPointRenderRecords(
   })
 }
 
-function buildSketchRenderRecords(state: OccAuthoringState) {
+function buildSketchRenderRecords(state: OccAuthoringState, options: OccSnapshotBuildOptions = {}) {
   return [
-    ...buildRegionRenderRecords(state),
+    ...buildRegionRenderRecords(state, options),
     ...state.sketches.flatMap((sketch) => [
       ...buildSketchCurveRenderRecords(state, sketch),
       ...buildSketchPointRenderRecords(state, sketch),
@@ -1576,11 +1585,12 @@ function buildSketchRenderRecords(state: OccAuthoringState) {
 export function buildOccRenderExport(
   state: OccAuthoringState,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses> = createFaceSemanticClassMap(state),
+  options: OccSnapshotBuildOptions = {},
 ) {
   const records: RenderableEntityRecord[] = [
     ...buildConstructionRenderRecords(state),
-    ...buildSketchRenderRecords(state),
-    ...state.bodies.flatMap((body) => buildBodyRenderRecords(state, body, faceSemanticClasses)),
+    ...buildSketchRenderRecords(state, options),
+    ...state.bodies.flatMap((body) => buildBodyRenderRecords(state, body, faceSemanticClasses, options)),
   ]
 
   return {
@@ -1592,6 +1602,7 @@ export function buildOccRenderExport(
 export function buildOccKernelDocumentSnapshot(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[] = [],
+  options: OccSnapshotBuildOptions = {},
 ): KernelDocumentSnapshot {
   const producedTargetsByFeatureId = createProducedTargetsByFeatureId(state.features)
   const consumerMap = createFeatureConsumerMap(state)
@@ -1623,15 +1634,16 @@ export function buildOccKernelDocumentSnapshot(
     entities,
     references,
     diagnostics,
-    render: buildOccRenderExport(state, faceSemanticClasses),
+    render: buildOccRenderExport(state, faceSemanticClasses, options),
   }
 }
 
 export function buildOccWorkspaceSnapshot(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[] = [],
+  options: OccSnapshotBuildOptions = {},
 ): WorkspaceSnapshot {
-  const document = buildOccKernelDocumentSnapshot(state, extraDiagnostics)
+  const document = buildOccKernelDocumentSnapshot(state, extraDiagnostics, options)
   const presentation: DocumentPresentationSnapshot = {
     featureTree: document.featureTree,
     objects: document.objects,

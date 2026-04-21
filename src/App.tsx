@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 import { CadWorkbench } from '@/app/cad-workbench'
 import { createModelingService } from '@/domain/modeling/modeling-service'
@@ -8,6 +8,9 @@ import {
   createLocalStorageDocumentRepositoryUrlStore,
 } from '@/domain/modeling/automerge-indexeddb-document-repository'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
+import { createOccPreloadController } from '@/domain/modeling/occ/preload'
+import { registerOpenCascadeAssetCache } from '@/domain/modeling/occ/asset-cache'
+import { createBrowserOccWorkerClient } from '@/domain/modeling/occ/worker-runtime'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -21,6 +24,8 @@ import { createToolActionBus } from '@/domain/tools/tool-action-bus'
 import { ReportedErrorBoundary } from '@/components/layout/reported-error-boundary'
 import { BuildMetadataLabel } from '@/components/layout/build-metadata-label'
 import { SentryAdBlockNotification } from '@/components/layout/sentry-ad-block-notification'
+import { normalizeUnknownError } from '@/contracts/errors'
+import { useErrorReporter } from '@/hooks/use-error-reporter'
 
 function App() {
   const actionBus = useMemo(() => createToolActionBus(), [])
@@ -38,6 +43,11 @@ function App() {
     }),
     [],
   )
+  const occWorkerClient = useMemo(
+    () => (typeof window === 'undefined' ? null : createBrowserOccWorkerClient()),
+    [],
+  )
+  const occWorkerDisposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const kernelAdapter = useMemo(
     () =>
       new OpenCascadeKernelAdapter({
@@ -47,9 +57,32 @@ function App() {
             documentId: OCC_KERNEL_DOCUMENT_ID,
             revisionId,
           }),
+        initialSnapshotRequiresRuntime: typeof window !== 'undefined',
+        workerSnapshotClient: occWorkerClient,
       }),
-    [kernelSketchSolver],
+    [kernelSketchSolver, occWorkerClient],
   )
+  const occPreloadController = useMemo(
+    () => createOccPreloadController({ preload: () => kernelAdapter.preloadRuntime() }),
+    [kernelAdapter],
+  )
+  useEffect(() => {
+    if (occWorkerDisposeTimerRef.current) {
+      clearTimeout(occWorkerDisposeTimerRef.current)
+      occWorkerDisposeTimerRef.current = null
+    }
+
+    return () => {
+      if (!occWorkerClient) {
+        return
+      }
+
+      occWorkerDisposeTimerRef.current = setTimeout(() => {
+        occWorkerClient.dispose?.()
+        occWorkerDisposeTimerRef.current = null
+      }, 0)
+    }
+  }, [occWorkerClient])
   const modelingService = useMemo(
     () =>
       createModelingService(kernelAdapter, {
@@ -74,6 +107,8 @@ function App() {
   return (
     <ErrorReporterProvider>
       <ReportedErrorBoundary>
+        <OccPreloadEffect preloadController={occPreloadController} />
+        <OccAssetCacheEffect />
         <ModelingServiceProvider modelingService={modelingService}>
           <EditorProvider modelingService={modelingService}>
             <ToolActionProvider actionBus={actionBus}>
@@ -86,6 +121,60 @@ function App() {
       <BuildMetadataLabel />
     </ErrorReporterProvider>
   )
+}
+
+function OccAssetCacheEffect() {
+  const errorReporter = useErrorReporter()
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !import.meta.env.PROD) {
+      return
+    }
+
+    void registerOpenCascadeAssetCache().catch((error: unknown) => {
+      errorReporter.report(
+        normalizeUnknownError(error, {
+          code: 'app/operation-failed',
+          fallbackMessage: 'OpenCascade asset cache registration failed.',
+          context: [{ key: 'operation', value: 'occ.assetCache.register' }],
+        }),
+        {
+          source: 'occ-asset-cache',
+          visibility: 'developer',
+          dedupeKey: 'occ-asset-cache:register',
+        },
+      )
+    })
+  }, [errorReporter])
+
+  return null
+}
+
+function OccPreloadEffect({ preloadController }: { preloadController: ReturnType<typeof createOccPreloadController> }) {
+  const errorReporter = useErrorReporter()
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    void preloadController.preload().catch((error: unknown) => {
+      errorReporter.report(
+        normalizeUnknownError(error, {
+          code: 'editor/effect-failed',
+          fallbackMessage: 'OpenCascade initialization failed.',
+          context: [{ key: 'operation', value: 'occ.preload' }],
+        }),
+        {
+          source: 'occ-preload',
+          visibility: 'user',
+          dedupeKey: 'occ-preload:init',
+        },
+      )
+    })
+  }, [errorReporter, preloadController])
+
+  return null
 }
 
 function getDevLocalPeerSyncOptions() {

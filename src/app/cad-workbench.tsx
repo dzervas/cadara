@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Loader } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
@@ -12,6 +13,7 @@ import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
 import { WorkbenchStateDebugger, type WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 import { WorkbenchNotification } from '@/components/layout/workbench-notification'
 import type { WorkbenchNotificationModel } from '@/components/layout/workbench-notification-model'
+import { isInitialOccRenderPending } from '@/app/initial-occ-render-state'
 import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
 import {
   createObjectDeletePlaceholderMessage,
@@ -96,6 +98,7 @@ import {
   type BugReportArtifactStatus,
 } from '@/domain/bug-reporting/report'
 import { getBuildModeLabel } from '@/components/layout/build-metadata'
+import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
@@ -138,6 +141,7 @@ export function CadWorkbench() {
     dispatch,
   } = useEditorState()
   const snapshot = machineState.snapshot
+  const initialOccRenderPending = isInitialOccRenderPending(machineState)
   const previewRenderables = machineState.previewRenderables
   const [hiddenTargetKeys, setHiddenTargetKeys] = useState<Record<string, boolean>>({})
   const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
@@ -339,6 +343,12 @@ export function CadWorkbench() {
 
   const handleViewportDeselect = () => {
     dispatch({ type: 'selection.cleared' })
+  }
+
+  const handleViewportLodTierChange = (tierId: OccTessellationTierId) => {
+    if (modelingService.setViewportLodTier(tierId)) {
+      dispatch({ type: 'document.refreshRequested' })
+    }
   }
 
   const handleShellSelect = (target: PrimitiveRef) => {
@@ -1322,9 +1332,19 @@ export function CadWorkbench() {
               onSketchGeometryDragMove={handleSketchGeometryDragMove}
               onSketchGeometryDragEnd={handleSketchGeometryDragEnd}
               onSketchToolPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
+              onLodTierChange={handleViewportLodTierChange}
               selection={visibleSelection}
               sketchToolPresentation={sketchToolPresentation}
             />
+            {initialOccRenderPending ? (
+              <div
+                role="status"
+                aria-label="Initial model render pending"
+                className="absolute inset-0 z-30 grid place-items-center bg-[var(--workbench-viewport-background)]/85"
+              >
+                <Loader color="gray" size="lg" />
+              </div>
+            ) : null}
             <SketchToolPanel
               schema={sketchToolPresentation}
               onPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}

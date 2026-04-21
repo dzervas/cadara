@@ -44,6 +44,8 @@ import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/mode
  * inferring omitted semantics from UI conventions.
  */
 export interface ModelingKernelAdapter {
+  /** Updates the requested viewport snapshot tessellation tier when supported. */
+  setSnapshotLodTier?(tierId: 'startup' | 'normal' | 'fine'): boolean
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */
   restoreAuthoredModelDocument?(document: AuthoredDocument, diagnostics?: readonly ModelingDiagnostic[]): Promise<void>
   /** Exports the complete authored document state, including history after the active cursor. */

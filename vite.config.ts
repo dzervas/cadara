@@ -20,9 +20,47 @@ function createOpenCascadeAlias() {
     : []
 }
 
+export function getOpenCascadeAssetHeaders(pathname: string): Record<string, string> {
+  if (!/opencascade.*\.(wasm|worker\.js)$/.test(pathname)) {
+    return {}
+  }
+
+  const headers: Record<string, string> = {
+    'Cache-Control': 'public, max-age=31536000, immutable',
+  }
+
+  if (pathname.endsWith('.wasm')) {
+    headers['Content-Type'] = 'application/wasm'
+  }
+
+  return headers
+}
+
+function createOpenCascadeAssetHeadersPlugin() {
+  return {
+    name: 'cadara-opencascade-asset-headers',
+    configureServer(server: { middlewares: { use: (middleware: (request: { url?: string }, response: { setHeader: (name: string, value: string) => void }, next: () => void) => void) => void } }) {
+      server.middlewares.use((request, response, next) => {
+        for (const [name, value] of Object.entries(getOpenCascadeAssetHeaders(request.url ?? ''))) {
+          response.setHeader(name, value)
+        }
+        next()
+      })
+    },
+    configurePreviewServer(server: { middlewares: { use: (middleware: (request: { url?: string }, response: { setHeader: (name: string, value: string) => void }, next: () => void) => void) => void } }) {
+      server.middlewares.use((request, response, next) => {
+        for (const [name, value] of Object.entries(getOpenCascadeAssetHeaders(request.url ?? ''))) {
+          response.setHeader(name, value)
+        }
+        next()
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [createBuildMetadataPlugin(__dirname), react(), tailwindcss()],
+  plugins: [createBuildMetadataPlugin(__dirname), createOpenCascadeAssetHeadersPlugin(), react(), tailwindcss()],
   assetsInclude: ['**/*.wasm'],
   resolve: {
     alias: [

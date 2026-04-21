@@ -189,6 +189,7 @@ import type {
   DocumentRepositoryMetadata,
   DocumentRepositoryRestoreStatus,
 } from '@/domain/modeling/document-repository'
+import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -204,6 +205,7 @@ export interface ModelingService {
   subscribeToDocumentChanges(listener: (event: ModelingServiceDocumentChangeEvent) => void): () => void
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
+  setViewportLodTier(tierId: OccTessellationTierId): boolean
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
@@ -4993,6 +4995,9 @@ export function createModelingService(
       return historyRestoreState
     },
     resetOperationHistory,
+    setViewportLodTier(tierId) {
+      return adapter.setSnapshotLodTier?.(tierId) ?? false
+    },
     async getCurrentDocumentSnapshot() {
       await restorePromise
       await repositoryChangePromise

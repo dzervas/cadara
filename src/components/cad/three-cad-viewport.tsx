@@ -74,6 +74,10 @@ import {
 } from '@/domain/workspace/viewport-projection'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import {
+  selectViewportLodTierForRenderables,
+  type OccTessellationTierId,
+} from '@/domain/modeling/occ/tessellation'
+import {
   type ViewNavigationCornerPresetId,
   type ViewNavigationFacePresetId,
   type ViewNavigationPresetId,
@@ -124,6 +128,7 @@ interface ThreeCadViewportProps {
   onSketchGeometryDragMove: (point: readonly [number, number]) => void
   onSketchGeometryDragEnd: (point: readonly [number, number]) => void
   onSketchToolPatch: (patch: Record<string, unknown>) => void
+  onLodTierChange: (tierId: OccTessellationTierId) => void
   selection: PrimitiveRef[]
   sketchToolPresentation: SketchToolPresentationSchema | null
 }
@@ -169,6 +174,7 @@ export function ThreeCadViewport({
   onSketchGeometryDragMove,
   onSketchGeometryDragEnd,
   onSketchToolPatch,
+  onLodTierChange,
   selection,
   sketchToolPresentation,
 }: ThreeCadViewportProps) {
@@ -214,6 +220,7 @@ export function ThreeCadViewport({
   const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove)
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
   const sketchToolPatchRef = useRef(onSketchToolPatch)
+  const lodTierChangeRef = useRef(onLodTierChange)
   const {
     machineState,
     state: { mode, selectionFilter, selectionCatalog, sketchSession },
@@ -301,6 +308,7 @@ export function ThreeCadViewport({
     sketchGeometryDragMoveRef.current = onSketchGeometryDragMove
     sketchGeometryDragEndRef.current = onSketchGeometryDragEnd
     sketchToolPatchRef.current = onSketchToolPatch
+    lodTierChangeRef.current = onLodTierChange
     selectionRef.current = selection
     selectionFilterRef.current = selectionFilter
     selectionCatalogRef.current = selectionCatalog
@@ -316,6 +324,7 @@ export function ThreeCadViewport({
     onSketchMove,
     onSketchRelease,
     onSketchToolPatch,
+    onLodTierChange,
     selection,
     selectionCatalog,
     selectionFilter,
@@ -1036,6 +1045,11 @@ export function ThreeCadViewport({
           enabled={Boolean(sketchSession)}
           onCameraChanged={updateSketchFeedbackProjections}
         />
+        <BodyLodWatcher
+          enabled={!sketchSession}
+          renderables={renderables}
+          onLodTierChange={(tierId) => lodTierChangeRef.current(tierId)}
+        />
         <RenderIdleSignal
           isEditorIdle={isEditorRenderIdle}
           sceneKey={bvhSceneKey}
@@ -1260,6 +1274,52 @@ function SketchProjectionFrameWatcher({
 
     lastCameraTokenRef.current = token
     onCameraChanged()
+  })
+
+  return null
+}
+
+function BodyLodWatcher({
+  enabled,
+  renderables,
+  onLodTierChange,
+}: {
+  enabled: boolean
+  renderables: ViewportRenderableRecord[]
+  onLodTierChange: (tierId: OccTessellationTierId) => void
+}) {
+  const lastCameraTokenRef = useRef<string | null>(null)
+  const lastTierRef = useRef<OccTessellationTierId>('startup')
+  const renderablesRef = useRef(renderables)
+
+  useEffect(() => {
+    renderablesRef.current = renderables
+    lastCameraTokenRef.current = null
+  }, [renderables])
+
+  useFrame(({ camera }) => {
+    if (!enabled) {
+      lastCameraTokenRef.current = null
+      return
+    }
+
+    const token = camera.position.toArray().map((value) => value.toFixed(3)).join(',')
+    if (lastCameraTokenRef.current === token) {
+      return
+    }
+
+    lastCameraTokenRef.current = token
+    const tierId = selectViewportLodTierForRenderables({
+      cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
+      renderables: renderablesRef.current.map((entry) => entry.renderable),
+    })
+
+    if (lastTierRef.current === tierId) {
+      return
+    }
+
+    lastTierRef.current = tierId
+    onLodTierChange(tierId)
   })
 
   return null

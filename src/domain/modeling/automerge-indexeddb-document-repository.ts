@@ -132,8 +132,11 @@ export function createLocalStorageDocumentRepositoryUrlStore(
 }
 
 export class IndexedDbAutomergeDocumentRepository implements DocumentRepository {
-  private readonly repo: AutomergeRepositoryLike
+  private repo: AutomergeRepositoryLike | null
   private readonly urlStore: DocumentRepositoryUrlStore
+  private readonly databaseName?: string
+  private readonly storeName?: string
+  private readonly localPeerSync: IndexedDbAutomergeDocumentRepositoryOptions['localPeerSync']
   private readonly statuses = new Map<DocumentId, DocumentRepositoryRestoreStatus>()
   private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>()
   private readonly handles = new Map<DocumentId, AutomergeHandleLike<AutomergeDocumentEnvelope>>()
@@ -147,11 +150,11 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
 
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
     this.prepareAutomerge = options.repo ? async () => {} : ensureAutomergeWasmInitialized
-    this.repo = options.repo ?? new Repo({
-      storage: new IndexedDBStorageAdapter(options.databaseName ?? 'cad-authored-documents', options.storeName ?? 'documents'),
-      network: createLocalPeerNetwork(options.localPeerSync),
-    }) as AutomergeRepositoryLike
+    this.repo = options.repo ?? null
     this.urlStore = options.urlStore ?? new MemoryDocumentRepositoryUrlStore()
+    this.databaseName = options.databaseName
+    this.storeName = options.storeName
+    this.localPeerSync = options.localPeerSync
     this.localPeerDocumentChannel = createLocalPeerDocumentChannel(options.localPeerSync)
     this.localPeerDocumentChannel?.addEventListener('message', (event: MessageEvent<unknown>) => {
       this.receiveLocalPeerDocumentMessage(event.data)
@@ -160,13 +163,13 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
 
   async load(input: { documentId: DocumentId; seedDocument: AuthoredModelDocument }): Promise<DocumentRepositoryLoadResult> {
     try {
-      await this.prepareAutomerge()
+      const repo = await this.getRepo()
       const url = this.urlStore.get(input.documentId)
       if (!url) {
         return await this.createSeedDocument(input.documentId, input.seedDocument)
       }
 
-      const handle = await this.repo.find<AutomergeDocumentEnvelope>(url)
+      const handle = await repo.find<AutomergeDocumentEnvelope>(url)
       await handle.whenReady()
       this.handles.set(input.documentId, handle)
       this.installHandleListener(input.documentId, handle)
@@ -192,7 +195,6 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     }
 
     try {
-      await this.prepareAutomerge()
       const handle = await this.getHandle(input.documentId, parsed.document)
       this.pendingLocalChanges.add(input.documentId)
       handle.change((doc) => {
@@ -227,7 +229,8 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
   async reset(documentId: DocumentId): Promise<DocumentRepositoryRestoreStatus> {
     const url = this.urlStore.get(documentId)
     if (url) {
-      this.repo.delete(url)
+      const repo = await this.getRepo()
+      repo.delete(url)
     }
     this.handles.delete(documentId)
     this.urlStore.delete(documentId)
@@ -246,12 +249,13 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
   }
 
   private async createSeedDocument(documentId: DocumentId, seedDocument: AuthoredModelDocument): Promise<DocumentRepositoryLoadResult> {
+    const repo = await this.getRepo()
     const parsed = parseAuthoredModelDocument(structuredClone(seedDocument))
     if (!parsed.ok) {
       return this.fail(documentId, parsed.diagnostic)
     }
 
-    const handle = this.repo.create<AutomergeDocumentEnvelope>({
+    const handle = repo.create<AutomergeDocumentEnvelope>({
       authoredDocument: structuredClone(parsed.document),
     })
     await handle.whenReady()
@@ -283,7 +287,8 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       return this.handles.get(documentId)!
     }
 
-    const handle = await this.repo.find<AutomergeDocumentEnvelope>(url)
+    const repo = await this.getRepo()
+    const handle = await repo.find<AutomergeDocumentEnvelope>(url)
     await handle.whenReady()
     this.handles.set(documentId, handle)
     this.installHandleListener(documentId, handle)
@@ -328,7 +333,21 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
   }
 
   private async flush(handle: AutomergeHandleLike<AutomergeDocumentEnvelope>) {
-    await this.repo.flush?.([handle.documentId])
+    const repo = await this.getRepo()
+    await repo.flush?.([handle.documentId])
+  }
+
+  private async getRepo() {
+    if (this.repo) {
+      return this.repo
+    }
+
+    await this.prepareAutomerge()
+    this.repo = new Repo({
+      storage: new IndexedDBStorageAdapter(this.databaseName ?? 'cad-authored-documents', this.storeName ?? 'documents'),
+      network: createLocalPeerNetwork(this.localPeerSync),
+    }) as AutomergeRepositoryLike
+    return this.repo
   }
 
   private fail(

@@ -1,0 +1,150 @@
+import { test } from 'bun:test'
+
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
+import type { RequestId } from '@/contracts/shared/ids'
+import { OccWorkerClient, type OccWorkerLike } from '@/domain/modeling/occ/worker-client'
+import type { OccWorkerRequest, OccWorkerResponse } from '@/domain/modeling/occ/worker-protocol'
+
+class FakeOccWorker implements OccWorkerLike {
+  readonly posted: OccWorkerRequest[] = []
+  private listener: ((event: MessageEvent<OccWorkerResponse>) => void) | null = null
+
+  postMessage(message: OccWorkerRequest) {
+    this.posted.push(message)
+  }
+
+  addEventListener(_type: 'message', listener: (event: MessageEvent<OccWorkerResponse>) => void) {
+    this.listener = listener
+  }
+
+  removeEventListener(_type: 'message', listener: (event: MessageEvent<OccWorkerResponse>) => void) {
+    if (this.listener === listener) {
+      this.listener = null
+    }
+  }
+
+  emit(message: OccWorkerResponse) {
+    this.listener?.({ data: message } as MessageEvent<OccWorkerResponse>)
+  }
+}
+
+test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  async function testWorkerInitializationSuccess() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+    const preload = client.preload({ mainWasm: '/assets/opencascade.full.wasm' })
+    const request = worker.posted[0]
+
+    assert(request?.kind === 'preload', 'Worker preload should post a typed preload request.')
+    assert(
+      request.assets?.mainWasm === '/assets/opencascade.full.wasm',
+      'Worker preload should pass configured wasm asset URLs.',
+    )
+
+    worker.emit({ kind: 'preloaded', requestId: request.requestId })
+    await preload
+    client.dispose()
+  }
+
+  async function testWorkerInitializationFailure() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+    const preload = client.preload()
+    const request = worker.posted[0]
+
+    assert(request?.kind === 'preload', 'Worker preload should post a preload request.')
+    worker.emit({
+      kind: 'failure',
+      requestId: request.requestId,
+      error: {
+        code: 'occ-worker-initialization-failed',
+        message: 'worker boot failed',
+      },
+    })
+
+    let failed = false
+    try {
+      await preload
+    } catch (error) {
+      failed = error instanceof Error && error.message === 'worker boot failed'
+    }
+
+    assert(failed, 'Worker initialization failures should reject the preload call.')
+    client.dispose()
+  }
+
+  async function testWorkerSnapshotOverlap() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+    const document = { documentId: 'document_occ_kernel' } as AuthoredModelDocument
+    const first = client.buildWorkspaceSnapshot(document)
+    const second = client.buildWorkspaceSnapshot(document)
+    const firstRequest = worker.posted[0]
+    const secondRequest = worker.posted[1]
+
+    assert(firstRequest?.kind === 'buildWorkspaceSnapshot', 'First snapshot should post a snapshot request.')
+    assert(
+      worker.posted.every((request) => request.kind !== 'cancel'),
+      'Overlapping snapshot callers should not receive user-facing cancellation errors.',
+    )
+    assert(secondRequest?.kind === 'buildWorkspaceSnapshot', 'Second snapshot should post another snapshot request.')
+
+    const firstSnapshot = {
+      revisionId: 'rev_0001',
+      document: { render: { records: [] } },
+      render: { records: [] },
+    } as WorkspaceSnapshot
+    const secondSnapshot = {
+      revisionId: 'rev_0002',
+      document: { render: { records: [] } },
+      render: { records: [] },
+    } as WorkspaceSnapshot
+    worker.emit({
+      kind: 'workspaceSnapshotBuilt',
+      requestId: firstRequest.requestId,
+      snapshot: firstSnapshot,
+    })
+    worker.emit({
+      kind: 'workspaceSnapshotBuilt',
+      requestId: secondRequest.requestId,
+      snapshot: secondSnapshot,
+    })
+
+    assert((await first).revisionId === firstSnapshot.revisionId, 'First snapshot request should resolve with its worker response.')
+    assert((await second).revisionId === secondSnapshot.revisionId, 'Second snapshot request should resolve with its worker response.')
+    client.dispose()
+  }
+
+  async function testWorkerSnapshotParityShape() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+    const snapshot = { document: { render: { records: [] } } } as WorkspaceSnapshot
+    const pending = client.buildWorkspaceSnapshot({ documentId: 'document_occ_kernel' } as AuthoredModelDocument)
+    const request = worker.posted[0]
+
+    assert(request?.kind === 'buildWorkspaceSnapshot', 'Worker snapshot builds should use the typed snapshot request.')
+    worker.emit({
+      kind: 'workspaceSnapshotBuilt',
+      requestId: request.requestId as RequestId,
+      snapshot,
+    })
+
+    assert(
+      (await pending).document.render.records.length === snapshot.document.render.records.length,
+      'Worker snapshot response should preserve the direct snapshot payload shape.',
+    )
+    client.dispose()
+  }
+
+  await testWorkerInitializationSuccess()
+  await testWorkerInitializationFailure()
+  await testWorkerSnapshotOverlap()
+  await testWorkerSnapshotParityShape()
+})
