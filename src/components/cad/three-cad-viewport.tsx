@@ -61,6 +61,8 @@ import {
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import {
+  type ViewNavigationCornerPresetId,
+  type ViewNavigationFacePresetId,
   type ViewNavigationPresetId,
   snapCameraToPreset,
 } from '@/domain/workspace/view-navigation'
@@ -83,13 +85,10 @@ import {
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
 
-const VIEW_CUBE_EDGE_SIZE = 1.24
-const VIEW_CUBE_FACE_FILL_SIZE = 1.1
-const VIEW_CUBE_FACE_FILL_OFFSET = 0.58
-const VIEW_CUBE_FACE_OUTLINE_SIZE = 0.78
-const VIEW_CUBE_FACE_HIT_SIZE = 0.72
-const VIEW_CUBE_CORNER_FACE_SIZE = 0.26
-const VIEW_CUBE_CORNER_HIT_SIZE = 0.34
+const VIEW_CUBE_BODY_HALF_SIZE = 0.58
+const VIEW_CUBE_SURFACE_OFFSET = 0.002
+const VIEW_CUBE_LABEL_OFFSET = 0.03
+const VIEW_CUBE_CORNER_CUT_SIZE = 0.30
 
 interface ThreeCadViewportProps {
   hoverTarget: PrimitiveRef | null
@@ -118,10 +117,19 @@ interface ViewportCameraFrame {
 }
 
 interface ViewCubeFaceVisual {
+  presetId: ViewNavigationFacePresetId
   normal: THREE.Vector3
   outlineMaterial: THREE.LineBasicMaterial
   labelMaterial: THREE.MeshBasicMaterial
   labelTexture: THREE.Texture
+}
+
+interface ViewCubeCornerVisual {
+  presetId: ViewNavigationCornerPresetId
+  outlineMaterial: THREE.LineBasicMaterial
+  faceGeometry: THREE.BufferGeometry
+  outlineGeometry: THREE.BufferGeometry
+  hitGeometry: THREE.BufferGeometry
 }
 
 interface ViewCubeSceneState {
@@ -129,6 +137,7 @@ interface ViewCubeSceneState {
   camera: THREE.PerspectiveCamera
   interactiveObjects: THREE.Object3D[]
   faceVisuals: ViewCubeFaceVisual[]
+  cornerVisuals: ViewCubeCornerVisual[]
   dispose: () => void
 }
 
@@ -369,19 +378,36 @@ export function ThreeCadViewport({
     const raycaster = new THREE.Raycaster()
     let animationFrameId = 0
     let attachedControls: ViewportCameraControls | null = null
+    let hoveredPresetId: ViewNavigationPresetId | null = null
+
+    const updatePointerFromEvent = (event: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect()
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+    }
+
+    const getIntersectedViewCubeObject = (event: PointerEvent) => {
+      updatePointerFromEvent(event)
+      raycaster.setFromCamera(pointer, viewCubeScene.camera)
+
+      return raycaster.intersectObjects(viewCubeScene.interactiveObjects, false)[0]?.object
+    }
+
+    const setHoveredPreset = (nextHoveredPresetId: ViewNavigationPresetId | null) => {
+      if (hoveredPresetId === nextHoveredPresetId) {
+        return
+      }
+
+      hoveredPresetId = nextHoveredPresetId
+      requestRender()
+    }
 
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button !== 0) {
         return
       }
 
-      const rect = renderer.domElement.getBoundingClientRect()
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-
-      raycaster.setFromCamera(pointer, viewCubeScene.camera)
-      const [intersection] = raycaster.intersectObjects(viewCubeScene.interactiveObjects, false)
-      const presetId = resolveViewCubePresetId(intersection?.object)
+      const presetId = resolveViewCubePresetId(getIntersectedViewCubeObject(event))
 
       if (!presetId) {
         return
@@ -390,7 +416,20 @@ export function ThreeCadViewport({
       snapView(presetId, cameraRef.current, controlsRef.current)
     }
 
-    const renderCube = () => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const object = getIntersectedViewCubeObject(event)
+      const presetId = resolveViewCubePresetId(object)
+
+      renderer.domElement.style.cursor = presetId ? 'pointer' : ''
+      setHoveredPreset(presetId)
+    }
+
+    const handlePointerLeave = () => {
+      renderer.domElement.style.cursor = ''
+      setHoveredPreset(null)
+    }
+
+    function renderCube() {
       const viewportCamera = cameraRef.current
       const viewportControls = controlsRef.current
 
@@ -404,11 +443,11 @@ export function ThreeCadViewport({
         viewCubeScene.camera.lookAt(0, 0, 0)
       }
 
-      updateViewCubeFaceVisibility(viewCubeScene.faceVisuals, viewCubeScene.camera)
+      updateViewCubeVisibility(viewCubeScene, hoveredPresetId)
       renderer.render(viewCubeScene.scene, viewCubeScene.camera)
     }
 
-    const requestRender = () => {
+    function requestRender() {
       if (animationFrameId !== 0) {
         return
       }
@@ -444,6 +483,8 @@ export function ThreeCadViewport({
     }
 
     renderer.domElement.addEventListener('pointerdown', handlePointerDown)
+    renderer.domElement.addEventListener('pointermove', handlePointerMove)
+    renderer.domElement.addEventListener('pointerleave', handlePointerLeave)
     resizeObserver.observe(cubeElement)
     resizeRenderer()
     animationFrameId = window.requestAnimationFrame(attachControls)
@@ -452,6 +493,8 @@ export function ThreeCadViewport({
       window.cancelAnimationFrame(animationFrameId)
       resizeObserver.disconnect()
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
+      renderer.domElement.removeEventListener('pointermove', handlePointerMove)
+      renderer.domElement.removeEventListener('pointerleave', handlePointerLeave)
       attachedControls?.removeEventListener('change', requestRender)
       viewCubeScene.dispose()
       renderer.dispose()
@@ -1103,6 +1146,7 @@ function createViewCubeScene(): ViewCubeSceneState {
   const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100)
   const interactiveObjects: THREE.Object3D[] = []
   const faceVisuals: ViewCubeFaceVisual[] = []
+  const cornerVisuals: ViewCubeCornerVisual[] = []
 
   scene.add(new THREE.AmbientLight(0xffffff, 1.1))
 
@@ -1113,20 +1157,12 @@ function createViewCubeScene(): ViewCubeSceneState {
   const cubeGroup = new THREE.Group()
   scene.add(cubeGroup)
 
-  const edgeGeometry = new THREE.EdgesGeometry(
-    new THREE.BoxGeometry(VIEW_CUBE_EDGE_SIZE, VIEW_CUBE_EDGE_SIZE, VIEW_CUBE_EDGE_SIZE),
-  )
-  const edgeMaterial = new THREE.LineBasicMaterial({
-    color: 0xd9e8ff,
-  })
-  cubeGroup.add(new THREE.LineSegments(edgeGeometry, edgeMaterial))
-
-  const faceFillGeometry = new THREE.PlaneGeometry(VIEW_CUBE_FACE_FILL_SIZE, VIEW_CUBE_FACE_FILL_SIZE)
+  const faceFillGeometry = createViewCubeFaceGeometry(VIEW_CUBE_BODY_HALF_SIZE, VIEW_CUBE_CORNER_CUT_SIZE)
   const faceFillMaterial = new THREE.MeshBasicMaterial({
     color: 0x314255,
   })
-  const faceOutlineGeometry = createViewCubeFaceOutlineGeometry(VIEW_CUBE_FACE_OUTLINE_SIZE)
-  const faceHitGeometry = new THREE.PlaneGeometry(VIEW_CUBE_FACE_HIT_SIZE, VIEW_CUBE_FACE_HIT_SIZE)
+  const faceOutlineGeometry = createViewCubeFaceOutlineGeometry(VIEW_CUBE_BODY_HALF_SIZE, VIEW_CUBE_CORNER_CUT_SIZE)
+  const faceHitGeometry = createViewCubeFaceGeometry(VIEW_CUBE_BODY_HALF_SIZE, VIEW_CUBE_CORNER_CUT_SIZE)
   const faceLabelGeometry = new THREE.PlaneGeometry(1.08, 0.54)
   const faceHitMaterial = new THREE.MeshBasicMaterial({
     transparent: true,
@@ -1136,8 +1172,10 @@ function createViewCubeScene(): ViewCubeSceneState {
 
   for (const faceTarget of VIEW_CUBE_FACE_TARGETS) {
     const faceNormal = new THREE.Vector3(...faceTarget.position).normalize()
+    const faceSurfacePosition = faceNormal.clone().multiplyScalar(VIEW_CUBE_BODY_HALF_SIZE)
+    const faceControlPosition = faceNormal.clone().multiplyScalar(VIEW_CUBE_BODY_HALF_SIZE + VIEW_CUBE_SURFACE_OFFSET)
     const fill = new THREE.Mesh(faceFillGeometry, faceFillMaterial)
-    fill.position.copy(faceNormal.clone().multiplyScalar(VIEW_CUBE_FACE_FILL_OFFSET))
+    fill.position.copy(faceSurfacePosition)
     applyViewCubeRotation(fill, faceTarget.rotation)
     cubeGroup.add(fill)
 
@@ -1147,13 +1185,12 @@ function createViewCubeScene(): ViewCubeSceneState {
       opacity: 0.5,
     })
     const outline = new THREE.LineLoop(faceOutlineGeometry, outlineMaterial)
-    outline.position.fromArray(faceTarget.position)
+    outline.position.copy(faceControlPosition)
     applyViewCubeRotation(outline, faceTarget.rotation)
     cubeGroup.add(outline)
 
     const label = createViewCubeLabelMesh(faceTarget.label, faceLabelGeometry)
-    label.mesh.position.fromArray(faceTarget.position)
-    label.mesh.position.add(faceNormal.clone().multiplyScalar(0.02))
+    label.mesh.position.copy(faceNormal.clone().multiplyScalar(VIEW_CUBE_BODY_HALF_SIZE + VIEW_CUBE_LABEL_OFFSET))
     label.mesh.quaternion.copy(
       createViewCubePlaneQuaternion(
         faceNormal,
@@ -1163,13 +1200,14 @@ function createViewCubeScene(): ViewCubeSceneState {
     cubeGroup.add(label.mesh)
 
     const hitTarget = new THREE.Mesh(faceHitGeometry, faceHitMaterial)
-    hitTarget.position.fromArray(faceTarget.position)
+    hitTarget.position.copy(faceControlPosition)
     applyViewCubeRotation(hitTarget, faceTarget.rotation)
     hitTarget.userData.presetId = faceTarget.presetId
     cubeGroup.add(hitTarget)
     interactiveObjects.push(hitTarget)
 
     faceVisuals.push({
+      presetId: faceTarget.presetId,
       normal: faceNormal,
       outlineMaterial,
       labelMaterial: label.material,
@@ -1177,19 +1215,8 @@ function createViewCubeScene(): ViewCubeSceneState {
     })
   }
 
-  const cornerFaceGeometry = createViewCubeCornerFaceGeometry(VIEW_CUBE_CORNER_FACE_SIZE)
-  const cornerFaceOutlineGeometry = createViewCubeCornerFaceOutlineGeometry(VIEW_CUBE_CORNER_FACE_SIZE)
-  const cornerHitGeometry = createViewCubeCornerFaceGeometry(VIEW_CUBE_CORNER_HIT_SIZE)
   const cornerFaceMaterial = new THREE.MeshBasicMaterial({
-    color: 0x8db7ff,
-    transparent: true,
-    opacity: 0.1,
-    depthWrite: false,
-  })
-  const cornerFaceOutlineMaterial = new THREE.LineBasicMaterial({
-    color: 0xbfd7ff,
-    transparent: true,
-    opacity: 0.74,
+    color: 0x314255,
   })
   const cornerHitMaterial = new THREE.MeshBasicMaterial({
     transparent: true,
@@ -1198,28 +1225,44 @@ function createViewCubeScene(): ViewCubeSceneState {
   })
 
   for (const cornerTarget of VIEW_CUBE_CORNER_TARGETS) {
-    const cornerNormal = new THREE.Vector3(...cornerTarget.position).normalize()
-    const cornerQuaternion = createViewCubePlaneQuaternion(
-      cornerNormal,
-      resolveViewCubePlaneUp(cornerNormal),
+    const cornerDirection = new THREE.Vector3(
+      Math.sign(cornerTarget.position[0]),
+      Math.sign(cornerTarget.position[1]),
+      Math.sign(cornerTarget.position[2]),
+    )
+    const cornerFaceGeometry = createViewCubeCornerFaceGeometry(cornerDirection, 0)
+    const cornerFaceOutlineGeometry = createViewCubeCornerFaceOutlineGeometry(
+      cornerDirection,
+      VIEW_CUBE_SURFACE_OFFSET,
+    )
+    const cornerHitGeometry = createViewCubeCornerFaceGeometry(
+      cornerDirection,
+      VIEW_CUBE_SURFACE_OFFSET,
     )
 
     const cornerFace = new THREE.Mesh(cornerFaceGeometry, cornerFaceMaterial)
-    cornerFace.position.fromArray(cornerTarget.position)
-    cornerFace.quaternion.copy(cornerQuaternion)
     cubeGroup.add(cornerFace)
 
+    const cornerFaceOutlineMaterial = new THREE.LineBasicMaterial({
+      color: 0x8db7ff,
+      transparent: true,
+      opacity: 0.4,
+    })
     const cornerOutline = new THREE.LineLoop(cornerFaceOutlineGeometry, cornerFaceOutlineMaterial)
-    cornerOutline.position.fromArray(cornerTarget.position)
-    cornerOutline.quaternion.copy(cornerQuaternion)
     cubeGroup.add(cornerOutline)
 
     const hitTarget = new THREE.Mesh(cornerHitGeometry, cornerHitMaterial)
-    hitTarget.position.fromArray(cornerTarget.position)
-    hitTarget.quaternion.copy(cornerQuaternion)
     hitTarget.userData.presetId = cornerTarget.presetId
     cubeGroup.add(hitTarget)
     interactiveObjects.push(hitTarget)
+
+    cornerVisuals.push({
+      presetId: cornerTarget.presetId,
+      outlineMaterial: cornerFaceOutlineMaterial,
+      faceGeometry: cornerFaceGeometry,
+      outlineGeometry: cornerFaceOutlineGeometry,
+      hitGeometry: cornerHitGeometry,
+    })
   }
 
   return {
@@ -1227,39 +1270,63 @@ function createViewCubeScene(): ViewCubeSceneState {
     camera,
     interactiveObjects,
     faceVisuals,
+    cornerVisuals,
     dispose: () => {
-      edgeGeometry.dispose()
-      edgeMaterial.dispose()
       faceFillGeometry.dispose()
       faceFillMaterial.dispose()
       faceOutlineGeometry.dispose()
       faceHitGeometry.dispose()
       faceLabelGeometry.dispose()
       faceHitMaterial.dispose()
-      cornerFaceGeometry.dispose()
-      cornerFaceOutlineGeometry.dispose()
       cornerFaceMaterial.dispose()
-      cornerFaceOutlineMaterial.dispose()
-      cornerHitGeometry.dispose()
       cornerHitMaterial.dispose()
       faceVisuals.forEach((faceVisual) => {
         faceVisual.outlineMaterial.dispose()
         faceVisual.labelMaterial.dispose()
         faceVisual.labelTexture.dispose()
       })
+      cornerVisuals.forEach((cornerVisual) => {
+        cornerVisual.outlineMaterial.dispose()
+        cornerVisual.faceGeometry.dispose()
+        cornerVisual.outlineGeometry.dispose()
+        cornerVisual.hitGeometry.dispose()
+      })
     },
   }
 }
 
-function createViewCubeFaceOutlineGeometry(size: number) {
-  const halfSize = size / 2
+function createViewCubeFaceGeometry(halfSize: number, cornerCutSize: number) {
+  const geometry = new THREE.BufferGeometry()
+  const points = createViewCubeFacePoints(halfSize, cornerCutSize)
 
-  return new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-halfSize, -halfSize, 0),
-    new THREE.Vector3(halfSize, -halfSize, 0),
-    new THREE.Vector3(halfSize, halfSize, 0),
-    new THREE.Vector3(-halfSize, halfSize, 0),
+  geometry.setFromPoints(points)
+  geometry.setIndex([
+    0, 1, 2,
+    0, 2, 3,
+    0, 3, 4,
+    0, 4, 5,
+    0, 5, 6,
+    0, 6, 7,
   ])
+
+  return geometry
+}
+
+function createViewCubeFaceOutlineGeometry(halfSize: number, cornerCutSize: number) {
+  return new THREE.BufferGeometry().setFromPoints(createViewCubeFacePoints(halfSize, cornerCutSize))
+}
+
+function createViewCubeFacePoints(halfSize: number, cornerCutSize: number) {
+  return [
+    new THREE.Vector3(-halfSize + cornerCutSize, -halfSize, 0),
+    new THREE.Vector3(halfSize - cornerCutSize, -halfSize, 0),
+    new THREE.Vector3(halfSize, -halfSize + cornerCutSize, 0),
+    new THREE.Vector3(halfSize, halfSize - cornerCutSize, 0),
+    new THREE.Vector3(halfSize - cornerCutSize, halfSize, 0),
+    new THREE.Vector3(-halfSize + cornerCutSize, halfSize, 0),
+    new THREE.Vector3(-halfSize, halfSize - cornerCutSize, 0),
+    new THREE.Vector3(-halfSize, -halfSize + cornerCutSize, 0),
+  ]
 }
 
 function applyViewCubeRotation(
@@ -1269,33 +1336,37 @@ function applyViewCubeRotation(
   object.rotation.set(rotation[0], rotation[1], rotation[2])
 }
 
-function createViewCubeCornerFaceGeometry(size: number) {
-  const height = size * Math.sqrt(3) * 0.5
-  const halfBase = size / 2
+function createViewCubeCornerFaceGeometry(cornerDirection: THREE.Vector3, surfaceOffset: number) {
   const geometry = new THREE.BufferGeometry()
+  const points = createViewCubeCornerFacePoints(cornerDirection, surfaceOffset)
 
-  geometry.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute([
-      0, height * (2 / 3), 0,
-      -halfBase, -height / 3, 0,
-      halfBase, -height / 3, 0,
-    ], 3),
-  )
+  geometry.setFromPoints(points)
   geometry.setIndex([0, 1, 2])
 
   return geometry
 }
 
-function createViewCubeCornerFaceOutlineGeometry(size: number) {
-  const height = size * Math.sqrt(3) * 0.5
-  const halfBase = size / 2
+function createViewCubeCornerFaceOutlineGeometry(cornerDirection: THREE.Vector3, surfaceOffset: number) {
+  return new THREE.BufferGeometry().setFromPoints(
+    createViewCubeCornerFacePoints(cornerDirection, surfaceOffset),
+  )
+}
 
-  return new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, height * (2 / 3), 0),
-    new THREE.Vector3(-halfBase, -height / 3, 0),
-    new THREE.Vector3(halfBase, -height / 3, 0),
-  ])
+function createViewCubeCornerFacePoints(cornerDirection: THREE.Vector3, surfaceOffset: number) {
+  const x = Math.sign(cornerDirection.x)
+  const y = Math.sign(cornerDirection.y)
+  const z = Math.sign(cornerDirection.z)
+  const normalOffset = new THREE.Vector3(x, y, z).normalize().multiplyScalar(surfaceOffset)
+  const halfSize = VIEW_CUBE_BODY_HALF_SIZE
+  const cutSize = VIEW_CUBE_CORNER_CUT_SIZE
+
+  const points = [
+    new THREE.Vector3(x * (halfSize - cutSize), y * halfSize, z * halfSize).add(normalOffset),
+    new THREE.Vector3(x * halfSize, y * (halfSize - cutSize), z * halfSize).add(normalOffset),
+    new THREE.Vector3(x * halfSize, y * halfSize, z * (halfSize - cutSize)).add(normalOffset),
+  ]
+
+  return x * y * z > 0 ? points : [points[0]!, points[2]!, points[1]!]
 }
 
 function createViewCubeLabelMesh(label: string, geometry: THREE.PlaneGeometry) {
@@ -1373,18 +1444,32 @@ function resolveViewCubePlaneUp(normal: THREE.Vector3) {
     .normalize()
 }
 
-function updateViewCubeFaceVisibility(
-  faceVisuals: ViewCubeFaceVisual[],
-  camera: THREE.PerspectiveCamera,
+function updateViewCubeVisibility(
+  viewCubeScene: ViewCubeSceneState,
+  hoveredPresetId: ViewNavigationPresetId | null,
 ) {
-  const cameraDirection = camera.position.clone().normalize()
+  const cameraDirection = viewCubeScene.camera.position.clone().normalize()
 
-  faceVisuals.forEach((faceVisual) => {
+  viewCubeScene.faceVisuals.forEach((faceVisual) => {
     const facingAlignment = faceVisual.normal.dot(cameraDirection)
     const facingForward = facingAlignment > 0.12
+    const isHovered = faceVisual.presetId === hoveredPresetId
+    let outlineOpacity = 0.16
 
-    faceVisual.outlineMaterial.opacity = facingForward ? 0.58 : 0.16
+    if (facingForward) {
+      outlineOpacity = 0.58
+    }
+
+    if (isHovered) {
+      outlineOpacity = 1
+    }
+
+    faceVisual.outlineMaterial.opacity = outlineOpacity
     faceVisual.labelMaterial.opacity = facingForward ? 1 : 0
+  })
+
+  viewCubeScene.cornerVisuals.forEach((cornerVisual) => {
+    cornerVisual.outlineMaterial.opacity = cornerVisual.presetId === hoveredPresetId ? 1 : 0.4
   })
 }
 
