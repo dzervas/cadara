@@ -47,6 +47,50 @@ The system SHALL define loop, ring, and derived region extraction as sketch-doma
 - **WHEN** a modeling adapter requests derived regions for a solved sketch
 - **THEN** it consumes region extraction from the sketch-domain subsystem instead of reimplementing ring traversal inside adapter code
 
+### Requirement: Region extraction SHALL use even-parity nesting to distinguish regions from holes
+The system SHALL classify extracted rings as regions or holes based on topological nesting depth so that outer boundaries, holes, and islands are handled correctly.
+
+#### Scenario: Outer ring contains an inner ring
+- **WHEN** a solved sketch produces a closed outer ring that fully contains a closed inner ring
+- **THEN** the outer ring at even nesting depth is classified as a region and the inner ring at odd nesting depth is classified as a hole
+
+#### Scenario: Island inside a hole
+- **WHEN** a solved sketch produces a ring nested inside a hole (depth 2)
+- **THEN** that ring is classified as an independent region at even nesting depth
+
+### Requirement: Region extraction SHALL reject self-intersecting rings
+The system SHALL validate that candidate rings do not self-intersect and SHALL report a diagnostic for rings that fail validation, except for primitive closed curves known to be valid.
+
+#### Scenario: Self-intersecting ring is rejected
+- **WHEN** a candidate ring derived from solved sketch geometry contains self-intersecting segments
+- **THEN** region extraction rejects the ring, does not include it in derived regions, and emits a `profile-invalid-ring` diagnostic
+
+#### Scenario: Closed primitive curve bypasses self-intersection check
+- **WHEN** a candidate ring is formed by a single closed primitive curve such as a circle or ellipse
+- **THEN** region extraction skips the self-intersection check for that ring
+
+### Requirement: Region extraction SHALL emit diagnostics for degenerate and unused segments
+The system SHALL report machine-readable diagnostics for segments that are too short, open-ended, or otherwise cannot participate in valid ring formation.
+
+#### Scenario: Degenerate segment is reported
+- **WHEN** a solved sketch segment has near-zero length
+- **THEN** region extraction emits a `profile-degenerate-segment` diagnostic and excludes the segment from ring formation
+
+#### Scenario: Open segment is reported
+- **WHEN** a solved sketch segment endpoint does not connect to any other segment endpoint within tolerance
+- **THEN** region extraction emits a `profile-open-segment` diagnostic for that endpoint
+
+### Requirement: Region IDs SHALL be content-stable across solve iterations
+The system SHALL derive region identifiers from the geometric content of region loops so that region identity is stable across re-solves that do not change the topological structure.
+
+#### Scenario: Unchanged geometry preserves region ID
+- **WHEN** a sketch is re-solved and the derived region loops contain the same geometric content
+- **THEN** the region IDs produced by extraction match the IDs from the previous solve
+
+#### Scenario: Changed geometry produces a new region ID
+- **WHEN** a sketch edit changes the geometric content of a region loop
+- **THEN** the region extraction produces a different region ID for the changed loop
+
 ### Requirement: Sketch contract SHALL expose multiple deterministic solve strategies
 The system SHALL support multiple sketch-domain solve strategies for the same authored constraint system so direct tests can verify equivalent behavior across supported iterative methods.
 

@@ -38,6 +38,17 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     return end >= 0 ? markup.slice(start, end) : markup.slice(start)
   }
 
+  function getDropdownTriggerMarkup(markup: string, toolId: string) {
+    const triggerIndex = markup.indexOf(`data-tool-dropdown-trigger="${toolId}"`)
+    assert(triggerIndex >= 0, `Expected ${toolId} dropdown trigger markup to exist.`)
+
+    const start = markup.lastIndexOf('<button', triggerIndex)
+    assert(start >= 0, `Expected ${toolId} dropdown trigger button markup to exist.`)
+
+    const end = markup.indexOf('</button>', triggerIndex)
+    return end >= 0 ? markup.slice(start, end) : markup.slice(start)
+  }
+
   const toolbarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <EditorContext.Provider
@@ -167,6 +178,10 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
       sketchToolbarMarkup.includes('data-tool-id="fillType"') &&
       sketchToolbarMarkup.includes('data-tool-id="strokeOptions"'),
     'Sketch toolbar should include the dedicated SVG style subsection tools.',
+  )
+  assert(
+    !getDropdownTriggerMarkup(sketchToolbarMarkup, 'line').includes('border-left'),
+    'Sketch dropdown tools should not render a divider between the tool icon and dropdown affordance.',
   )
   assert(
     getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"') &&

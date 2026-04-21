@@ -140,6 +140,34 @@ The workbench viewport SHALL clear the current selection when the user primary-c
 - **WHEN** the user primary-clicks a selectable target inside the viewport
 - **THEN** the viewport routes the click through the existing target selection behavior instead of treating it as empty space
 
+### Requirement: Active sketch editing SHALL hide snapshot renderables for the edited sketch
+The viewport SHALL hide all committed document snapshot renderables (regions, edges, and points) belonging to the actively edited sketch so that only live sketch-session-derived geometry is visible during editing.
+
+#### Scenario: Snapshot regions are hidden during editing
+- **WHEN** the user is actively editing a sketch that has committed regions in the document snapshot
+- **THEN** the viewport omits those committed region renderables from the document layer
+- **AND** only live sketch-session-derived region geometry is displayed
+
+#### Scenario: Snapshot edges and points are hidden during editing
+- **WHEN** the user is actively editing a sketch that has committed edges and points in the document snapshot
+- **THEN** the viewport omits those committed sketch entity and sketch point renderables from the document layer
+
+#### Scenario: Non-edited sketch renderables remain visible
+- **WHEN** the document snapshot contains renderables for sketches that are not actively being edited
+- **THEN** those renderables remain visible in the document layer
+
+### Requirement: Live sketch regions SHALL be re-derived during geometry editing
+The viewport SHALL display sketch regions derived from the current sketch definition during active editing, including during drag operations, so that region boundaries update in real time.
+
+#### Scenario: Region updates during drag
+- **WHEN** the user drags sketch geometry and the constraint solver produces an updated solution
+- **THEN** the viewport displays regions derived from the updated solved sketch geometry
+- **AND** the solver result from the drag operation is reused for region derivation without re-solving
+
+#### Scenario: Region updates after entity deletion
+- **WHEN** the user deletes sketch geometry while editing
+- **THEN** the viewport displays regions derived from the updated sketch definition without stale region artifacts
+
 ### Requirement: Transient sketch tool geometry SHALL stay separate from accepted sketch geometry
 The viewport SHALL render transient active-tool sketch geometry from explicit staged tool state and SHALL render accepted sketch geometry from the active sketch definition.
 

@@ -8,18 +8,12 @@ import type {
   CommitSketchRequest,
   CreateFeatureRequest,
 } from '../../src/contracts/modeling/schema'
+import {
+  deriveSketchRegionsCore,
+  solveSketchDefinitionCore,
+} from '../../src/contracts/sketch'
 import { SKETCH_SCHEMA_VERSION } from '../../src/contracts/sketch/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '../../src/contracts/shared/versioning'
-
-export const FEATURE_FIXTURE = {
-  profile: 'sketch_primary.region_primary-outer',
-  body: 'body_feature_extrude-1',
-} as const
-
-export const SECONDARY_EXTRUDE_FIXTURE = {
-  profile: 'sketch_2.region_2-outer',
-  body: 'body_feature_extrude-2',
-} as const
 
 const DOCUMENT_ID = 'doc_workspace' as const
 const BASE_REVISION_ID = 'rev_fixture' as const
@@ -180,6 +174,60 @@ function createRectangleSketchDefinition(
   }
 }
 
+function deriveFixtureRegionId(
+  sketchId: `sketch_${string}`,
+  idPrefix: `${number}`,
+  bounds: RectangleBounds,
+) {
+  const definition = createRectangleSketchDefinition(sketchId, idPrefix, bounds)
+  const solved = solveSketchDefinitionCore({
+    definition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    partialSolvePolicy: 'bestEffort',
+  })
+  const region = deriveSketchRegionsCore({
+    documentId: DOCUMENT_ID,
+    revisionId: BASE_REVISION_ID,
+    sketchId,
+    definition,
+    solvedSnapshot: solved.solvedSnapshot,
+  }).regions[0]
+
+  if (!region) {
+    throw new Error(`Fixture sketch ${sketchId} did not produce a profile region.`)
+  }
+
+  return region.regionId
+}
+
+const PRIMARY_PROFILE_REGION_ID = deriveFixtureRegionId(
+  'sketch_primary',
+  '1',
+  { minX: -15.5, minY: -5, maxX: -5, maxY: 4.5 },
+)
+
+const SECONDARY_PROFILE_REGION_ID = deriveFixtureRegionId(
+  'sketch_2',
+  '2',
+  { minX: -10.5, minY: -5, maxX: 0, maxY: 4.5 },
+)
+
+export const FEATURE_FIXTURE = {
+  profile: `sketch_primary.${PRIMARY_PROFILE_REGION_ID}`,
+  body: 'body_feature_extrude-1',
+  regionId: PRIMARY_PROFILE_REGION_ID,
+} as const
+
+export const SECONDARY_EXTRUDE_FIXTURE = {
+  profile: `sketch_2.${SECONDARY_PROFILE_REGION_ID}`,
+  body: 'body_feature_extrude-2',
+  regionId: SECONDARY_PROFILE_REGION_ID,
+} as const
+
 function createCommitSketchRequest(
   sketchId: `sketch_${string}`,
   label: string,
@@ -260,7 +308,7 @@ export function createBaseExtrudeOperationHistory(): ModelingOperationHistoryPay
     entries: [
       createCommitSketchHistoryEntry(sketchRequest, 'sketch_primary'),
       createCreateFeatureHistoryEntry(
-        createExtrudeFeatureRequest('sketch_primary', 'region_primary-outer'),
+        createExtrudeFeatureRequest('sketch_primary', FEATURE_FIXTURE.regionId),
       ),
     ],
   }
@@ -465,11 +513,11 @@ export function createTwoExtrudeBodiesOperationHistory(): ModelingOperationHisto
     entries: [
       createCommitSketchHistoryEntry(firstSketchRequest, 'sketch_primary'),
       createCreateFeatureHistoryEntry(
-        createExtrudeFeatureRequest('sketch_primary', 'region_primary-outer'),
+        createExtrudeFeatureRequest('sketch_primary', FEATURE_FIXTURE.regionId),
       ),
       createCommitSketchHistoryEntry(secondSketchRequest, 'sketch_2'),
       createCreateFeatureHistoryEntry(
-        createExtrudeFeatureRequest('sketch_2', 'region_2-outer'),
+        createExtrudeFeatureRequest('sketch_2', SECONDARY_EXTRUDE_FIXTURE.regionId),
       ),
     ],
   }

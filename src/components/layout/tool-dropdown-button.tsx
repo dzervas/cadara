@@ -136,7 +136,6 @@ export function ToolDropdownButton({
               data-disabled={disabled || undefined}
               className="flex items-center px-1.5"
               style={{
-                borderLeft: `1px solid ${active ? 'var(--workbench-shell-accent)' : 'var(--workbench-shell-border)'}`,
                 color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text-muted)',
               }}
             >

@@ -7,6 +7,7 @@ import {
   createRectangleProfileOperationHistory,
   createTwoExtrudeBodiesOperationHistory,
   FEATURE_FIXTURE,
+  SECONDARY_EXTRUDE_FIXTURE,
 } from './modeling-fixtures'
 
 export { FEATURE_FIXTURE } from './modeling-fixtures'
@@ -66,7 +67,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     return {
       firstProfileTarget: FEATURE_FIXTURE.profile,
-      secondProfileTarget: 'sketch_2.region_2-outer',
+      secondProfileTarget: SECONDARY_EXTRUDE_FIXTURE.profile,
       targetBody: 'body_feature_extrude-1',
       toolBody: 'body_feature_extrude-2',
     }

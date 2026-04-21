@@ -125,11 +125,13 @@ The system SHALL render accepted editable sketch geometry from the active sketch
 - **WHEN** a user edits existing sketch geometry and the active sketch definition changes
 - **THEN** the viewport displays the geometry derived from the updated sketch definition
 - **AND** stale accepted geometry from before the edit is not displayed
+- **AND** committed snapshot renderables (regions, edges, and points) for the active sketch are hidden from the document layer
 
 #### Scenario: Deleted entity is removed from active sketch display
 - **WHEN** a user deletes selected editable local sketch geometry while a sketch remains active
 - **THEN** the deleted geometry is absent from the active sketch definition-derived display entities
 - **AND** the deleted geometry is not rendered as a stale accepted sketch entity
+- **AND** committed snapshot regions that depended on the deleted geometry are not visible as stale artifacts
 
 ### Requirement: Direct sketch drag updates SHALL be coalesced to animation frames
 The system SHALL coalesce direct sketch geometry drag move events so constraint-backed draft updates run no more than once per animation frame while preserving the latest pointer position for the frame.
