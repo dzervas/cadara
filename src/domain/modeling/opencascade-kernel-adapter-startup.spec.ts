@@ -1,13 +1,15 @@
 import { test } from 'bun:test'
 
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import { CONTRACT_VERSION, MESH_IMPORT_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
+import { DEFAULT_MESH_RECONSTRUCTION_SETTINGS } from '@/contracts/modeling/mesh-reconstruction'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
+import type { FeatureId } from '@/contracts/shared/ids'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import type { OccWorkerSnapshotClient } from '@/domain/modeling/occ/worker-client'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
@@ -67,6 +69,7 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
 
   const directInitialSnapshot = response.snapshot
   let workerPreloads = 0
+  let workerRebuilds = 0
   let workerSnapshots = 0
   let workerDocument: AuthoredModelDocument | null = null
   let workerSnapshotAssets: readonly GeometryAssetBlobInput[] = []
@@ -74,7 +77,9 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
     async preload() {
       workerPreloads += 1
     },
-    async rebuildDocument() {},
+    async rebuildDocument() {
+      workerRebuilds += 1
+    },
     async buildWorkspaceSnapshot(document, _lodTierId, assets = []) {
       workerSnapshots += 1
       workerDocument = document
@@ -127,4 +132,73 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
   })
 
   assert(workerSnapshotAssets[0]?.bytes.byteLength === asset.bytes.byteLength, 'Worker-backed snapshots should keep restored asset bytes available.')
+
+  const facetedFeatureId = 'feature_meshImport_worker_fallback' as FeatureId
+  const facetedDocument = structuredClone(restoredDocument)
+  const facetedReconstruction = {
+    algorithmId: 'test',
+    algorithmVersion: '1',
+    settings: DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
+    sourceHash: asset.asset.hash,
+    resultClassification: 'facetedFallback' as const,
+    qualityMetrics: {
+      triangleCount: 6_224,
+      vertexCount: 3_114,
+      openEdgeCount: 0,
+      degenerateTriangleCount: 0,
+      planarRegionCount: 209,
+      cylindricalRegionCount: 0,
+      analyticConfidence: 0.1,
+      maxPlanarDeviation: 0,
+      maxCylindricalDeviation: null,
+    },
+    surfaceSummary: {
+      planarRegions: 209,
+      cylindricalRegions: 0,
+    },
+  }
+  facetedDocument.features.push({
+    featureId: facetedFeatureId,
+    label: 'Imported faceted mesh',
+    definition: {
+      kind: 'meshImport',
+      featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        assetId: asset.asset.assetId,
+        source: {
+          originalFileName: 'keyboard.stl',
+          sourceFormat: 'stl',
+          sourceHash: asset.asset.hash,
+          sourceStored: false,
+        },
+        resolvedSettings: {
+          unit: {
+            source: 'user',
+            resolvedUnit: 'millimeter',
+            scaleToDocument: 1,
+          },
+          orientation: {
+            upAxis: 'z',
+            handedness: 'rightHanded',
+          },
+          placement: {
+            translation: [0, 0, 0] as const,
+            rotationEulerRadians: [0, 0, 0] as const,
+            scale: 1,
+          },
+        },
+        reconstruction: facetedReconstruction,
+        label: 'Imported faceted mesh',
+      },
+    },
+  })
+  facetedDocument.featureOrder.push(facetedFeatureId)
+
+  const rebuildsBeforeFacetedValidation = workerRebuilds
+  await workerBackedAdapter.validateAuthoredModelDocument(facetedDocument, [], assetResolver)
+
+  assert(
+    workerRebuilds === rebuildsBeforeFacetedValidation,
+    'Worker-backed faceted fallback validation should not synchronously rebuild the raw triangle mesh.',
+  )
 })

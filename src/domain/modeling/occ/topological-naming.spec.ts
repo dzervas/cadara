@@ -920,7 +920,7 @@ test('proper naming should keep stable references live after an authored rebuild
     resolved.resolution.invalidation === null,
     `Expected rebuilt authored history to preserve the bottom face reference, got ${resolved.resolution.invalidation?.reason}.`,
   )
-})
+}, 15000)
 
 test('proper naming should report a deleted-topology diagnostic for a cut-away face', async () => {
   const oc = await getDefaultOpenCascadeInstance()

@@ -17,12 +17,13 @@ The system SHALL import STL and 3MF mesh files by transiently parsing the source
 - **AND** the saved document does not contain original STL bytes, original 3MF bytes, raw triangle arrays, or source mesh render records
 
 ### Requirement: Mesh imports SHALL bake durable geometry before commit
-The system SHALL commit a mesh import only after the initial basic conversion path produces a valid internal geometry asset.
+The system SHALL commit a mesh import only after the initial basic conversion path produces a valid internal geometry asset. After conversion, the kernel SHALL apply bounded surface domain unification to recover analytical faces before tracking the solid when the import is eligible for same-domain merging.
 
 #### Scenario: Conversion succeeds
 - **WHEN** transient mesh conversion produces accepted baked geometry
 - **THEN** the authored document records a mesh import feature referencing the baked asset
 - **AND** restore uses the baked asset rather than the original mesh source
+- **AND** eligible restored solids undergo bounded surface domain unification to merge tessellation triangles into analytical faces
 
 #### Scenario: Conversion fails
 - **WHEN** transient basic mesh conversion cannot produce acceptable durable geometry
@@ -44,3 +45,4 @@ The mesh import flow SHALL show reconstruction quality and fallback classificati
 - **WHEN** mesh conversion can only produce faceted baked geometry
 - **THEN** the user sees a warning that the saved result will be faceted and the source mesh will not be retained
 - **AND** the user must accept the result before the import feature is committed
+

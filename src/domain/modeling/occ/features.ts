@@ -30,6 +30,13 @@ import {
 } from '@/contracts/modeling/step-import'
 import type { MeshImportDiagnosticCode, MeshImportFeatureParameters } from '@/contracts/modeling/mesh-import'
 import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
+import {
+  DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
+  type MeshReconstructionProvenance,
+  type MeshReconstructionSettings,
+  type MeshUnificationDiagnostics,
+  type MeshUnificationSurfaceTypeCounts,
+} from '@/contracts/modeling/mesh-reconstruction'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { RegionRecord } from '@/contracts/sketch/schema'
 import type {
@@ -44,7 +51,7 @@ import type { DurableRef } from '@/contracts/shared/references'
 import { getAuthoredLiteralValue, type MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 import { getAdvancedParticipant } from '@/contracts/modeling/advanced-solid'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
-import { RENDER_EXPORT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import { MESH_IMPORT_FEATURE_SCHEMA_VERSION, RENDER_EXPORT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import {
   getConstructionBackedRevolveAxisRejectionReason,
   OCC_CONTRACT_GAP_CODES,
@@ -78,6 +85,7 @@ import {
   bakedMeshGeometryToAsciiStl,
   parseBakedMeshGeometry,
 } from '@/domain/modeling/baked-mesh-geometry'
+import type { MeshPoint } from '@/domain/modeling/mesh-parser'
 
 export interface OccFeatureExecutionContext {
   oc: OpenCascadeInstance
@@ -96,6 +104,8 @@ export interface OccFeatureExecutionResult {
   bodies: OccTrackedBody[]
   constructions: ConstructionSnapshotRecord[]
   constructionPlanes: Map<ConstructionId, SketchPlaneDefinition>
+  featureDefinition?: FeatureDefinition
+  assetRecords?: GeometryAssetRecord[]
   producedTargets: DurableRef[]
   entities: SnapshotEntityRecord[]
   renderRecords: RenderableEntityRecord[]
@@ -940,6 +950,286 @@ function countUnsupportedStepShapes(
   return childCount === 0 ? 1 : unsupportedCount
 }
 
+function createEmptyMeshSurfaceCounts(): MeshUnificationSurfaceTypeCounts {
+  return {
+    plane: 0,
+    cylinder: 0,
+    cone: 0,
+    sphere: 0,
+    torus: 0,
+  }
+}
+
+function getMeshSurfaceTypeKey(
+  oc: OpenCascadeInstance,
+  face: InstanceType<OpenCascadeInstance['TopoDS_Face']>,
+): keyof MeshUnificationSurfaceTypeCounts | null {
+  const surface = new oc.BRepAdaptor_Surface_2(face, true)
+  try {
+    const surfaceType = surface.GetType() as unknown as number
+    if (surfaceType === (oc.GeomAbs_SurfaceType.GeomAbs_Plane as unknown as number)) {
+      return 'plane'
+    }
+    if (surfaceType === (oc.GeomAbs_SurfaceType.GeomAbs_Cylinder as unknown as number)) {
+      return 'cylinder'
+    }
+    if (surfaceType === (oc.GeomAbs_SurfaceType.GeomAbs_Cone as unknown as number)) {
+      return 'cone'
+    }
+    if (surfaceType === (oc.GeomAbs_SurfaceType.GeomAbs_Sphere as unknown as number)) {
+      return 'sphere'
+    }
+    if (surfaceType === (oc.GeomAbs_SurfaceType.GeomAbs_Torus as unknown as number)) {
+      return 'torus'
+    }
+    return null
+  } finally {
+    surface.delete()
+  }
+}
+
+function summarizeMeshSolidFaces(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+) {
+  const faceMap = new oc.TopTools_IndexedMapOfShape_1()
+  const mergedSurfaceTypes = createEmptyMeshSurfaceCounts()
+  try {
+    oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE as never, faceMap)
+    for (let index = 1; index <= faceMap.Size(); index += 1) {
+      const face = oc.TopoDS.Face_1(faceMap.FindKey(index))
+      const surfaceType = getMeshSurfaceTypeKey(oc, face)
+      if (surfaceType) {
+        mergedSurfaceTypes[surfaceType] += 1
+      }
+    }
+
+    return {
+      faceCount: faceMap.Size(),
+      mergedSurfaceTypes,
+    }
+  } finally {
+    faceMap.delete()
+  }
+}
+
+type BakedMeshPayloadForOcc = {
+  vertices: readonly MeshPoint[]
+  indices: ReadonlyArray<readonly [number, number, number]>
+}
+
+const MESH_SAME_DOMAIN_UNIFICATION_TRIANGLE_LIMIT = 5_000
+
+function findAnalyticCylinderCandidate(
+  payload: BakedMeshPayloadForOcc,
+  tolerance: number,
+) {
+  let best: {
+    axis: 0 | 1 | 2
+    center: readonly [number, number]
+    minAxis: number
+    height: number
+    radius: number
+    sideTriangleCount: number
+  } | null = null
+
+  for (const axis of [0, 1, 2] as const) {
+    const radialAxes = [0, 1, 2].filter((index) => index !== axis) as [number, number]
+    const axisValues = payload.vertices.map((vertex) => vertex[axis])
+    const minAxis = Math.min(...axisValues)
+    const maxAxis = Math.max(...axisValues)
+    const height = maxAxis - minAxis
+    const sideTriangleIndexes: number[] = []
+    let minCapTriangleCount = 0
+    let maxCapTriangleCount = 0
+
+    for (const [triangleIndex, triangle] of payload.indices.entries()) {
+      const vertices = triangle.map((index) => payload.vertices[index]!)
+      const onMinCap = vertices.every((vertex) => Math.abs(vertex[axis] - minAxis) <= tolerance)
+      const onMaxCap = vertices.every((vertex) => Math.abs(vertex[axis] - maxAxis) <= tolerance)
+      if (onMinCap) {
+        minCapTriangleCount += 1
+      } else if (onMaxCap) {
+        maxCapTriangleCount += 1
+      } else {
+        sideTriangleIndexes.push(triangleIndex)
+      }
+    }
+
+    if (
+      height <= tolerance
+      || sideTriangleIndexes.length < 8
+      || minCapTriangleCount === 0
+      || maxCapTriangleCount === 0
+    ) {
+      continue
+    }
+
+    const sideVertices = uniqueMeshTriangleVertices(payload, sideTriangleIndexes)
+    const center = [
+      averageMeshValues(sideVertices.map((vertex) => vertex[radialAxes[0]])),
+      averageMeshValues(sideVertices.map((vertex) => vertex[radialAxes[1]])),
+    ] as const
+    const radii = sideVertices.map((vertex) =>
+      Math.hypot(vertex[radialAxes[0]] - center[0], vertex[radialAxes[1]] - center[1]),
+    )
+    const radius = averageMeshValues(radii)
+    const maxDeviation = Math.max(...radii.map((value) => Math.abs(value - radius)))
+    const angularBins = new Set(sideVertices.map((vertex) => {
+      const angle = Math.atan2(vertex[radialAxes[1]] - center[1], vertex[radialAxes[0]] - center[0])
+      return Math.round(angle / (Math.PI / 16))
+    }))
+
+    if (radius <= tolerance || maxDeviation > tolerance || angularBins.size < 8) {
+      continue
+    }
+
+    if (!best || sideTriangleIndexes.length > best.sideTriangleCount) {
+      best = {
+        axis,
+        center,
+        minAxis,
+        height,
+        radius,
+        sideTriangleCount: sideTriangleIndexes.length,
+      }
+    }
+  }
+
+  return best
+}
+
+function uniqueMeshTriangleVertices(payload: BakedMeshPayloadForOcc, triangleIndexes: readonly number[]) {
+  const vertexIndexes = new Set<number>()
+  for (const triangleIndex of triangleIndexes) {
+    for (const vertexIndex of payload.indices[triangleIndex]!) {
+      vertexIndexes.add(vertexIndex)
+    }
+  }
+  return [...vertexIndexes].map((index) => payload.vertices[index]!)
+}
+
+function averageMeshValues(values: readonly number[]) {
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1)
+}
+
+function analyticCylinderLocation(candidate: NonNullable<ReturnType<typeof findAnalyticCylinderCandidate>>): Vec3 {
+  switch (candidate.axis) {
+    case 0:
+      return [candidate.minAxis, candidate.center[0], candidate.center[1]]
+    case 1:
+      return [candidate.center[0], candidate.minAxis, candidate.center[1]]
+    case 2:
+      return [candidate.center[0], candidate.center[1], candidate.minAxis]
+  }
+}
+
+function analyticCylinderDirection(axis: 0 | 1 | 2): Vec3 {
+  switch (axis) {
+    case 0:
+      return [1, 0, 0]
+    case 1:
+      return [0, 1, 0]
+    case 2:
+      return [0, 0, 1]
+  }
+}
+
+function tryBuildAnalyticCylinderMeshSolid(
+  oc: OpenCascadeInstance,
+  payload: BakedMeshPayloadForOcc,
+  settings: MeshReconstructionSettings = DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
+) {
+  const tolerance = settings.unificationLinearTolerance ?? 0.01
+  const candidate = findAnalyticCylinderCandidate(payload, tolerance)
+  if (!candidate) {
+    return null
+  }
+
+  const axes = new oc.gp_Ax2_3(
+    toGpPnt(oc, analyticCylinderLocation(candidate)),
+    toGpDir(oc, analyticCylinderDirection(candidate.axis)),
+  )
+  const builder = new oc.BRepPrimAPI_MakeCylinder_3(axes, candidate.radius, candidate.height)
+  builder.Build(new oc.Message_ProgressRange_1())
+  const solid = builder.Solid()
+  const summary = summarizeMeshSolidFaces(oc, solid)
+
+  return {
+    solid,
+    diagnostics: {
+      preFaceCount: payload.indices.length,
+      postFaceCount: summary.faceCount,
+      mergedSurfaceTypes: summary.mergedSurfaceTypes,
+    } satisfies MeshUnificationDiagnostics,
+  }
+}
+
+function unifyMeshSolidFaces(
+  oc: OpenCascadeInstance,
+  solid: InstanceType<OpenCascadeInstance['TopoDS_Solid']>,
+  settings: MeshReconstructionSettings = DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
+) {
+  const preFaceCount = summarizeMeshSolidFaces(oc, solid).faceCount
+  const unifier = new oc.ShapeUpgrade_UnifySameDomain_2(solid, true, true, true)
+  unifier.AllowInternalEdges(false)
+  unifier.SetSafeInputMode(true)
+  unifier.SetLinearTolerance(settings.unificationLinearTolerance ?? 0.01)
+  unifier.SetAngularTolerance(settings.unificationAngularTolerance ?? 0.01)
+  unifier.Build()
+
+  const unifiedShape = unifier.Shape()
+  const unifiedSolids = extractSolidShapes(oc, unifiedShape)
+  unifier.delete()
+
+  if (unifiedSolids.length !== 1) {
+    throw createMeshImportErrorCode(
+      'mesh-import-conversion-failed',
+      `Baked mesh unification produced ${unifiedSolids.length} solids instead of one.`,
+    )
+  }
+
+  const unifiedSolid = unifiedSolids[0]!
+  const postSummary = summarizeMeshSolidFaces(oc, unifiedSolid)
+
+  return {
+    solid: unifiedSolid,
+    diagnostics: {
+      preFaceCount,
+      postFaceCount: postSummary.faceCount,
+      mergedSurfaceTypes: postSummary.mergedSurfaceTypes,
+    } satisfies MeshUnificationDiagnostics,
+  }
+}
+
+function summarizeMeshSolidWithoutSameDomainUnification(
+  oc: OpenCascadeInstance,
+  solid: InstanceType<OpenCascadeInstance['TopoDS_Solid']>,
+  sourceTriangleCount: number,
+) {
+  const summary = summarizeMeshSolidFaces(oc, solid)
+
+  return {
+    solid,
+    diagnostics: {
+      preFaceCount: sourceTriangleCount,
+      postFaceCount: summary.faceCount,
+      mergedSurfaceTypes: summary.mergedSurfaceTypes,
+    } satisfies MeshUnificationDiagnostics,
+  }
+}
+
+function shouldRunSameDomainMeshUnification(
+  payload: BakedMeshPayloadForOcc,
+  reconstruction?: MeshReconstructionProvenance,
+) {
+  if (reconstruction?.resultClassification === 'facetedFallback') {
+    return false
+  }
+
+  return payload.indices.length <= MESH_SAME_DOMAIN_UNIFICATION_TRIANGLE_LIMIT
+}
+
 function executeStepImportFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -1040,6 +1330,7 @@ function readBakedMeshImportSolid(
   context: OccFeatureExecutionContext,
   asset: GeometryAssetRecord,
   label: string,
+  reconstruction?: MeshReconstructionProvenance,
 ) {
   const bytes = context.assetBlobs.get(asset.hash)
   if (!bytes) {
@@ -1052,6 +1343,13 @@ function readBakedMeshImportSolid(
 
   try {
     const payload = parseBakedMeshGeometry(bytes)
+    const settings = reconstruction?.settings ?? DEFAULT_MESH_RECONSTRUCTION_SETTINGS
+    const shouldRunUnification = shouldRunSameDomainMeshUnification(payload, reconstruction)
+    const analyticCylinder = tryBuildAnalyticCylinderMeshSolid(oc, payload, settings)
+    if (analyticCylinder) {
+      return analyticCylinder
+    }
+
     oc.FS.writeFile(path, new TextEncoder().encode(bakedMeshGeometryToAsciiStl(payload, label)))
 
     if (!oc.StlAPI.Read(shape, path)) {
@@ -1060,7 +1358,9 @@ function readBakedMeshImportSolid(
 
     const solids = extractSolidShapes(oc, shape)
     if (solids.length === 1) {
-      return solids[0]!
+      return shouldRunUnification
+        ? unifyMeshSolidFaces(oc, solids[0]!, settings)
+        : summarizeMeshSolidWithoutSameDomainUnification(oc, solids[0]!, payload.indices.length)
     }
 
     if ((shape.ShapeType() as unknown as number) !== (oc.TopAbs_ShapeEnum.TopAbs_SHELL as unknown as number)) {
@@ -1072,7 +1372,10 @@ function readBakedMeshImportSolid(
       throw createMeshImportErrorCode('mesh-import-conversion-failed', `Baked mesh asset ${asset.assetId} could not be converted to a durable solid.`)
     }
 
-    return solidBuilder.Solid()
+    const solid = solidBuilder.Solid()
+    return shouldRunUnification
+      ? unifyMeshSolidFaces(oc, solid, settings)
+      : summarizeMeshSolidWithoutSameDomainUnification(oc, solid, payload.indices.length)
   } catch (error) {
     if (error instanceof Error && 'code' in error) {
       throw error
@@ -1082,6 +1385,41 @@ function readBakedMeshImportSolid(
     throw createMeshImportErrorCode('mesh-import-conversion-failed', message)
   } finally {
     removeTempImportPath(oc, path)
+  }
+}
+
+function withMeshUnificationDiagnostics(
+  reconstruction: MeshReconstructionProvenance | undefined,
+  diagnostics: MeshUnificationDiagnostics,
+) {
+  return reconstruction
+    ? {
+        ...reconstruction,
+        settings: {
+          ...reconstruction.settings,
+          unificationLinearTolerance: reconstruction.settings.unificationLinearTolerance ?? 0.01,
+          unificationAngularTolerance: reconstruction.settings.unificationAngularTolerance ?? 0.01,
+        },
+        unificationDiagnostics: diagnostics,
+      }
+    : undefined
+}
+
+function updateMeshImportAssetProvenance(
+  asset: GeometryAssetRecord,
+  diagnostics: MeshUnificationDiagnostics,
+) {
+  const reconstruction = withMeshUnificationDiagnostics(asset.provenance.reconstruction, diagnostics)
+  if (!reconstruction) {
+    return asset
+  }
+
+  return {
+    ...asset,
+    provenance: {
+      ...asset.provenance,
+      reconstruction,
+    },
   }
 }
 
@@ -1095,12 +1433,13 @@ function executeMeshImportFeature(
     throw createMeshImportErrorCode('mesh-import-missing-baked-asset', `Mesh import asset ${parameters.assetId} is not in the authored document manifest.`)
   }
 
-  const solid = readBakedMeshImportSolid(context, asset, parameters.label)
+  const restored = readBakedMeshImportSolid(context, asset, parameters.label, parameters.reconstruction)
+  const reconstruction = withMeshUnificationDiagnostics(parameters.reconstruction, restored.diagnostics)
   const body = trackNewSolidBody(context.oc, {
     bodyId: `body_${ownerFeatureId}` as BodyId,
     label: parameters.label,
     ownerFeatureId,
-    shape: solid,
+    shape: restored.solid,
     seedNaming: parameters.reconstruction?.resultClassification !== 'facetedFallback',
   })
 
@@ -1108,6 +1447,17 @@ function executeMeshImportFeature(
     bodies: [...context.bodies, body],
     constructions: [...context.constructions],
     constructionPlanes: new Map(context.constructionPlanes),
+    featureDefinition: reconstruction
+      ? {
+          kind: 'meshImport',
+          featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            ...parameters,
+            reconstruction,
+          },
+        }
+      : undefined,
+    assetRecords: [updateMeshImportAssetProvenance(asset, restored.diagnostics)],
     producedTargets: [{ kind: 'body', bodyId: body.bodyId }],
     entities: [],
     renderRecords: [],

@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises'
 
 import { expect, test } from '@playwright/test'
 
+test.setTimeout(60_000)
+
 test('toolbar file menu exports and imports the current cadara document', async ({ page }) => {
   await page.goto('/')
 

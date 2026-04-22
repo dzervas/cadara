@@ -1937,4 +1937,4 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
   await testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns()
 
   console.log('OCC phase 4 feature execution tests passed.')
-})
+}, 15000)

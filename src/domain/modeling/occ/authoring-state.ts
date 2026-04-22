@@ -3,6 +3,7 @@ import {
   createEmptyGeometryAssetManifest,
   type GeometryAssetHash,
   type GeometryAssetManifest,
+  type GeometryAssetRecord,
 } from '@/contracts/modeling/geometry-assets'
 import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
@@ -78,6 +79,21 @@ function applyBodyLabels(
     const label = bodyLabels.get(body.bodyId)
     return label ? { ...body, label } : body
   })
+}
+
+function mergeGeometryAssetRecords(
+  manifest: GeometryAssetManifest,
+  updates: readonly GeometryAssetRecord[] | undefined,
+): GeometryAssetManifest {
+  if (!updates || updates.length === 0) {
+    return manifest
+  }
+
+  const updatesById = new Map(updates.map((asset) => [asset.assetId, asset]))
+  return {
+    ...manifest,
+    records: manifest.records.map((asset) => updatesById.get(asset.assetId) ?? asset),
+  }
 }
 
 function createStandardConstructionState(
@@ -227,6 +243,7 @@ function applyFeatureResult(
     ...state.features,
     {
       ...feature,
+      definition: result.featureDefinition ?? feature.definition,
       label: feature.label ?? feature.featureId,
       producedTargets: [...result.producedTargets],
     },
@@ -245,6 +262,7 @@ function applyFeatureResult(
 
   return {
     ...state,
+    assets: mergeGeometryAssetRecords(state.assets, result.assetRecords),
     bodies,
     constructions: result.constructions,
     constructionPlanes: result.constructionPlanes,

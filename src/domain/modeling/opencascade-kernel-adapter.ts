@@ -150,6 +150,13 @@ interface WorkerRestoredAuthoredDocument {
   assets: readonly GeometryAssetBlobInput[]
 }
 
+function hasFacetedFallbackMeshImport(document: AuthoredModelDocument) {
+  return document.features.some((feature) =>
+    feature.definition.kind === 'meshImport'
+    && feature.definition.parameters.reconstruction?.resultClassification === 'facetedFallback',
+  )
+}
+
 const DEFAULT_SOLVER_TOLERANCES: SolverTolerancePolicy = {
   coincidence: OCC_KERNEL_SETTINGS.modelingTolerance,
   angleRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
@@ -1431,7 +1438,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     if (this.workerSnapshotClient) {
       const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
       const assets = createGeometryAssetBlobInputs(document, assetBlobs)
-      await this.workerSnapshotClient.rebuildDocument(document, assets)
+      if (!hasFacetedFallbackMeshImport(document)) {
+        await this.workerSnapshotClient.rebuildDocument(document, assets)
+      }
+
       this.runtimeState = null
       this.initializationPromise = null
       this.workerRestoredDocument = {

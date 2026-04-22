@@ -87,7 +87,7 @@ import { getNextDocumentHistoryCursor } from '@/domain/modeling/document-history
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 import { toGpPnt } from '@/domain/modeling/occ/geometry'
 import { createBakedMeshGeometryAsset } from '@/domain/modeling/baked-mesh-geometry'
-import type { MeshTriangle } from '@/domain/modeling/mesh-parser'
+import type { MeshPoint, MeshTriangle } from '@/domain/modeling/mesh-parser'
 import { createStepSolidKey } from '@/contracts/modeling/step-import'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
@@ -1178,6 +1178,29 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     ]
   }
 
+  function createCylinderMeshTriangles(segments = 16, radius = 1, height = 2): MeshTriangle[] {
+    const bottomCenter: MeshPoint = [0, 0, 0]
+    const topCenter: MeshPoint = [0, 0, height]
+    const bottom = Array.from({ length: segments }, (_, index) => {
+      const angle = (index / segments) * Math.PI * 2
+      return [Math.cos(angle) * radius, Math.sin(angle) * radius, 0] as MeshPoint
+    })
+    const top = bottom.map((point) => [point[0], point[1], height] as MeshPoint)
+    const triangles: MeshTriangle[] = []
+
+    for (let index = 0; index < segments; index += 1) {
+      const next = (index + 1) % segments
+      triangles.push(
+        [bottom[index]!, bottom[next]!, top[next]!],
+        [bottom[index]!, top[next]!, top[index]!],
+        [bottomCenter, bottom[index]!, bottom[next]!],
+        [topCenter, top[next]!, top[index]!],
+      )
+    }
+
+    return triangles
+  }
+
   async function createMeshImportDocumentFromTriangles(
     sourceDocument: AuthoredModelDocument,
     input: {
@@ -1516,13 +1539,49 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
 
     assert(importedBody, 'Mesh import should rebuild into a tracked baked body.')
     assert(importedBody.label === 'Imported baked cube', 'Baked mesh body should use the authored import label.')
-    assert(importedBody.topology.faceIds.length > 0, 'Baked mesh body should expose durable face topology.')
+    assert(importedBody.topology.faceIds.length === 6, `Baked cube mesh should unify to six selectable faces, got ${importedBody.topology.faceIds.length}.`)
     assert(importedBody.topology.edgeIds.length > 0, 'Baked mesh body should expose durable edge topology.')
     assert(importedBody.topology.vertexIds.length > 0, 'Baked mesh body should expose durable vertex topology.')
+    const restoredDocument = await adapter.exportAuthoredModelDocument('doc_workspace')
+    const restoredFeature = restoredDocument.features.find((feature) => feature.featureId === featureId)
+    const diagnostics = restoredFeature?.definition.kind === 'meshImport'
+      ? restoredFeature.definition.parameters.reconstruction?.unificationDiagnostics
+      : undefined
+    const assetDiagnostics = restoredDocument.assets.records.find((record) => record.assetId === imported.asset.assetId)
+      ?.provenance.reconstruction?.unificationDiagnostics
+
+    assert(diagnostics?.preFaceCount === 12, `Baked cube provenance should record 12 pre-unification faces, got ${diagnostics?.preFaceCount}.`)
+    assert(diagnostics.postFaceCount === 6, `Baked cube provenance should record 6 post-unification faces, got ${diagnostics.postFaceCount}.`)
+    assert(diagnostics.mergedSurfaceTypes.plane === 6, `Baked cube should record six planar faces, got ${diagnostics.mergedSurfaceTypes.plane}.`)
+    assert(assetDiagnostics?.postFaceCount === 6, 'Baked mesh asset provenance should record post-unification face count.')
     assert(
       snapshot.document.diagnostics.every((diagnostic) => diagnostic.code !== 'mesh-import-missing-baked-asset'),
       'Baked mesh restore should not require original STL source bytes.',
     )
+  }
+
+  async function testCylinderMeshImportRecordsUnifiedSurfaceDiagnostics() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_meshImport-cylinder' as FeatureId
+    const imported = await createMeshImportDocumentFromTriangles(sourceDocument, {
+      featureId,
+      label: 'Imported baked cylinder',
+      fileName: 'cylinder.stl',
+      triangles: createCylinderMeshTriangles(),
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const restoredDocument = await adapter.exportAuthoredModelDocument('doc_workspace')
+    const restoredFeature = restoredDocument.features.find((feature) => feature.featureId === featureId)
+    const diagnostics = restoredFeature?.definition.kind === 'meshImport'
+      ? restoredFeature.definition.parameters.reconstruction?.unificationDiagnostics
+      : undefined
+
+    assert(diagnostics, 'Cylinder mesh import should record unification diagnostics.')
+    assert(diagnostics.postFaceCount < diagnostics.preFaceCount, 'Cylinder mesh unification should reduce the imported face count.')
+    assert(diagnostics.mergedSurfaceTypes.plane >= 2, `Cylinder mesh diagnostics should include planar cap faces, got ${diagnostics.mergedSurfaceTypes.plane}.`)
+    assert(diagnostics.mergedSurfaceTypes.cylinder >= 1, `Cylinder mesh diagnostics should include a cylindrical face, got ${diagnostics.mergedSurfaceTypes.cylinder}.`)
   }
 
   async function testFacetedMeshImportUsesBakedAssetRenderMesh() {
@@ -1549,7 +1608,21 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     const meshRecords = snapshot.render.records.filter((record) =>
       record.ownerFeatureId === featureId && record.geometry.kind === 'mesh',
     )
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId === featureId)
 
+    assert(importedBody?.topology.faceIds.length === 4, 'Faceted fallback mesh imports should still produce durable face IDs.')
+    const resolved = importedBody
+      ? await adapter.resolveReference({
+          contractVersion: CONTRACT_VERSION,
+          documentId: 'doc_workspace',
+          target: {
+            kind: 'face',
+            bodyId: importedBody.bodyId,
+            faceId: importedBody.topology.faceIds[0]!,
+          },
+        })
+      : null
+    assert(resolved?.resolution.invalidation === null, 'Faceted fallback face IDs should resolve as durable topology refs.')
     assert(meshRecords.length === 1, 'Faceted mesh imports should render from one baked asset mesh record.')
     assert(
       meshRecords[0]?.geometry.kind === 'mesh' && meshRecords[0].geometry.triangleIndices.length === 4,
@@ -5550,6 +5623,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testOccGeometryExportsProduceRealPayloads()
   await testStepImportRestoresExactBodiesFromAssetBytes()
   await testMeshImportRestoresBakedBodiesFromGeneratedAssetBytes()
+  await testCylinderMeshImportRecordsUnifiedSurfaceDiagnostics()
   await testFacetedMeshImportUsesBakedAssetRenderMesh()
   await testStlAndThreeMfExportImportPreservesVolume()
   await testStlAndThreeMfCurvedExportImportTracksTessellatedVolume()
@@ -5564,4 +5638,4 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testOccGeometryExportsRejectInvalidTargets()
 
   console.log('OCC phase 8 adapter tests passed.')
-}, 60000)
+}, 120000)

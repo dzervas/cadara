@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
 import type {
+  MeshUnificationDiagnostics,
   MeshReconstructionProvenance,
   MeshReconstructionQualityMetrics,
   MeshReconstructionSettings,
@@ -13,6 +14,8 @@ export function createMeshReconstructionSettingsSchema() {
     qualityPreset: z.literal('conservative'),
     linearTolerance: z.number().positive('Mesh reconstruction linear tolerance must be positive.'),
     angularToleranceRadians: z.number().positive('Mesh reconstruction angular tolerance must be positive.'),
+    unificationLinearTolerance: z.number().positive('Mesh unification linear tolerance must be positive.').optional(),
+    unificationAngularTolerance: z.number().positive('Mesh unification angular tolerance must be positive.').optional(),
     maxFacetedTriangles: z.number().int().positive('Mesh reconstruction triangle limit must be positive.'),
     maxFacetedVertices: z.number().int().positive('Mesh reconstruction vertex limit must be positive.'),
     meshBodyFallback: z.literal('disabled'),
@@ -40,6 +43,20 @@ export function createMeshReconstructionSurfaceSummarySchema() {
   }).strict().transform((value) => value as MeshReconstructionSurfaceSummary)
 }
 
+export function createMeshUnificationDiagnosticsSchema() {
+  return z.object({
+    preFaceCount: z.number().int().nonnegative(),
+    postFaceCount: z.number().int().nonnegative(),
+    mergedSurfaceTypes: z.object({
+      plane: z.number().int().nonnegative(),
+      cylinder: z.number().int().nonnegative(),
+      cone: z.number().int().nonnegative(),
+      sphere: z.number().int().nonnegative(),
+      torus: z.number().int().nonnegative(),
+    }).strict(),
+  }).strict().transform((value) => value as MeshUnificationDiagnostics)
+}
+
 export function createMeshReconstructionProvenanceSchema(
   sourceHashSchema: z.ZodType<GeometryAssetHash>,
 ) {
@@ -56,5 +73,6 @@ export function createMeshReconstructionProvenanceSchema(
     ]),
     qualityMetrics: createMeshReconstructionQualityMetricsSchema(),
     surfaceSummary: createMeshReconstructionSurfaceSummarySchema(),
+    unificationDiagnostics: createMeshUnificationDiagnosticsSchema().optional(),
   }).strict().transform((value) => value as MeshReconstructionProvenance)
 }
