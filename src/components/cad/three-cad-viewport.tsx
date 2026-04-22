@@ -11,10 +11,15 @@ import {
   SketchConstraintAnnotations,
 } from '@/components/cad/sketch-constraint-annotations'
 import {
+  getSketchDisplayMarkerMaterialConfig,
   getSketchDisplayMeshMaterialConfig,
   getSketchDisplayPolylineMaterialConfig,
   shouldApplySketchDisplayStyles,
 } from '@/components/cad/sketch-display-style'
+import {
+  resolveSketchRenderingPalette,
+  type SketchRenderingPalette,
+} from '@/components/cad/sketch-rendering-palette'
 import {
   collectSketchViewportFeedbackAnchors,
   getAnnotationProjectionId,
@@ -50,7 +55,6 @@ import {
   isSeededDatumPlaneRenderable,
   resolveAllCandidates,
   shouldIncludeProjectedPickCandidate,
-  SURFACE_COLORS,
   type PickCandidate,
   updateWorkspaceHighlight,
 } from '@/domain/workspace/render-picking'
@@ -226,6 +230,7 @@ export function ThreeCadViewport({
     state: { mode, selectionFilter, selectionCatalog, sketchSession },
   } = useEditorState()
   const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(mode, sketchSession !== null)
+  const sketchRenderingPalette = useMemo(() => resolveSketchRenderingPalette(), [])
   const selectionRef = useRef(selection)
   const renderablesRef = useRef(renderables)
   const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables)
@@ -1058,13 +1063,18 @@ export function ThreeCadViewport({
         <Bvh key={bvhSceneKey} enabled>
           <group ref={pickRootRef}>
             {renderables.map((entry) => (
-              <DocumentRenderableNode key={`${entry.origin}:${entry.renderable.id}`} entry={entry} />
+              <DocumentRenderableNode
+                key={`${entry.origin}:${entry.renderable.id}`}
+                entry={entry}
+                palette={sketchRenderingPalette}
+              />
             ))}
             {sketchDisplayRenderables.map((renderable) => (
               <SketchDisplayRenderableNode
                 key={renderable.id}
                 renderable={renderable}
                 applyStyles={sketchDisplayStylesEnabled}
+                palette={sketchRenderingPalette}
               />
             ))}
           </group>
@@ -1734,18 +1744,68 @@ function WorkspaceSceneScaffold() {
   )
 }
 
-function DocumentRenderableNode({ entry }: { entry: ViewportRenderableRecord }) {
+function getDocumentRenderableMaterialOptions(
+  entry: ViewportRenderableRecord,
+  palette: SketchRenderingPalette,
+  diagnostic = false,
+) {
+  const semanticClass = entry.renderable.binding.semanticClass
+  const display = entry.sketchConstraintDisplay
+
+  if (semanticClass === 'region') {
+    return { color: palette.regionFill, flat: true }
+  }
+
+  if (semanticClass !== 'sketchCurve' && semanticClass !== 'sketchPoint') {
+    return {}
+  }
+
+  if (diagnostic) {
+    return { color: palette.overconstrained, flat: true }
+  }
+
+  if (semanticClass === 'sketchPoint' && display?.isAffectedOverconstraint) {
+    return { color: palette.overconstrained, flat: true }
+  }
+
+  if (display?.state === 'constrained') {
+    return { color: palette.constrained, flat: true }
+  }
+
+  return { color: palette.underconstrained, flat: true }
+}
+
+function DocumentRenderableNode({
+  entry,
+  palette,
+}: {
+  entry: ViewportRenderableRecord
+  palette: SketchRenderingPalette
+}) {
   switch (entry.renderable.geometry.kind) {
     case 'mesh':
-      return <DocumentMeshNode entry={entry} />
+      return <DocumentMeshNode entry={entry} palette={palette} />
     case 'polyline':
-      return <DocumentPolylineNode entry={entry} />
+      return (
+        <>
+          <DocumentPolylineNode entry={entry} palette={palette} />
+          {entry.sketchConstraintDisplay?.isAffectedOverconstraint
+            ? <DocumentPolylineNode entry={entry} palette={palette} diagnostic />
+            : null}
+        </>
+      )
     case 'marker':
-      return <DocumentMarkerNode entry={entry} />
+      return <DocumentMarkerNode entry={entry} palette={palette} />
   }
 }
 
-function DocumentMeshNode({ entry }: { entry: ViewportRenderableRecord }) {
+function DocumentMeshNode({
+  entry,
+  palette,
+}: {
+  entry: ViewportRenderableRecord
+  palette: SketchRenderingPalette
+}) {
   const { renderable, origin } = entry
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
   const geometry = useMemo(() => {
@@ -1785,8 +1845,8 @@ function DocumentMeshNode({ entry }: { entry: ViewportRenderableRecord }) {
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
         })
-      : createRenderableMeshMaterial(renderable, origin)
-  }, [origin, renderable])
+      : createRenderableMeshMaterial(renderable, origin, getDocumentRenderableMaterialOptions(entry, palette))
+  }, [entry, origin, palette, renderable])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
@@ -1815,7 +1875,15 @@ function DocumentMeshNode({ entry }: { entry: ViewportRenderableRecord }) {
   )
 }
 
-function DocumentPolylineNode({ entry }: { entry: ViewportRenderableRecord }) {
+function DocumentPolylineNode({
+  entry,
+  palette,
+  diagnostic = false,
+}: {
+  entry: ViewportRenderableRecord
+  palette: SketchRenderingPalette
+  diagnostic?: boolean
+}) {
   const { renderable, origin } = entry
   const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
   const line = useMemo(() => {
@@ -1834,7 +1902,7 @@ function DocumentPolylineNode({ entry }: { entry: ViewportRenderableRecord }) {
           depthTest: true,
           depthWrite: false,
         })
-      : createRenderableLineMaterial(renderable, origin)
+      : createRenderableLineMaterial(renderable, origin, getDocumentRenderableMaterialOptions(entry, palette, diagnostic))
     nextMaterial.depthTest = true
     nextMaterial.depthWrite = false
     const nextLine = new THREE.Line(nextGeometry, nextMaterial)
@@ -1850,7 +1918,7 @@ function DocumentPolylineNode({ entry }: { entry: ViewportRenderableRecord }) {
       renderable,
     )
     return nextLine
-  }, [geometryData, origin, renderable])
+  }, [diagnostic, entry, geometryData, origin, palette, renderable])
 
   useEffect(() => {
     return () => {
@@ -1866,7 +1934,13 @@ function DocumentPolylineNode({ entry }: { entry: ViewportRenderableRecord }) {
   return <primitive object={line} />
 }
 
-function DocumentMarkerNode({ entry }: { entry: ViewportRenderableRecord }) {
+function DocumentMarkerNode({
+  entry,
+  palette,
+}: {
+  entry: ViewportRenderableRecord
+  palette: SketchRenderingPalette
+}) {
   const { renderable, origin } = entry
   const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
   const pickProxy = useMemo(() => {
@@ -1878,7 +1952,10 @@ function DocumentMarkerNode({ entry }: { entry: ViewportRenderableRecord }) {
     proxy.userData.highlightExcluded = true
     return proxy
   }, [geometryData])
-  const material = useMemo(() => createRenderableMarkerMaterial(renderable, origin), [origin, renderable])
+  const material = useMemo(
+    () => createRenderableMarkerMaterial(renderable, origin, getDocumentRenderableMaterialOptions(entry, palette)),
+    [entry, origin, palette, renderable],
+  )
 
   useEffect(() => () => material.dispose(), [material])
   useEffect(() => {
@@ -1921,25 +1998,28 @@ function DocumentMarkerNode({ entry }: { entry: ViewportRenderableRecord }) {
 interface SketchDisplayRenderableNodeProps {
   renderable: SketchSessionDisplayRenderable
   applyStyles: boolean
+  palette: SketchRenderingPalette
 }
 
-function SketchDisplayRenderableNode({ renderable, applyStyles }: SketchDisplayRenderableNodeProps) {
+function SketchDisplayRenderableNode({ renderable, applyStyles, palette }: SketchDisplayRenderableNodeProps) {
   switch (renderable.geometry.kind) {
     case 'mesh':
-      return <SketchDisplayMeshNode renderable={renderable} applyStyles={applyStyles} />
+      return <SketchDisplayMeshNode renderable={renderable} applyStyles={applyStyles} palette={palette} />
     case 'polyline':
-      return <SketchDisplayPolylineNode renderable={renderable} applyStyles={applyStyles} />
+      return <SketchDisplayPolylineNode renderable={renderable} applyStyles={applyStyles} palette={palette} />
     case 'marker':
-      return <SketchDisplayMarkerNode renderable={renderable} applyStyles={applyStyles} />
+      return <SketchDisplayMarkerNode renderable={renderable} applyStyles={applyStyles} palette={palette} />
   }
 }
 
 function SketchDisplayMeshNode({
   renderable,
   applyStyles,
+  palette,
 }: {
   renderable: SketchSessionDisplayRenderable
   applyStyles: boolean
+  palette: SketchRenderingPalette
 }) {
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
   const geometry = useMemo(() => {
@@ -1964,11 +2044,11 @@ function SketchDisplayMeshNode({
     return nextGeometry
   }, [geometryData])
   const materialConfig = useMemo(
-    () => getSketchDisplayMeshMaterialConfig(renderable, applyStyles),
-    [applyStyles, renderable],
+    () => getSketchDisplayMeshMaterialConfig(renderable, applyStyles, palette),
+    [applyStyles, palette, renderable],
   )
   const material = useMemo(() => {
-    const nextMaterial = new THREE.MeshStandardMaterial(materialConfig)
+    const nextMaterial = new THREE.MeshBasicMaterial(materialConfig)
     nextMaterial.depthWrite = false
     return nextMaterial
   }, [materialConfig])
@@ -2018,9 +2098,11 @@ function updatePolylineGeometryBuffer(
 function SketchDisplayPolylineNode({
   renderable,
   applyStyles,
+  palette,
 }: {
   renderable: SketchSessionDisplayRenderable
   applyStyles: boolean
+  palette: SketchRenderingPalette
 }) {
   const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
   if (!geometryData) {
@@ -2028,7 +2110,7 @@ function SketchDisplayPolylineNode({
   }
 
   const geometry = useMemo(() => new THREE.BufferGeometry(), [])
-  const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles)
+  const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette)
   const {
     color,
     dashSize,
@@ -2097,31 +2179,26 @@ function SketchDisplayPolylineNode({
 function SketchDisplayMarkerNode({
   renderable,
   applyStyles,
+  palette,
 }: {
   renderable: SketchSessionDisplayRenderable
   applyStyles: boolean
+  palette: SketchRenderingPalette
 }) {
   const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
   if (!geometryData) {
     throw new Error('Display renderable is missing marker geometry.')
   }
 
-  const defaultColor = renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchPoint
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: applyStyles
-      ? renderable.paintStyle?.color ?? renderable.strokeStyle?.color ?? defaultColor
-      : defaultColor,
-    transparent: applyStyles && (
-      renderable.paintStyle?.opacity !== undefined || renderable.strokeStyle?.opacity !== undefined
-    ),
-    opacity: applyStyles ? renderable.paintStyle?.opacity ?? renderable.strokeStyle?.opacity ?? 1 : 1,
-    metalness: 0.08,
-    roughness: 0.34,
-    emissive: renderable.role === 'reference' ? 0x4a3511 : 0x1c3245,
-    emissiveIntensity: renderable.role === 'reference' ? 0.2 : 0.16,
+  const materialConfig = useMemo(
+    () => getSketchDisplayMarkerMaterialConfig(renderable, applyStyles, palette),
+    [applyStyles, palette, renderable],
+  )
+  const material = useMemo(() => new THREE.MeshBasicMaterial({
+    ...materialConfig,
     depthTest: true,
     depthWrite: false,
-  }), [applyStyles, defaultColor, renderable.paintStyle, renderable.role, renderable.strokeStyle])
+  }), [materialConfig])
   const pickProxy = useMemo(() => {
     const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius)
     proxy.userData.highlightExcluded = true

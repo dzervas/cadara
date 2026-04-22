@@ -44,6 +44,11 @@ interface HighlightMaterialBaseline {
   opacity: number
 }
 
+interface RenderableMaterialDisplayOptions {
+  color?: number
+  flat?: boolean
+}
+
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
 const PICK_PROXY_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 16, 16)
 const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
@@ -309,6 +314,7 @@ function applyRenderableState(
   for (const entry of materials) {
     if (
       !(entry instanceof THREE.MeshStandardMaterial)
+      && !(entry instanceof THREE.MeshBasicMaterial)
       && !(entry instanceof THREE.LineBasicMaterial)
     ) {
       continue
@@ -335,6 +341,10 @@ function applyRenderableState(
       entry.opacity = isActive || isSelected
         ? getRenderableMeshOpacity(semanticClass, origin, isActive, isSelected)
         : baseline.opacity
+    } else if (entry instanceof THREE.MeshBasicMaterial) {
+      entry.opacity = isActive || isSelected
+        ? getRenderableMeshOpacity(semanticClass, origin, isActive, isSelected)
+        : baseline.opacity
     } else {
       entry.opacity = isActive || isSelected
         ? getRenderableLineOpacity(semanticClass, origin, isActive, isSelected)
@@ -344,7 +354,7 @@ function applyRenderableState(
 }
 
 function getHighlightMaterialBaseline(
-  material: THREE.MeshStandardMaterial | THREE.LineBasicMaterial,
+  material: THREE.MeshStandardMaterial | THREE.MeshBasicMaterial | THREE.LineBasicMaterial,
 ): HighlightMaterialBaseline {
   const existing = material.userData.highlightBaseline as HighlightMaterialBaseline | undefined
   if (existing) {
@@ -601,31 +611,41 @@ export function getRenderableRenderOrder(
 export function createRenderableMeshMaterial(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
+  displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
   const semanticClass = renderable.binding.semanticClass
-
-  return new THREE.MeshStandardMaterial({
-    color: getRenderableBaseColor(semanticClass),
+  const color = displayOptions.color ?? getRenderableBaseColor(semanticClass)
+  const sharedOptions = {
+    color,
     transparent: origin === 'preview' || semanticClass === 'region',
     opacity: getRenderableMeshOpacity(semanticClass, origin, false, false),
     side: THREE.DoubleSide,
+    depthWrite: displayOptions.flat || origin === 'preview' ? false : true,
+    polygonOffset: true,
+    polygonOffsetFactor: origin === 'preview' ? -1 : 1,
+    polygonOffsetUnits: origin === 'preview' ? -1 : 1,
+  }
+
+  if (displayOptions.flat) {
+    return new THREE.MeshBasicMaterial(sharedOptions)
+  }
+
+  return new THREE.MeshStandardMaterial({
+    ...sharedOptions,
     metalness: 0.02,
     roughness: semanticClass === 'region' ? 0.9 : origin === 'preview' ? 0.7 : 0.76,
     emissive: getRenderableMeshEmissive(semanticClass, origin),
     emissiveIntensity: getRenderableMeshEmissiveIntensity(semanticClass, origin),
-    depthWrite: origin === 'preview' ? false : true,
-    polygonOffset: true,
-    polygonOffsetFactor: origin === 'preview' ? -1 : 1,
-    polygonOffsetUnits: origin === 'preview' ? -1 : 1,
   })
 }
 
 export function createRenderableLineMaterial(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
+  displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
   return new THREE.LineBasicMaterial({
-    color: getRenderableBaseColor(renderable.binding.semanticClass),
+    color: displayOptions.color ?? getRenderableBaseColor(renderable.binding.semanticClass),
     transparent: true,
     opacity: getRenderableLineOpacity(renderable.binding.semanticClass, origin, false, false),
   })
@@ -634,9 +654,19 @@ export function createRenderableLineMaterial(
 export function createRenderableMarkerMaterial(
   renderable: RenderableEntityRecord,
   origin: ViewportRenderableOrigin,
+  displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
+  if (displayOptions.flat) {
+    return new THREE.MeshBasicMaterial({
+      color: displayOptions.color ?? getRenderableBaseColor(renderable.binding.semanticClass),
+      transparent: origin === 'preview',
+      opacity: origin === 'preview' ? 0.72 : 1,
+      depthWrite: origin === 'preview' ? false : true,
+    })
+  }
+
   return new THREE.MeshStandardMaterial({
-    color: getRenderableBaseColor(renderable.binding.semanticClass),
+    color: displayOptions.color ?? getRenderableBaseColor(renderable.binding.semanticClass),
     transparent: origin === 'preview',
     opacity: origin === 'preview' ? 0.72 : 1,
     metalness: 0.08,

@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
+import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
 import {
   acceptSketchDraw,
@@ -7,6 +8,7 @@ import {
   createNewSketchSessionFromSupport,
   startSketchDraw,
 } from '@/domain/editor/sketch-session'
+import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
 test('src/app/viewport-renderables.spec.ts', async () => {
   function assert(condition: unknown, message = 'Assertion failed'): asserts condition {
@@ -212,6 +214,73 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     assert(
       composed.documentRenderables.some(({ renderable }) => renderable.id === otherSketchRegion.id),
       'Committed regions from inactive sketches should remain visible.',
+    )
+  }
+
+  {
+    const plane = createStandardPlaneDefinition('xy')
+    const sketchSnapshot = {
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: null,
+      ownerSketchId: 'sketch_a',
+      ownerBodyId: null,
+      sketchId: 'sketch_a',
+      label: 'Sketch A',
+      plane,
+      planeTarget: plane.support,
+      planeKey: 'xy',
+      sketch: {
+        ownerDocumentId: 'doc_workspace',
+        ownerRevisionId: 'rev_0001',
+        ownerFeatureId: null,
+        ownerSketchId: 'sketch_a',
+        ownerBodyId: null,
+        sketchId: 'sketch_a',
+        label: 'Sketch A',
+        planeSupport: plane.support,
+        definition: {
+          schemaVersion: 'sketch-definition/v1alpha1',
+          referenceIds: [],
+          references: [],
+          pointIds: [],
+          points: [],
+          entityIds: ['sketch_entity_a'],
+          entities: [],
+          constraintIds: ['constraint_horizontal'],
+          constraints: [{
+            kind: 'horizontal',
+            constraintId: 'constraint_horizontal',
+            label: 'Horizontal',
+            entityId: 'sketch_entity_a',
+          }],
+          dimensionIds: [],
+          dimensions: [],
+        },
+        solvedSnapshot: {
+          schemaVersion: 'solved-sketch/v1alpha1',
+          status: { solveState: 'partiallySolved', constraintState: 'underConstrained' },
+          solvedEntities: [],
+          solvedPoints: [],
+          constraintStatuses: [{ constraintId: 'constraint_horizontal', status: 'unsatisfied' }],
+          dimensionStatuses: [],
+          diagnostics: [],
+        },
+        projectedReferences: [],
+        regions: [],
+      },
+    } satisfies SketchSnapshotRecord
+    const composed = composeViewportRenderables({
+      snapshotRenderables: [committedSketchCurve],
+      snapshotSketches: [sketchSnapshot],
+      previewRenderables: null,
+      sketchSession: null,
+      hiddenTargetKeys: {},
+    })
+
+    assert(
+      composed.documentRenderables[0]?.sketchConstraintDisplay?.isAffectedOverconstraint,
+      'Committed sketch renderables should carry solved constraint display diagnostics from their sketch snapshot.',
     )
   }
 

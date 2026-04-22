@@ -27,6 +27,7 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
       { kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_1_line' },
       { kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_2_line' },
     ],
+    constraintDisplay: { state: 'overconstrained', isAffectedOverconstraint: true },
     label: 'Parallel',
     detail: 'Parallel lines',
     status: 'constraint',
@@ -143,5 +144,9 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
   assert(
     markup.includes('Parallel: Parallel lines') && markup.includes('Distance: 10.00 aligned'),
     'Committed annotation glyphs should preserve durable label/detail metadata for accessible labels.',
+  )
+  assert(
+    markup.includes('var(--workbench-shell-danger-text)'),
+    'Affected overconstrained annotation glyphs should use the shared danger theme token.',
   )
 })

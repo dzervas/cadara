@@ -3,16 +3,13 @@ import * as THREE from 'three'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
 import { SURFACE_COLORS } from '@/domain/workspace/render-picking'
 import type { ToolbarMode } from '@/domain/tools/schema'
+import type { SketchRenderingPalette } from '@/components/cad/sketch-rendering-palette'
 
 export interface SketchDisplayMeshMaterialConfig {
   color: number
   transparent: boolean
   opacity: number
   side: THREE.Side
-  metalness: number
-  roughness: number
-  emissive: number
-  emissiveIntensity: number
 }
 
 export interface SketchDisplayPolylineMaterialConfig {
@@ -27,6 +24,12 @@ export interface SketchDisplayPolylineMaterialConfig {
   gapSize: number
 }
 
+export interface SketchDisplayMarkerMaterialConfig {
+  color: number
+  transparent: boolean
+  opacity: number
+}
+
 export function shouldApplySketchDisplayStyles(mode: ToolbarMode, hasSketchSession: boolean) {
   return mode === 'sketch' && hasSketchSession
 }
@@ -34,10 +37,11 @@ export function shouldApplySketchDisplayStyles(mode: ToolbarMode, hasSketchSessi
 export function getSketchDisplayMeshMaterialConfig(
   renderable: SketchSessionDisplayRenderable,
   applyStyles: boolean,
+  palette: SketchRenderingPalette,
 ): SketchDisplayMeshMaterialConfig {
   const defaultColor = renderable.semanticClass === 'region'
-    ? SURFACE_COLORS.region
-    : renderable.role === 'reference' ? SURFACE_COLORS.sketchReference : SURFACE_COLORS.sketchCurve
+    ? palette.regionFill
+    : renderable.role === 'reference' ? SURFACE_COLORS.sketchReference : getDefaultSketchConstraintColor(renderable, palette)
   const defaultOpacity = renderable.semanticClass === 'region' ? 0.22 : 0.24
   const color = applyStyles ? renderable.paintStyle?.color ?? defaultColor : defaultColor
   const opacity = applyStyles ? renderable.paintStyle?.opacity ?? defaultOpacity : defaultOpacity
@@ -47,35 +51,76 @@ export function getSketchDisplayMeshMaterialConfig(
     transparent: true,
     opacity,
     side: THREE.DoubleSide,
-    metalness: 0.08,
-    roughness: 0.58,
-    emissive: renderable.role === 'reference' ? 0x4a3511 : 0x214566,
-    emissiveIntensity: renderable.role === 'reference' ? 0.2 : 0.18,
   }
 }
 
 export function getSketchDisplayPolylineMaterialConfig(
   renderable: SketchSessionDisplayRenderable,
   applyStyles: boolean,
+  palette: SketchRenderingPalette,
 ): SketchDisplayPolylineMaterialConfig {
-  const defaultColor = renderable.role === 'reference' ? 0xf0c56c : SURFACE_COLORS.sketchCurve
+  const isDiagnostic = renderable.diagnosticStyle?.kind === 'overconstraint'
+  const defaultColor = renderable.role === 'reference'
+    ? SURFACE_COLORS.sketchReference
+    : isDiagnostic
+      ? palette.overconstrained
+      : getDefaultSketchConstraintColor(renderable, palette)
   const hasAuthoredDash = applyStyles
     && (renderable.strokeStyle?.dashSize ?? 0) > 0
     && (renderable.strokeStyle?.gapSize ?? 0) > 0
-  const linePattern = hasAuthoredDash ? 'dashed' : renderable.linePattern
+  const linePattern = isDiagnostic ? 'solid' : hasAuthoredDash ? 'dashed' : renderable.linePattern
   const defaultOpacity = linePattern === 'dashed'
     ? (renderable.role === 'reference' ? 0.7 : 0.88)
     : 0.95
 
   return {
     linePattern,
-    color: applyStyles ? renderable.strokeStyle?.color ?? defaultColor : defaultColor,
-    opacity: applyStyles ? renderable.strokeStyle?.opacity ?? defaultOpacity : defaultOpacity,
-    lineWidth: applyStyles ? renderable.strokeStyle?.width ?? 1 : 1,
-    lineCap: applyStyles ? renderable.strokeStyle?.lineCap ?? 'round' : 'round',
-    lineJoin: applyStyles ? renderable.strokeStyle?.lineJoin ?? 'round' : 'round',
-    miterLimit: applyStyles ? renderable.strokeStyle?.miterLimit ?? 4 : 4,
-    dashSize: applyStyles ? renderable.strokeStyle?.dashSize ?? 0.24 : 0.24,
-    gapSize: applyStyles ? renderable.strokeStyle?.gapSize ?? 0.14 : 0.14,
+    color: isDiagnostic ? defaultColor : applyStyles ? renderable.strokeStyle?.color ?? defaultColor : defaultColor,
+    opacity: isDiagnostic ? 1 : applyStyles ? renderable.strokeStyle?.opacity ?? defaultOpacity : defaultOpacity,
+    lineWidth: isDiagnostic ? 1 : applyStyles ? renderable.strokeStyle?.width ?? 1 : 1,
+    lineCap: isDiagnostic ? 'round' : applyStyles ? renderable.strokeStyle?.lineCap ?? 'round' : 'round',
+    lineJoin: isDiagnostic ? 'round' : applyStyles ? renderable.strokeStyle?.lineJoin ?? 'round' : 'round',
+    miterLimit: isDiagnostic ? 4 : applyStyles ? renderable.strokeStyle?.miterLimit ?? 4 : 4,
+    dashSize: isDiagnostic ? 0.24 : applyStyles ? renderable.strokeStyle?.dashSize ?? 0.24 : 0.24,
+    gapSize: isDiagnostic ? 0.14 : applyStyles ? renderable.strokeStyle?.gapSize ?? 0.14 : 0.14,
+  }
+}
+
+export function getSketchDisplayMarkerMaterialConfig(
+  renderable: SketchSessionDisplayRenderable,
+  applyStyles: boolean,
+  palette: SketchRenderingPalette,
+): SketchDisplayMarkerMaterialConfig {
+  const defaultColor = renderable.role === 'reference'
+    ? SURFACE_COLORS.sketchReference
+    : renderable.constraintDisplay?.isAffectedOverconstraint
+      ? palette.overconstrained
+      : getDefaultSketchConstraintColor(renderable, palette)
+
+  return {
+    color: applyStyles
+      ? renderable.paintStyle?.color ?? renderable.strokeStyle?.color ?? defaultColor
+      : defaultColor,
+    transparent: applyStyles && (
+      renderable.paintStyle?.opacity !== undefined || renderable.strokeStyle?.opacity !== undefined
+    ),
+    opacity: applyStyles ? renderable.paintStyle?.opacity ?? renderable.strokeStyle?.opacity ?? 1 : 1,
+  }
+}
+
+function getDefaultSketchConstraintColor(
+  renderable: SketchSessionDisplayRenderable,
+  palette: SketchRenderingPalette,
+) {
+  switch (renderable.constraintDisplay?.state) {
+    case 'constrained':
+      return palette.constrained
+    case 'overconstrained':
+      return renderable.constraintDisplay.isAffectedOverconstraint
+        ? palette.underconstrained
+        : palette.underconstrained
+    case 'underconstrained':
+    case undefined:
+      return palette.underconstrained
   }
 }

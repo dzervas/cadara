@@ -1,11 +1,15 @@
 import { test } from 'bun:test'
 
 import type { SketchDefinition } from '@/contracts/sketch/schema'
+import type { SolvedSketchSnapshot } from '@/contracts/sketch/schema'
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import {
   createSketchSessionFromSnapshot,
+  getSketchConstraintDisplayForTarget,
+  getSketchConstraintDisplaySummary,
   getSketchSessionDisplayRenderables,
+  normalizeSketchConstraintDisplayState,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
@@ -291,4 +295,61 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
     entry.target?.kind === 'sketchPoint' && entry.target.pointId === 'sketch_point_a',
   )
   assert(pointRenderable?.strokeStyle?.color === 0xdd44aa, 'Point marker renderables should resolve enabled local stroke style.')
+
+  assert(
+    normalizeSketchConstraintDisplayState({ solveState: 'solved', constraintState: 'wellConstrained' }, 0) === 'constrained',
+    'Well constrained solver status should normalize to constrained display state.',
+  )
+  assert(
+    normalizeSketchConstraintDisplayState({ solveState: 'solved', constraintState: 'unknown' }, 0) === 'underconstrained',
+    'Unknown solver constrainedness should normalize to underconstrained display state.',
+  )
+  assert(
+    normalizeSketchConstraintDisplayState({ solveState: 'solved', constraintState: 'inconsistent' }, 0) === 'overconstrained',
+    'Inconsistent solver constrainedness should normalize to overconstrained display state.',
+  )
+  assert(
+    normalizeSketchConstraintDisplayState({ solveState: 'partiallySolved', constraintState: 'underConstrained' }, 1) === 'overconstrained',
+    'Partial solves with known affected geometry should normalize to overconstrained display state.',
+  )
+
+  const constrainedDefinition = {
+    ...definition,
+    constraintIds: ['constraint_horizontal'],
+    constraints: [{
+      kind: 'horizontal',
+      constraintId: 'constraint_horizontal',
+      label: 'Horizontal',
+      entityId: 'sketch_entity_ab',
+    }],
+  } as SketchDefinition
+  const unsatisfiedSnapshot: SolvedSketchSnapshot = {
+    schemaVersion: 'solved-sketch/v1alpha1',
+    status: { solveState: 'partiallySolved', constraintState: 'underConstrained' },
+    solvedEntities: [],
+    solvedPoints: [],
+    constraintStatuses: [{ constraintId: 'constraint_horizontal', status: 'unsatisfied' }],
+    dimensionStatuses: [],
+    diagnostics: [],
+  }
+  const displaySummary = getSketchConstraintDisplaySummary({
+    sketchId: 'sketch_primary',
+    definition: constrainedDefinition,
+    solvedSnapshot: unsatisfiedSnapshot,
+  })
+  assert(displaySummary.state === 'overconstrained', 'Unsatisfied partial solve display summary should be overconstrained.')
+  assert(
+    getSketchConstraintDisplayForTarget(
+      { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_ab' },
+      displaySummary,
+    ).isAffectedOverconstraint,
+    'Unsatisfied constraints should mark only their affected sketch geometry targets.',
+  )
+  assert(
+    !getSketchConstraintDisplayForTarget(
+      { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_b' },
+      displaySummary,
+    ).isAffectedOverconstraint,
+    'Unaffected geometry should not receive overconstraint diagnostics.',
+  )
 })

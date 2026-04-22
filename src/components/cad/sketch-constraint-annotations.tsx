@@ -6,6 +6,7 @@ import {
   layoutSketchAnnotationProjections,
   type SketchViewportFeedbackProjection,
 } from '@/components/cad/sketch-viewport-feedback-model'
+import { getSketchRenderingPaletteToken } from '@/components/cad/sketch-rendering-palette'
 
 interface SketchConstraintAnnotationsProps {
   annotations: readonly SketchAnnotationDescriptor[]
@@ -65,6 +66,8 @@ export function SketchConstraintAnnotations({
               left: projection.x,
               top: projection.y,
               transform: 'translate(-50%, -50%)',
+              borderColor: getAnnotationConstraintColor(annotation),
+              color: getAnnotationConstraintColor(annotation),
             }}
             aria-label={`${annotation.label}: ${annotation.detail}`}
             title={`${annotation.label}: ${annotation.detail}`}
@@ -88,6 +91,18 @@ export function SketchConstraintAnnotations({
       })}
     </div>
   )
+}
+
+function getAnnotationConstraintColor(annotation: SketchAnnotationDescriptor) {
+  if (annotation.constraintDisplay?.isAffectedOverconstraint) {
+    return `var(${getSketchRenderingPaletteToken('overconstrained')})`
+  }
+
+  if (annotation.constraintDisplay?.state === 'constrained') {
+    return `var(${getSketchRenderingPaletteToken('constrained')})`
+  }
+
+  return `var(${getSketchRenderingPaletteToken('underconstrained')})`
 }
 
 function annotationTargetsEqual(

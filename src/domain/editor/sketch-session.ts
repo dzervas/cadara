@@ -47,7 +47,7 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
-import { primitiveRefEquals } from '@/domain/editor/schema'
+import { getPrimitiveRefKey, primitiveRefEquals } from '@/domain/editor/schema'
 import { ShapeUtils, Vector2 } from 'three'
 import {
   buildSketchStyleControls,
@@ -141,6 +141,7 @@ export interface SketchAnnotationDescriptor {
   glyphKind: SketchAnnotationGlyphKind
   anchor: SketchToolAnchorDescriptor
   affectedGeometryRefs: readonly PrimitiveRef[]
+  constraintDisplay?: SketchConstraintDisplayTargetState
   label: string
   detail: string
   status: 'constraint' | 'dimension'
@@ -245,6 +246,24 @@ export interface SketchSessionDisplayRenderable {
   semanticClass?: RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
   paintStyle?: SketchDisplayPaintStyle
   strokeStyle?: SketchDisplayStrokeStyle
+  constraintDisplay?: SketchConstraintDisplayTargetState
+  diagnosticStyle?: SketchDisplayDiagnosticStyle
+}
+
+export type SketchConstraintDisplayState = 'constrained' | 'underconstrained' | 'overconstrained'
+
+export interface SketchConstraintDisplayTargetState {
+  state: SketchConstraintDisplayState
+  isAffectedOverconstraint: boolean
+}
+
+export interface SketchConstraintDisplaySummary {
+  state: SketchConstraintDisplayState
+  affectedTargetKeys: ReadonlySet<string>
+}
+
+export interface SketchDisplayDiagnosticStyle {
+  kind: 'overconstraint'
 }
 
 export interface SketchDisplayPaintStyle {
@@ -442,6 +461,129 @@ function getDefinitionSketchId(definition: SketchDefinition) {
   return definition.entities[0]?.target.sketchId
     ?? definition.points[0]?.target.sketchId
     ?? ('sketch_draft' as SketchId)
+}
+
+export function normalizeSketchConstraintDisplayState(
+  status: SolvedSketchSnapshot['status'],
+  affectedTargetCount: number,
+): SketchConstraintDisplayState {
+  if (
+    status.constraintState === 'overConstrained'
+    || status.constraintState === 'inconsistent'
+    || (status.solveState !== 'solved' && affectedTargetCount > 0)
+  ) {
+    return 'overconstrained'
+  }
+
+  if (status.constraintState === 'wellConstrained') {
+    return 'constrained'
+  }
+
+  return 'underconstrained'
+}
+
+export function getSketchConstraintDisplaySummary(input: {
+  sketchId: SketchId
+  definition: SketchDefinition
+  solvedSnapshot: SolvedSketchSnapshot
+}): SketchConstraintDisplaySummary {
+  const affectedTargetKeys = getSketchAffectedConstraintTargetKeys(input)
+
+  return {
+    state: normalizeSketchConstraintDisplayState(input.solvedSnapshot.status, affectedTargetKeys.size),
+    affectedTargetKeys,
+  }
+}
+
+export function getSketchConstraintDisplayForTarget(
+  target: PrimitiveRef | null,
+  summary: SketchConstraintDisplaySummary,
+): SketchConstraintDisplayTargetState {
+  return {
+    state: summary.state,
+    isAffectedOverconstraint: target !== null
+      && summary.state === 'overconstrained'
+      && summary.affectedTargetKeys.has(getPrimitiveRefKey(target)),
+  }
+}
+
+function getSketchAffectedConstraintTargetKeys(input: {
+  sketchId: SketchId
+  definition: SketchDefinition
+  solvedSnapshot: SolvedSketchSnapshot
+}) {
+  const targetKeys = new Set<string>()
+
+  for (const diagnostic of input.solvedSnapshot.diagnostics) {
+    if (diagnostic.severity !== 'error' || !diagnostic.target) {
+      continue
+    }
+
+    for (const target of getSketchDiagnosticAffectedTargets(input.sketchId, input.definition, diagnostic.target)) {
+      targetKeys.add(getPrimitiveRefKey(target))
+    }
+  }
+
+  for (const status of input.solvedSnapshot.constraintStatuses) {
+    if (status.status === 'satisfied') {
+      continue
+    }
+
+    targetKeys.add(getPrimitiveRefKey(createSketchConstraintRef(input.sketchId, status.constraintId)))
+    const constraint = input.definition.constraints.find((entry) => entry.constraintId === status.constraintId)
+    if (!constraint) {
+      continue
+    }
+
+    for (const target of getConstraintAffectedGeometryRefs(input.sketchId, constraint)) {
+      targetKeys.add(getPrimitiveRefKey(target))
+    }
+  }
+
+  for (const status of input.solvedSnapshot.dimensionStatuses) {
+    if (status.status !== 'unsatisfied') {
+      continue
+    }
+
+    targetKeys.add(getPrimitiveRefKey(createSketchDimensionRef(input.sketchId, status.dimensionId)))
+    const dimension = input.definition.dimensions.find((entry) => entry.dimensionId === status.dimensionId)
+    if (!dimension) {
+      continue
+    }
+
+    for (const target of getDimensionAffectedGeometryRefs(input.sketchId, dimension)) {
+      targetKeys.add(getPrimitiveRefKey(target))
+    }
+  }
+
+  return targetKeys
+}
+
+function getSketchDiagnosticAffectedTargets(
+  sketchId: SketchId,
+  definition: SketchDefinition,
+  target: NonNullable<SolvedSketchSnapshot['diagnostics'][number]['target']>,
+): readonly PrimitiveRef[] {
+  switch (target.kind) {
+    case 'entity':
+      return [createSketchEntityRef(sketchId, target.entityId)]
+    case 'point':
+      return [createSketchPointRef(sketchId, target.pointId)]
+    case 'region':
+      return [{ kind: 'region', sketchId, regionId: target.regionId }]
+    case 'constraint': {
+      const constraint = definition.constraints.find((entry) => entry.constraintId === target.constraintId)
+      return constraint
+        ? [createSketchConstraintRef(sketchId, target.constraintId), ...getConstraintAffectedGeometryRefs(sketchId, constraint)]
+        : [createSketchConstraintRef(sketchId, target.constraintId)]
+    }
+    case 'dimension': {
+      const dimension = definition.dimensions.find((entry) => entry.dimensionId === target.dimensionId)
+      return dimension
+        ? [createSketchDimensionRef(sketchId, target.dimensionId), ...getDimensionAffectedGeometryRefs(sketchId, dimension)]
+        : [createSketchDimensionRef(sketchId, target.dimensionId)]
+    }
+  }
 }
 
 export function getSketchHistoryItems(definition: SketchDefinition): SketchHistoryItem[] {
@@ -5578,6 +5720,17 @@ export function getSketchAnnotationDescriptors(
   session: SketchSessionState,
 ): SketchAnnotationDescriptor[] {
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const solved = solveSketchDefinitionCore({
+    definition: session.definition,
+    projectedReferences: session.projectedReferences,
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const constraintDisplaySummary = getSketchConstraintDisplaySummary({
+    sketchId,
+    definition: session.definition,
+    solvedSnapshot: solved.solvedSnapshot,
+  })
 
   return [
     ...session.definition.constraints.map((constraint) => ({
@@ -5586,6 +5739,10 @@ export function getSketchAnnotationDescriptors(
       glyphKind: getConstraintGlyphKind(constraint),
       anchor: createConstraintAnnotationAnchor(session, constraint),
       affectedGeometryRefs: getConstraintAffectedGeometryRefs(sketchId, constraint),
+      constraintDisplay: getSketchConstraintDisplayForTarget(
+        createSketchConstraintRef(sketchId, constraint.constraintId),
+        constraintDisplaySummary,
+      ),
       label: constraint.label,
       detail: describeConstraint(constraint),
       status: 'constraint' as const,
@@ -5596,6 +5753,10 @@ export function getSketchAnnotationDescriptors(
       glyphKind: getDimensionGlyphKind(dimension),
       anchor: createDimensionAnnotationAnchor(session.definition, dimension),
       affectedGeometryRefs: getDimensionAffectedGeometryRefs(sketchId, dimension),
+      constraintDisplay: getSketchConstraintDisplayForTarget(
+        createSketchDimensionRef(sketchId, dimension.dimensionId),
+        constraintDisplaySummary,
+      ),
       label: dimension.label,
       detail: describeDimension(dimension),
       status: 'dimension' as const,
@@ -6071,39 +6232,58 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   const pointStyleLookup = svgRenderingEnabled ? createSketchPointStyleLookup(session) : new Map<SketchPointId, SketchEntityDisplayStyle>()
   const regionStyleLookup = svgRenderingEnabled ? createSketchRegionStyleLookup(session) : new Map<RegionRecord['regionId'], SketchEntityDisplayStyle>()
   const displayDefinition = evaluateSketchDerivations(session.definition).definition
+  const solved = solveSketchDefinitionCore({
+    definition: displayDefinition,
+    projectedReferences: session.projectedReferences,
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const constraintDisplaySummary = getSketchConstraintDisplaySummary({
+    sketchId,
+    definition: displayDefinition,
+    solvedSnapshot: solved.solvedSnapshot,
+  })
   const regionRenderables = session.solvedRegions.flatMap((region, index) => {
     const renderable = createDisplayRenderableForRegion(session, displayDefinition, region, index, regionStyleLookup.get(region.regionId))
-    return renderable ? [renderable] : []
+    return renderable
+      ? [withSketchConstraintDisplay(renderable, constraintDisplaySummary)]
+      : []
   })
+  const pointRenderables = displayDefinition.points.map((point) => {
+    const style = pointStyleLookup.get(point.pointId)
 
-  return [
-    ...regionRenderables,
-    ...displayDefinition.points.map((point) => {
-      const style = pointStyleLookup.get(point.pointId)
-
-      return {
-        id: `renderable_sketch_point_${point.pointId}` as RenderableId,
-        label: point.label,
-        target: createSketchPointRef(sketchId, point.pointId),
-        geometry: {
-          kind: 'marker' as const,
-          position: mapSketchPointToWorld(session.plane, point.position),
-          displayRadius: 0.16,
-        },
-        linePattern: 'solid' as const,
-        role: 'local' as const,
-        paintStyle: style?.paintStyle,
-        strokeStyle: style?.strokeStyle,
-      }
-    }),
-    ...deriveSketchDisplayEntities(session).map((entity, index) =>
+    return withSketchConstraintDisplay({
+      id: `renderable_sketch_point_${point.pointId}` as RenderableId,
+      label: point.label,
+      target: createSketchPointRef(sketchId, point.pointId),
+      geometry: {
+        kind: 'marker' as const,
+        position: mapSketchPointToWorld(session.plane, point.position),
+        displayRadius: 0.16,
+      },
+      linePattern: 'solid' as const,
+      role: 'local' as const,
+      paintStyle: style?.paintStyle,
+      strokeStyle: style?.strokeStyle,
+    }, constraintDisplaySummary)
+  })
+  const entityRenderables = deriveSketchDisplayEntities(session).map((entity, index) =>
+    withSketchConstraintDisplay(
       createDisplayRenderableForEntity(
         session,
         entity,
         index,
         entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
       ),
+      constraintDisplaySummary,
     ),
+  )
+
+  return [
+    ...regionRenderables,
+    ...pointRenderables,
+    ...entityRenderables,
+    ...entityRenderables.flatMap(createOverconstraintDiagnosticRenderable),
     ...displayDefinition.references.flatMap((reference, index) => {
       const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
       if (projectedReference && projectedReference.status === 'projected' && projectedReference.geometry.length > 0) {
@@ -6118,6 +6298,43 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       ),
     ),
   ]
+}
+
+function withSketchConstraintDisplay(
+  renderable: SketchSessionDisplayRenderable,
+  summary: SketchConstraintDisplaySummary,
+): SketchSessionDisplayRenderable {
+  if (renderable.role === 'reference') {
+    return renderable
+  }
+
+  return {
+    ...renderable,
+    constraintDisplay: getSketchConstraintDisplayForTarget(renderable.target, summary),
+  }
+}
+
+function createOverconstraintDiagnosticRenderable(
+  renderable: SketchSessionDisplayRenderable,
+): SketchSessionDisplayRenderable[] {
+  if (
+    renderable.geometry.kind !== 'polyline'
+    || renderable.role !== 'local'
+    || renderable.target?.kind !== 'sketchEntity'
+    || !renderable.constraintDisplay?.isAffectedOverconstraint
+  ) {
+    return []
+  }
+
+  return [{
+    ...renderable,
+    id: `${renderable.id}_overconstraint_diagnostic` as RenderableId,
+    label: `${renderable.label} overconstraint diagnostic`,
+    linePattern: 'solid',
+    paintStyle: undefined,
+    strokeStyle: undefined,
+    diagnosticStyle: { kind: 'overconstraint' },
+  }]
 }
 
 function createDisplayRenderableForRegion(

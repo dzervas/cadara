@@ -278,6 +278,7 @@ export function CadWorkbench() {
     () => {
       return composeViewportRenderables({
         snapshotRenderables: snapshot?.document.render.records ?? [],
+        snapshotSketches: snapshot?.document.sketches ?? [],
         previewRenderables,
         sketchSession,
         hiddenTargetKeys: visibleHiddenTargetKeys,
