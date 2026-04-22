@@ -922,6 +922,7 @@ endsolid cube
     const result = await service.importMeshFile({
       fileName: 'cube.stl',
       bytes: sourceBytes,
+      acceptFacetedFallback: true,
     })
 
     assert(result.ok, 'Mesh file import should commit an authored document mutation.')
@@ -934,8 +935,17 @@ endsolid cube
     assert(asset?.format === 'baked-mesh', 'Mesh file import should store a generated baked geometry asset.')
     assert(asset.provenance.kind === 'generated', 'Baked mesh asset should be generated, not an imported source asset.')
     assert(asset.provenance.sourceStored === false, 'Baked mesh asset manifest should record that the source mesh is not stored.')
+    assert(asset.provenance.reconstruction?.algorithmId, 'Baked mesh asset manifest should record reconstruction algorithm provenance.')
+    assert(
+      asset.provenance.reconstruction?.resultClassification === 'analytic',
+      'Clean cube import should record analytic reconstruction classification.',
+    )
     assert(feature?.definition.kind === 'meshImport', 'Mesh file import should persist a mesh import feature.')
     assert(feature.definition.parameters.source.sourceStored === false, 'Mesh import feature should record sourceStored false.')
+    assert(
+      feature.definition.parameters.reconstruction?.sourceHash === feature.definition.parameters.source.sourceHash,
+      'Mesh import feature should preserve reconstruction source hash provenance.',
+    )
     assert(
       !JSON.stringify(savedDocument).includes(sourceText),
       'Saved authored document should not contain original STL source bytes.',
@@ -964,6 +974,7 @@ endsolid open
     const result = await service.importMeshFile({
       fileName: 'open.stl',
       bytes: sourceBytes,
+      acceptFacetedFallback: true,
     })
 
     assert(!result.ok, 'Mesh file import should reject meshes the basic baker cannot convert.')

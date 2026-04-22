@@ -8,6 +8,12 @@ import { CONTRACT_VERSION, MESH_IMPORT_FEATURE_SCHEMA_VERSION, STEP_IMPORT_FEATU
 import type { BodyId } from '@/contracts/shared/ids'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import {
+  DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
+  MESH_RECONSTRUCTION_ALGORITHM_ID,
+  MESH_RECONSTRUCTION_ALGORITHM_VERSION,
+  type MeshReconstructionProvenance,
+} from '@/contracts/modeling/mesh-reconstruction'
 
 test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -117,6 +123,28 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
     assetId: 'asset_baked_mesh_contract',
     ownerFeatureIds: ['feature_meshImport-1'],
   })
+  const meshReconstruction: MeshReconstructionProvenance = {
+    algorithmId: MESH_RECONSTRUCTION_ALGORITHM_ID,
+    algorithmVersion: MESH_RECONSTRUCTION_ALGORITHM_VERSION,
+    settings: DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
+    sourceHash: bakedMeshAsset.asset.hash,
+    resultClassification: 'facetedFallback',
+    qualityMetrics: {
+      triangleCount: 4,
+      vertexCount: 4,
+      openEdgeCount: 0,
+      degenerateTriangleCount: 0,
+      planarRegionCount: 0,
+      cylindricalRegionCount: 0,
+      analyticConfidence: 0,
+      maxPlanarDeviation: 0,
+      maxCylindricalDeviation: null,
+    },
+    surfaceSummary: {
+      planarRegions: 0,
+      cylindricalRegions: 0,
+    },
+  }
   bakedMeshAsset.asset.format = 'baked-mesh'
   bakedMeshAsset.asset.mediaType = 'application/vnd.cadara.baked-mesh+json'
   bakedMeshAsset.asset.provenance = {
@@ -125,7 +153,8 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
     sourceHash: bakedMeshAsset.asset.hash,
     sourceFormat: 'stl',
     sourceStored: false,
-    generator: 'basic-mesh-baker/v1',
+    generator: `${MESH_RECONSTRUCTION_ALGORITHM_ID}/v${MESH_RECONSTRUCTION_ALGORITHM_VERSION}`,
+    reconstruction: meshReconstruction,
   }
   const meshImportDocument = structuredClone(authoredDocument)
   meshImportDocument.assets.records = [bakedMeshAsset.asset]
@@ -161,6 +190,7 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
               scale: 1,
             },
           },
+          reconstruction: meshReconstruction,
           label: 'Imported mesh bracket',
         },
       },
@@ -175,6 +205,28 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
 
   const parsedMeshImport = parseAuthoredModelDocument(meshImportDocument)
   assert(parsedMeshImport.ok, 'Authored validation should accept baked mesh import feature definitions.')
+
+  const invalidMeshClassification = parseAuthoredModelDocument({
+    ...meshImportDocument,
+    features: meshImportDocument.features.map((feature) =>
+      feature.featureId === 'feature_meshImport-1' && feature.definition.kind === 'meshImport'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                reconstruction: {
+                  ...feature.definition.parameters.reconstruction!,
+                  resultClassification: 'speculative',
+                },
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(!invalidMeshClassification.ok, 'Authored validation should reject unknown mesh reconstruction classifications.')
 
   const meshImportWithSourceBytes = parseAuthoredModelDocument({
     ...meshImportDocument,

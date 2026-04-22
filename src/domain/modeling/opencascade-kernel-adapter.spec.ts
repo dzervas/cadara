@@ -1171,6 +1171,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       sourceFormat: 'stl',
       sourceHash,
       ownerFeatureId: input.featureId,
+      acceptFacetedFallback: true,
     })
     assert(baked.ok, baked.ok ? 'Baked mesh fixture should succeed.' : baked.reason)
     const asset = baked.assetInput.asset
@@ -1209,6 +1210,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
                   scale: 1,
                 },
               },
+              reconstruction: baked.reconstruction,
               label: input.label,
             },
           },
@@ -1535,6 +1537,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       const imported = await importService.importMeshFile({
         fileName: `round-trip.${format}`,
         bytes: exported.payload,
+        acceptFacetedFallback: true,
       })
       assert(imported.ok, `${format} mesh import should bake a generated geometry asset.`)
 
@@ -1619,6 +1622,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       const importedMesh = await importService.importMeshFile({
         fileName: `curved-cylinder.${format}`,
         bytes: exported.payload,
+        acceptFacetedFallback: true,
       })
       assert(importedMesh.ok, `${format} curved mesh import should bake a generated geometry asset.`)
 

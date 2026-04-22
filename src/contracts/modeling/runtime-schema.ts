@@ -38,6 +38,7 @@ import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
 import { durableRefSchema, edgeRefSchema, vertexRefSchema } from '@/contracts/shared/references.runtime-schema'
 import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 import { geometryAssetHashSchema } from '@/contracts/modeling/geometry-assets.runtime-schema'
+import { createMeshReconstructionProvenanceSchema } from '@/contracts/modeling/mesh-reconstruction.runtime-schema'
 import {
   bodyIdSchema,
   contractVersionSchema,
@@ -422,6 +423,7 @@ const meshImportDefinitionSchema = z.object({
       sourceStored: z.literal(false),
     }).strict(),
     resolvedSettings: meshImportResolvedSettingsSchema,
+    reconstruction: createMeshReconstructionProvenanceSchema(geometryAssetHashSchema).optional(),
     label: stringSchema.trim().min(1, 'Mesh import label is required.'),
   }).strict(),
 }).transform((value) => value as FeatureDefinition)

@@ -2,6 +2,12 @@ import type { FeatureId, GeometryAssetId } from '@/contracts/shared/ids'
 import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
 import { getGeometryAssetHashPrefix } from '@/contracts/modeling/geometry-assets'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type {
+  MeshReconstructionProvenance,
+  MeshReconstructionQualityMetrics,
+  MeshReconstructionResultClassification,
+  MeshReconstructionSettings,
+} from '@/contracts/modeling/mesh-reconstruction'
 
 export type MeshImportSourceFormat = 'stl' | '3mf'
 export type MeshImportUnitSource = 'user'
@@ -41,6 +47,7 @@ export interface MeshImportFeatureParameters {
   assetId: GeometryAssetId
   source: MeshImportSourceProvenance
   resolvedSettings: MeshImportResolvedSettings
+  reconstruction?: MeshReconstructionProvenance
   label: string
 }
 
@@ -48,6 +55,10 @@ export type MeshImportDiagnosticCode =
   | 'mesh-import-source-discard-warning'
   | 'mesh-import-parse-failed'
   | 'mesh-import-conversion-failed'
+  | 'mesh-import-uncertain-analytic-recovery'
+  | 'mesh-import-faceted-fallback-limit-exceeded'
+  | 'mesh-import-faceted-fallback-acceptance-required'
+  | 'mesh-import-mesh-body-fallback-disabled'
   | 'mesh-import-missing-baked-asset'
 
 export interface MeshImportDiagnosticDetail {
@@ -59,6 +70,9 @@ export interface MeshImportDiagnosticDetail {
   conversionPhase?: 'parse' | 'validate' | 'bake' | 'restore'
   rejectionReason?: string
   sourceStored?: false
+  resultClassification?: MeshReconstructionResultClassification
+  reconstructionSettings?: MeshReconstructionSettings
+  qualityMetrics?: MeshReconstructionQualityMetrics
 }
 
 export function createMeshImportDiagnostic(
@@ -72,6 +86,9 @@ export function createMeshImportDiagnostic(
     conversionPhase?: MeshImportDiagnosticDetail['conversionPhase']
     rejectionReason?: string
     severity?: ModelingDiagnostic['severity']
+    resultClassification?: MeshReconstructionResultClassification
+    reconstructionSettings?: MeshReconstructionSettings
+    qualityMetrics?: MeshReconstructionQualityMetrics
   } = {},
 ): ModelingDiagnostic {
   return {
@@ -89,6 +106,9 @@ export function createMeshImportDiagnostic(
       conversionPhase: input.conversionPhase,
       rejectionReason: input.rejectionReason,
       sourceStored: false,
+      resultClassification: input.resultClassification,
+      reconstructionSettings: input.reconstructionSettings,
+      qualityMetrics: input.qualityMetrics,
     },
   }
 }

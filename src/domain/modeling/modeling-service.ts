@@ -413,6 +413,7 @@ export interface ModelingImportStepFileInput {
 export interface ModelingImportMeshFileInput {
   fileName: string
   bytes: Uint8Array
+  acceptFacetedFallback?: boolean
 }
 
 export type ModelingDocumentFileMutationResult =
@@ -1326,6 +1327,9 @@ function normalizeMeshImportFeatureParameters(value: unknown): MeshImportFeature
         scale: typeof settings.placement.scale === 'number' && settings.placement.scale > 0 ? settings.placement.scale : 1,
       },
     },
+    ...(isRecord(value.reconstruction)
+      ? { reconstruction: structuredClone(value.reconstruction) as unknown as MeshImportFeatureParameters['reconstruction'] }
+      : {}),
     label: value.label.trim(),
   }
 }
@@ -5006,6 +5010,7 @@ export function createModelingService(
       sourceFormat,
       sourceHash,
       ownerFeatureId: featureId,
+      acceptFacetedFallback: input.acceptFacetedFallback,
     })
 
     if (!baked.ok) {
@@ -5013,7 +5018,7 @@ export function createModelingService(
         ok: false as const,
         diagnostics: [
           createMeshImportDiagnostic(
-            'mesh-import-conversion-failed',
+            baked.diagnosticCode,
             `Mesh import failed while baking ${input.fileName}.`,
             {
               sourceFormat,
@@ -5021,6 +5026,9 @@ export function createModelingService(
               triangleCount: baked.triangleCount,
               conversionPhase: 'bake',
               rejectionReason: baked.reason,
+              resultClassification: baked.resultClassification,
+              reconstructionSettings: baked.reconstruction.settings,
+              qualityMetrics: baked.reconstruction.qualityMetrics,
             },
           ),
         ],
@@ -5063,6 +5071,7 @@ export function createModelingService(
                   scale: 1,
                 },
               },
+              reconstruction: baked.reconstruction,
               label,
             },
           },

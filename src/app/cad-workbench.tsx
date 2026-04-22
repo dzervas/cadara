@@ -109,6 +109,11 @@ import {
 import { getBuildModeLabel } from '@/components/layout/build-metadata'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
+import { parseMeshSourceFile } from '@/domain/modeling/mesh-parser'
+import {
+  evaluateMeshReconstructionFallbacks,
+  type MeshReconstructionEvaluation,
+} from '@/domain/modeling/baked-mesh-geometry'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
@@ -119,7 +124,14 @@ type StepImportFlowState =
   | { kind: 'importing'; fileName: string; label: string }
 type MeshImportFlowState =
   | { kind: 'idle' }
-  | { kind: 'review'; fileName: string; bytes: Uint8Array; label: string; warningAccepted: boolean }
+  | {
+    kind: 'review'
+    fileName: string
+    bytes: Uint8Array
+    label: string
+    warningAccepted: boolean
+    reconstruction: MeshReconstructionEvaluation
+  }
   | { kind: 'importing'; fileName: string; label: string }
 type WorkbenchUndoEntry =
   | {
@@ -141,6 +153,25 @@ function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
     || status.kind === 'syncing'
     || status.kind === 'synced'
     || status.kind === 'persistent-binding-unavailable'
+}
+
+function formatMeshReconstructionClassification(classification: MeshReconstructionEvaluation['resultClassification']) {
+  switch (classification) {
+    case 'analytic':
+      return 'analytic'
+    case 'facetedFallback':
+      return 'faceted fallback'
+    case 'rejected':
+      return 'rejected'
+    case 'meshBodyException':
+      return 'mesh body exception'
+  }
+}
+
+function getMeshImportWarningLabel(reconstruction: MeshReconstructionEvaluation) {
+  return reconstruction.resultClassification === 'facetedFallback'
+    ? 'I accept the faceted fallback result and understand the original mesh file will not be saved in this document.'
+    : 'I understand the original mesh file will not be saved in this document.'
 }
 
 export function CadWorkbench() {
@@ -1358,15 +1389,18 @@ export function CadWorkbench() {
 
     if (/\.(?:stl|3mf)$/i.test(file.name)) {
       try {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const parsed = parseMeshSourceFile({ fileName: file.name, bytes })
         setMeshImportFlow({
           kind: 'review',
           fileName: file.name,
-          bytes: new Uint8Array(await file.arrayBuffer()),
+          bytes,
           label: createMeshImportLabel(file.name),
           warningAccepted: false,
+          reconstruction: evaluateMeshReconstructionFallbacks(parsed.triangles),
         })
       } catch (error) {
-        reportDocumentFileActionFailure('workbench.file.prepare-mesh-import', 'Mesh import failed.', error)
+        showWorkbenchError(error instanceof Error ? error.message : 'Mesh import failed.')
       }
       return
     }
@@ -1446,6 +1480,7 @@ export function CadWorkbench() {
       const result = await modelingService.importMeshFile({
         fileName: review.fileName,
         bytes: review.bytes,
+        acceptFacetedFallback: review.reconstruction.resultClassification === 'facetedFallback',
       })
       if (!result.ok) {
         setMeshImportFlow({ ...review })
@@ -1742,8 +1777,38 @@ export function CadWorkbench() {
                   <Text size="xs" c="dimmed">{meshImportFlow.fileName}</Text>
                   <Stack gap={4}>
                     <Text size="xs">Source: STL or 3MF triangles</Text>
-                    <Text size="xs">Result: generated baked geometry asset</Text>
+                    <Text size="xs">
+                      Result: {meshImportFlow.kind === 'review'
+                        ? formatMeshReconstructionClassification(meshImportFlow.reconstruction.resultClassification)
+                        : 'generated baked geometry asset'}
+                    </Text>
                     <Text size="xs">Source stored: false</Text>
+                    {meshImportFlow.kind === 'review' ? (
+                      <>
+                        <Text size="xs">
+                          Settings: {meshImportFlow.reconstruction.settings.qualityPreset};
+                          tolerance {meshImportFlow.reconstruction.settings.linearTolerance};
+                          mesh body fallback {meshImportFlow.reconstruction.settings.meshBodyFallback}
+                        </Text>
+                        <Text size="xs">
+                          Quality: {meshImportFlow.reconstruction.qualityMetrics.triangleCount} triangles;
+                          {` ${meshImportFlow.reconstruction.qualityMetrics.planarRegionCount}`} planar regions;
+                          {` ${meshImportFlow.reconstruction.qualityMetrics.cylindricalRegionCount}`} cylindrical regions;
+                          confidence {Math.round(meshImportFlow.reconstruction.qualityMetrics.analyticConfidence * 100)}%
+                        </Text>
+                        {meshImportFlow.reconstruction.resultClassification === 'facetedFallback' ? (
+                          <Text size="xs" c="yellow">
+                            The saved result will be faceted baked geometry. Re-import the original file to try different reconstruction settings later.
+                          </Text>
+                        ) : null}
+                        {meshImportFlow.reconstruction.resultClassification === 'rejected'
+                        || meshImportFlow.reconstruction.resultClassification === 'meshBodyException' ? (
+                          <Text size="xs" c="red">
+                            {meshImportFlow.reconstruction.rejectionReason ?? 'Mesh reconstruction rejected this source.'}
+                          </Text>
+                        ) : null}
+                      </>
+                    ) : null}
                   </Stack>
                   {meshImportFlow.kind === 'importing' ? (
                     <Group gap="xs">
@@ -1755,13 +1820,20 @@ export function CadWorkbench() {
                       <Checkbox
                         checked={meshImportFlow.warningAccepted}
                         onChange={(event) => handleMeshImportWarningAcceptedChange(event.currentTarget.checked)}
-                        label="I understand the original mesh file will not be saved in this document."
+                        label={getMeshImportWarningLabel(meshImportFlow.reconstruction)}
                       />
                       <Group justify="flex-end">
                         <Button variant="subtle" color="gray" onClick={handleMeshImportCancel}>
                           Cancel
                         </Button>
-                        <Button onClick={handleMeshImportAccept} disabled={!meshImportFlow.warningAccepted}>
+                        <Button
+                          onClick={handleMeshImportAccept}
+                          disabled={
+                            !meshImportFlow.warningAccepted
+                            || meshImportFlow.reconstruction.resultClassification === 'rejected'
+                            || meshImportFlow.reconstruction.resultClassification === 'meshBodyException'
+                          }
+                        >
                           Import
                         </Button>
                       </Group>

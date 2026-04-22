@@ -37,3 +37,10 @@ The first 3MF import scope SHALL extract only triangle geometry needed for baked
 - **THEN** the importer ignores metadata that does not affect triangle geometry
 - **AND** it rejects cases where unsupported metadata is required to interpret geometry correctly
 
+### Requirement: Mesh import SHALL show reconstruction quality before commit
+The mesh import flow SHALL show reconstruction quality and fallback classification before committing a baked geometry result.
+
+#### Scenario: Faceted fallback is available
+- **WHEN** mesh conversion can only produce faceted baked geometry
+- **THEN** the user sees a warning that the saved result will be faceted and the source mesh will not be retained
+- **AND** the user must accept the result before the import feature is committed

@@ -6,6 +6,7 @@ import {
   type GeometryAssetSchemaVersion,
 } from '@/contracts/shared/versioning'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type { MeshReconstructionProvenance } from '@/contracts/modeling/mesh-reconstruction'
 
 export type GeometryAssetHash = `sha256:${string}`
 export type GeometryAssetFormat = 'step' | 'stl' | '3mf' | 'baked-occ' | 'baked-mesh'
@@ -24,6 +25,7 @@ export interface GeometryAssetProvenance {
   sourceFormat?: 'step' | 'stl' | '3mf'
   sourceStored?: false
   generator?: string
+  reconstruction?: MeshReconstructionProvenance
 }
 
 export interface GeometryAssetRecord {
