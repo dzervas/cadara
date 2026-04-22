@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 
 import {
   createBakedMeshGeometryAsset,
+  createMeshSizeLimitEvaluation,
   evaluateMeshReconstructionFallbacks,
   parseBakedMeshGeometry,
 } from '@/domain/modeling/baked-mesh-geometry'
@@ -134,6 +135,14 @@ test('src/domain/modeling/baked-mesh-geometry.spec.ts', async () => {
   assert(
     limitedEvaluation.rejectionReason?.includes('Persistent mesh body fallback is not enabled'),
     'Mesh-body fallback cases should explain that persistent mesh bodies are disabled.',
+  )
+  const preflightLimitedEvaluation = createMeshSizeLimitEvaluation({
+    triangleCount: 50_001,
+  })
+  assert(
+    preflightLimitedEvaluation?.resultClassification === 'meshBodyException' &&
+      preflightLimitedEvaluation.qualityMetrics.triangleCount === 50_001,
+    'Preflight size-limit evaluation should reject oversized binary STL payloads before triangle parsing.',
   )
 
   const limitedBake = await createBakedMeshGeometryAsset({

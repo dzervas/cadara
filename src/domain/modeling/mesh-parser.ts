@@ -10,6 +10,12 @@ export interface ParsedMeshSource {
   triangles: MeshTriangle[]
 }
 
+export interface MeshSourcePreflight {
+  sourceFormat: MeshImportSourceFormat
+  byteLength: number
+  triangleCount: number | null
+}
+
 export class MeshParseError extends Error {
   readonly sourceFormat: MeshImportSourceFormat
 
@@ -46,6 +52,21 @@ export function parseMeshSourceFile(input: { fileName: string; bytes: Uint8Array
     : { sourceFormat, triangles: parse3mfTriangles(input.bytes) }
 }
 
+export function getMeshSourcePreflight(input: { fileName: string; bytes: Uint8Array }): MeshSourcePreflight | null {
+  const sourceFormat = inferMeshSourceFormat(input.fileName)
+  if (!sourceFormat) {
+    return null
+  }
+
+  return {
+    sourceFormat,
+    byteLength: input.bytes.byteLength,
+    triangleCount: sourceFormat === 'stl'
+      ? getBinaryStlTriangleCount({ headerBytes: input.bytes, byteLength: input.bytes.byteLength })
+      : null,
+  }
+}
+
 export function parseStlTriangles(bytes: Uint8Array): MeshTriangle[] {
   const triangles = isBinaryStl(bytes)
     ? parseBinaryStlTriangles(bytes)
@@ -59,12 +80,20 @@ export function parseStlTriangles(bytes: Uint8Array): MeshTriangle[] {
 }
 
 function isBinaryStl(bytes: Uint8Array) {
-  if (bytes.byteLength < 84) {
-    return false
+  return getBinaryStlTriangleCount({ headerBytes: bytes, byteLength: bytes.byteLength }) !== null
+}
+
+export function getBinaryStlTriangleCount(input: { headerBytes: Uint8Array; byteLength: number }) {
+  if (input.headerBytes.byteLength < 84) {
+    return null
   }
 
-  const triangleCount = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(80, true)
-  return 84 + triangleCount * 50 === bytes.byteLength
+  const triangleCount = new DataView(
+    input.headerBytes.buffer,
+    input.headerBytes.byteOffset,
+    input.headerBytes.byteLength,
+  ).getUint32(80, true)
+  return 84 + triangleCount * 50 === input.byteLength ? triangleCount : null
 }
 
 function parseBinaryStlTriangles(bytes: Uint8Array): MeshTriangle[] {

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RequestId } from '@/contracts/shared/ids'
 import type { PackedWorkspaceSnapshot } from '@/domain/modeling/occ/mesh-transport'
@@ -25,12 +26,14 @@ export type OccWorkerRequest =
       kind: 'rebuildDocument'
       requestId: RequestId
       document: AuthoredModelDocument
+      assets?: readonly GeometryAssetBlobInput[]
     }
   | {
       kind: 'buildWorkspaceSnapshot'
       requestId: RequestId
       document: AuthoredModelDocument
       lodTierId?: OccTessellationTierId
+      assets?: readonly GeometryAssetBlobInput[]
     }
   | {
       kind: 'cancel'
@@ -73,12 +76,14 @@ export const occWorkerRequestEnvelopeSchema = z.discriminatedUnion('kind', [
     kind: z.literal('rebuildDocument'),
     requestId: requestIdSchema,
     document: z.unknown(),
+    assets: z.array(z.unknown()).optional(),
   }),
   z.object({
     kind: z.literal('buildWorkspaceSnapshot'),
     requestId: requestIdSchema,
     document: z.unknown(),
     lodTierId: z.enum(['startup', 'normal', 'fine']).optional(),
+    assets: z.array(z.unknown()).optional(),
   }),
   z.object({
     kind: z.literal('cancel'),

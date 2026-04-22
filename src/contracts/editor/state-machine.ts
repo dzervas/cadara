@@ -1856,6 +1856,13 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         return transitionEditorState(state, { type: 'history.redoRequested' })
       }
 
+      if (event.toolId === 'importPart') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
       if (event.toolId === 'finishSketch' && state.kind === 'editingSketch') {
         return emitSketchCommit(state)
       }

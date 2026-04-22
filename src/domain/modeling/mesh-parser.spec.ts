@@ -2,6 +2,8 @@ import { test } from 'bun:test'
 import { zipSync } from 'fflate'
 
 import {
+  getBinaryStlTriangleCount,
+  getMeshSourcePreflight,
   parse3mfTriangles,
   parseStlTriangles,
 } from '@/domain/modeling/mesh-parser'
@@ -115,6 +117,8 @@ endsolid one
 
   assert(parseStlTriangles(asciiStl()).length === 1, 'ASCII STL parser should extract triangle facets.')
   assert(parseStlTriangles(binaryStl(4096)).length === 4096, 'Binary STL parser should handle medium-size payloads.')
+  assert(getBinaryStlTriangleCount({ headerBytes: binaryStl(4096).slice(0, 84), byteLength: 84 + 4096 * 50 }) === 4096, 'Binary STL header preflight should read triangle count without loading full file bytes.')
+  assert(getMeshSourcePreflight({ fileName: 'part.stl', bytes: binaryStl(4096) })?.triangleCount === 4096, 'Binary STL preflight should read triangle count without parsing facets.')
   assert(parse3mfTriangles(triangleOnly3mf()).length === 1, '3MF parser should extract triangle-only geometry.')
   assert(parse3mfTriangles(singleQuoted3mf()).length === 1, '3MF parser should accept XML single-quoted attributes.')
 

@@ -10,10 +10,19 @@ test('src/app/cad-workbench-mesh-import.spec.ts', () => {
   }
 
   const source = readFileSync(join(process.cwd(), 'src/app/cad-workbench.tsx'), 'utf8')
+  const workerSource = readFileSync(join(process.cwd(), 'src/domain/modeling/mesh-import-review.worker.ts'), 'utf8')
 
   assert(
-    source.includes('evaluateMeshReconstructionFallbacks(parsed.triangles)'),
-    'Mesh import review should evaluate reconstruction quality before commit.',
+    source.includes('reviewMeshImportWithWorker(file.name, bytes, taskSequence)') &&
+      workerSource.includes('evaluateMeshReconstructionFallbacks(parsed.triangles)') &&
+      workerSource.includes('createBakedMeshGeometryAsset({'),
+    'Mesh import review should parse, reconstruct, and prepare baked mesh assets in the worker.',
+  )
+  assert(
+    source.includes('file.slice(0, 84).arrayBuffer()') &&
+      source.includes('getBinaryStlTriangleCount({ headerBytes, byteLength: file.size })') &&
+      source.includes('createMeshSizeLimitEvaluation({ triangleCount })'),
+    'Mesh import review should reject oversized binary STL files before loading or parsing every triangle on the UI thread.',
   )
   assert(
     source.includes("showWorkbenchError(error instanceof Error ? error.message : 'Mesh import failed.')"),
@@ -28,11 +37,23 @@ test('src/app/cad-workbench-mesh-import.spec.ts', () => {
     'Mesh import review should warn before accepting faceted fallback.',
   )
   assert(
-    source.includes("acceptFacetedFallback: review.reconstruction.resultClassification === 'facetedFallback'"),
-    'Mesh import commit should pass explicit faceted fallback acceptance.',
+    source.includes('modelingService.importPreparedMeshFile') &&
+      source.includes('assetInput: review.assetInput'),
+    'Mesh import commit should use the worker-prepared baked mesh asset instead of reparsing source bytes.',
   )
   assert(
     source.includes('mesh body fallback {meshImportFlow.reconstruction.settings.meshBodyFallback}'),
     'Mesh import review should show reconstruction settings, including disabled mesh body fallback.',
+  )
+  assert(
+    source.includes('data-mesh-import-progress') &&
+      source.includes('Mesh import progress') &&
+      source.includes('cancelMeshImportPreparation') &&
+      source.includes('meshImportFileReaderRef.current?.abort()'),
+    'Mesh import preparation should expose cancellable non-blocking progress UI.',
+  )
+  assert(
+    source.includes('maxFacetedTriangles.toLocaleString()'),
+    'Mesh import review should tell users the current faceted fallback triangle cap.',
   )
 })

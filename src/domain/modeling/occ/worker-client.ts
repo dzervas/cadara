@@ -1,4 +1,5 @@
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RequestId } from '@/contracts/shared/ids'
 import type {
@@ -29,8 +30,12 @@ export interface OccWorkerClientOptions {
 
 export interface OccWorkerSnapshotClient {
   preload(assets?: OccWorkerAssetConfig): Promise<void>
-  rebuildDocument(document: AuthoredModelDocument): Promise<void>
-  buildWorkspaceSnapshot(document: AuthoredModelDocument, lodTierId?: OccTessellationTierId): Promise<WorkspaceSnapshot>
+  rebuildDocument(document: AuthoredModelDocument, assets?: readonly GeometryAssetBlobInput[]): Promise<void>
+  buildWorkspaceSnapshot(
+    document: AuthoredModelDocument,
+    lodTierId?: OccTessellationTierId,
+    assets?: readonly GeometryAssetBlobInput[],
+  ): Promise<WorkspaceSnapshot>
   dispose?(): void
 }
 
@@ -54,20 +59,24 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     })
   }
 
-  rebuildDocument(document: AuthoredModelDocument) {
+  rebuildDocument(document: AuthoredModelDocument, assets: readonly GeometryAssetBlobInput[] = []) {
     const requestId = this.createRequestId('occ_rebuild')
 
-    return this.sendRequest<void>({ kind: 'rebuildDocument', requestId, document }, {
+    return this.sendRequest<void>({ kind: 'rebuildDocument', requestId, document, assets }, {
       kind: 'rebuildDocument',
       resolve: () => undefined,
       reject: () => undefined,
     })
   }
 
-  buildWorkspaceSnapshot(document: AuthoredModelDocument, lodTierId?: OccTessellationTierId) {
+  buildWorkspaceSnapshot(
+    document: AuthoredModelDocument,
+    lodTierId?: OccTessellationTierId,
+    assets: readonly GeometryAssetBlobInput[] = [],
+  ) {
     const requestId = this.createRequestId('occ_snapshot')
 
-    return this.sendRequest<WorkspaceSnapshot>({ kind: 'buildWorkspaceSnapshot', requestId, document, lodTierId }, {
+    return this.sendRequest<WorkspaceSnapshot>({ kind: 'buildWorkspaceSnapshot', requestId, document, lodTierId, assets }, {
       kind: 'buildWorkspaceSnapshot',
       resolve: () => undefined,
       reject: () => undefined,

@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RequestId } from '@/contracts/shared/ids'
 import { OccWorkerClient, type OccWorkerLike } from '@/domain/modeling/occ/worker-client'
@@ -143,8 +144,38 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
     client.dispose()
   }
 
+  async function testWorkerSnapshotTransfersGeometryAssets() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+    const document = { documentId: 'document_occ_kernel' } as AuthoredModelDocument
+    const assets = [{
+      asset: {
+        assetId: 'asset_baked_mesh_test',
+        hash: `sha256:${'a'.repeat(64)}`,
+        byteLength: 3,
+        format: 'baked-mesh',
+        mediaType: 'application/vnd.cadara.baked-mesh+json',
+        ownerFeatureIds: ['feature_meshImport-1'],
+      },
+      bytes: new Uint8Array([1, 2, 3]),
+    }] as GeometryAssetBlobInput[]
+    const pending = client.buildWorkspaceSnapshot(document, 'normal', assets)
+    const request = worker.posted[0]
+
+    assert(request?.kind === 'buildWorkspaceSnapshot', 'Worker snapshot builds should post a snapshot request.')
+    assert(request.assets?.[0]?.bytes.byteLength === 3, 'Worker snapshot requests should include geometry asset bytes.')
+    worker.emit({
+      kind: 'workspaceSnapshotBuilt',
+      requestId: request.requestId,
+      snapshot: { document: { render: { records: [] } } } as WorkspaceSnapshot,
+    })
+    await pending
+    client.dispose()
+  }
+
   await testWorkerInitializationSuccess()
   await testWorkerInitializationFailure()
   await testWorkerSnapshotOverlap()
   await testWorkerSnapshotParityShape()
+  await testWorkerSnapshotTransfersGeometryAssets()
 })

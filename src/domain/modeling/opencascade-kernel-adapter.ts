@@ -48,6 +48,7 @@ import type {
 import {
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import {
   createStepImportDiagnostic,
   type StepImportDiagnosticCode,
@@ -139,6 +140,11 @@ interface OpenCascadeKernelAdapterOptions {
 interface OccKernelRuntimeState {
   authoringState: OccAuthoringState
   revisionSequence: number
+}
+
+interface WorkerRestoredAuthoredDocument {
+  document: AuthoredModelDocument
+  assets: readonly GeometryAssetBlobInput[]
 }
 
 const DEFAULT_SOLVER_TOLERANCES: SolverTolerancePolicy = {
@@ -700,6 +706,35 @@ async function resolveGeometryAssetBlobs(
   return assetBlobs
 }
 
+function createGeometryAssetBlobInputs(
+  document: AuthoredModelDocument,
+  assetBlobs: ReadonlyMap<AuthoredModelDocument['assets']['records'][number]['hash'], Uint8Array>,
+) {
+  const assets: GeometryAssetBlobInput[] = []
+  for (const asset of document.assets.records) {
+    const bytes = assetBlobs.get(asset.hash)
+    if (bytes) {
+      assets.push({ asset, bytes: bytes.slice() })
+    }
+  }
+  return assets
+}
+
+function createInMemoryGeometryAssetResolver(
+  assets: readonly GeometryAssetBlobInput[],
+): GeometryAssetResolver | undefined {
+  if (assets.length === 0) {
+    return undefined
+  }
+
+  const blobs = new Map(assets.map((asset) => [asset.asset.hash, asset.bytes.slice()] as const))
+  return {
+    async getGeometryAssetBytes(hash) {
+      return blobs.get(hash)?.slice() ?? null
+    },
+  }
+}
+
 function capitalizeFeatureKind(kind: FeatureDefinition['kind']) {
   return `${kind[0]!.toUpperCase()}${kind.slice(1)}`
 }
@@ -1171,6 +1206,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null
   private runtimeState: OccKernelRuntimeState | null = null
+  private workerRestoredDocument: WorkerRestoredAuthoredDocument | null = null
   private snapshotLodTierId: OccTessellationTierId = 'startup'
 
   constructor(options: OpenCascadeKernelAdapterOptions) {
@@ -1209,6 +1245,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private async getRuntimeState() {
+    if (this.workerRestoredDocument) {
+      const restored = this.workerRestoredDocument
+      this.workerRestoredDocument = null
+      await this.restoreAuthoredModelDocumentOnMainThread(
+        restored.document,
+        [],
+        createInMemoryGeometryAssetResolver(restored.assets),
+      )
+    }
+
     if (this.runtimeState) {
       return this.runtimeState
     }
@@ -1335,6 +1381,47 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
+    if (this.workerSnapshotClient) {
+      const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
+      const assets = createGeometryAssetBlobInputs(document, assetBlobs)
+      this.runtimeState = null
+      this.initializationPromise = null
+      this.workerRestoredDocument = {
+        document: structuredClone(document),
+        assets,
+      }
+      return
+    }
+
+    await this.restoreAuthoredModelDocumentOnMainThread(document, diagnostics, assetResolver)
+  }
+
+  async validateAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assetResolver?: GeometryAssetResolver,
+  ): Promise<void> {
+    if (this.workerSnapshotClient) {
+      const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
+      const assets = createGeometryAssetBlobInputs(document, assetBlobs)
+      await this.workerSnapshotClient.rebuildDocument(document, assets)
+      this.runtimeState = null
+      this.initializationPromise = null
+      this.workerRestoredDocument = {
+        document: structuredClone(document),
+        assets,
+      }
+      return
+    }
+
+    await this.restoreAuthoredModelDocumentOnMainThread(document, diagnostics, assetResolver)
+  }
+
+  private async restoreAuthoredModelDocumentOnMainThread(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assetResolver?: GeometryAssetResolver,
+  ): Promise<void> {
     const oc = await this.loadOpenCascadeInstance()
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
     const historyOrder = createAuthoredHistoryRestoreOrder(document)
@@ -1432,6 +1519,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   async exportAuthoredModelDocument(documentId: AuthoredModelDocument['documentId']) {
+    if (this.workerRestoredDocument) {
+      if (this.workerRestoredDocument.document.documentId !== documentId) {
+        throw new Error(`OCC authored export requested document ${documentId}, but active document is ${this.workerRestoredDocument.document.documentId}.`)
+      }
+
+      return structuredClone(this.workerRestoredDocument.document)
+    }
+
     const runtimeState = await this.getRuntimeState()
 
     if (runtimeState.authoringState.documentId !== documentId) {
@@ -1462,6 +1557,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
+    this.workerRestoredDocument = null
     this.runtimeState = runtimeState
     this.initializationPromise = Promise.resolve(runtimeState)
   }
@@ -1831,6 +1927,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId)
 
+    if (this.workerSnapshotClient && this.workerRestoredDocument) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        snapshot: await this.workerSnapshotClient.buildWorkspaceSnapshot(
+          this.workerRestoredDocument.document,
+          this.snapshotLodTierId,
+          this.workerRestoredDocument.assets,
+        ),
+      }
+    }
+
     if (this.workerSnapshotClient && !this.runtimeState && !this.initializationPromise) {
       return {
         contractVersion: CONTRACT_VERSION,
@@ -1853,10 +1960,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return {
       contractVersion: CONTRACT_VERSION,
       snapshot: this.workerSnapshotClient
-        ? await this.workerSnapshotClient.buildWorkspaceSnapshot(
-            createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState),
-            this.snapshotLodTierId,
-          )
+        ? await (() => {
+            const document = createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState)
+            return this.workerSnapshotClient!.buildWorkspaceSnapshot(
+              document,
+              this.snapshotLodTierId,
+              createGeometryAssetBlobInputs(document, runtimeState.authoringState.assetBlobs),
+            )
+          })()
         : buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
             lodTierId: this.snapshotLodTierId,
           }),

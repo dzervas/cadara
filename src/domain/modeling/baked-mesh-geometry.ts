@@ -224,6 +224,38 @@ export function evaluateMeshReconstructionFallbacks(
   }
 }
 
+export function createMeshSizeLimitEvaluation(input: {
+  triangleCount: number
+  settings?: MeshReconstructionSettings
+}): MeshReconstructionEvaluation | null {
+  const settings = input.settings ?? DEFAULT_MESH_RECONSTRUCTION_SETTINGS
+  if (input.triangleCount <= settings.maxFacetedTriangles) {
+    return null
+  }
+
+  const rejectionReason = `Faceted fallback exceeds the ${settings.maxFacetedTriangles} triangle limit. Persistent mesh body fallback is not enabled.`
+  return {
+    resultClassification: 'meshBodyException',
+    settings,
+    qualityMetrics: {
+      triangleCount: input.triangleCount,
+      vertexCount: input.triangleCount * 3,
+      openEdgeCount: 0,
+      degenerateTriangleCount: 0,
+      planarRegionCount: 0,
+      cylindricalRegionCount: 0,
+      analyticConfidence: 0,
+      maxPlanarDeviation: 0,
+      maxCylindricalDeviation: null,
+    },
+    surfaceSummary: {
+      planarRegions: 0,
+      cylindricalRegions: 0,
+    },
+    rejectionReason,
+  }
+}
+
 function createMeshReconstructionProvenance(
   sourceHash: GeometryAssetHash,
   evaluation: MeshReconstructionEvaluation,

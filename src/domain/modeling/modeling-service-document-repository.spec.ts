@@ -14,7 +14,8 @@ import type {
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
-import type { BodyId } from '@/contracts/shared/ids'
+import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
+import type { BodyId, FeatureId } from '@/contracts/shared/ids'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import type { AppResultAsync } from '@/contracts/errors'
@@ -24,6 +25,8 @@ import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-hi
 import { createModelingService, type ModelingService } from '@/domain/modeling/modeling-service'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import { createBakedMeshGeometryAsset } from '@/domain/modeling/baked-mesh-geometry'
+import type { MeshTriangle } from '@/domain/modeling/mesh-parser'
 import { parseCadaraPayload } from '@/lib/cadara-package'
 
 test('src/domain/modeling/modeling-service-document-repository.spec.ts', async () => {
@@ -954,6 +957,109 @@ endsolid cube
     assert(storedAsset?.byteLength !== sourceBytes.byteLength, 'Stored baked asset bytes should not be the original STL payload.')
   }
 
+  async function testPreparedMeshFileImportStoresGeneratedAssetBytes() {
+    const documentRepository = createMemoryDocumentRepository()
+    const reset = documentRepository.reset.bind(documentRepository)
+    let resetCount = 0
+    documentRepository.reset = async (documentId) => {
+      resetCount += 1
+      return reset(documentId)
+    }
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const tetrahedronTriangles: MeshTriangle[] = [
+      [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      [[0, 0, 0], [0, 0, 1], [1, 0, 0]],
+      [[0, 0, 0], [0, 1, 0], [0, 0, 1]],
+      [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+    ]
+    const prepared = await createBakedMeshGeometryAsset({
+      triangles: tetrahedronTriangles,
+      sourceFileName: 'tetra.stl',
+      sourceFormat: 'stl',
+      sourceHash: `sha256:${'b'.repeat(64)}` as GeometryAssetHash,
+      ownerFeatureId: 'feature_meshImport-prepared' as FeatureId,
+      acceptFacetedFallback: true,
+    })
+    assert(prepared.ok, 'Prepared mesh test asset should bake successfully.')
+
+    const result = await service.importPreparedMeshFile({
+      fileName: 'tetra.stl',
+      assetInput: prepared.assetInput,
+    })
+
+    assert(result.ok, 'Prepared mesh file import should commit an authored document mutation.')
+    const savedDocument = documentRepository.savedDocuments.at(-1)
+    const asset = savedDocument?.assets.records[0]
+    assert(asset?.format === 'baked-mesh', 'Prepared mesh import should persist a generated baked mesh asset record.')
+    assert(
+      asset.ownerFeatureIds[0]?.startsWith('feature_meshImport-'),
+      'Prepared mesh import should rewrite asset ownership to the committed feature id.',
+    )
+    assert(
+      (await documentRepository.getGeometryAssetRecord(asset))?.byteLength === prepared.assetInput.bytes.byteLength,
+      'Prepared mesh import should store generated asset bytes for later restores.',
+    )
+    assert(resetCount === 0, 'Prepared mesh import should not reset the repository before writing the replacement document.')
+  }
+
+  async function testPreparedMeshRestoreFailureDoesNotPersistPreparedDocument() {
+    const documentRepository = createMemoryDocumentRepository()
+    const reset = documentRepository.reset.bind(documentRepository)
+    let resetCount = 0
+    documentRepository.reset = async (documentId) => {
+      resetCount += 1
+      return reset(documentId)
+    }
+    class FailingMeshRestoreAdapter extends MockKernelAdapter {
+      override async restoreAuthoredModelDocument(
+        document: AuthoredModelDocument,
+        diagnostics: readonly ModelingDiagnostic[] = [],
+        assetResolver?: GeometryAssetResolver,
+      ) {
+        if (document.features.some((feature) => feature.definition.kind === 'meshImport')) {
+          throw new Error('Prepared mesh restore failed.')
+        }
+
+        await super.restoreAuthoredModelDocument(document, diagnostics, assetResolver)
+      }
+    }
+    const service = createModelingService(new FailingMeshRestoreAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const tetrahedronTriangles: MeshTriangle[] = [
+      [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      [[0, 0, 0], [0, 0, 1], [1, 0, 0]],
+      [[0, 0, 0], [0, 1, 0], [0, 0, 1]],
+      [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+    ]
+    const prepared = await createBakedMeshGeometryAsset({
+      triangles: tetrahedronTriangles,
+      sourceFileName: 'tetra.stl',
+      sourceFormat: 'stl',
+      sourceHash: `sha256:${'c'.repeat(64)}` as GeometryAssetHash,
+      ownerFeatureId: 'feature_meshImport-prepared' as FeatureId,
+      acceptFacetedFallback: true,
+    })
+    assert(prepared.ok, 'Prepared mesh restore failure test asset should bake successfully.')
+
+    const result = await service.importPreparedMeshFile({
+      fileName: 'tetra.stl',
+      assetInput: prepared.assetInput,
+    })
+
+    assert(!result.ok, 'Prepared mesh import should fail when the restore validation fails.')
+    assert(
+      result.diagnostics[0]?.code === 'document-import-restore-failed',
+      'Prepared mesh restore validation failures should be reported as document restore failures.',
+    )
+    assert(documentRepository.savedDocuments.length === 0, 'Prepared mesh restore failures should not persist a mesh import document.')
+    assert(resetCount === 0, 'Prepared mesh restore failures should not reset the existing repository document.')
+  }
+
   async function testMeshFileImportRejectsUnclosedMeshConversion() {
     const documentRepository = createMemoryDocumentRepository()
     const service = createModelingService(new MockKernelAdapter(), {
@@ -990,6 +1096,40 @@ endsolid open
     )
   }
 
+  async function testMeshFileImportRejectsOversizedBinaryStlBeforeParsing() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const triangleCount = 50_001
+    const sourceBytes = new Uint8Array(84 + triangleCount * 50)
+    new DataView(sourceBytes.buffer).setUint32(80, triangleCount, true)
+
+    const result = await service.importMeshFile({
+      fileName: 'oversized.stl',
+      bytes: sourceBytes,
+      acceptFacetedFallback: true,
+    })
+
+    assert(!result.ok, 'Mesh file import should reject oversized binary STL payloads before baking.')
+    assert(
+      result.diagnostics[0]?.code === 'mesh-import-mesh-body-fallback-disabled',
+      'Oversized binary STL preflight should report the disabled mesh-body fallback diagnostic.',
+    )
+    assert(
+      result.diagnostics[0]?.detail?.kind === 'meshImport' &&
+        result.diagnostics[0].detail.qualityMetrics?.triangleCount === triangleCount,
+      'Oversized binary STL diagnostics should preserve the preflight triangle count.',
+    )
+    assert(
+      documentRepository.savedDocuments.every((document) =>
+        document.features.every((feature) => feature.definition.kind !== 'meshImport'),
+      ),
+      'Rejected oversized binary STL imports should not commit a partial mesh feature.',
+    )
+  }
+
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
@@ -1007,5 +1147,8 @@ endsolid open
   await testPackagedAssetImportStoresAssetsBeforeRestore()
   await testStepFileImportStoresSourceBytesAsFeatureAsset()
   await testMeshFileImportStoresOnlyGeneratedBakedAsset()
+  await testPreparedMeshFileImportStoresGeneratedAssetBytes()
+  await testPreparedMeshRestoreFailureDoesNotPersistPreparedDocument()
   await testMeshFileImportRejectsUnclosedMeshConversion()
+  await testMeshFileImportRejectsOversizedBinaryStlBeforeParsing()
 })

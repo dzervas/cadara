@@ -75,6 +75,7 @@ import {
   getOccTessellationTier,
   type OccTessellationTierId,
 } from '@/domain/modeling/occ/tessellation'
+import { parseBakedMeshGeometry } from '@/domain/modeling/baked-mesh-geometry'
 
 const FACE_PICK_PRIORITY = 20
 const SKETCH_CURVE_PICK_PRIORITY = 12
@@ -1173,6 +1174,11 @@ function buildBodyRenderRecords(
   options: OccSnapshotBuildOptions = {},
 ) {
   const records: RenderableEntityRecord[] = []
+  const facetedMeshRecord = buildFacetedMeshImportRenderRecord(state, body)
+  if (facetedMeshRecord) {
+    return [facetedMeshRecord]
+  }
+
   const tessellationTier = getOccTessellationTier(options.lodTierId)
 
   new state.oc.BRepMesh_IncrementalMesh_2(
@@ -1220,6 +1226,54 @@ function buildBodyRenderRecords(
   }
 
   return records
+}
+
+function buildFacetedMeshImportRenderRecord(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+): RenderableEntityRecord | null {
+  const feature = state.features.find((entry) => entry.featureId === body.ownerFeatureId)
+  const definition = feature?.definition
+  if (
+    !definition
+    || definition.kind !== 'meshImport'
+    || definition.parameters.reconstruction?.resultClassification !== 'facetedFallback'
+  ) {
+    return null
+  }
+
+  const asset = state.assets.records.find((record) =>
+    record.assetId === definition.parameters.assetId
+    && record.format === 'baked-mesh',
+  )
+  const bytes = asset ? state.assetBlobs.get(asset.hash) : null
+  const faceId = body.topology.faceIds[0]
+  if (!bytes || !faceId) {
+    return null
+  }
+
+  const payload = parseBakedMeshGeometry(bytes)
+  const target = createFaceTarget(body.bodyId, faceId)
+
+  return {
+    id: createRenderableId(target),
+    label: `${body.label} faceted mesh`,
+    ownerBodyId: body.bodyId,
+    ownerFeatureId: body.ownerFeatureId,
+    binding: {
+      pickId: createPickId(target),
+      pickPriority: FACE_PICK_PRIORITY,
+      target,
+      topology: 'face',
+      semanticClass: 'bodyFace',
+    },
+    geometry: {
+      kind: 'mesh',
+      vertexPositions: payload.vertices,
+      vertexNormals: null,
+      triangleIndices: payload.indices,
+    },
+  }
 }
 
 function sampleCirclePoints(

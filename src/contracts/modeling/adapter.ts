@@ -57,6 +57,12 @@ export interface ModelingKernelAdapter {
     diagnostics?: readonly ModelingDiagnostic[],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void>
+  /** Rebuilds an authored document for validation without requiring a viewport snapshot. */
+  validateAuthoredModelDocument?(
+    document: AuthoredDocument,
+    diagnostics?: readonly ModelingDiagnostic[],
+    assetResolver?: GeometryAssetResolver,
+  ): Promise<void>
   /** Exports the complete authored document state, including history after the active cursor. */
   exportAuthoredModelDocument?(documentId: AuthoredDocument['documentId']): Promise<AuthoredDocument>
   /** Returns the authoritative typed snapshot for the requested document. */

@@ -1,4 +1,6 @@
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import {
   loadDefaultOpenCascadeFactory,
@@ -76,12 +78,20 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
       postOccWorkerMessage({ kind: 'preloaded', requestId: request.requestId })
       return
     case 'rebuildDocument':
-      await getWorkerAdapter().restoreAuthoredModelDocument?.(request.document)
+      await getWorkerAdapter().restoreAuthoredModelDocument?.(
+        request.document,
+        [],
+        createWorkerAssetResolver(request.assets),
+      )
       postOccWorkerMessage({ kind: 'documentRebuilt', requestId: request.requestId })
       return
     case 'buildWorkspaceSnapshot': {
       const workerAdapter = getWorkerAdapter()
-      await workerAdapter.restoreAuthoredModelDocument?.(request.document)
+      await workerAdapter.restoreAuthoredModelDocument?.(
+        request.document,
+        [],
+        createWorkerAssetResolver(request.assets),
+      )
       workerAdapter.setSnapshotLodTier(request.lodTierId ?? 'startup')
       const response = await workerAdapter.getDocumentSnapshot({
         contractVersion: CONTRACT_VERSION,
@@ -102,6 +112,21 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
         'occ-worker-request-cancelled',
       ))
       return
+  }
+}
+
+function createWorkerAssetResolver(
+  assets: readonly GeometryAssetBlobInput[] | undefined,
+): GeometryAssetResolver | undefined {
+  if (!assets || assets.length === 0) {
+    return undefined
+  }
+
+  const blobs = new Map(assets.map((asset) => [asset.asset.hash, asset.bytes.slice()] as const))
+  return {
+    async getGeometryAssetBytes(hash) {
+      return blobs.get(hash)?.slice() ?? null
+    },
   }
 }
 

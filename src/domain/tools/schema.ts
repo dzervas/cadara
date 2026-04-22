@@ -55,6 +55,7 @@ export type ToolIconId =
   | 'sketchSplit'
   | 'sketchSlot'
   | 'finishSketch'
+  | 'importPart'
   | 'search'
   | 'plane'
   | 'combine'

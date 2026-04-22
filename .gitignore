@@ -32,3 +32,7 @@ test-results/
 !.codex/skills/
 .tmp-*
 tmp-*
+*.stl
+*.step
+*.3mf
+*.cadara

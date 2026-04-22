@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Button, Checkbox, Group, Loader, Modal, Stack, Text } from '@mantine/core'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { Button, Checkbox, Group, Loader, Modal, Paper, Progress, Stack, Text } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
@@ -41,6 +41,7 @@ import type {
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import { createAppError, errorContext, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
@@ -109,11 +110,16 @@ import {
 import { getBuildModeLabel } from '@/components/layout/build-metadata'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
-import { parseMeshSourceFile } from '@/domain/modeling/mesh-parser'
+import { getBinaryStlTriangleCount } from '@/domain/modeling/mesh-parser'
 import {
-  evaluateMeshReconstructionFallbacks,
+  createMeshSizeLimitEvaluation,
   type MeshReconstructionEvaluation,
 } from '@/domain/modeling/baked-mesh-geometry'
+import type {
+  MeshImportReviewWorkerRequest,
+  MeshImportReviewWorkerResponse,
+} from '@/domain/modeling/mesh-import-review-worker-protocol'
+import type { RequestId } from '@/contracts/shared/ids'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
@@ -127,12 +133,17 @@ type MeshImportFlowState =
   | {
     kind: 'review'
     fileName: string
-    bytes: Uint8Array
+    assetInput: GeometryAssetBlobInput | null
     label: string
     warningAccepted: boolean
     reconstruction: MeshReconstructionEvaluation
   }
-  | { kind: 'importing'; fileName: string; label: string }
+type MeshImportProgressState = {
+  fileName: string
+  message: string
+  progress: number
+  canCancel: boolean
+}
 type WorkbenchUndoEntry =
   | {
       kind: 'updateVariable'
@@ -147,6 +158,8 @@ type WorkbenchUndoEntry =
       after: DocumentHistoryOrderEntry[]
       label: string
     }
+
+const PART_IMPORT_FILE_ACCEPT = '.step,.stp,.stl,.3mf,model/step,model/stl,model/3mf'
 
 function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
   return status.kind === 'binding-restored'
@@ -172,6 +185,14 @@ function getMeshImportWarningLabel(reconstruction: MeshReconstructionEvaluation)
   return reconstruction.resultClassification === 'facetedFallback'
     ? 'I accept the faceted fallback result and understand the original mesh file will not be saved in this document.'
     : 'I understand the original mesh file will not be saved in this document.'
+}
+
+function canUseMeshImportReviewWorker() {
+  return typeof Worker !== 'undefined' && typeof URL !== 'undefined'
+}
+
+function createMeshImportReviewWorker() {
+  return new Worker(new URL('../domain/modeling/mesh-import-review.worker.ts', import.meta.url), { type: 'module' })
 }
 
 export function CadWorkbench() {
@@ -208,6 +229,7 @@ export function CadWorkbench() {
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [stepImportFlow, setStepImportFlow] = useState<StepImportFlowState>({ kind: 'idle' })
   const [meshImportFlow, setMeshImportFlow] = useState<MeshImportFlowState>({ kind: 'idle' })
+  const [meshImportProgress, setMeshImportProgress] = useState<MeshImportProgressState | null>(null)
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -219,6 +241,10 @@ export function CadWorkbench() {
   const undoStackRef = useRef(undoStack)
   const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
+  const partImportInputRef = useRef<HTMLInputElement | null>(null)
+  const meshImportFileReaderRef = useRef<FileReader | null>(null)
+  const meshImportReviewWorkerRef = useRef<Worker | null>(null)
+  const meshImportTaskSequenceRef = useRef(0)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
   // TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
   const cloudSaveEnabled = false
@@ -240,12 +266,119 @@ export function CadWorkbench() {
     })
   }, [])
 
+  const openPartImportPicker = useCallback(() => {
+    partImportInputRef.current?.click()
+  }, [])
+
+  const cancelMeshImportPreparation = useCallback(() => {
+    meshImportTaskSequenceRef.current += 1
+    meshImportFileReaderRef.current?.abort()
+    meshImportFileReaderRef.current = null
+    meshImportReviewWorkerRef.current?.terminate()
+    meshImportReviewWorkerRef.current = null
+    setMeshImportProgress(null)
+  }, [])
+
+  const readMeshImportFileBytes = useCallback((file: File) =>
+    new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader()
+      meshImportFileReaderRef.current = reader
+      const cleanup = () => {
+        if (meshImportFileReaderRef.current === reader) {
+          meshImportFileReaderRef.current = null
+        }
+      }
+
+      reader.addEventListener('load', () => {
+        cleanup()
+        if (!(reader.result instanceof ArrayBuffer)) {
+          reject(new Error('Mesh file could not be read.'))
+          return
+        }
+
+        resolve(new Uint8Array(reader.result))
+      })
+      reader.addEventListener('error', () => {
+        cleanup()
+        reject(reader.error ?? new Error('Mesh file could not be read.'))
+      })
+      reader.addEventListener('abort', () => {
+        cleanup()
+        reject(new Error('Mesh import cancelled.'))
+      })
+      reader.readAsArrayBuffer(file)
+    }), [])
+
+  const reviewMeshImportWithWorker = useCallback((
+    fileName: string,
+    bytes: Uint8Array,
+    taskSequence: number,
+  ) => {
+    if (!canUseMeshImportReviewWorker()) {
+      return Promise.reject(new Error('Mesh import worker is not available.'))
+    }
+
+    meshImportReviewWorkerRef.current?.terminate()
+    const worker = createMeshImportReviewWorker()
+    meshImportReviewWorkerRef.current = worker
+    const requestId = `request_mesh_import_review_${taskSequence}` as RequestId
+    const request: MeshImportReviewWorkerRequest = {
+      kind: 'reviewMeshImport',
+      requestId,
+      fileName,
+      bytes,
+    }
+
+    return new Promise<Extract<MeshImportReviewWorkerResponse, { kind: 'completed' }>['result']>((resolve, reject) => {
+      const cleanup = () => {
+        worker.removeEventListener('message', handleMessage)
+        if (meshImportReviewWorkerRef.current === worker) {
+          meshImportReviewWorkerRef.current = null
+        }
+      }
+      const handleMessage = (event: MessageEvent<MeshImportReviewWorkerResponse>) => {
+        const message = event.data
+        if (message.requestId !== requestId || meshImportTaskSequenceRef.current !== taskSequence) {
+          return
+        }
+
+        if (message.kind === 'progress') {
+          setMeshImportProgress({
+            fileName,
+            message: message.message,
+            progress: message.progress,
+            canCancel: true,
+          })
+          return
+        }
+
+        cleanup()
+        worker.terminate()
+
+        if (message.kind === 'failure') {
+          reject(new Error(message.message))
+          return
+        }
+
+        resolve(message.result)
+      }
+
+      worker.addEventListener('message', handleMessage)
+      worker.postMessage(request, [bytes.buffer as ArrayBuffer])
+    })
+  }, [])
+
   const applyLoadedSnapshot = (nextSnapshot: DocumentSnapshot) => {
     snapshotRef.current = nextSnapshot
     dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })
   }
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
+
+  useEffect(() => () => {
+    meshImportFileReaderRef.current?.abort()
+    meshImportReviewWorkerRef.current?.terminate()
+  }, [])
 
   useEffect(() => {
     snapshotRef.current = snapshot
@@ -1388,19 +1521,72 @@ export function CadWorkbench() {
     }
 
     if (/\.(?:stl|3mf)$/i.test(file.name)) {
+      const taskSequence = meshImportTaskSequenceRef.current + 1
+      meshImportTaskSequenceRef.current = taskSequence
+      meshImportReviewWorkerRef.current?.terminate()
+      meshImportReviewWorkerRef.current = null
+      setMeshImportFlow({ kind: 'idle' })
+      setMeshImportProgress({
+        fileName: file.name,
+        message: 'Reading mesh file',
+        progress: 8,
+        canCancel: true,
+      })
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer())
-        const parsed = parseMeshSourceFile({ fileName: file.name, bytes })
+        if (/\.stl$/i.test(file.name)) {
+          const headerBytes = new Uint8Array(await file.slice(0, 84).arrayBuffer())
+          if (meshImportTaskSequenceRef.current !== taskSequence) {
+            return
+          }
+
+          const triangleCount = getBinaryStlTriangleCount({ headerBytes, byteLength: file.size })
+          const limitEvaluation = triangleCount === null
+            ? null
+            : createMeshSizeLimitEvaluation({ triangleCount })
+          if (limitEvaluation) {
+            setMeshImportProgress(null)
+            setMeshImportFlow({
+              kind: 'review',
+              fileName: file.name,
+              assetInput: null,
+              label: createMeshImportLabel(file.name),
+              warningAccepted: false,
+              reconstruction: limitEvaluation,
+            })
+            return
+          }
+        }
+
+        setMeshImportProgress({
+          fileName: file.name,
+          message: 'Loading mesh bytes',
+          progress: 15,
+          canCancel: true,
+        })
+        const bytes = await readMeshImportFileBytes(file)
+        if (meshImportTaskSequenceRef.current !== taskSequence) {
+          return
+        }
+
+        const review = await reviewMeshImportWithWorker(file.name, bytes, taskSequence)
+        if (meshImportTaskSequenceRef.current !== taskSequence) {
+          return
+        }
+
+        setMeshImportProgress(null)
         setMeshImportFlow({
           kind: 'review',
           fileName: file.name,
-          bytes,
+          assetInput: review.assetInput,
           label: createMeshImportLabel(file.name),
           warningAccepted: false,
-          reconstruction: evaluateMeshReconstructionFallbacks(parsed.triangles),
+          reconstruction: review.reconstruction,
         })
       } catch (error) {
-        showWorkbenchError(error instanceof Error ? error.message : 'Mesh import failed.')
+        if (meshImportTaskSequenceRef.current === taskSequence) {
+          setMeshImportProgress(null)
+          showWorkbenchError(error instanceof Error ? error.message : 'Mesh import failed.')
+        }
       }
       return
     }
@@ -1427,11 +1613,23 @@ export function CadWorkbench() {
     }
   }
 
+  const handlePartImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+
+    if (file) {
+      void handleImportDocument(file)
+    }
+  }
+
+  useEffect(() => actionBus.subscribeToTool('importPart', openPartImportPicker), [actionBus, openPartImportPicker])
+
   const handleStepImportCancel = () => {
     setStepImportFlow({ kind: 'idle' })
   }
 
   const handleMeshImportCancel = () => {
+    cancelMeshImportPreparation()
     setMeshImportFlow({ kind: 'idle' })
   }
 
@@ -1470,28 +1668,40 @@ export function CadWorkbench() {
   }
 
   const handleMeshImportAccept = async () => {
-    if (meshImportFlow.kind !== 'review' || !meshImportFlow.warningAccepted) {
+    if (meshImportFlow.kind !== 'review' || !meshImportFlow.warningAccepted || !meshImportFlow.assetInput) {
       return
     }
 
     const review = meshImportFlow
-    setMeshImportFlow({ kind: 'importing', fileName: review.fileName, label: review.label })
+    const assetInput = meshImportFlow.assetInput
+    setMeshImportFlow({ kind: 'idle' })
+    setMeshImportProgress({
+      fileName: review.fileName,
+      message: 'Committing prepared mesh',
+      progress: 92,
+      canCancel: false,
+    })
     try {
-      const result = await modelingService.importMeshFile({
+      const result = await modelingService.importPreparedMeshFile({
         fileName: review.fileName,
-        bytes: review.bytes,
-        acceptFacetedFallback: review.reconstruction.resultClassification === 'facetedFallback',
+        assetInput,
       })
       if (!result.ok) {
-        setMeshImportFlow({ ...review })
+        setMeshImportFlow(review)
+        setMeshImportProgress(null)
         showWorkbenchError(result.diagnostics[0]?.message ?? 'Mesh import failed.')
         return
       }
 
-      setMeshImportFlow({ kind: 'idle' })
-      refreshAfterDocumentFileAction(`Imported ${review.fileName}.`)
+      setMeshImportProgress(null)
+      setHiddenTargetKeys({})
+      setObjectLabelOverrides({})
+      setUndoStack([])
+      setRedoStack([])
+      showWorkbenchInfo(`Imported ${review.fileName}. Mesh rebuild will run when the viewport refreshes.`)
     } catch (error) {
-      setMeshImportFlow({ ...review })
+      setMeshImportFlow(review)
+      setMeshImportProgress(null)
       reportDocumentFileActionFailure('workbench.file.import-mesh', 'Mesh import failed.', error)
     }
   }
@@ -1616,6 +1826,14 @@ export function CadWorkbench() {
         onImportDocument={handleImportDocument}
         onExportDocument={handleExportDocument}
         onReportBug={handleReportBug}
+      />
+      <input
+        ref={partImportInputRef}
+        aria-label="Import part file"
+        type="file"
+        accept={PART_IMPORT_FILE_ACCEPT}
+        hidden
+        onChange={handlePartImportFileChange}
       />
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
@@ -1768,8 +1986,8 @@ export function CadWorkbench() {
             <Modal
               centered
               opened={meshImportFlow.kind !== 'idle'}
-              onClose={meshImportFlow.kind === 'importing' ? () => undefined : handleMeshImportCancel}
-              title={meshImportFlow.kind === 'importing' ? 'Importing Mesh' : 'Import Mesh'}
+              onClose={handleMeshImportCancel}
+              title="Import Mesh"
             >
               {meshImportFlow.kind !== 'idle' ? (
                 <Stack gap="sm">
@@ -1778,70 +1996,99 @@ export function CadWorkbench() {
                   <Stack gap={4}>
                     <Text size="xs">Source: STL or 3MF triangles</Text>
                     <Text size="xs">
-                      Result: {meshImportFlow.kind === 'review'
-                        ? formatMeshReconstructionClassification(meshImportFlow.reconstruction.resultClassification)
-                        : 'generated baked geometry asset'}
+                      Result: {formatMeshReconstructionClassification(meshImportFlow.reconstruction.resultClassification)}
                     </Text>
                     <Text size="xs">Source stored: false</Text>
-                    {meshImportFlow.kind === 'review' ? (
-                      <>
-                        <Text size="xs">
-                          Settings: {meshImportFlow.reconstruction.settings.qualityPreset};
-                          tolerance {meshImportFlow.reconstruction.settings.linearTolerance};
-                          mesh body fallback {meshImportFlow.reconstruction.settings.meshBodyFallback}
-                        </Text>
-                        <Text size="xs">
-                          Quality: {meshImportFlow.reconstruction.qualityMetrics.triangleCount} triangles;
-                          {` ${meshImportFlow.reconstruction.qualityMetrics.planarRegionCount}`} planar regions;
-                          {` ${meshImportFlow.reconstruction.qualityMetrics.cylindricalRegionCount}`} cylindrical regions;
-                          confidence {Math.round(meshImportFlow.reconstruction.qualityMetrics.analyticConfidence * 100)}%
-                        </Text>
-                        {meshImportFlow.reconstruction.resultClassification === 'facetedFallback' ? (
-                          <Text size="xs" c="yellow">
-                            The saved result will be faceted baked geometry. Re-import the original file to try different reconstruction settings later.
-                          </Text>
-                        ) : null}
-                        {meshImportFlow.reconstruction.resultClassification === 'rejected'
-                        || meshImportFlow.reconstruction.resultClassification === 'meshBodyException' ? (
-                          <Text size="xs" c="red">
-                            {meshImportFlow.reconstruction.rejectionReason ?? 'Mesh reconstruction rejected this source.'}
-                          </Text>
-                        ) : null}
-                      </>
+                    <Text size="xs">
+                      Settings: {meshImportFlow.reconstruction.settings.qualityPreset};
+                      tolerance {meshImportFlow.reconstruction.settings.linearTolerance};
+                      mesh body fallback {meshImportFlow.reconstruction.settings.meshBodyFallback}
+                    </Text>
+                    <Text size="xs">
+                      Quality: {meshImportFlow.reconstruction.qualityMetrics.triangleCount} triangles;
+                      {` ${meshImportFlow.reconstruction.qualityMetrics.planarRegionCount}`} planar regions;
+                      {` ${meshImportFlow.reconstruction.qualityMetrics.cylindricalRegionCount}`} cylindrical regions;
+                      confidence {Math.round(meshImportFlow.reconstruction.qualityMetrics.analyticConfidence * 100)}%
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      Faceted fallback is currently capped at {meshImportFlow.reconstruction.settings.maxFacetedTriangles.toLocaleString()} triangles because persistent mesh bodies are disabled.
+                    </Text>
+                    {meshImportFlow.reconstruction.resultClassification === 'facetedFallback' ? (
+                      <Text size="xs" c="yellow">
+                        The saved result will be faceted baked geometry. Re-import the original file to try different reconstruction settings later.
+                      </Text>
+                    ) : null}
+                    {meshImportFlow.reconstruction.resultClassification === 'rejected'
+                    || meshImportFlow.reconstruction.resultClassification === 'meshBodyException' ? (
+                      <Text size="xs" c="red">
+                        {meshImportFlow.reconstruction.rejectionReason ?? 'Mesh reconstruction rejected this source.'}
+                      </Text>
                     ) : null}
                   </Stack>
-                  {meshImportFlow.kind === 'importing' ? (
-                    <Group gap="xs">
-                      <Loader color="gray" size="sm" />
-                      <Text size="sm">Parsing and baking mesh geometry</Text>
-                    </Group>
-                  ) : (
-                    <>
-                      <Checkbox
-                        checked={meshImportFlow.warningAccepted}
-                        onChange={(event) => handleMeshImportWarningAcceptedChange(event.currentTarget.checked)}
-                        label={getMeshImportWarningLabel(meshImportFlow.reconstruction)}
-                      />
-                      <Group justify="flex-end">
-                        <Button variant="subtle" color="gray" onClick={handleMeshImportCancel}>
-                          Cancel
-                        </Button>
-                        <Button
-                          onClick={handleMeshImportAccept}
-                          disabled={
-                            !meshImportFlow.warningAccepted
-                            || meshImportFlow.reconstruction.resultClassification === 'rejected'
-                            || meshImportFlow.reconstruction.resultClassification === 'meshBodyException'
-                          }
-                        >
-                          Import
-                        </Button>
-                      </Group>
-                    </>
-                  )}
+                  <Checkbox
+                    checked={meshImportFlow.warningAccepted}
+                    onChange={(event) => handleMeshImportWarningAcceptedChange(event.currentTarget.checked)}
+                    label={getMeshImportWarningLabel(meshImportFlow.reconstruction)}
+                  />
+                  <Group justify="flex-end">
+                    <Button variant="subtle" color="gray" onClick={handleMeshImportCancel}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleMeshImportAccept}
+                      disabled={
+                        !meshImportFlow.warningAccepted
+                        || !meshImportFlow.assetInput
+                        || meshImportFlow.reconstruction.resultClassification === 'rejected'
+                        || meshImportFlow.reconstruction.resultClassification === 'meshBodyException'
+                      }
+                    >
+                      Import
+                    </Button>
+                  </Group>
                 </Stack>
               ) : null}
             </Modal>
+            {meshImportProgress ? (
+              <Paper
+                role="status"
+                aria-live="polite"
+                className="fixed bottom-4 right-4 z-40 w-[min(360px,calc(100vw-32px))] border p-3 text-xs shadow-[var(--cad-panel-shadow)]"
+                style={{
+                  backgroundColor: 'var(--workbench-notification-surface)',
+                  borderColor: 'var(--workbench-shell-border-strong)',
+                  color: 'var(--workbench-notification-text)',
+                }}
+                data-mesh-import-progress
+              >
+                <Stack gap={8}>
+                  <Group justify="space-between" align="flex-start" gap="sm">
+                    <Stack gap={2} className="min-w-0">
+                      <Text size="xs" fw={600} truncate="end" style={{ color: 'var(--workbench-notification-info-title)' }}>
+                        Importing mesh
+                      </Text>
+                      <Text size="xs" truncate="end" style={{ color: 'var(--workbench-notification-text-muted)' }}>
+                        {meshImportProgress.fileName}
+                      </Text>
+                    </Stack>
+                    {meshImportProgress.canCancel ? (
+                      <Button size="xs" variant="default" onClick={cancelMeshImportPreparation}>
+                        Cancel
+                      </Button>
+                    ) : null}
+                  </Group>
+                  <Progress
+                    value={meshImportProgress.progress}
+                    size="sm"
+                    color="gray"
+                    aria-label="Mesh import progress"
+                  />
+                  <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
+                    {meshImportProgress.message}
+                  </Text>
+                </Stack>
+              </Paper>
+            ) : null}
             <DocumentExportModal
               opened={objectExportModal !== null}
               target={objectExportModal}

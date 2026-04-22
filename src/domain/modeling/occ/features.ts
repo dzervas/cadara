@@ -736,6 +736,7 @@ function executeMeshImportFeature(
     label: parameters.label,
     ownerFeatureId,
     shape: solid,
+    seedNaming: parameters.reconstruction?.resultClassification !== 'facetedFallback',
   })
 
   return {

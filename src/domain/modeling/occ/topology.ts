@@ -383,6 +383,7 @@ export function trackNewSolidBody(
     label: string
     ownerFeatureId: FeatureId | null
     shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
+    seedNaming?: boolean
   },
 ) {
   return buildTrackedSolidBody(oc, {

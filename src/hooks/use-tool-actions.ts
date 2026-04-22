@@ -42,6 +42,11 @@ export function useToolActions() {
         return
       }
 
+      if (toolId === 'importPart') {
+        actionBus.triggerTool(toolId, machineState.mode, metadata)
+        return
+      }
+
       const nextMode =
         toolId === 'sketch'
           ? 'part'

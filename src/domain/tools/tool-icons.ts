@@ -57,6 +57,7 @@ export const toolIconAssetFileNames: Record<ToolIconId, string> = {
   sketchSplit: 'sketch_split_icon.svg',
   sketchSlot: 'sketch-slot.svg',
   finishSketch: 'check_mark.svg',
+  importPart: 'import-part.svg',
   search: 'search.svg',
   plane: 'c-plane.svg',
   combine: 'boolean-bodies.svg',

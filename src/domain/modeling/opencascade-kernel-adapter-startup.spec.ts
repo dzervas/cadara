@@ -1,11 +1,17 @@
 import { test } from 'bun:test'
 
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import {
+  createAuthoredModelDocumentFromSnapshot,
+  type AuthoredModelDocument,
+} from '@/contracts/modeling/authored-document'
+import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import type { OccWorkerSnapshotClient } from '@/domain/modeling/occ/worker-client'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -63,14 +69,16 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
   let workerPreloads = 0
   let workerSnapshots = 0
   let workerDocument: AuthoredModelDocument | null = null
+  let workerSnapshotAssets: readonly GeometryAssetBlobInput[] = []
   const workerClient: OccWorkerSnapshotClient = {
     async preload() {
       workerPreloads += 1
     },
     async rebuildDocument() {},
-    async buildWorkspaceSnapshot(document) {
+    async buildWorkspaceSnapshot(document, _lodTierId, assets = []) {
       workerSnapshots += 1
       workerDocument = document
+      workerSnapshotAssets = assets
       return directInitialSnapshot as WorkspaceSnapshot
     },
   }
@@ -99,4 +107,24 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
     workerSnapshot.snapshot === directInitialSnapshot,
     'Worker-backed snapshot routing should preserve the public snapshot response shape.',
   )
+
+  const restoredDocument = createAuthoredModelDocumentFromSnapshot(directInitialSnapshot)
+  const asset = await createDeterministicGeometryAsset()
+  restoredDocument.assets = {
+    schemaVersion: 'geometry-asset-manifest/v1alpha1',
+    records: [asset.asset],
+  }
+  const assetResolver: GeometryAssetResolver = {
+    async getGeometryAssetBytes(hash) {
+      return hash === asset.asset.hash ? asset.bytes : null
+    },
+  }
+
+  await workerBackedAdapter.restoreAuthoredModelDocument(restoredDocument, [], assetResolver)
+  await workerBackedAdapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+  })
+
+  assert(workerSnapshotAssets[0]?.bytes.byteLength === asset.bytes.byteLength, 'Worker-backed snapshots should keep restored asset bytes available.')
 })

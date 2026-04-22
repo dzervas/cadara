@@ -59,6 +59,12 @@ export const toolGroups = {
     tooltip: 'Create solid and surface features.',
     modes: ['part'],
   },
+  import: {
+    id: 'import',
+    name: 'Import',
+    tooltip: 'Import external part geometry.',
+    modes: ['part'],
+  },
   patterns: {
     id: 'patterns',
     name: 'Patterns',
@@ -190,6 +196,14 @@ export const toolDefinitions = [
     modes: ['sketch'],
   },
   ...featureToolDefinitions,
+  {
+    id: 'importPart',
+    group: 'import',
+    name: 'Import Part',
+    tooltip: 'Import a STEP, STL, or 3MF mesh file.',
+    icon: 'importPart',
+    modes: ['part'],
+  },
   {
     id: 'linearPattern',
     group: 'patterns',
@@ -358,6 +372,13 @@ const toolbarSections = [
     align: 'center',
     modes: ['sketch'],
     toolIds: ['svgRendering', 'fill', 'stroke'],
+  },
+  {
+    id: 'import',
+    label: 'Import',
+    align: 'center',
+    modes: ['part'],
+    toolIds: ['importPart'],
   },
   {
     id: 'features',

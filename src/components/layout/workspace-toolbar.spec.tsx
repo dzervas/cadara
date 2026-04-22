@@ -82,6 +82,12 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     'Toolbar should render standard tool buttons with local SVG assets.',
   )
   assert(
+    toolbarMarkup.includes('data-tool-id="importPart"') &&
+      toolbarMarkup.includes('aria-label="Import Part"') &&
+      toolbarMarkup.includes('/icons/import-part.svg'),
+    'Toolbar should expose part import as a real icon-only tool.',
+  )
+  assert(
     toolbarMarkup.includes('/icons/linear-pattern.svg'),
     'Toolbar should render dropdown-backed tool triggers with local SVG assets.',
   )

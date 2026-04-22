@@ -207,8 +207,9 @@ import { CADARA_PACKAGE_MIME_TYPE, isCadaraPackagePayload } from '@/lib/cadara-p
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 import {
   createBakedMeshGeometryAsset,
+  createMeshSizeLimitEvaluation,
 } from '@/domain/modeling/baked-mesh-geometry'
-import { MeshParseError, parseMeshSourceFile } from '@/domain/modeling/mesh-parser'
+import { getMeshSourcePreflight, MeshParseError, parseMeshSourceFile } from '@/domain/modeling/mesh-parser'
 import {
   createMeshImportDiagnostic,
   type MeshImportFeatureParameters,
@@ -239,6 +240,7 @@ export interface ModelingService {
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
   importStepFile(input: ModelingImportStepFileInput): Promise<ModelingDocumentFileMutationResult>
   importMeshFile(input: ModelingImportMeshFileInput): Promise<ModelingDocumentFileMutationResult>
+  importPreparedMeshFile(input: ModelingImportPreparedMeshFileInput): Promise<ModelingDocumentFileMutationResult>
   exportCurrentDocument(): Promise<DocumentExportSuccessResult>
   bindLocalFile(input: {
     handle: LocalFileSystemFileHandle
@@ -414,6 +416,11 @@ export interface ModelingImportMeshFileInput {
   fileName: string
   bytes: Uint8Array
   acceptFacetedFallback?: boolean
+}
+
+export interface ModelingImportPreparedMeshFileInput {
+  fileName: string
+  assetInput: GeometryAssetBlobInput
 }
 
 export type ModelingDocumentFileMutationResult =
@@ -4977,6 +4984,36 @@ export function createModelingService(
     const sourceHash = await hashGeometryAssetBytes(sourceBytes)
     let sourceFormat: MeshImportSourceFormat = /\.3mf$/i.test(input.fileName) ? '3mf' : 'stl'
     let triangles
+    const preflight = getMeshSourcePreflight({ fileName: input.fileName, bytes: sourceBytes })
+    const limitEvaluation = preflight?.triangleCount === null || preflight === null
+      ? null
+      : createMeshSizeLimitEvaluation({ triangleCount: preflight.triangleCount })
+
+    if (preflight) {
+      sourceFormat = preflight.sourceFormat
+    }
+
+    if (limitEvaluation) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createMeshImportDiagnostic(
+            'mesh-import-mesh-body-fallback-disabled',
+            `Mesh import failed while baking ${input.fileName}.`,
+            {
+              sourceFormat,
+              sourceHash,
+              triangleCount: limitEvaluation.qualityMetrics.triangleCount,
+              conversionPhase: 'bake',
+              rejectionReason: limitEvaluation.rejectionReason ?? 'Persistent mesh body fallback is not enabled.',
+              resultClassification: limitEvaluation.resultClassification,
+              reconstructionSettings: limitEvaluation.settings,
+              qualityMetrics: limitEvaluation.qualityMetrics,
+            },
+          ),
+        ],
+      }
+    }
 
     try {
       const parsed = parseMeshSourceFile({ fileName: input.fileName, bytes: sourceBytes })
@@ -5096,6 +5133,130 @@ export function createModelingService(
     }
   }
 
+  async function createPreparedMeshImportAuthoredDocument(input: ModelingImportPreparedMeshFileInput) {
+    if (!/\.(?:stl|3mf)$/i.test(input.fileName)) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            'mesh-import-unsupported-file-type',
+            'Import failed. Select an STL or 3MF file.',
+          ),
+        ],
+      }
+    }
+
+    const preparedAsset = input.assetInput.asset
+    const preparedBytes = input.assetInput.bytes.slice()
+    if (preparedBytes.byteLength !== preparedAsset.byteLength) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createMeshImportDiagnostic(
+            'mesh-import-conversion-failed',
+            `Mesh import failed while preparing ${input.fileName}.`,
+            {
+              sourceFormat: /\.3mf$/i.test(input.fileName) ? '3mf' : 'stl',
+              conversionPhase: 'validate',
+              rejectionReason: 'Prepared mesh import asset bytes are missing.',
+            },
+          ),
+        ],
+      }
+    }
+
+    const provenance = preparedAsset.provenance
+    if (
+      preparedAsset.format !== 'baked-mesh'
+      || provenance.kind !== 'generated'
+      || provenance.sourceStored !== false
+      || (provenance.sourceFormat !== 'stl' && provenance.sourceFormat !== '3mf')
+      || !provenance.sourceHash
+      || !provenance.reconstruction
+    ) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createMeshImportDiagnostic(
+            'mesh-import-conversion-failed',
+            `Mesh import failed while preparing ${input.fileName}.`,
+            {
+              sourceFormat: /\.3mf$/i.test(input.fileName) ? '3mf' : 'stl',
+              conversionPhase: 'validate',
+              rejectionReason: 'Prepared mesh import asset payload is invalid.',
+            },
+          ),
+        ],
+      }
+    }
+
+    const sourceDocument = await exportAuthoredDocumentForRepository()
+    const featureId = allocateMeshImportFeatureId(sourceDocument)
+    const label = createMeshImportLabel(input.fileName)
+    const asset: GeometryAssetRecord = {
+      ...preparedAsset,
+      ownerFeatureIds: [featureId],
+    }
+    const document: AuthoredModelDocument = {
+      ...sourceDocument,
+      revisionId: createNextAuthoredRevisionId(sourceDocument.revisionId),
+      features: [
+        ...sourceDocument.features,
+        {
+          featureId,
+          label,
+          definition: {
+            kind: 'meshImport',
+            featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              assetId: asset.assetId,
+              source: {
+                originalFileName: input.fileName,
+                sourceFormat: provenance.sourceFormat,
+                sourceHash: provenance.sourceHash,
+                sourceStored: false,
+              },
+              resolvedSettings: {
+                unit: {
+                  source: 'user',
+                  resolvedUnit: 'millimeter',
+                  scaleToDocument: 1,
+                },
+                orientation: {
+                  upAxis: 'z',
+                  handedness: 'rightHanded',
+                },
+                placement: {
+                  translation: [0, 0, 0],
+                  rotationEulerRadians: [0, 0, 0],
+                  scale: 1,
+                },
+              },
+              reconstruction: provenance.reconstruction,
+              label,
+            },
+          },
+        },
+      ],
+      featureOrder: [...sourceDocument.featureOrder, featureId],
+      historyOrder: [
+        ...getAuthoredHistoryOrder(sourceDocument),
+        { kind: 'feature', featureId },
+      ],
+      cursor: { kind: 'feature', featureId },
+      assets: normalizeGeometryAssetManifest({
+        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+        records: [...sourceDocument.assets.records, asset],
+      }),
+    }
+
+    return {
+      ok: true as const,
+      document,
+      assets: [{ asset, bytes: preparedBytes }],
+    }
+  }
+
   type AuthoredDocumentValidationResult =
     | { ok: true; document: AuthoredModelDocument }
     | { ok: false; diagnostics: ModelingDiagnostic[] }
@@ -5127,6 +5288,7 @@ export function createModelingService(
   async function replaceCurrentAuthoredDocument(
     document: AuthoredModelDocument,
     assets: readonly GeometryAssetBlobInput[] = [],
+    options: { fetchSnapshot?: boolean; validateBeforePersist?: boolean } = {},
   ): Promise<ModelingDocumentFileMutationResult> {
     if (!adapter.restoreAuthoredModelDocument) {
       return {
@@ -5147,9 +5309,41 @@ export function createModelingService(
 
     const activeDocument = normalized.document
     let restoreDiagnostics: ModelingDiagnostic[] = []
+    const rollbackDocument = options.validateBeforePersist && documentRepository
+      ? await exportAuthoredDocumentForRepository()
+      : null
+
+    const restoreActiveDocument = async () => {
+      await restoreAuthoredRepositoryDocument(activeDocument, restoreDiagnostics, assets)
+    }
+
+    const validateActiveDocument = async () => {
+      await (
+        adapter.validateAuthoredModelDocument?.(
+          activeDocument,
+          restoreDiagnostics,
+          createLocalAssetResolver(assets),
+        ) ?? restoreActiveDocument()
+      )
+    }
+
+    if (options.validateBeforePersist) {
+      try {
+        await validateActiveDocument()
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          diagnostics: [
+            createDocumentFileDiagnostic(
+              'document-import-restore-failed',
+              error instanceof Error ? error.message : 'Imported document could not be restored.',
+            ),
+          ],
+        }
+      }
+    }
 
     if (documentRepository) {
-      await documentRepository.reset(currentDocumentId)
       const writeResult = await documentRepository.mutate({
         documentId: currentDocumentId,
         document: activeDocument,
@@ -5158,6 +5352,9 @@ export function createModelingService(
 
       if (!writeResult.ok) {
         canPersistAuthoredDocument = false
+        if (rollbackDocument) {
+          await restoreAuthoredRepositoryDocument(rollbackDocument)
+        }
         return {
           ok: false,
           diagnostics: [createDocumentRepositoryDiagnostic(writeResult.status)],
@@ -5168,12 +5365,22 @@ export function createModelingService(
       restoreDiagnostics = writeResult.diagnostics ?? []
     }
 
-    await restoreAuthoredRepositoryDocument(activeDocument, restoreDiagnostics, assets)
+    if (!options.validateBeforePersist) {
+      await restoreActiveDocument()
+    }
     operationHistoryStore?.clear()
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
     canPersistOperationHistory = true
     canPersistAuthoredDocument = true
     historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
+
+    if (options.fetchSnapshot === false) {
+      return {
+        ok: true,
+        revisionId: activeDocument.revisionId,
+        diagnostics: restoreDiagnostics,
+      }
+    }
 
     const snapshot = validateSnapshotResponse(
       await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
@@ -5561,7 +5768,7 @@ export function createModelingService(
         return imported
       }
 
-      return replaceCurrentAuthoredDocument(imported.document, imported.assets)
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets, { fetchSnapshot: false })
     },
     async importMeshFile(input) {
       await restorePromise
@@ -5571,7 +5778,23 @@ export function createModelingService(
         return imported
       }
 
-      return replaceCurrentAuthoredDocument(imported.document, imported.assets)
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets, {
+        fetchSnapshot: false,
+        validateBeforePersist: true,
+      })
+    },
+    async importPreparedMeshFile(input) {
+      await restorePromise
+      await repositoryChangePromise
+      const imported = await createPreparedMeshImportAuthoredDocument(input)
+      if (!imported.ok) {
+        return imported
+      }
+
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets, {
+        fetchSnapshot: false,
+        validateBeforePersist: true,
+      })
     },
     async bindLocalFile(input) {
       await restorePromise

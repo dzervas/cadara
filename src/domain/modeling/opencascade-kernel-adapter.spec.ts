@@ -1502,6 +1502,38 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testFacetedMeshImportUsesBakedAssetRenderMesh() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_meshImport-faceted' as FeatureId
+    const imported = await createMeshImportDocumentFromTriangles(sourceDocument, {
+      featureId,
+      label: 'Imported faceted tetrahedron',
+      fileName: 'tetra.stl',
+      triangles: [
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        [[0, 0, 0], [0, 0, 1], [1, 0, 0]],
+        [[0, 0, 0], [0, 1, 0], [0, 0, 1]],
+        [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+      ],
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const meshRecords = snapshot.render.records.filter((record) =>
+      record.ownerFeatureId === featureId && record.geometry.kind === 'mesh',
+    )
+
+    assert(meshRecords.length === 1, 'Faceted mesh imports should render from one baked asset mesh record.')
+    assert(
+      meshRecords[0]?.geometry.kind === 'mesh' && meshRecords[0].geometry.triangleIndices.length === 4,
+      'Faceted mesh import render geometry should preserve baked mesh triangles.',
+    )
+  }
+
   async function testStlAndThreeMfExportImportPreservesVolume() {
     const fixture = await createExportableBodyFixture()
     const originalStep = await fixture.adapter.exportDocument({
@@ -5370,6 +5402,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testOccGeometryExportsProduceRealPayloads()
   await testStepImportRestoresExactBodiesFromAssetBytes()
   await testMeshImportRestoresBakedBodiesFromGeneratedAssetBytes()
+  await testFacetedMeshImportUsesBakedAssetRenderMesh()
   await testStlAndThreeMfExportImportPreservesVolume()
   await testStlAndThreeMfCurvedExportImportTracksTessellatedVolume()
   await testStepExportImportPreservesComplexFilletedChamferedVolume()
