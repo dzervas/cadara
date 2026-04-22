@@ -52,6 +52,10 @@ import {
   createStepImportDiagnostic,
   type StepImportDiagnosticCode,
 } from '@/contracts/modeling/step-import'
+import {
+  createMeshImportDiagnostic,
+  type MeshImportDiagnosticCode,
+} from '@/contracts/modeling/mesh-import'
 import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
@@ -158,12 +162,18 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   'step-import-unsupported-structure',
   'step-import-no-solids',
   'step-import-missing-asset',
+  'mesh-import-missing-baked-asset',
+  'mesh-import-conversion-failed',
 ])
 const STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<StepImportDiagnosticCode>([
   'step-import-unreadable-file',
   'step-import-unsupported-structure',
   'step-import-no-solids',
   'step-import-missing-asset',
+])
+const MESH_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<MeshImportDiagnosticCode>([
+  'mesh-import-missing-baked-asset',
+  'mesh-import-conversion-failed',
 ])
 
 function assertSupportedModelingRequest(
@@ -380,6 +390,20 @@ function createRebuildFailureDiagnostic(
       {
         assetId: feature.definition.parameters.assetId,
         featureId: feature.featureId,
+      },
+    )
+  }
+
+  if (feature?.definition.kind === 'meshImport' && MESH_IMPORT_REBUILD_DIAGNOSTIC_CODES.has(code as MeshImportDiagnosticCode)) {
+    return createMeshImportDiagnostic(
+      code as MeshImportDiagnosticCode,
+      message.replace(new RegExp(`^${code}:\\s*`), ''),
+      {
+        featureId: feature.featureId,
+        sourceFormat: feature.definition.parameters.source.sourceFormat,
+        sourceHash: feature.definition.parameters.source.sourceHash,
+        conversionPhase: 'restore',
+        rejectionReason: message.replace(new RegExp(`^${code}:\\s*`), ''),
       },
     )
   }
@@ -1085,6 +1109,7 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
     case 'split':
     case 'deleteSolid':
     case 'stepImport':
+    case 'meshImport':
       return []
     default:
       return definition.parameters.participants.flatMap((participant) => [...participant.targets])

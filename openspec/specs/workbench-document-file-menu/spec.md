@@ -54,3 +54,11 @@ The workbench file menu or import surface SHALL allow users to select STEP files
 #### Scenario: User selects STEP import
 - **WHEN** the user chooses Import and selects a `.step` or `.stp` file
 - **THEN** the workbench starts the STEP import flow with file-type validation, progress feedback, settings review, and error reporting
+
+### Requirement: Workbench SHALL expose STL and 3MF import
+The workbench import surface SHALL allow users to select STL and 3MF files for mesh-to-baked-geometry import.
+
+#### Scenario: User imports mesh file
+- **WHEN** the user chooses Import and selects an `.stl` or `.3mf` file
+- **THEN** the workbench starts the mesh import flow with source-discard warning, file validation, progress feedback, and conversion diagnostics
+

@@ -4,7 +4,7 @@ import {
   createAuthoredModelDocumentFromSnapshot,
 } from '@/contracts/modeling/authored-document'
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
-import { CONTRACT_VERSION, STEP_IMPORT_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import { CONTRACT_VERSION, MESH_IMPORT_FEATURE_SCHEMA_VERSION, STEP_IMPORT_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import type { BodyId } from '@/contracts/shared/ids'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
@@ -112,6 +112,107 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
     ),
   })
   assert(!invalidStepImportScale.ok, 'Authored validation should reject non-positive STEP import placement scale.')
+
+  const bakedMeshAsset = await createDeterministicGeometryAsset({
+    assetId: 'asset_baked_mesh_contract',
+    ownerFeatureIds: ['feature_meshImport-1'],
+  })
+  bakedMeshAsset.asset.format = 'baked-mesh'
+  bakedMeshAsset.asset.mediaType = 'application/vnd.cadara.baked-mesh+json'
+  bakedMeshAsset.asset.provenance = {
+    kind: 'generated',
+    sourceName: 'bracket.stl',
+    sourceHash: bakedMeshAsset.asset.hash,
+    sourceFormat: 'stl',
+    sourceStored: false,
+    generator: 'basic-mesh-baker/v1',
+  }
+  const meshImportDocument = structuredClone(authoredDocument)
+  meshImportDocument.assets.records = [bakedMeshAsset.asset]
+  meshImportDocument.features = [
+    ...meshImportDocument.features,
+    {
+      featureId: 'feature_meshImport-1',
+      label: 'Imported mesh bracket',
+      definition: {
+        kind: 'meshImport',
+        featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          assetId: bakedMeshAsset.asset.assetId,
+          source: {
+            originalFileName: 'bracket.stl',
+            sourceFormat: 'stl',
+            sourceHash: bakedMeshAsset.asset.hash,
+            sourceStored: false,
+          },
+          resolvedSettings: {
+            unit: {
+              source: 'user',
+              resolvedUnit: 'millimeter',
+              scaleToDocument: 1,
+            },
+            orientation: {
+              upAxis: 'z',
+              handedness: 'rightHanded',
+            },
+            placement: {
+              translation: [0, 0, 0],
+              rotationEulerRadians: [0, 0, 0],
+              scale: 1,
+            },
+          },
+          label: 'Imported mesh bracket',
+        },
+      },
+    },
+  ]
+  meshImportDocument.featureOrder = [...meshImportDocument.featureOrder, 'feature_meshImport-1']
+  meshImportDocument.historyOrder = [
+    ...(meshImportDocument.historyOrder ?? []),
+    { kind: 'feature', featureId: 'feature_meshImport-1' },
+  ]
+  meshImportDocument.cursor = { kind: 'feature', featureId: 'feature_meshImport-1' }
+
+  const parsedMeshImport = parseAuthoredModelDocument(meshImportDocument)
+  assert(parsedMeshImport.ok, 'Authored validation should accept baked mesh import feature definitions.')
+
+  const meshImportWithSourceBytes = parseAuthoredModelDocument({
+    ...meshImportDocument,
+    features: meshImportDocument.features.map((feature) =>
+      feature.featureId === 'feature_meshImport-1' && feature.definition.kind === 'meshImport'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                sourceBytes: 'solid source',
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(!meshImportWithSourceBytes.ok, 'Authored validation should reject raw mesh bytes on mesh import records.')
+
+  const meshImportWithTriangles = parseAuthoredModelDocument({
+    ...meshImportDocument,
+    features: meshImportDocument.features.map((feature) =>
+      feature.featureId === 'feature_meshImport-1' && feature.definition.kind === 'meshImport'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                triangles: [[[0, 0, 0], [1, 0, 0], [0, 1, 0]]],
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(!meshImportWithTriangles.ok, 'Authored validation should reject triangle arrays on mesh import records.')
 
   assert(authoredDocument.sketches.length > 0, 'Authored document should include sketch rebuild inputs.')
   assert(authoredDocument.features.length > 0, 'Authored document should include feature rebuild inputs.')

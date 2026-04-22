@@ -824,6 +824,161 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
+  async function testMeshFileImportStoresOnlyGeneratedBakedAsset() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const sourceText = `solid cube
+facet normal 0 0 -1
+ outer loop
+  vertex 0 0 0
+  vertex 0 1 0
+  vertex 1 1 0
+ endloop
+endfacet
+facet normal 0 0 -1
+ outer loop
+  vertex 0 0 0
+  vertex 1 1 0
+  vertex 1 0 0
+ endloop
+endfacet
+facet normal 0 0 1
+ outer loop
+  vertex 0 0 1
+  vertex 1 1 1
+  vertex 0 1 1
+ endloop
+endfacet
+facet normal 0 0 1
+ outer loop
+  vertex 0 0 1
+  vertex 1 0 1
+  vertex 1 1 1
+ endloop
+endfacet
+facet normal 0 -1 0
+ outer loop
+  vertex 0 0 0
+  vertex 1 0 0
+  vertex 1 0 1
+ endloop
+endfacet
+facet normal 0 -1 0
+ outer loop
+  vertex 0 0 0
+  vertex 1 0 1
+  vertex 0 0 1
+ endloop
+endfacet
+facet normal 1 0 0
+ outer loop
+  vertex 1 0 0
+  vertex 1 1 0
+  vertex 1 1 1
+ endloop
+endfacet
+facet normal 1 0 0
+ outer loop
+  vertex 1 0 0
+  vertex 1 1 1
+  vertex 1 0 1
+ endloop
+endfacet
+facet normal 0 1 0
+ outer loop
+  vertex 1 1 0
+  vertex 0 1 0
+  vertex 0 1 1
+ endloop
+endfacet
+facet normal 0 1 0
+ outer loop
+  vertex 1 1 0
+  vertex 0 1 1
+  vertex 1 1 1
+ endloop
+endfacet
+facet normal -1 0 0
+ outer loop
+  vertex 0 1 0
+  vertex 0 0 0
+  vertex 0 0 1
+ endloop
+endfacet
+facet normal -1 0 0
+ outer loop
+  vertex 0 1 0
+  vertex 0 0 1
+  vertex 0 1 1
+ endloop
+endfacet
+endsolid cube
+`
+    const sourceBytes = new TextEncoder().encode(sourceText)
+
+    const result = await service.importMeshFile({
+      fileName: 'cube.stl',
+      bytes: sourceBytes,
+    })
+
+    assert(result.ok, 'Mesh file import should commit an authored document mutation.')
+    const savedDocument = documentRepository.savedDocuments.at(-1)
+    const asset = savedDocument?.assets.records[0]
+    const feature = savedDocument?.features.find((entry) => entry.definition.kind === 'meshImport')
+
+    assert(savedDocument, 'Mesh file import should persist an authored document.')
+    assert(asset, 'Mesh file import should persist a generated asset record.')
+    assert(asset?.format === 'baked-mesh', 'Mesh file import should store a generated baked geometry asset.')
+    assert(asset.provenance.kind === 'generated', 'Baked mesh asset should be generated, not an imported source asset.')
+    assert(asset.provenance.sourceStored === false, 'Baked mesh asset manifest should record that the source mesh is not stored.')
+    assert(feature?.definition.kind === 'meshImport', 'Mesh file import should persist a mesh import feature.')
+    assert(feature.definition.parameters.source.sourceStored === false, 'Mesh import feature should record sourceStored false.')
+    assert(
+      !JSON.stringify(savedDocument).includes(sourceText),
+      'Saved authored document should not contain original STL source bytes.',
+    )
+    const storedAsset = await documentRepository.getGeometryAssetRecord(asset)
+    assert(storedAsset?.byteLength !== sourceBytes.byteLength, 'Stored baked asset bytes should not be the original STL payload.')
+  }
+
+  async function testMeshFileImportRejectsUnclosedMeshConversion() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const sourceBytes = new TextEncoder().encode(`solid open
+facet normal 0 0 1
+ outer loop
+  vertex 0 0 0
+  vertex 1 0 0
+  vertex 0 1 0
+ endloop
+endfacet
+endsolid open
+`)
+
+    const result = await service.importMeshFile({
+      fileName: 'open.stl',
+      bytes: sourceBytes,
+    })
+
+    assert(!result.ok, 'Mesh file import should reject meshes the basic baker cannot convert.')
+    assert(
+      result.diagnostics[0]?.code === 'mesh-import-conversion-failed',
+      'Rejected mesh conversion should report a structured conversion diagnostic.',
+    )
+    assert(
+      documentRepository.savedDocuments.every((document) =>
+        document.features.every((feature) => feature.definition.kind !== 'meshImport'),
+      ),
+      'Rejected mesh conversion should not commit a partial mesh feature.',
+    )
+  }
+
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
@@ -840,4 +995,6 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
   await testStepFileImportStoresSourceBytesAsFeatureAsset()
+  await testMeshFileImportStoresOnlyGeneratedBakedAsset()
+  await testMeshFileImportRejectsUnclosedMeshConversion()
 })

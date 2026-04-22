@@ -205,12 +205,22 @@ import {
 } from '@/lib/local-file-system-access'
 import { CADARA_PACKAGE_MIME_TYPE, isCadaraPackagePayload } from '@/lib/cadara-package'
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
+import {
+  createBakedMeshGeometryAsset,
+} from '@/domain/modeling/baked-mesh-geometry'
+import { MeshParseError, parseMeshSourceFile } from '@/domain/modeling/mesh-parser'
+import {
+  createMeshImportDiagnostic,
+  type MeshImportFeatureParameters,
+  type MeshImportSourceFormat,
+} from '@/contracts/modeling/mesh-import'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
   GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
   GEOMETRY_ASSET_SCHEMA_VERSION,
+  MESH_IMPORT_FEATURE_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
@@ -228,6 +238,7 @@ export interface ModelingService {
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
   importStepFile(input: ModelingImportStepFileInput): Promise<ModelingDocumentFileMutationResult>
+  importMeshFile(input: ModelingImportMeshFileInput): Promise<ModelingDocumentFileMutationResult>
   exportCurrentDocument(): Promise<DocumentExportSuccessResult>
   bindLocalFile(input: {
     handle: LocalFileSystemFileHandle
@@ -399,6 +410,11 @@ export interface ModelingImportStepFileInput {
   bytes: Uint8Array
 }
 
+export interface ModelingImportMeshFileInput {
+  fileName: string
+  bytes: Uint8Array
+}
+
 export type ModelingDocumentFileMutationResult =
   | { ok: true; revisionId: RevisionId; diagnostics: ModelingDiagnostic[] }
   | { ok: false; diagnostics: ModelingDiagnostic[] }
@@ -496,6 +512,14 @@ function assertFeatureId(value: unknown): FeatureId {
   }
 
   return value as FeatureId
+}
+
+function assertGeometryAssetId(value: unknown): GeometryAssetId {
+  if (!isString(value)) {
+    throw new Error('Invalid geometry asset ID payload.')
+  }
+
+  return value as GeometryAssetId
 }
 
 function assertSketchId(value: unknown): SketchId {
@@ -1223,6 +1247,89 @@ function normalizeAdvancedSolidFeatureParameters(value: unknown): AdvancedSolidF
   }
 }
 
+function normalizeStepImportFeatureParameters(
+  value: unknown,
+): Extract<FeatureDefinition, { kind: 'stepImport' }>['parameters'] {
+  if (!isRecord(value) || !isString(value.label) || !isRecord(value.unit) || !isRecord(value.orientation) || !isRecord(value.placement)) {
+    throw new Error('Invalid STEP import feature parameters payload.')
+  }
+
+  return {
+    assetId: assertGeometryAssetId(value.assetId),
+    unit: {
+      source: value.unit.source === 'user' ? 'user' : 'file',
+      resolvedUnit: value.unit.resolvedUnit === 'millimeter' ? 'millimeter' : 'millimeter',
+      scaleToDocument: typeof value.unit.scaleToDocument === 'number' && value.unit.scaleToDocument > 0
+        ? value.unit.scaleToDocument
+        : 1,
+    },
+    orientation: {
+      upAxis: value.orientation.upAxis === 'y' ? 'y' : 'z',
+      handedness: 'rightHanded',
+    },
+    placement: {
+      translation: Array.isArray(value.placement.translation) && value.placement.translation.length === 3
+        ? value.placement.translation.map((entry) => Number(entry)) as [number, number, number]
+        : [0, 0, 0],
+      rotationEulerRadians: Array.isArray(value.placement.rotationEulerRadians) && value.placement.rotationEulerRadians.length === 3
+        ? value.placement.rotationEulerRadians.map((entry) => Number(entry)) as [number, number, number]
+        : [0, 0, 0],
+      scale: typeof value.placement.scale === 'number' && value.placement.scale > 0 ? value.placement.scale : 1,
+    },
+    label: value.label.trim(),
+  }
+}
+
+function normalizeMeshImportFeatureParameters(value: unknown): MeshImportFeatureParameters {
+  if (!isRecord(value) || !isString(value.label) || !isRecord(value.source) || !isRecord(value.resolvedSettings)) {
+    throw new Error('Invalid mesh import feature parameters payload.')
+  }
+
+  const sourceFormat = value.source.sourceFormat
+  const sourceHash = value.source.sourceHash
+  if ((sourceFormat !== 'stl' && sourceFormat !== '3mf') || !isString(sourceHash) || !sourceHash.startsWith('sha256:')) {
+    throw new Error('Invalid mesh import source provenance payload.')
+  }
+
+  const settings = value.resolvedSettings
+  if (!isRecord(settings.unit) || !isRecord(settings.orientation) || !isRecord(settings.placement)) {
+    throw new Error('Invalid mesh import resolved settings payload.')
+  }
+
+  return {
+    assetId: assertGeometryAssetId(value.assetId),
+    source: {
+      originalFileName: isString(value.source.originalFileName) ? value.source.originalFileName : 'mesh',
+      sourceFormat,
+      sourceHash: sourceHash as GeometryAssetHash,
+      sourceStored: false,
+    },
+    resolvedSettings: {
+      unit: {
+        source: 'user',
+        resolvedUnit: 'millimeter',
+        scaleToDocument: typeof settings.unit.scaleToDocument === 'number' && settings.unit.scaleToDocument > 0
+          ? settings.unit.scaleToDocument
+          : 1,
+      },
+      orientation: {
+        upAxis: settings.orientation.upAxis === 'y' ? 'y' : 'z',
+        handedness: 'rightHanded',
+      },
+      placement: {
+        translation: Array.isArray(settings.placement.translation) && settings.placement.translation.length === 3
+          ? settings.placement.translation.map((entry) => Number(entry)) as [number, number, number]
+          : [0, 0, 0],
+        rotationEulerRadians: Array.isArray(settings.placement.rotationEulerRadians) && settings.placement.rotationEulerRadians.length === 3
+          ? settings.placement.rotationEulerRadians.map((entry) => Number(entry)) as [number, number, number]
+          : [0, 0, 0],
+        scale: typeof settings.placement.scale === 'number' && settings.placement.scale > 0 ? settings.placement.scale : 1,
+      },
+    },
+    label: value.label.trim(),
+  }
+}
+
 function normalizeFeatureDefinition(value: unknown): FeatureDefinition {
   if (!isRecord(value) || !isString(value.kind) || !isString(value.featureTypeVersion)) {
     throw new Error('Invalid feature definition payload.')
@@ -1273,6 +1380,18 @@ function normalizeFeatureDefinition(value: unknown): FeatureDefinition {
             ? value.featureTypeVersion
             : SHELL_FEATURE_SCHEMA_VERSION,
         parameters: normalizeShellFeatureParameters(value.parameters),
+      }
+    case 'stepImport':
+      return {
+        kind: 'stepImport',
+        featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+        parameters: normalizeStepImportFeatureParameters(value.parameters),
+      }
+    case 'meshImport':
+      return {
+        kind: 'meshImport',
+        featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+        parameters: normalizeMeshImportFeatureParameters(value.parameters),
       }
     default:
       if (isAdvancedSolidFeatureKind(value.kind)) {
@@ -4689,6 +4808,19 @@ export function createModelingService(
     return `feature_stepImport-${maxOrdinal + 1}` as FeatureId
   }
 
+  function allocateMeshImportFeatureId(document: AuthoredModelDocument): FeatureId {
+    const pattern = /^feature_meshImport-(\d+)$/
+    let maxOrdinal = 0
+    for (const feature of document.features) {
+      const match = pattern.exec(feature.featureId)
+      if (match) {
+        maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+      }
+    }
+
+    return `feature_meshImport-${maxOrdinal + 1}` as FeatureId
+  }
+
   function createStepImportAssetId(hash: GeometryAssetHash): GeometryAssetId {
     return `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}` as GeometryAssetId
   }
@@ -4697,6 +4829,12 @@ export function createModelingService(
     const trimmed = fileName.trim()
     const baseName = trimmed.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
     return baseName && baseName.length > 0 ? baseName : 'STEP Import'
+  }
+
+  function createMeshImportLabel(fileName: string) {
+    const trimmed = fileName.trim()
+    const baseName = trimmed.split(/[\\/]/).pop()?.replace(/\.(?:stl|3mf)$/i, '').trim()
+    return baseName && baseName.length > 0 ? baseName : 'Mesh Import'
   }
 
   function getAuthoredHistoryOrder(document: AuthoredModelDocument) {
@@ -4803,6 +4941,149 @@ export function createModelingService(
       ok: true as const,
       document,
       assets: [{ asset, bytes }],
+    }
+  }
+
+  async function createMeshImportAuthoredDocument(input: ModelingImportMeshFileInput) {
+    if (!/\.(?:stl|3mf)$/i.test(input.fileName)) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            'mesh-import-unsupported-file-type',
+            'Import failed. Select an STL or 3MF file.',
+          ),
+        ],
+      }
+    }
+
+    if (input.bytes.byteLength === 0) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            'mesh-import-empty-file',
+            'Import failed. The selected mesh file is empty.',
+          ),
+        ],
+      }
+    }
+
+    const sourceBytes = input.bytes.slice()
+    const sourceHash = await hashGeometryAssetBytes(sourceBytes)
+    let sourceFormat: MeshImportSourceFormat = /\.3mf$/i.test(input.fileName) ? '3mf' : 'stl'
+    let triangles
+
+    try {
+      const parsed = parseMeshSourceFile({ fileName: input.fileName, bytes: sourceBytes })
+      sourceFormat = parsed.sourceFormat
+      triangles = parsed.triangles
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Mesh source could not be parsed.'
+      return {
+        ok: false as const,
+        diagnostics: [
+          createMeshImportDiagnostic(
+            'mesh-import-parse-failed',
+            `Mesh import failed while parsing ${input.fileName}.`,
+            {
+              sourceFormat: error instanceof MeshParseError ? error.sourceFormat : sourceFormat,
+              sourceHash,
+              conversionPhase: 'parse',
+              rejectionReason: message,
+            },
+          ),
+        ],
+      }
+    }
+
+    const sourceDocument = await exportAuthoredDocumentForRepository()
+    const featureId = allocateMeshImportFeatureId(sourceDocument)
+    const label = createMeshImportLabel(input.fileName)
+    const baked = await createBakedMeshGeometryAsset({
+      triangles,
+      sourceFileName: input.fileName,
+      sourceFormat,
+      sourceHash,
+      ownerFeatureId: featureId,
+    })
+
+    if (!baked.ok) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createMeshImportDiagnostic(
+            'mesh-import-conversion-failed',
+            `Mesh import failed while baking ${input.fileName}.`,
+            {
+              sourceFormat,
+              sourceHash,
+              triangleCount: baked.triangleCount,
+              conversionPhase: 'bake',
+              rejectionReason: baked.reason,
+            },
+          ),
+        ],
+      }
+    }
+
+    const asset = baked.assetInput.asset
+    const document: AuthoredModelDocument = {
+      ...sourceDocument,
+      revisionId: createNextAuthoredRevisionId(sourceDocument.revisionId),
+      features: [
+        ...sourceDocument.features,
+        {
+          featureId,
+          label,
+          definition: {
+            kind: 'meshImport',
+            featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              assetId: asset.assetId,
+              source: {
+                originalFileName: input.fileName,
+                sourceFormat,
+                sourceHash,
+                sourceStored: false,
+              },
+              resolvedSettings: {
+                unit: {
+                  source: 'user',
+                  resolvedUnit: 'millimeter',
+                  scaleToDocument: 1,
+                },
+                orientation: {
+                  upAxis: 'z',
+                  handedness: 'rightHanded',
+                },
+                placement: {
+                  translation: [0, 0, 0],
+                  rotationEulerRadians: [0, 0, 0],
+                  scale: 1,
+                },
+              },
+              label,
+            },
+          },
+        },
+      ],
+      featureOrder: [...sourceDocument.featureOrder, featureId],
+      historyOrder: [
+        ...getAuthoredHistoryOrder(sourceDocument),
+        { kind: 'feature', featureId },
+      ],
+      cursor: { kind: 'feature', featureId },
+      assets: normalizeGeometryAssetManifest({
+        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+        records: [...sourceDocument.assets.records, asset],
+      }),
+    }
+
+    return {
+      ok: true as const,
+      document,
+      assets: [baked.assetInput],
     }
   }
 
@@ -5267,6 +5548,16 @@ export function createModelingService(
       await restorePromise
       await repositoryChangePromise
       const imported = await createStepImportAuthoredDocument(input)
+      if (!imported.ok) {
+        return imported
+      }
+
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets)
+    },
+    async importMeshFile(input) {
+      await restorePromise
+      await repositoryChangePromise
+      const imported = await createMeshImportAuthoredDocument(input)
       if (!imported.ok) {
         return imported
       }

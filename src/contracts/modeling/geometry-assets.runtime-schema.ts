@@ -53,6 +53,8 @@ export const geometryAssetRecordSchema = z.object({
     kind: z.union([z.literal('imported'), z.literal('generated')]),
     sourceName: stringSchema.min(1).optional(),
     sourceHash: geometryAssetHashSchema.optional(),
+    sourceFormat: z.union([z.literal('step'), z.literal('stl'), z.literal('3mf')]).optional(),
+    sourceStored: z.literal(false).optional(),
     generator: stringSchema.min(1).optional(),
   }).strict(),
   ownerFeatureIds: z.array(featureIdSchema),
@@ -105,5 +107,7 @@ function sameAssetContentMetadata(left: GeometryAssetRecord, right: GeometryAsse
     && left.provenance.kind === right.provenance.kind
     && (left.provenance.sourceName ?? null) === (right.provenance.sourceName ?? null)
     && (left.provenance.sourceHash ?? null) === (right.provenance.sourceHash ?? null)
+    && (left.provenance.sourceFormat ?? null) === (right.provenance.sourceFormat ?? null)
+    && (left.provenance.sourceStored ?? null) === (right.provenance.sourceStored ?? null)
     && (left.provenance.generator ?? null) === (right.provenance.generator ?? null)
 }

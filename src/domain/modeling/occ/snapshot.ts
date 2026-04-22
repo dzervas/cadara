@@ -206,6 +206,7 @@ function collectFeatureConsumedTargets(definition: OccAuthoringState['features']
       booleanScope = definition.parameters.booleanScope
       break
     case 'stepImport':
+    case 'meshImport':
       break
     default:
       targets.push(...definition.parameters.participants.flatMap((participant) => [...participant.targets]))
@@ -338,6 +339,12 @@ function createSnapshotFeatureDefinition(
       return {
         kind: 'stepImport',
         featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+        parameters: structuredClone(definition.parameters),
+      }
+    case 'meshImport':
+      return {
+        kind: 'meshImport',
+        featureTypeVersion: definition.featureTypeVersion,
         parameters: structuredClone(definition.parameters),
       }
     default:

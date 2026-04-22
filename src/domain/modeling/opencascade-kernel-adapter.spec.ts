@@ -48,6 +48,7 @@ import {
   FILLET_FEATURE_SCHEMA_VERSION,
   GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
   GEOMETRY_ASSET_SCHEMA_VERSION,
+  MESH_IMPORT_FEATURE_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
@@ -84,6 +85,8 @@ import { createMemoryDocumentRepository } from '@/domain/modeling/memory-documen
 import { getNextDocumentHistoryCursor } from '@/domain/modeling/document-history'
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 import { toGpPnt } from '@/domain/modeling/occ/geometry'
+import { createBakedMeshGeometryAsset } from '@/domain/modeling/baked-mesh-geometry'
+import type { MeshTriangle } from '@/domain/modeling/mesh-parser'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -1135,6 +1138,97 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     return { document, asset, bytes }
   }
 
+  function createCubeMeshTriangles(): MeshTriangle[] {
+    return [
+      [[0, 0, 0], [0, 1, 0], [1, 1, 0]],
+      [[0, 0, 0], [1, 1, 0], [1, 0, 0]],
+      [[0, 0, 1], [1, 1, 1], [0, 1, 1]],
+      [[0, 0, 1], [1, 0, 1], [1, 1, 1]],
+      [[0, 0, 0], [1, 0, 0], [1, 0, 1]],
+      [[0, 0, 0], [1, 0, 1], [0, 0, 1]],
+      [[1, 0, 0], [1, 1, 0], [1, 1, 1]],
+      [[1, 0, 0], [1, 1, 1], [1, 0, 1]],
+      [[1, 1, 0], [0, 1, 0], [0, 1, 1]],
+      [[1, 1, 0], [0, 1, 1], [1, 1, 1]],
+      [[0, 1, 0], [0, 0, 0], [0, 0, 1]],
+      [[0, 1, 0], [0, 0, 1], [0, 1, 1]],
+    ]
+  }
+
+  async function createMeshImportDocumentFromTriangles(
+    sourceDocument: AuthoredModelDocument,
+    input: {
+      featureId: FeatureId
+      label: string
+      fileName: string
+      triangles: MeshTriangle[]
+    },
+  ) {
+    const sourceHash = await hashGeometryAssetBytes(new TextEncoder().encode(input.fileName))
+    const baked = await createBakedMeshGeometryAsset({
+      triangles: input.triangles,
+      sourceFileName: input.fileName,
+      sourceFormat: 'stl',
+      sourceHash,
+      ownerFeatureId: input.featureId,
+    })
+    assert(baked.ok, baked.ok ? 'Baked mesh fixture should succeed.' : baked.reason)
+    const asset = baked.assetInput.asset
+    const document: AuthoredModelDocument = {
+      ...sourceDocument,
+      revisionId: 'rev_0100',
+      features: [
+        ...sourceDocument.features,
+        {
+          featureId: input.featureId,
+          label: input.label,
+          definition: {
+            kind: 'meshImport',
+            featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              assetId: asset.assetId,
+              source: {
+                originalFileName: input.fileName,
+                sourceFormat: 'stl',
+                sourceHash,
+                sourceStored: false,
+              },
+              resolvedSettings: {
+                unit: {
+                  source: 'user',
+                  resolvedUnit: 'millimeter',
+                  scaleToDocument: 1,
+                },
+                orientation: {
+                  upAxis: 'z',
+                  handedness: 'rightHanded',
+                },
+                placement: {
+                  translation: [0, 0, 0],
+                  rotationEulerRadians: [0, 0, 0],
+                  scale: 1,
+                },
+              },
+              label: input.label,
+            },
+          },
+        },
+      ],
+      featureOrder: [...sourceDocument.featureOrder, input.featureId],
+      historyOrder: [
+        ...(sourceDocument.historyOrder ?? []),
+        { kind: 'feature', featureId: input.featureId },
+      ],
+      cursor: { kind: 'feature', featureId: input.featureId },
+      assets: normalizeGeometryAssetManifest({
+        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+        records: [...sourceDocument.assets.records, asset],
+      }),
+    }
+
+    return { document, asset, bytes: baked.assetInput.bytes }
+  }
+
   function createStepAssetResolver(asset: GeometryAssetRecord, bytes: Uint8Array) {
     return {
       async getGeometryAssetBytes(hash: GeometryAssetHash) {
@@ -1239,6 +1333,15 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       builder.Add(compound, firstBox.Shape())
       builder.Add(compound, secondBox.Shape())
       return compound
+    })
+  }
+
+  function createCylinderStepPayload() {
+    return writeStepShape((oc) => {
+      const cylinder = new oc.BRepPrimAPI_MakeCylinder_1(6, 18)
+      cylinder.Build(new oc.Message_ProgressRange_1())
+      assert(cylinder.IsDone(), 'Test cylinder should build for curved mesh volume round-trip coverage.')
+      return cylinder.Shape()
     })
   }
 
@@ -1366,6 +1469,184 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       resolved.resolution.invalidation === null && resolved.resolution.ownerFeatureId === featureId,
       'Downstream feature refs should resolve imported STEP body topology.',
     )
+  }
+
+  async function testMeshImportRestoresBakedBodiesFromGeneratedAssetBytes() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_meshImport-1' as FeatureId
+    const imported = await createMeshImportDocumentFromTriangles(sourceDocument, {
+      featureId,
+      label: 'Imported baked cube',
+      fileName: 'cube.stl',
+      triangles: createCubeMeshTriangles(),
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId === featureId)
+
+    assert(importedBody, 'Mesh import should rebuild into a tracked baked body.')
+    assert(importedBody.label === 'Imported baked cube', 'Baked mesh body should use the authored import label.')
+    assert(importedBody.topology.faceIds.length > 0, 'Baked mesh body should expose durable face topology.')
+    assert(importedBody.topology.edgeIds.length > 0, 'Baked mesh body should expose durable edge topology.')
+    assert(importedBody.topology.vertexIds.length > 0, 'Baked mesh body should expose durable vertex topology.')
+    assert(
+      snapshot.document.diagnostics.every((diagnostic) => diagnostic.code !== 'mesh-import-missing-baked-asset'),
+      'Baked mesh restore should not require original STL source bytes.',
+    )
+  }
+
+  async function testStlAndThreeMfExportImportPreservesVolume() {
+    const fixture = await createExportableBodyFixture()
+    const originalStep = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(originalStep.ok && typeof originalStep.payload === 'string', 'Fixture STEP export should produce a volume baseline.')
+    const beforeVolume = await readStepPayloadVolume(originalStep.payload)
+
+    async function assertMeshRoundTripVolume(format: 'stl' | '3mf') {
+      const exported = await fixture.adapter.exportDocument({
+        contractVersion: CONTRACT_VERSION,
+        documentId: 'doc_workspace',
+        baseRevisionId: fixture.revisionId,
+        target: { kind: 'body', bodyId: fixture.bodyId },
+        targetLabel: fixture.targetLabel,
+        format,
+        options: getDefaultDocumentExportOptions(format),
+      })
+      assert(exported.ok && exported.payload instanceof Uint8Array, `${format} export should produce mesh bytes.`)
+
+      const importAdapter = createAdapter()
+      const importService = createModelingService(importAdapter, {
+        currentDocumentId: 'doc_workspace',
+        operationHistoryStore: null,
+        documentRepository: null,
+      })
+      const imported = await importService.importMeshFile({
+        fileName: `round-trip.${format}`,
+        bytes: exported.payload,
+      })
+      assert(imported.ok, `${format} mesh import should bake a generated geometry asset.`)
+
+      const importedSnapshot = await importService.getCurrentDocumentSnapshot()
+      const importedBody = importedSnapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_meshImport-'))
+      assert(importedBody, `${format} mesh import should restore a baked body.`)
+
+      const importedStep = await importAdapter.exportDocument({
+        contractVersion: CONTRACT_VERSION,
+        documentId: 'doc_workspace',
+        baseRevisionId: importedSnapshot.revisionId,
+        target: { kind: 'body', bodyId: importedBody.bodyId },
+        targetLabel: `Imported ${format.toUpperCase()} Body`,
+        format: 'step',
+        options: getDefaultDocumentExportOptions('step'),
+      })
+      assert(importedStep.ok && typeof importedStep.payload === 'string', `Imported ${format} baked body should export as STEP.`)
+
+      const afterVolume = await readStepPayloadVolume(importedStep.payload)
+      const relativeDelta = Math.abs(beforeVolume - afterVolume) / Math.max(beforeVolume, 1)
+      assert(beforeVolume > 0, `${format} round-trip source volume should be positive.`)
+      assert(
+        relativeDelta < 1e-6,
+        `${format} export/import should preserve volume. Before=${beforeVolume}; after=${afterVolume}; relative delta=${relativeDelta}.`,
+      )
+    }
+
+    await assertMeshRoundTripVolume('stl')
+    await assertMeshRoundTripVolume('3mf')
+  }
+
+  async function testStlAndThreeMfCurvedExportImportTracksTessellatedVolume() {
+    const sourceAdapter = createAdapter()
+    const sourceDocument = await sourceAdapter.exportAuthoredModelDocument('doc_workspace' as DocumentId)
+    const featureId = 'feature_stepImport-curved' as FeatureId
+    const cylinderPayload = await createCylinderStepPayload()
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'Imported exact cylinder',
+      fileName: 'curved-cylinder.step',
+      payload: cylinderPayload,
+    })
+    const exactAdapter = createAdapter()
+
+    await exactAdapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const exactSnapshotResponse = await exactAdapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const exactSnapshot = exactSnapshotResponse.snapshot
+    const exactBody = exactSnapshot.bodies.find((body) => body.ownerFeatureId === featureId)
+    assert(exactBody, 'Curved STEP import should restore an exact source body.')
+
+    const beforeVolume = await readStepPayloadVolume(cylinderPayload)
+    assert(beforeVolume > 0, 'Curved round-trip source volume should be positive.')
+    const curvedMeshAccuracy = {
+      chordTolerance: 1,
+      angleToleranceRadians: 0.5,
+    }
+
+    async function assertCurvedMeshRoundTripVolume(format: 'stl' | '3mf') {
+      const exported = await exactAdapter.exportDocument({
+        contractVersion: CONTRACT_VERSION,
+        documentId: 'doc_workspace',
+        baseRevisionId: exactSnapshot.revisionId,
+        target: { kind: 'body', bodyId: exactBody.bodyId },
+        targetLabel: 'Imported exact cylinder',
+        format,
+        options: {
+          ...getDefaultDocumentExportOptions(format),
+          meshAccuracy: curvedMeshAccuracy,
+        },
+      })
+      assert(exported.ok && exported.payload instanceof Uint8Array, `${format} curved export should produce mesh bytes.`)
+
+      const importAdapter = createAdapter()
+      const importService = createModelingService(importAdapter, {
+        currentDocumentId: 'doc_workspace',
+        operationHistoryStore: null,
+        documentRepository: null,
+      })
+      const importedMesh = await importService.importMeshFile({
+        fileName: `curved-cylinder.${format}`,
+        bytes: exported.payload,
+      })
+      assert(importedMesh.ok, `${format} curved mesh import should bake a generated geometry asset.`)
+
+      const importedSnapshot = await importService.getCurrentDocumentSnapshot()
+      const importedBody = importedSnapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_meshImport-'))
+      assert(importedBody, `${format} curved mesh import should restore a baked body.`)
+
+      const importedStep = await importAdapter.exportDocument({
+        contractVersion: CONTRACT_VERSION,
+        documentId: 'doc_workspace',
+        baseRevisionId: importedSnapshot.revisionId,
+        target: { kind: 'body', bodyId: importedBody.bodyId },
+        targetLabel: `Imported curved ${format.toUpperCase()} body`,
+        format: 'step',
+        options: getDefaultDocumentExportOptions('step'),
+      })
+      assert(importedStep.ok && typeof importedStep.payload === 'string', `Imported curved ${format} baked body should export as STEP.`)
+
+      const afterVolume = await readStepPayloadVolume(importedStep.payload)
+      const relativeDelta = Math.abs(beforeVolume - afterVolume) / Math.max(beforeVolume, 1)
+      assert(
+        relativeDelta < 0.08,
+        `${format} curved mesh round-trip should stay within tessellated volume tolerance. Before=${beforeVolume}; after=${afterVolume}; relative delta=${relativeDelta}.`,
+      )
+    }
+
+    await assertCurvedMeshRoundTripVolume('stl')
+    await assertCurvedMeshRoundTripVolume('3mf')
   }
 
   async function testStepExportImportPreservesComplexFilletedChamferedVolume() {
@@ -5084,6 +5365,9 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRepositoryRestoreConsumesWorkerNormalizedCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
   await testStepImportRestoresExactBodiesFromAssetBytes()
+  await testMeshImportRestoresBakedBodiesFromGeneratedAssetBytes()
+  await testStlAndThreeMfExportImportPreservesVolume()
+  await testStlAndThreeMfCurvedExportImportTracksTessellatedVolume()
   await testStepExportImportPreservesComplexFilletedChamferedVolume()
   await testStepImportReportsMissingAssetBytes()
   await testStepImportReportsUnsupportedStepFiles()

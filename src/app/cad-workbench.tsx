@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Button, Group, Loader, Modal, Stack, Text } from '@mantine/core'
+import { Button, Checkbox, Group, Loader, Modal, Stack, Text } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
@@ -117,6 +117,10 @@ type StepImportFlowState =
   | { kind: 'idle' }
   | { kind: 'review'; fileName: string; bytes: Uint8Array; label: string }
   | { kind: 'importing'; fileName: string; label: string }
+type MeshImportFlowState =
+  | { kind: 'idle' }
+  | { kind: 'review'; fileName: string; bytes: Uint8Array; label: string; warningAccepted: boolean }
+  | { kind: 'importing'; fileName: string; label: string }
 type WorkbenchUndoEntry =
   | {
       kind: 'updateVariable'
@@ -172,6 +176,7 @@ export function CadWorkbench() {
     useState<WorkbenchNotificationModel | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [stepImportFlow, setStepImportFlow] = useState<StepImportFlowState>({ kind: 'idle' })
+  const [meshImportFlow, setMeshImportFlow] = useState<MeshImportFlowState>({ kind: 'idle' })
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -1331,6 +1336,11 @@ export function CadWorkbench() {
     return baseName && baseName.length > 0 ? baseName : 'STEP Import'
   }
 
+  const createMeshImportLabel = (fileName: string) => {
+    const baseName = fileName.split(/[\\/]/).pop()?.replace(/\.(?:stl|3mf)$/i, '').trim()
+    return baseName && baseName.length > 0 ? baseName : 'Mesh Import'
+  }
+
   const handleImportDocument = async (file: File) => {
     if (/\.(?:step|stp)$/i.test(file.name)) {
       try {
@@ -1342,6 +1352,21 @@ export function CadWorkbench() {
         })
       } catch (error) {
         reportDocumentFileActionFailure('workbench.file.prepare-step-import', 'STEP import failed.', error)
+      }
+      return
+    }
+
+    if (/\.(?:stl|3mf)$/i.test(file.name)) {
+      try {
+        setMeshImportFlow({
+          kind: 'review',
+          fileName: file.name,
+          bytes: new Uint8Array(await file.arrayBuffer()),
+          label: createMeshImportLabel(file.name),
+          warningAccepted: false,
+        })
+      } catch (error) {
+        reportDocumentFileActionFailure('workbench.file.prepare-mesh-import', 'Mesh import failed.', error)
       }
       return
     }
@@ -1372,6 +1397,18 @@ export function CadWorkbench() {
     setStepImportFlow({ kind: 'idle' })
   }
 
+  const handleMeshImportCancel = () => {
+    setMeshImportFlow({ kind: 'idle' })
+  }
+
+  const handleMeshImportWarningAcceptedChange = (accepted: boolean) => {
+    setMeshImportFlow((current) =>
+      current.kind === 'review'
+        ? { ...current, warningAccepted: accepted }
+        : current,
+    )
+  }
+
   const handleStepImportAccept = async () => {
     if (stepImportFlow.kind !== 'review') {
       return
@@ -1395,6 +1432,32 @@ export function CadWorkbench() {
     } catch (error) {
       setStepImportFlow({ kind: 'review', fileName: review.fileName, bytes: review.bytes, label: review.label })
       reportDocumentFileActionFailure('workbench.file.import-step', 'STEP import failed.', error)
+    }
+  }
+
+  const handleMeshImportAccept = async () => {
+    if (meshImportFlow.kind !== 'review' || !meshImportFlow.warningAccepted) {
+      return
+    }
+
+    const review = meshImportFlow
+    setMeshImportFlow({ kind: 'importing', fileName: review.fileName, label: review.label })
+    try {
+      const result = await modelingService.importMeshFile({
+        fileName: review.fileName,
+        bytes: review.bytes,
+      })
+      if (!result.ok) {
+        setMeshImportFlow({ ...review })
+        showWorkbenchError(result.diagnostics[0]?.message ?? 'Mesh import failed.')
+        return
+      }
+
+      setMeshImportFlow({ kind: 'idle' })
+      refreshAfterDocumentFileAction(`Imported ${review.fileName}.`)
+    } catch (error) {
+      setMeshImportFlow({ ...review })
+      reportDocumentFileActionFailure('workbench.file.import-mesh', 'Mesh import failed.', error)
     }
   }
 
@@ -1663,6 +1726,46 @@ export function CadWorkbench() {
                         Import
                       </Button>
                     </Group>
+                  )}
+                </Stack>
+              ) : null}
+            </Modal>
+            <Modal
+              centered
+              opened={meshImportFlow.kind !== 'idle'}
+              onClose={meshImportFlow.kind === 'importing' ? () => undefined : handleMeshImportCancel}
+              title={meshImportFlow.kind === 'importing' ? 'Importing Mesh' : 'Import Mesh'}
+            >
+              {meshImportFlow.kind !== 'idle' ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>{meshImportFlow.label}</Text>
+                  <Text size="xs" c="dimmed">{meshImportFlow.fileName}</Text>
+                  <Stack gap={4}>
+                    <Text size="xs">Source: STL or 3MF triangles</Text>
+                    <Text size="xs">Result: generated baked geometry asset</Text>
+                    <Text size="xs">Source stored: false</Text>
+                  </Stack>
+                  {meshImportFlow.kind === 'importing' ? (
+                    <Group gap="xs">
+                      <Loader color="gray" size="sm" />
+                      <Text size="sm">Parsing and baking mesh geometry</Text>
+                    </Group>
+                  ) : (
+                    <>
+                      <Checkbox
+                        checked={meshImportFlow.warningAccepted}
+                        onChange={(event) => handleMeshImportWarningAcceptedChange(event.currentTarget.checked)}
+                        label="I understand the original mesh file will not be saved in this document."
+                      />
+                      <Group justify="flex-end">
+                        <Button variant="subtle" color="gray" onClick={handleMeshImportCancel}>
+                          Cancel
+                        </Button>
+                        <Button onClick={handleMeshImportAccept} disabled={!meshImportFlow.warningAccepted}>
+                          Import
+                        </Button>
+                      </Group>
+                    </>
                   )}
                 </Stack>
               ) : null}

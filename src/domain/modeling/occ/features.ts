@@ -17,6 +17,7 @@ import type {
 import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
 import { createStepImportDiagnostic, type StepImportDiagnosticCode, type StepImportFeatureParameters } from '@/contracts/modeling/step-import'
+import type { MeshImportDiagnosticCode, MeshImportFeatureParameters } from '@/contracts/modeling/mesh-import'
 import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { RegionRecord } from '@/contracts/sketch/schema'
@@ -62,6 +63,10 @@ import {
   isOccTopologyHistoryDeleted,
   type OccTopologyHistorySource,
 } from '@/domain/modeling/occ/topology-naming'
+import {
+  bakedMeshGeometryToAsciiStl,
+  parseBakedMeshGeometry,
+} from '@/domain/modeling/baked-mesh-geometry'
 
 export interface OccFeatureExecutionContext {
   oc: OpenCascadeInstance
@@ -451,8 +456,18 @@ function createStepImportErrorCode(code: StepImportDiagnosticCode, message: stri
   return error
 }
 
+function createMeshImportErrorCode(code: MeshImportDiagnosticCode, message: string) {
+  const error = new Error(`${code}: ${message}`) as Error & { code: MeshImportDiagnosticCode }
+  error.code = code
+  return error
+}
+
 function createTempStepImportPath(asset: GeometryAssetRecord) {
   return `/cadara-import-${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}.step`
+}
+
+function createTempMeshImportPath(asset: GeometryAssetRecord) {
+  return `/cadara-import-${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}.stl`
 }
 
 function removeTempImportPath(oc: OpenCascadeInstance, path: string) {
@@ -466,6 +481,13 @@ function findStepImportAsset(
   parameters: StepImportFeatureParameters,
 ) {
   return context.assets.records.find((asset) => asset.assetId === parameters.assetId && asset.format === 'step') ?? null
+}
+
+function findMeshImportAsset(
+  context: OccFeatureExecutionContext,
+  parameters: MeshImportFeatureParameters,
+) {
+  return context.assets.records.find((asset) => asset.assetId === parameters.assetId && asset.format === 'baked-mesh') ?? null
 }
 
 function readStepImportShape(
@@ -646,6 +668,84 @@ function executeStepImportFeature(
           ),
         ]
       : [],
+  }
+}
+
+function readBakedMeshImportSolid(
+  context: OccFeatureExecutionContext,
+  asset: GeometryAssetRecord,
+  label: string,
+) {
+  const bytes = context.assetBlobs.get(asset.hash)
+  if (!bytes) {
+    throw createMeshImportErrorCode('mesh-import-missing-baked-asset', `Baked mesh asset ${asset.assetId} bytes are missing.`)
+  }
+
+  const oc = context.oc
+  const path = createTempMeshImportPath(asset)
+  const shape = new oc.TopoDS_Shape()
+
+  try {
+    const payload = parseBakedMeshGeometry(bytes)
+    oc.FS.writeFile(path, new TextEncoder().encode(bakedMeshGeometryToAsciiStl(payload, label)))
+
+    if (!oc.StlAPI.Read(shape, path)) {
+      throw createMeshImportErrorCode('mesh-import-conversion-failed', `Baked mesh asset ${asset.assetId} could not be read.`)
+    }
+
+    const solids = extractSolidShapes(oc, shape)
+    if (solids.length === 1) {
+      return solids[0]!
+    }
+
+    if ((shape.ShapeType() as unknown as number) !== (oc.TopAbs_ShapeEnum.TopAbs_SHELL as unknown as number)) {
+      throw createMeshImportErrorCode('mesh-import-conversion-failed', `Baked mesh asset ${asset.assetId} did not restore as a closed shell.`)
+    }
+
+    const solidBuilder = new oc.BRepBuilderAPI_MakeSolid_3(oc.TopoDS.Shell_1(shape))
+    if (!solidBuilder.IsDone()) {
+      throw createMeshImportErrorCode('mesh-import-conversion-failed', `Baked mesh asset ${asset.assetId} could not be converted to a durable solid.`)
+    }
+
+    return solidBuilder.Solid()
+  } catch (error) {
+    if (error instanceof Error && 'code' in error) {
+      throw error
+    }
+
+    const message = error instanceof Error ? error.message : 'Baked mesh geometry could not be restored.'
+    throw createMeshImportErrorCode('mesh-import-conversion-failed', message)
+  } finally {
+    removeTempImportPath(oc, path)
+  }
+}
+
+function executeMeshImportFeature(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  parameters: MeshImportFeatureParameters,
+): OccFeatureExecutionResult {
+  const asset = findMeshImportAsset(context, parameters)
+  if (!asset) {
+    throw createMeshImportErrorCode('mesh-import-missing-baked-asset', `Mesh import asset ${parameters.assetId} is not in the authored document manifest.`)
+  }
+
+  const solid = readBakedMeshImportSolid(context, asset, parameters.label)
+  const body = trackNewSolidBody(context.oc, {
+    bodyId: `body_${ownerFeatureId}` as BodyId,
+    label: parameters.label,
+    ownerFeatureId,
+    shape: solid,
+  })
+
+  return {
+    bodies: [...context.bodies, body],
+    constructions: [...context.constructions],
+    constructionPlanes: new Map(context.constructionPlanes),
+    producedTargets: [{ kind: 'body', bodyId: body.bodyId }],
+    entities: [],
+    renderRecords: [],
+    historyInvalidations: new Map(),
   }
 }
 
@@ -3202,6 +3302,8 @@ export function executeOccFeature(
       return executeShellFeature(context, ownerFeatureId, definition.parameters)
     case 'stepImport':
       return executeStepImportFeature(context, ownerFeatureId, definition.parameters)
+    case 'meshImport':
+      return executeMeshImportFeature(context, ownerFeatureId, definition.parameters)
     case 'sweep':
       return executeSweepFeature(context, ownerFeatureId, definition as AdvancedSolidFeatureDefinition & { kind: 'sweep' })
     case 'loft':

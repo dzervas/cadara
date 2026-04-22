@@ -42,3 +42,12 @@ The geometry asset substrate SHALL retain original STEP bytes as immutable sourc
 - **WHEN** a document contains a STEP import feature
 - **THEN** the self-contained saved payload includes the exact STEP bytes referenced by that feature
 - **AND** reopening the payload does not require the user to select the original STEP file again
+
+### Requirement: Baked mesh results SHALL be generated geometry assets
+The geometry asset substrate SHALL store accepted mesh import results as generated immutable geometry assets, not as retained source mesh assets.
+
+#### Scenario: Mesh import produces baked asset
+- **WHEN** an STL or 3MF import commits
+- **THEN** the asset manifest records a generated baked geometry asset with reconstruction provenance
+- **AND** the manifest records that the original mesh source is not stored
+

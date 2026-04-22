@@ -37,6 +37,7 @@ import { renderExportSchema } from '@/contracts/render/runtime-schema'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
 import { durableRefSchema, edgeRefSchema, vertexRefSchema } from '@/contracts/shared/references.runtime-schema'
 import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
+import { geometryAssetHashSchema } from '@/contracts/modeling/geometry-assets.runtime-schema'
 import {
   bodyIdSchema,
   contractVersionSchema,
@@ -68,6 +69,7 @@ import {
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
+  MESH_IMPORT_FEATURE_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
   STEP_IMPORT_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
@@ -391,6 +393,39 @@ const stepImportDefinitionSchema = z.object({
   }).strict(),
 }).transform((value) => value as FeatureDefinition)
 
+const meshImportResolvedSettingsSchema = z.object({
+  unit: z.object({
+    source: z.literal('user'),
+    resolvedUnit: z.literal('millimeter'),
+    scaleToDocument: positiveNumberSchema('Mesh import unit scale must be positive.'),
+  }).strict(),
+  orientation: z.object({
+    upAxis: z.union([z.literal('z'), z.literal('y')]),
+    handedness: z.literal('rightHanded'),
+  }).strict(),
+  placement: z.object({
+    translation: z.tuple([numberSchema, numberSchema, numberSchema]),
+    rotationEulerRadians: z.tuple([numberSchema, numberSchema, numberSchema]),
+    scale: positiveNumberSchema('Mesh import placement scale must be positive.'),
+  }).strict(),
+}).strict()
+
+const meshImportDefinitionSchema = z.object({
+  kind: z.literal('meshImport'),
+  featureTypeVersion: z.literal(MESH_IMPORT_FEATURE_SCHEMA_VERSION),
+  parameters: z.object({
+    assetId: z.string().regex(/^asset_.+$/, 'Mesh import baked asset ID is invalid.'),
+    source: z.object({
+      originalFileName: stringSchema.trim().min(1, 'Mesh import source filename is required.'),
+      sourceFormat: z.union([z.literal('stl'), z.literal('3mf')]),
+      sourceHash: geometryAssetHashSchema,
+      sourceStored: z.literal(false),
+    }).strict(),
+    resolvedSettings: meshImportResolvedSettingsSchema,
+    label: stringSchema.trim().min(1, 'Mesh import label is required.'),
+  }).strict(),
+}).transform((value) => value as FeatureDefinition)
+
 const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional().transform((options) => {
   if (!options) {
     return options
@@ -502,6 +537,7 @@ export const featureDefinitionSchema = z.union([
   planeDefinitionSchema,
   shellDefinitionSchema,
   stepImportDefinitionSchema,
+  meshImportDefinitionSchema,
   advancedDefinitionSchema,
 ]).transform((value) => value as FeatureDefinition)
 

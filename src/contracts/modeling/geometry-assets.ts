@@ -21,6 +21,8 @@ export interface GeometryAssetProvenance {
   kind: GeometryAssetProvenanceKind
   sourceName?: string
   sourceHash?: GeometryAssetHash
+  sourceFormat?: 'step' | 'stl' | '3mf'
+  sourceStored?: false
   generator?: string
 }
 

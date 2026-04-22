@@ -34,12 +34,14 @@ import type {
   PlaneFeatureSchemaVersion,
   RevolveFeatureSchemaVersion,
   ShellFeatureSchemaVersion,
+  MeshImportFeatureSchemaVersion,
   SnapshotSchemaVersion,
   StepImportFeatureSchemaVersion,
 } from '@/contracts/shared/versioning'
 import type { AdvancedFeatureValidationDiagnostic, AdvancedSolidFeatureDefinition, AdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 import type { GeometryAssetDiagnosticDetail } from '@/contracts/modeling/geometry-assets'
+import type { MeshImportDiagnosticDetail, MeshImportFeatureParameters } from '@/contracts/modeling/mesh-import'
 import type { StepImportDiagnosticDetail, StepImportFeatureParameters } from '@/contracts/modeling/step-import'
 
 export interface DocumentSnapshotProvenance {
@@ -89,6 +91,8 @@ export type { PreviewId }
 export type { ReferenceId }
 /** Re-exported STEP import parameters used by authoring helpers. */
 export type { StepImportFeatureParameters }
+/** Re-exported baked mesh import parameters used by authoring helpers. */
+export type { MeshImportFeatureParameters }
 /** Canonical durable reference union accepted throughout the modeling boundary. */
 export type PrimitiveRef = DurableRef
 /** Re-exported sketch-plane support and placement types used by modeling APIs. */
@@ -102,9 +106,9 @@ export type SketchPoint = SketchPoint2D
  * Canonical feature families currently exposed by the kernel contract.
  * This union is closed so callers cannot invent feature types ad hoc.
  */
-export type FeatureKind = 'extrude' | 'fillet' | 'plane' | 'revolve' | 'shell' | 'stepImport'
+export type FeatureKind = 'extrude' | 'fillet' | 'plane' | 'revolve' | 'shell' | 'stepImport' | 'meshImport'
 export type AuthoredFeatureKind =
-  | FeatureKind
+  | Exclude<FeatureKind, 'meshImport'>
   | 'sweep'
   | 'loft'
   | 'chamfer'
@@ -498,6 +502,14 @@ export type FeatureDefinition =
       /** Exact asset reference and resolved import settings. */
       parameters: StepImportFeatureParameters
     }
+  | {
+      /** Stable discriminant for baked mesh import features. */
+      kind: 'meshImport'
+      /** Per-variant schema version owned by the mesh import contract family. */
+      featureTypeVersion: MeshImportFeatureSchemaVersion
+      /** Exact baked asset reference, provenance, and resolved import settings. */
+      parameters: MeshImportFeatureParameters
+    }
   | AdvancedSolidFeatureDefinition
 
 /**
@@ -568,6 +580,7 @@ export type ModelingDiagnosticDetail =
     }
   | GeometryAssetDiagnosticDetail
   | StepImportDiagnosticDetail
+  | MeshImportDiagnosticDetail
 
 /**
  * Top-level diagnostic record returned by the modeling boundary.

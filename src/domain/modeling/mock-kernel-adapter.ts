@@ -389,6 +389,7 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
     case 'shell':
       return [definition.parameters.bodyTarget, ...definition.parameters.faceTargets]
     case 'stepImport':
+    case 'meshImport':
       return []
     default:
       return definition.parameters.participants.flatMap((participant) => [...participant.targets])
@@ -2071,8 +2072,8 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
       angularToleranceRadians: 0.0001,
     },
     capabilities: {
-      supportedFeatureKinds: ['extrude', 'fillet', 'stepImport', 'sweep', 'loft', 'chamfer', 'thicken', 'combine', 'split', 'deleteSolid'],
-      previewableFeatureKinds: ['extrude', 'stepImport', 'sweep', 'loft', 'chamfer', 'thicken', 'combine', 'split', 'deleteSolid'],
+      supportedFeatureKinds: ['extrude', 'fillet', 'stepImport', 'meshImport', 'sweep', 'loft', 'chamfer', 'thicken', 'combine', 'split', 'deleteSolid'],
+      previewableFeatureKinds: ['extrude', 'stepImport', 'meshImport', 'sweep', 'loft', 'chamfer', 'thicken', 'combine', 'split', 'deleteSolid'],
       supportedProfileKinds: ['region', 'face'],
       supportsFaceBackedSketchPlanes: true,
       supportsDurableTopologyNaming: false,
