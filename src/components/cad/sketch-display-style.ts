@@ -10,6 +10,9 @@ export interface SketchDisplayMeshMaterialConfig {
   transparent: boolean
   opacity: number
   side: THREE.Side
+  polygonOffset: boolean
+  polygonOffsetFactor: number
+  polygonOffsetUnits: number
 }
 
 export interface SketchDisplayPolylineMaterialConfig {
@@ -51,6 +54,9 @@ export function getSketchDisplayMeshMaterialConfig(
     transparent: true,
     opacity,
     side: THREE.DoubleSide,
+    polygonOffset: renderable.semanticClass === 'region',
+    polygonOffsetFactor: renderable.semanticClass === 'region' ? -2 : 0,
+    polygonOffsetUnits: renderable.semanticClass === 'region' ? -2 : 0,
   }
 }
 

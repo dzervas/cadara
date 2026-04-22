@@ -47,6 +47,8 @@ interface HighlightMaterialBaseline {
 interface RenderableMaterialDisplayOptions {
   color?: number
   flat?: boolean
+  polygonOffsetFactor?: number
+  polygonOffsetUnits?: number
 }
 
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
@@ -615,6 +617,7 @@ export function createRenderableMeshMaterial(
 ) {
   const semanticClass = renderable.binding.semanticClass
   const color = displayOptions.color ?? getRenderableBaseColor(semanticClass)
+  const defaultPolygonOffset = getDefaultRenderableMeshPolygonOffset(semanticClass, origin)
   const sharedOptions = {
     color,
     transparent: origin === 'preview' || semanticClass === 'region',
@@ -622,8 +625,8 @@ export function createRenderableMeshMaterial(
     side: THREE.DoubleSide,
     depthWrite: displayOptions.flat || origin === 'preview' ? false : true,
     polygonOffset: true,
-    polygonOffsetFactor: origin === 'preview' ? -1 : 1,
-    polygonOffsetUnits: origin === 'preview' ? -1 : 1,
+    polygonOffsetFactor: displayOptions.polygonOffsetFactor ?? defaultPolygonOffset.factor,
+    polygonOffsetUnits: displayOptions.polygonOffsetUnits ?? defaultPolygonOffset.units,
   }
 
   if (displayOptions.flat) {
@@ -637,6 +640,21 @@ export function createRenderableMeshMaterial(
     emissive: getRenderableMeshEmissive(semanticClass, origin),
     emissiveIntensity: getRenderableMeshEmissiveIntensity(semanticClass, origin),
   })
+}
+
+function getDefaultRenderableMeshPolygonOffset(
+  semanticClass: WorkspaceSemanticClass,
+  origin: ViewportRenderableOrigin,
+) {
+  if (semanticClass === 'region') {
+    return { factor: -2, units: -2 }
+  }
+
+  if (origin === 'preview') {
+    return { factor: -1, units: -1 }
+  }
+
+  return { factor: 1, units: 1 }
 }
 
 export function createRenderableLineMaterial(

@@ -111,6 +111,16 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     'Part mode should not apply sketch paint styles to display mesh renderables.',
   )
 
+  const regionMeshConfig = getSketchDisplayMeshMaterialConfig({
+    ...styledMeshRenderable,
+    semanticClass: 'region',
+  }, false, palette)
+  assert(regionMeshConfig.polygonOffset, 'Sketch-owned region fills should use polygon offset.')
+  assert(
+    regionMeshConfig.polygonOffsetFactor < 0 && regionMeshConfig.polygonOffsetUnits < 0,
+    'Sketch-owned region fills should be biased toward the camera to avoid coplanar flicker.',
+  )
+
   assert(
     getSketchRenderingPaletteToken('constrained') === '--workbench-tooltip-description'
       && getSketchRenderingPaletteToken('underconstrained') === '--mantine-color-blue-9'

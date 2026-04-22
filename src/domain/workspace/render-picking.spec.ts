@@ -11,6 +11,7 @@ import {
   collectBindings,
   createInvisiblePickMaterial,
   createMarkerPickProxy,
+  createRenderableMeshMaterial,
   createProjectedPickCandidate,
   getVisibleMarkerRadius,
   resolveAllCandidates,
@@ -651,6 +652,34 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
 
   {
     assertEqual(DEFAULT_LINE_PICK_THRESHOLD, 0.75, 'Line picking must use the stable default threshold.')
+  }
+
+  {
+    const regionRenderable: RenderableEntityRecord = {
+      id: 'renderable_region_material_offset',
+      label: 'Region',
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: 'pick_region_material_offset',
+        pickPriority: 8,
+        target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_material_offset' },
+        topology: null,
+        semanticClass: 'region',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+        vertexNormals: [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        triangleIndices: [[0, 1, 2]],
+      },
+    }
+    const material = createRenderableMeshMaterial(regionRenderable, 'document')
+    assert(
+      material.polygonOffsetFactor < 0 && material.polygonOffsetUnits < 0,
+      'Committed sketch regions should be biased toward the camera to avoid coplanar depth flicker.',
+    )
+    material.dispose()
   }
 
   {
