@@ -3,7 +3,10 @@ import { test } from 'bun:test'
 import {
   CADARA_OPEN_FILE_PICKER_OPTIONS,
   CADARA_SAVE_FILE_PICKER_OPTIONS,
+  createCadaraPackagePayload,
+  createLocalAuthoredDocumentPayload,
   getLocalFileSystemOpenSupport,
+  readCadaraDocumentFile,
   getLocalFileSystemSaveSupport,
   showOpenLocalDocumentPicker,
   showSaveLocalDocumentPicker,
@@ -17,6 +20,8 @@ import {
   createLocalFileBindingMetadata,
 } from '@/domain/modeling/local-file-binding-store'
 import { serializeAuthoredDocumentJson } from '@/contracts/modeling/authored-document-serialization'
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
 test('src/lib/local-file-system-access.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -157,6 +162,62 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
     )
   }
 
+  async function testPackagedCadaraDocumentsIncludeAssets() {
+    const asset = await createDeterministicGeometryAsset()
+    const document = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      schemaVersion: 'authored-model-document/v1alpha1',
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      settings: {
+        linearUnit: 'millimeter',
+        modelingTolerance: 0.001,
+        angularToleranceRadians: 0.001,
+      },
+      variables: [],
+      sketches: [],
+      features: [],
+      featureOrder: [],
+      historyOrder: [],
+      cursor: { kind: 'empty' },
+      bodyLabels: [],
+      assets: {
+        schemaVersion: 'geometry-asset-manifest/v1alpha1',
+        records: [asset.asset],
+      },
+    } as AuthoredModelDocument
+
+    const payload = createLocalAuthoredDocumentPayload(document, [asset])
+    assert(payload instanceof Uint8Array, 'Documents with geometry assets should serialize as ZIP-backed cadara bytes.')
+
+    const parsed = await readCadaraDocumentFile(new File([payload], 'asset.cadara'))
+    assert(
+      parsed.assets[0]?.asset.hash === asset.asset.hash && parsed.assets[0]?.bytes.byteLength === asset.bytes.byteLength,
+      'Cadara package reads should restore authored JSON and included geometry blobs.',
+    )
+
+    let missingAssetRejected = false
+    try {
+      createLocalAuthoredDocumentPayload(document, [])
+    } catch (error: unknown) {
+      missingAssetRejected = error instanceof Error && error.message.includes('missing geometry asset')
+    }
+    assert(missingAssetRejected, 'Cadara package writes should reject manifests without all referenced blobs.')
+
+    const legacyPayload = createCadaraPackagePayload({
+      document: {
+        ...document,
+        assets: [asset.asset],
+      },
+      assets: [asset],
+    })
+    const legacyParsed = await readCadaraDocumentFile(new File([legacyPayload], 'legacy-asset.cadara'))
+    assert(
+      legacyParsed.assets[0]?.asset.hash === asset.asset.hash,
+      'Cadara package reads should restore blobs for legacy asset-array manifests.',
+    )
+  }
+
   assert(
     CADARA_OPEN_FILE_PICKER_OPTIONS.types[0]?.accept['application/json']?.includes('.cadara'),
     'Open picker constants should advertise cadara JSON documents.',
@@ -169,5 +230,6 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
   await testPickerOptionsAndRouting()
   await testUnsupportedAndCancelledPickers()
   await testWritePermissionAndPersistentBindingSupport()
+  await testPackagedCadaraDocumentsIncludeAssets()
   testStableSerialization()
 })

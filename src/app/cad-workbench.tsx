@@ -77,7 +77,8 @@ import { useToolActionBus, useToolActions } from '@/hooks/use-tool-actions'
 import { downloadDocumentExportResult } from '@/lib/download-export'
 import {
   ensureLocalFileWritePermission,
-  readLocalFileText,
+  readCadaraDocumentFile,
+  readLocalCadaraDocument,
   showOpenLocalDocumentPicker,
   showSaveLocalDocumentPicker,
   writeTextToLocalFileHandle,
@@ -1324,7 +1325,7 @@ export function CadWorkbench() {
     let payload: unknown
 
     try {
-      payload = JSON.parse(await file.text()) as unknown
+      payload = await readCadaraDocumentFile(file)
     } catch {
       showWorkbenchError('Import failed. Select a valid cadara JSON document.')
       return
@@ -1365,7 +1366,7 @@ export function CadWorkbench() {
 
     let payload: unknown
     try {
-      payload = JSON.parse(await readLocalFileText(pickerResult.handle)) as unknown
+      payload = await readLocalCadaraDocument(pickerResult.handle)
     } catch (error: unknown) {
       reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed. Select a valid cadara JSON document.', error)
       return
@@ -1415,7 +1416,7 @@ export function CadWorkbench() {
       }
 
       const result = await modelingService.exportCurrentDocument()
-      const writeResult = await writeTextToLocalFileHandle(pickerResult.handle, String(result.payload))
+      const writeResult = await writeTextToLocalFileHandle(pickerResult.handle, result.payload)
       if (!writeResult.ok) {
         if (writeResult.reason === 'permission-denied') {
           showWorkbenchError('Local file write permission was denied.')

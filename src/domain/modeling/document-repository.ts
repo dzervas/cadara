@@ -1,4 +1,10 @@
 import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/contracts/modeling/authored-document'
+import type {
+  GeometryAssetAvailability,
+  GeometryAssetBlobInput,
+  GeometryAssetHash,
+  GeometryAssetRecord,
+} from '@/contracts/modeling/geometry-assets'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { DocumentId } from '@/contracts/shared/ids'
 import type { LocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
@@ -12,6 +18,7 @@ export interface DocumentRepositoryMetadata {
   heads: readonly string[]
   source: DocumentRepositoryChangeSource
   storageKey?: string
+  assetAvailability?: readonly GeometryAssetAvailability[]
 }
 
 export type DocumentRepositoryRestoreStatus =
@@ -26,6 +33,7 @@ export type DocumentRepositoryLoadResult =
       ok: true
       document: AuthoredModelDocument
       diagnostics?: ModelingDiagnostic[]
+      assetAvailability?: readonly GeometryAssetAvailability[]
       status: DocumentRepositoryRestoreStatus
       metadata: DocumentRepositoryMetadata
     }
@@ -36,6 +44,7 @@ export type DocumentRepositoryMutationResult =
       ok: true
       document: AuthoredModelDocument
       diagnostics?: ModelingDiagnostic[]
+      assetAvailability?: readonly GeometryAssetAvailability[]
       status: DocumentRepositoryRestoreStatus
       metadata: DocumentRepositoryMetadata
     }
@@ -44,6 +53,7 @@ export type DocumentRepositoryMutationResult =
 export interface DocumentRepositoryChangeEvent {
   document: AuthoredModelDocument
   diagnostics?: ModelingDiagnostic[]
+  assetAvailability?: readonly GeometryAssetAvailability[]
   status: DocumentRepositoryRestoreStatus
   metadata: DocumentRepositoryMetadata
 }
@@ -56,6 +66,7 @@ export interface DocumentRepository {
   mutate(input: {
     documentId: DocumentId
     document: AuthoredModelDocument
+    assets?: readonly GeometryAssetBlobInput[]
   }): Promise<DocumentRepositoryMutationResult>
   subscribe(
     documentId: DocumentId,
@@ -64,6 +75,17 @@ export interface DocumentRepository {
   reset(documentId: DocumentId): Promise<DocumentRepositoryRestoreStatus>
   getRestoreStatus(documentId: DocumentId): DocumentRepositoryRestoreStatus
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata
+}
+
+export interface GeometryAssetDocumentRepository extends DocumentRepository {
+  getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>
+  getGeometryAssetRecord(asset: GeometryAssetRecord): Promise<Uint8Array | null>
+}
+
+export function isGeometryAssetDocumentRepository(
+  repository: DocumentRepository | null | undefined,
+): repository is GeometryAssetDocumentRepository {
+  return Boolean(repository && 'getGeometryAssetBytes' in repository)
 }
 
 export type LocalFileBindingResult =

@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
+import { createGeometryAssetDiagnostic } from '@/contracts/modeling/geometry-assets'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import { initialEditorState, getEditorViewState } from '@/contracts/editor/state-machine'
@@ -20,6 +21,7 @@ import { createNewSketchSession } from '@/domain/editor/sketch-session'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { MODELING_OPERATION_HISTORY_STORAGE_KEY, type StorageLike } from '@/domain/modeling/modeling-history-persistence'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
 test('src/domain/bug-reporting/report.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -104,6 +106,26 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {
       payloadResult.payload.editor.activeReferencePickerFieldId === 'profiles' &&
       payloadResult.payload.editor.selectedTargets.length === 1,
     'Payload should include compact transient editor context.',
+  )
+
+  const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [snapshot.document.features[0]!.featureId] })
+  const assetDiagnosticSnapshot = structuredClone(snapshot)
+  assetDiagnosticSnapshot.document.diagnostics = [
+    createGeometryAssetDiagnostic('geometry-asset-corrupt', asset.asset, 'Referenced geometry asset bytes are corrupt.'),
+  ]
+  const assetPayload = createBugReportPayload({
+    build: { version: '0.0.1', commit: 'abc1234', mode: 'test' },
+    editorState: baseEditorState,
+    snapshot: assetDiagnosticSnapshot,
+    storage: null,
+  })
+  assert(
+    assetPayload.payload.documentSummary.assetDiagnostics?.[0]?.hashPrefix === asset.asset.hash.replace(/^sha256:/, '').slice(0, 12),
+    'Bug report document summaries should include compact geometry asset diagnostic context.',
+  )
+  assert(
+    !('bytes' in assetPayload.payload.documentSummary.assetDiagnostics![0]!),
+    'Bug report geometry asset summaries should not include raw asset bytes.',
   )
 
   const invalidHistory = createBugReportPayload({

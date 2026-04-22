@@ -7,6 +7,7 @@ import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-docume
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import type { BodyId } from '@/contracts/shared/ids'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
 test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -24,6 +25,7 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   const authoredDocument = createAuthoredModelDocumentFromSnapshot(snapshot)
   const parsed = parseAuthoredModelDocument(authoredDocument)
   assert(parsed.ok, 'Authored documents derived from snapshots should validate.')
+  assert(parsed.ok && parsed.document.assets.records.length === 0, 'Authored documents should default to an empty geometry asset manifest.')
 
   assert(authoredDocument.sketches.length > 0, 'Authored document should include sketch rebuild inputs.')
   assert(authoredDocument.features.length > 0, 'Authored document should include feature rebuild inputs.')
@@ -142,6 +144,103 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
     withoutStylesField.document.sketches.every((sketch) => sketch.definition.svgRenderingEnabled === true),
     'Older sketches should migrate with SVG rendering enabled.',
   )
+
+  const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [authoredDocument.features[0]!.featureId] })
+  const withAssetManifest = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: {
+      schemaVersion: 'geometry-asset-manifest/v1alpha1',
+      records: [asset.asset],
+    },
+  })
+  assert(withAssetManifest.ok, 'Authored document validation should accept valid geometry asset manifests.')
+  assert(
+    withAssetManifest.ok && withAssetManifest.document.assets.records[0]?.hash === asset.asset.hash,
+    'Parsed authored documents should preserve content-addressed geometry asset records.',
+  )
+
+  const duplicateAsset = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: {
+      schemaVersion: 'geometry-asset-manifest/v1alpha1',
+      records: [asset.asset, asset.asset],
+    },
+  })
+  assert(duplicateAsset.ok, 'Duplicate identical geometry asset records should be normalized.')
+  assert(
+    duplicateAsset.ok && duplicateAsset.document.assets.records.length === 1,
+    'Duplicate identical geometry asset records should not produce duplicate manifest entries.',
+  )
+
+  const duplicateAssetOwners = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: {
+      schemaVersion: 'geometry-asset-manifest/v1alpha1',
+      records: [
+        asset.asset,
+        {
+          ...asset.asset,
+          ownerFeatureIds: ['feature_second_owner'],
+        },
+      ],
+    },
+  })
+  assert(
+    duplicateAssetOwners.ok
+      && duplicateAssetOwners.document.assets.records[0]?.ownerFeatureIds.includes('feature_second_owner'),
+    'Duplicate identical geometry asset records should merge owner feature references.',
+  )
+
+  const conflictingAsset = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: {
+      schemaVersion: 'geometry-asset-manifest/v1alpha1',
+      records: [
+        asset.asset,
+        {
+          ...asset.asset,
+          byteLength: asset.asset.byteLength + 1,
+        },
+      ],
+    },
+  })
+  assert(!conflictingAsset.ok, 'Conflicting duplicate geometry asset records should be rejected.')
+
+  const conflictingAssetProvenance = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: {
+      schemaVersion: 'geometry-asset-manifest/v1alpha1',
+      records: [
+        asset.asset,
+        {
+          ...asset.asset,
+          provenance: { kind: 'generated', generator: 'test-kernel' },
+        },
+      ],
+    },
+  })
+  assert(!conflictingAssetProvenance.ok, 'Duplicate geometry asset records with conflicting provenance should be rejected.')
+
+  const legacyAssetArray = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: [asset.asset],
+  })
+  assert(
+    legacyAssetArray.ok && legacyAssetArray.document.assets.schemaVersion === 'geometry-asset-manifest/v1alpha1',
+    'Legacy asset arrays should migrate to the versioned geometry asset manifest.',
+  )
+
+  const conflictingLegacyAssetArray = parseAuthoredModelDocument({
+    ...authoredDocument,
+    assets: [
+      asset.asset,
+      {
+        ...asset.asset,
+        mediaType: 'application/octet-stream',
+      },
+    ],
+  })
+  assert(!conflictingLegacyAssetArray.ok, 'Legacy asset arrays should reject conflicting duplicate asset records.')
 
   const withDerivedField = {
     ...authoredDocument,

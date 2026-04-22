@@ -11,7 +11,9 @@ import type {
   FeatureDefinition,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
+  ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
+import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
 import type { BodyId } from '@/contracts/shared/ids'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
@@ -21,6 +23,8 @@ import { createMemoryDocumentRepository } from '@/domain/modeling/memory-documen
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import { createModelingService, type ModelingService } from '@/domain/modeling/modeling-service'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import { parseCadaraPayload } from '@/lib/cadara-package'
 
 test('src/domain/modeling/modeling-service-document-repository.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -632,7 +636,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
         peerEventCount += 1
       }
     })
-    const peerResult = documentRepository.receivePeerDocument(peerDocument)
+    const peerResult = await documentRepository.receivePeerDocument(peerDocument)
     assert(peerResult.ok, 'Test peer document should be accepted by the repository.')
 
     const staleMutation = await expectModelingError(service.createFeature({
@@ -669,11 +673,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   async function testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory() {
     const documentRepository = createMemoryDocumentRepository()
     const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
-    let publishPeerDocument = () => {}
+    let publishPeerDocument = async () => {}
     class PeerDuringAcceptedMutationAdapter extends MockKernelAdapter {
       override async createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse> {
         const response = await super.createFeature(request)
-        publishPeerDocument()
+        await publishPeerDocument()
         return response
       }
     }
@@ -691,9 +695,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
         ? { ...label, label: 'In-flight Peer Body' }
         : label,
     )
-    publishPeerDocument = () => {
-      publishPeerDocument = () => {}
-      const peerResult = documentRepository.receivePeerDocument(peerDocument)
+    publishPeerDocument = async () => {
+      publishPeerDocument = async () => {}
+      const peerResult = await documentRepository.receivePeerDocument(peerDocument)
       assert(peerResult.ok, 'In-flight peer document should be accepted by the repository.')
     }
 
@@ -721,6 +725,70 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
+  async function testPackagedAssetImportStoresAssetsBeforeRestore() {
+    const documentRepository = createMemoryDocumentRepository()
+    class AssetResolvingRestoreAdapter extends MockKernelAdapter {
+      sawAssetBytes = false
+
+      override async restoreAuthoredModelDocument(
+        document: AuthoredModelDocument,
+        diagnostics: readonly ModelingDiagnostic[] = [],
+        assetResolver?: GeometryAssetResolver,
+      ) {
+        const asset = document.assets.records[0]
+        if (asset) {
+          const bytes = await assetResolver?.getGeometryAssetBytes(asset.hash)
+          this.sawAssetBytes = bytes?.byteLength === asset.byteLength
+        }
+
+        await super.restoreAuthoredModelDocument(document, diagnostics)
+      }
+    }
+    const adapter = new AssetResolvingRestoreAdapter()
+    const service = createModelingService(adapter, {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const document = createAuthoredModelDocumentFromSnapshot(snapshot)
+    const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [document.features[0]!.featureId] })
+    document.assets = {
+      schemaVersion: 'geometry-asset-manifest/v1alpha1',
+      records: [asset.asset],
+    }
+
+    const result = await service.importDocument({ document: { document, assets: [asset] } })
+
+    assert(result.ok, 'Package import should accept authored documents with included geometry assets.')
+    assert(adapter.sawAssetBytes, 'Imported asset bytes should be stored before adapter restore resolves assets.')
+    assert(
+      await documentRepository.getGeometryAssetRecord(asset.asset) !== null,
+      'Imported asset bytes should remain available from the repository after restore.',
+    )
+    assert(
+      (await adapter.exportAuthoredModelDocument(document.documentId)).assets.records[0]?.hash === asset.asset.hash,
+      'Adapter authored exports should preserve restored geometry asset manifests.',
+    )
+    const exportResult = await service.exportCurrentDocument()
+    assert(exportResult.payload instanceof Uint8Array, 'Current document export should package documents with geometry assets.')
+    assert(
+      parseCadaraPayload(exportResult.payload).assets[0]?.bytes.byteLength === asset.bytes.byteLength,
+      'Current document export should include stored geometry asset blobs in the cadara package.',
+    )
+
+    const snapshotAfterImport = await service.getCurrentDocumentSnapshot()
+    const rename = await unwrapModelingResult(service.renameBody({
+      baseRevisionId: snapshotAfterImport.revisionId,
+      bodyId: 'body_part-1',
+      bodyLabel: 'Asset Body',
+    }))
+    assert(rename.revisionState.kind === 'accepted', 'Post-import authored mutations should still be accepted.')
+    assert(
+      documentRepository.savedDocuments.at(-1)?.assets.records[0]?.hash === asset.asset.hash,
+      'Post-import repository mutations should not drop restored geometry asset manifests.',
+    )
+  }
+
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
@@ -735,4 +803,5 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testInvalidRepositoryDocumentBlocksFutureWrites()
   await testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict()
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
+  await testPackagedAssetImportStoresAssetsBeforeRestore()
 })

@@ -24,6 +24,16 @@ export type OperationHistorySchemaVersion = 'modeling-operation-history/v1alpha1
 export type AuthoredModelDocumentSchemaVersion = 'authored-model-document/v1alpha1'
 
 /**
+ * Versioned schema for immutable geometry asset manifest records.
+ */
+export type GeometryAssetSchemaVersion = 'geometry-asset/v1alpha1'
+
+/**
+ * Versioned schema for the authored document geometry asset manifest.
+ */
+export type GeometryAssetManifestSchemaVersion = 'geometry-asset-manifest/v1alpha1'
+
+/**
  * Versioned schema for extrude feature definitions.
  */
 export type ExtrudeFeatureSchemaVersion = 'feature-type/extrude/v1alpha1'
@@ -88,6 +98,16 @@ export const OPERATION_HISTORY_SCHEMA_VERSION: OperationHistorySchemaVersion = '
  * Current authored model document schema version literal.
  */
 export const AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION: AuthoredModelDocumentSchemaVersion = 'authored-model-document/v1alpha1'
+
+/**
+ * Current immutable geometry asset record schema version literal.
+ */
+export const GEOMETRY_ASSET_SCHEMA_VERSION: GeometryAssetSchemaVersion = 'geometry-asset/v1alpha1'
+
+/**
+ * Current authored geometry asset manifest schema version literal.
+ */
+export const GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION: GeometryAssetManifestSchemaVersion = 'geometry-asset-manifest/v1alpha1'
 
 /**
  * Current extrude feature schema version literal.

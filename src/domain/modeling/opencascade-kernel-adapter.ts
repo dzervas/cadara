@@ -217,6 +217,7 @@ function createAuthoredModelDocumentFromAuthoringState(
       bodyId: body.bodyId,
       label: body.label,
     })),
+    assets: structuredClone(state.assets),
   }
 }
 
@@ -1283,6 +1284,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       modelingTolerance: document.settings.modelingTolerance,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
+      assets: document.assets,
       historyOrder,
       diagnostics,
       cursor: { kind: 'empty' },
@@ -1332,6 +1334,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketches,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
+      assets: document.assets,
       historyOrder,
       diagnostics,
       cursor: { kind: 'empty' },
@@ -1413,6 +1416,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
+      assets: runtimeState.authoringState.assets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
@@ -1654,6 +1658,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
+      assets: runtimeState.authoringState.assets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,

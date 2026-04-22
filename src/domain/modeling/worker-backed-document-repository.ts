@@ -1,3 +1,4 @@
+import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import type { DocumentId } from '@/contracts/shared/ids'
 import type { DocumentRepositoryUrlStore } from '@/domain/modeling/automerge-indexeddb-document-repository'
 import type { DocumentSyncWorkerClient } from '@/domain/modeling/document-sync-worker-client'
@@ -11,6 +12,7 @@ import type {
   DocumentRepositoryRestoreStatus,
   LocalFileBindingResult,
   LocalFileSyncDocumentRepository,
+  GeometryAssetDocumentRepository,
 } from '@/domain/modeling/document-repository'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
@@ -20,7 +22,7 @@ export interface WorkerBackedDocumentRepositoryOptions {
   urlStore?: DocumentRepositoryUrlStore | null
 }
 
-export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepository {
+export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepository, GeometryAssetDocumentRepository {
   private readonly client: DocumentSyncWorkerClient
   private readonly urlStore: DocumentRepositoryUrlStore | null
   private readonly statuses = new Map<DocumentId, DocumentRepositoryRestoreStatus>()
@@ -52,6 +54,14 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
     }
 
     return this.normalizeResult(result)
+  }
+
+  getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null> {
+    return this.client.getGeometryAssetBytes({ hash })
+  }
+
+  getGeometryAssetRecord(asset: GeometryAssetRecord): Promise<Uint8Array | null> {
+    return this.client.getGeometryAssetRecord({ asset })
   }
 
   subscribe(
@@ -143,7 +153,8 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
     return {
       ...result,
       document: normalized.document,
-      diagnostics: normalized.diagnostics,
+      diagnostics: [...(result.diagnostics ?? []), ...normalized.diagnostics],
+      assetAvailability: result.assetAvailability,
       metadata,
     }
   }
@@ -160,7 +171,8 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
     return {
       ...event,
       document: normalized.document,
-      diagnostics: normalized.diagnostics,
+      diagnostics: [...(event.diagnostics ?? []), ...normalized.diagnostics],
+      assetAvailability: event.assetAvailability,
       metadata: normalized.metadata,
     }
   }

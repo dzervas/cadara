@@ -1,4 +1,9 @@
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type {
+  GeometryAssetBlobInput,
+  GeometryAssetHash,
+  GeometryAssetRecord,
+} from '@/contracts/modeling/geometry-assets'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { DocumentId, RequestId } from '@/contracts/shared/ids'
 import type {
@@ -51,6 +56,17 @@ export type DocumentSyncWorkerRequest =
       requestId: RequestId
       documentId: DocumentId
       document: AuthoredModelDocument
+      assets?: readonly GeometryAssetBlobInput[]
+    }
+  | {
+      kind: 'getGeometryAssetBytes'
+      requestId: RequestId
+      hash: GeometryAssetHash
+    }
+  | {
+      kind: 'getGeometryAssetRecord'
+      requestId: RequestId
+      asset: GeometryAssetRecord
     }
   | {
       kind: 'reset'
@@ -102,6 +118,16 @@ export type DocumentSyncWorkerResponse =
       kind: 'mutated'
       requestId: RequestId
       result: DocumentRepositoryMutationResult
+    }
+  | {
+      kind: 'geometryAssetBytes'
+      requestId: RequestId
+      bytes: Uint8Array | null
+    }
+  | {
+      kind: 'geometryAssetRecord'
+      requestId: RequestId
+      bytes: Uint8Array | null
     }
   | {
       kind: 'reset'

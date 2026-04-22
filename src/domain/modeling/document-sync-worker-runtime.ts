@@ -6,10 +6,13 @@ import {
   type DocumentSyncWorkerResponse,
   type DocumentSyncWriteStatus,
 } from '@/domain/modeling/document-sync-worker-protocol'
-import type { DocumentRepository } from '@/domain/modeling/document-repository'
+import {
+  isGeometryAssetDocumentRepository,
+  type DocumentRepository,
+} from '@/domain/modeling/document-repository'
 import type { LocalFileBindingRecord, LocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
 import type { DocumentRepositoryUrlStore } from '@/domain/modeling/automerge-indexeddb-document-repository'
-import { serializeLocalAuthoredDocument, writeTextToLocalFileHandle } from '@/lib/local-file-system-access'
+import { createLocalAuthoredDocumentPayload, writeTextToLocalFileHandle } from '@/lib/local-file-system-access'
 
 export interface DocumentSyncWorkerRuntimeOptions {
   repository: DocumentRepository
@@ -70,10 +73,25 @@ export function createDocumentSyncWorkerMessageHandler(
           metadata: pending.metadata,
         })
 
-        const result = await writeTextToLocalFileHandle(
-          bindings.get(documentId)!.handle,
-          serializeLocalAuthoredDocument(pending.document),
-        )
+        let result: Awaited<ReturnType<typeof writeTextToLocalFileHandle>>
+        try {
+          result = await writeTextToLocalFileHandle(
+            bindings.get(documentId)!.handle,
+            createLocalAuthoredDocumentPayload(
+              pending.document,
+              await collectRepositoryAssetBlobs(options.repository, pending.document),
+            ),
+          )
+        } catch (error: unknown) {
+          publishWriteStatus({
+            kind: 'failed',
+            documentId: pending.metadata.documentId,
+            sequence: nextWriteSequence(documentId),
+            metadata: pending.metadata,
+            message: error instanceof Error ? error.message : 'Local file sync failed.',
+          })
+          continue
+        }
 
         if (result.ok) {
           publishWriteStatus({
@@ -135,6 +153,7 @@ export function createDocumentSyncWorkerMessageHandler(
           const result = await options.repository.mutate({
             documentId: request.documentId,
             document: request.document,
+            assets: request.assets,
           })
           if (result.ok) {
             const normalized = normalizeCollaborativeAuthoredModelDocument(result.document)
@@ -144,6 +163,26 @@ export function createDocumentSyncWorkerMessageHandler(
             kind: 'mutated',
             requestId: request.requestId,
             result,
+          })
+          return
+        }
+        case 'getGeometryAssetBytes': {
+          postMessage({
+            kind: 'geometryAssetBytes',
+            requestId: request.requestId,
+            bytes: isGeometryAssetDocumentRepository(options.repository)
+              ? await options.repository.getGeometryAssetBytes(request.hash)
+              : null,
+          })
+          return
+        }
+        case 'getGeometryAssetRecord': {
+          postMessage({
+            kind: 'geometryAssetRecord',
+            requestId: request.requestId,
+            bytes: isGeometryAssetDocumentRepository(options.repository)
+              ? await options.repository.getGeometryAssetRecord(request.asset)
+              : null,
           })
           return
         }
@@ -263,4 +302,22 @@ export function createDocumentSyncWorkerMessageHandler(
       postMessage(createDocumentSyncWorkerFailure(request.requestId, error))
     }
   }
+}
+
+async function collectRepositoryAssetBlobs(
+  repository: DocumentRepository,
+  document: AuthoredModelDocument,
+) {
+  if (!isGeometryAssetDocumentRepository(repository) || document.assets.records.length === 0) {
+    return []
+  }
+
+  const assets = []
+  for (const asset of document.assets.records) {
+    const bytes = await repository.getGeometryAssetRecord(asset)
+    if (bytes) {
+      assets.push({ asset, bytes })
+    }
+  }
+  return assets
 }

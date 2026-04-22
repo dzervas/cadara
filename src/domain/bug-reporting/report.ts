@@ -147,6 +147,14 @@ export interface BugReportDocumentSummary {
     diagnostics: number
     renderRecords: number
   }
+  assetDiagnostics?: readonly {
+    code: string
+    assetId: string
+    format: string
+    byteLength: number
+    hashPrefix: string
+    ownerFeatureIds: readonly string[]
+  }[]
   reason?: string
 }
 
@@ -735,6 +743,20 @@ function createDocumentSummary(snapshot: DocumentSnapshot | null): BugReportDocu
       diagnostics: snapshot.document.diagnostics.length,
       renderRecords: snapshot.document.render.records.length,
     },
+    assetDiagnostics: snapshot.document.diagnostics.flatMap((diagnostic) => {
+      if (diagnostic.detail?.kind !== 'geometryAsset') {
+        return []
+      }
+
+      return [{
+        code: diagnostic.detail.code,
+        assetId: diagnostic.detail.assetId,
+        format: diagnostic.detail.format,
+        byteLength: diagnostic.detail.byteLength,
+        hashPrefix: diagnostic.detail.hashPrefix,
+        ownerFeatureIds: diagnostic.detail.ownerFeatureIds,
+      }]
+    }),
   }
 }
 

@@ -93,6 +93,7 @@ import type {
   AdvancedSolidFeatureParameters,
   UpToOffsetDirection,
 } from '@/contracts/modeling/schema'
+import type { GeometryAssetDiagnosticDetail } from '@/contracts/modeling/geometry-assets'
 import {
   documentExportRequestSchema,
   documentExportResultSchema,
@@ -121,7 +122,7 @@ import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
-import { serializeAuthoredDocumentJson, stableJsonValue } from '@/contracts/modeling/authored-document-serialization'
+import { stableJsonValue } from '@/contracts/modeling/authored-document-serialization'
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import {
   createCommitSketchHistoryEntry,
@@ -188,6 +189,7 @@ import {
 } from '@/domain/modeling/modeling-history-persistence'
 import {
   isLocalFileSyncDocumentRepository,
+  isGeometryAssetDocumentRepository,
   type DocumentRepository,
   type DocumentRepositoryChangeEvent,
   type DocumentRepositoryMetadata,
@@ -196,7 +198,12 @@ import {
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { LocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
-import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
+import {
+  createLocalAuthoredDocumentPayload,
+  type LocalFileSystemFileHandle,
+} from '@/lib/local-file-system-access'
+import { CADARA_PACKAGE_MIME_TYPE, isCadaraPackagePayload } from '@/lib/cadara-package'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -379,6 +386,7 @@ export type ModelingExportDocumentResult = DocumentExportResult
 
 export interface ModelingImportDocumentInput {
   document: unknown
+  assets?: readonly GeometryAssetBlobInput[]
 }
 
 export type ModelingDocumentFileMutationResult =
@@ -1388,6 +1396,31 @@ function normalizeDiagnosticDetail(value: unknown): ModelingDiagnosticDetail {
         kind: 'rebuildFailure',
         affectedFeatureIds: value.affectedFeatureIds.map((featureId) => assertFeatureId(featureId)),
         affectedTargets: value.affectedTargets.map((target) => assertDurableRef(target)),
+      }
+    case 'geometryAsset':
+      if (
+        !isString(value.code) ||
+        !isString(value.assetId) ||
+        !isString(value.hash) ||
+        !isString(value.hashPrefix) ||
+        typeof value.byteLength !== 'number' ||
+        !isString(value.format) ||
+        !isString(value.mediaType) ||
+        !Array.isArray(value.ownerFeatureIds)
+      ) {
+        throw new Error('Invalid geometry asset diagnostic detail payload.')
+      }
+
+      return {
+        kind: 'geometryAsset',
+        code: value.code as GeometryAssetDiagnosticDetail['code'],
+        assetId: value.assetId as GeometryAssetDiagnosticDetail['assetId'],
+        hash: value.hash as GeometryAssetDiagnosticDetail['hash'],
+        hashPrefix: value.hashPrefix,
+        byteLength: value.byteLength,
+        format: value.format as GeometryAssetDiagnosticDetail['format'],
+        mediaType: value.mediaType,
+        ownerFeatureIds: value.ownerFeatureIds.map((featureId) => assertFeatureId(featureId)),
       }
     default:
       throw new Error('Invalid diagnostic detail kind.')
@@ -3587,6 +3620,24 @@ function buildDocumentRequest(documentId: DocumentSnapshot['documentId']): GetDo
   }
 }
 
+async function collectRepositoryAssetBlobs(
+  repository: DocumentRepository | null,
+  document: AuthoredModelDocument,
+) {
+  if (!isGeometryAssetDocumentRepository(repository) || document.assets.records.length === 0) {
+    return [] as GeometryAssetBlobInput[]
+  }
+
+  const assets: GeometryAssetBlobInput[] = []
+  for (const asset of document.assets.records) {
+    const bytes = await repository.getGeometryAssetRecord(asset)
+    if (bytes) {
+      assets.push({ asset, bytes })
+    }
+  }
+  return assets
+}
+
 function assertKernelContractVersion(contractVersion: GetDocumentSnapshotResponse['snapshot']['contractVersion']) {
   if (contractVersion !== CONTRACT_VERSION) {
     throw new Error('Kernel contract version does not match the active modeling service.')
@@ -4537,7 +4588,11 @@ export function createModelingService(
     document: Parameters<NonNullable<ModelingKernelAdapter['restoreAuthoredModelDocument']>>[0],
     diagnostics: ModelingDiagnostic[] = [],
   ) {
-    await adapter.restoreAuthoredModelDocument?.(document, diagnostics)
+    await adapter.restoreAuthoredModelDocument?.(
+      document,
+      diagnostics,
+      isGeometryAssetDocumentRepository(documentRepository) ? documentRepository : undefined,
+    )
   }
 
   async function getSeedAuthoredDocument() {
@@ -4603,7 +4658,10 @@ export function createModelingService(
     }
   }
 
-  async function replaceCurrentAuthoredDocument(document: AuthoredModelDocument): Promise<ModelingDocumentFileMutationResult> {
+  async function replaceCurrentAuthoredDocument(
+    document: AuthoredModelDocument,
+    assets: readonly GeometryAssetBlobInput[] = [],
+  ): Promise<ModelingDocumentFileMutationResult> {
     if (!adapter.restoreAuthoredModelDocument) {
       return {
         ok: false,
@@ -4622,18 +4680,14 @@ export function createModelingService(
     }
 
     const activeDocument = normalized.document
-    await restoreAuthoredRepositoryDocument(activeDocument)
-    operationHistoryStore?.clear()
-    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
-    canPersistOperationHistory = true
-    canPersistAuthoredDocument = true
-    historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
+    let restoreDiagnostics: ModelingDiagnostic[] = []
 
     if (documentRepository) {
       await documentRepository.reset(currentDocumentId)
       const writeResult = await documentRepository.mutate({
         documentId: currentDocumentId,
         document: activeDocument,
+        assets,
       })
 
       if (!writeResult.ok) {
@@ -4645,7 +4699,15 @@ export function createModelingService(
       }
 
       markRepositorySnapshotFresh(writeResult.metadata)
+      restoreDiagnostics = writeResult.diagnostics ?? []
     }
+
+    await restoreAuthoredRepositoryDocument(activeDocument, restoreDiagnostics)
+    operationHistoryStore?.clear()
+    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+    canPersistOperationHistory = true
+    canPersistAuthoredDocument = true
+    historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
 
     const snapshot = validateSnapshotResponse(
       await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
@@ -5015,12 +5077,15 @@ export function createModelingService(
     async importDocument(input) {
       await restorePromise
       await repositoryChangePromise
-      const normalized = normalizeImportedDocument(input.document)
+      const imported = isCadaraPackagePayload(input.document)
+        ? input.document
+        : { document: input.document, assets: input.assets ?? [] }
+      const normalized = normalizeImportedDocument(imported.document)
       if (!normalized.ok) {
         return normalized
       }
 
-      return replaceCurrentAuthoredDocument(normalized.document)
+      return replaceCurrentAuthoredDocument(normalized.document, imported.assets)
     },
     async bindLocalFile(input) {
       await restorePromise
@@ -5088,14 +5153,15 @@ export function createModelingService(
       await restorePromise
       await repositoryChangePromise
       const document = await exportAuthoredDocumentForRepository()
+      const assets = await collectRepositoryAssetBlobs(documentRepository, document)
 
       return {
         ok: true,
         format: 'cadara',
         filename: 'document.cadara',
         extension: getDocumentExportExtension('cadara'),
-        mimeType: getDocumentExportMimeType('cadara'),
-        payload: serializeAuthoredDocumentJson(document),
+        mimeType: assets.length > 0 ? CADARA_PACKAGE_MIME_TYPE : getDocumentExportMimeType('cadara'),
+        payload: createLocalAuthoredDocumentPayload(document, assets),
         diagnostics: [],
       }
     },

@@ -17,6 +17,15 @@ export interface ActiveDocumentTelemetryCounts {
   variables: number
 }
 
+export interface ActiveDocumentTelemetryAssetDiagnostic {
+  code: string
+  assetId: string
+  format: string
+  byteLength: number
+  hashPrefix: string
+  ownerFeatureIds: readonly string[]
+}
+
 export type ActiveDocumentTelemetryContext =
   | {
       availability: 'loaded'
@@ -24,6 +33,7 @@ export type ActiveDocumentTelemetryContext =
       revisionId: string
       schemaVersion: AuthoredModelDocumentSchemaVersion
       counts: ActiveDocumentTelemetryCounts
+      assetDiagnostics: readonly ActiveDocumentTelemetryAssetDiagnostic[]
       payloadStatus: 'attached'
       document: AuthoredModelDocument
     }
@@ -33,6 +43,7 @@ export type ActiveDocumentTelemetryContext =
       revisionId: string
       schemaVersion: AuthoredModelDocumentSchemaVersion
       counts: ActiveDocumentTelemetryCounts
+      assetDiagnostics: readonly ActiveDocumentTelemetryAssetDiagnostic[]
       payloadStatus: 'omitted-too-large' | 'omitted-unserializable'
       omittedReason: string
     }
@@ -75,6 +86,7 @@ export function createActiveDocumentTelemetryContext(
   const documentId = snapshot.document.documentId
   const revisionId = snapshot.document.revisionId
   const counts = getActiveDocumentTelemetryCounts(snapshot)
+  const assetDiagnostics = getActiveDocumentTelemetryAssetDiagnostics(snapshot)
 
   try {
     const document = createAuthoredModelDocumentFromSnapshot(snapshot)
@@ -89,6 +101,7 @@ export function createActiveDocumentTelemetryContext(
         revisionId,
         schemaVersion: document.schemaVersion,
         counts,
+        assetDiagnostics,
         payloadStatus: 'omitted-too-large',
         omittedReason: `Authored document payload was ${payloadByteLength} bytes, over the ${payloadByteLimit} byte telemetry limit.`,
       }
@@ -100,6 +113,7 @@ export function createActiveDocumentTelemetryContext(
       revisionId,
       schemaVersion: document.schemaVersion,
       counts,
+      assetDiagnostics,
       payloadStatus: 'attached',
       document,
     }
@@ -110,10 +124,30 @@ export function createActiveDocumentTelemetryContext(
       revisionId,
       schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
       counts,
+      assetDiagnostics,
       payloadStatus: 'omitted-unserializable',
       omittedReason: error instanceof Error ? error.message : 'Authored document payload could not be serialized.',
     }
   }
+}
+
+function getActiveDocumentTelemetryAssetDiagnostics(
+  snapshot: DocumentSnapshot,
+): ActiveDocumentTelemetryAssetDiagnostic[] {
+  return snapshot.document.diagnostics.flatMap((diagnostic) => {
+    if (diagnostic.detail?.kind !== 'geometryAsset') {
+      return []
+    }
+
+    return [{
+      code: diagnostic.detail.code,
+      assetId: diagnostic.detail.assetId,
+      format: diagnostic.detail.format,
+      byteLength: diagnostic.detail.byteLength,
+      hashPrefix: diagnostic.detail.hashPrefix,
+      ownerFeatureIds: diagnostic.detail.ownerFeatureIds,
+    }]
+  })
 }
 
 function getActiveDocumentTelemetryCounts(snapshot: DocumentSnapshot): ActiveDocumentTelemetryCounts {

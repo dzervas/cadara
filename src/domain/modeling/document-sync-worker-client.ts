@@ -53,6 +53,18 @@ export class DocumentSyncWorkerClient {
     )
   }
 
+  getGeometryAssetBytes(input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'getGeometryAssetBytes' }>, 'kind' | 'requestId'>) {
+    return this.request('getGeometryAssetBytes', 'geometryAssetBytes', input).then((message) =>
+      (message as Extract<DocumentSyncWorkerResponse, { kind: 'geometryAssetBytes' }>).bytes,
+    )
+  }
+
+  getGeometryAssetRecord(input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'getGeometryAssetRecord' }>, 'kind' | 'requestId'>) {
+    return this.request('getGeometryAssetRecord', 'geometryAssetRecord', input).then((message) =>
+      (message as Extract<DocumentSyncWorkerResponse, { kind: 'geometryAssetRecord' }>).bytes,
+    )
+  }
+
   reset(input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'reset' }>, 'kind' | 'requestId'>) {
     return this.request('reset', 'reset', input).then((message) =>
       (message as Extract<DocumentSyncWorkerResponse, { kind: 'reset' }>).status,

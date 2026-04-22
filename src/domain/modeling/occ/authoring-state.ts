@@ -1,4 +1,8 @@
 import type { DurableRef } from '@/contracts/shared/references'
+import {
+  createEmptyGeometryAssetManifest,
+  type GeometryAssetManifest,
+} from '@/contracts/modeling/geometry-assets'
 import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { BodyId, ConstructionId, FeatureId, SketchId } from '@/contracts/shared/ids'
@@ -38,6 +42,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   bodyLabels: ReadonlyMap<BodyId, string>
   variables: readonly DocumentVariableRecord[]
   features: readonly OccAuthoringFeatureRecord[]
+  assets: GeometryAssetManifest
   historyOrder: readonly DocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   diagnostics: readonly ModelingDiagnostic[]
@@ -134,6 +139,7 @@ export function createOccAuthoringState(
     bodyLabels?: ReadonlyMap<BodyId, string>
     variables?: readonly DocumentVariableRecord[]
     features?: readonly OccAuthoringFeatureRecord[]
+    assets?: GeometryAssetManifest
     historyOrder?: readonly DocumentHistoryOrderEntry[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
@@ -165,6 +171,7 @@ export function createOccAuthoringState(
   const variables = [...(input.variables ?? [])]
   const baseBodies = applyBodyLabels(input.bodies ?? [], bodyLabels)
   const features = [...(input.features ?? [])]
+  const assets = structuredClone(input.assets ?? createEmptyGeometryAssetManifest())
   const sketches = input.sketches ?? []
   const historyOrder = input.historyOrder ?? [
     ...sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
@@ -196,6 +203,7 @@ export function createOccAuthoringState(
     bodyLabels,
     variables,
     features,
+    assets,
     historyOrder,
     cursor,
     diagnostics: [...(input.diagnostics ?? [])],
@@ -278,6 +286,7 @@ export function rebuildOccAuthoringState(
     constructions: state.baseConstructions,
     constructionPlanes: state.baseConstructionPlanes,
     features: [],
+    assets: state.assets,
     cursor: { kind: 'empty' },
     previousReferenceState: state.referenceState,
   })

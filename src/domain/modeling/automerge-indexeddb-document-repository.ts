@@ -8,8 +8,9 @@ import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-docume
 import { parseAutomergeDocumentUrlStorePayload } from '@/contracts/modeling/document-repository.runtime-schema'
 import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/contracts/modeling/authored-document'
 import type { DocumentId } from '@/contracts/shared/ids'
+import type { GeometryAssetBlobInput, GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import type {
-  DocumentRepository,
+  GeometryAssetDocumentRepository,
   DocumentRepositoryChangeEvent,
   DocumentRepositoryChangeSource,
   DocumentRepositoryMetadata,
@@ -17,6 +18,13 @@ import type {
   DocumentRepositoryMutationResult,
   DocumentRepositoryRestoreStatus,
 } from '@/domain/modeling/document-repository'
+import {
+  collectAssetAvailability,
+  createIndexedDbGeometryAssetStore,
+  filterGeometryAssetInputsForManifest,
+  storeGeometryAssetInputsForManifest,
+  type GeometryAssetStore,
+} from '@/domain/modeling/geometry-asset-store'
 
 interface AutomergeDocumentEnvelope {
   authoredDocument: AuthoredModelDocument
@@ -27,6 +35,7 @@ interface LocalPeerDocumentMessage {
   senderId: string
   documentId: DocumentId
   document: AuthoredModelDocument
+  assets?: GeometryAssetBlobInput[]
 }
 
 interface AutomergeHandleLike<T> {
@@ -67,6 +76,7 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
   urlStore?: DocumentRepositoryUrlStore
   databaseName?: string
   storeName?: string
+  assetStore?: GeometryAssetStore
   localPeerSync?: false | {
     channelName?: string
     peerWaitMs?: number
@@ -131,15 +141,17 @@ export function createLocalStorageDocumentRepositoryUrlStore(
   }
 }
 
-export class IndexedDbAutomergeDocumentRepository implements DocumentRepository {
+export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocumentRepository {
   private repo: AutomergeRepositoryLike | null
   private readonly urlStore: DocumentRepositoryUrlStore
   private readonly databaseName?: string
   private readonly storeName?: string
   private readonly localPeerSync: IndexedDbAutomergeDocumentRepositoryOptions['localPeerSync']
+  private readonly assetStore: GeometryAssetStore
   private readonly statuses = new Map<DocumentId, DocumentRepositoryRestoreStatus>()
   private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>()
   private readonly handles = new Map<DocumentId, AutomergeHandleLike<AutomergeDocumentEnvelope>>()
+  private readonly localPeerDocuments = new Map<DocumentId, AuthoredModelDocument>()
   private readonly installedListeners = new Set<string>()
   private readonly pendingLocalChanges = new Set<DocumentId>()
   private readonly pendingSeedEchoes = new Map<DocumentId, AuthoredModelDocument>()
@@ -154,6 +166,9 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     this.urlStore = options.urlStore ?? new MemoryDocumentRepositoryUrlStore()
     this.databaseName = options.databaseName
     this.storeName = options.storeName
+    this.assetStore = options.assetStore ?? createIndexedDbGeometryAssetStore({
+      databaseName: `${options.databaseName ?? 'cad-authored-documents'}-geometry-assets`,
+    })
     this.localPeerSync = options.localPeerSync
     this.localPeerDocumentChannel = createLocalPeerDocumentChannel(options.localPeerSync)
     this.localPeerDocumentChannel?.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -179,19 +194,38 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       }
 
       const status = { kind: 'restored' as const, documentId: input.documentId }
-      const metadata = this.createMetadata(input.documentId, handle, 'restore')
+      const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
+      const metadata = this.createMetadata(input.documentId, handle, 'restore', assets.availability)
       this.statuses.set(input.documentId, status)
       this.metadata.set(input.documentId, metadata)
-      return { ok: true, document: parsed.document, status, metadata }
+      return {
+        ok: true,
+        document: parsed.document,
+        diagnostics: assets.diagnostics,
+        assetAvailability: assets.availability,
+        status,
+        metadata,
+      }
     } catch (error: unknown) {
       return this.fail(input.documentId, createFailureDiagnostic('automerge-load-failed', error, 'Authored document could not be loaded.'))
     }
   }
 
-  async mutate(input: { documentId: DocumentId; document: AuthoredModelDocument }): Promise<DocumentRepositoryMutationResult> {
+  async mutate(input: { documentId: DocumentId; document: AuthoredModelDocument; assets?: readonly GeometryAssetBlobInput[] }): Promise<DocumentRepositoryMutationResult> {
     const parsed = parseAuthoredModelDocument(structuredClone(input.document))
     if (!parsed.ok) {
       return this.fail(input.documentId, parsed.diagnostic)
+    }
+
+    const stored = await storeGeometryAssetInputsForManifest(this.assetStore, parsed.document.assets.records, input.assets ?? [])
+    if (!stored.ok) {
+      return this.fail(input.documentId, { reasonCode: stored.diagnostic.code, message: stored.diagnostic.message })
+    }
+
+    const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
+    if (assets.diagnostics.length > 0) {
+      const diagnostic = assets.diagnostics[0]!
+      return this.fail(input.documentId, { reasonCode: diagnostic.code, message: diagnostic.message })
     }
 
     try {
@@ -202,11 +236,18 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       })
       await this.flush(handle)
       const status = { kind: 'restored' as const, documentId: input.documentId }
-      const metadata = this.createMetadata(input.documentId, handle, 'local')
+      const metadata = this.createMetadata(input.documentId, handle, 'local', assets.availability)
       this.statuses.set(input.documentId, status)
       this.metadata.set(input.documentId, metadata)
-      this.broadcastLocalPeerDocument(input.documentId, parsed.document)
-      return { ok: true, document: parsed.document, status, metadata }
+      await this.broadcastLocalPeerDocument(input.documentId, parsed.document)
+      return {
+        ok: true,
+        document: parsed.document,
+        diagnostics: [],
+        assetAvailability: assets.availability,
+        status,
+        metadata,
+      }
     } catch (error: unknown) {
       this.pendingLocalChanges.delete(input.documentId)
       return this.fail(input.documentId, createFailureDiagnostic('automerge-write-failed', error, 'Authored document could not be written.'))
@@ -233,6 +274,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       repo.delete(url)
     }
     this.handles.delete(documentId)
+    this.localPeerDocuments.delete(documentId)
     this.urlStore.delete(documentId)
     const status = { kind: 'reset' as const, documentId }
     this.statuses.set(documentId, status)
@@ -246,6 +288,21 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
 
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
     return this.metadata.get(documentId) ?? { documentId, heads: [], source: 'restore' }
+  }
+
+  async getGeometryAssetBytes(hash: GeometryAssetHash) {
+    const asset = [
+      ...[...this.handles.values()].map((handle) => handle.doc().authoredDocument),
+      ...this.localPeerDocuments.values(),
+    ]
+      .flatMap((document) => document.assets.records)
+      .find((record) => record.hash === hash)
+    return asset ? this.getGeometryAssetRecord(asset) : null
+  }
+
+  async getGeometryAssetRecord(asset: GeometryAssetRecord) {
+    const result = await this.assetStore.get(asset)
+    return result.ok ? result.bytes : null
   }
 
   private async createSeedDocument(documentId: DocumentId, seedDocument: AuthoredModelDocument): Promise<DocumentRepositoryLoadResult> {
@@ -263,13 +320,21 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     this.urlStore.set(documentId, handle.url)
     await this.flush(handle)
     const status = { kind: 'seeded' as const, documentId }
-    const metadata = this.createMetadata(documentId, handle, 'seed')
+    const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
+    const metadata = this.createMetadata(documentId, handle, 'seed', assets.availability)
     this.statuses.set(documentId, status)
     this.metadata.set(documentId, metadata)
     this.pendingSeedEchoes.set(documentId, structuredClone(parsed.document))
     this.installHandleListener(documentId, handle)
-    this.notify(documentId, parsed.document, status, metadata)
-    return { ok: true, document: parsed.document, status, metadata }
+    this.notify(documentId, parsed.document, status, metadata, assets.diagnostics, assets.availability)
+    return {
+      ok: true,
+      document: parsed.document,
+      diagnostics: assets.diagnostics,
+      assetAvailability: assets.availability,
+      status,
+      metadata,
+    }
   }
 
   private async getHandle(documentId: DocumentId, seedDocument: AuthoredModelDocument) {
@@ -303,6 +368,12 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     this.installedListeners.add(listenerKey)
 
     const callback = () => {
+      void this.handleAutomergeChange(documentId, handle)
+    }
+    handle.on('change', callback)
+  }
+
+  private async handleAutomergeChange(documentId: DocumentId, handle: AutomergeHandleLike<AutomergeDocumentEnvelope>) {
       const parsed = parseAuthoredModelDocument(structuredClone(handle.doc().authoredDocument))
       if (!parsed.ok) {
         this.fail(documentId, parsed.diagnostic)
@@ -312,7 +383,8 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       const status = { kind: 'restored' as const, documentId }
       const source = this.pendingLocalChanges.has(documentId) ? 'local' : 'peer'
       this.pendingLocalChanges.delete(documentId)
-      const metadata = this.createMetadata(documentId, handle, source)
+      const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
+      const metadata = this.createMetadata(documentId, handle, source, assets.availability)
       const previousMetadata = this.metadata.get(documentId)
       if (
         source === 'peer'
@@ -327,9 +399,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       this.pendingSeedEchoes.delete(documentId)
       this.statuses.set(documentId, status)
       this.metadata.set(documentId, metadata)
-      this.notify(documentId, parsed.document, status, metadata)
-    }
-    handle.on('change', callback)
+      this.notify(documentId, parsed.document, status, metadata, assets.diagnostics, assets.availability)
   }
 
   private async flush(handle: AutomergeHandleLike<AutomergeDocumentEnvelope>) {
@@ -363,6 +433,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     documentId: DocumentId,
     handle: AutomergeHandleLike<AutomergeDocumentEnvelope>,
     source: DocumentRepositoryChangeSource,
+    assetAvailability = [] as NonNullable<DocumentRepositoryMetadata['assetAvailability']>,
   ): DocumentRepositoryMetadata {
     const heads = handle.heads?.() ?? [`automerge:${handle.documentId}:${handle.doc().authoredDocument.revisionId}`]
     return {
@@ -370,6 +441,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       heads: [...heads].sort(),
       source,
       storageKey: handle.url,
+      assetAvailability,
     }
   }
 
@@ -378,22 +450,39 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
     document: AuthoredModelDocument,
     status: DocumentRepositoryRestoreStatus,
     metadata: DocumentRepositoryMetadata,
+    diagnostics: DocumentRepositoryChangeEvent['diagnostics'] = [],
+    assetAvailability: DocumentRepositoryChangeEvent['assetAvailability'] = [],
   ) {
     for (const listener of this.listeners.get(documentId) ?? []) {
       listener({
         document: structuredClone(document),
+        diagnostics,
+        assetAvailability,
         status,
         metadata,
       })
     }
   }
 
-  private broadcastLocalPeerDocument(documentId: DocumentId, document: AuthoredModelDocument) {
+  private async broadcastLocalPeerDocument(documentId: DocumentId, document: AuthoredModelDocument) {
+    if (!this.localPeerDocumentChannel) {
+      return
+    }
+
+    const assets: GeometryAssetBlobInput[] = []
+    for (const asset of document.assets.records) {
+      const bytes = await this.getGeometryAssetRecord(asset)
+      if (bytes) {
+        assets.push({ asset, bytes })
+      }
+    }
+
     this.localPeerDocumentChannel?.postMessage({
       type: 'cad-authored-document-repository/document-updated',
       senderId: this.localPeerId,
       documentId,
       document: structuredClone(document),
+      assets,
     } satisfies LocalPeerDocumentMessage)
   }
 
@@ -402,21 +491,34 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       return
     }
 
+    void this.handleLocalPeerDocumentMessage(data)
+  }
+
+  private async handleLocalPeerDocumentMessage(data: LocalPeerDocumentMessage) {
     const parsed = parseAuthoredModelDocument(structuredClone(data.document))
     if (!parsed.ok) {
       this.fail(data.documentId, parsed.diagnostic)
       return
     }
 
+    const peerAssets = filterGeometryAssetInputsForManifest(
+      parsed.document.assets.records,
+      (data.assets ?? []).filter(isLocalPeerAssetBlob),
+    )
+    await storeGeometryAssetInputsForManifest(this.assetStore, parsed.document.assets.records, peerAssets)
+
+    this.localPeerDocuments.set(data.documentId, structuredClone(parsed.document))
+    const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
     const status = { kind: 'restored' as const, documentId: data.documentId }
     const metadata: DocumentRepositoryMetadata = {
       documentId: data.documentId,
       heads: [`local-peer:${data.senderId}:${parsed.document.revisionId}`],
       source: 'peer',
+      assetAvailability: assets.availability,
     }
     this.statuses.set(data.documentId, status)
     this.metadata.set(data.documentId, metadata)
-    this.notify(data.documentId, parsed.document, status, metadata)
+    this.notify(data.documentId, parsed.document, status, metadata, assets.diagnostics, assets.availability)
   }
 }
 
@@ -465,6 +567,17 @@ function isLocalPeerDocumentMessage(value: unknown): value is LocalPeerDocumentM
     && typeof (value as { documentId?: unknown }).documentId === 'string'
     && typeof (value as { document?: unknown }).document === 'object'
     && (value as { document?: unknown }).document !== null
+    && (
+      (value as { assets?: unknown }).assets === undefined
+      || Array.isArray((value as { assets?: unknown }).assets)
+    )
+}
+
+function isLocalPeerAssetBlob(value: unknown): value is GeometryAssetBlobInput {
+  return typeof value === 'object'
+    && value !== null
+    && typeof (value as { asset?: { hash?: unknown } }).asset?.hash === 'string'
+    && (value as { bytes?: unknown }).bytes instanceof Uint8Array
 }
 
 function sameStringSet(left: readonly string[], right: readonly string[]) {

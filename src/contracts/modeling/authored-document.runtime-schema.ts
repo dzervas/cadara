@@ -19,6 +19,11 @@ import {
 import { featureDefinitionSchema } from '@/contracts/modeling/runtime-schema'
 import { sketchPlaneDefinitionSchema, sketchPlaneSupportRefSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
+import {
+  geometryAssetManifestSchema,
+  legacyGeometryAssetManifestSchema,
+} from '@/contracts/modeling/geometry-assets.runtime-schema'
+import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import type {
   AuthoredModelDocument,
   AuthoredModelDocumentMigrationResult,
@@ -84,6 +89,10 @@ export const authoredModelDocumentSchema = z.object({
   historyOrder: z.array(authoredDocumentHistoryOrderEntrySchema).optional(),
   cursor: authoredDocumentFeatureCursorSchema,
   bodyLabels: z.array(authoredBodyLabelRecordSchema),
+  assets: z.union([
+    geometryAssetManifestSchema,
+    legacyGeometryAssetManifestSchema,
+  ]).optional(),
 }).strict().superRefine((value, ctx) => {
   const featureIds = value.features.map((feature) => feature.featureId)
   const featureIdSet = new Set(featureIds)
@@ -183,6 +192,7 @@ export const authoredModelDocumentSchema = z.object({
   return {
     ...value,
     historyOrder,
+    assets: value.assets ?? createEmptyGeometryAssetManifest(),
     contractVersion: CONTRACT_VERSION,
     schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   } as AuthoredModelDocument

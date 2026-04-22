@@ -1,4 +1,13 @@
 import { serializeAuthoredDocumentJson } from '@/contracts/modeling/authored-document-serialization'
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
+import {
+  CADARA_JSON_MIME_TYPE,
+  CADARA_PACKAGE_MIME_TYPE,
+  createCadaraPackagePayload,
+  parseCadaraPayload,
+  type CadaraPackagePayload,
+} from '@/lib/cadara-package'
 
 export type LocalFileSystemPermissionMode = 'read' | 'readwrite'
 export type LocalFileSystemPermissionState = 'granted' | 'denied' | 'prompt'
@@ -8,7 +17,7 @@ export interface LocalFileSystemPermissionDescriptor {
 }
 
 export interface LocalFileSystemWritableFileStream {
-  write(data: string): Promise<void> | void
+  write(data: string | Uint8Array | ArrayBuffer | Blob): Promise<void> | void
   close(): Promise<void> | void
   abort?(): Promise<void> | void
 }
@@ -62,7 +71,8 @@ export type LocalFileWriteResult =
 
 const CADARA_JSON_ACCEPT: Record<string, string[]> = {
   'application/json': ['.cadara', '.json'],
-  'application/vnd.cadara+json': ['.cadara'],
+  [CADARA_JSON_MIME_TYPE]: ['.cadara'],
+  [CADARA_PACKAGE_MIME_TYPE]: ['.cadara'],
 }
 
 export const CADARA_OPEN_FILE_PICKER_OPTIONS: LocalFileSystemOpenPickerOptions = {
@@ -157,6 +167,14 @@ export async function readLocalFileText(handle: LocalFileSystemFileHandle) {
   return (await handle.getFile()).text()
 }
 
+export async function readLocalCadaraDocument(handle: LocalFileSystemFileHandle): Promise<CadaraPackagePayload> {
+  return readCadaraDocumentFile(await handle.getFile())
+}
+
+export async function readCadaraDocumentFile(file: File): Promise<CadaraPackagePayload> {
+  return parseCadaraPayload(new Uint8Array(await file.arrayBuffer()))
+}
+
 export async function queryLocalFilePermission(
   handle: LocalFileSystemFileHandle,
   mode: LocalFileSystemPermissionMode,
@@ -186,7 +204,7 @@ export async function createLocalFileWritableStream(handle: LocalFileSystemFileH
 
 export async function writeTextToLocalFileHandle(
   handle: LocalFileSystemFileHandle,
-  text: string,
+  text: string | Uint8Array,
 ): Promise<LocalFileWriteResult> {
   const hasPermission = await ensureLocalFileWritePermission(handle)
   if (!hasPermission) {
@@ -214,6 +232,17 @@ export async function writeTextToLocalFileHandle(
 export function serializeLocalAuthoredDocument(document: unknown) {
   return serializeAuthoredDocumentJson(document)
 }
+
+export function createLocalAuthoredDocumentPayload(
+  document: AuthoredModelDocument,
+  assets: readonly GeometryAssetBlobInput[] = [],
+) {
+  return document.assets.records.length === 0
+    ? serializeAuthoredDocumentJson(document)
+    : new Uint8Array(createCadaraPackagePayload({ document, assets }))
+}
+
+export { createCadaraPackagePayload } from '@/lib/cadara-package'
 
 function isPickerAbort(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'

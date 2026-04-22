@@ -40,7 +40,7 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
   )
   assert(
     workerRuntimeSource.includes('writeTextToLocalFileHandle')
-      && workerRuntimeSource.includes('serializeLocalAuthoredDocument')
+      && workerRuntimeSource.includes('createLocalAuthoredDocumentPayload')
       && !workerRuntimeSource.includes('downloadDocumentExportResult')
       && !workerRuntimeSource.includes('showSaveFilePicker')
       && !workerRuntimeSource.includes('showOpenFilePicker'),

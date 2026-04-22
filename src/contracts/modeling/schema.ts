@@ -38,6 +38,7 @@ import type {
 } from '@/contracts/shared/versioning'
 import type { AdvancedFeatureValidationDiagnostic, AdvancedSolidFeatureDefinition, AdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
+import type { GeometryAssetDiagnosticDetail } from '@/contracts/modeling/geometry-assets'
 
 export interface DocumentSnapshotProvenance {
   repositoryHeads: readonly string[]
@@ -553,6 +554,7 @@ export type ModelingDiagnosticDetail =
       /** Role-specific validation or unsupported-case diagnostic. */
       diagnostic: AdvancedFeatureValidationDiagnostic
     }
+  | GeometryAssetDiagnosticDetail
 
 /**
  * Top-level diagnostic record returned by the modeling boundary.

@@ -86,6 +86,7 @@ import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument as RepositoryAuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
+import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
 import { getAdvancedParticipant, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
@@ -2729,6 +2730,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   private snapshotPromise: Promise<DocumentSnapshot> | null = null
   private currentRevisionId: RevisionId = REVISION_ID
   private revisionSequence = 1
+  private authoredAssets = createEmptyGeometryAssetManifest()
 
   constructor(options?: { solverAdapter?: SketchSolverAdapter }) {
     this.solverAdapter = options?.solverAdapter ?? new MockSketchSolverAdapter()
@@ -2749,7 +2751,10 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       throw new Error(`Mock authored export requested document ${documentId}, but active document is ${snapshot.document.documentId}.`)
     }
 
-    return createAuthoredModelDocumentFromSnapshot(snapshot)
+    return {
+      ...createAuthoredModelDocumentFromSnapshot(snapshot),
+      assets: structuredClone(this.authoredAssets),
+    }
   }
 
   async restoreAuthoredModelDocument(
@@ -2757,6 +2762,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
   ): Promise<void> {
     const snapshot = structuredClone(await this.getSnapshot())
+    this.authoredAssets = structuredClone(document.assets)
     const featureTargets = new Map(snapshot.document.features.map((feature) => [feature.featureId, feature.producedTargets]))
     const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
     const orderedFeatures = document.featureOrder

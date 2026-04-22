@@ -21,6 +21,11 @@ export type RevisionId = `rev_${string}`
 export type FeatureId = `feature_${string}`
 
 /**
+ * Durable immutable geometry asset identifier.
+ */
+export type GeometryAssetId = `asset_${string}`
+
+/**
  * Durable feature instance identifier for kernels that separate feature
  * definitions from instantiated occurrences.
  */

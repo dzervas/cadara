@@ -10,6 +10,7 @@ import type {
   EdgeId,
   FaceId,
   FeatureId,
+  GeometryAssetId,
   FeatureTreeNodeId,
   LoopId,
   ObjectTreeNodeId,
@@ -61,6 +62,7 @@ export const documentIdSchema = prefixedIdSchema<DocumentId>('doc_', 'Document I
 export const documentVariableIdSchema = prefixedIdSchema<DocumentVariableId>('variable_', 'Document variable ID')
 export const revisionIdSchema = prefixedIdSchema<RevisionId>('rev_', 'Revision ID')
 export const featureIdSchema = prefixedIdSchema<FeatureId>('feature_', 'Feature ID')
+export const geometryAssetIdSchema = prefixedIdSchema<GeometryAssetId>('asset_', 'Geometry asset ID')
 export const sketchIdSchema = prefixedIdSchema<SketchId>('sketch_', 'Sketch ID')
 export const bodyIdSchema = prefixedIdSchema<BodyId>('body_', 'Body ID')
 export const faceIdSchema = prefixedIdSchema<FaceId>('face_', 'Face ID')

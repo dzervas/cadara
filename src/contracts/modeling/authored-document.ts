@@ -7,6 +7,8 @@ import type {
   SketchSnapshotRecord,
 } from '@/contracts/modeling/schema'
 import type { BodyId, DocumentId, FeatureId, RevisionId, SketchId } from '@/contracts/shared/ids'
+import type { GeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
+import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
@@ -51,6 +53,7 @@ export interface AuthoredModelDocument {
   historyOrder?: AuthoredDocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   bodyLabels: AuthoredBodyLabelRecord[]
+  assets: GeometryAssetManifest
 }
 
 export interface AuthoredModelDocumentDiagnostic {
@@ -94,5 +97,6 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: DocumentSnapsh
       bodyId: body.bodyId,
       label: body.label,
     })),
+    assets: createEmptyGeometryAssetManifest(),
   }
 }

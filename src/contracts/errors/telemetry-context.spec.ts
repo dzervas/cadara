@@ -7,6 +7,8 @@ import {
   publishActiveDocumentTelemetryContext,
 } from '@/contracts/errors/telemetry-context'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import { createGeometryAssetDiagnostic } from '@/contracts/modeling/geometry-assets'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/contracts/errors/telemetry-context.spec.ts', async () => {
@@ -38,6 +40,19 @@ test('src/contracts/errors/telemetry-context.spec.ts', async () => {
   assert(context.document.documentId === snapshot.document.documentId, 'Attached payload should be the durable authored document.')
   assert(!('render' in context.document), 'Attached payload should exclude render exports.')
   assert(!('presentation' in context.document), 'Attached payload should exclude presentation state.')
+
+  const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [snapshot.document.features[0]!.featureId] })
+  const diagnosticSnapshot = structuredClone(snapshot)
+  diagnosticSnapshot.document.diagnostics = [
+    createGeometryAssetDiagnostic('geometry-asset-missing', asset.asset, 'Referenced geometry asset bytes are missing.'),
+  ]
+  const assetContext = createActiveDocumentTelemetryContext(diagnosticSnapshot)
+  assert(
+    assetContext.availability === 'loaded'
+      && assetContext.assetDiagnostics[0]?.hashPrefix === asset.asset.hash.replace(/^sha256:/, '').slice(0, 12)
+      && !('bytes' in assetContext.assetDiagnostics[0]),
+    'Telemetry should summarize geometry asset diagnostics without raw bytes.',
+  )
 
   publishActiveDocumentTelemetryContext(context)
   assert(

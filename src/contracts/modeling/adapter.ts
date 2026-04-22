@@ -36,6 +36,11 @@ import type {
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
+
+export interface GeometryAssetResolver {
+  getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>
+}
 
 /**
  * Public modeling-kernel boundary for durable document queries and feature
@@ -47,7 +52,11 @@ export interface ModelingKernelAdapter {
   /** Updates the requested viewport snapshot tessellation tier when supported. */
   setSnapshotLodTier?(tierId: 'startup' | 'normal' | 'fine'): boolean
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */
-  restoreAuthoredModelDocument?(document: AuthoredDocument, diagnostics?: readonly ModelingDiagnostic[]): Promise<void>
+  restoreAuthoredModelDocument?(
+    document: AuthoredDocument,
+    diagnostics?: readonly ModelingDiagnostic[],
+    assetResolver?: GeometryAssetResolver,
+  ): Promise<void>
   /** Exports the complete authored document state, including history after the active cursor. */
   exportAuthoredModelDocument?(documentId: AuthoredDocument['documentId']): Promise<AuthoredDocument>
   /** Returns the authoritative typed snapshot for the requested document. */

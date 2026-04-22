@@ -8,6 +8,8 @@ import {
   IndexedDbAutomergeDocumentRepository,
   type DocumentRepositoryUrlStore,
 } from '@/domain/modeling/automerge-indexeddb-document-repository'
+import { createMemoryGeometryAssetStore } from '@/domain/modeling/geometry-asset-store'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
@@ -63,6 +65,91 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     assert(reloaded.ok && reloaded.status.kind === 'seeded', 'Repository should recreate a seeded document after reset.')
   }
 
+  async function testRepositoryAssetMutationsAreAtomic() {
+    const seed = await createSeedDocument()
+    const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [seed.features[0]!.featureId] })
+    const documentWithAsset: AuthoredModelDocument = {
+      ...seed,
+      assets: {
+        schemaVersion: 'geometry-asset-manifest/v1alpha1',
+        records: [asset.asset],
+      },
+    }
+    const repository = createMemoryDocumentRepository()
+    await repository.load({ documentId: seed.documentId, seedDocument: seed })
+
+    const unrelatedAsset = await createDeterministicGeometryAsset({
+      assetId: 'asset_unreferenced_geometry',
+      ownerFeatureIds: [seed.features[0]!.featureId],
+      seed: 23,
+    })
+    const invalidAssetBatch = await repository.mutate({
+      documentId: seed.documentId,
+      document: documentWithAsset,
+      assets: [asset, unrelatedAsset],
+    })
+    assert(!invalidAssetBatch.ok, 'Asset mutations with blobs outside the authored manifest should fail.')
+    assert(
+      await repository.getGeometryAssetRecord(asset.asset) === null,
+      'Failed asset mutations should not store a partial blob batch.',
+    )
+
+    const missingAsset = await repository.mutate({ documentId: seed.documentId, document: documentWithAsset })
+    assert(!missingAsset.ok, 'Asset-referencing mutations should fail before publishing when required blobs are missing.')
+    assert(repository.savedDocuments.length === 0, 'Failed asset mutations should not publish the authored manifest.')
+
+    const storedAsset = await repository.mutate({
+      documentId: seed.documentId,
+      document: documentWithAsset,
+      assets: [asset],
+    })
+    assert(storedAsset.ok, 'Asset-referencing mutations should commit after required blobs are stored.')
+    assert(
+      storedAsset.ok && storedAsset.assetAvailability?.every((entry) => entry.available),
+      'Committed asset mutations should report asset availability metadata.',
+    )
+    assert(
+      await repository.getGeometryAssetRecord(asset.asset) !== null,
+      'Repository asset resolver should return stored immutable blob bytes.',
+    )
+  }
+
+  async function testPeerAssetTransferStoresBlobs() {
+    const seed = await createSeedDocument()
+    const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [seed.features[0]!.featureId] })
+    const documentWithAsset: AuthoredModelDocument = {
+      ...seed,
+      assets: {
+        schemaVersion: 'geometry-asset-manifest/v1alpha1',
+        records: [asset.asset],
+      },
+    }
+    const peer = new IndexedDbAutomergeDocumentRepository({
+      repo: createFakeAutomergeRepo(),
+      urlStore: createMemoryUrlStore(),
+      assetStore: createMemoryGeometryAssetStore(),
+      localPeerSync: false,
+    })
+    const observed: string[] = []
+    peer.subscribe(seed.documentId, (event) => {
+      observed.push(`${event.metadata.source}:${event.assetAvailability?.[0]?.available}`)
+    })
+
+    await (peer as unknown as {
+      handleLocalPeerDocumentMessage(data: unknown): Promise<void>
+    }).handleLocalPeerDocumentMessage({
+      type: 'cad-authored-document-repository/document-updated',
+      senderId: 'peer_source',
+      documentId: seed.documentId,
+      document: documentWithAsset,
+      assets: [asset],
+    })
+
+    assert(observed.includes('peer:true'), 'Peer asset transfer should notify with available verified blob metadata.')
+    assert(await peer.getGeometryAssetRecord(asset.asset) !== null, 'Peer asset transfer should store received blob bytes.')
+    assert(await peer.getGeometryAssetBytes(asset.asset.hash) !== null, 'Peer asset transfer should make blobs resolvable by hash for restore paths.')
+  }
+
   async function testIndexedDbRepositoryUsesInternalHandleAndReportsFailures() {
     const seed = await createSeedDocument()
     const urlStore = createMemoryUrlStore()
@@ -103,10 +190,12 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
         ),
       },
     })
+    await Promise.resolve()
     assert(events.some((event) => event.startsWith('peer:')), 'Peer-originated handle changes should notify subscribers.')
     unsubscribe()
     const eventCount = events.length
     repo.pushPeerChange(urlStore.get(seed.documentId)!, { authoredDocument: seed })
+    await Promise.resolve()
     assert(events.length === eventCount, 'Unsubscribed Automerge repository listeners should not receive later peer changes.')
 
     const unsupported = await repository.mutate({
@@ -171,6 +260,8 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
   }
 
   await testMemoryRepositoryLoadsMutatesSubscribesAndResets()
+  await testRepositoryAssetMutationsAreAtomic()
+  await testPeerAssetTransferStoresBlobs()
   await testIndexedDbRepositoryUsesInternalHandleAndReportsFailures()
   testLocalStorageUrlStoreValidatesPersistedPayloads()
 })

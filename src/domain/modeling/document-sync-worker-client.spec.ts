@@ -13,6 +13,7 @@ import { createDocumentSyncWorkerMessageHandler } from '@/domain/modeling/docume
 import type { LocalFileBindingRecord, LocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
 test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
@@ -174,6 +175,36 @@ test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
       metadata: { documentId: seed.documentId, heads: ['head_normalized'], source: 'restore' },
     })
     assert(posted.some((message) => message.kind === 'normalized'), 'Worker shell should own authored document normalization requests.')
+
+    const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [seed.features[0]!.featureId] })
+    const documentWithAsset = {
+      ...seed,
+      assets: {
+        schemaVersion: 'geometry-asset-manifest/v1alpha1' as const,
+        records: [asset.asset],
+      },
+    }
+    await handle({
+      kind: 'mutate',
+      requestId: 'request_document_sync_asset_mutate' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+      document: documentWithAsset,
+      assets: [asset],
+    })
+    assert(
+      posted.some((message) => message.kind === 'mutated' && message.requestId === 'request_document_sync_asset_mutate' && message.result.ok),
+      'Worker shell should pass mutation asset blobs into the repository.',
+    )
+
+    await handle({
+      kind: 'getGeometryAssetRecord',
+      requestId: 'request_document_sync_asset_record' as DocumentSyncWorkerRequest['requestId'],
+      asset: asset.asset,
+    })
+    assert(
+      posted.some((message) => message.kind === 'geometryAssetRecord' && message.bytes?.byteLength === asset.bytes.byteLength),
+      'Worker shell should proxy verified asset record bytes from the repository.',
+    )
   }
 
   async function testWorkerRuntimeFileBindingAutosyncAndPermissionFailures() {
