@@ -789,6 +789,41 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
+  async function testStepFileImportStoresSourceBytesAsFeatureAsset() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const bytes = new TextEncoder().encode('ISO-10303-21;\nEND-ISO-10303-21;\n')
+
+    const result = await service.importStepFile({
+      fileName: 'bracket.step',
+      bytes,
+    })
+
+    assert(result.ok, 'STEP file import should commit an authored document mutation.')
+    const savedDocument = documentRepository.savedDocuments.at(-1)
+    const asset = savedDocument?.assets.records[0]
+    const feature = savedDocument?.features.find((entry) => entry.definition.kind === 'stepImport')
+
+    assert(savedDocument, 'STEP file import should persist an authored document.')
+    assert(asset?.format === 'step', 'STEP file import should store the original source bytes as a STEP geometry asset.')
+    assert(feature?.definition.kind === 'stepImport', 'STEP file import should persist a STEP import feature.')
+    assert(
+      feature.definition.parameters.assetId === asset.assetId,
+      'STEP import feature should reference the persisted asset record.',
+    )
+    assert(
+      feature.definition.parameters.label === 'bracket',
+      'STEP import feature should default its label from the source filename.',
+    )
+    assert(
+      (await documentRepository.getGeometryAssetRecord(asset))?.byteLength === bytes.byteLength,
+      'STEP source bytes should be retrievable from the repository after import.',
+    )
+  }
+
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
@@ -804,4 +839,5 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict()
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
+  await testStepFileImportStoresSourceBytesAsFeatureAsset()
 })

@@ -1,4 +1,4 @@
-import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import type { GeometryAssetResolver, ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
   DocumentExportDiagnostic,
   DocumentExportFormat,
@@ -93,7 +93,8 @@ import type {
   AdvancedSolidFeatureParameters,
   UpToOffsetDirection,
 } from '@/contracts/modeling/schema'
-import type { GeometryAssetDiagnosticDetail } from '@/contracts/modeling/geometry-assets'
+import type { GeometryAssetBlobInput, GeometryAssetDiagnosticDetail, GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
+import { normalizeGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import {
   documentExportRequestSchema,
   documentExportResultSchema,
@@ -171,7 +172,7 @@ import type {
 } from '@/contracts/solver/schema'
 import type { SketchSolverAdapter as SketchSolverBoundary } from '@/contracts/solver/adapter'
 import type { DurableRef } from '@/contracts/shared/references'
-import type { ConstraintId, DimensionId, RegionId, RequestId, SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
+import type { ConstraintId, DimensionId, GeometryAssetId, RegionId, RequestId, SketchEntityId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
 import {
   appErrorFromModelingResult,
@@ -203,14 +204,17 @@ import {
   type LocalFileSystemFileHandle,
 } from '@/lib/local-file-system-access'
 import { CADARA_PACKAGE_MIME_TYPE, isCadaraPackagePayload } from '@/lib/cadara-package'
-import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
+import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
+  GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+  GEOMETRY_ASSET_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
+  STEP_IMPORT_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 
 export interface ModelingService {
@@ -223,6 +227,7 @@ export interface ModelingService {
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
+  importStepFile(input: ModelingImportStepFileInput): Promise<ModelingDocumentFileMutationResult>
   exportCurrentDocument(): Promise<DocumentExportSuccessResult>
   bindLocalFile(input: {
     handle: LocalFileSystemFileHandle
@@ -387,6 +392,11 @@ export type ModelingExportDocumentResult = DocumentExportResult
 export interface ModelingImportDocumentInput {
   document: unknown
   assets?: readonly GeometryAssetBlobInput[]
+}
+
+export interface ModelingImportStepFileInput {
+  fileName: string
+  bytes: Uint8Array
 }
 
 export type ModelingDocumentFileMutationResult =
@@ -4587,11 +4597,12 @@ export function createModelingService(
   async function restoreAuthoredRepositoryDocument(
     document: Parameters<NonNullable<ModelingKernelAdapter['restoreAuthoredModelDocument']>>[0],
     diagnostics: ModelingDiagnostic[] = [],
+    assets: readonly GeometryAssetBlobInput[] = [],
   ) {
     await adapter.restoreAuthoredModelDocument?.(
       document,
       diagnostics,
-      isGeometryAssetDocumentRepository(documentRepository) ? documentRepository : undefined,
+      createLocalAssetResolver(assets),
     )
   }
 
@@ -4627,6 +4638,171 @@ export function createModelingService(
       message,
       target: null,
       detail: null,
+    }
+  }
+
+  function createLocalAssetResolver(assets: readonly GeometryAssetBlobInput[]): GeometryAssetResolver | undefined {
+    const transientAssetBytes = new Map<GeometryAssetHash, Uint8Array>()
+    for (const asset of assets) {
+      transientAssetBytes.set(asset.asset.hash, asset.bytes.slice())
+    }
+
+    const repositoryResolver = isGeometryAssetDocumentRepository(documentRepository)
+      ? documentRepository
+      : undefined
+
+    if (transientAssetBytes.size === 0) {
+      return repositoryResolver
+    }
+
+    return {
+      async getGeometryAssetBytes(hash) {
+        const bytes = transientAssetBytes.get(hash)
+        if (bytes) {
+          return bytes.slice()
+        }
+
+        return repositoryResolver?.getGeometryAssetBytes(hash) ?? null
+      },
+    }
+  }
+
+  function createNextAuthoredRevisionId(revisionId: RevisionId): RevisionId {
+    const match = /^rev_(\d+)$/.exec(revisionId)
+    if (!match) {
+      throw new Error(`Unsupported revision format ${revisionId}.`)
+    }
+
+    return `rev_${String(Number.parseInt(match[1]!, 10) + 1).padStart(match[1]!.length, '0')}` as RevisionId
+  }
+
+  function allocateStepImportFeatureId(document: AuthoredModelDocument): FeatureId {
+    const pattern = /^feature_stepImport-(\d+)$/
+    let maxOrdinal = 0
+    for (const feature of document.features) {
+      const match = pattern.exec(feature.featureId)
+      if (match) {
+        maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+      }
+    }
+
+    return `feature_stepImport-${maxOrdinal + 1}` as FeatureId
+  }
+
+  function createStepImportAssetId(hash: GeometryAssetHash): GeometryAssetId {
+    return `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}` as GeometryAssetId
+  }
+
+  function createStepImportLabel(fileName: string) {
+    const trimmed = fileName.trim()
+    const baseName = trimmed.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
+    return baseName && baseName.length > 0 ? baseName : 'STEP Import'
+  }
+
+  function getAuthoredHistoryOrder(document: AuthoredModelDocument) {
+    if (document.historyOrder) {
+      return structuredClone(document.historyOrder)
+    }
+
+    return [
+      ...document.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
+      ...document.featureOrder.map((featureId) => ({ kind: 'feature' as const, featureId })),
+    ]
+  }
+
+  async function createStepImportAuthoredDocument(input: ModelingImportStepFileInput) {
+    if (!/\.(?:step|stp)$/i.test(input.fileName)) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            'step-import-unsupported-file-type',
+            'Import failed. Select a STEP file with a .step or .stp extension.',
+          ),
+        ],
+      }
+    }
+
+    if (input.bytes.byteLength === 0) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createDocumentFileDiagnostic(
+            'step-import-empty-file',
+            'Import failed. The selected STEP file is empty.',
+          ),
+        ],
+      }
+    }
+
+    const sourceDocument = await exportAuthoredDocumentForRepository()
+    const bytes = input.bytes.slice()
+    const hash = await hashGeometryAssetBytes(bytes)
+    const featureId = allocateStepImportFeatureId(sourceDocument)
+    const label = createStepImportLabel(input.fileName)
+    const asset: GeometryAssetRecord = {
+      schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
+      assetId: createStepImportAssetId(hash),
+      hash,
+      byteLength: bytes.byteLength,
+      format: 'step',
+      mediaType: 'model/step',
+      provenance: {
+        kind: 'imported',
+        sourceName: input.fileName,
+        sourceHash: hash,
+      },
+      ownerFeatureIds: [featureId],
+    }
+
+    const document: AuthoredModelDocument = {
+      ...sourceDocument,
+      revisionId: createNextAuthoredRevisionId(sourceDocument.revisionId),
+      features: [
+        ...sourceDocument.features,
+        {
+          featureId,
+          label,
+          definition: {
+            kind: 'stepImport',
+            featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              assetId: asset.assetId,
+              unit: {
+                source: 'file',
+                resolvedUnit: sourceDocument.settings.linearUnit,
+                scaleToDocument: 1,
+              },
+              orientation: {
+                upAxis: 'z',
+                handedness: 'rightHanded',
+              },
+              placement: {
+                translation: [0, 0, 0],
+                rotationEulerRadians: [0, 0, 0],
+                scale: 1,
+              },
+              label,
+            },
+          },
+        },
+      ],
+      featureOrder: [...sourceDocument.featureOrder, featureId],
+      historyOrder: [
+        ...getAuthoredHistoryOrder(sourceDocument),
+        { kind: 'feature', featureId },
+      ],
+      cursor: { kind: 'feature', featureId },
+      assets: normalizeGeometryAssetManifest({
+        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+        records: [...sourceDocument.assets.records, asset],
+      }),
+    }
+
+    return {
+      ok: true as const,
+      document,
+      assets: [{ asset, bytes }],
     }
   }
 
@@ -4702,7 +4878,7 @@ export function createModelingService(
       restoreDiagnostics = writeResult.diagnostics ?? []
     }
 
-    await restoreAuthoredRepositoryDocument(activeDocument, restoreDiagnostics)
+    await restoreAuthoredRepositoryDocument(activeDocument, restoreDiagnostics, assets)
     operationHistoryStore?.clear()
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
     canPersistOperationHistory = true
@@ -5086,6 +5262,16 @@ export function createModelingService(
       }
 
       return replaceCurrentAuthoredDocument(normalized.document, imported.assets)
+    },
+    async importStepFile(input) {
+      await restorePromise
+      await repositoryChangePromise
+      const imported = await createStepImportAuthoredDocument(input)
+      if (!imported.ok) {
+        return imported
+      }
+
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets)
     },
     async bindLocalFile(input) {
       await restorePromise

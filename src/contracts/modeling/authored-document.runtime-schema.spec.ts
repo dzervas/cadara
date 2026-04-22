@@ -4,7 +4,7 @@ import {
   createAuthoredModelDocumentFromSnapshot,
 } from '@/contracts/modeling/authored-document'
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import { CONTRACT_VERSION, STEP_IMPORT_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import type { BodyId } from '@/contracts/shared/ids'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
@@ -26,6 +26,92 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   const parsed = parseAuthoredModelDocument(authoredDocument)
   assert(parsed.ok, 'Authored documents derived from snapshots should validate.')
   assert(parsed.ok && parsed.document.assets.records.length === 0, 'Authored documents should default to an empty geometry asset manifest.')
+
+  const stepAsset = await createDeterministicGeometryAsset({
+    assetId: 'asset_step_import_contract',
+    ownerFeatureIds: ['feature_stepImport-1'],
+  })
+  const stepImportDocument = structuredClone(authoredDocument)
+  stepImportDocument.assets.records = [stepAsset.asset]
+  stepImportDocument.features = [
+    ...stepImportDocument.features,
+    {
+      featureId: 'feature_stepImport-1',
+      label: 'Imported bracket',
+      definition: {
+        kind: 'stepImport',
+        featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          assetId: stepAsset.asset.assetId,
+          unit: {
+            source: 'file',
+            resolvedUnit: 'millimeter',
+            scaleToDocument: 1,
+          },
+          orientation: {
+            upAxis: 'z',
+            handedness: 'rightHanded',
+          },
+          placement: {
+            translation: [0, 0, 0],
+            rotationEulerRadians: [0, 0, 0],
+            scale: 1,
+          },
+          label: 'Imported bracket',
+        },
+      },
+    },
+  ]
+  stepImportDocument.featureOrder = [...stepImportDocument.featureOrder, 'feature_stepImport-1']
+  stepImportDocument.historyOrder = [
+    ...(stepImportDocument.historyOrder ?? []),
+    { kind: 'feature', featureId: 'feature_stepImport-1' },
+  ]
+  stepImportDocument.cursor = { kind: 'feature', featureId: 'feature_stepImport-1' }
+
+  const parsedStepImport = parseAuthoredModelDocument(stepImportDocument)
+  assert(parsedStepImport.ok, 'Authored validation should accept STEP import feature definitions.')
+
+  const invalidStepImportLabel = parseAuthoredModelDocument({
+    ...stepImportDocument,
+    features: stepImportDocument.features.map((feature) =>
+      feature.featureId === 'feature_stepImport-1' && feature.definition.kind === 'stepImport'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                label: ' ',
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(!invalidStepImportLabel.ok, 'Authored validation should reject blank STEP import labels.')
+
+  const invalidStepImportScale = parseAuthoredModelDocument({
+    ...stepImportDocument,
+    features: stepImportDocument.features.map((feature) =>
+      feature.featureId === 'feature_stepImport-1' && feature.definition.kind === 'stepImport'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                placement: {
+                  ...feature.definition.parameters.placement,
+                  scale: 0,
+                },
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(!invalidStepImportScale.ok, 'Authored validation should reject non-positive STEP import placement scale.')
 
   assert(authoredDocument.sketches.length > 0, 'Authored document should include sketch rebuild inputs.')
   assert(authoredDocument.features.length > 0, 'Authored document should include feature rebuild inputs.')

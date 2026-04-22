@@ -1,4 +1,4 @@
-import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import type { GeometryAssetResolver, ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
   DocumentExportDiagnostic,
   DocumentExportRequest,
@@ -48,6 +48,10 @@ import type {
 import {
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
+import {
+  createStepImportDiagnostic,
+  type StepImportDiagnosticCode,
+} from '@/contracts/modeling/step-import'
 import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
@@ -150,6 +154,16 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   ...Object.values(OCC_CONTRACT_GAP_CODES),
   'unsupported-profile-group',
   'advanced-feature-unsupported-kernel-case',
+  'step-import-unreadable-file',
+  'step-import-unsupported-structure',
+  'step-import-no-solids',
+  'step-import-missing-asset',
+])
+const STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<StepImportDiagnosticCode>([
+  'step-import-unreadable-file',
+  'step-import-unsupported-structure',
+  'step-import-no-solids',
+  'step-import-missing-asset',
 ])
 
 function assertSupportedModelingRequest(
@@ -359,6 +373,17 @@ function createRebuildFailureDiagnostic(
   affectedTargets: NonNullable<ModelingDiagnostic['target']>[],
   feature?: OccAuthoringFeatureRecord,
 ): ModelingDiagnostic {
+  if (feature?.definition.kind === 'stepImport' && STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES.has(code as StepImportDiagnosticCode)) {
+    return createStepImportDiagnostic(
+      code as StepImportDiagnosticCode,
+      message.replace(new RegExp(`^${code}:\\s*`), ''),
+      {
+        assetId: feature.definition.parameters.assetId,
+        featureId: feature.featureId,
+      },
+    )
+  }
+
   const diagnostic = createDiagnostic(
     code,
     'error',
@@ -630,6 +655,25 @@ function createAuthoredHistoryRestoreOrder(
   }
 
   return order
+}
+
+async function resolveGeometryAssetBlobs(
+  document: AuthoredModelDocument,
+  assetResolver?: GeometryAssetResolver,
+) {
+  const assetBlobs = new Map<AuthoredModelDocument['assets']['records'][number]['hash'], Uint8Array>()
+  if (!assetResolver) {
+    return assetBlobs
+  }
+
+  for (const asset of document.assets.records) {
+    const bytes = await assetResolver.getGeometryAssetBytes(asset.hash)
+    if (bytes) {
+      assetBlobs.set(asset.hash, bytes.slice())
+    }
+  }
+
+  return assetBlobs
 }
 
 function capitalizeFeatureKind(kind: FeatureDefinition['kind']) {
@@ -1040,6 +1084,7 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
     }
     case 'split':
     case 'deleteSolid':
+    case 'stepImport':
       return []
     default:
       return definition.parameters.participants.flatMap((participant) => [...participant.targets])
@@ -1263,8 +1308,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   async restoreAuthoredModelDocument(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
+    assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
     const oc = await this.loadOpenCascadeInstance()
+    const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
     const historyOrder = createAuthoredHistoryRestoreOrder(document)
     const sketchById = new Map(document.sketches.map((sketch) => [sketch.sketchId, sketch]))
     const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
@@ -1285,6 +1332,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: structuredClone(document.variables),
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
       assets: document.assets,
+      assetBlobs,
       historyOrder,
       diagnostics,
       cursor: { kind: 'empty' },
@@ -1335,6 +1383,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: structuredClone(document.variables),
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
       assets: document.assets,
+      assetBlobs,
       historyOrder,
       diagnostics,
       cursor: { kind: 'empty' },
@@ -1417,6 +1466,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
+      assetBlobs: runtimeState.authoringState.assetBlobs,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
@@ -1659,6 +1709,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
+      assetBlobs: runtimeState.authoringState.assetBlobs,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,

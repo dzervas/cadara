@@ -69,6 +69,7 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
+  STEP_IMPORT_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 
 export const snapshotSchemaVersionSchema = literalVersionSchema<SnapshotSchemaVersion>(
@@ -361,6 +362,35 @@ const shellDefinitionSchema = z.object({
   }).passthrough(),
 })
 
+const stepImportDefinitionSchema = z.object({
+  kind: z.literal('stepImport'),
+  featureTypeVersion: z.literal(STEP_IMPORT_FEATURE_SCHEMA_VERSION),
+  parameters: z.object({
+    assetId: z.string().regex(/^asset_.+$/, 'STEP import asset ID is invalid.'),
+    unit: z.object({
+      source: z.union([z.literal('file'), z.literal('user')]),
+      resolvedUnit: z.union([
+        z.literal('millimeter'),
+        z.literal('centimeter'),
+        z.literal('meter'),
+        z.literal('inch'),
+        z.literal('foot'),
+      ]),
+      scaleToDocument: positiveNumberSchema('STEP import unit scale must be positive.'),
+    }).strict(),
+    orientation: z.object({
+      upAxis: z.union([z.literal('z'), z.literal('y')]),
+      handedness: z.literal('rightHanded'),
+    }).strict(),
+    placement: z.object({
+      translation: z.tuple([numberSchema, numberSchema, numberSchema]),
+      rotationEulerRadians: z.tuple([numberSchema, numberSchema, numberSchema]),
+      scale: positiveNumberSchema('STEP import placement scale must be positive.'),
+    }).strict(),
+    label: stringSchema.trim().min(1, 'STEP import label is required.'),
+  }).strict(),
+}).transform((value) => value as FeatureDefinition)
+
 const advancedOptionsAuthoredSchema = z.record(z.string(), z.unknown()).optional().transform((options) => {
   if (!options) {
     return options
@@ -471,6 +501,7 @@ export const featureDefinitionSchema = z.union([
   filletDefinitionSchema,
   planeDefinitionSchema,
   shellDefinitionSchema,
+  stepImportDefinitionSchema,
   advancedDefinitionSchema,
 ]).transform((value) => value as FeatureDefinition)
 

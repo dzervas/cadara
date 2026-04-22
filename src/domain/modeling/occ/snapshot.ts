@@ -50,6 +50,7 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
+  STEP_IMPORT_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 import {
   OCC_CONTRACT_GAP_CODES,
@@ -204,6 +205,8 @@ function collectFeatureConsumedTargets(definition: OccAuthoringState['features']
       targets.push(definition.parameters.bodyTarget, ...definition.parameters.faceTargets)
       booleanScope = definition.parameters.booleanScope
       break
+    case 'stepImport':
+      break
     default:
       targets.push(...definition.parameters.participants.flatMap((participant) => [...participant.targets]))
       break
@@ -330,6 +333,12 @@ function createSnapshotFeatureDefinition(
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
+      }
+    case 'stepImport':
+      return {
+        kind: 'stepImport',
+        featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+        parameters: structuredClone(definition.parameters),
       }
     default:
       return {

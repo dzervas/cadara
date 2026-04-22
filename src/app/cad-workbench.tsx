@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Loader } from '@mantine/core'
+import { Button, Group, Loader, Modal, Stack, Text } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
@@ -113,6 +113,10 @@ import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-wo
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
+type StepImportFlowState =
+  | { kind: 'idle' }
+  | { kind: 'review'; fileName: string; bytes: Uint8Array; label: string }
+  | { kind: 'importing'; fileName: string; label: string }
 type WorkbenchUndoEntry =
   | {
       kind: 'updateVariable'
@@ -167,6 +171,7 @@ export function CadWorkbench() {
   const [workbenchStatusNotification, setWorkbenchStatusNotification] =
     useState<WorkbenchNotificationModel | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
+  const [stepImportFlow, setStepImportFlow] = useState<StepImportFlowState>({ kind: 'idle' })
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -1321,7 +1326,26 @@ export function CadWorkbench() {
     }
   }
 
+  const createStepImportLabel = (fileName: string) => {
+    const baseName = fileName.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
+    return baseName && baseName.length > 0 ? baseName : 'STEP Import'
+  }
+
   const handleImportDocument = async (file: File) => {
+    if (/\.(?:step|stp)$/i.test(file.name)) {
+      try {
+        setStepImportFlow({
+          kind: 'review',
+          fileName: file.name,
+          bytes: new Uint8Array(await file.arrayBuffer()),
+          label: createStepImportLabel(file.name),
+        })
+      } catch (error) {
+        reportDocumentFileActionFailure('workbench.file.prepare-step-import', 'STEP import failed.', error)
+      }
+      return
+    }
+
     let payload: unknown
 
     try {
@@ -1341,6 +1365,36 @@ export function CadWorkbench() {
       refreshAfterDocumentFileAction(`Imported ${file.name}.`)
     } catch (error) {
       reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
+    }
+  }
+
+  const handleStepImportCancel = () => {
+    setStepImportFlow({ kind: 'idle' })
+  }
+
+  const handleStepImportAccept = async () => {
+    if (stepImportFlow.kind !== 'review') {
+      return
+    }
+
+    const review = stepImportFlow
+    setStepImportFlow({ kind: 'importing', fileName: review.fileName, label: review.label })
+    try {
+      const result = await modelingService.importStepFile({
+        fileName: review.fileName,
+        bytes: review.bytes,
+      })
+      if (!result.ok) {
+        setStepImportFlow({ kind: 'review', fileName: review.fileName, bytes: review.bytes, label: review.label })
+        showWorkbenchError(result.diagnostics[0]?.message ?? 'STEP import failed.')
+        return
+      }
+
+      setStepImportFlow({ kind: 'idle' })
+      refreshAfterDocumentFileAction(`Imported ${review.fileName}.`)
+    } catch (error) {
+      setStepImportFlow({ kind: 'review', fileName: review.fileName, bytes: review.bytes, label: review.label })
+      reportDocumentFileActionFailure('workbench.file.import-step', 'STEP import failed.', error)
     }
   }
 
@@ -1580,6 +1634,39 @@ export function CadWorkbench() {
                 />
               </WorkbenchInspectorOverlay>
             ) : null}
+            <Modal
+              centered
+              opened={stepImportFlow.kind !== 'idle'}
+              onClose={stepImportFlow.kind === 'importing' ? () => undefined : handleStepImportCancel}
+              title={stepImportFlow.kind === 'importing' ? 'Importing STEP' : 'Import STEP'}
+            >
+              {stepImportFlow.kind !== 'idle' ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>{stepImportFlow.label}</Text>
+                  <Text size="xs" c="dimmed">{stepImportFlow.fileName}</Text>
+                  <Stack gap={4}>
+                    <Text size="xs">Unit: file units to millimeters</Text>
+                    <Text size="xs">Up axis: Z</Text>
+                    <Text size="xs">Placement: origin, scale 1</Text>
+                  </Stack>
+                  {stepImportFlow.kind === 'importing' ? (
+                    <Group gap="xs">
+                      <Loader color="gray" size="sm" />
+                      <Text size="sm">Importing exact solids</Text>
+                    </Group>
+                  ) : (
+                    <Group justify="flex-end">
+                      <Button variant="subtle" color="gray" onClick={handleStepImportCancel}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleStepImportAccept}>
+                        Import
+                      </Button>
+                    </Group>
+                  )}
+                </Stack>
+              ) : null}
+            </Modal>
             <DocumentExportModal
               opened={objectExportModal !== null}
               target={objectExportModal}

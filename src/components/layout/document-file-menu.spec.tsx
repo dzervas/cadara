@@ -46,6 +46,7 @@ test('src/components/layout/document-file-menu.spec.tsx', () => {
 
   assert(markup.includes('aria-label="File"'), 'File menu should expose an accessible icon-only trigger.')
   assert(markup.includes('aria-label="Import document file"'), 'File menu should render the hidden import file input.')
+  assert(markup.includes('.step,.stp'), 'File menu import picker should accept STEP files.')
   assert(markup.includes('/icons/document.svg'), 'File trigger should use the local document icon.')
   assert(
     BROWSER_STORAGE_WARNING_TOOLTIP

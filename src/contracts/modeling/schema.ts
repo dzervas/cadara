@@ -35,10 +35,12 @@ import type {
   RevolveFeatureSchemaVersion,
   ShellFeatureSchemaVersion,
   SnapshotSchemaVersion,
+  StepImportFeatureSchemaVersion,
 } from '@/contracts/shared/versioning'
 import type { AdvancedFeatureValidationDiagnostic, AdvancedSolidFeatureDefinition, AdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type { MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
 import type { GeometryAssetDiagnosticDetail } from '@/contracts/modeling/geometry-assets'
+import type { StepImportDiagnosticDetail, StepImportFeatureParameters } from '@/contracts/modeling/step-import'
 
 export interface DocumentSnapshotProvenance {
   repositoryHeads: readonly string[]
@@ -85,6 +87,8 @@ export type {
 export type { PreviewId }
 /** Re-exported durable reference-record identifier used by named references. */
 export type { ReferenceId }
+/** Re-exported STEP import parameters used by authoring helpers. */
+export type { StepImportFeatureParameters }
 /** Canonical durable reference union accepted throughout the modeling boundary. */
 export type PrimitiveRef = DurableRef
 /** Re-exported sketch-plane support and placement types used by modeling APIs. */
@@ -98,7 +102,7 @@ export type SketchPoint = SketchPoint2D
  * Canonical feature families currently exposed by the kernel contract.
  * This union is closed so callers cannot invent feature types ad hoc.
  */
-export type FeatureKind = 'extrude' | 'fillet' | 'plane' | 'revolve' | 'shell'
+export type FeatureKind = 'extrude' | 'fillet' | 'plane' | 'revolve' | 'shell' | 'stepImport'
 export type AuthoredFeatureKind =
   | FeatureKind
   | 'sweep'
@@ -486,6 +490,14 @@ export type FeatureDefinition =
       /** Exact rebuild inputs owned by this shell feature instance. */
       parameters: ShellFeatureParameters
     }
+  | {
+      /** Stable discriminant for STEP exact-solid import features. */
+      kind: 'stepImport'
+      /** Per-variant schema version owned by the STEP import contract family. */
+      featureTypeVersion: StepImportFeatureSchemaVersion
+      /** Exact asset reference and resolved import settings. */
+      parameters: StepImportFeatureParameters
+    }
   | AdvancedSolidFeatureDefinition
 
 /**
@@ -555,6 +567,7 @@ export type ModelingDiagnosticDetail =
       diagnostic: AdvancedFeatureValidationDiagnostic
     }
   | GeometryAssetDiagnosticDetail
+  | StepImportDiagnosticDetail
 
 /**
  * Top-level diagnostic record returned by the modeling boundary.

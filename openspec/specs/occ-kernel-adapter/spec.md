@@ -69,3 +69,11 @@ An OpenCascade-backed kernel adapter SHALL use internal OCC naming data to recon
 - **WHEN** a boolean result is simplified or same-domain unified before becoming the committed body shape
 - **THEN** topology naming resolves references against the final stored body shape
 - **AND** it does not leave durable references bound only to pre-refinement builder output
+
+### Requirement: OCC adapter SHALL restore STEP import features from assets
+The OCC kernel adapter SHALL rebuild STEP import features from referenced geometry assets during authored document restore.
+
+#### Scenario: Rebuild imported STEP body
+- **WHEN** the authored history cursor includes a STEP import feature
+- **THEN** the OCC adapter reads the referenced asset bytes in the worker/runtime rebuild path
+- **AND** it registers produced bodies through the same topology tracking used by native solid features

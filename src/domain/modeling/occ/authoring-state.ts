@@ -1,6 +1,7 @@
 import type { DurableRef } from '@/contracts/shared/references'
 import {
   createEmptyGeometryAssetManifest,
+  type GeometryAssetHash,
   type GeometryAssetManifest,
 } from '@/contracts/modeling/geometry-assets'
 import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
@@ -43,6 +44,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   variables: readonly DocumentVariableRecord[]
   features: readonly OccAuthoringFeatureRecord[]
   assets: GeometryAssetManifest
+  assetBlobs: ReadonlyMap<GeometryAssetHash, Uint8Array>
   historyOrder: readonly DocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   diagnostics: readonly ModelingDiagnostic[]
@@ -140,6 +142,7 @@ export function createOccAuthoringState(
     variables?: readonly DocumentVariableRecord[]
     features?: readonly OccAuthoringFeatureRecord[]
     assets?: GeometryAssetManifest
+    assetBlobs?: ReadonlyMap<GeometryAssetHash, Uint8Array>
     historyOrder?: readonly DocumentHistoryOrderEntry[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
@@ -172,6 +175,7 @@ export function createOccAuthoringState(
   const baseBodies = applyBodyLabels(input.bodies ?? [], bodyLabels)
   const features = [...(input.features ?? [])]
   const assets = structuredClone(input.assets ?? createEmptyGeometryAssetManifest())
+  const assetBlobs = new Map(input.assetBlobs ?? [])
   const sketches = input.sketches ?? []
   const historyOrder = input.historyOrder ?? [
     ...sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
@@ -204,6 +208,7 @@ export function createOccAuthoringState(
     variables,
     features,
     assets,
+    assetBlobs,
     historyOrder,
     cursor,
     diagnostics: [...(input.diagnostics ?? [])],
@@ -245,6 +250,7 @@ function applyFeatureResult(
     constructionPlanes: result.constructionPlanes,
     features,
     cursor: { kind: 'feature', featureId: feature.featureId },
+    diagnostics: [...state.diagnostics, ...(result.diagnostics ?? [])],
     entities: [...state.entities, ...result.entities],
     renderRecords: [...state.renderRecords, ...result.renderRecords],
     referenceState,

@@ -46,10 +46,14 @@ import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
+  GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+  GEOMETRY_ASSET_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
+  STEP_IMPORT_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
+import { normalizeGeometryAssetManifest, type GeometryAssetHash, type GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import { OCC_CONTRACT_GAP_CODES } from '@/domain/modeling/occ/implementation-policy'
 import {
@@ -65,6 +69,7 @@ import {
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
+import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 import type { DocumentRepository } from '@/domain/modeling/document-repository'
 import {
   COLLABORATIVE_MERGE_DIAGNOSTIC_CODES,
@@ -72,11 +77,13 @@ import {
 } from '@/domain/modeling/collaborative-authored-document'
 import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
-import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
+import { extractSolidShapes, getOccDurableRefKey } from '@/domain/modeling/occ/topology'
 import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
 import type { AppResultAsync } from '@/contracts/errors'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { getNextDocumentHistoryCursor } from '@/domain/modeling/document-history'
+import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
+import { toGpPnt } from '@/domain/modeling/occ/geometry'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -829,6 +836,33 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     }
   }
 
+  async function createFeatureBody(
+    adapter: OpenCascadeKernelAdapter,
+    baseRevisionId: RevisionId,
+    definition: FeatureDefinition,
+    message: string,
+  ) {
+    const created = await adapter.createFeature({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId,
+      definition,
+    })
+
+    assert(created.revisionState.kind === 'accepted', `${message} must be accepted.`)
+    assert(created.rebuildResult.kind === 'rebuilt', `${message} must rebuild.`)
+
+    const bodyTarget = created.changedTargets.find((target) => target.kind === 'body')
+    if (!bodyTarget || bodyTarget.kind !== 'body') {
+      throw new Error(`${message} must report a body target.`)
+    }
+
+    return {
+      response: created,
+      bodyId: bodyTarget.bodyId,
+    }
+  }
+
   async function findPreviewablePlanarFace(
     adapter: OpenCascadeKernelAdapter,
     revisionId: RevisionId,
@@ -873,6 +907,44 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     }
 
     return edgeId
+  }
+
+  async function findPreviewableFilletEdgeForRadius(
+    adapter: OpenCascadeKernelAdapter,
+    revisionId: RevisionId,
+    bodyId: BodyId,
+    radius: number,
+  ) {
+    const snapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const body = requireBody(snapshot.snapshot, bodyId)
+    const rejectionSummaries: string[] = []
+
+    for (const edgeId of body.topology.edgeIds) {
+      const preview = await adapter.evaluatePreview({
+        contractVersion: CONTRACT_VERSION,
+        documentId: 'doc_workspace',
+        baseRevisionId: revisionId,
+        previewId: `preview_fillet_edge_${edgeId}_${String(radius).replace('.', '_')}`,
+        definition: createFilletDefinition(bodyId, edgeId, radius),
+      })
+
+      if (!hasFeatureExecutionFailureDiagnostics(preview.diagnostics) && preview.render.records.length > 0) {
+        return edgeId
+      }
+
+      rejectionSummaries.push(
+        `${edgeId}: records=${preview.render.records.length}; diagnostics=${
+          preview.diagnostics.map((diagnostic) => `${diagnostic.code}:${diagnostic.message}`).join(' | ')
+        }`,
+      )
+    }
+
+    throw new Error(
+      `Expected body ${bodyId} to expose a previewable fillet edge. Tried ${body.topology.edgeIds.length} edges:\n${rejectionSummaries.join('\n')}`,
+    )
   }
 
   async function findPreviewableChamferEdge(
@@ -991,6 +1063,185 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     }
   }
 
+  async function createStepImportDocumentFromPayload(
+    sourceDocument: AuthoredModelDocument,
+    input: {
+      featureId: FeatureId
+      label: string
+      fileName: string
+      payload: string
+    },
+  ) {
+    const bytes = new TextEncoder().encode(input.payload)
+    const hash = await hashGeometryAssetBytes(bytes)
+    const asset: GeometryAssetRecord = {
+      schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
+      assetId: `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}`,
+      hash,
+      byteLength: bytes.byteLength,
+      format: 'step',
+      mediaType: 'model/step',
+      provenance: {
+        kind: 'imported',
+        sourceName: input.fileName,
+        sourceHash: hash,
+      },
+      ownerFeatureIds: [input.featureId],
+    }
+    const document: AuthoredModelDocument = {
+      ...sourceDocument,
+      revisionId: 'rev_0100',
+      features: [
+        ...sourceDocument.features,
+        {
+          featureId: input.featureId,
+          label: input.label,
+          definition: {
+            kind: 'stepImport',
+            featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              assetId: asset.assetId,
+              unit: {
+                source: 'file',
+                resolvedUnit: 'millimeter',
+                scaleToDocument: 1,
+              },
+              orientation: {
+                upAxis: 'z',
+                handedness: 'rightHanded',
+              },
+              placement: {
+                translation: [0, 0, 0],
+                rotationEulerRadians: [0, 0, 0],
+                scale: 1,
+              },
+              label: input.label,
+            },
+          },
+        },
+      ],
+      featureOrder: [...sourceDocument.featureOrder, input.featureId],
+      historyOrder: [
+        ...(sourceDocument.historyOrder ?? []),
+        { kind: 'feature', featureId: input.featureId },
+      ],
+      cursor: { kind: 'feature', featureId: input.featureId },
+      assets: normalizeGeometryAssetManifest({
+        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+        records: [...sourceDocument.assets.records, asset],
+      }),
+    }
+
+    return { document, asset, bytes }
+  }
+
+  function createStepAssetResolver(asset: GeometryAssetRecord, bytes: Uint8Array) {
+    return {
+      async getGeometryAssetBytes(hash: GeometryAssetHash) {
+        return hash === asset.hash ? bytes.slice() : null
+      },
+    }
+  }
+
+  async function readStepPayloadVolume(payload: string) {
+    const oc = await getDefaultOpenCascadeInstance()
+    const inputPath = `/cadara-test-step-volume-${Date.now()}-${Math.random().toString(36).slice(2)}.step`
+    const reader = new oc.STEPControl_Reader_1()
+
+    try {
+      oc.FS.writeFile(inputPath, payload)
+      assert(reader.ReadFile(inputPath) === oc.IFSelect_ReturnStatus.IFSelect_RetDone, 'STEP volume reader should read payload.')
+      assert(reader.TransferRoots(new oc.Message_ProgressRange_1()) > 0, 'STEP volume reader should transfer at least one root.')
+
+      const solids = extractSolidShapes(oc, reader.OneShape())
+      assert(solids.length > 0, 'STEP volume reader should find at least one solid.')
+
+      let total = 0
+      for (const solid of solids) {
+        const props = new oc.GProp_GProps_1()
+        oc.BRepGProp.VolumeProperties_1(solid, props, false, false, false)
+        total += props.Mass()
+      }
+
+      return total
+    } finally {
+      if (oc.FS.analyzePath(inputPath).exists) {
+        oc.FS.unlink(inputPath)
+      }
+      reader.delete()
+    }
+  }
+
+  async function writeStepShape(
+    createShape: (oc: Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>) => InstanceType<Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>['TopoDS_Shape']>,
+  ) {
+    const oc = await getDefaultOpenCascadeInstance()
+    oc.STEPControl_Controller.Init()
+    oc.Interface_Static.SetCVal('write.step.schema', 'AP242DIS')
+    oc.Interface_Static.SetCVal('write.step.unit', 'MM')
+    const outputPath = `/cadara-test-step-import-${Date.now()}-${Math.random().toString(36).slice(2)}.step`
+    const writer = new oc.STEPControl_Writer_1()
+    const progress = new oc.Message_ProgressRange_1()
+    const transferMode = oc.STEPControl_StepModelType.STEPControl_AsIs as unknown as Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>['STEPControl_StepModelType']
+
+    try {
+      const status = writer.Transfer(createShape(oc), transferMode, true, progress)
+
+      assert(status === oc.IFSelect_ReturnStatus.IFSelect_RetDone, 'Test STEP writer should transfer shape.')
+      assert(writer.Write(outputPath) === oc.IFSelect_ReturnStatus.IFSelect_RetDone, 'Test STEP writer should write shape.')
+      return oc.FS.readFile(outputPath, { encoding: 'utf8' }) as string
+    } finally {
+      if (oc.FS.analyzePath(outputPath).exists) {
+        oc.FS.unlink(outputPath)
+      }
+      writer.delete()
+    }
+  }
+
+  function createEdgeOnlyStepPayload() {
+    return writeStepShape((oc) => {
+      const edge = new oc.BRepBuilderAPI_MakeEdge_3(
+        toGpPnt(oc, [0, 0, 0]),
+        toGpPnt(oc, [10, 0, 0]),
+      )
+      return edge.Edge()
+    })
+  }
+
+  function createMixedSolidAndEdgeStepPayload() {
+    return writeStepShape((oc) => {
+      const box = new oc.BRepPrimAPI_MakeBox_2(10, 10, 10)
+      box.Build(new oc.Message_ProgressRange_1())
+      assert(box.IsDone(), 'Test box should build for mixed STEP import payload.')
+      const edge = new oc.BRepBuilderAPI_MakeEdge_3(
+        toGpPnt(oc, [20, 0, 0]),
+        toGpPnt(oc, [30, 0, 0]),
+      )
+      const builder = new oc.BRep_Builder()
+      const compound = new oc.TopoDS_Compound()
+      builder.MakeCompound(compound)
+      builder.Add(compound, box.Shape())
+      builder.Add(compound, edge.Edge())
+      return compound
+    })
+  }
+
+  function createTwoSolidStepPayload() {
+    return writeStepShape((oc) => {
+      const firstBox = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 10, 10)
+      const secondBox = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [20, 0, 0]), 8, 8, 8)
+      firstBox.Build(new oc.Message_ProgressRange_1())
+      secondBox.Build(new oc.Message_ProgressRange_1())
+      assert(firstBox.IsDone() && secondBox.IsDone(), 'Test boxes should build for multi-solid STEP import payload.')
+      const builder = new oc.BRep_Builder()
+      const compound = new oc.TopoDS_Compound()
+      builder.MakeCompound(compound)
+      builder.Add(compound, firstBox.Shape())
+      builder.Add(compound, secondBox.Shape())
+      return compound
+    })
+  }
+
   function assertExportPayloadMetadata(
     result: Awaited<ReturnType<OpenCascadeKernelAdapter['exportDocument']>>,
     format: 'stl' | 'step' | '3mf',
@@ -1064,6 +1315,312 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(modelXml.includes('<triangle '), '3MF model should contain tessellated triangles.')
     assert(vertexCount > 0 && triangleCount > 0, '3MF model should contain indexed mesh data.')
     assert(vertexCount < triangleCount * 3, '3MF model should reuse coincident vertices instead of emitting disconnected triangles.')
+  }
+
+  async function testStepImportRestoresExactBodiesFromAssetBytes() {
+    const fixture = await createExportableBodyFixture()
+    const step = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(step.ok && typeof step.payload === 'string', 'Fixture STEP export should produce importable text.')
+
+    const sourceDocument = await fixture.adapter.exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_stepImport-1' as FeatureId
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'Imported exact body',
+      fileName: 'imported.step',
+      payload: step.payload,
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId === featureId)
+
+    assert(importedBody, 'STEP import should rebuild into a tracked body.')
+    assert(importedBody.label === 'Imported exact body', 'Imported STEP body should use the authored import label.')
+    assert(importedBody.topology.faceIds.length > 0, 'Imported STEP body should expose selectable face refs.')
+    assert(importedBody.topology.edgeIds.length > 0, 'Imported STEP body should expose selectable edge refs.')
+    assert(importedBody.topology.vertexIds.length > 0, 'Imported STEP body should expose selectable vertex refs.')
+
+    const resolved = await adapter.resolveReference({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      target: {
+        kind: 'face',
+        bodyId: importedBody.bodyId,
+        faceId: importedBody.topology.faceIds[0]!,
+      },
+    })
+    assert(
+      resolved.resolution.invalidation === null && resolved.resolution.ownerFeatureId === featureId,
+      'Downstream feature refs should resolve imported STEP body topology.',
+    )
+  }
+
+  async function testStepExportImportPreservesComplexFilletedChamferedVolume() {
+    const adapter = createAdapter()
+    const committed = await commitSeedSketch(adapter)
+    assert(committed.revisionState.kind === 'accepted', 'Seed sketch commit must succeed before complex STEP round-trip coverage.')
+
+    const committedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const sketch = requirePrimarySketch(committedSnapshot.snapshot)
+    const extrude = await createExtrudeBody(adapter, committedSnapshot.snapshot.revisionId, sketch, 18)
+    let revisionId = extrude.response.revisionId
+    let bodyId = extrude.bodyId
+
+    const extrudedSnapshot = await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })
+    const removableFaceId = requireBody(extrudedSnapshot.snapshot, bodyId).topology.faceIds[0]
+    assert(removableFaceId, 'Complex STEP round-trip body should expose a removable face for shelling.')
+
+    const shell = await createFeatureBody(
+      adapter,
+      revisionId,
+      createShellDefinition(bodyId, removableFaceId, 0.65),
+      'Shell create',
+    )
+    revisionId = shell.response.revisionId
+    bodyId = shell.bodyId
+
+    const internalFilletEdge = await findPreviewableFilletEdgeForRadius(adapter, revisionId, bodyId, 0.18)
+    const internalFillet = await createFeatureBody(
+      adapter,
+      revisionId,
+      createFilletDefinition(bodyId, internalFilletEdge, 0.18),
+      'Internal fillet create',
+    )
+    revisionId = internalFillet.response.revisionId
+    bodyId = internalFillet.bodyId
+
+    const chamferEdge = await findPreviewableChamferEdge(adapter, revisionId, bodyId)
+    const chamfer = await createFeatureBody(
+      adapter,
+      revisionId,
+      createChamferDefinition(bodyId, chamferEdge, 0.08),
+      'Exterior chamfer create',
+    )
+    revisionId = chamfer.response.revisionId
+    bodyId = chamfer.bodyId
+
+    const exteriorFilletEdge = await findPreviewableFilletEdgeForRadius(adapter, revisionId, bodyId, 0.12)
+    const exteriorFillet = await createFeatureBody(
+      adapter,
+      revisionId,
+      createFilletDefinition(bodyId, exteriorFilletEdge, 0.12),
+      'Exterior fillet create',
+    )
+    revisionId = exteriorFillet.response.revisionId
+    bodyId = exteriorFillet.bodyId
+
+    const originalStep = await adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: revisionId,
+      target: { kind: 'body', bodyId },
+      targetLabel: 'Complex Filleted Chamfered Body',
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(originalStep.ok && typeof originalStep.payload === 'string', 'Complex STEP export should succeed.')
+    const beforeVolume = await readStepPayloadVolume(originalStep.payload)
+
+    const sourceDocument = await adapter.exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_stepImport-1' as FeatureId
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'Imported complex body',
+      fileName: 'complex-filleted-chamfered.step',
+      payload: originalStep.payload,
+    })
+    const importAdapter = createAdapter()
+
+    await importAdapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const importedSnapshot = (await importAdapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const importedBody = importedSnapshot.bodies.find((body) => body.ownerFeatureId === featureId)
+    assert(importedBody, 'Complex STEP import should rebuild an imported body.')
+
+    const importedStep = await importAdapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: importedSnapshot.revisionId,
+      target: { kind: 'body', bodyId: importedBody.bodyId },
+      targetLabel: 'Imported Complex Body',
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(importedStep.ok && typeof importedStep.payload === 'string', 'Imported complex body STEP export should succeed.')
+
+    const afterVolume = await readStepPayloadVolume(importedStep.payload)
+    const relativeDelta = Math.abs(beforeVolume - afterVolume) / Math.max(beforeVolume, 1)
+    assert(beforeVolume > 0, 'Complex STEP round-trip source volume should be positive.')
+    assert(
+      relativeDelta < 1e-6,
+      `Complex STEP export/import should preserve volume. Before=${beforeVolume}; after=${afterVolume}; relative delta=${relativeDelta}.`,
+    )
+  }
+
+  async function testStepImportReportsMissingAssetBytes() {
+    const fixture = await createExportableBodyFixture()
+    const step = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(step.ok && typeof step.payload === 'string', 'Fixture STEP export should produce importable text.')
+
+    const sourceDocument = await fixture.adapter.exportAuthoredModelDocument('doc_workspace')
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId: 'feature_stepImport-1' as FeatureId,
+      label: 'Missing asset body',
+      fileName: 'missing.step',
+      payload: step.payload,
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(imported.document, [], {
+      async getGeometryAssetBytes() {
+        return null
+      },
+    })
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+
+    const missingAssetDiagnostic = snapshot.document.diagnostics.find((diagnostic) => diagnostic.code === 'step-import-missing-asset')
+    assert(
+      missingAssetDiagnostic?.detail?.kind === 'stepImport'
+        && missingAssetDiagnostic.featureId === 'feature_stepImport-1'
+        && missingAssetDiagnostic.detail.assetId === imported.asset.assetId
+        && missingAssetDiagnostic.message.includes(imported.asset.assetId),
+      'STEP import should report missing asset bytes as a structured document diagnostic.',
+    )
+  }
+
+  async function testStepImportReportsUnsupportedStepFiles() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const edgeOnlyPayload = await createEdgeOnlyStepPayload()
+    const noSolidImport = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId: 'feature_stepImport-1' as FeatureId,
+      label: 'No solid body',
+      fileName: 'edge-only.step',
+      payload: edgeOnlyPayload,
+    })
+    const noSolidAdapter = createAdapter()
+
+    await noSolidAdapter.restoreAuthoredModelDocument(
+      noSolidImport.document,
+      [],
+      createStepAssetResolver(noSolidImport.asset, noSolidImport.bytes),
+    )
+    const noSolidSnapshot = (await noSolidAdapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+
+    const noSolidDiagnostic = noSolidSnapshot.document.diagnostics.find((diagnostic) => diagnostic.code === 'step-import-no-solids')
+    assert(
+      noSolidDiagnostic?.detail?.kind === 'stepImport'
+        && noSolidDiagnostic.featureId === 'feature_stepImport-1'
+        && noSolidDiagnostic.detail.assetId === noSolidImport.asset.assetId,
+      'STEP import should report readable STEP files with no supported solid bodies.',
+    )
+    assert(
+      noSolidSnapshot.bodies.every((body) => body.ownerFeatureId !== 'feature_stepImport-1'),
+      'STEP import should not commit partial bodies when no supported solids are present.',
+    )
+
+    const mixedPayload = await createMixedSolidAndEdgeStepPayload()
+    const mixedFeatureId = 'feature_stepImport-2' as FeatureId
+    const mixedImport = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId: mixedFeatureId,
+      label: 'Mixed body',
+      fileName: 'mixed.step',
+      payload: mixedPayload,
+    })
+    const mixedAdapter = createAdapter()
+
+    await mixedAdapter.restoreAuthoredModelDocument(
+      mixedImport.document,
+      [],
+      createStepAssetResolver(mixedImport.asset, mixedImport.bytes),
+    )
+    const mixedSnapshot = (await mixedAdapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+
+    assert(
+      mixedSnapshot.bodies.some((body) => body.ownerFeatureId === mixedFeatureId),
+      'STEP import should keep supported solids from mixed STEP files.',
+    )
+    assert(
+      mixedSnapshot.document.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'step-import-unsupported-structure'
+        && diagnostic.severity === 'warning',
+      ),
+      'STEP import should warn when non-solid STEP content is skipped.',
+    )
+  }
+
+  async function testStepImportRestoresMultipleSupportedSolids() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_stepImport-1' as FeatureId
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'Multi body',
+      fileName: 'multi-body.step',
+      payload: await createTwoSolidStepPayload(),
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(
+      imported.document,
+      [],
+      createStepAssetResolver(imported.asset, imported.bytes),
+    )
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const importedBodies = snapshot.bodies.filter((body) => body.ownerFeatureId === featureId)
+
+    assert(importedBodies.length === 2, 'STEP import should flatten multiple supported solids into separate bodies.')
+    assert(
+      importedBodies.map((body) => body.label).join(',') === 'Multi body 1,Multi body 2',
+      'STEP import should assign deterministic labels to multiple imported bodies.',
+    )
+    assert(
+      importedBodies.every((body) =>
+        body.topology.faceIds.length > 0
+        && body.topology.edgeIds.length > 0
+        && body.topology.vertexIds.length > 0,
+      ),
+      'Every imported STEP body should expose selectable topology refs.',
+    )
   }
 
   async function testOccGeometryExportsRejectInvalidTargets() {
@@ -4526,7 +5083,12 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures()
   await testRepositoryRestoreConsumesWorkerNormalizedCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
+  await testStepImportRestoresExactBodiesFromAssetBytes()
+  await testStepExportImportPreservesComplexFilletedChamferedVolume()
+  await testStepImportReportsMissingAssetBytes()
+  await testStepImportReportsUnsupportedStepFiles()
+  await testStepImportRestoresMultipleSupportedSolids()
   await testOccGeometryExportsRejectInvalidTargets()
 
   console.log('OCC phase 8 adapter tests passed.')
-})
+}, 60000)

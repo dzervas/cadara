@@ -63,6 +63,7 @@ function advancedParticipantField(definition: FeatureDefinition, target: Durable
     || definition.kind === 'plane'
     || definition.kind === 'revolve'
     || definition.kind === 'shell'
+    || definition.kind === 'stepImport'
   ) {
     return null
   }

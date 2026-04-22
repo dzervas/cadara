@@ -13,6 +13,7 @@ import type {
   RevolveEndCondition,
   RevolveFeatureParameters,
   ShellFeatureParameters,
+  StepImportFeatureParameters,
   AdvancedOperationIntentDescriptor,
   AdvancedFeatureOptionDescriptor,
   AdvancedParticipantDescriptor,
@@ -31,6 +32,7 @@ import type {
   PlaneFeatureSchemaVersion,
   RevolveFeatureSchemaVersion,
   ShellFeatureSchemaVersion,
+  StepImportFeatureSchemaVersion,
 } from '@/contracts/shared/versioning'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import type { FeatureId, PrimitiveRef, RevisionId, SelectionFilter } from '@/domain/editor/schema'
@@ -145,12 +147,15 @@ export interface TransformFeatureParameterDraft {
   direction: 'positive' | 'negative'
 }
 
+export type StepImportFeatureParameterDraft = StepImportFeatureParameters
+
 export interface FeatureDraftByKind {
   extrude: ExtrudeFeatureParameterDraft
   revolve: RevolveFeatureParameterDraft
   fillet: FilletFeatureParameterDraft
   plane: PlaneFeatureParameterDraft
   shell: ShellFeatureParameterDraft
+  stepImport: StepImportFeatureParameterDraft
   sweep: SweepFeatureParameterDraft
   loft: LoftFeatureParameterDraft
   chamfer: ChamferFeatureParameterDraft
@@ -168,6 +173,7 @@ export interface FeatureParametersByKind {
   fillet: FilletFeatureParameters
   plane: PlaneFeatureParameters
   shell: ShellFeatureParameters
+  stepImport: StepImportFeatureParameters
   sweep: AdvancedSolidFeatureParameters
   loft: AdvancedSolidFeatureParameters
   chamfer: AdvancedSolidFeatureParameters
@@ -185,6 +191,7 @@ export interface FeatureVersionByKind {
   fillet: FilletFeatureSchemaVersion
   plane: PlaneFeatureSchemaVersion
   shell: ShellFeatureSchemaVersion
+  stepImport: StepImportFeatureSchemaVersion
   sweep: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   loft: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
   chamfer: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION
@@ -222,6 +229,7 @@ export type RevolveFeatureEditSessionState = FeatureEditSessionStateForKind<'rev
 export type FilletFeatureEditSessionState = FeatureEditSessionStateForKind<'fillet'>
 export type PlaneFeatureEditSessionState = FeatureEditSessionStateForKind<'plane'>
 export type ShellFeatureEditSessionState = FeatureEditSessionStateForKind<'shell'>
+export type StepImportFeatureEditSessionState = FeatureEditSessionStateForKind<'stepImport'>
 export type SweepFeatureEditSessionState = FeatureEditSessionStateForKind<'sweep'>
 export type LoftFeatureEditSessionState = FeatureEditSessionStateForKind<'loft'>
 export type ChamferFeatureEditSessionState = FeatureEditSessionStateForKind<'chamfer'>
@@ -238,6 +246,7 @@ export type FeatureEditSessionState =
   | FilletFeatureEditSessionState
   | PlaneFeatureEditSessionState
   | ShellFeatureEditSessionState
+  | StepImportFeatureEditSessionState
   | SweepFeatureEditSessionState
   | LoftFeatureEditSessionState
   | ChamferFeatureEditSessionState

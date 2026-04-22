@@ -146,7 +146,7 @@ export function DocumentFileMenu({
         ref={importInputRef}
         aria-label="Import document file"
         type="file"
-        accept=".cadara,application/json,application/vnd.cadara+json"
+        accept=".cadara,.step,.stp,application/json,application/vnd.cadara+json,model/step"
         hidden
         onChange={handleImportFileChange}
       />

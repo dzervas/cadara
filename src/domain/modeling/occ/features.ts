@@ -12,9 +12,12 @@ import type {
   ShellFeatureParameters,
   SketchSnapshotRecord,
   SnapshotEntityRecord,
+  ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
+import { createStepImportDiagnostic, type StepImportDiagnosticCode, type StepImportFeatureParameters } from '@/contracts/modeling/step-import'
+import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { RegionRecord } from '@/contracts/sketch/schema'
 import type {
@@ -69,6 +72,8 @@ export interface OccFeatureExecutionContext {
   constructions: readonly ConstructionSnapshotRecord[]
   constructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>
   bodies: readonly OccTrackedBody[]
+  assets: { records: readonly GeometryAssetRecord[] }
+  assetBlobs: ReadonlyMap<GeometryAssetHash, Uint8Array>
 }
 
 export interface OccFeatureExecutionResult {
@@ -79,6 +84,7 @@ export interface OccFeatureExecutionResult {
   entities: SnapshotEntityRecord[]
   renderRecords: RenderableEntityRecord[]
   historyInvalidations: Map<string, OccReferenceInvalidationRecord>
+  diagnostics?: ModelingDiagnostic[]
 }
 
 export interface OccFeaturePresentationArtifacts {
@@ -430,6 +436,217 @@ function trackNewBodyResults(
     ownerFeatureId,
     shape: solid,
   }))
+}
+
+function isOccDoneStatus(status: unknown) {
+  return typeof status === 'object'
+    && status !== null
+    && 'value' in status
+    && (status as { value: unknown }).value === 1
+}
+
+function createStepImportErrorCode(code: StepImportDiagnosticCode, message: string) {
+  const error = new Error(`${code}: ${message}`) as Error & { code: StepImportDiagnosticCode }
+  error.code = code
+  return error
+}
+
+function createTempStepImportPath(asset: GeometryAssetRecord) {
+  return `/cadara-import-${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}.step`
+}
+
+function removeTempImportPath(oc: OpenCascadeInstance, path: string) {
+  if (oc.FS.analyzePath(path).exists) {
+    oc.FS.unlink(path)
+  }
+}
+
+function findStepImportAsset(
+  context: OccFeatureExecutionContext,
+  parameters: StepImportFeatureParameters,
+) {
+  return context.assets.records.find((asset) => asset.assetId === parameters.assetId && asset.format === 'step') ?? null
+}
+
+function readStepImportShape(
+  context: OccFeatureExecutionContext,
+  asset: GeometryAssetRecord,
+) {
+  const bytes = context.assetBlobs.get(asset.hash)
+  if (!bytes) {
+    throw createStepImportErrorCode('step-import-missing-asset', `STEP asset ${asset.assetId} bytes are missing.`)
+  }
+
+  const oc = context.oc
+  const path = createTempStepImportPath(asset)
+  const reader = new oc.STEPControl_Reader_1()
+  const progress = new oc.Message_ProgressRange_1()
+
+  try {
+    oc.FS.writeFile(path, bytes)
+    const readStatus = reader.ReadFile(path)
+    if (!isOccDoneStatus(readStatus)) {
+      throw createStepImportErrorCode('step-import-unreadable-file', `STEP asset ${asset.assetId} could not be read.`)
+    }
+
+    const transferredRoots = reader.TransferRoots(progress)
+    if (transferredRoots <= 0 || reader.NbShapes() <= 0) {
+      throw createStepImportErrorCode('step-import-unsupported-structure', `STEP asset ${asset.assetId} contains no transferable shape roots.`)
+    }
+
+    return {
+      shape: reader.OneShape(),
+      topLevelShapeCount: reader.NbShapes(),
+    }
+  } finally {
+    removeTempImportPath(oc, path)
+    reader.delete()
+  }
+}
+
+function transformShape(
+  context: OccFeatureExecutionContext,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+  transform: InstanceType<OpenCascadeInstance['gp_Trsf']>,
+  failureMessage: string,
+) {
+  const builder = new context.oc.BRepBuilderAPI_Transform_2(shape, transform, true)
+  builder.Build(new context.oc.Message_ProgressRange_1())
+
+  if (!builder.IsDone()) {
+    throw createStepImportErrorCode('step-import-unsupported-structure', failureMessage)
+  }
+
+  return builder.Shape()
+}
+
+function rotationAxis(
+  context: OccFeatureExecutionContext,
+  direction: Vec3,
+) {
+  return new context.oc.gp_Ax1_2(toGpPnt(context.oc, [0, 0, 0]), toGpDir(context.oc, direction))
+}
+
+function applyStepImportTransforms(
+  context: OccFeatureExecutionContext,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+  parameters: StepImportFeatureParameters,
+) {
+  let transformed = shape
+  const scaleFactor = parameters.unit.scaleToDocument * parameters.placement.scale
+
+  if (scaleFactor !== 1) {
+    const scaleTransform = new context.oc.gp_Trsf_1()
+    scaleTransform.SetScale(toGpPnt(context.oc, [0, 0, 0]), scaleFactor)
+    transformed = transformShape(context, transformed, scaleTransform, 'STEP import scale transform failed.')
+  }
+
+  if (parameters.orientation.upAxis === 'y') {
+    const upAxisTransform = new context.oc.gp_Trsf_1()
+    upAxisTransform.SetRotation_1(rotationAxis(context, [1, 0, 0]), Math.PI / 2)
+    transformed = transformShape(context, transformed, upAxisTransform, 'STEP import up-axis transform failed.')
+  }
+
+  const [rx, ry, rz] = parameters.placement.rotationEulerRadians
+  const rotations: Array<[number, Vec3]> = [
+    [rx, [1, 0, 0]],
+    [ry, [0, 1, 0]],
+    [rz, [0, 0, 1]],
+  ]
+  for (const [angle, axis] of rotations) {
+    if (angle === 0) {
+      continue
+    }
+    const rotation = new context.oc.gp_Trsf_1()
+    rotation.SetRotation_1(rotationAxis(context, axis), angle)
+    transformed = transformShape(context, transformed, rotation, 'STEP import placement rotation failed.')
+  }
+
+  if (parameters.placement.translation.some((component) => component !== 0)) {
+    const translation = new context.oc.gp_Trsf_1()
+    translation.SetTranslation_1(toGpVec(context.oc, [...parameters.placement.translation] as Vec3))
+    transformed = transformShape(context, transformed, translation, 'STEP import placement translation failed.')
+  }
+
+  return transformed
+}
+
+function countUnsupportedStepShapes(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+): number {
+  if ((shape.ShapeType() as unknown as number) === (oc.TopAbs_ShapeEnum.TopAbs_SOLID as unknown as number)) {
+    return 0
+  }
+
+  const iterator = new oc.TopoDS_Iterator_2(shape, false, false)
+  let childCount = 0
+  let unsupportedCount = 0
+  try {
+    while (iterator.More()) {
+      childCount += 1
+      unsupportedCount += countUnsupportedStepShapes(oc, iterator.Value())
+      iterator.Next()
+    }
+  } finally {
+    iterator.delete()
+  }
+
+  return childCount === 0 ? 1 : unsupportedCount
+}
+
+function executeStepImportFeature(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  parameters: StepImportFeatureParameters,
+): OccFeatureExecutionResult {
+  const asset = findStepImportAsset(context, parameters)
+  if (!asset) {
+    throw createStepImportErrorCode('step-import-missing-asset', `STEP import asset ${parameters.assetId} is not in the authored document manifest.`)
+  }
+
+  const imported = readStepImportShape(context, asset)
+  const solids = extractSolidShapes(context.oc, imported.shape)
+  if (solids.length === 0) {
+    throw createStepImportErrorCode('step-import-no-solids', `STEP asset ${asset.assetId} does not contain supported solid bodies.`)
+  }
+
+  const bodies = solids.map((solid, index) => {
+    const transformed = applyStepImportTransforms(context, solid, parameters)
+    const bodyId = solids.length === 1
+      ? `body_${ownerFeatureId}` as BodyId
+      : `body_${ownerFeatureId}_${index + 1}` as BodyId
+    const label = solids.length === 1
+      ? parameters.label
+      : `${parameters.label} ${index + 1}`
+
+    return trackNewSolidBody(context.oc, {
+      bodyId,
+      label,
+      ownerFeatureId,
+      shape: transformed,
+    })
+  })
+  const skippedUnsupportedCount = countUnsupportedStepShapes(context.oc, imported.shape)
+
+  return {
+    bodies: [...context.bodies, ...bodies],
+    constructions: [...context.constructions],
+    constructionPlanes: new Map(context.constructionPlanes),
+    producedTargets: bodies.map((body) => ({ kind: 'body' as const, bodyId: body.bodyId })),
+    entities: [],
+    renderRecords: [],
+    historyInvalidations: new Map(),
+    diagnostics: skippedUnsupportedCount > 0
+      ? [
+          createStepImportDiagnostic(
+            'step-import-unsupported-structure',
+            `STEP import skipped ${skippedUnsupportedCount} unsupported non-solid shape${skippedUnsupportedCount === 1 ? '' : 's'}.`,
+            { asset, skippedUnsupportedCount, severity: 'warning' },
+          ),
+        ]
+      : [],
+  }
 }
 
 function assertBooleanScopeCompatible(
@@ -2983,6 +3200,8 @@ export function executeOccFeature(
       return executeFilletFeature(context, ownerFeatureId, definition.parameters)
     case 'shell':
       return executeShellFeature(context, ownerFeatureId, definition.parameters)
+    case 'stepImport':
+      return executeStepImportFeature(context, ownerFeatureId, definition.parameters)
     case 'sweep':
       return executeSweepFeature(context, ownerFeatureId, definition as AdvancedSolidFeatureDefinition & { kind: 'sweep' })
     case 'loft':
