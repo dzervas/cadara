@@ -107,6 +107,8 @@ interface SketchHistoryTimelineBarProps {
 
 function getSketchHistoryIcon(kind: ReturnType<typeof getSketchHistoryItems>[number]['kind']) {
   switch (kind) {
+    case 'operation':
+      return <WorkbenchIcon name="history" className="h-4 w-4" />
     case 'entity':
       return <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
     case 'constraint':
@@ -162,13 +164,15 @@ function SketchHistoryTimelineBar({
             </span>
           ) : null}
           {items.map((item, index) => {
-            const targetKey = getPrimitiveRefKey(item.target)
-            const isSelected = visibleSelection.some((entry) => getPrimitiveRefKey(entry) === targetKey)
-            const isAllowed = selectionFilterAllowsTarget(selectionFilter, selection, item.target, selectionCatalog)
+            const targetKey = item.target ? getPrimitiveRefKey(item.target) : null
+            const isSelected = targetKey !== null && visibleSelection.some((entry) => getPrimitiveRefKey(entry) === targetKey)
+            const isAllowed = item.target !== null && selectionFilterAllowsTarget(selectionFilter, selection, item.target, selectionCatalog)
             const isAfterCursor = index > cursorIndex
             const itemToolIcon = getSketchHistoryItemToolIcon(item, session.fullDefinition)
             const description =
-              item.kind === 'entity' ? 'Sketch entity' : item.kind === 'constraint' ? 'Sketch constraint' : 'Sketch dimension'
+              item.kind === 'operation'
+                ? 'Sketch operation'
+                : item.kind === 'entity' ? 'Sketch entity' : item.kind === 'constraint' ? 'Sketch constraint' : 'Sketch dimension'
             const menuItems: WorkbenchContextMenuEntry[] = [
               {
                 kind: 'item',
@@ -177,7 +181,11 @@ function SketchHistoryTimelineBar({
                 commandId: 'context.selectTarget',
                 icon: <WorkbenchIcon name="mousePointer" className="h-3.5 w-3.5" />,
                 disabled: !isAllowed,
-                onSelect: () => onSelectTarget(item.target),
+                onSelect: () => {
+                  if (item.target) {
+                    onSelectTarget(item.target)
+                  }
+                },
               },
               {
                 kind: 'item',
@@ -212,7 +220,7 @@ function SketchHistoryTimelineBar({
                   aria-disabled={!isAllowed}
                   title={`${description}${isAfterCursor ? '. After current cursor' : ''}. Double-click to move sketch history cursor.`}
                   onClick={() => {
-                    if (!isAllowed) {
+                    if (!isAllowed || !item.target) {
                       return
                     }
                     onSelectTarget(item.target)

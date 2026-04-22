@@ -5,6 +5,7 @@ import type {
   RegionId,
   RegionLoopId,
   ReferenceId,
+  SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -54,6 +55,73 @@ export type SketchStrokeCap = 'butt' | 'round' | 'square'
 export type SketchStrokeJoin = 'miter' | 'round' | 'bevel'
 
 export type SketchDerivedTransformKind = 'mirror' | 'linearPattern' | 'circularPattern' | 'transform'
+export type SketchAuthoringOperationKind =
+  | 'point'
+  | 'line'
+  | 'midpointLine'
+  | 'rectangle'
+  | 'centerPointRectangle'
+  | 'alignedRectangle'
+  | 'circle'
+  | 'threePointCircle'
+  | 'centerPointArc'
+  | 'threePointArc'
+  | 'tangentArc'
+  | 'ellipse'
+  | 'ellipticalArc'
+  | 'conic'
+  | 'bezierCurve'
+  | 'inscribedPolygon'
+  | 'circumscribedPolygon'
+  | 'spline'
+  | 'controlPointSpline'
+  | 'profileText'
+  | 'constraint'
+  | 'dimension'
+  | 'construction'
+  | 'reference'
+  | 'delete'
+  | 'edit'
+  | 'derived'
+  | 'operation'
+
+export type SketchAuthoringOperationMemberRef =
+  | { kind: 'point'; pointId: SketchPointId }
+  | { kind: 'entity'; entityId: SketchEntityId }
+  | { kind: 'constraint'; constraintId: ConstraintId }
+  | { kind: 'dimension'; dimensionId: DimensionId }
+  | { kind: 'style'; styleId: SketchStyleId }
+  | { kind: 'derivation'; derivationId: string }
+
+export interface SketchAuthoringOperationGraphSnapshot {
+  points?: readonly SketchPointDefinition[]
+  entities?: readonly SketchEntityDefinition[]
+  constraints?: readonly ConstraintDefinition[]
+  dimensions?: readonly DimensionDefinition[]
+  styles?: readonly SketchStyleRecord[]
+  derivedRelationships?: readonly SketchDerivationDefinition[]
+}
+
+export interface SketchAuthoringOperationTargets {
+  created?: readonly SketchAuthoringOperationMemberRef[]
+  removed?: readonly SketchAuthoringOperationMemberRef[]
+  edited?: readonly SketchAuthoringOperationMemberRef[]
+}
+
+export interface SketchAuthoringOperation {
+  /** Durable sketch-local operation identity used by sketch history cursors. */
+  operationId: SketchAuthoringOperationId
+  /** Human-readable row label shown in sketch-local history. */
+  label: string
+  /** User intent or fallback operation category. */
+  kind: SketchAuthoringOperationKind
+  /** Typed references to graph members affected by this operation. */
+  targets: SketchAuthoringOperationTargets
+  /** Metadata-only records needed to rebuild sketch-local cursor states. */
+  createdGraph?: SketchAuthoringOperationGraphSnapshot
+  /** Metadata-only records removed by delete operations. */
+  removedGraph?: SketchAuthoringOperationGraphSnapshot
+}
 
 export interface SketchDerivedEntityOutput {
   /** Seed entity driving this derived output. */
@@ -790,6 +858,8 @@ export interface SketchDefinition {
   svgRenderingEnabled?: boolean
   /** Durable sketch-local mirror, pattern, and transform relationships. */
   derivedRelationships?: SketchDerivationDefinition[]
+  /** Ordered durable metadata describing accepted sketch authoring intent. */
+  authoringOperations?: SketchAuthoringOperation[]
 }
 
 /**

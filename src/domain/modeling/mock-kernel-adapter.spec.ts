@@ -551,6 +551,142 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testAcceptedSketchCommitNormalizesAuthoringOperationTargets() {
+    const adapter = new MockKernelAdapter()
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const sourceSketch = before.snapshot.sketches[0]
+
+    if (!sourceSketch) {
+      throw new Error('Seed sketch must exist for authoring operation commit coverage.')
+    }
+
+    const committed = await adapter.commitSketch({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: before.snapshot.revisionId,
+      solverCorrelation: {
+        requestId: 'request_commit_authoring_operations',
+        projectionRequestId: 'request_commit_authoring_operations:project',
+        validationRequestId: 'request_commit_authoring_operations:validate',
+        solveRequestId: 'request_commit_authoring_operations:solve',
+        regionRequestId: 'request_commit_authoring_operations:regions',
+      },
+      sketchId: null,
+      sketchLabel: 'Authoring Operation Sketch',
+      plane: sourceSketch.plane,
+      planeTarget: sourceSketch.planeTarget,
+      planeKey: sourceSketch.planeKey,
+      definition: {
+        schemaVersion: 'sketch-definition/v1alpha1',
+        referenceIds: [],
+        references: [],
+        pointIds: ['sketch_point_1_a', 'sketch_point_1_b'],
+        points: [
+          {
+            pointId: 'sketch_point_1_a',
+            label: 'A',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_1_a' },
+            position: [0, 0],
+            isConstruction: false,
+          },
+          {
+            pointId: 'sketch_point_1_b',
+            label: 'B',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_1_b' },
+            position: [1, 0],
+            isConstruction: false,
+          },
+        ],
+        entityIds: ['sketch_entity_1_line'],
+        entities: [
+          {
+            kind: 'lineSegment',
+            entityId: 'sketch_entity_1_line',
+            label: 'Line 1',
+            target: { kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_1_line' },
+            isConstruction: false,
+            startPointId: 'sketch_point_1_a',
+            endPointId: 'sketch_point_1_b',
+          },
+        ],
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+        authoringOperations: [
+          {
+            operationId: 'sketch_operation_1_line',
+            label: 'Line 1',
+            kind: 'line',
+            targets: {
+              created: [
+                { kind: 'point', pointId: 'sketch_point_1_a' },
+                { kind: 'point', pointId: 'sketch_point_1_b' },
+                { kind: 'entity', entityId: 'sketch_entity_1_line' },
+              ],
+            },
+            createdGraph: {
+              points: [
+                {
+                  pointId: 'sketch_point_1_a',
+                  label: 'A',
+                  target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_1_a' },
+                  position: [0, 0],
+                  isConstruction: false,
+                },
+                {
+                  pointId: 'sketch_point_1_b',
+                  label: 'B',
+                  target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_1_b' },
+                  position: [1, 0],
+                  isConstruction: false,
+                },
+              ],
+              entities: [
+                {
+                  kind: 'lineSegment',
+                  entityId: 'sketch_entity_1_line',
+                  label: 'Line 1',
+                  target: { kind: 'sketchEntity', sketchId: 'sketch_draft', entityId: 'sketch_entity_1_line' },
+                  isConstruction: false,
+                  startPointId: 'sketch_point_1_a',
+                  endPointId: 'sketch_point_1_b',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const reopenedSketch = after.snapshot.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
+
+    assert(committed.revisionState.kind === 'accepted', 'Sketch with authoring operation metadata should commit.')
+    assert(reopenedSketch, 'Committed sketch should be available for reopen.')
+    assert(
+      reopenedSketch.sketch.definition.points.every((point) => point.target.sketchId === committed.sketchId),
+      'Committed mock sketch points should be normalized to the committed sketch id.',
+    )
+    assert(
+      reopenedSketch.sketch.definition.authoringOperations?.[0]?.createdGraph?.points?.every(
+        (point) => point.target.sketchId === committed.sketchId,
+      ),
+      'Committed mock sketch operation point snapshots should be normalized to the committed sketch id.',
+    )
+    assert(
+      reopenedSketch.sketch.definition.authoringOperations?.[0]?.createdGraph?.entities?.every(
+        (entity) => entity.target.sketchId === committed.sketchId,
+      ),
+      'Committed mock sketch operation entity snapshots should be normalized to the committed sketch id.',
+    )
+  }
+
   async function testAcceptedSketchCommitPersistsActiveProjectionData() {
     class ProjectingSolverAdapter extends MockSketchSolverAdapter {
       override async projectExternalReferences(request: Parameters<MockSketchSolverAdapter['projectExternalReferences']>[0]) {
@@ -1991,6 +2127,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testSourceBackedSketchReferenceProjection()
   await testRollbackCursorPreservesAndInsertsFeatureAfterCursor()
   await testAcceptedSketchCommitMutatesCommittedSnapshot()
+  await testAcceptedSketchCommitNormalizesAuthoringOperationTargets()
   await testAcceptedSketchCommitPersistsActiveProjectionData()
   await testMissingMutationTargetsAreRejected()
   await testDocumentHistoryReorderAcceptsRejectsAndConflicts()

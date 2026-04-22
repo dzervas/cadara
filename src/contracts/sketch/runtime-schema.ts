@@ -8,6 +8,7 @@ import type {
   SketchDefinition,
   SketchDerivationDefinition,
   SketchEntityDefinition,
+  SketchAuthoringOperation,
   SketchPointDefinition,
   SketchRecord,
   SketchReferenceDefinition,
@@ -30,6 +31,7 @@ import {
   referenceIdSchema,
   regionIdSchema,
   requestIdSchema,
+  sketchAuthoringOperationIdSchema,
   sketchEntityIdSchema,
   sketchIdSchema,
   sketchPointIdSchema,
@@ -550,6 +552,84 @@ const sketchDerivationDefinitionSchema = z.discriminatedUnion('kind', [
   }),
 ]).transform((value) => value as SketchDerivationDefinition)
 
+const sketchAuthoringOperationMemberRefSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('point'),
+    pointId: sketchPointIdSchema,
+  }),
+  z.object({
+    kind: z.literal('entity'),
+    entityId: sketchEntityIdSchema,
+  }),
+  z.object({
+    kind: z.literal('constraint'),
+    constraintId: constraintIdSchema,
+  }),
+  z.object({
+    kind: z.literal('dimension'),
+    dimensionId: dimensionIdSchema,
+  }),
+  z.object({
+    kind: z.literal('style'),
+    styleId: sketchStyleIdSchema,
+  }),
+  z.object({
+    kind: z.literal('derivation'),
+    derivationId: z.string(),
+  }),
+])
+
+const sketchAuthoringOperationGraphSchema = z.object({
+  points: z.array(sketchPointDefinitionSchema).optional(),
+  entities: z.array(sketchEntityDefinitionSchema).optional(),
+  constraints: z.array(constraintDefinitionSchema).optional(),
+  dimensions: z.array(dimensionDefinitionSchema).optional(),
+  styles: z.array(sketchStyleRecordSchema).optional(),
+  derivedRelationships: z.array(sketchDerivationDefinitionSchema).optional(),
+})
+
+const sketchAuthoringOperationSchema = z.object({
+  operationId: sketchAuthoringOperationIdSchema,
+  label: z.string(),
+  kind: z.union([
+    z.literal('point'),
+    z.literal('line'),
+    z.literal('midpointLine'),
+    z.literal('rectangle'),
+    z.literal('centerPointRectangle'),
+    z.literal('alignedRectangle'),
+    z.literal('circle'),
+    z.literal('threePointCircle'),
+    z.literal('centerPointArc'),
+    z.literal('threePointArc'),
+    z.literal('tangentArc'),
+    z.literal('ellipse'),
+    z.literal('ellipticalArc'),
+    z.literal('conic'),
+    z.literal('bezierCurve'),
+    z.literal('inscribedPolygon'),
+    z.literal('circumscribedPolygon'),
+    z.literal('spline'),
+    z.literal('controlPointSpline'),
+    z.literal('profileText'),
+    z.literal('constraint'),
+    z.literal('dimension'),
+    z.literal('construction'),
+    z.literal('reference'),
+    z.literal('delete'),
+    z.literal('edit'),
+    z.literal('derived'),
+    z.literal('operation'),
+  ]),
+  targets: z.object({
+    created: z.array(sketchAuthoringOperationMemberRefSchema).optional(),
+    removed: z.array(sketchAuthoringOperationMemberRefSchema).optional(),
+    edited: z.array(sketchAuthoringOperationMemberRefSchema).optional(),
+  }),
+  createdGraph: sketchAuthoringOperationGraphSchema.optional(),
+  removedGraph: sketchAuthoringOperationGraphSchema.optional(),
+}).transform((value) => value as SketchAuthoringOperation)
+
 export const sketchDefinitionSchema = z.object({
   schemaVersion: sketchSchemaVersionSchema,
   referenceIds: z.array(referenceIdSchema),
@@ -566,6 +646,7 @@ export const sketchDefinitionSchema = z.object({
   styles: z.array(sketchStyleRecordSchema).default([]),
   svgRenderingEnabled: z.boolean().default(true),
   derivedRelationships: z.array(sketchDerivationDefinitionSchema).default([]),
+  authoringOperations: z.array(sketchAuthoringOperationSchema).default([]),
 }).transform((value) => value as SketchDefinition)
 
 const regionRecordSchema = z.object({

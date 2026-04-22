@@ -2191,6 +2191,9 @@ function normalizeSketchDefinition(value: unknown): SketchDefinition {
     derivedRelationships: Array.isArray(value.derivedRelationships)
       ? value.derivedRelationships.map((relationship) => normalizeSketchDerivationDefinition(relationship))
       : [],
+    authoringOperations: Array.isArray(value.authoringOperations)
+      ? value.authoringOperations as SketchDefinition['authoringOperations']
+      : [],
   }
 }
 

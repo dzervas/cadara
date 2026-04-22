@@ -437,6 +437,28 @@ function normalizeSketchDefinitionForSketchId(
   definition: SketchDefinition,
   sketchId: SketchId,
 ): SketchDefinition {
+  const normalizeOperationGraph = (
+    graph: NonNullable<NonNullable<SketchDefinition['authoringOperations']>[number]['createdGraph']> | undefined,
+  ) => graph
+    ? {
+        ...graph,
+        points: graph.points?.map((point) => ({
+          ...point,
+          target: {
+            ...point.target,
+            sketchId,
+          },
+        })),
+        entities: graph.entities?.map((entity) => ({
+          ...entity,
+          target: {
+            ...entity.target,
+            sketchId,
+          },
+        })),
+      }
+    : undefined
+
   return {
     ...definition,
     points: definition.points.map((point) => ({
@@ -452,6 +474,11 @@ function normalizeSketchDefinitionForSketchId(
         ...entity.target,
         sketchId,
       },
+    })),
+    authoringOperations: definition.authoringOperations?.map((operation) => ({
+      ...operation,
+      createdGraph: normalizeOperationGraph(operation.createdGraph),
+      removedGraph: normalizeOperationGraph(operation.removedGraph),
     })),
   }
 }

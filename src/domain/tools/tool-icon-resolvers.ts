@@ -12,7 +12,7 @@ import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-autho
 import type { ToolIconId } from '@/domain/tools/schema'
 
 type SketchHistoryIconItem = {
-  kind: 'entity' | 'constraint' | 'dimension'
+  kind: 'operation' | 'entity' | 'constraint' | 'dimension'
   id: string
 }
 
@@ -54,6 +54,10 @@ export function getSketchHistoryItemToolIcon(
   definition: SketchDefinition,
 ): ToolIconId | null {
   switch (item.kind) {
+    case 'operation': {
+      const operation = definition.authoringOperations?.find((entry) => entry.operationId === item.id) ?? null
+      return operation ? getSketchOperationToolIcon(operation.kind) : null
+    }
     case 'entity': {
       const entity = definition.entities.find((entry) => entry.entityId === item.id) ?? null
       return entity ? getSketchEntityToolIcon(entity) : null
@@ -66,6 +70,46 @@ export function getSketchHistoryItemToolIcon(
       const dimension = definition.dimensions.find((entry) => entry.dimensionId === item.id) ?? null
       return dimension ? getSketchDimensionToolIcon() : null
     }
+  }
+}
+
+function getSketchOperationToolIcon(kind: NonNullable<SketchDefinition['authoringOperations']>[number]['kind']): ToolIconId | null {
+  switch (kind) {
+    case 'rectangle':
+    case 'centerPointRectangle':
+    case 'alignedRectangle':
+      return 'rectangle'
+    case 'line':
+    case 'midpointLine':
+      return 'line'
+    case 'circle':
+    case 'threePointCircle':
+    case 'centerPointArc':
+    case 'threePointArc':
+    case 'tangentArc':
+      return 'circle'
+    case 'spline':
+    case 'controlPointSpline':
+    case 'ellipse':
+    case 'ellipticalArc':
+    case 'conic':
+    case 'bezierCurve':
+    case 'profileText':
+      return 'spline'
+    case 'constraint':
+      return 'constraintCoincident'
+    case 'dimension':
+      return 'dimension'
+    case 'delete':
+    case 'edit':
+    case 'derived':
+    case 'point':
+    case 'construction':
+    case 'reference':
+    case 'inscribedPolygon':
+    case 'circumscribedPolygon':
+    case 'operation':
+      return null
   }
 }
 

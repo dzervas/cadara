@@ -289,6 +289,56 @@ function createSketchTarget(sketchId: SketchId): DurableRef {
   return { kind: 'sketch', sketchId }
 }
 
+function normalizeSketchDefinitionForSketchId(
+  definition: SketchDefinition,
+  sketchId: SketchId,
+): SketchDefinition {
+  const normalizeOperationGraph = (
+    graph: NonNullable<NonNullable<SketchDefinition['authoringOperations']>[number]['createdGraph']> | undefined,
+  ) => graph
+    ? {
+        ...graph,
+        points: graph.points?.map((point) => ({
+          ...point,
+          target: {
+            ...point.target,
+            sketchId,
+          },
+        })),
+        entities: graph.entities?.map((entity) => ({
+          ...entity,
+          target: {
+            ...entity.target,
+            sketchId,
+          },
+        })),
+      }
+    : undefined
+
+  return {
+    ...definition,
+    points: definition.points.map((point) => ({
+      ...point,
+      target: {
+        ...point.target,
+        sketchId,
+      },
+    })),
+    entities: definition.entities.map((entity) => ({
+      ...entity,
+      target: {
+        ...entity.target,
+        sketchId,
+      },
+    })),
+    authoringOperations: definition.authoringOperations?.map((operation) => ({
+      ...operation,
+      createdGraph: normalizeOperationGraph(operation.createdGraph),
+      removedGraph: normalizeOperationGraph(operation.removedGraph),
+    })),
+  }
+}
+
 function isSketchRenameOnlyRequest(
   request: CommitSketchRequest,
   existing: DocumentSnapshot['document']['sketches'][number] | undefined,
@@ -296,9 +346,10 @@ function isSketchRenameOnlyRequest(
   if (!existing || !request.sketchId || existing.label === request.sketchLabel) {
     return false
   }
+  const normalizedDefinition = normalizeSketchDefinitionForSketchId(request.definition, request.sketchId)
 
   return JSON.stringify(existing.plane) === JSON.stringify(request.plane)
-    && JSON.stringify(existing.sketch.definition) === JSON.stringify(request.definition)
+    && JSON.stringify(existing.sketch.definition) === JSON.stringify(normalizedDefinition)
 }
 
 function getFeatureDefinitionLabel(definition: FeatureDefinition) {
@@ -3071,6 +3122,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       })
     }
 
+    const normalizedDefinition = normalizeSketchDefinitionForSketchId(request.definition, sketchId)
     const projection = await this.projectSketchExternalReferences({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -3080,7 +3132,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       plane: referenceFrame,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-      references: request.definition.references.map((reference) => ({
+      references: normalizedDefinition.references.map((reference) => ({
         referenceId: reference.referenceId,
         reference,
       })),
@@ -3094,7 +3146,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       plane: referenceFrame,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-      definition: request.definition,
+      definition: normalizedDefinition,
       projectedReferences: projection.projectedReferences,
     })
     const solved = await this.solverAdapter.solveSketch({
@@ -3107,7 +3159,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       plane: referenceFrame,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
       partialSolvePolicy: 'bestEffort',
-      definition: request.definition,
+      definition: normalizedDefinition,
       projectedReferences: projection.projectedReferences,
       incrementalEdit: null,
     })
@@ -3119,7 +3171,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       revisionId: request.baseRevisionId,
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
-      definition: request.definition,
+      definition: normalizedDefinition,
       projectedReferences: projection.projectedReferences,
     })
 
@@ -3161,7 +3213,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         sketchId,
         label: request.sketchLabel,
         planeSupport: request.plane.support,
-        definition: request.definition,
+        definition: normalizedDefinition,
         solvedSnapshot: solved.solvedSnapshot,
         projectedReferences: structuredClone(projection.projectedReferences),
         regions: regions.regions.map((region) => ({ ...region, ownerRevisionId: nextRevisionId })),
@@ -3170,8 +3222,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       const changedTargets = [
         createSketchTarget(sketchId),
         ...regions.regions.map((region) => ({ ...region.target, sketchId })),
-        ...request.definition.entities.map((entity) => ({ ...entity.target, sketchId })),
-        ...request.definition.points.map((point) => ({ ...point.target, sketchId })),
+        ...normalizedDefinition.entities.map((entity) => ({ ...entity.target, sketchId })),
+        ...normalizedDefinition.points.map((point) => ({ ...point.target, sketchId })),
       ]
 
       const existingIndex = mutableSnapshot.document.sketches.findIndex((entry) => entry.sketchId === sketchId)
@@ -3231,7 +3283,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           consumedByFeatureIds: [],
         }),
       ))
-      mutableSnapshot.presentation.entities.push(...request.definition.entities.map((entry, index) =>
+      mutableSnapshot.presentation.entities.push(...normalizedDefinition.entities.map((entry, index) =>
         entity({
           ownerFeatureId: null,
           ownerSketchId: sketchId,
@@ -3243,7 +3295,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           consumedByFeatureIds: [],
         }),
       ))
-      mutableSnapshot.presentation.entities.push(...request.definition.points.map((point, index) =>
+      mutableSnapshot.presentation.entities.push(...normalizedDefinition.points.map((point, index) =>
         entity({
           ownerFeatureId: null,
           ownerSketchId: sketchId,

@@ -4,6 +4,10 @@ import type {
   ProjectedSketchGeometryRef,
   RegionLoopRecord,
   RegionRecord,
+  SketchAuthoringOperation,
+  SketchAuthoringOperationGraphSnapshot,
+  SketchAuthoringOperationKind,
+  SketchAuthoringOperationMemberRef,
   SketchDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
@@ -33,6 +37,7 @@ import type {
   RenderableId,
   ReferenceId,
   RevisionId,
+  SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -295,6 +300,13 @@ export interface SketchHistoryOperation {
 
 export type SketchHistoryItem =
   | {
+      kind: 'operation'
+      id: SketchAuthoringOperationId
+      label: string
+      operation: SketchAuthoringOperation
+      target: PrimitiveRef | null
+    }
+  | {
       kind: 'entity'
       id: SketchEntityId
       label: string
@@ -335,6 +347,10 @@ function createConstraintId(sequence: number, suffix: string): ConstraintId {
 
 function createDimensionId(sequence: number, suffix: string): DimensionId {
   return `dimension_${sequence}_${suffix}` as DimensionId
+}
+
+function createAuthoringOperationId(sequence: number, suffix: string): SketchAuthoringOperationId {
+  return `sketch_operation_${sequence}_${suffix}` as SketchAuthoringOperationId
 }
 
 function createSketchEntityRef(sketchId: SketchId, entityId: SketchEntityId): SketchEntityRef {
@@ -390,6 +406,7 @@ function createEmptyDefinition(): SketchDefinition {
     dimensions: [],
     svgRenderingEnabled: true,
     derivedRelationships: [],
+    authoringOperations: [],
   }
 }
 
@@ -411,6 +428,7 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
     styles: definition.styles ? [...definition.styles] : undefined,
     svgRenderingEnabled: definition.svgRenderingEnabled ?? true,
     derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
+    authoringOperations: definition.authoringOperations ? [...definition.authoringOperations] : undefined,
   }
 }
 
@@ -455,6 +473,117 @@ function getHistorySequence(id: string) {
   const match = id.match(/_(\d+)_/)
   const parsed = match ? Number.parseInt(match[1], 10) : Number.NaN
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed
+}
+
+function getContributionSequence(patch: SketchToolCommitContribution) {
+  const ids = [
+    ...patch.points.map((point) => point.pointId),
+    ...patch.entities.map((entity) => entity.entityId),
+    ...(patch.constraints ?? []).map((constraint) => constraint.constraintId),
+    ...(patch.dimensions ?? []).map((dimension) => dimension.dimensionId),
+    ...(patch.derivedRelationships ?? []).map((relationship) => relationship.derivationId),
+  ]
+  const sequences = ids
+    .map((id) => getHistorySequence(id))
+    .filter((sequence) => sequence !== Number.MAX_SAFE_INTEGER)
+
+  return sequences[0] ?? 0
+}
+
+function getAuthoringMemberRefsFromGraph(graph: SketchAuthoringOperationGraphSnapshot): SketchAuthoringOperationMemberRef[] {
+  return [
+    ...(graph.points ?? []).map((point) => ({ kind: 'point' as const, pointId: point.pointId })),
+    ...(graph.entities ?? []).map((entity) => ({ kind: 'entity' as const, entityId: entity.entityId })),
+    ...(graph.constraints ?? []).map((constraint) => ({ kind: 'constraint' as const, constraintId: constraint.constraintId })),
+    ...(graph.dimensions ?? []).map((dimension) => ({ kind: 'dimension' as const, dimensionId: dimension.dimensionId })),
+    ...(graph.styles ?? []).map((style) => ({ kind: 'style' as const, styleId: style.styleId })),
+    ...(graph.derivedRelationships ?? []).map((relationship) => ({ kind: 'derivation' as const, derivationId: relationship.derivationId })),
+  ]
+}
+
+function createAuthoringOperationFromContribution(
+  patch: SketchToolCommitContribution,
+  input?: {
+    sequence?: number
+    kind?: SketchAuthoringOperationKind
+    label?: string
+    suffix?: string
+  },
+): SketchAuthoringOperation {
+  const sequence = input?.sequence ?? getContributionSequence(patch)
+  const createdGraph: SketchAuthoringOperationGraphSnapshot = {
+    points: patch.points,
+    entities: patch.entities,
+    constraints: patch.constraints ?? [],
+    dimensions: patch.dimensions ?? [],
+    derivedRelationships: patch.derivedRelationships ?? [],
+  }
+  const label = input?.label
+    ?? patch.entities[0]?.label
+    ?? patch.constraints?.[0]?.label
+    ?? patch.dimensions?.[0]?.label
+    ?? patch.derivedRelationships?.[0]?.label
+    ?? `Sketch operation ${sequence}`
+
+  return {
+    operationId: createAuthoringOperationId(sequence, input?.suffix ?? 'operation'),
+    label,
+    kind: input?.kind ?? 'operation',
+    targets: {
+      created: getAuthoringMemberRefsFromGraph(createdGraph),
+    },
+    createdGraph,
+  }
+}
+
+function createDeleteAuthoringOperation(input: {
+  sequence: number
+  removedGraph: SketchAuthoringOperationGraphSnapshot
+}): SketchAuthoringOperation {
+  return {
+    operationId: createAuthoringOperationId(input.sequence, 'delete'),
+    label: `Delete ${input.sequence}`,
+    kind: 'delete',
+    targets: {
+      removed: getAuthoringMemberRefsFromGraph(input.removedGraph),
+    },
+    removedGraph: input.removedGraph,
+  }
+}
+
+function createLegacyAuthoringOperation(definition: SketchDefinition): SketchAuthoringOperation | null {
+  const graph: SketchAuthoringOperationGraphSnapshot = {
+    points: definition.points,
+    entities: definition.entities,
+    constraints: definition.constraints,
+    dimensions: definition.dimensions,
+    styles: definition.styles ?? [],
+    derivedRelationships: definition.derivedRelationships ?? [],
+  }
+  const targets = getAuthoringMemberRefsFromGraph(graph)
+  if (targets.length === 0) {
+    return null
+  }
+
+  return {
+    operationId: createAuthoringOperationId(Math.max(0, getNextDefinitionSequence(definition)), 'legacy'),
+    label: 'Legacy sketch graph',
+    kind: 'operation',
+    targets: {
+      created: targets,
+    },
+    createdGraph: graph,
+  }
+}
+
+function getAppendBaseAuthoringOperations(definition: SketchDefinition): SketchAuthoringOperation[] {
+  const operations = definition.authoringOperations ?? []
+  if (operations.length > 0) {
+    return [...operations]
+  }
+
+  const legacyOperation = createLegacyAuthoringOperation(definition)
+  return legacyOperation ? [legacyOperation] : []
 }
 
 function getDefinitionSketchId(definition: SketchDefinition) {
@@ -586,8 +715,49 @@ function getSketchDiagnosticAffectedTargets(
   }
 }
 
+function getAuthoringOperationHistoryTarget(
+  sketchId: SketchId,
+  operation: SketchAuthoringOperation,
+): PrimitiveRef | null {
+  const target = [
+    ...(operation.targets.created ?? []),
+    ...(operation.targets.edited ?? []),
+    ...(operation.targets.removed ?? []),
+  ].find((entry) =>
+    entry.kind === 'entity'
+    || entry.kind === 'point'
+    || entry.kind === 'constraint'
+    || entry.kind === 'dimension',
+  )
+
+  if (!target) {
+    return null
+  }
+
+  switch (target.kind) {
+    case 'point':
+      return createSketchPointRef(sketchId, target.pointId)
+    case 'entity':
+      return createSketchEntityRef(sketchId, target.entityId)
+    case 'constraint':
+      return createSketchConstraintRef(sketchId, target.constraintId)
+    case 'dimension':
+      return createSketchDimensionRef(sketchId, target.dimensionId)
+  }
+}
+
 export function getSketchHistoryItems(definition: SketchDefinition): SketchHistoryItem[] {
   const sketchId = getDefinitionSketchId(definition)
+  const operations = definition.authoringOperations ?? []
+  if (operations.length > 0) {
+    return operations.map((operation) => ({
+      kind: 'operation' as const,
+      id: operation.operationId,
+      label: operation.label,
+      operation,
+      target: getAuthoringOperationHistoryTarget(sketchId, operation),
+    }))
+  }
 
   return [
     ...definition.entities.map((entity) => ({
@@ -739,10 +909,108 @@ function getSketchHistoryOperationForCursor(
     : null
 }
 
+function replayAuthoringOperationsThroughCursor(
+  definition: SketchDefinition,
+  cursor: SketchHistoryCursor,
+): SketchDefinition {
+  const operations = definition.authoringOperations ?? []
+  const items = getSketchHistoryItems(definition)
+  const cursorIndex = getSketchHistoryCursorIndex(items, cursor)
+  const visibleOperations = cursor.kind === 'empty'
+    ? []
+    : cursorIndex < 0 ? operations : operations.slice(0, cursorIndex + 1)
+
+  const pointById = new Map<SketchPointId, SketchPointDefinition>()
+  const entityById = new Map<SketchEntityId, SketchEntityDefinition>()
+  const constraintById = new Map<ConstraintId, ConstraintDefinition>()
+  const dimensionById = new Map<DimensionId, DimensionDefinition>()
+  const styleById = new Map<SketchStyleId, SketchStyleRecord>()
+  const derivationById = new Map<string, NonNullable<SketchDefinition['derivedRelationships']>[number]>()
+  const livePointById = new Map(definition.points.map((point) => [point.pointId, point]))
+  const liveEntityById = new Map(definition.entities.map((entity) => [entity.entityId, entity]))
+  const liveConstraintById = new Map(definition.constraints.map((constraint) => [constraint.constraintId, constraint]))
+  const liveDimensionById = new Map(definition.dimensions.map((dimension) => [dimension.dimensionId, dimension]))
+  const liveStyleById = new Map((definition.styles ?? []).map((style) => [style.styleId, style]))
+  const liveDerivationById = new Map((definition.derivedRelationships ?? []).map((relationship) => [relationship.derivationId, relationship]))
+
+  const addGraph = (graph?: SketchAuthoringOperationGraphSnapshot) => {
+    for (const point of graph?.points ?? []) {
+      pointById.set(point.pointId, livePointById.get(point.pointId) ?? point)
+    }
+    for (const entity of graph?.entities ?? []) {
+      entityById.set(entity.entityId, liveEntityById.get(entity.entityId) ?? entity)
+    }
+    for (const constraint of graph?.constraints ?? []) {
+      constraintById.set(constraint.constraintId, liveConstraintById.get(constraint.constraintId) ?? constraint)
+    }
+    for (const dimension of graph?.dimensions ?? []) {
+      dimensionById.set(dimension.dimensionId, liveDimensionById.get(dimension.dimensionId) ?? dimension)
+    }
+    for (const style of graph?.styles ?? []) {
+      styleById.set(style.styleId, liveStyleById.get(style.styleId) ?? style)
+    }
+    for (const relationship of graph?.derivedRelationships ?? []) {
+      derivationById.set(relationship.derivationId, liveDerivationById.get(relationship.derivationId) ?? relationship)
+    }
+  }
+  const removeGraph = (graph?: SketchAuthoringOperationGraphSnapshot) => {
+    for (const point of graph?.points ?? []) {
+      pointById.delete(point.pointId)
+    }
+    for (const entity of graph?.entities ?? []) {
+      entityById.delete(entity.entityId)
+    }
+    for (const constraint of graph?.constraints ?? []) {
+      constraintById.delete(constraint.constraintId)
+    }
+    for (const dimension of graph?.dimensions ?? []) {
+      dimensionById.delete(dimension.dimensionId)
+    }
+    for (const style of graph?.styles ?? []) {
+      styleById.delete(style.styleId)
+    }
+    for (const relationship of graph?.derivedRelationships ?? []) {
+      derivationById.delete(relationship.derivationId)
+    }
+  }
+
+  for (const operation of visibleOperations) {
+    addGraph(operation.createdGraph)
+    removeGraph(operation.removedGraph)
+  }
+
+  const points = [...pointById.values()]
+  const entities = [...entityById.values()]
+  const constraints = [...constraintById.values()]
+  const dimensions = [...dimensionById.values()]
+  const styles = [...styleById.values()]
+  const derivedRelationships = [...derivationById.values()]
+
+  return {
+    ...definition,
+    pointIds: points.map((point) => point.pointId),
+    points,
+    entityIds: entities.map((entity) => entity.entityId),
+    entities,
+    constraintIds: constraints.map((constraint) => constraint.constraintId),
+    constraints,
+    dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+    dimensions,
+    styleIds: styles.map((style) => style.styleId),
+    styles,
+    derivedRelationships,
+    authoringOperations: visibleOperations,
+  }
+}
+
 export function filterSketchDefinitionThroughCursor(
   definition: SketchDefinition,
   cursor: SketchHistoryCursor,
 ): SketchDefinition {
+  if ((definition.authoringOperations ?? []).length > 0) {
+    return replayAuthoringOperationsThroughCursor(definition, cursor)
+  }
+
   const items = getSketchHistoryItems(definition)
   const cursorIndex = getSketchHistoryCursorIndex(items, cursor)
   const visibleItemIds = new Set(
@@ -786,6 +1054,7 @@ function getNextDefinitionSequence(definition: SketchDefinition) {
     ...definition.entityIds,
     ...definition.constraintIds,
     ...definition.dimensionIds,
+    ...(definition.authoringOperations ?? []).map((operation) => operation.operationId),
   ]
 
   let highestSequence = 0
@@ -1566,6 +1835,10 @@ function appendDefinition(definition: SketchDefinition, patch: SketchToolCommitC
       ...(definition.derivedRelationships ?? []),
       ...(patch.derivedRelationships ?? []),
     ],
+    authoringOperations: [
+      ...getAppendBaseAuthoringOperations(definition),
+      patch.authoringOperation ?? createAuthoringOperationFromContribution(patch),
+    ],
   }
 }
 
@@ -1795,6 +2068,17 @@ export function deleteSelectedSketchGeometry(
   const dimensions = beforeDefinition.dimensions.filter((dimension) =>
     !dimensionReferencesSketchGeometry(dimension, deletedPointIds, deletedEntityIds),
   )
+  const remainingConstraintIds = new Set(constraints.map((constraint) => constraint.constraintId))
+  const remainingDimensionIds = new Set(dimensions.map((dimension) => dimension.dimensionId))
+  const deleteOperation = createDeleteAuthoringOperation({
+    sequence: session.sequence + 1,
+    removedGraph: {
+      points: beforeDefinition.points.filter((point) => deletedPointIds.has(point.pointId)),
+      entities: beforeDefinition.entities.filter((entity) => deletedEntityIds.has(entity.entityId)),
+      constraints: beforeDefinition.constraints.filter((constraint) => !remainingConstraintIds.has(constraint.constraintId)),
+      dimensions: beforeDefinition.dimensions.filter((dimension) => !remainingDimensionIds.has(dimension.dimensionId)),
+    },
+  })
   const afterDefinition: SketchDefinition = {
     ...beforeDefinition,
     pointIds: points.map((point) => point.pointId),
@@ -1805,9 +2089,13 @@ export function deleteSelectedSketchGeometry(
     constraints,
     dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
     dimensions,
+    authoringOperations: [
+      ...getAppendBaseAuthoringOperations(beforeDefinition),
+      deleteOperation,
+    ],
   }
   const operation: SketchHistoryOperation = {
-    itemId: `sketch_history_delete_${session.sequence + 1}`,
+    itemId: deleteOperation.operationId,
     beforeCursor: session.historyCursor,
     beforeDefinition,
     afterDefinition,
@@ -4455,7 +4743,15 @@ export function acceptSketchDraw(session: SketchSessionState, point: SketchPoint
     sequence: nextSequence,
     createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   })
-  const history = applySketchHistoryContribution(session, definitionPatch)
+  const history = applySketchHistoryContribution(session, {
+    ...definitionPatch,
+    authoringOperation: createAuthoringOperationFromContribution(definitionPatch, {
+      sequence: nextSequence,
+      kind: session.activeTool,
+      label: `${toolDefinition.metadata.name} ${nextSequence}`,
+      suffix: session.activeTool,
+    }),
+  })
 
   return {
     ...session,
@@ -5416,6 +5712,86 @@ function solveCommittedConstraintDefinition(
   }
 }
 
+function updateAuthoringOperationsForAnnotationEdit(
+  operations: SketchDefinition['authoringOperations'],
+  target: SketchConstraintRef | SketchDimensionRef,
+  graph: Pick<SketchAuthoringOperationGraphSnapshot, 'constraints' | 'dimensions' | 'entities'>,
+) {
+  if (!operations || operations.length === 0) {
+    return operations
+  }
+
+  return operations.map((operation) => {
+    const createdGraph = operation.createdGraph
+    if (!createdGraph) {
+      return operation
+    }
+
+    if (target.kind === 'constraint') {
+      const replacement = graph.constraints?.find((constraint) => constraint.constraintId === target.constraintId)
+      const constraints = replacement
+        ? createdGraph.constraints?.map((constraint) =>
+            constraint.constraintId === target.constraintId ? replacement : constraint,
+          )
+        : createdGraph.constraints
+      const edited = constraints?.some((constraint, index) => constraint !== createdGraph.constraints?.[index]) ?? false
+
+      return edited
+        ? {
+            ...operation,
+            targets: {
+              ...operation.targets,
+              edited: [
+                ...(operation.targets.edited ?? []),
+                { kind: 'constraint' as const, constraintId: target.constraintId },
+              ],
+            },
+            createdGraph: {
+              ...createdGraph,
+              constraints,
+            },
+          }
+        : operation
+    }
+
+    const replacementDimension = graph.dimensions?.find((dimension) => dimension.dimensionId === target.dimensionId)
+    const dimensions = replacementDimension
+      ? createdGraph.dimensions?.map((dimension) =>
+          dimension.dimensionId === target.dimensionId ? replacementDimension : dimension,
+        )
+      : createdGraph.dimensions
+    const editedDimension = dimensions?.some((dimension, index) => dimension !== createdGraph.dimensions?.[index]) ?? false
+    const editedEntityIds = new Set(
+      replacementDimension?.kind === 'circleRadius' ? [replacementDimension.entityId] : [],
+    )
+    const entities = editedEntityIds.size > 0
+      ? createdGraph.entities?.map((entity) =>
+          editedEntityIds.has(entity.entityId)
+            ? graph.entities?.find((candidate) => candidate.entityId === entity.entityId) ?? entity
+            : entity,
+        )
+      : createdGraph.entities
+
+    return editedDimension
+      ? {
+          ...operation,
+          targets: {
+            ...operation.targets,
+            edited: [
+              ...(operation.targets.edited ?? []),
+              { kind: 'dimension' as const, dimensionId: target.dimensionId },
+            ],
+          },
+          createdGraph: {
+            ...createdGraph,
+            dimensions,
+            entities,
+          },
+        }
+      : operation
+  })
+}
+
 function updateAnnotationValueInDefinition(
   definition: SketchDefinition,
   target: SketchConstraintRef | SketchDimensionRef,
@@ -5438,6 +5814,11 @@ function updateAnnotationValueInDefinition(
       ? {
           ...definition,
           constraints,
+          authoringOperations: updateAuthoringOperationsForAnnotationEdit(
+            definition.authoringOperations,
+            target,
+            { constraints },
+          ),
         }
       : definition
   }
@@ -5479,6 +5860,20 @@ function updateAnnotationValueInDefinition(
             )
           : definition.entities,
         dimensions,
+        authoringOperations: updateAuthoringOperationsForAnnotationEdit(
+          definition.authoringOperations,
+          target,
+          {
+            dimensions,
+            entities: editedCircleRadiusEntityId
+              ? definition.entities.map((entity) =>
+                  entity.entityId === editedCircleRadiusEntityId && entity.kind === 'circle'
+                    ? { ...entity, radius: value }
+                    : entity,
+                )
+              : definition.entities,
+          },
+        ),
       }
     : definition
 }
@@ -5632,6 +6027,16 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     points: [],
     entities: [],
     ...contribution,
+    authoringOperation: createAuthoringOperationFromContribution({
+      points: [],
+      entities: [],
+      ...contribution,
+    }, {
+      sequence: session.sequence + 1,
+      kind: (contribution.dimensions?.length ?? 0) > 0 ? 'dimension' : 'constraint',
+      label: `${definition.metadata.name} ${session.sequence + 1}`,
+      suffix: authoring.toolId,
+    }),
   })
   const solvedDefinition = solveCommittedConstraintDefinition(history.definition, session.projectedReferences)
   const solvedFullDefinition = solveCommittedConstraintDefinition(history.fullDefinition, session.projectedReferences)
@@ -5677,6 +6082,20 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
     return session
   }
 
+  const deleteOperation = createDeleteAuthoringOperation({
+    sequence: session.sequence + 1,
+    removedGraph: selectedAnnotation.kind === 'constraint'
+      ? {
+          constraints: session.fullDefinition.constraints.filter(
+            (constraint) => constraint.constraintId === selectedAnnotation.constraintId,
+          ),
+        }
+      : {
+          dimensions: session.fullDefinition.dimensions.filter(
+            (dimension) => dimension.dimensionId === selectedAnnotation.dimensionId,
+          ),
+        },
+  })
   const nextFullDefinition =
     selectedAnnotation.kind === 'constraint'
       ? {
@@ -5687,6 +6106,10 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
           constraints: session.fullDefinition.constraints.filter(
             (constraint) => constraint.constraintId !== selectedAnnotation.constraintId,
           ),
+          authoringOperations: [
+            ...getAppendBaseAuthoringOperations(session.fullDefinition),
+            deleteOperation,
+          ],
         }
       : {
           ...session.fullDefinition,
@@ -5696,6 +6119,10 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
           dimensions: session.fullDefinition.dimensions.filter(
             (dimension) => dimension.dimensionId !== selectedAnnotation.dimensionId,
           ),
+          authoringOperations: [
+            ...getAppendBaseAuthoringOperations(session.fullDefinition),
+            deleteOperation,
+          ],
         }
   const historyCursor = createTailSketchHistoryCursor(nextFullDefinition)
   const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, historyCursor)
@@ -5705,6 +6132,7 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
     fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     historyCursor,
+    sequence: session.sequence + 1,
     toolStagedEntities: [],
     activeAnnotationEdit: null,
     selectedAnnotation: null,

@@ -21,6 +21,7 @@ import type {
   RenderableId,
   RequestId,
   RevisionId,
+  SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -69,6 +70,7 @@ export const loopIdSchema = prefixedIdSchema<LoopId>('loop_', 'Loop ID')
 export const sketchEntityIdSchema = prefixedIdSchema<SketchEntityId>('sketch_entity_', 'Sketch entity ID')
 export const sketchPointIdSchema = prefixedIdSchema<SketchPointId>('sketch_point_', 'Sketch point ID')
 export const sketchStyleIdSchema = prefixedIdSchema<SketchStyleId>('sketch_style_', 'Sketch style ID')
+export const sketchAuthoringOperationIdSchema = prefixedIdSchema<SketchAuthoringOperationId>('sketch_operation_', 'Sketch authoring operation ID')
 export const constraintIdSchema = prefixedIdSchema<ConstraintId>('constraint_', 'Constraint ID')
 export const dimensionIdSchema = prefixedIdSchema<DimensionId>('dimension_', 'Dimension ID')
 export const regionIdSchema = prefixedIdSchema<RegionId>('region_', 'Region ID')
