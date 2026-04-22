@@ -27,6 +27,7 @@ const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
+  showBrowserStorageWarning?: boolean
   onNewDocument?: () => void
   onOpenLocalFile?: () => void
   onSaveLocalFile?: () => void
@@ -37,6 +38,7 @@ interface WorkspaceToolbarProps {
 
 export function WorkspaceToolbar({
   historyAvailability,
+  showBrowserStorageWarning = false,
   onNewDocument = () => undefined,
   onOpenLocalFile = () => undefined,
   onSaveLocalFile = () => undefined,
@@ -111,6 +113,7 @@ export function WorkspaceToolbar({
     >
       <div className="flex min-w-0 items-center gap-3">
         <DocumentFileMenu
+          showBrowserStorageWarning={showBrowserStorageWarning}
           onNewDocument={onNewDocument}
           onOpenLocalFile={onOpenLocalFile}
           onSaveLocalFile={onSaveLocalFile}

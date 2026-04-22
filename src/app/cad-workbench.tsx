@@ -107,6 +107,7 @@ import {
 } from '@/domain/bug-reporting/report'
 import { getBuildModeLabel } from '@/components/layout/build-metadata'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
@@ -125,6 +126,13 @@ type WorkbenchUndoEntry =
       after: DocumentHistoryOrderEntry[]
       label: string
     }
+
+function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
+  return status.kind === 'binding-restored'
+    || status.kind === 'syncing'
+    || status.kind === 'synced'
+    || status.kind === 'persistent-binding-unavailable'
+}
 
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
@@ -158,6 +166,7 @@ export function CadWorkbench() {
   const [workbenchStatusNotification, setWorkbenchStatusNotification] =
     useState<WorkbenchNotificationModel | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
+  const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
   const [redoStack, setRedoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -169,6 +178,9 @@ export function CadWorkbench() {
   const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
+  // TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
+  const cloudSaveEnabled = false
+  const showBrowserStorageWarning = !localFileSyncEnabled && !cloudSaveEnabled
 
   const showWorkbenchInfo = useCallback((message: string) => {
     setWorkbenchStatusNotification({
@@ -1245,6 +1257,8 @@ export function CadWorkbench() {
 
   useEffect(() => {
     return modelingService.subscribeToLocalFileSyncStatus((status) => {
+      setLocalFileSyncEnabled(isLocalFileSyncEnabledStatus(status))
+
       switch (status.kind) {
         case 'binding-restored':
           showWorkbenchInfo(`Restored local file sync for ${status.metadata.fileName}.`)
@@ -1441,6 +1455,7 @@ export function CadWorkbench() {
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
       <WorkspaceToolbar
         historyAvailability={toolbarHistoryAvailability}
+        showBrowserStorageWarning={showBrowserStorageWarning}
         onNewDocument={handleNewDocument}
         onOpenLocalFile={handleOpenLocalFile}
         onSaveLocalFile={handleSaveLocalFile}

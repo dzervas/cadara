@@ -3,6 +3,7 @@ import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
+  BROWSER_STORAGE_WARNING_TOOLTIP,
   DocumentFileMenu,
 } from '@/components/layout/document-file-menu'
 import {
@@ -33,6 +34,7 @@ test('src/components/layout/document-file-menu.spec.tsx', () => {
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <DocumentFileMenu
         defaultOpened
+        showBrowserStorageWarning
         onNewDocument={() => undefined}
         onOpenLocalFile={() => undefined}
         onSaveLocalFile={() => undefined}
@@ -45,4 +47,15 @@ test('src/components/layout/document-file-menu.spec.tsx', () => {
   assert(markup.includes('aria-label="File"'), 'File menu should expose an accessible icon-only trigger.')
   assert(markup.includes('aria-label="Import document file"'), 'File menu should render the hidden import file input.')
   assert(markup.includes('/icons/document.svg'), 'File trigger should use the local document icon.')
+  assert(
+    BROWSER_STORAGE_WARNING_TOOLTIP
+      === "The data are currently saved within the browser, which might result in data loss. Please use the local file functionality to make sure that all changes are saved on your computer's disk so you can back them up",
+    'Browser-storage warning tooltip copy should match the product copy exactly.',
+  )
+  assert(
+    markup.includes('data-workbench-browser-storage-warning')
+      && markup.includes('/icons/warning-overlay.svg')
+      && markup.includes('The data are currently saved within the browser'),
+    'File menu should render a browser-storage warning next to the file icon when durable save is unavailable.',
+  )
 })

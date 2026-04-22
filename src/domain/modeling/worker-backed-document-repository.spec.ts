@@ -161,8 +161,30 @@ test('src/domain/modeling/worker-backed-document-repository.spec.ts', async () =
     )
   }
 
+  function testBrowserWorkerReceivesRepositorySearchOptions() {
+    const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
+    const clientSource = readFileSync(join(process.cwd(), 'src/domain/modeling/document-sync-worker-client.ts'), 'utf8')
+    const workerSource = readFileSync(join(process.cwd(), 'src/domain/modeling/document-sync.worker.ts'), 'utf8')
+
+    assert(
+      appSource.includes('createBrowserDocumentSyncWorkerClient({ search: window.location.search })'),
+      'App should pass repository URL parameters to the browser document sync worker.',
+    )
+    assert(
+      clientSource.includes('workerUrl.search = options.search ?? \'\''),
+      'Browser document sync worker client should forward search params through the worker URL.',
+    )
+    assert(
+      workerSource.includes("workerSearchParams.get('cadLocalPeerSync') === '1'")
+        && workerSource.includes("workerSearchParams.get('cadLocalPeerSyncChannel')")
+        && workerSource.includes("workerSearchParams.get('cadRepositoryDbName')"),
+      'Document sync worker should consume opt-in peer-sync and repository database URL parameters.',
+    )
+  }
+
   await testLoadMutatePeerUpdateAndDiagnostics()
   testModelingServiceDoesNotImportMainThreadCollaborativeNormalization()
+  testBrowserWorkerReceivesRepositorySearchOptions()
 })
 
 function createMemoryUrlStore(): DocumentRepositoryUrlStore {

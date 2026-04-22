@@ -49,7 +49,10 @@ function App() {
     [],
   )
   const documentSyncWorkerClient = useMemo(
-    () => (typeof window === 'undefined' ? null : createBrowserDocumentSyncWorkerClient()),
+    () =>
+      typeof window === 'undefined'
+        ? null
+        : createBrowserDocumentSyncWorkerClient({ search: window.location.search }),
     [],
   )
   const occWorkerDisposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)

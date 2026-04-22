@@ -7,15 +7,24 @@ import type { DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from '@/do
 import { createIndexedDbLocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
 
 interface DocumentSyncWorkerGlobalScope {
+  location?: Location
   postMessage(message: DocumentSyncWorkerResponse): void
   addEventListener(type: 'message', listener: (event: MessageEvent<DocumentSyncWorkerRequest>) => void): void
 }
 
 const workerScope = globalThis as unknown as DocumentSyncWorkerGlobalScope
 const repositoryUrlStore = new MemoryDocumentRepositoryUrlStore()
+const workerSearchParams = new URLSearchParams(workerScope.location?.search ?? '')
+const localPeerSyncEnabled = workerSearchParams.get('cadLocalPeerSync') === '1'
 const handleMessage = createDocumentSyncWorkerMessageHandler(
   {
-    repository: createIndexedDbAutomergeDocumentRepository({ urlStore: repositoryUrlStore }),
+    repository: createIndexedDbAutomergeDocumentRepository({
+      urlStore: repositoryUrlStore,
+      databaseName: workerSearchParams.get('cadRepositoryDbName') ?? undefined,
+      localPeerSync: localPeerSyncEnabled
+        ? { channelName: workerSearchParams.get('cadLocalPeerSyncChannel') ?? undefined }
+        : false,
+    }),
     repositoryUrlStore,
     bindingStore: createIndexedDbLocalFileBindingStore(),
   },

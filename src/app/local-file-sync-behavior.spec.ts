@@ -30,6 +30,11 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
     'Workbench should surface visible local sync unavailable, invalid file, permission, bind, and persistence-unavailable states.',
   )
   assert(
+    workbenchSource.includes('showBrowserStorageWarning')
+      && workbenchSource.includes('TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.'),
+    'Workbench should keep the browser-storage warning wired to local file sync status with a cloud-save TODO.',
+  )
+  assert(
     !importHandler.includes('bindLocalFile') && !exportHandler.includes('bindLocalFile'),
     'Import and Export should remain one-shot actions that do not create or replace local filesystem sync bindings.',
   )
