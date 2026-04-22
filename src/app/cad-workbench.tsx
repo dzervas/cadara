@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Button, Checkbox, Group, Loader, Modal, Paper, Progress, Stack, Text } from '@mantine/core'
+import { Alert, Badge, Button, Checkbox, Group, Loader, Modal, Paper, Progress, ScrollArea, Stack, Text } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
@@ -42,6 +42,7 @@ import type {
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
+import type { StepImportReviewResult } from '@/contracts/modeling/step-import'
 import { createAppError, errorContext, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
@@ -126,8 +127,21 @@ type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
 type StepImportFlowState =
   | { kind: 'idle' }
-  | { kind: 'review'; fileName: string; bytes: Uint8Array; label: string }
-  | { kind: 'importing'; fileName: string; label: string }
+  | { kind: 'preparing'; fileNames: readonly string[]; label: string }
+  | {
+    kind: 'review'
+    files: readonly { fileName: string; bytes: Uint8Array }[]
+    review: StepImportReviewResult
+    selectedSolidKeys: readonly string[]
+    label: string
+  }
+  | {
+    kind: 'importing'
+    files: readonly { fileName: string; bytes: Uint8Array }[]
+    review: StepImportReviewResult
+    selectedSolidKeys: readonly string[]
+    label: string
+  }
 type MeshImportFlowState =
   | { kind: 'idle' }
   | {
@@ -1505,15 +1519,32 @@ export function CadWorkbench() {
     return baseName && baseName.length > 0 ? baseName : 'Mesh Import'
   }
 
+  const getImportFileName = (file: File) => {
+    const fileWithRelativePath = file as File & { webkitRelativePath?: string }
+    return fileWithRelativePath.webkitRelativePath?.trim() || file.name
+  }
+
+  const prepareStepImportFiles = async (files: readonly File[]) => {
+    const label = createStepImportLabel(files[0] ? getImportFileName(files[0]) : 'STEP Import')
+    setStepImportFlow({ kind: 'preparing', fileNames: files.map(getImportFileName), label })
+    const stepFiles = await Promise.all(files.map(async (file) => ({
+      fileName: getImportFileName(file),
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    })))
+    const review = await modelingService.prepareStepImportReview({ files: stepFiles })
+    setStepImportFlow({
+      kind: 'review',
+      files: stepFiles,
+      review,
+      selectedSolidKeys: review.solids.filter((solid) => solid.importable).map((solid) => solid.solidKey),
+      label,
+    })
+  }
+
   const handleImportDocument = async (file: File) => {
     if (/\.(?:step|stp)$/i.test(file.name)) {
       try {
-        setStepImportFlow({
-          kind: 'review',
-          fileName: file.name,
-          bytes: new Uint8Array(await file.arrayBuffer()),
-          label: createStepImportLabel(file.name),
-        })
+        await prepareStepImportFiles([file])
       } catch (error) {
         reportDocumentFileActionFailure('workbench.file.prepare-step-import', 'STEP import failed.', error)
       }
@@ -1614,18 +1645,65 @@ export function CadWorkbench() {
   }
 
   const handlePartImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0]
+    const files = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ''
 
-    if (file) {
-      void handleImportDocument(file)
+    if (files.length === 0) {
+      return
     }
+
+    const stepFiles = files.filter((file) => /\.(?:step|stp)$/i.test(getImportFileName(file)))
+    const meshFiles = files.filter((file) => /\.(?:stl|3mf)$/i.test(getImportFileName(file)))
+
+    if (stepFiles.length === files.length) {
+      void prepareStepImportFiles(stepFiles).catch((error) => {
+        reportDocumentFileActionFailure('workbench.file.prepare-step-import', 'STEP import failed.', error)
+      })
+      return
+    }
+
+    if (files.length === 1 && meshFiles.length === 1) {
+      void handleImportDocument(files[0]!)
+      return
+    }
+
+    showWorkbenchError('Import failed. Select STEP files together, or one STL/3MF mesh file.')
   }
 
   useEffect(() => actionBus.subscribeToTool('importPart', openPartImportPicker), [actionBus, openPartImportPicker])
 
   const handleStepImportCancel = () => {
     setStepImportFlow({ kind: 'idle' })
+  }
+
+  const handleStepImportSolidToggle = (solidKey: string, checked: boolean) => {
+    setStepImportFlow((current) => {
+      if (current.kind !== 'review') {
+        return current
+      }
+
+      const selected = new Set(current.selectedSolidKeys)
+      if (checked) {
+        selected.add(solidKey)
+      } else {
+        selected.delete(solidKey)
+      }
+
+      return { ...current, selectedSolidKeys: [...selected] }
+    })
+  }
+
+  const handleStepImportSelectAll = (checked: boolean) => {
+    setStepImportFlow((current) =>
+      current.kind === 'review'
+        ? {
+            ...current,
+            selectedSolidKeys: checked
+              ? current.review.solids.filter((solid) => solid.importable).map((solid) => solid.solidKey)
+              : [],
+          }
+        : current,
+    )
   }
 
   const handleMeshImportCancel = () => {
@@ -1647,22 +1725,29 @@ export function CadWorkbench() {
     }
 
     const review = stepImportFlow
-    setStepImportFlow({ kind: 'importing', fileName: review.fileName, label: review.label })
+    setStepImportFlow({
+      kind: 'importing',
+      files: review.files,
+      review: review.review,
+      selectedSolidKeys: review.selectedSolidKeys,
+      label: review.label,
+    })
     try {
-      const result = await modelingService.importStepFile({
-        fileName: review.fileName,
-        bytes: review.bytes,
+      const result = await modelingService.commitPreparedStepImport({
+        files: review.files,
+        review: review.review,
+        selectedSolidKeys: review.selectedSolidKeys,
       })
       if (!result.ok) {
-        setStepImportFlow({ kind: 'review', fileName: review.fileName, bytes: review.bytes, label: review.label })
+        setStepImportFlow(review)
         showWorkbenchError(result.diagnostics[0]?.message ?? 'STEP import failed.')
         return
       }
 
       setStepImportFlow({ kind: 'idle' })
-      refreshAfterDocumentFileAction(`Imported ${review.fileName}.`)
+      refreshAfterDocumentFileAction(`Imported ${review.review.rootFileName}.`)
     } catch (error) {
-      setStepImportFlow({ kind: 'review', fileName: review.fileName, bytes: review.bytes, label: review.label })
+      setStepImportFlow(review)
       reportDocumentFileActionFailure('workbench.file.import-step', 'STEP import failed.', error)
     }
   }
@@ -1814,6 +1899,16 @@ export function CadWorkbench() {
     }
   }
 
+  const stepReview = stepImportFlow.kind === 'review' ? stepImportFlow : null
+  const stepImportableSolids = stepReview?.review.solids.filter((solid) => solid.importable) ?? []
+  const selectedStepSolidKeys = new Set(stepReview?.selectedSolidKeys ?? [])
+  const selectedStepSolidCount = stepImportableSolids.filter((solid) => selectedStepSolidKeys.has(solid.solidKey)).length
+  const allStepSolidsSelected = stepImportableSolids.length > 0 && selectedStepSolidCount === stepImportableSolids.length
+  const someStepSolidsSelected = selectedStepSolidCount > 0 && selectedStepSolidCount < stepImportableSolids.length
+  const stepImportDisabled = stepReview
+    ? selectedStepSolidCount === 0 || stepReview.review.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+    : true
+
   return (
     <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
@@ -1832,6 +1927,7 @@ export function CadWorkbench() {
         aria-label="Import part file"
         type="file"
         accept={PART_IMPORT_FILE_ACCEPT}
+        multiple
         hidden
         onChange={handlePartImportFileChange}
       />
@@ -1953,18 +2049,75 @@ export function CadWorkbench() {
             <Modal
               centered
               opened={stepImportFlow.kind !== 'idle'}
-              onClose={stepImportFlow.kind === 'importing' ? () => undefined : handleStepImportCancel}
+              onClose={stepImportFlow.kind === 'importing' || stepImportFlow.kind === 'preparing' ? () => undefined : handleStepImportCancel}
               title={stepImportFlow.kind === 'importing' ? 'Importing STEP' : 'Import STEP'}
+              size="lg"
             >
               {stepImportFlow.kind !== 'idle' ? (
                 <Stack gap="sm">
                   <Text size="sm" fw={600}>{stepImportFlow.label}</Text>
-                  <Text size="xs" c="dimmed">{stepImportFlow.fileName}</Text>
-                  <Stack gap={4}>
-                    <Text size="xs">Unit: file units to millimeters</Text>
-                    <Text size="xs">Up axis: Z</Text>
-                    <Text size="xs">Placement: origin, scale 1</Text>
-                  </Stack>
+                  {stepImportFlow.kind === 'preparing' ? (
+                    <Group gap="xs">
+                      <Loader color="gray" size="sm" />
+                      <Text size="sm">Preparing review</Text>
+                    </Group>
+                  ) : null}
+                  {stepImportFlow.kind === 'review' ? (
+                    <>
+                      <Group gap="xs">
+                        <Text size="xs" c="dimmed">{stepImportFlow.review.rootFileName}</Text>
+                        <Badge size="xs" variant="outline">{stepImportFlow.files.length} file{stepImportFlow.files.length === 1 ? '' : 's'}</Badge>
+                      </Group>
+                      {stepImportFlow.review.diagnostics.length > 0 ? (
+                        <Stack gap={6}>
+                          {stepImportFlow.review.diagnostics.map((diagnostic) => (
+                            <Alert
+                              key={`${diagnostic.code}-${diagnostic.message}`}
+                              color={diagnostic.severity === 'error' ? 'red' : 'yellow'}
+                              variant="light"
+                              py={6}
+                            >
+                              <Text size="xs">{diagnostic.message}</Text>
+                            </Alert>
+                          ))}
+                        </Stack>
+                      ) : null}
+                      <Stack gap={6}>
+                        <Checkbox
+                          checked={allStepSolidsSelected}
+                          indeterminate={someStepSolidsSelected}
+                          disabled={stepImportableSolids.length === 0}
+                          onChange={(event) => handleStepImportSelectAll(event.currentTarget.checked)}
+                          label={`${selectedStepSolidCount}/${stepImportableSolids.length} solids selected`}
+                        />
+                        <ScrollArea.Autosize mah={260} type="auto">
+                          <Stack gap={4}>
+                            {stepImportFlow.review.solids.map((solid) => (
+                              <Group
+                                key={solid.solidKey}
+                                justify="space-between"
+                                gap="sm"
+                                className="rounded border border-[var(--workbench-shell-border)] px-2 py-1"
+                              >
+                                <Checkbox
+                                  checked={selectedStepSolidKeys.has(solid.solidKey)}
+                                  disabled={!solid.importable}
+                                  onChange={(event) => handleStepImportSolidToggle(solid.solidKey, event.currentTarget.checked)}
+                                  label={solid.label}
+                                />
+                                <Text size="xs" c="dimmed" truncate="end" className="max-w-[220px]">
+                                  {solid.sourceFileName}
+                                </Text>
+                              </Group>
+                            ))}
+                          </Stack>
+                        </ScrollArea.Autosize>
+                      </Stack>
+                      {selectedStepSolidCount === 0 ? (
+                        <Text size="xs" c="red">At least one solid must be selected.</Text>
+                      ) : null}
+                    </>
+                  ) : null}
                   {stepImportFlow.kind === 'importing' ? (
                     <Group gap="xs">
                       <Loader color="gray" size="sm" />
@@ -1975,7 +2128,7 @@ export function CadWorkbench() {
                       <Button variant="subtle" color="gray" onClick={handleStepImportCancel}>
                         Cancel
                       </Button>
-                      <Button onClick={handleStepImportAccept}>
+                      <Button onClick={handleStepImportAccept} disabled={stepImportFlow.kind !== 'review' || stepImportDisabled}>
                         Import
                       </Button>
                     </Group>

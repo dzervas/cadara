@@ -16,7 +16,18 @@ import type {
 } from '@/contracts/modeling/schema'
 import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
-import { createStepImportDiagnostic, type StepImportDiagnosticCode, type StepImportFeatureParameters } from '@/contracts/modeling/step-import'
+import {
+  createStepImportDiagnostic,
+  createStepSolidKey,
+  findExternalStepDocumentNames,
+  getStepDocumentBasename,
+  type StepImportReviewFileInput,
+  type StepImportReviewResolvedSource,
+  type StepImportReviewResult,
+  type StepImportDiagnosticCode,
+  type StepImportFeatureParameters,
+  type StepImportSourceAssetReference,
+} from '@/contracts/modeling/step-import'
 import type { MeshImportDiagnosticCode, MeshImportFeatureParameters } from '@/contracts/modeling/mesh-import'
 import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
@@ -450,9 +461,25 @@ function isOccDoneStatus(status: unknown) {
     && (status as { value: unknown }).value === 1
 }
 
-function createStepImportErrorCode(code: StepImportDiagnosticCode, message: string) {
-  const error = new Error(`${code}: ${message}`) as Error & { code: StepImportDiagnosticCode }
+function createStepImportErrorCode(
+  code: StepImportDiagnosticCode,
+  message: string,
+  detail: {
+    documentName?: string
+    selectedFileName?: string
+    solidKey?: string
+  } = {},
+) {
+  const error = new Error(`${code}: ${message}`) as Error & {
+    code: StepImportDiagnosticCode
+    documentName?: string
+    selectedFileName?: string
+    solidKey?: string
+  }
   error.code = code
+  error.documentName = detail.documentName
+  error.selectedFileName = detail.selectedFileName
+  error.solidKey = detail.solidKey
   return error
 }
 
@@ -464,6 +491,36 @@ function createMeshImportErrorCode(code: MeshImportDiagnosticCode, message: stri
 
 function createTempStepImportPath(asset: GeometryAssetRecord) {
   return `/cadara-import-${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}.step`
+}
+
+function escapeStepString(value: string) {
+  return value.replaceAll("'", "''")
+}
+
+function createTempStepImportPathForDocument(rootKey: string, documentName: string) {
+  const safeName = getStepDocumentBasename(documentName).replace(/[^a-z0-9._-]/gi, '_') || 'source.step'
+  return `/cadara-import-${rootKey}-${safeName}`
+}
+
+function rewriteStepDocumentReferences(
+  bytes: Uint8Array,
+  documentPathByName: ReadonlyMap<string, string>,
+) {
+  if (documentPathByName.size === 0) {
+    return bytes
+  }
+
+  const text = new TextDecoder().decode(bytes)
+  const rewritten = text.replace(
+    /DOCUMENT_FILE\s*\(\s*'((?:[^']|'')*)'/gi,
+    (match, encodedName: string) => {
+      const name = encodedName.replaceAll("''", "'").trim()
+      const replacement = documentPathByName.get(getStepDocumentBasename(name))
+      return replacement ? match.replace(`'${encodedName}'`, `'${escapeStepString(replacement)}'`) : match
+    },
+  )
+
+  return new TextEncoder().encode(rewritten)
 }
 
 function createTempMeshImportPath(asset: GeometryAssetRecord) {
@@ -490,9 +547,221 @@ function findMeshImportAsset(
   return context.assets.records.find((asset) => asset.assetId === parameters.assetId && asset.format === 'baked-mesh') ?? null
 }
 
+function transferStepImportRoots(
+  reader: InstanceType<OpenCascadeInstance['STEPControl_Reader_1']>,
+  progress: InstanceType<OpenCascadeInstance['Message_ProgressRange_1']>,
+) {
+  const rootCount = reader.NbRootsForTransfer()
+  let transferredRoots = 0
+
+  for (let rootIndex = 1; rootIndex <= rootCount; rootIndex += 1) {
+    if (reader.TransferRoot(rootIndex, progress)) {
+      transferredRoots += 1
+    }
+  }
+
+  if (reader.NbShapes() > 0) {
+    return transferredRoots
+  }
+
+  reader.ClearShapes()
+  return reader.TransferRoots(progress)
+}
+
+function formatExternalStepDocumentNames(names: readonly string[]) {
+  const visibleNames = names.slice(0, 3).join(', ')
+  const remainingCount = names.length - 3
+
+  return remainingCount > 0
+    ? `${visibleNames}, and ${remainingCount} more`
+    : visibleNames
+}
+
+function createDefaultStepSolidLabel(documentName: string, solidOrdinal: number, solidCount: number) {
+  const baseName = documentName.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
+  const labelBase = baseName && baseName.length > 0 ? baseName : 'STEP Solid'
+  return solidCount === 1 ? labelBase : `${labelBase} ${solidOrdinal}`
+}
+
+function resolveReviewStepFiles(files: readonly StepImportReviewFileInput[]) {
+  const rootFile = files[0] ?? null
+  const diagnostics: ModelingDiagnostic[] = []
+  if (!rootFile) {
+    diagnostics.push(createStepImportDiagnostic(
+      'step-import-empty-selection',
+      'Select at least one STEP file to import.',
+    ))
+    return { rootFile, referencedDocumentNames: [], resolvedSources: [], diagnostics }
+  }
+
+  const referencedDocumentNames = findExternalStepDocumentNames(rootFile.bytes)
+  const resolvedSources: StepImportReviewResolvedSource[] = [
+    {
+      role: 'root',
+      fileName: rootFile.fileName,
+      documentName: rootFile.fileName,
+    },
+  ]
+
+  for (const documentName of referencedDocumentNames) {
+    const basename = getStepDocumentBasename(documentName)
+    const matches = files.slice(1).filter((file) => getStepDocumentBasename(file.fileName) === basename)
+    if (matches.length === 0) {
+      diagnostics.push(createStepImportDiagnostic(
+        'step-import-missing-reference',
+        `STEP reference ${documentName} was not included in the selected files.`,
+        { documentName, severity: 'warning' },
+      ))
+      continue
+    }
+    if (matches.length > 1) {
+      diagnostics.push(createStepImportDiagnostic(
+        'step-import-ambiguous-reference',
+        `STEP reference ${documentName} matches multiple selected files.`,
+        { documentName },
+      ))
+      continue
+    }
+
+    resolvedSources.push({
+      role: 'referenced',
+      fileName: matches[0]!.fileName,
+      documentName,
+    })
+  }
+
+  return {
+    rootFile,
+    referencedDocumentNames,
+    resolvedSources,
+    diagnostics,
+  }
+}
+
+export function prepareStepImportReviewWithOpenCascade(
+  oc: OpenCascadeInstance,
+  files: readonly StepImportReviewFileInput[],
+): StepImportReviewResult {
+  const resolved = resolveReviewStepFiles(files)
+  if (!resolved.rootFile || resolved.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+    return {
+      rootFileName: resolved.rootFile?.fileName ?? '',
+      referencedDocumentNames: resolved.referencedDocumentNames,
+      resolvedSources: resolved.resolvedSources,
+      solids: [],
+      diagnostics: resolved.diagnostics,
+    }
+  }
+
+  const rootKey = `review-${Date.now()}-${Math.floor(Math.random() * 100000)}`
+  const pathByFileName = new Map<string, string>()
+  const pathByDocumentName = new Map<string, string>()
+  const writtenPaths: string[] = []
+  for (const source of resolved.resolvedSources) {
+    const path = createTempStepImportPathForDocument(rootKey, source.documentName)
+    pathByFileName.set(source.fileName, path)
+    pathByDocumentName.set(getStepDocumentBasename(source.documentName), path)
+  }
+
+  const reader = new oc.STEPControl_Reader_1()
+  const progress = new oc.Message_ProgressRange_1()
+  try {
+    for (const source of resolved.resolvedSources) {
+      const file = files.find((entry) => entry.fileName === source.fileName)
+      const path = pathByFileName.get(source.fileName)
+      if (!file || !path) {
+        continue
+      }
+      const bytes = source.role === 'root'
+        ? rewriteStepDocumentReferences(file.bytes, pathByDocumentName)
+        : file.bytes
+      oc.FS.writeFile(path, bytes)
+      writtenPaths.push(path)
+    }
+
+    const rootPath = pathByFileName.get(resolved.rootFile.fileName)
+    if (!rootPath) {
+      throw new Error('STEP review root path was not prepared.')
+    }
+
+    const readStatus = reader.ReadFile(rootPath)
+    if (!isOccDoneStatus(readStatus)) {
+      return {
+        rootFileName: resolved.rootFile.fileName,
+        referencedDocumentNames: resolved.referencedDocumentNames,
+        resolvedSources: resolved.resolvedSources,
+        solids: [],
+        diagnostics: [
+          ...resolved.diagnostics,
+          createStepImportDiagnostic(
+            'step-import-unreadable-file',
+            `STEP file ${resolved.rootFile.fileName} could not be read.`,
+            { sourceName: resolved.rootFile.fileName },
+          ),
+        ],
+      }
+    }
+
+    const transferredRoots = transferStepImportRoots(reader, progress)
+    if (transferredRoots <= 0 || reader.NbShapes() <= 0) {
+      return {
+        rootFileName: resolved.rootFile.fileName,
+        referencedDocumentNames: resolved.referencedDocumentNames,
+        resolvedSources: resolved.resolvedSources,
+        solids: [],
+        diagnostics: [
+          ...resolved.diagnostics,
+          createStepImportDiagnostic(
+            'step-import-unsupported-structure',
+            `STEP file ${resolved.rootFile.fileName} contains no transferable shape roots.`,
+            { sourceName: resolved.rootFile.fileName },
+          ),
+        ],
+      }
+    }
+
+    const shape = reader.OneShape()
+    const solids = extractSolidShapes(oc, shape)
+    return {
+      rootFileName: resolved.rootFile.fileName,
+      referencedDocumentNames: resolved.referencedDocumentNames,
+      resolvedSources: resolved.resolvedSources,
+      solids: solids.map((_solid, index) => {
+        const solidOrdinal = index + 1
+        return {
+          solidKey: createStepSolidKey({
+            documentName: resolved.rootFile!.fileName,
+            solidOrdinal,
+          }),
+          label: createDefaultStepSolidLabel(resolved.rootFile!.fileName, solidOrdinal, solids.length),
+          sourceFileName: resolved.rootFile!.fileName,
+          documentName: resolved.rootFile!.fileName,
+          importable: true,
+        }
+      }),
+      diagnostics: solids.length === 0
+        ? [
+            ...resolved.diagnostics,
+            createStepImportDiagnostic(
+              'step-import-no-solids',
+              `STEP file ${resolved.rootFile.fileName} does not contain supported solid bodies.`,
+              { sourceName: resolved.rootFile.fileName },
+            ),
+          ]
+        : resolved.diagnostics,
+    }
+  } finally {
+    for (const path of writtenPaths) {
+      removeTempImportPath(oc, path)
+    }
+    reader.delete()
+  }
+}
+
 function readStepImportShape(
   context: OccFeatureExecutionContext,
   asset: GeometryAssetRecord,
+  parameters: StepImportFeatureParameters,
 ) {
   const bytes = context.assetBlobs.get(asset.hash)
   if (!bytes) {
@@ -500,18 +769,68 @@ function readStepImportShape(
   }
 
   const oc = context.oc
-  const path = createTempStepImportPath(asset)
+  const sourceFiles = parameters.sourceFiles
+  const rootSource = sourceFiles?.find((source) => source.role === 'root' && source.assetId === asset.assetId)
+  const rootDocumentName = rootSource?.documentName ?? asset.provenance.stepDocumentName ?? asset.provenance.sourceName ?? `${asset.assetId}.step`
+  const path = sourceFiles
+    ? createTempStepImportPathForDocument(`${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}`, rootDocumentName)
+    : createTempStepImportPath(asset)
   const reader = new oc.STEPControl_Reader_1()
   const progress = new oc.Message_ProgressRange_1()
+  const writtenPaths: string[] = []
 
   try {
-    oc.FS.writeFile(path, bytes)
+    if (sourceFiles) {
+      const documentPathByName = new Map<string, string>()
+      const sourceAssetById = new Map(context.assets.records.map((sourceAsset) => [sourceAsset.assetId, sourceAsset]))
+      const resolvedSources: Array<{
+        source: StepImportSourceAssetReference
+        asset: GeometryAssetRecord
+        bytes: Uint8Array
+        path: string
+      }> = []
+
+      for (const source of sourceFiles) {
+        const sourceAsset = sourceAssetById.get(source.assetId)
+        if (!sourceAsset || sourceAsset.format !== 'step') {
+          throw createStepImportErrorCode(
+            'step-import-missing-reference',
+            `STEP reference ${source.documentName} is not in the authored document manifest.`,
+          )
+        }
+        const sourceBytes = context.assetBlobs.get(sourceAsset.hash)
+        if (!sourceBytes) {
+          throw createStepImportErrorCode(
+            source.role === 'root' ? 'step-import-missing-asset' : 'step-import-unreadable-referenced-file',
+            `STEP reference ${source.documentName} bytes are missing.`,
+          )
+        }
+
+        const sourcePath = source.role === 'root'
+          ? path
+          : createTempStepImportPathForDocument(`${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}`, source.documentName)
+        documentPathByName.set(getStepDocumentBasename(source.documentName), sourcePath)
+        resolvedSources.push({ source, asset: sourceAsset, bytes: sourceBytes, path: sourcePath })
+      }
+
+      for (const resolved of resolvedSources) {
+        const nextBytes = resolved.source.role === 'root'
+          ? rewriteStepDocumentReferences(resolved.bytes, documentPathByName)
+          : resolved.bytes
+        oc.FS.writeFile(resolved.path, nextBytes)
+        writtenPaths.push(resolved.path)
+      }
+    } else {
+      oc.FS.writeFile(path, bytes)
+      writtenPaths.push(path)
+    }
+
     const readStatus = reader.ReadFile(path)
     if (!isOccDoneStatus(readStatus)) {
       throw createStepImportErrorCode('step-import-unreadable-file', `STEP asset ${asset.assetId} could not be read.`)
     }
 
-    const transferredRoots = reader.TransferRoots(progress)
+    const transferredRoots = transferStepImportRoots(reader, progress)
     if (transferredRoots <= 0 || reader.NbShapes() <= 0) {
       throw createStepImportErrorCode('step-import-unsupported-structure', `STEP asset ${asset.assetId} contains no transferable shape roots.`)
     }
@@ -519,9 +838,13 @@ function readStepImportShape(
     return {
       shape: reader.OneShape(),
       topLevelShapeCount: reader.NbShapes(),
+      externalDocumentNames: findExternalStepDocumentNames(bytes),
+      rootDocumentName,
     }
   } finally {
-    removeTempImportPath(oc, path)
+    for (const writtenPath of writtenPaths) {
+      removeTempImportPath(oc, writtenPath)
+    }
     reader.delete()
   }
 }
@@ -627,20 +950,62 @@ function executeStepImportFeature(
     throw createStepImportErrorCode('step-import-missing-asset', `STEP import asset ${parameters.assetId} is not in the authored document manifest.`)
   }
 
-  const imported = readStepImportShape(context, asset)
+  const imported = readStepImportShape(context, asset, parameters)
   const solids = extractSolidShapes(context.oc, imported.shape)
   if (solids.length === 0) {
+    if (imported.externalDocumentNames.length > 0) {
+      throw createStepImportErrorCode(
+        'step-import-no-solids',
+        `STEP asset ${asset.assetId} references external STEP files (${formatExternalStepDocumentNames(imported.externalDocumentNames)}) but contains no embedded solid bodies.`,
+      )
+    }
+
     throw createStepImportErrorCode('step-import-no-solids', `STEP asset ${asset.assetId} does not contain supported solid bodies.`)
   }
 
-  const bodies = solids.map((solid, index) => {
-    const transformed = applyStepImportTransforms(context, solid, parameters)
-    const bodyId = solids.length === 1
+  const discoveredSolids = solids.map((solid, index) => {
+    const solidOrdinal = index + 1
+    return {
+      solid,
+      solidKey: createStepSolidKey({
+        documentName: imported.rootDocumentName,
+        solidOrdinal,
+      }),
+      label: createDefaultStepSolidLabel(imported.rootDocumentName, solidOrdinal, solids.length),
+    }
+  })
+
+  const selectedByKey = new Map(parameters.selectedSolids?.map((solid) => [solid.solidKey, solid]) ?? [])
+  const solidsToImport = parameters.selectedSolids
+    ? discoveredSolids.filter((solid) => selectedByKey.has(solid.solidKey))
+    : discoveredSolids
+
+  if (parameters.selectedSolids && parameters.selectedSolids.length === 0) {
+    throw createStepImportErrorCode(
+      'step-import-empty-selection',
+      'STEP import cannot commit an empty solid selection.',
+    )
+  }
+
+  if (parameters.selectedSolids) {
+    const discoveredKeys = new Set(discoveredSolids.map((solid) => solid.solidKey))
+    const missingSelection = parameters.selectedSolids.find((solid) => !discoveredKeys.has(solid.solidKey))
+    if (missingSelection) {
+      throw createStepImportErrorCode(
+        'step-import-stale-selected-solid',
+        `STEP selected solid ${missingSelection.solidKey} is no longer present.`,
+        { solidKey: missingSelection.solidKey },
+      )
+    }
+  }
+
+  const bodies = solidsToImport.map((entry, index) => {
+    const selected = selectedByKey.get(entry.solidKey)
+    const transformed = applyStepImportTransforms(context, entry.solid, parameters)
+    const bodyId = solidsToImport.length === 1
       ? `body_${ownerFeatureId}` as BodyId
       : `body_${ownerFeatureId}_${index + 1}` as BodyId
-    const label = solids.length === 1
-      ? parameters.label
-      : `${parameters.label} ${index + 1}`
+    const label = selected?.label ?? (solidsToImport.length === 1 ? parameters.label : `${parameters.label} ${index + 1}`)
 
     return trackNewSolidBody(context.oc, {
       bodyId,

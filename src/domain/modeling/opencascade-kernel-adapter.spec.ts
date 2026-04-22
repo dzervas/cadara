@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
 import { strFromU8, unzipSync } from 'fflate'
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
@@ -87,6 +88,7 @@ import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 import { toGpPnt } from '@/domain/modeling/occ/geometry'
 import { createBakedMeshGeometryAsset } from '@/domain/modeling/baked-mesh-geometry'
 import type { MeshTriangle } from '@/domain/modeling/mesh-parser'
+import { createStepSolidKey } from '@/contracts/modeling/step-import'
 
 test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -1073,6 +1075,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       label: string
       fileName: string
       payload: string
+      selectedSolidKeys?: readonly string[]
     },
   ) {
     const bytes = new TextEncoder().encode(input.payload)
@@ -1087,7 +1090,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       provenance: {
         kind: 'imported',
         sourceName: input.fileName,
+        selectedFileName: input.fileName,
+        stepDocumentName: input.fileName,
         sourceHash: hash,
+        sourceFormat: 'step',
       },
       ownerFeatureIds: [input.featureId],
     }
@@ -1119,6 +1125,23 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
                 scale: 1,
               },
               label: input.label,
+              ...(input.selectedSolidKeys
+                ? {
+                    sourceFiles: [
+                      {
+                        role: 'root' as const,
+                        assetId: asset.assetId,
+                        selectedFileName: input.fileName,
+                        documentName: input.fileName,
+                      },
+                    ],
+                    selectedSolids: input.selectedSolidKeys.map((solidKey) => ({
+                      solidKey,
+                      label: `${input.label} selection`,
+                      sourceAssetId: asset.assetId,
+                    })),
+                  }
+                : {}),
             },
           },
         },
@@ -1903,6 +1926,48 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testStepImportTransfersAssemblyRootWhenAggregateCountIsZero() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_stepImport-external-assembly' as FeatureId
+    const samplePayload = new TextDecoder().decode(await readFile('Windows 98 Theme Progress Bar pp1425198.step'))
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'External assembly',
+      fileName: 'Windows 98 Theme Progress Bar pp1425198.step',
+      payload: samplePayload,
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(
+      imported.document,
+      [],
+      createStepAssetResolver(imported.asset, imported.bytes),
+    )
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+
+    assert(
+      !snapshot.document.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'step-import-unsupported-structure'
+        && diagnostic.message.includes('contains no transferable shape roots'),
+      ),
+      'STEP import should not reject transferable assembly roots because aggregate transfer returned zero.',
+    )
+    assert(
+      snapshot.document.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'step-import-no-solids'
+        && diagnostic.featureId === featureId
+        && diagnostic.message.includes('references external STEP files')
+        && diagnostic.message.includes('contains no embedded solid bodies')
+        && diagnostic.detail?.kind === 'stepImport'
+        && diagnostic.detail.assetId === imported.asset.assetId,
+      ),
+      'Assembly STEP files with no embedded solids should reach the no-solids diagnostic after root transfer.',
+    )
+  }
+
   async function testStepImportRestoresMultipleSupportedSolids() {
     const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
     const featureId = 'feature_stepImport-1' as FeatureId
@@ -1937,6 +2002,89 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
         && body.topology.vertexIds.length > 0,
       ),
       'Every imported STEP body should expose selectable topology refs.',
+    )
+  }
+
+  async function testStepImportReviewKeepsEmbeddedSolidsWithMissingReferences() {
+    const adapter = createAdapter()
+    const payloadText = await createTwoSolidStepPayload()
+    const payloadWithMissingReference = `${payloadText}\n#999999=DOCUMENT_FILE('missing.step','',(),(),(),());\n`
+
+    const review = await adapter.prepareStepImportReview([
+      { fileName: 'multi-body.step', bytes: new TextEncoder().encode(payloadWithMissingReference) },
+    ])
+
+    const missingReference = review.diagnostics.find((diagnostic) => diagnostic.code === 'step-import-missing-reference')
+    assert(missingReference?.severity === 'warning', 'STEP review should warn about unresolved external references.')
+    assert(
+      !review.diagnostics.some((diagnostic) => diagnostic.severity === 'error'),
+      'Unresolved external STEP references should not block embedded solid review.',
+    )
+    assert(review.solids.length === 2, 'STEP review should still expose embedded solids from the selected file.')
+  }
+
+  async function testStepImportRestoresSelectedSolidSubset() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_stepImport-selected-subset' as FeatureId
+    const fileName = 'multi-body.step'
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'Selected body',
+      fileName,
+      payload: await createTwoSolidStepPayload(),
+      selectedSolidKeys: [createStepSolidKey({ documentName: fileName, solidOrdinal: 2 })],
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(
+      imported.document,
+      [],
+      createStepAssetResolver(imported.asset, imported.bytes),
+    )
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const importedBodies = snapshot.bodies.filter((body) => body.ownerFeatureId === featureId)
+
+    assert(importedBodies.length === 1, 'STEP import should rebuild only selected solid keys.')
+    assert(importedBodies[0]?.label === 'Selected body selection', 'STEP import should use the selected solid label.')
+  }
+
+  async function testStepImportReportsStaleSelectedSolidKey() {
+    const sourceDocument = await createAdapter().exportAuthoredModelDocument('doc_workspace')
+    const featureId = 'feature_stepImport-stale-selection' as FeatureId
+    const imported = await createStepImportDocumentFromPayload(sourceDocument, {
+      featureId,
+      label: 'Stale body',
+      fileName: 'multi-body.step',
+      payload: await createTwoSolidStepPayload(),
+      selectedSolidKeys: ['multi-body.step#solid-99'],
+    })
+    const adapter = createAdapter()
+
+    await adapter.restoreAuthoredModelDocument(
+      imported.document,
+      [],
+      createStepAssetResolver(imported.asset, imported.bytes),
+    )
+    const snapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+
+    assert(
+      snapshot.document.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'step-import-stale-selected-solid'
+        && diagnostic.featureId === featureId
+        && diagnostic.detail?.kind === 'stepImport'
+        && diagnostic.detail.solidKey === 'multi-body.step#solid-99',
+      ),
+      'STEP import should report stale selected solid keys as structured diagnostics.',
+    )
+    assert(
+      snapshot.bodies.every((body) => body.ownerFeatureId !== featureId),
+      'STEP import with stale selected solid keys should not silently import replacement bodies.',
     )
   }
 
@@ -5408,7 +5556,11 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testStepExportImportPreservesComplexFilletedChamferedVolume()
   await testStepImportReportsMissingAssetBytes()
   await testStepImportReportsUnsupportedStepFiles()
+  await testStepImportTransfersAssemblyRootWhenAggregateCountIsZero()
   await testStepImportRestoresMultipleSupportedSolids()
+  await testStepImportReviewKeepsEmbeddedSolidsWithMissingReferences()
+  await testStepImportRestoresSelectedSolidSubset()
+  await testStepImportReportsStaleSelectedSolidKey()
   await testOccGeometryExportsRejectInvalidTargets()
 
   console.log('OCC phase 8 adapter tests passed.')

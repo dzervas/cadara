@@ -827,6 +827,98 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
+  async function testPreparedMultiFileStepImportStoresSourceAssetSet() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const encoder = new TextEncoder()
+    const rootBytes = encoder.encode("ISO-10303-21;\n#1=DOCUMENT_FILE('part.step','',(),(),(),());\nEND-ISO-10303-21;\n")
+    const partBytes = encoder.encode('ISO-10303-21;\nEND-ISO-10303-21;\n')
+    const files = [
+      { fileName: 'assembly.step', bytes: rootBytes },
+      { fileName: 'part.step', bytes: partBytes },
+    ]
+
+    const review = await service.prepareStepImportReview({ files })
+    assert(review.diagnostics.length === 0, 'Prepared STEP review should resolve the selected referenced STEP file.')
+    assert(review.resolvedSources.length === 2, 'Prepared STEP review should keep root and referenced source records.')
+
+    const result = await service.commitPreparedStepImport({
+      files,
+      review,
+      selectedSolidKeys: [review.solids[0]!.solidKey],
+    })
+
+    assert(result.ok, 'Prepared multi-file STEP import should commit an authored document mutation.')
+    const savedDocument = documentRepository.savedDocuments.at(-1)
+    const feature = savedDocument?.features.find((entry) => entry.definition.kind === 'stepImport')
+    assert(savedDocument, 'Prepared STEP import should persist the authored document.')
+    assert(feature?.definition.kind === 'stepImport', 'Prepared STEP import should persist a STEP import feature.')
+    assert(savedDocument.assets.records.length === 2, 'Prepared STEP import should retain root and referenced STEP assets.')
+    assert(
+      savedDocument.assets.records.some((asset) =>
+        asset.provenance.selectedFileName === 'part.step' && asset.provenance.stepDocumentName === 'part.step',
+      ),
+      'Referenced STEP asset provenance should preserve selected and STEP document names.',
+    )
+    assert(
+      feature.definition.parameters.sourceFiles?.length === 2,
+      'Prepared STEP feature parameters should record the retained source file set.',
+    )
+    assert(
+      feature.definition.parameters.selectedSolids?.[0]?.solidKey === review.solids[0]!.solidKey,
+      'Prepared STEP feature parameters should record selected solid intent.',
+    )
+
+    const exportResult = await service.exportCurrentDocument()
+    assert(exportResult.payload instanceof Uint8Array, 'Current document export should package prepared STEP imports.')
+    assert(
+      parseCadaraPayload(exportResult.payload).assets.length === 2,
+      'Cadara package export should include every retained STEP source asset.',
+    )
+
+    const reopenedRepository = createMemoryDocumentRepository()
+    const reopenedService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository: reopenedRepository,
+    })
+    const reopenResult = await reopenedService.importDocument({ document: parseCadaraPayload(exportResult.payload) })
+    assert(reopenResult.ok, 'Packaged multi-file STEP imports should reopen without original local files.')
+    assert(
+      reopenedRepository.savedDocuments.at(-1)?.assets.records.length === 2,
+      'Reopened multi-file STEP import should preserve packaged source asset records.',
+    )
+  }
+
+  async function testPreparedStepImportReportsMissingSiblingAsWarning() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const rootBytes = new TextEncoder().encode("ISO-10303-21;\n#1=DOCUMENT_FILE('missing.step','',(),(),(),());\nEND-ISO-10303-21;\n")
+
+    const review = await service.prepareStepImportReview({
+      files: [{ fileName: 'assembly.step', bytes: rootBytes }],
+    })
+
+    const missingReference = review.diagnostics.find((diagnostic) => diagnostic.code === 'step-import-missing-reference')
+    assert(missingReference?.severity === 'warning', 'Prepared STEP review should warn about missing referenced STEP files.')
+    assert(
+      !review.diagnostics.some((diagnostic) => diagnostic.severity === 'error'),
+      'Missing referenced STEP files should not block review of the selected STEP file.',
+    )
+    assert(review.solids.length === 1, 'Prepared STEP review should still expose importable solids from the selected STEP file.')
+    assert(
+      documentRepository.savedDocuments.every((document) =>
+        document.features.every((feature) => feature.definition.kind !== 'stepImport'),
+      ),
+      'STEP review preparation should not commit a partial STEP import feature.',
+    )
+  }
+
   async function testMeshFileImportStoresOnlyGeneratedBakedAsset() {
     const documentRepository = createMemoryDocumentRepository()
     const service = createModelingService(new MockKernelAdapter(), {
@@ -1146,6 +1238,8 @@ endsolid open
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
   await testStepFileImportStoresSourceBytesAsFeatureAsset()
+  await testPreparedMultiFileStepImportStoresSourceAssetSet()
+  await testPreparedStepImportReportsMissingSiblingAsWarning()
   await testMeshFileImportStoresOnlyGeneratedBakedAsset()
   await testPreparedMeshFileImportStoresGeneratedAssetBytes()
   await testPreparedMeshRestoreFailureDoesNotPersistPreparedDocument()

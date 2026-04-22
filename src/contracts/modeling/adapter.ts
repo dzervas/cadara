@@ -37,6 +37,7 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
+import type { StepImportReviewFileInput, StepImportReviewResult } from '@/contracts/modeling/step-import'
 
 export interface GeometryAssetResolver {
   getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>
@@ -65,6 +66,8 @@ export interface ModelingKernelAdapter {
   ): Promise<void>
   /** Exports the complete authored document state, including history after the active cursor. */
   exportAuthoredModelDocument?(documentId: AuthoredDocument['documentId']): Promise<AuthoredDocument>
+  /** Prepares a STEP import review without mutating authored document history. */
+  prepareStepImportReview?(files: readonly StepImportReviewFileInput[]): Promise<StepImportReviewResult>
   /** Returns the authoritative typed snapshot for the requested document. */
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */

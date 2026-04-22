@@ -21,6 +21,8 @@ export type GeometryAssetDiagnosticCode =
 export interface GeometryAssetProvenance {
   kind: GeometryAssetProvenanceKind
   sourceName?: string
+  selectedFileName?: string
+  stepDocumentName?: string
   sourceHash?: GeometryAssetHash
   sourceFormat?: 'step' | 'stl' | '3mf'
   sourceStored?: false

@@ -51,6 +51,8 @@ import {
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import {
   createStepImportDiagnostic,
+  type StepImportReviewFileInput,
+  type StepImportReviewResult,
   type StepImportDiagnosticCode,
 } from '@/contracts/modeling/step-import'
 import {
@@ -96,6 +98,7 @@ import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
+import { prepareStepImportReviewWithOpenCascade } from '@/domain/modeling/occ/features'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { OccWorkerSnapshotClient } from '@/domain/modeling/occ/worker-client'
 import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
@@ -168,6 +171,11 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   'step-import-unsupported-structure',
   'step-import-no-solids',
   'step-import-missing-asset',
+  'step-import-missing-reference',
+  'step-import-ambiguous-reference',
+  'step-import-unreadable-referenced-file',
+  'step-import-stale-selected-solid',
+  'step-import-empty-selection',
   'mesh-import-missing-baked-asset',
   'mesh-import-conversion-failed',
 ])
@@ -176,6 +184,11 @@ const STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<StepImportDiagnosticCode>([
   'step-import-unsupported-structure',
   'step-import-no-solids',
   'step-import-missing-asset',
+  'step-import-missing-reference',
+  'step-import-ambiguous-reference',
+  'step-import-unreadable-referenced-file',
+  'step-import-stale-selected-solid',
+  'step-import-empty-selection',
 ])
 const MESH_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<MeshImportDiagnosticCode>([
   'mesh-import-missing-baked-asset',
@@ -388,14 +401,23 @@ function createRebuildFailureDiagnostic(
   affectedFeatureIds: FeatureId[],
   affectedTargets: NonNullable<ModelingDiagnostic['target']>[],
   feature?: OccAuthoringFeatureRecord,
+  error?: unknown,
 ): ModelingDiagnostic {
   if (feature?.definition.kind === 'stepImport' && STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES.has(code as StepImportDiagnosticCode)) {
+    const stepError = error as Partial<{
+      documentName: string
+      selectedFileName: string
+      solidKey: string
+    }>
     return createStepImportDiagnostic(
       code as StepImportDiagnosticCode,
       message.replace(new RegExp(`^${code}:\\s*`), ''),
       {
         assetId: feature.definition.parameters.assetId,
         featureId: feature.featureId,
+        documentName: stepError?.documentName,
+        selectedFileName: stepError?.selectedFileName,
+        solidKey: stepError?.solidKey,
       },
     )
   }
@@ -1227,6 +1249,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return this.getRuntimeState().then(() => undefined)
   }
 
+  async prepareStepImportReview(files: readonly StepImportReviewFileInput[]): Promise<StepImportReviewResult> {
+    const oc = await this.loadOpenCascadeInstance()
+    return prepareStepImportReviewWithOpenCascade(oc, files)
+  }
+
   setSnapshotLodTier(tierId: OccTessellationTierId) {
     if (this.snapshotLodTierId === tierId) {
       return false
@@ -1895,6 +1922,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           [feature.featureId],
           uniqueTargets(consumedTargets),
           feature,
+          error,
         ))
         failedFeatures.push(createFailedFeatureRecord(feature))
       }

@@ -109,7 +109,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     watch: {
-      ignored: ['/e2e', '/tmp-*', '/.tmp*', '**/Dockerfile*', '**/.*', '/openspec']
+      ignored: ['/e2e', '/tmp-*', '/.tmp*', '**/Dockerfile*', '**/.*', '/openspec', '**/*.spec.ts']
     }
   },
 })

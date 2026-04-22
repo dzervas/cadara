@@ -215,6 +215,14 @@ import {
   type MeshImportFeatureParameters,
   type MeshImportSourceFormat,
 } from '@/contracts/modeling/mesh-import'
+import {
+  createStepImportDiagnostic,
+  createStepSolidKey,
+  findExternalStepDocumentNames,
+  getStepDocumentBasename,
+  type StepImportReviewFileInput,
+  type StepImportReviewResult,
+} from '@/contracts/modeling/step-import'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -238,6 +246,8 @@ export interface ModelingService {
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
+  prepareStepImportReview(input: ModelingPrepareStepImportReviewInput): Promise<StepImportReviewResult>
+  commitPreparedStepImport(input: ModelingCommitPreparedStepImportInput): Promise<ModelingDocumentFileMutationResult>
   importStepFile(input: ModelingImportStepFileInput): Promise<ModelingDocumentFileMutationResult>
   importMeshFile(input: ModelingImportMeshFileInput): Promise<ModelingDocumentFileMutationResult>
   importPreparedMeshFile(input: ModelingImportPreparedMeshFileInput): Promise<ModelingDocumentFileMutationResult>
@@ -405,6 +415,16 @@ export type ModelingExportDocumentResult = DocumentExportResult
 export interface ModelingImportDocumentInput {
   document: unknown
   assets?: readonly GeometryAssetBlobInput[]
+}
+
+export interface ModelingPrepareStepImportReviewInput {
+  files: readonly StepImportReviewFileInput[]
+}
+
+export interface ModelingCommitPreparedStepImportInput {
+  files: readonly StepImportReviewFileInput[]
+  review: StepImportReviewResult
+  selectedSolidKeys: readonly string[]
 }
 
 export interface ModelingImportStepFileInput {
@@ -1262,7 +1282,7 @@ function normalizeStepImportFeatureParameters(
     throw new Error('Invalid STEP import feature parameters payload.')
   }
 
-  return {
+  const normalized: Extract<FeatureDefinition, { kind: 'stepImport' }>['parameters'] = {
     assetId: assertGeometryAssetId(value.assetId),
     unit: {
       source: value.unit.source === 'user' ? 'user' : 'file',
@@ -1285,6 +1305,44 @@ function normalizeStepImportFeatureParameters(
       scale: typeof value.placement.scale === 'number' && value.placement.scale > 0 ? value.placement.scale : 1,
     },
     label: value.label.trim(),
+  }
+
+  if (!Array.isArray(value.sourceFiles) && !Array.isArray(value.selectedSolids)) {
+    return normalized
+  }
+
+  if (!Array.isArray(value.sourceFiles) || !Array.isArray(value.selectedSolids)) {
+    throw new Error('Invalid multi-file STEP import feature parameters payload.')
+  }
+
+  const sourceFiles = value.sourceFiles.map((sourceFile) => {
+    if (!isRecord(sourceFile) || !isString(sourceFile.selectedFileName) || !isString(sourceFile.documentName)) {
+      throw new Error('Invalid multi-file STEP source file payload.')
+    }
+
+    return {
+      role: sourceFile.role === 'root' ? 'root' as const : 'referenced' as const,
+      assetId: assertGeometryAssetId(sourceFile.assetId),
+      selectedFileName: sourceFile.selectedFileName.trim(),
+      documentName: sourceFile.documentName.trim(),
+    }
+  })
+  const selectedSolids = value.selectedSolids.map((solid) => {
+    if (!isRecord(solid) || !isString(solid.solidKey) || !isString(solid.label)) {
+      throw new Error('Invalid multi-file STEP selected solid payload.')
+    }
+
+    return {
+      solidKey: solid.solidKey.trim(),
+      label: solid.label.trim(),
+      sourceAssetId: assertGeometryAssetId(solid.sourceAssetId),
+    }
+  })
+
+  return {
+    ...normalized,
+    sourceFiles,
+    selectedSolids,
   }
 }
 
@@ -4836,10 +4894,79 @@ export function createModelingService(
     return `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}` as GeometryAssetId
   }
 
+  function createMultiFileStepImportAssetId(hash: GeometryAssetHash, index: number): GeometryAssetId {
+    return `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}_${index + 1}` as GeometryAssetId
+  }
+
   function createStepImportLabel(fileName: string) {
     const trimmed = fileName.trim()
     const baseName = trimmed.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
     return baseName && baseName.length > 0 ? baseName : 'STEP Import'
+  }
+
+  function createFallbackStepImportReview(files: readonly StepImportReviewFileInput[]): StepImportReviewResult {
+    const rootFile = files[0]
+    if (!rootFile) {
+      return {
+        rootFileName: '',
+        referencedDocumentNames: [],
+        resolvedSources: [],
+        solids: [],
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-empty-selection',
+            'Select at least one STEP file to import.',
+          ),
+        ],
+      }
+    }
+
+    const referencedDocumentNames = findExternalStepDocumentNames(rootFile.bytes)
+    const diagnostics: ModelingDiagnostic[] = []
+    const resolvedSources: Array<StepImportReviewResult['resolvedSources'][number]> = [
+      { role: 'root', fileName: rootFile.fileName, documentName: rootFile.fileName },
+    ]
+
+    for (const documentName of referencedDocumentNames) {
+      const matches = files.slice(1).filter((file) =>
+        getStepDocumentBasename(file.fileName) === getStepDocumentBasename(documentName),
+      )
+      if (matches.length === 0) {
+        diagnostics.push(createStepImportDiagnostic(
+          'step-import-missing-reference',
+          `STEP reference ${documentName} was not included in the selected files.`,
+          { documentName, severity: 'warning' },
+        ))
+        continue
+      }
+      if (matches.length > 1) {
+        diagnostics.push(createStepImportDiagnostic(
+          'step-import-ambiguous-reference',
+          `STEP reference ${documentName} matches multiple selected files.`,
+          { documentName },
+        ))
+        continue
+      }
+      resolvedSources.push({ role: 'referenced', fileName: matches[0]!.fileName, documentName })
+    }
+
+    return {
+      rootFileName: rootFile.fileName,
+      referencedDocumentNames,
+      resolvedSources,
+      solids: diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+        ? []
+        : [
+            {
+              solidKey: createStepSolidKey({ documentName: rootFile.fileName, solidOrdinal: 1 }),
+              label: createStepImportLabel(rootFile.fileName),
+              sourceFileName: rootFile.fileName,
+              documentName: rootFile.fileName,
+              importable: true,
+            },
+          ],
+      diagnostics,
+    }
   }
 
   function createMeshImportLabel(fileName: string) {
@@ -4899,7 +5026,10 @@ export function createModelingService(
       provenance: {
         kind: 'imported',
         sourceName: input.fileName,
+        selectedFileName: input.fileName,
+        stepDocumentName: input.fileName,
         sourceHash: hash,
+        sourceFormat: 'step',
       },
       ownerFeatureIds: [featureId],
     }
@@ -4952,6 +5082,182 @@ export function createModelingService(
       ok: true as const,
       document,
       assets: [{ asset, bytes }],
+    }
+  }
+
+  async function createPreparedStepImportAuthoredDocument(input: ModelingCommitPreparedStepImportInput) {
+    const selectedSolidKeys = new Set(input.selectedSolidKeys)
+    if (selectedSolidKeys.size === 0) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-empty-selection',
+            'Import failed. Select at least one STEP solid.',
+          ),
+        ],
+      }
+    }
+
+    const selectedSolids = input.review.solids.filter((solid) => selectedSolidKeys.has(solid.solidKey))
+    const missingSolidKey = input.selectedSolidKeys.find((solidKey) =>
+      !input.review.solids.some((solid) => solid.solidKey === solidKey),
+    )
+    if (missingSolidKey) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-stale-selected-solid',
+            `Import failed. STEP solid ${missingSolidKey} is no longer present in the review.`,
+            { solidKey: missingSolidKey },
+          ),
+        ],
+      }
+    }
+
+    if (selectedSolids.length === 0) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-empty-selection',
+            'Import failed. Select at least one importable STEP solid.',
+          ),
+        ],
+      }
+    }
+
+    const sourceDocument = await exportAuthoredDocumentForRepository()
+    const featureId = allocateStepImportFeatureId(sourceDocument)
+    const label = createStepImportLabel(input.review.rootFileName)
+    const filesByName = new Map(input.files.map((file) => [file.fileName, file]))
+    const assets: GeometryAssetBlobInput[] = []
+    const sourceFiles = []
+
+    for (const [index, source] of input.review.resolvedSources.entries()) {
+      const file = filesByName.get(source.fileName)
+      if (!file) {
+        return {
+          ok: false as const,
+          diagnostics: [
+            createStepImportDiagnostic(
+              'step-import-missing-reference',
+              `Import failed. STEP source ${source.fileName} is no longer available.`,
+              { documentName: source.documentName, selectedFileName: source.fileName },
+            ),
+          ],
+        }
+      }
+
+      const bytes = file.bytes.slice()
+      const hash = await hashGeometryAssetBytes(bytes)
+      const asset: GeometryAssetRecord = {
+        schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
+        assetId: createMultiFileStepImportAssetId(hash, index),
+        hash,
+        byteLength: bytes.byteLength,
+        format: 'step',
+        mediaType: 'model/step',
+        provenance: {
+          kind: 'imported',
+          sourceName: source.fileName,
+          selectedFileName: source.fileName,
+          stepDocumentName: source.documentName,
+          sourceHash: hash,
+          sourceFormat: 'step',
+        },
+        ownerFeatureIds: [featureId],
+      }
+      assets.push({ asset, bytes })
+      sourceFiles.push({
+        role: source.role,
+        assetId: asset.assetId,
+        selectedFileName: source.fileName,
+        documentName: source.documentName,
+      })
+    }
+
+    const rootSource = sourceFiles.find((source) => source.role === 'root')
+    if (!rootSource) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-missing-reference',
+            'Import failed. STEP review did not include a root source file.',
+          ),
+        ],
+      }
+    }
+
+    const rootAsset = assets.find((entry) => entry.asset.assetId === rootSource.assetId)?.asset
+    if (!rootAsset) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-missing-reference',
+            'Import failed. STEP root source asset was not prepared.',
+          ),
+        ],
+      }
+    }
+
+    const document: AuthoredModelDocument = {
+      ...sourceDocument,
+      revisionId: createNextAuthoredRevisionId(sourceDocument.revisionId),
+      features: [
+        ...sourceDocument.features,
+        {
+          featureId,
+          label,
+          definition: {
+            kind: 'stepImport',
+            featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              assetId: rootAsset.assetId,
+              sourceFiles,
+              selectedSolids: selectedSolids.map((solid) => ({
+                solidKey: solid.solidKey,
+                label: solid.label,
+                sourceAssetId: rootAsset.assetId,
+              })),
+              unit: {
+                source: 'file',
+                resolvedUnit: sourceDocument.settings.linearUnit,
+                scaleToDocument: 1,
+              },
+              orientation: {
+                upAxis: 'z',
+                handedness: 'rightHanded',
+              },
+              placement: {
+                translation: [0, 0, 0],
+                rotationEulerRadians: [0, 0, 0],
+                scale: 1,
+              },
+              label,
+            },
+          },
+        },
+      ],
+      featureOrder: [...sourceDocument.featureOrder, featureId],
+      historyOrder: [
+        ...getAuthoredHistoryOrder(sourceDocument),
+        { kind: 'feature', featureId },
+      ],
+      cursor: { kind: 'feature', featureId },
+      assets: normalizeGeometryAssetManifest({
+        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+        records: [...sourceDocument.assets.records, ...assets.map((entry) => entry.asset)],
+      }),
+    }
+
+    return {
+      ok: true as const,
+      document,
+      assets,
     }
   }
 
@@ -5759,6 +6065,25 @@ export function createModelingService(
       }
 
       return replaceCurrentAuthoredDocument(normalized.document, imported.assets)
+    },
+    async prepareStepImportReview(input) {
+      await restorePromise
+      await repositoryChangePromise
+      if (adapter.prepareStepImportReview) {
+        return adapter.prepareStepImportReview(input.files)
+      }
+
+      return createFallbackStepImportReview(input.files)
+    },
+    async commitPreparedStepImport(input) {
+      await restorePromise
+      await repositoryChangePromise
+      const imported = await createPreparedStepImportAuthoredDocument(input)
+      if (!imported.ok) {
+        return imported
+      }
+
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets, { fetchSnapshot: false })
     },
     async importStepFile(input) {
       await restorePromise

@@ -365,33 +365,110 @@ const shellDefinitionSchema = z.object({
   }).passthrough(),
 })
 
+const stepImportAssetIdSchema = z.string().regex(/^asset_.+$/, 'STEP import asset ID is invalid.')
+
+const stepImportSourceFileSchema = z.object({
+  role: z.union([z.literal('root'), z.literal('referenced')]),
+  assetId: stepImportAssetIdSchema,
+  selectedFileName: stringSchema.trim().min(1, 'STEP import selected file name is required.'),
+  documentName: stringSchema.trim().min(1, 'STEP import document reference name is required.'),
+}).strict()
+
+const stepImportSelectedSolidSchema = z.object({
+  solidKey: stringSchema.trim().min(1, 'STEP import selected solid key is required.'),
+  label: stringSchema.trim().min(1, 'STEP import selected solid label is required.'),
+  sourceAssetId: stepImportAssetIdSchema,
+}).strict()
+
+const stepImportParametersSchema = z.object({
+  assetId: stepImportAssetIdSchema,
+  unit: z.object({
+    source: z.union([z.literal('file'), z.literal('user')]),
+    resolvedUnit: z.union([
+      z.literal('millimeter'),
+      z.literal('centimeter'),
+      z.literal('meter'),
+      z.literal('inch'),
+      z.literal('foot'),
+    ]),
+    scaleToDocument: positiveNumberSchema('STEP import unit scale must be positive.'),
+  }).strict(),
+  orientation: z.object({
+    upAxis: z.union([z.literal('z'), z.literal('y')]),
+    handedness: z.literal('rightHanded'),
+  }).strict(),
+  placement: z.object({
+    translation: z.tuple([numberSchema, numberSchema, numberSchema]),
+    rotationEulerRadians: z.tuple([numberSchema, numberSchema, numberSchema]),
+    scale: positiveNumberSchema('STEP import placement scale must be positive.'),
+  }).strict(),
+  label: stringSchema.trim().min(1, 'STEP import label is required.'),
+  sourceFiles: z.array(stepImportSourceFileSchema).optional(),
+  selectedSolids: z.array(stepImportSelectedSolidSchema).optional(),
+}).strict().superRefine((parameters, ctx) => {
+  const hasSourceFiles = parameters.sourceFiles !== undefined
+  const hasSelectedSolids = parameters.selectedSolids !== undefined
+  if (!hasSourceFiles && !hasSelectedSolids) {
+    return
+  }
+
+  if (!hasSourceFiles || !hasSelectedSolids) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Multi-file STEP imports must provide both source files and selected solids.',
+      path: hasSourceFiles ? ['selectedSolids'] : ['sourceFiles'],
+    })
+    return
+  }
+
+  const sourceFiles = parameters.sourceFiles
+  const selectedSolids = parameters.selectedSolids
+  if (!sourceFiles || !selectedSolids) {
+    return
+  }
+
+  const rootFiles = sourceFiles.filter((sourceFile) => sourceFile.role === 'root')
+  if (rootFiles.length !== 1 || rootFiles[0]?.assetId !== parameters.assetId) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Multi-file STEP imports must include exactly one root source file matching assetId.',
+      path: ['sourceFiles'],
+    })
+  }
+
+  if (selectedSolids.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Multi-file STEP imports must select at least one solid.',
+      path: ['selectedSolids'],
+    })
+  }
+
+  const sourceAssetIds = new Set(sourceFiles.map((sourceFile) => sourceFile.assetId))
+  const seenSolidKeys = new Set<string>()
+  selectedSolids.forEach((solid, index) => {
+    if (!sourceAssetIds.has(solid.sourceAssetId)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Selected STEP solid ${solid.solidKey} references a missing source asset.`,
+        path: ['selectedSolids', index, 'sourceAssetId'],
+      })
+    }
+    if (seenSolidKeys.has(solid.solidKey)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Selected STEP solid key ${solid.solidKey} is duplicated.`,
+        path: ['selectedSolids', index, 'solidKey'],
+      })
+    }
+    seenSolidKeys.add(solid.solidKey)
+  })
+})
+
 const stepImportDefinitionSchema = z.object({
   kind: z.literal('stepImport'),
   featureTypeVersion: z.literal(STEP_IMPORT_FEATURE_SCHEMA_VERSION),
-  parameters: z.object({
-    assetId: z.string().regex(/^asset_.+$/, 'STEP import asset ID is invalid.'),
-    unit: z.object({
-      source: z.union([z.literal('file'), z.literal('user')]),
-      resolvedUnit: z.union([
-        z.literal('millimeter'),
-        z.literal('centimeter'),
-        z.literal('meter'),
-        z.literal('inch'),
-        z.literal('foot'),
-      ]),
-      scaleToDocument: positiveNumberSchema('STEP import unit scale must be positive.'),
-    }).strict(),
-    orientation: z.object({
-      upAxis: z.union([z.literal('z'), z.literal('y')]),
-      handedness: z.literal('rightHanded'),
-    }).strict(),
-    placement: z.object({
-      translation: z.tuple([numberSchema, numberSchema, numberSchema]),
-      rotationEulerRadians: z.tuple([numberSchema, numberSchema, numberSchema]),
-      scale: positiveNumberSchema('STEP import placement scale must be positive.'),
-    }).strict(),
-    label: stringSchema.trim().min(1, 'STEP import label is required.'),
-  }).strict(),
+  parameters: stepImportParametersSchema,
 }).transform((value) => value as FeatureDefinition)
 
 const meshImportResolvedSettingsSchema = z.object({

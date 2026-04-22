@@ -30,7 +30,13 @@ export async function createDeterministicGeometryAsset(input: {
     byteLength: bytes.byteLength,
     format: 'step',
     mediaType: 'model/step',
-    provenance: { kind: 'imported', sourceName: 'part.step' },
+    provenance: {
+      kind: 'imported',
+      sourceName: 'part.step',
+      selectedFileName: 'part.step',
+      stepDocumentName: 'part.step',
+      sourceFormat: 'step',
+    },
     ownerFeatureIds: input.ownerFeatureIds ?? ['feature_imported_geometry'],
   }
 

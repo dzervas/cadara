@@ -14,6 +14,7 @@ import {
   MESH_RECONSTRUCTION_ALGORITHM_VERSION,
   type MeshReconstructionProvenance,
 } from '@/contracts/modeling/mesh-reconstruction'
+import { createStepImportDiagnostic } from '@/contracts/modeling/step-import'
 
 test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -77,6 +78,92 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
 
   const parsedStepImport = parseAuthoredModelDocument(stepImportDocument)
   assert(parsedStepImport.ok, 'Authored validation should accept STEP import feature definitions.')
+
+  const referencedStepAsset = await createDeterministicGeometryAsset({
+    assetId: 'asset_step_import_reference_contract',
+    ownerFeatureIds: ['feature_stepImport-1'],
+    seed: 23,
+  })
+  const multiFileStepImportDocument = structuredClone(stepImportDocument)
+  multiFileStepImportDocument.assets.records = [stepAsset.asset, referencedStepAsset.asset]
+  multiFileStepImportDocument.features = multiFileStepImportDocument.features.map((feature) =>
+    feature.featureId === 'feature_stepImport-1' && feature.definition.kind === 'stepImport'
+      ? {
+          ...feature,
+          definition: {
+            ...feature.definition,
+            parameters: {
+              ...feature.definition.parameters,
+              sourceFiles: [
+                {
+                  role: 'root',
+                  assetId: stepAsset.asset.assetId,
+                  selectedFileName: 'assembly.step',
+                  documentName: 'assembly.step',
+                },
+                {
+                  role: 'referenced',
+                  assetId: referencedStepAsset.asset.assetId,
+                  selectedFileName: 'part.step',
+                  documentName: 'part.step',
+                },
+              ],
+              selectedSolids: [
+                {
+                  solidKey: 'part.step#solid-1',
+                  label: 'Part 1',
+                  sourceAssetId: referencedStepAsset.asset.assetId,
+                },
+              ],
+            },
+          },
+        }
+      : feature,
+  )
+  const parsedMultiFileStepImport = parseAuthoredModelDocument(multiFileStepImportDocument)
+  assert(parsedMultiFileStepImport.ok, 'Authored validation should accept multi-file STEP import feature definitions.')
+
+  const invalidMissingReferenceStepImport = parseAuthoredModelDocument({
+    ...multiFileStepImportDocument,
+    features: multiFileStepImportDocument.features.map((feature) =>
+      feature.featureId === 'feature_stepImport-1' && feature.definition.kind === 'stepImport'
+        ? {
+            ...feature,
+            definition: {
+              ...feature.definition,
+              parameters: {
+                ...feature.definition.parameters,
+                selectedSolids: [
+                  {
+                    solidKey: 'missing.step#solid-1',
+                    label: 'Missing Part',
+                    sourceAssetId: 'asset_step_import_missing_reference',
+                  },
+                ],
+              },
+            },
+          }
+        : feature,
+    ),
+  })
+  assert(!invalidMissingReferenceStepImport.ok, 'Authored validation should reject selected solids that reference missing STEP source assets.')
+
+  const staleSelectionDiagnostic = createStepImportDiagnostic(
+    'step-import-stale-selected-solid',
+    'Selected STEP solid part.step#solid-1 is no longer present.',
+    {
+      asset: referencedStepAsset.asset,
+      documentName: 'part.step',
+      selectedFileName: 'part.step',
+      solidKey: 'part.step#solid-1',
+    },
+  )
+  assert(
+    staleSelectionDiagnostic.detail?.kind === 'stepImport'
+      && staleSelectionDiagnostic.detail.code === 'step-import-stale-selected-solid'
+      && staleSelectionDiagnostic.detail.solidKey === 'part.step#solid-1',
+    'STEP stale-selection diagnostics should preserve the selected solid key.',
+  )
 
   const invalidStepImportLabel = parseAuthoredModelDocument({
     ...stepImportDocument,
