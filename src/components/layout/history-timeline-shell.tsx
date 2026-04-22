@@ -26,7 +26,7 @@ interface HistoryTimelineShellProps {
   onDocumentHistoryReorder?: (item: DocumentHistoryOrderEntry, beforeItem: DocumentHistoryOrderEntry | null) => void
   documentHistoryReorderDisabled?: boolean
   onSketchCursorRequested?: (cursor: SketchHistoryCursor) => void
-  onDeleteFeature: (item: Extract<DocumentHistoryItemRecord, { kind: 'feature' }>) => void
+  onDeleteDocumentItem: (item: DocumentHistoryItemRecord) => void
   onRenameDocumentItem: (item: DocumentHistoryItemRecord) => void
   onSuppressFeature: (item: Extract<DocumentHistoryItemRecord, { kind: 'feature' }>) => void
   visibleSelection: PrimitiveRef[]
@@ -42,7 +42,7 @@ export function HistoryTimelineShell({
   onDocumentHistoryReorder,
   documentHistoryReorderDisabled = false,
   onSketchCursorRequested,
-  onDeleteFeature,
+  onDeleteDocumentItem,
   onRenameDocumentItem,
   onSuppressFeature,
   visibleSelection,
@@ -75,7 +75,7 @@ export function HistoryTimelineShell({
           cursorDisabled={documentCursorDisabled}
           onReorderItem={onDocumentHistoryReorder}
           reorderDisabled={documentHistoryReorderDisabled}
-          onDeleteFeature={onDeleteFeature}
+          onDeleteItem={onDeleteDocumentItem}
           onRenameItem={onRenameDocumentItem}
           onSuppressFeature={onSuppressFeature}
         />
@@ -126,6 +126,7 @@ function SketchHistoryTimelineBar({
 }: SketchHistoryTimelineBarProps) {
   const {
     state: { selection, selectionFilter, selectionCatalog },
+    dispatch,
   } = useEditorState()
   const items = getSketchHistoryItems(session.fullDefinition)
   const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
@@ -195,6 +196,27 @@ function SketchHistoryTimelineBar({
                 icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
                 onSelect: () => onCursorRequested?.(getSketchHistoryCursorForIndex(items, index)),
               },
+              {
+                kind: 'divider',
+                id: 'destructive-divider',
+              },
+              {
+                kind: 'item',
+                id: 'delete',
+                label: 'Delete',
+                commandId: 'context.delete',
+                icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
+                disabled: item.target === null,
+                danger: true,
+                onSelect: () => {
+                  if (!item.target) {
+                    return
+                  }
+
+                  dispatch({ type: 'viewport.selectionRequested', target: item.target })
+                  dispatch({ type: 'sketch.annotationDeleteRequested' })
+                },
+              },
             ]
 
             return (
@@ -219,6 +241,7 @@ function SketchHistoryTimelineBar({
                   aria-current={index === cursorIndex ? 'step' : undefined}
                   aria-disabled={!isAllowed}
                   title={`${description}${isAfterCursor ? '. After current cursor' : ''}. Double-click to move sketch history cursor.`}
+                  data-delete-supported={item.target ? 'true' : undefined}
                   onClick={() => {
                     if (!isAllowed || !item.target) {
                       return

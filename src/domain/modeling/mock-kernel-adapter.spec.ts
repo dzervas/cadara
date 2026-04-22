@@ -816,6 +816,91 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(missingReorder.revisionState.kind === 'rejected', 'Reorders targeting missing anchors must be rejected.')
   }
 
+  async function testGenericDeleteTargetsAcceptRejectAndConflict() {
+    const featureAdapter = new MockKernelAdapter()
+    const initialFeature = await featureAdapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const deletedFeature = await featureAdapter.deleteTarget({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: initialFeature.snapshot.revisionId,
+      target: { kind: 'feature', featureId: 'feature_extrude-1' },
+    })
+    assert(deletedFeature.revisionState.kind === 'accepted', 'Generic feature deletion should be accepted.')
+    const afterFeatureDelete = await featureAdapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      afterFeatureDelete.snapshot.document.features.every((feature) => feature.featureId !== 'feature_extrude-1'),
+      'Generic feature deletion should remove the feature from authored history.',
+    )
+    assert(
+      afterFeatureDelete.snapshot.presentation.documentHistory.every((item) => item.target.kind !== 'feature' || item.target.featureId !== 'feature_extrude-1'),
+      'Generic feature deletion should remove the feature timeline item.',
+    )
+
+    const sketchAdapter = new MockKernelAdapter()
+    const initialSketch = await sketchAdapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const deletedSketch = await sketchAdapter.deleteTarget({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: initialSketch.snapshot.revisionId,
+      target: { kind: 'sketch', sketchId: 'sketch_primary' },
+    })
+    assert(deletedSketch.revisionState.kind === 'accepted', 'Generic sketch deletion should be accepted.')
+    const afterSketchDelete = await sketchAdapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      afterSketchDelete.snapshot.document.sketches.every((sketch) => sketch.sketchId !== 'sketch_primary'),
+      'Generic sketch deletion should remove the sketch from authored history.',
+    )
+
+    const bodyAdapter = new MockKernelAdapter()
+    const initialBody = await bodyAdapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const deletedBody = await bodyAdapter.deleteTarget({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: initialBody.snapshot.revisionId,
+      target: { kind: 'body', bodyId: 'body_part-1' },
+    })
+    assert(deletedBody.revisionState.kind === 'accepted', 'Generic body deletion should be accepted.')
+    const afterBodyDelete = await bodyAdapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      afterBodyDelete.snapshot.presentation.objects.every((item) => item.target.kind !== 'body' || item.target.bodyId !== 'body_part-1'),
+      'Generic body deletion should remove the body object row.',
+    )
+
+    const unsupported = await bodyAdapter.deleteTarget({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: afterBodyDelete.snapshot.revisionId,
+      target: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
+    })
+    assert(unsupported.revisionState.kind === 'rejected', 'Unsupported generic delete targets should be rejected.')
+
+    const conflict = await bodyAdapter.deleteTarget({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_stale',
+      target: { kind: 'body', bodyId: 'body_part-1' },
+    })
+    assert(conflict.revisionState.kind === 'conflict', 'Stale generic delete requests should conflict.')
+  }
+
   async function testDocumentHistoryReorderAcceptsRejectsAndConflicts() {
     const adapter = new MockKernelAdapter()
     const initial = await adapter.getDocumentSnapshot({
@@ -2130,6 +2215,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testAcceptedSketchCommitNormalizesAuthoringOperationTargets()
   await testAcceptedSketchCommitPersistsActiveProjectionData()
   await testMissingMutationTargetsAreRejected()
+  await testGenericDeleteTargetsAcceptRejectAndConflict()
   await testDocumentHistoryReorderAcceptsRejectsAndConflicts()
   await testPreviewStalenessReportsObservedRevision()
   await testResolveReferenceReportsMissingTargetsExplicitly()

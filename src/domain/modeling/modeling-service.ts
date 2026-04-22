@@ -37,6 +37,8 @@ import type {
   ConstructionSnapshotRecord,
   CreateFeatureResponse,
   CreateFeatureRequest,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
   DeleteFeatureResponse,
   DeleteFeatureRequest,
   DocumentSnapshot,
@@ -106,6 +108,7 @@ import {
   commitSketchResponseSchema,
   addDocumentVariableResponseSchema,
   createFeatureResponseSchema,
+  deleteDocumentTargetResponseSchema,
   deleteFeatureResponseSchema,
   evaluatePreviewResponseSchema,
   getDocumentSnapshotResponseSchema,
@@ -130,6 +133,7 @@ import {
   createAddDocumentVariableHistoryEntry,
   createCreateFeatureHistoryEntry,
   createDeleteFeatureHistoryEntry,
+  createDeleteTargetHistoryEntry,
   createEmptyOperationHistory,
   createRenameBodyHistoryEntry,
   createReorderDocumentHistoryEntry,
@@ -268,6 +272,7 @@ export interface ModelingService {
   createFeature(input: ModelingCreateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
   updateFeature(input: ModelingUpdateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
   deleteFeature(input: ModelingDeleteFeatureInput): AppResultAsync<ModelingDeleteFeatureResult>
+  deleteTarget(input: ModelingDeleteTargetInput): AppResultAsync<ModelingDeleteTargetResult>
   renameBody(input: ModelingRenameBodyInput): AppResultAsync<ModelingRenameBodyResult>
   reorderFeature(input: ModelingReorderFeatureInput): AppResultAsync<ModelingReorderFeatureResult>
   reorderDocumentHistory(input: ModelingReorderDocumentHistoryInput): AppResultAsync<ModelingReorderDocumentHistoryResult>
@@ -282,6 +287,7 @@ export interface ModelingServiceOptions {
   sketchSolver?: SketchSolverBoundary
   operationHistoryStore?: OperationHistoryStore | null
   documentRepository?: DocumentRepository | null
+  documentRepositoryPersistence?: 'blocking' | 'background'
 }
 
 export interface ModelingServiceDocumentChangeEvent {
@@ -332,6 +338,15 @@ export interface ModelingFeatureMutationResult {
 export interface ModelingDeleteFeatureResult {
   revisionId: DocumentSnapshot['revisionId']
   deletedFeatureId: FeatureId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingDeleteTargetResult {
+  revisionId: DocumentSnapshot['revisionId']
+  deletedTarget: PrimitiveRef
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
   changedTargets: PrimitiveRef[]
@@ -401,6 +416,7 @@ export type ModelingAddDocumentVariableInput = Omit<AddDocumentVariableRequest, 
 export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingDeleteTargetInput = Omit<DeleteDocumentTargetRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingReorderDocumentHistoryInput =
@@ -3960,6 +3976,23 @@ function mapDeleteFeatureResponse(
   }
 }
 
+function mapDeleteTargetResponse(
+  response: DeleteDocumentTargetResponse,
+  expectedDocumentId: DocumentId,
+): ModelingDeleteTargetResult {
+  const parsed = deleteDocumentTargetResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Delete target')
+  return {
+    revisionId: parsed.revisionId,
+    deletedTarget: parsed.deletedTarget,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
+  }
+}
+
 function mapRenameBodyResponse(
   response: RenameBodyResponse,
   expectedDocumentId: DocumentId,
@@ -4178,6 +4211,21 @@ function normalizeDeleteFeatureInput(
 
   return {
     ...requestInput,
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  }
+}
+
+function normalizeDeleteTargetInput(
+  input: ModelingDeleteTargetInput,
+  documentId: DocumentId,
+): DeleteDocumentTargetRequest {
+  assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
+
+  return {
+    ...requestInput,
+    target: assertDurableRef(input.target),
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
@@ -4467,7 +4515,6 @@ function runModelingMutationBoundary<T extends ModelingMutationBoundaryResult>(i
 interface HistoryReplayCursor {
   revisionId: RevisionId
   sketchIds: Set<SketchId>
-  sketchCount: number
 }
 
 async function getAdapterReplayCursor(
@@ -4480,7 +4527,6 @@ async function getAdapterReplayCursor(
   return {
     revisionId: snapshot.document.revisionId,
     sketchIds: new Set(snapshot.document.sketches.map((entry) => entry.sketchId)),
-    sketchCount: snapshot.document.sketches.length,
   }
 }
 
@@ -4496,11 +4542,21 @@ function createHistoryReplayCorrelation(index: number): ModelingCommitSketchCorr
 }
 
 function getExpectedAllocatedReplaySketchId(
-  sketchCount: number,
+  sketchIds: ReadonlySet<SketchId>,
 ): SketchId {
-  return sketchCount === 0
-    ? 'sketch_primary'
-    : (`sketch_${sketchCount + 1}` as SketchId)
+  if (!sketchIds.has('sketch_primary' as SketchId)) {
+    return 'sketch_primary' as SketchId
+  }
+
+  let maxOrdinal = 1
+  for (const sketchId of sketchIds) {
+    const match = /^sketch_(\d+)$/.exec(sketchId)
+    if (match) {
+      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+    }
+  }
+
+  return `sketch_${maxOrdinal + 1}` as SketchId
 }
 
 function resolveReplayCommitSketchId(
@@ -4515,7 +4571,7 @@ function resolveReplayCommitSketchId(
     return sketchId
   }
 
-  return sketchId === getExpectedAllocatedReplaySketchId(cursor.sketchCount) ? null : sketchId
+  return sketchId === getExpectedAllocatedReplaySketchId(cursor.sketchIds) ? null : sketchId
 }
 
 function advanceHistoryReplayCursor(
@@ -4525,6 +4581,23 @@ function advanceHistoryReplayCursor(
 ): HistoryReplayCursor {
   if (!isAcceptedMutation(response)) {
     return cursor
+  }
+
+  if (entry.kind === 'deleteTarget' && entry.payload.target.kind === 'sketch') {
+    if (!cursor.sketchIds.has(entry.payload.target.sketchId)) {
+      return {
+        ...cursor,
+        revisionId: response.revisionId,
+      }
+    }
+
+    const nextSketchIds = new Set(cursor.sketchIds)
+    nextSketchIds.delete(entry.payload.target.sketchId)
+
+    return {
+      revisionId: response.revisionId,
+      sketchIds: nextSketchIds,
+    }
   }
 
   if (entry.kind !== 'commitSketch') {
@@ -4549,7 +4622,6 @@ function advanceHistoryReplayCursor(
   return {
     revisionId: response.revisionId,
     sketchIds: nextSketchIds,
-    sketchCount: cursor.sketchCount + 1,
   }
 }
 
@@ -4606,6 +4678,19 @@ async function replayHistoryEntry(input: {
     }
     case 'deleteFeature': {
       const response = await input.adapter.deleteFeature({
+        ...input.entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      })
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      }
+    }
+    case 'deleteTarget': {
+      const response = await input.adapter.deleteTarget({
         ...input.entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
@@ -4708,7 +4793,9 @@ export function createModelingService(
   const sketchSolver = options.sketchSolver ? createSketchSolverService(options.sketchSolver) : null
   const operationHistoryStore = options.operationHistoryStore ?? null
   const documentRepository = options.documentRepository ?? null
+  const documentRepositoryPersistence = options.documentRepositoryPersistence ?? 'blocking'
   let operationHistoryPayload: ModelingOperationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+  let operationHistoryGeneration = 0
   let canPersistOperationHistory = true
   let canPersistAuthoredDocument = true
   let historyRestoreState: ModelingHistoryRestoreState = {
@@ -4719,6 +4806,7 @@ export function createModelingService(
   let currentRepositoryMetadata: DocumentRepositoryMetadata | null = null
   let seedAuthoredDocument: AuthoredModelDocument | null = null
   let repositoryChangePromise = Promise.resolve()
+  let repositoryPersistencePromise = Promise.resolve()
   let isRestoringRepositoryDocument = documentRepository !== null
   const documentChangeListeners = new Set<(event: ModelingServiceDocumentChangeEvent) => void>()
 
@@ -4731,6 +4819,28 @@ export function createModelingService(
 
   function markRepositorySnapshotFresh(metadata: DocumentRepositoryMetadata) {
     rememberRepositoryMetadata(metadata)
+  }
+
+  function createEmptyOperationHistoryForCurrentRepository() {
+    return createEmptyOperationHistory(currentDocumentId, currentRepositoryMetadata?.heads)
+  }
+
+  function resetOperationHistoryPayloadForCurrentRepository() {
+    operationHistoryPayload = createEmptyOperationHistoryForCurrentRepository()
+    operationHistoryGeneration += 1
+  }
+
+  function canReplayOperationHistoryOverRestoredRepository(
+    historyPayload: ModelingOperationHistoryPayload,
+    restoredDocument: AuthoredModelDocument,
+    seedDocument: AuthoredModelDocument,
+    restoredMetadata: DocumentRepositoryMetadata,
+  ) {
+    return authoredDocumentsEqual(restoredDocument, seedDocument)
+      || (
+        historyPayload.baseRepositoryHeads !== undefined
+        && sameStringSet(historyPayload.baseRepositoryHeads, restoredMetadata.heads)
+      )
   }
 
   function attachRepositoryProvenance(snapshot: DocumentSnapshot): DocumentSnapshot {
@@ -4753,6 +4863,10 @@ export function createModelingService(
 
   function repositoryHeadsChangedSinceBasis(input: { baseRepositoryHeads?: readonly string[] }) {
     if (!currentRepositoryMetadata || !input.baseRepositoryHeads) {
+      return false
+    }
+
+    if (currentRepositoryMetadata.source !== 'peer') {
       return false
     }
 
@@ -4805,6 +4919,13 @@ export function createModelingService(
     )
     seedAuthoredDocument = createAuthoredModelDocumentFromSnapshot(seedSnapshot)
     return structuredClone(seedAuthoredDocument)
+  }
+
+  function authoredDocumentsEqual(
+    left: AuthoredModelDocument,
+    right: AuthoredModelDocument,
+  ) {
+    return JSON.stringify(left) === JSON.stringify(right)
   }
 
   async function exportAuthoredDocumentForRepository() {
@@ -5675,7 +5796,7 @@ export function createModelingService(
       await restoreActiveDocument()
     }
     operationHistoryStore?.clear()
-    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+    resetOperationHistoryPayloadForCurrentRepository()
     canPersistOperationHistory = true
     canPersistAuthoredDocument = true
     historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
@@ -5765,6 +5886,13 @@ export function createModelingService(
 
     if (createHistoryEntry) {
       appendOperationHistoryEntry(createHistoryEntry())
+      if (documentRepositoryPersistence === 'background') {
+        enqueueAcceptedAuthoredDocumentPersistence()
+        return freshResult
+      }
+    } else if (documentRepositoryPersistence === 'background') {
+      enqueueAcceptedAuthoredDocumentPersistence()
+      return freshResult
     }
 
     return persistAcceptedAuthoredDocument(freshResult)
@@ -5799,6 +5927,7 @@ export function createModelingService(
 
   async function replayOperationHistoryPayload(loadResultPayload: ModelingOperationHistoryPayload) {
     operationHistoryPayload = structuredClone(loadResultPayload)
+    operationHistoryGeneration = loadResultPayload.entries.length
     let replayCursor = await getAdapterReplayCursor(adapter, currentDocumentId)
 
     for (const [entryIndex, entry] of loadResultPayload.entries.entries()) {
@@ -5880,17 +6009,53 @@ export function createModelingService(
 
     rememberRepositoryMetadata(loadResult.metadata)
 
+    const historyLoadResult = operationHistoryStore?.load()
+
     if (loadResult.status.kind === 'restored') {
       await restoreAuthoredRepositoryDocument(loadResult.document, loadResult.diagnostics)
-      operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+      if (
+        historyLoadResult?.ok
+        && historyLoadResult.payload
+        && historyLoadResult.payload.entries.length > 0
+        && historyLoadResult.payload.documentId === currentDocumentId
+        && canReplayOperationHistoryOverRestoredRepository(
+          historyLoadResult.payload,
+          loadResult.document,
+          seedDocument,
+          loadResult.metadata,
+        )
+      ) {
+        await replayOperationHistoryPayload(historyLoadResult.payload)
+        if (historyRestoreState.kind === 'failed') {
+          canPersistAuthoredDocument = false
+          return
+        }
+
+        const writeResult = await documentRepository!.mutate({
+          documentId: currentDocumentId,
+          document: await exportAuthoredDocumentForRepository(),
+        })
+        if (!writeResult.ok) {
+          canPersistOperationHistory = false
+          canPersistAuthoredDocument = false
+          historyRestoreState = createRepositoryRestoreFailure(writeResult.status, historyRestoreState.entriesReplayed)
+          return
+        }
+
+        markRepositorySnapshotFresh(writeResult.metadata)
+        operationHistoryStore?.clear()
+        resetOperationHistoryPayloadForCurrentRepository()
+        return
+      }
+
+      resetOperationHistoryPayloadForCurrentRepository()
       historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
       return
     }
 
-    const historyLoadResult = operationHistoryStore?.load()
     if (historyLoadResult && !historyLoadResult.ok) {
       operationHistoryStore?.clear()
-      operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+      resetOperationHistoryPayloadForCurrentRepository()
       historyRestoreState = { kind: 'empty', entriesReplayed: 0, diagnostics: [] }
       return
     }
@@ -5928,11 +6093,13 @@ export function createModelingService(
       }
       if (writeResult.ok) {
         markRepositorySnapshotFresh(writeResult.metadata)
+        operationHistoryStore?.clear()
+        resetOperationHistoryPayloadForCurrentRepository()
       }
       return
     }
 
-    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+    resetOperationHistoryPayloadForCurrentRepository()
     historyRestoreState = { kind: 'empty', entriesReplayed: 0, diagnostics: [] }
   }
 
@@ -5959,7 +6126,9 @@ export function createModelingService(
   function resetOperationHistory() {
     operationHistoryStore?.clear()
     void documentRepository?.reset(currentDocumentId)
+    repositoryPersistencePromise = Promise.resolve()
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
+    operationHistoryGeneration += 1
     canPersistOperationHistory = true
     canPersistAuthoredDocument = true
     historyRestoreState = {
@@ -5969,9 +6138,9 @@ export function createModelingService(
     }
   }
 
-  function appendOperationHistoryEntry(entry: ModelingOperationHistoryEntry) {
+  function appendOperationHistoryEntry(entry: ModelingOperationHistoryEntry): number | null {
     if (!operationHistoryStore || !canPersistOperationHistory) {
-      return
+      return null
     }
 
     operationHistoryPayload = {
@@ -5981,6 +6150,8 @@ export function createModelingService(
 
     try {
       operationHistoryStore.save(operationHistoryPayload)
+      operationHistoryGeneration += 1
+      return operationHistoryGeneration
     } catch (error: unknown) {
       canPersistOperationHistory = false
       historyRestoreState = createRestoreFailure(
@@ -5989,6 +6160,7 @@ export function createModelingService(
         null,
         operationHistoryPayload.entries.length,
       )
+      return null
     }
   }
 
@@ -6022,6 +6194,93 @@ export function createModelingService(
       ...result,
       diagnostics: [...result.diagnostics, createDocumentRepositoryDiagnostic(writeResult.status)],
     }
+  }
+
+  function reconcileOperationHistoryAfterRepositoryWrite(input: {
+    persistedGeneration: number
+    persistedEntryCount: number
+  } | null) {
+    if (!operationHistoryStore || !input || input.persistedEntryCount === 0) {
+      return
+    }
+
+    if (input.persistedGeneration === operationHistoryGeneration) {
+      operationHistoryStore.clear()
+      resetOperationHistoryPayloadForCurrentRepository()
+      canPersistOperationHistory = true
+      return
+    }
+
+    if (operationHistoryPayload.entries.length < input.persistedEntryCount) {
+      return
+    }
+
+    operationHistoryPayload = {
+      ...createEmptyOperationHistoryForCurrentRepository(),
+      entries: operationHistoryPayload.entries.slice(input.persistedEntryCount),
+    }
+
+    try {
+      operationHistoryStore.save(operationHistoryPayload)
+      operationHistoryGeneration += 1
+      canPersistOperationHistory = true
+    } catch (error: unknown) {
+      canPersistOperationHistory = false
+      historyRestoreState = createRestoreFailure(
+        'history-write-failed',
+        error instanceof Error ? error.message : 'Operation history could not be written.',
+        null,
+        operationHistoryPayload.entries.length,
+      )
+    }
+  }
+
+  function enqueueAcceptedAuthoredDocumentPersistence() {
+    if (!documentRepository || !canPersistAuthoredDocument) {
+      return
+    }
+
+    repositoryPersistencePromise = repositoryPersistencePromise
+      .catch(() => undefined)
+      .then(async () => {
+        if (!canPersistAuthoredDocument || !documentRepository) {
+          return
+        }
+
+        const persistedHistory = operationHistoryStore
+          ? {
+              persistedGeneration: operationHistoryGeneration,
+              persistedEntryCount: operationHistoryPayload.entries.length,
+            }
+          : null
+        const writeResult = await documentRepository.mutate({
+          documentId: currentDocumentId,
+          document: await exportAuthoredDocumentForRepository(),
+        })
+
+        if (writeResult.ok) {
+          markRepositorySnapshotFresh(writeResult.metadata)
+          reconcileOperationHistoryAfterRepositoryWrite(persistedHistory)
+          return
+        }
+
+        canPersistAuthoredDocument = false
+        historyRestoreState = createRestoreFailure(
+          writeResult.status.diagnostic.reasonCode,
+          writeResult.status.diagnostic.message,
+          null,
+          historyRestoreState.entriesReplayed,
+        )
+      })
+      .catch((error: unknown) => {
+        canPersistAuthoredDocument = false
+        historyRestoreState = createRestoreFailure(
+          'repository-write-exception',
+          error instanceof Error ? error.message : 'Authored document could not be written.',
+          null,
+          historyRestoreState.entriesReplayed,
+        )
+      })
   }
 
   return {
@@ -6214,7 +6473,9 @@ export function createModelingService(
             response,
             mapCommitSketchResponse(response, currentDocumentId),
             input,
-            () => createCommitSketchHistoryEntry(request, response.sketchId),
+            () => createCommitSketchHistoryEntry(request, response.sketchId, {
+              includeAuthoringOperations: !(documentRepository && documentRepositoryPersistence === 'background' && canPersistAuthoredDocument),
+            }),
           )
         },
       })
@@ -6329,6 +6590,28 @@ export function createModelingService(
             mapDeleteFeatureResponse(response, currentDocumentId),
             input,
             () => createDeleteFeatureHistoryEntry(request),
+          )
+        },
+      })
+    },
+    deleteTarget(input) {
+      return runModelingMutationBoundary({
+        operation: 'Delete target',
+        fallbackMessage: 'Delete target failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'target', value: getPrimitiveRefKey(input.target) },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeDeleteTargetInput(input, currentDocumentId)
+          const response = await adapter.deleteTarget(request)
+          return finalizeMutationResult(
+            response,
+            mapDeleteTargetResponse(response, currentDocumentId),
+            input,
+            () => createDeleteTargetHistoryEntry(request),
           )
         },
       })

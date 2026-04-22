@@ -245,7 +245,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
-          onDeleteFeature={() => undefined}
+          onDeleteItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -306,7 +306,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
-          onDeleteFeature={() => undefined}
+          onDeleteItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -342,7 +342,10 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
     !erroredTimelineMarkup.includes('region_deleted'),
     'Timeline error copy should not expose raw durable ids.',
   )
-  assert(!erroredTimelineMarkup.includes('>Delete<'), 'Recoverable feature errors should not offer destructive recovery actions.')
+  assert(
+    erroredTimelineMarkup.match(/data-delete-supported="true"/g)?.length === erroredTimelineSnapshot.presentation.documentHistory.length,
+    'Recoverable feature errors and sketch rows should still expose delete support.',
+  )
 
   assert(
     getNearestTimelineAnchorIndex([100, 160, 220, 280], 208) === 1,
@@ -391,7 +394,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
           reorderDisabled
-          onDeleteFeature={() => undefined}
+          onDeleteItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -420,7 +423,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
-          onDeleteFeature={() => undefined}
+          onDeleteDocumentItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -445,7 +448,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onReopenTarget={() => undefined}
           onDocumentCursorRequested={() => undefined}
           onSketchCursorRequested={() => undefined}
-          onDeleteFeature={() => undefined}
+          onDeleteItem={() => undefined}
           onRenameDocumentItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -458,6 +461,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(sketchHistoryMarkup.includes('/icons/sketch-line-segment.svg'), 'Sketch history entity entries should use shared drawing tool icons.')
   assert(sketchHistoryMarkup.includes('/icons/sketch-dimension.svg'), 'Sketch history dimension entries should use shared dimension tool icons.')
   assert(sketchHistoryMarkup.includes('aria-haspopup="menu"'), 'Sketch history items should expose custom context menu affordances.')
+  assert(sketchHistoryMarkup.includes('data-delete-supported="true"'), 'Sketch history items should expose delete support from their context menu.')
   assert(
     sketchHistoryMarkup.includes('data-transition-state="leaving-down"'),
     'Document history should expose a reduced-motion-friendly leaving state while sketch history is active.',

@@ -16,7 +16,6 @@ import type { WorkbenchNotificationModel } from '@/components/layout/workbench-n
 import { isInitialOccRenderPending } from '@/app/initial-occ-render-state'
 import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
 import {
-  createObjectDeletePlaceholderMessage,
   createObjectExportModalState,
   type ObjectExportModalState,
 } from '@/app/object-export-state'
@@ -53,6 +52,7 @@ import {
 import {
   getPrimitiveRefLabel,
   getPrimitiveRefKey,
+  isDurablePrimitiveRef,
   primitiveRefEquals,
   type PrimitiveRef,
 } from '@/domain/editor/schema'
@@ -632,8 +632,44 @@ export function CadWorkbench() {
     showWorkbenchError(error.message)
   }
 
-  const handleObjectDeletePlaceholder = (_target: PrimitiveRef, label: string) => {
-    showPlaceholderStatus(createObjectDeletePlaceholderMessage(label))
+  const handleDeleteTarget = (target: PrimitiveRef, label: string) => {
+    if (!snapshot) {
+      return
+    }
+
+    if (!isDurablePrimitiveRef(target)) {
+      showWorkbenchError(`Delete ${label} failed.`)
+      return
+    }
+
+    void runWorkbenchAction({
+      operation: `Delete ${label}`,
+      reporter: errorReporter,
+      context: [
+        { key: 'baseRevisionId', value: snapshot.document.revisionId },
+        { key: 'target', value: getPrimitiveRefKey(target) },
+      ],
+      action: () => modelingService.deleteTarget({
+        baseRevisionId: snapshot.document.revisionId,
+        target,
+      }),
+      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        operation: `Delete ${label}`,
+        fallbackMessage: `Delete ${label} failed.`,
+        context: [
+          { key: 'baseRevisionId', value: snapshot.document.revisionId },
+          { key: 'target', value: getPrimitiveRefKey(target) },
+        ],
+      }),
+      onError: (error) => showWorkbenchError(error.message),
+    }).then((result) => {
+      if (result.isErr()) {
+        return
+      }
+
+      showWorkbenchInfo(`Deleted ${label}.`)
+      dispatch({ type: 'document.refreshRequested' })
+    })
   }
 
   const handleObjectExport = (target: PrimitiveRef, label: string) => {
@@ -936,39 +972,8 @@ export function CadWorkbench() {
     })
   }
 
-  const handleFeatureDelete = (item: FeatureHistoryItem) => {
-    if (!snapshot) {
-      return
-    }
-
-    void runWorkbenchAction({
-      operation: `Delete ${item.label}`,
-      reporter: errorReporter,
-      context: [
-        { key: 'baseRevisionId', value: snapshot.document.revisionId },
-        { key: 'featureId', value: item.featureId },
-      ],
-      action: () => modelingService.deleteFeature({
-        baseRevisionId: snapshot.document.revisionId,
-        featureId: item.featureId,
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
-        operation: `Delete ${item.label}`,
-        fallbackMessage: `Delete ${item.label} failed.`,
-        context: [
-          { key: 'baseRevisionId', value: snapshot.document.revisionId },
-          { key: 'featureId', value: item.featureId },
-        ],
-      }),
-      onError: (error) => showWorkbenchError(error.message),
-    }).then((result) => {
-      if (result.isErr()) {
-        return
-      }
-
-      showWorkbenchInfo(`Deleted ${item.label}.`)
-      dispatch({ type: 'document.refreshRequested' })
-    })
+  const handleDocumentHistoryDelete = (item: DocumentHistoryItemRecord) => {
+    handleDeleteTarget(item.target, item.label)
   }
 
   const requestRenameLabel = (currentLabel: string) => {
@@ -1940,7 +1945,7 @@ export function CadWorkbench() {
             objectLabelOverrides={objectLabelOverrides}
             onAddVariable={handleVariableAdd}
             onInspectDiagnostic={handleDiagnosticInspectPlaceholder}
-            onObjectDelete={handleObjectDeletePlaceholder}
+            onObjectDelete={handleDeleteTarget}
             onObjectExport={handleObjectExport}
             onRenameTarget={handleTargetRename}
             onReopenTarget={handleNavigationReopen}
@@ -2262,7 +2267,7 @@ export function CadWorkbench() {
             onDocumentHistoryReorder={handleDocumentHistoryReorder}
             documentHistoryReorderDisabled={Boolean(sketchSession) || isDocumentHistoryReorderRunning || isUndoRedoRunning || (!history.canUndo && !history.canRedo)}
             onSketchCursorRequested={(cursor) => dispatch({ type: 'sketch.historyCursorRequested', cursor })}
-            onDeleteFeature={handleFeatureDelete}
+            onDeleteDocumentItem={handleDocumentHistoryDelete}
             onRenameDocumentItem={handleDocumentHistoryRename}
             onSuppressFeature={handleFeatureSuppressPlaceholder}
           />

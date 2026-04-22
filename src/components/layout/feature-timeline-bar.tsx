@@ -43,7 +43,7 @@ interface FeatureTimelineBarProps {
   cursorDisabled?: boolean
   onReorderItem?: (item: DocumentHistoryOrderEntry, beforeItem: DocumentHistoryOrderEntry | null) => void
   reorderDisabled?: boolean
-  onDeleteFeature: (item: FeatureHistoryItem) => void
+  onDeleteItem: (item: DocumentHistoryItemRecord) => void
   onRenameItem: (item: DocumentHistoryItemRecord) => void
   onSuppressFeature: (item: FeatureHistoryItem) => void
   visibleSelection: PrimitiveRef[]
@@ -96,7 +96,7 @@ export function FeatureTimelineBar({
   cursorDisabled = false,
   onReorderItem,
   reorderDisabled = false,
-  onDeleteFeature,
+  onDeleteItem,
   onRenameItem,
   onSuppressFeature,
   visibleSelection,
@@ -479,21 +479,19 @@ export function FeatureTimelineBar({
                       disabled: cursorDisabled,
                       onSelect: () => onCursorRequested?.(getPositionCursor(anchorIndex)),
                     },
-                    ...(item.kind === 'feature' && !primaryFeatureDiagnostic ? [
-                      {
-                        kind: 'divider' as const,
-                        id: 'feature-destructive-divider',
-                      },
-                      {
-                        kind: 'item' as const,
-                        id: 'delete',
-                        label: 'Delete',
-                        commandId: 'context.delete' as const,
-                        icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
-                        danger: true,
-                        onSelect: () => onDeleteFeature(item),
-                      },
-                    ] : []),
+                    {
+                      kind: 'divider' as const,
+                      id: 'destructive-divider',
+                    },
+                    {
+                      kind: 'item' as const,
+                      id: 'delete',
+                      label: 'Delete',
+                      commandId: 'context.delete' as const,
+                      icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
+                      danger: true,
+                      onSelect: () => onDeleteItem(item),
+                    },
                   ] : []
 
                   return (
@@ -512,72 +510,71 @@ export function FeatureTimelineBar({
                       </div>
                       {item ? (
                         <WorkbenchContextMenu label={`${item.label} actions`} items={menuItems}>
-                          <span className="relative flex h-10 items-center justify-center">
-                            <button
-                              type="button"
-                              onPointerDown={(event) => handleItemPointerDown(event, item, anchorIndex)}
-                              onClick={() => {
-                                if (suppressNextItemClickRef.current) {
-                                  suppressNextItemClickRef.current = false
-                                  return
-                                }
+                          <button
+                            type="button"
+                            onPointerDown={(event) => handleItemPointerDown(event, item, anchorIndex)}
+                            onClick={() => {
+                              if (suppressNextItemClickRef.current) {
+                                suppressNextItemClickRef.current = false
+                                return
+                              }
 
-                                if (primaryFeatureDiagnostic) {
-                                  onReopenTarget(target!)
-                                  return
-                                }
+                              if (primaryFeatureDiagnostic) {
+                                onReopenTarget(target!)
+                                return
+                              }
 
-                                if (!isAllowed) {
-                                  return
-                                }
+                              if (!isAllowed) {
+                                return
+                              }
 
-                                onSelectTarget(target!)
-                              }}
-                              onDoubleClick={() => onReopenTarget(target!)}
-                              className={`relative flex h-8 w-8 items-center justify-center rounded-md border transition ${
-                                isAfterCursor ? 'opacity-45' : ''
-                              } ${isDraggingItem ? 'opacity-70' : ''
-                              } ${!isAllowed ? 'cursor-not-allowed' : ''}`}
-                              style={{
-                                backgroundColor: primaryFeatureDiagnostic
-                                  ? 'var(--workbench-shell-danger-surface)'
-                                  : isSelected
-                                  ? 'var(--workbench-shell-accent-surface)'
-                                  : 'transparent',
-                                borderColor: primaryFeatureDiagnostic
-                                  ? 'var(--workbench-shell-danger-border)'
-                                  : isSelected
-                                  ? 'var(--workbench-shell-border-strong)'
-                                  : 'transparent',
-                                color: primaryFeatureDiagnostic
-                                  ? 'var(--workbench-shell-danger-text)'
-                                  : 'var(--workbench-shell-text)',
-                              }}
-                              aria-label={primaryFeatureDiagnostic
-                                ? `Repair ${item.label}. ${repairMessage}`
-                                : `Select ${item.label}. Double-click to reopen.`}
-                              aria-disabled={!isAllowed}
-                              aria-grabbed={isDraggingItem}
-                              title={primaryFeatureDiagnostic
-                                ? repairMessage ?? getHistoryItemDescription(item)
-                                : `${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
-                              data-feature-error={primaryFeatureDiagnostic ? 'true' : undefined}
-                              data-repair-guidance={primaryFeatureDiagnostic ? repairMessage ?? undefined : undefined}
-                              aria-describedby={primaryFeatureDiagnostic ? tooltipId : undefined}
-                              onMouseEnter={(event) => showRepairTooltip(event.currentTarget, repairMessage)}
-                              onMouseLeave={() => setRepairTooltip(null)}
-                              onFocus={(event) => showRepairTooltip(event.currentTarget, repairMessage)}
-                              onBlur={() => setRepairTooltip(null)}
-                            >
-                              {itemToolIcon ? (
-                                <ToolIcon icon={itemToolIcon} className="h-4 w-4" />
-                              ) : item.kind === 'sketch' ? (
-                                <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
-                              ) : (
-                                <WorkbenchIcon name="layers" className="h-4 w-4" />
-                              )}
-                            </button>
-                          </span>
+                              onSelectTarget(target!)
+                            }}
+                            onDoubleClick={() => onReopenTarget(target!)}
+                            className={`relative flex h-8 w-8 items-center justify-center rounded-md border transition ${
+                              isAfterCursor ? 'opacity-45' : ''
+                            } ${isDraggingItem ? 'opacity-70' : ''
+                            } ${!isAllowed ? 'cursor-not-allowed' : ''}`}
+                            style={{
+                              backgroundColor: primaryFeatureDiagnostic
+                                ? 'var(--workbench-shell-danger-surface)'
+                                : isSelected
+                                ? 'var(--workbench-shell-accent-surface)'
+                                : 'transparent',
+                              borderColor: primaryFeatureDiagnostic
+                                ? 'var(--workbench-shell-danger-border)'
+                                : isSelected
+                                ? 'var(--workbench-shell-border-strong)'
+                                : 'transparent',
+                              color: primaryFeatureDiagnostic
+                                ? 'var(--workbench-shell-danger-text)'
+                                : 'var(--workbench-shell-text)',
+                            }}
+                            aria-label={primaryFeatureDiagnostic
+                              ? `Repair ${item.label}. ${repairMessage}`
+                              : `Select ${item.label}. Double-click to reopen.`}
+                            aria-disabled={!isAllowed}
+                            aria-grabbed={isDraggingItem}
+                            title={primaryFeatureDiagnostic
+                              ? repairMessage ?? getHistoryItemDescription(item)
+                              : `${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
+                            data-feature-error={primaryFeatureDiagnostic ? 'true' : undefined}
+                            data-delete-supported="true"
+                            data-repair-guidance={primaryFeatureDiagnostic ? repairMessage ?? undefined : undefined}
+                            aria-describedby={primaryFeatureDiagnostic ? tooltipId : undefined}
+                            onMouseEnter={(event) => showRepairTooltip(event.currentTarget, repairMessage)}
+                            onMouseLeave={() => setRepairTooltip(null)}
+                            onFocus={(event) => showRepairTooltip(event.currentTarget, repairMessage)}
+                            onBlur={() => setRepairTooltip(null)}
+                          >
+                            {itemToolIcon ? (
+                              <ToolIcon icon={itemToolIcon} className="h-4 w-4" />
+                            ) : item.kind === 'sketch' ? (
+                              <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
+                            ) : (
+                              <WorkbenchIcon name="layers" className="h-4 w-4" />
+                            )}
+                          </button>
                         </WorkbenchContextMenu>
                       ) : null}
                     </div>

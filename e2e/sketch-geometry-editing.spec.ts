@@ -57,3 +57,47 @@ test('dragging an active sketch vertex updates the committed sketch definition',
   expect(pointPositions.length).toBeGreaterThanOrEqual(2)
   expect(pointPositions[0]![0]).toBeGreaterThan(pointPositions[1]![0])
 })
+
+test('saving a new sketch persists it across browser reload', async ({ page }) => {
+  const workbench = new SketchWorkbenchHarness(page)
+
+  await workbench.open()
+  await workbench.activateTool('Start a new sketch.')
+  await page.getByRole('button', { name: /Top Plane/ }).first().click()
+  await workbench.expectSketchSessionActive()
+  await workbench.activateTool('Create line geometry.')
+
+  const canvas = page.locator('main canvas').first()
+  await canvas.click({ position: { x: 360, y: 260 }, force: true })
+  await canvas.click({ position: { x: 440, y: 320 }, force: true })
+  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('1 entities staged')
+
+  await workbench.activateTool('Exit the active sketch.')
+  await workbench.expectMachine('idle')
+  await expect(page.getByRole('button', { name: 'Select Sketch Draft. Double-click to reopen.' })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  const persistedSketchCount = await page.evaluate((storageKey) => {
+    const serialized = window.localStorage.getItem(storageKey)
+    if (!serialized) {
+      return 0
+    }
+
+    const payload = JSON.parse(serialized) as {
+      entries?: Array<{ kind: string }>
+    }
+
+    return payload.entries?.filter((entry) => entry.kind === 'commitSketch').length ?? 0
+  }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
+
+  expect(persistedSketchCount).toBeGreaterThanOrEqual(1)
+
+  await workbench.reloadPreservingStorage()
+
+  await expect(page.getByText('History restore failed')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Select Sketch Draft. Double-click to reopen.' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toBe('none')
+})

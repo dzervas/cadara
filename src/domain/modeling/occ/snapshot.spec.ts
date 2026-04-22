@@ -326,6 +326,9 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       async deleteFeature() {
         throw new Error('Not implemented in phase 6 snapshot test adapter.')
       },
+      async deleteTarget() {
+        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+      },
       async renameBody() {
         throw new Error('Not implemented in phase 6 snapshot test adapter.')
       },

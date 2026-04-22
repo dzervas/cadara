@@ -118,6 +118,7 @@ function App() {
           typeof window === 'undefined'
             ? null
             : createLocalStorageOperationHistoryStore(window.localStorage),
+        documentRepositoryPersistence: 'background',
         documentRepository:
           typeof window === 'undefined' || shouldDisableDevRepository() || !documentSyncWorkerClient
             ? null

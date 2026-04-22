@@ -1319,6 +1319,22 @@ export interface DeleteFeatureResponse extends ModelingOperationResult {
 }
 
 /**
+ * Generic durable deletion request for supported document-history and object targets.
+ */
+export interface DeleteDocumentTargetRequest extends DocumentMutationRequest {
+  /** Durable target to remove from the authored document. */
+  target: PrimitiveRef
+}
+
+/**
+ * Generic durable deletion response.
+ */
+export interface DeleteDocumentTargetResponse extends ModelingOperationResult {
+  /** Durable target accepted by the deletion planner. */
+  deletedTarget: PrimitiveRef
+}
+
+/**
  * Body rename request.
  */
 export interface RenameBodyRequest extends DocumentMutationRequest {

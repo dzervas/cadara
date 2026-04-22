@@ -50,6 +50,17 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     return resolved.error
   }
 
+  async function waitFor(condition: () => boolean, message: string) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (condition()) {
+        return
+      }
+      await Promise.resolve()
+    }
+
+    throw new Error(message)
+  }
+
   async function getSeedExtrudeDefinition(service: ModelingService): Promise<ExtrudeFeatureDefinition> {
     const snapshot = await service.getCurrentDocumentSnapshot()
     const seedExtrude = snapshot.features.find(
@@ -519,6 +530,299 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(
       restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Migrated Body',
       'Existing authored documents should be preferred over operation history after migration.',
+    )
+  }
+
+  async function testSeedRepositoryRestoreReplaysOperationHistoryFallback() {
+    const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
+    const historyService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+    })
+    const historySnapshot = await historyService.getCurrentDocumentSnapshot()
+    const historyRename = await unwrapModelingResult(historyService.renameBody({
+      baseRevisionId: historySnapshot.revisionId,
+      bodyId: 'body_part-1',
+      bodyLabel: 'Recovered History Body',
+    }))
+    assert(historyRename.revisionState.kind === 'accepted', 'History mutation should prepare a browser fallback payload.')
+
+    const seedDocument = await createSeedAuthoredDocument()
+    const documentRepository = createMemoryDocumentRepository([seedDocument])
+    const restoredService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+    })
+    const restoreState = await restoredService.getHistoryRestoreState()
+    const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+
+    assert(restoreState.kind === 'restored', 'Seed repository restores should replay valid operation-history fallback entries.')
+    assert(restoreState.entriesReplayed === 1, 'Seed repository restore should replay the browser fallback operation.')
+    assert(documentRepository.savedDocuments.length === 1, 'Recovered browser fallback history should migrate into the repository.')
+    assert(
+      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered History Body',
+      'Restored seed repositories should recover the document from operation history before exposing snapshots.',
+    )
+  }
+
+  async function testRestoredRepositoryRestoreReplaysRepositoryBasedOperationHistoryFallback() {
+    const repositoryDocument = await createSeedAuthoredDocument()
+    repositoryDocument.bodyLabels = repositoryDocument.bodyLabels.map((label) =>
+      label.bodyId === 'body_part-1'
+        ? { ...label, label: 'Repository Basis Body' }
+        : label,
+    )
+    const documentRepository = createMemoryDocumentRepository([repositoryDocument])
+    const historyStore = createMemoryOperationHistoryStore({
+      ...createEmptyOperationHistory('doc_workspace', documentRepository.getMetadata('doc_workspace').heads),
+      entries: [{
+        kind: 'renameBody',
+        payload: {
+          bodyId: 'body_part-1',
+          bodyLabel: 'Recovered Repository Tail Body',
+        },
+      }],
+    })
+    const restoredService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+    })
+    const restoreState = await restoredService.getHistoryRestoreState()
+    const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+
+    assert(restoreState.kind === 'restored', 'Repository-based operation-history fallback should restore successfully.')
+    assert(restoreState.entriesReplayed === 1, 'Repository-based operation-history fallback should replay its pending entry.')
+    assert(documentRepository.savedDocuments.length === 1, 'Recovered repository fallback history should migrate into the repository.')
+    assert(
+      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered Repository Tail Body',
+      'Restored repository documents should replay operation-history entries saved against the same repository heads.',
+    )
+  }
+
+  async function testBackgroundRepositoryPersistenceDoesNotBlockAcceptedMutation() {
+    const documentRepository = createMemoryDocumentRepository()
+    const mutate = documentRepository.mutate.bind(documentRepository)
+    let releaseMutate: (() => void) | null = null
+    let resolveMutateComplete: (() => void) | null = null
+    const mutateComplete = new Promise<void>((resolve) => {
+      resolveMutateComplete = resolve
+    })
+    let mutateStarted = false
+    const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
+    documentRepository.mutate = async (input) => {
+      mutateStarted = true
+      await new Promise<void>((resolve) => {
+        releaseMutate = resolve
+      })
+      const result = await mutate(input)
+      resolveMutateComplete?.()
+      return result
+    }
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+      documentRepositoryPersistence: 'background',
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const definition = await getSeedExtrudeDefinition(service)
+
+    const accepted = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: snapshot.revisionId,
+      definition,
+    }))
+
+    assert(accepted.revisionState.kind === 'accepted', 'Background repository persistence should still accept the mutation.')
+    assert(documentRepository.savedDocuments.length === 0, 'Accepted mutation should return before the repository write finishes.')
+    const pendingHistory = historyStore.load()
+    assert(pendingHistory.ok && pendingHistory.payload, 'Background persistence should keep a browser fallback until the repository write finishes.')
+    assert(
+      pendingHistory.payload.baseRepositoryHeads?.join('|') === snapshot.provenance?.repositoryHeads.join('|'),
+      'Background persistence fallback should record the repository heads it extends.',
+    )
+
+    await Promise.resolve()
+    assert(mutateStarted, 'Background persistence should enqueue the repository write after accepting the mutation.')
+    releaseMutate?.()
+    await mutateComplete
+    await Promise.resolve()
+    assert(documentRepository.savedDocuments.length === 1, 'Background repository persistence should still write the authored document.')
+    const clearedHistory = historyStore.load()
+    assert(clearedHistory.ok && clearedHistory.payload === null, 'Completed background repository persistence should clear the browser fallback log.')
+  }
+
+  async function testBackgroundSketchCommitCompactsFallbackAuthoringOperations() {
+    const documentRepository = createMemoryDocumentRepository()
+    const mutate = documentRepository.mutate.bind(documentRepository)
+    let releaseMutate: (() => void) | null = null
+    const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
+    documentRepository.mutate = async (input) => {
+      await new Promise<void>((resolve) => {
+        releaseMutate = resolve
+      })
+      return mutate(input)
+    }
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+      documentRepositoryPersistence: 'background',
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const sourceSketch = snapshot.sketches[0]
+    assert(sourceSketch, 'Seed sketch should exist for compact background sketch fallback coverage.')
+    const firstPointId = sourceSketch.sketch.definition.pointIds[0]
+    const firstEntityId = sourceSketch.sketch.definition.entityIds[0]
+    assert(firstPointId && firstEntityId, 'Seed sketch should expose graph members for compact fallback coverage.')
+
+    const committed = await unwrapModelingResult(service.commitSketch({
+      baseRevisionId: snapshot.revisionId,
+      sketchId: sourceSketch.sketchId,
+      sketchLabel: 'Compacted Background Sketch',
+      plane: sourceSketch.plane,
+      planeTarget: sourceSketch.planeTarget,
+      planeKey: sourceSketch.planeKey,
+      solverCorrelation: {
+        requestId: 'request_compact_background_sketch',
+        projectionRequestId: 'request_compact_background_sketch:project',
+        validationRequestId: 'request_compact_background_sketch:validate',
+        solveRequestId: 'request_compact_background_sketch:solve',
+        regionRequestId: 'request_compact_background_sketch:regions',
+      },
+      definition: {
+        ...sourceSketch.sketch.definition,
+        authoringOperations: [{
+          operationId: 'sketch_operation_compact_background',
+          label: 'Compacted metadata',
+          kind: 'operation',
+          targets: {
+            created: [
+              { kind: 'point', pointId: firstPointId },
+              { kind: 'entity', entityId: firstEntityId },
+            ],
+          },
+          createdGraph: {
+            points: sourceSketch.sketch.definition.points.slice(0, 1),
+            entities: sourceSketch.sketch.definition.entities.slice(0, 1),
+          },
+        }],
+      },
+    }))
+
+    assert(committed.revisionState.kind === 'accepted', 'Background sketch commit should still accept compact fallback payloads.')
+    const pendingHistory = historyStore.load()
+    assert(pendingHistory.ok && pendingHistory.payload?.entries[0]?.kind === 'commitSketch', 'Background sketch commits should persist a fallback entry.')
+    assert(
+      pendingHistory.payload.entries[0].payload.definition.authoringOperations?.length === 0,
+      'Background sketch commit fallback should omit bulky sketch-local authoring operations.',
+    )
+    releaseMutate?.()
+  }
+
+  async function testBackgroundRepositoryPersistenceAdvancesFallbackTail() {
+    const documentRepository = createMemoryDocumentRepository()
+    const mutate = documentRepository.mutate.bind(documentRepository)
+    const mutateCalls: Array<{
+      release: () => void
+      complete: Promise<void>
+      resolveComplete: () => void
+    }> = []
+    const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
+    documentRepository.mutate = async (input) => {
+      let release = () => {}
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let resolveComplete = () => {}
+      const complete = new Promise<void>((resolve) => {
+        resolveComplete = resolve
+      })
+      mutateCalls.push({ release, complete, resolveComplete })
+      await gate
+      const result = await mutate(input)
+      resolveComplete()
+      return result
+    }
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+      documentRepositoryPersistence: 'background',
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const first = await unwrapModelingResult(service.renameBody({
+      baseRevisionId: snapshot.revisionId,
+      bodyId: 'body_part-1',
+      bodyLabel: 'First Background Body',
+    }))
+    assert(first.revisionState.kind === 'accepted', 'First background mutation should be accepted.')
+    await waitFor(() => mutateCalls.length === 1, 'First background repository write should start.')
+
+    const second = await unwrapModelingResult(service.renameBody({
+      baseRevisionId: first.revisionId,
+      bodyId: 'body_part-1',
+      bodyLabel: 'Second Background Body',
+    }))
+    assert(second.revisionState.kind === 'accepted', 'Second background mutation should be accepted while the first write is pending.')
+
+    mutateCalls[0]?.release()
+    await mutateCalls[0]?.complete
+    await waitFor(() => mutateCalls.length === 2, 'Second background repository write should start after the first completes.')
+
+    const pendingHistory = historyStore.load()
+    assert(pendingHistory.ok && pendingHistory.payload, 'Partial background writes should keep the unpersisted fallback tail.')
+    assert(pendingHistory.payload.entries.length === 1, 'Partial background writes should trim only the persisted prefix.')
+    assert(
+      pendingHistory.payload.entries[0]?.kind === 'renameBody'
+        && pendingHistory.payload.entries[0].payload.bodyLabel === 'Second Background Body',
+      'Partial background writes should keep the newer pending operation.',
+    )
+    assert(
+      pendingHistory.payload.baseRepositoryHeads?.join('|') === documentRepository.getMetadata('doc_workspace').heads.join('|'),
+      'Partial background writes should advance the fallback basis to the repository heads that were written.',
+    )
+
+    mutateCalls[1]?.release()
+    await mutateCalls[1]?.complete
+    await Promise.resolve()
+    const clearedHistory = historyStore.load()
+    assert(clearedHistory.ok && clearedHistory.payload === null, 'Final background write should clear the fallback tail.')
+  }
+
+  async function testLocalRepositoryHeadAdvancesDoNotConflictWithCurrentRevisionMutation() {
+    const documentRepository = createMemoryDocumentRepository()
+    const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: historyStore,
+      documentRepository,
+      documentRepositoryPersistence: 'background',
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+
+    const renamed = await unwrapModelingResult(service.renameBody({
+      baseRevisionId: initial.revisionId,
+      baseRepositoryHeads: initial.provenance?.repositoryHeads,
+      bodyId: 'body_part-1',
+      bodyLabel: 'Local Background Body',
+    }))
+    assert(renamed.revisionState.kind === 'accepted', 'Local setup mutation should be accepted.')
+    await waitFor(() => documentRepository.savedDocuments.length === 1, 'Local background repository write should complete.')
+
+    const current = await service.getCurrentDocumentSnapshot()
+    const definition = await getSeedExtrudeDefinition(service)
+    const committed = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: current.revisionId,
+      baseRepositoryHeads: initial.provenance?.repositoryHeads,
+      definition,
+    }))
+
+    assert(committed.revisionState.kind === 'accepted', 'Mutations should not conflict with local background repository head advances.')
+    assert(
+      committed.diagnostics.every((diagnostic) => diagnostic.code !== 'repository-head-conflict'),
+      'Mutations after local background writes should not report repository head conflicts.',
     )
   }
 
@@ -1232,6 +1536,12 @@ endsolid open
   await testSeededRepositoryClearsInvalidOperationHistory()
   await testRestoredRepositoryLeavesInvalidOperationHistoryAlone()
   await testOperationHistoryMigratesOnlyWhenRepositoryIsMissing()
+  await testSeedRepositoryRestoreReplaysOperationHistoryFallback()
+  await testRestoredRepositoryRestoreReplaysRepositoryBasedOperationHistoryFallback()
+  await testBackgroundRepositoryPersistenceDoesNotBlockAcceptedMutation()
+  await testBackgroundSketchCommitCompactsFallbackAuthoringOperations()
+  await testBackgroundRepositoryPersistenceAdvancesFallbackTail()
+  await testLocalRepositoryHeadAdvancesDoNotConflictWithCurrentRevisionMutation()
   await testMigrationWriteFailureResetsSeededRepositoryForRetry()
   await testInvalidRepositoryDocumentBlocksFutureWrites()
   await testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict()

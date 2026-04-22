@@ -13,6 +13,8 @@ import type {
   AddDocumentVariableResponse,
   CreateFeatureRequest,
   CreateFeatureResponse,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
   DeleteFeatureRequest,
   DeleteFeatureResponse,
   EvaluatePreviewRequest,
@@ -82,6 +84,8 @@ export interface ModelingKernelAdapter {
   updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>
   /** Deletes an existing durable feature from the document. */
   deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>
+  /** Deletes a supported durable document history or object target from the document. */
+  deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse>
   /** Renames an existing durable body without changing its topology. */
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>
   /** Reorders an existing durable feature within the document feature list. */

@@ -27,7 +27,3 @@ export function createObjectExportModalState(
     baseRevisionId: snapshot.document.revisionId,
   }
 }
-
-export function createObjectDeletePlaceholderMessage(label: string) {
-  return `Delete for ${label} is not implemented yet.`
-}

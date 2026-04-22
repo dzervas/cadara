@@ -3,6 +3,7 @@ import {
   createAddDocumentVariableHistoryEntry,
   createCommitSketchHistoryEntry,
   createCreateFeatureHistoryEntry,
+  createDeleteTargetHistoryEntry,
   createEmptyOperationHistory,
   createReorderDocumentHistoryEntry,
   createReorderFeatureHistoryEntry,
@@ -14,6 +15,7 @@ import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
   CreateFeatureRequest,
+  DeleteDocumentTargetRequest,
   FeatureDefinition,
   ReorderDocumentHistoryRequest,
   ReorderFeatureRequest,
@@ -118,6 +120,13 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     baseRevisionId: 'rev_0004',
     item: { kind: 'sketch', sketchId: 'sketch_profile' },
     beforeItem: { kind: 'feature', featureId: 'feature_extrude-1' },
+  }
+
+  const deleteTargetRequest: DeleteDocumentTargetRequest = {
+    contractVersion: 'modeling-contract/v1alpha1',
+    documentId: 'doc_workspace',
+    baseRevisionId: 'rev_0005',
+    target: { kind: 'feature', featureId: 'feature_extrude-1' },
   }
 
   function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
@@ -265,6 +274,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       entries: [
         createCommitSketchHistoryEntry(commitSketchRequest, commitSketchRequest.sketchId!),
         createCreateFeatureHistoryEntry(createFeatureRequest),
+        createDeleteTargetHistoryEntry(deleteTargetRequest),
         createReorderFeatureHistoryEntry(reorderFeatureRequest),
         createReorderDocumentHistoryEntry(reorderDocumentHistoryRequest),
       ],
@@ -282,10 +292,16 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       !('baseRevisionId' in result.payload.entries[1]!.payload),
       'Persisted feature entries must omit replay-derived base revision metadata.',
     )
+    assert(result.payload.entries[2]?.kind === 'deleteTarget', 'Generic delete entry kind must be preserved.')
     assert(
-      result.payload.entries[3]?.kind === 'reorderDocumentHistory'
-        && result.payload.entries[3].payload.item.kind === 'sketch'
-        && result.payload.entries[3].payload.beforeItem?.kind === 'feature',
+      result.payload.entries[2]?.kind === 'deleteTarget'
+        && result.payload.entries[2].payload.target.kind === 'feature',
+      'Generic delete entries should preserve the accepted durable target.',
+    )
+    assert(
+      result.payload.entries[4]?.kind === 'reorderDocumentHistory'
+        && result.payload.entries[4].payload.item.kind === 'sketch'
+        && result.payload.entries[4].payload.beforeItem?.kind === 'feature',
       'Persisted document history reorder entries must preserve mixed sketch/feature identities.',
     )
   }
@@ -316,12 +332,25 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(!missingAnchorShape.ok, 'Document history reorder entries with malformed anchors should be rejected.')
   }
 
+  function testRejectsInvalidGenericDeleteEntries() {
+    const result = validateOperationHistoryPayload({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [{
+        kind: 'deleteTarget',
+        payload: { target: { kind: 'feature' } },
+      }],
+    })
+
+    assert(!result.ok, 'Generic delete entries with malformed targets should be rejected.')
+  }
+
   function testNormalizesCommittedCommitSketchTargets() {
     const committedSketchId = 'sketch_committed'
+    const draftDefinition = createDraftSketchDefinition('sketch_draft')
     const entry = createCommitSketchHistoryEntry({
       ...commitSketchRequest,
       sketchId: null,
-      definition: createDraftSketchDefinition('sketch_draft'),
+      definition: draftDefinition,
     }, committedSketchId)
 
     assert(entry.kind === 'commitSketch', 'Commit sketch history entry should preserve its kind.')
@@ -333,6 +362,50 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(
       entry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
       'Persisted commitSketch entity targets must be normalized to the committed sketch id.',
+    )
+  }
+
+  function testCanCompactCommitSketchAuthoringOperations() {
+    const committedSketchId = 'sketch_committed'
+    const draftDefinition = createDraftSketchDefinition('sketch_draft')
+    const definitionWithOperations: CommitSketchRequest['definition'] = {
+      ...draftDefinition,
+      authoringOperations: [{
+        operationId: 'sketch_operation_1_line',
+        label: 'Line 1',
+        kind: 'line',
+        targets: {
+          created: [
+            { kind: 'point', pointId: draftDefinition.pointIds[0]! },
+            { kind: 'point', pointId: draftDefinition.pointIds[1]! },
+            { kind: 'entity', entityId: draftDefinition.entityIds[0]! },
+          ],
+        },
+        createdGraph: {
+          points: draftDefinition.points.slice(0, 2),
+          entities: draftDefinition.entities.slice(0, 1),
+        },
+      }],
+    }
+
+    const fullEntry = createCommitSketchHistoryEntry({
+      ...commitSketchRequest,
+      sketchId: null,
+      definition: definitionWithOperations,
+    }, committedSketchId)
+    const compactEntry = createCommitSketchHistoryEntry({
+      ...commitSketchRequest,
+      sketchId: null,
+      definition: definitionWithOperations,
+    }, committedSketchId, { includeAuthoringOperations: false })
+
+    assert(fullEntry.kind === 'commitSketch' && fullEntry.payload.definition.authoringOperations?.length === 1, 'Full commit history should preserve authoring operations by default.')
+    assert(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve the commitSketch entry kind.')
+    assert(compactEntry.payload.definition.authoringOperations === undefined, 'Compact commit history should omit sketch-local authoring operations.')
+    assert(
+      compactEntry.payload.definition.points.every((point) => point.target.sketchId === committedSketchId)
+        && compactEntry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
+      'Compact commit history should still normalize the live sketch graph targets.',
     )
   }
 
@@ -1167,7 +1240,9 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
   testValidatesRepresentativeHistory()
   testRejectsInvalidDocumentHistoryReorderEntries()
+  testRejectsInvalidGenericDeleteEntries()
   testNormalizesCommittedCommitSketchTargets()
+  testCanCompactCommitSketchAuthoringOperations()
   testAcceptsLegacyDraftCommitSketchTargets()
   testRejectsUnsupportedVersion()
   testRejectsTransportMetadataLeak()

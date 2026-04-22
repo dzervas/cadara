@@ -8,6 +8,7 @@ import type {
   PersistedCommitSketchPayload,
   PersistedCreateFeaturePayload,
   PersistedDeleteFeaturePayload,
+  PersistedDeleteTargetPayload,
   PersistedRenameBodyPayload,
   PersistedReorderDocumentHistoryPayload,
   PersistedReorderFeaturePayload,
@@ -27,6 +28,7 @@ import {
   sketchIdSchema,
   stringSchema,
 } from '@/contracts/shared/runtime-schema'
+import { durableRefSchema } from '@/contracts/shared/references.runtime-schema'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
 import { sketchPlaneDefinitionSchema, sketchPlaneSupportRefSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 
@@ -240,6 +242,10 @@ const persistedDeleteFeaturePayloadSchema = z.object({
   featureId: featureIdSchema,
 }).transform((value) => value as PersistedDeleteFeaturePayload)
 
+const persistedDeleteTargetPayloadSchema = z.object({
+  target: durableRefSchema,
+}).transform((value) => value as PersistedDeleteTargetPayload)
+
 const persistedRenameBodyPayloadSchema = z.object({
   bodyId: bodyIdSchema,
   bodyLabel: stringSchema,
@@ -285,6 +291,7 @@ const operationHistoryEntrySchema = z.object({
     z.literal('createFeature'),
     z.literal('updateFeature'),
     z.literal('deleteFeature'),
+    z.literal('deleteTarget'),
     z.literal('renameBody'),
     z.literal('reorderFeature'),
     z.literal('reorderDocumentHistory'),
@@ -313,6 +320,8 @@ const operationHistoryEntrySchema = z.object({
         return persistedUpdateFeaturePayloadSchema
       case 'deleteFeature':
         return persistedDeleteFeaturePayloadSchema
+      case 'deleteTarget':
+        return persistedDeleteTargetPayloadSchema
       case 'renameBody':
         return persistedRenameBodyPayloadSchema
       case 'reorderFeature':
@@ -359,6 +368,8 @@ const operationHistoryEntrySchema = z.object({
       return { kind: value.kind, payload: persistedUpdateFeaturePayloadSchema.parse(value.payload) }
     case 'deleteFeature':
       return { kind: value.kind, payload: persistedDeleteFeaturePayloadSchema.parse(value.payload) }
+    case 'deleteTarget':
+      return { kind: value.kind, payload: persistedDeleteTargetPayloadSchema.parse(value.payload) }
     case 'renameBody':
       return { kind: value.kind, payload: persistedRenameBodyPayloadSchema.parse(value.payload) }
     case 'reorderFeature':
@@ -378,6 +389,7 @@ export const operationHistoryPayloadSchema = z.object({
   contractVersion: contractVersionSchema,
   schemaVersion: operationHistorySchemaVersionSchema,
   documentId: documentIdSchema,
+  baseRepositoryHeads: z.array(z.string()).optional(),
   entries: z.array(operationHistoryEntrySchema),
 }).transform((value) => value as ModelingOperationHistoryPayload)
 

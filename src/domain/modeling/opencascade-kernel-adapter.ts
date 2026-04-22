@@ -20,6 +20,8 @@ import type {
   AddDocumentVariableResponse,
   CreateFeatureRequest,
   CreateFeatureResponse,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
   DeleteFeatureRequest,
   DeleteFeatureResponse,
   EvaluatePreviewRequest,
@@ -59,7 +61,7 @@ import {
   createMeshImportDiagnostic,
   type MeshImportDiagnosticCode,
 } from '@/contracts/modeling/mesh-import'
-import { isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
   DocumentId,
@@ -319,6 +321,24 @@ function createMissingBodyDiagnostic(bodyId: BodyId): ModelingDiagnostic {
     'error',
     `Body ${bodyId} does not resolve in the current OCC authoring state.`,
     { kind: 'body', bodyId },
+  )
+}
+
+function createMissingSketchDiagnostic(sketchId: SketchId): ModelingDiagnostic {
+  return createDiagnostic(
+    'occ-missing-sketch',
+    'error',
+    `Sketch ${sketchId} does not resolve in the current OCC authoring state.`,
+    { kind: 'sketch', sketchId },
+  )
+}
+
+function createUnsupportedDeleteTargetDiagnostic(target: DurableRef): ModelingDiagnostic {
+  return createDiagnostic(
+    'occ-unsupported-delete-target',
+    'error',
+    `Target ${getOccDurableRefKey(target)} cannot be deleted by generic document deletion.`,
+    target,
   )
 }
 
@@ -773,7 +793,15 @@ function allocateSketchId(state: OccAuthoringState) {
     return OCC_KERNEL_PRIMARY_SKETCH_ID
   }
 
-  return `sketch_${state.sketches.length + 1}` as SketchId
+  let maxOrdinal = 1
+  for (const sketch of state.sketches) {
+    const match = /^sketch_(\d+)$/.exec(sketch.sketchId)
+    if (match) {
+      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+    }
+  }
+
+  return `sketch_${maxOrdinal + 1}` as SketchId
 }
 
 function allocateFeatureId(
@@ -929,6 +957,74 @@ function reorderFeaturesByDocumentHistory(
   }
 
   return ordered
+}
+
+function getDeleteTargetHistoryEntry(target: DurableRef): DocumentHistoryOrderEntry | null {
+  if (target.kind === 'sketch') {
+    return { kind: 'sketch', sketchId: target.sketchId }
+  }
+
+  if (target.kind === 'feature') {
+    return { kind: 'feature', featureId: target.featureId }
+  }
+
+  return null
+}
+
+function deleteDocumentHistoryOrderEntry(
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+  item: DocumentHistoryOrderEntry,
+): DocumentHistoryOrderEntry[] {
+  const itemKey = getDocumentHistoryOrderEntryKey(item)
+  return historyOrder.filter((entry) => getDocumentHistoryOrderEntryKey(entry) !== itemKey)
+}
+
+function documentHistoryOrderContainsCursor(
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+  cursor: OccAuthoringState['cursor'],
+) {
+  if (cursor.kind === 'empty') {
+    return true
+  }
+
+  return historyOrder.some((entry) =>
+    cursor.kind === 'sketch'
+      ? entry.kind === 'sketch' && entry.sketchId === cursor.sketchId
+      : entry.kind === 'feature' && entry.featureId === cursor.featureId,
+  )
+}
+
+function createTailCursorFromHistoryOrder(
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+): OccAuthoringState['cursor'] {
+  const tail = historyOrder.at(-1)
+  if (!tail) {
+    return { kind: 'empty' }
+  }
+
+  return tail.kind === 'sketch'
+    ? { kind: 'sketch', sketchId: tail.sketchId }
+    : { kind: 'feature', featureId: tail.featureId }
+}
+
+function repairCursorAfterHistoryDeletion(
+  cursor: OccAuthoringState['cursor'],
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+) {
+  return documentHistoryOrderContainsCursor(historyOrder, cursor)
+    ? cursor
+    : createTailCursorFromHistoryOrder(historyOrder)
+}
+
+function createDeleteSolidDefinition(bodyId: BodyId): FeatureDefinition {
+  return {
+    kind: 'deleteSolid',
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      participants: [{ role: 'body', targets: [{ kind: 'body', bodyId }] }],
+      options: {},
+    },
+  }
 }
 
 function uniqueTargets(targets: readonly NonNullable<ModelingDiagnostic['target']>[]) {
@@ -2412,23 +2508,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const nextFeatures = runtimeState.authoringState.features.filter(
       (feature) => feature.featureId !== request.featureId,
     )
-    const currentCursor = runtimeState.authoringState.cursor
-    const nextCursor = currentCursor.kind !== 'feature'
-      || nextFeatures.some((feature) => feature.featureId === currentCursor.featureId)
-      ? currentCursor
-      : (() => {
-          const tail = nextFeatures.at(-1)
-          const sketch = runtimeState.authoringState.sketches.at(-1)
-          return tail
-            ? { kind: 'feature' as const, featureId: tail.featureId }
-            : sketch
-              ? { kind: 'sketch' as const, sketchId: sketch.sketchId }
-              : { kind: 'empty' as const }
-        })()
+    const deletedItem = { kind: 'feature' as const, featureId: request.featureId }
+    const nextHistoryOrder = deleteDocumentHistoryOrderEntry(runtimeState.authoringState.historyOrder, deletedItem)
+    const nextCursor = repairCursorAfterHistoryDeletion(runtimeState.authoringState.cursor, nextHistoryOrder)
 
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
       features: nextFeatures,
+      historyOrder: nextHistoryOrder,
       cursor: nextCursor,
     })
     this.replaceRuntimeState({
@@ -2448,6 +2535,147 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ...accepted,
       }),
     }
+  }
+
+  async deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(request.baseRevisionId, currentRevisionId)
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        deletedTarget: request.target,
+        changedTargets: [],
+        ...conflict,
+      }
+    }
+
+    if (request.target.kind === 'feature' || request.target.kind === 'sketch') {
+      const target = request.target
+      const deletedItem = getDeleteTargetHistoryEntry(target)
+      if (!deletedItem) {
+        throw new Error('Unsupported history delete target.')
+      }
+
+      const itemKey = getDocumentHistoryOrderEntryKey(deletedItem)
+      if (!runtimeState.authoringState.historyOrder.some((entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey)) {
+        const diagnostic = target.kind === 'feature'
+          ? createMissingFeatureDiagnostic(target.featureId)
+          : createMissingSketchDiagnostic(target.sketchId)
+        const rejected = this.buildRejectedResult(request.baseRevisionId, [diagnostic], diagnostic.code)
+        return this.withOperationEnvelope({
+          deletedTarget: target,
+          changedTargets: [],
+          ...rejected,
+        })
+      }
+
+      const nextSequence = runtimeState.revisionSequence + 1
+      const nextRevisionId = createRevisionId(nextSequence)
+      const nextHistoryOrder = deleteDocumentHistoryOrderEntry(runtimeState.authoringState.historyOrder, deletedItem)
+      const nextFeatures = target.kind === 'feature'
+        ? runtimeState.authoringState.features.filter((feature) => feature.featureId !== target.featureId)
+        : runtimeState.authoringState.features
+      const nextSketches = target.kind === 'sketch'
+        ? runtimeState.authoringState.sketches.filter((sketch) => sketch.sketchId !== target.sketchId)
+        : runtimeState.authoringState.sketches
+      const nextCursor = repairCursorAfterHistoryDeletion(runtimeState.authoringState.cursor, nextHistoryOrder)
+
+      const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+        revisionId: nextRevisionId,
+        sketches: nextSketches,
+        features: nextFeatures,
+        historyOrder: nextHistoryOrder,
+        cursor: nextCursor,
+      })
+      this.replaceRuntimeState({
+        authoringState: nextAuthoringState.state,
+        revisionSequence: nextSequence,
+      })
+
+      const deletedFeature = target.kind === 'feature'
+        ? runtimeState.authoringState.features.find((feature) => feature.featureId === target.featureId)
+        : null
+      const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
+
+      return this.withOperationEnvelope({
+        deletedTarget: target,
+        changedTargets: uniqueTargets([
+          target,
+          ...(deletedFeature?.producedTargets ?? []),
+        ]),
+        ...accepted,
+      })
+    }
+
+    if (request.target.kind === 'body') {
+      const target = request.target
+      if (!runtimeState.authoringState.bodies.some((body) => body.bodyId === target.bodyId)) {
+        const rejected = this.buildRejectedResult(
+          request.baseRevisionId,
+          [createMissingBodyDiagnostic(target.bodyId)],
+          OCC_MISSING_BODY_CODE,
+        )
+        return this.withOperationEnvelope({
+          deletedTarget: target,
+          changedTargets: [],
+          ...rejected,
+        })
+      }
+
+      const nextSequence = runtimeState.revisionSequence + 1
+      const nextRevisionId = createRevisionId(nextSequence)
+      const featureId = allocateFeatureId(runtimeState.authoringState, 'deleteSolid')
+      const feature: OccAuthoringFeatureRecord = {
+        featureId,
+        label: `DeleteSolid ${featureOrdinalForLabel(runtimeState.authoringState, 'deleteSolid')}`,
+        definition: createDeleteSolidDefinition(target.bodyId),
+      }
+      const insertionIndex = getCursorInsertionIndex(
+        runtimeState.authoringState.cursor,
+        runtimeState.authoringState.features,
+        runtimeState.authoringState.historyOrder,
+      )
+      const nextFeatures = [...runtimeState.authoringState.features]
+      nextFeatures.splice(insertionIndex, 0, feature)
+      const nextHistoryOrder = insertDocumentHistoryOrderEntryAfterCursor(
+        buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation.documentHistory,
+        runtimeState.authoringState.cursor,
+        { kind: 'feature', featureId },
+      )
+      const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+        revisionId: nextRevisionId,
+        features: nextFeatures,
+        historyOrder: nextHistoryOrder,
+        cursor: { kind: 'feature', featureId },
+      })
+
+      this.replaceRuntimeState({
+        authoringState: nextAuthoringState.state,
+        revisionSequence: nextSequence,
+      })
+
+      const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
+      return this.withOperationEnvelope({
+        deletedTarget: target,
+        changedTargets: uniqueTargets([target, { kind: 'feature', featureId }]),
+        ...accepted,
+      })
+    }
+
+    const rejected = this.buildRejectedResult(
+      request.baseRevisionId,
+      [createUnsupportedDeleteTargetDiagnostic(request.target)],
+      'occ-unsupported-delete-target',
+    )
+    return this.withOperationEnvelope({
+      deletedTarget: request.target,
+      changedTargets: [],
+      ...rejected,
+    })
   }
 
   async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {

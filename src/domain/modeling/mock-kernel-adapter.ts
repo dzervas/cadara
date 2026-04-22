@@ -57,6 +57,8 @@ import type {
   AddDocumentVariableResponse,
   CreateFeatureRequest,
   CreateFeatureResponse,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
   DeleteFeatureRequest,
   DeleteFeatureResponse,
   DocumentSnapshot,
@@ -89,7 +91,7 @@ import {
 import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
-import { getAdvancedParticipant, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, getAdvancedParticipant, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import {
   RENDER_EXPORT_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
@@ -109,6 +111,22 @@ const REVISION_ID = 'rev_0001' as const
 const DOCUMENT_ID = 'doc_workspace' as const
 const SKETCH_ID = 'sketch_primary' as const
 const CONSTRUCTION_PICK_PRIORITY = 40
+
+function allocateMockSketchId(sketches: readonly { sketchId: SketchId }[]): SketchId {
+  if (!sketches.some((sketch) => sketch.sketchId === SKETCH_ID)) {
+    return SKETCH_ID
+  }
+
+  let maxOrdinal = 1
+  for (const sketch of sketches) {
+    const match = /^sketch_(\d+)$/.exec(sketch.sketchId)
+    if (match) {
+      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+    }
+  }
+
+  return `sketch_${maxOrdinal + 1}` as SketchId
+}
 
 function applyCursorToMockSnapshot(snapshot: DocumentSnapshot) {
   const appliedFeatureIds = getAppliedFeatureIdsForDocumentCursor(
@@ -527,6 +545,37 @@ function reorderFeaturesByDocumentHistory<TFeature extends { featureId: FeatureI
   return ordered
 }
 
+function getDeleteTargetHistoryEntry(target: DurableRef): DocumentHistoryOrderEntry | null {
+  if (target.kind === 'sketch') {
+    return { kind: 'sketch', sketchId: target.sketchId }
+  }
+
+  if (target.kind === 'feature') {
+    return { kind: 'feature', featureId: target.featureId }
+  }
+
+  return null
+}
+
+function deleteDocumentHistoryOrderEntry(
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+  item: DocumentHistoryOrderEntry,
+): DocumentHistoryOrderEntry[] {
+  const itemKey = getDocumentHistoryOrderEntryKey(item)
+  return historyOrder.filter((entry) => getDocumentHistoryOrderEntryKey(entry) !== itemKey)
+}
+
+function createDeleteSolidDefinition(bodyId: BodyId): FeatureDefinition {
+  return {
+    kind: 'deleteSolid',
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      participants: [{ role: 'body', targets: [{ kind: 'body', bodyId }] }],
+      options: {},
+    },
+  }
+}
+
 function createExportDiagnostic(
   code: string,
   message: string,
@@ -610,6 +659,26 @@ function createMissingBodyDiagnostic(bodyId: BodyId) {
         sourceTarget: null,
       },
     },
+  }
+}
+
+function createMissingSketchDiagnostic(sketchId: SketchId) {
+  return {
+    code: 'mock-missing-sketch',
+    severity: 'error' as const,
+    message: `Sketch ${sketchId} does not resolve in the current revision.`,
+    target: { kind: 'sketch' as const, sketchId },
+    detail: null,
+  }
+}
+
+function createUnsupportedDeleteTargetDiagnostic(target: DurableRef) {
+  return {
+    code: 'mock-unsupported-delete-target',
+    severity: 'error' as const,
+    message: `Target ${getPrimitiveRefKey(target)} cannot be deleted by generic document deletion.`,
+    target,
+    detail: null,
   }
 }
 
@@ -3051,7 +3120,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   async commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse> {
     assertSupportedModelingRequest(request)
     const snapshot = await this.getSnapshot()
-    const sketchId = request.sketchId ?? (`sketch_${snapshot.document.sketches.length + 1}` as SketchId)
+    const sketchId = request.sketchId ?? allocateMockSketchId(snapshot.document.sketches)
     const solverCorrelation = getCommitSolverCorrelation(request)
     const referenceFrame = createSketchReferenceFrame({
       planeTarget: request.plane.support,
@@ -3550,6 +3619,17 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       mutableSnapshot.document.features = mutableSnapshot.document.features.filter((feature) => feature.featureId !== request.featureId)
+      const historyOrder = deleteDocumentHistoryOrderEntry(
+        createDocumentHistoryOrder(mutableSnapshot.presentation.documentHistory),
+        { kind: 'feature', featureId: request.featureId },
+      )
+      mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+        featureTree: mutableSnapshot.presentation.featureTree,
+        features: mutableSnapshot.document.features,
+        sketches: mutableSnapshot.document.sketches,
+        historyOrder,
+      })
+      mutableSnapshot.documentHistory = mutableSnapshot.presentation.documentHistory
       rebuildFeatureTree(mutableSnapshot)
       if (!isValidDocumentHistoryCursor(mutableSnapshot.presentation.documentHistory, mutableSnapshot.document.cursor)) {
         mutableSnapshot.document.cursor = createTailDocumentCursor(mutableSnapshot.presentation.documentHistory)
@@ -3590,6 +3670,250 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       }
     })
+  }
+
+  async deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse> {
+    assertSupportedModelingRequest(request)
+    const snapshot = await this.getSnapshot()
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [createRevisionConflictDiagnostic(request.baseRevisionId, this.currentRevisionId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        deletedTarget: request.target,
+        revisionState: {
+          kind: 'conflict',
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'revisionConflict',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    if (request.target.kind === 'feature' || request.target.kind === 'sketch') {
+      const target = request.target
+      const deletedItem = getDeleteTargetHistoryEntry(target)
+      if (!deletedItem) {
+        throw new Error('Unsupported history delete target.')
+      }
+
+      const historyOrder = createDocumentHistoryOrder(snapshot.presentation.documentHistory)
+      const itemKey = getDocumentHistoryOrderEntryKey(deletedItem)
+      if (!historyOrder.some((entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey)) {
+        const diagnostics = [
+          target.kind === 'feature'
+            ? createMissingFeatureDiagnostic(target.featureId)
+            : createMissingSketchDiagnostic(target.sketchId),
+        ]
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: request.documentId,
+          revisionId: this.currentRevisionId,
+          deletedTarget: target,
+          revisionState: {
+            kind: 'rejected',
+            baseRevisionId: request.baseRevisionId,
+            reasonCode: target.kind === 'feature' ? 'mock-missing-feature' : 'mock-missing-sketch',
+          },
+          rebuildResult: createRebuildResult({
+            kind: 'skipped',
+            reasonCode: 'validationRejected',
+            diagnostics,
+          }),
+          changedTargets: [],
+          diagnostics,
+        }
+      }
+
+      return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+        const changedTargets: DurableRef[] = [target]
+        if (target.kind === 'feature') {
+          mutableSnapshot.document.features = mutableSnapshot.document.features.filter((feature) => feature.featureId !== target.featureId)
+          mutableSnapshot.presentation.entities = mutableSnapshot.presentation.entities.filter(
+            (entry) => !(entry.target.kind === 'feature' && entry.target.featureId === target.featureId),
+          )
+          for (const entityRecord of mutableSnapshot.presentation.entities) {
+            entityRecord.consumedByFeatureIds = entityRecord.consumedByFeatureIds.filter((featureId) => featureId !== target.featureId)
+          }
+        } else {
+          mutableSnapshot.document.sketches = mutableSnapshot.document.sketches.filter((sketch) => sketch.sketchId !== target.sketchId)
+          mutableSnapshot.presentation.entities = mutableSnapshot.presentation.entities.filter((entry) => entry.ownerSketchId !== target.sketchId)
+        }
+
+        mutableSnapshot.features = mutableSnapshot.document.features
+        mutableSnapshot.sketches = mutableSnapshot.document.sketches
+        mutableSnapshot.document.entities = mutableSnapshot.presentation.entities
+        mutableSnapshot.entities = mutableSnapshot.presentation.entities
+        mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+          featureTree: mutableSnapshot.presentation.featureTree,
+          features: mutableSnapshot.document.features,
+          sketches: mutableSnapshot.document.sketches,
+          historyOrder: deleteDocumentHistoryOrderEntry(historyOrder, deletedItem),
+        })
+        mutableSnapshot.documentHistory = mutableSnapshot.presentation.documentHistory
+        rebuildFeatureTree(mutableSnapshot)
+        rebuildObjectTree(mutableSnapshot)
+        if (!isValidDocumentHistoryCursor(mutableSnapshot.presentation.documentHistory, mutableSnapshot.document.cursor)) {
+          mutableSnapshot.document.cursor = createTailDocumentCursor(mutableSnapshot.presentation.documentHistory)
+          mutableSnapshot.cursor = mutableSnapshot.document.cursor
+        }
+
+        const diagnostics: DeleteDocumentTargetResponse['diagnostics'] = [
+          {
+            code: 'mock-delete-target',
+            severity: 'info',
+            message: 'Mock kernel committed the generic deletion into the current revision.',
+            target,
+            detail: null,
+          },
+        ]
+
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: request.documentId,
+          revisionId: nextRevisionId,
+          deletedTarget: target,
+          revisionState: {
+            kind: 'accepted',
+            baseRevisionId: request.baseRevisionId,
+          },
+          rebuildResult: createRebuildResult({
+            kind: 'rebuilt',
+            revisionId: nextRevisionId,
+            diagnostics,
+          }),
+          changedTargets,
+          diagnostics,
+        }
+      })
+    }
+
+    if (request.target.kind === 'body') {
+      const target = request.target
+      if (!snapshot.document.bodies.some((body) => body.bodyId === target.bodyId)) {
+        const diagnostics = [createMissingBodyDiagnostic(target.bodyId)]
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: request.documentId,
+          revisionId: this.currentRevisionId,
+          deletedTarget: target,
+          revisionState: {
+            kind: 'rejected',
+            baseRevisionId: request.baseRevisionId,
+            reasonCode: 'mock-missing-body',
+          },
+          rebuildResult: createRebuildResult({
+            kind: 'skipped',
+            reasonCode: 'validationRejected',
+            diagnostics,
+          }),
+          changedTargets: [],
+          diagnostics,
+        }
+      }
+
+      return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+        const featureId = allocateFeatureId(mutableSnapshot, 'deleteSolid')
+        const nextFeature = {
+          ownerDocumentId: DOCUMENT_ID,
+          ownerRevisionId: nextRevisionId,
+          ownerFeatureId: featureId,
+          ownerSketchId: null,
+          ownerBodyId: null,
+          featureId,
+          label: `Delete Solid ${mutableSnapshot.document.features.length + 1}`,
+          definition: createDeleteSolidDefinition(target.bodyId),
+          producedTargets: [] as DurableRef[],
+        }
+        mutableSnapshot.document.features.push(nextFeature)
+        mutableSnapshot.features = mutableSnapshot.document.features
+        mutableSnapshot.document.bodies = mutableSnapshot.document.bodies.filter((body) => body.bodyId !== target.bodyId)
+        mutableSnapshot.bodies = mutableSnapshot.document.bodies
+        mutableSnapshot.presentation.objects = mutableSnapshot.presentation.objects.filter(
+          (item) => item.target.kind !== 'body' || item.target.bodyId !== target.bodyId,
+        )
+        mutableSnapshot.document.objects = mutableSnapshot.presentation.objects
+        mutableSnapshot.objects = mutableSnapshot.presentation.objects
+        mutableSnapshot.document.render.records = mutableSnapshot.document.render.records.filter(
+          (record) => record.ownerBodyId !== target.bodyId,
+        )
+        mutableSnapshot.render = mutableSnapshot.document.render
+        mutableSnapshot.presentation.entities = mutableSnapshot.presentation.entities.filter(
+          (entry) => entry.ownerBodyId !== target.bodyId,
+        )
+        mutableSnapshot.document.entities = mutableSnapshot.presentation.entities
+        mutableSnapshot.entities = mutableSnapshot.presentation.entities
+        mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+          featureTree: mutableSnapshot.presentation.featureTree,
+          features: mutableSnapshot.document.features,
+          sketches: mutableSnapshot.document.sketches,
+          historyOrder: [
+            ...createDocumentHistoryOrder(mutableSnapshot.presentation.documentHistory),
+            { kind: 'feature', featureId },
+          ],
+        })
+        mutableSnapshot.documentHistory = mutableSnapshot.presentation.documentHistory
+        rebuildFeatureTree(mutableSnapshot)
+        rebuildObjectTree(mutableSnapshot)
+        mutableSnapshot.document.cursor = { kind: 'feature', featureId }
+        mutableSnapshot.cursor = mutableSnapshot.document.cursor
+
+        const diagnostics: DeleteDocumentTargetResponse['diagnostics'] = [
+          {
+            code: 'mock-delete-target',
+            severity: 'info',
+            message: 'Mock kernel committed the generic body deletion into the current revision.',
+            target,
+            detail: null,
+          },
+        ]
+
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: request.documentId,
+          revisionId: nextRevisionId,
+          deletedTarget: target,
+          revisionState: {
+            kind: 'accepted',
+            baseRevisionId: request.baseRevisionId,
+          },
+          rebuildResult: createRebuildResult({
+            kind: 'rebuilt',
+            revisionId: nextRevisionId,
+            diagnostics,
+          }),
+          changedTargets: [target, { kind: 'feature', featureId }],
+          diagnostics,
+        }
+      })
+    }
+
+    const diagnostics = [createUnsupportedDeleteTargetDiagnostic(request.target)]
+    return {
+      contractVersion: CONTRACT_VERSION,
+      documentId: request.documentId,
+      revisionId: this.currentRevisionId,
+      deletedTarget: request.target,
+      revisionState: {
+        kind: 'rejected',
+        baseRevisionId: request.baseRevisionId,
+        reasonCode: 'mock-unsupported-delete-target',
+      },
+      rebuildResult: createRebuildResult({
+        kind: 'skipped',
+        reasonCode: 'validationRejected',
+        diagnostics,
+      }),
+      changedTargets: [],
+      diagnostics,
+    }
   }
 
   async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {

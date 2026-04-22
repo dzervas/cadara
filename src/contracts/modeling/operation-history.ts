@@ -2,6 +2,7 @@ import type {
   CommitSketchRequest,
   AddDocumentVariableRequest,
   CreateFeatureRequest,
+  DeleteDocumentTargetRequest,
   DeleteFeatureRequest,
   RenameBodyRequest,
   ReorderDocumentHistoryRequest,
@@ -36,6 +37,10 @@ export type PersistedDeleteFeaturePayload = Omit<
   DeleteFeatureRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
 >
+export type PersistedDeleteTargetPayload = Omit<
+  DeleteDocumentTargetRequest,
+  'contractVersion' | 'documentId' | 'baseRevisionId'
+>
 export type PersistedRenameBodyPayload = Omit<
   RenameBodyRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
@@ -66,6 +71,7 @@ export type ModelingOperationHistoryEntry =
   | { kind: 'createFeature'; payload: PersistedCreateFeaturePayload }
   | { kind: 'updateFeature'; payload: PersistedUpdateFeaturePayload }
   | { kind: 'deleteFeature'; payload: PersistedDeleteFeaturePayload }
+  | { kind: 'deleteTarget'; payload: PersistedDeleteTargetPayload }
   | { kind: 'renameBody'; payload: PersistedRenameBodyPayload }
   | { kind: 'reorderFeature'; payload: PersistedReorderFeaturePayload }
   | { kind: 'reorderDocumentHistory'; payload: PersistedReorderDocumentHistoryPayload }
@@ -77,6 +83,7 @@ export interface ModelingOperationHistoryPayload {
   contractVersion: ContractVersion
   schemaVersion: OperationHistorySchemaVersion
   documentId: DocumentId
+  baseRepositoryHeads?: readonly string[]
   entries: ModelingOperationHistoryEntry[]
 }
 
@@ -84,19 +91,30 @@ export type OperationHistoryValidationResult =
   | { ok: true; payload: ModelingOperationHistoryPayload }
   | { ok: false; reasonCode: string; message: string }
 
-export function createEmptyOperationHistory(documentId: DocumentId): ModelingOperationHistoryPayload {
-  return {
+export function createEmptyOperationHistory(
+  documentId: DocumentId,
+  baseRepositoryHeads?: readonly string[],
+): ModelingOperationHistoryPayload {
+  const payload: ModelingOperationHistoryPayload = {
     contractVersion: CONTRACT_VERSION,
     schemaVersion: OPERATION_HISTORY_SCHEMA_VERSION,
     documentId,
     entries: [],
   }
+
+  return baseRepositoryHeads ? { ...payload, baseRepositoryHeads: [...baseRepositoryHeads] } : payload
+}
+
+interface CommitSketchHistoryEntryOptions {
+  includeAuthoringOperations?: boolean
 }
 
 function normalizeCommitSketchDefinitionForSketchId(
   definition: CommitSketchRequest['definition'],
   sketchId: SketchId,
+  options: CommitSketchHistoryEntryOptions = {},
 ): CommitSketchRequest['definition'] {
+  const includeAuthoringOperations = options.includeAuthoringOperations ?? true
   const normalizeOperationGraph = (
     graph: NonNullable<NonNullable<CommitSketchRequest['definition']['authoringOperations']>[number]['createdGraph']> | undefined,
   ) => graph
@@ -135,17 +153,20 @@ function normalizeCommitSketchDefinitionForSketchId(
         sketchId,
       },
     })),
-    authoringOperations: definition.authoringOperations?.map((operation) => ({
-      ...operation,
-      createdGraph: normalizeOperationGraph(operation.createdGraph),
-      removedGraph: normalizeOperationGraph(operation.removedGraph),
-    })),
+    authoringOperations: includeAuthoringOperations
+      ? definition.authoringOperations?.map((operation) => ({
+          ...operation,
+          createdGraph: normalizeOperationGraph(operation.createdGraph),
+          removedGraph: normalizeOperationGraph(operation.removedGraph),
+        }))
+      : undefined,
   }
 }
 
 export function createCommitSketchHistoryEntry(
   payload: CommitSketchRequest,
   committedSketchId: SketchId,
+  options: CommitSketchHistoryEntryOptions = {},
 ): ModelingOperationHistoryEntry {
   return {
     kind: 'commitSketch',
@@ -155,7 +176,7 @@ export function createCommitSketchHistoryEntry(
       plane: payload.plane,
       planeTarget: payload.planeTarget,
       planeKey: payload.planeKey,
-      definition: normalizeCommitSketchDefinitionForSketchId(payload.definition, committedSketchId),
+      definition: normalizeCommitSketchDefinitionForSketchId(payload.definition, committedSketchId, options),
     },
   }
 }
@@ -192,6 +213,17 @@ export function createDeleteFeatureHistoryEntry(
     kind: 'deleteFeature',
     payload: {
       featureId: payload.featureId,
+    },
+  }
+}
+
+export function createDeleteTargetHistoryEntry(
+  payload: DeleteDocumentTargetRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: 'deleteTarget',
+    payload: {
+      target: payload.target,
     },
   }
 }

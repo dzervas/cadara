@@ -2820,6 +2820,95 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testSketchCommitConflictRefreshesBeforeRetry() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [8, 0])
+    assert(session.commitRequest, 'Sketch conflict fixture should have a commit payload.')
+
+    const staleSnapshot = createSnapshot()
+    staleSnapshot.revisionId = 'rev_0001'
+    staleSnapshot.document.revisionId = 'rev_0001'
+    const diagnostic: ModelingDiagnostic = {
+      code: 'occ-revision-conflict',
+      severity: 'error',
+      message: 'Request revision rev_0001 does not match current revision rev_0002.',
+      target: null,
+      detail: {
+        kind: 'revisionConflict',
+        expectedRevisionId: 'rev_0001',
+        actualRevisionId: 'rev_0002',
+      },
+    }
+    const state: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_0001',
+      },
+      snapshot: staleSnapshot,
+      selection: [],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-commit-1',
+        toolId: 'finishSketch',
+        phase: 'awaitingEffect',
+      },
+      session,
+      pendingCommitRequestId: 'request_sketch-commit-1',
+    }
+
+    const conflicted = transitionEditorState(state, {
+      type: 'effect.sketchCommitted',
+      requestId: 'request_sketch-commit-1',
+      documentId: 'doc_workspace',
+      commandSessionId: 'command_sketch-commit-1',
+      baseRevisionId: 'rev_0001',
+      revisionId: 'rev_0002',
+      accepted: false,
+      actualRevisionId: 'rev_0002',
+      diagnostics: [diagnostic],
+    })
+
+    const refreshEffect = conflicted.effects[0]
+    assert(refreshEffect?.type === 'document.fetchSnapshot', 'Sketch commit conflicts should request a snapshot refresh.')
+    assert(conflicted.state.kind === 'editingSketch', 'Sketch commit conflicts should keep the sketch open.')
+    assert(conflicted.state.document.revisionId === 'rev_0002', 'Sketch commit conflicts should advance the editor revision.')
+    assert(conflicted.state.pendingSnapshotRequestId === refreshEffect.requestId, 'Conflict refresh should be tracked as pending.')
+
+    const refreshedSnapshot = createSnapshot()
+    refreshedSnapshot.revisionId = 'rev_0002'
+    refreshedSnapshot.document.revisionId = 'rev_0002'
+    const refreshed = transitionEditorState(conflicted.state, {
+      type: 'effect.snapshotLoaded',
+      payload: {
+        requestId: refreshEffect.requestId,
+        documentId: refreshedSnapshot.documentId,
+        revisionId: refreshedSnapshot.revisionId,
+        snapshot: refreshedSnapshot,
+        selectionCatalog: buildSelectionTargetCatalog(refreshedSnapshot),
+      },
+    })
+    const retry = transitionEditorState(refreshed.state, {
+      type: 'tool.activated',
+      toolId: 'finishSketch',
+    })
+    const retryEffect = retry.effects[0]
+
+    assert(retryEffect?.type === 'sketch.commit', 'Retrying Finish Sketch should emit another sketch commit.')
+    assert(retryEffect.baseRevisionId === 'rev_0002', 'Sketch commit retries should use the refreshed revision.')
+  }
+
   async function testModelingServiceRuntimePreservesResultRejections() {
     const appError = createAppError({
       code: 'modeling/diagnostic',
@@ -2898,6 +2987,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
   testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest()
   testRejectedSketchCommitShowsValidationMessage()
+  testSketchCommitConflictRefreshesBeforeRetry()
   await testModelingServiceRuntimePreservesResultRejections()
   testReplayIsDeterministic()
   testDirectSnapshotLoadUpdatesDocumentWithoutFetch()

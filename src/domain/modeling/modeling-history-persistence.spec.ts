@@ -287,6 +287,48 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     )
   }
 
+  async function testGenericDeleteReplayMatchesFinalState() {
+    const { service, store } = await createServiceWithStore()
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const deleted = await unwrapModelingResult(service.deleteTarget({
+      baseRevisionId: snapshot.revisionId,
+      target: { kind: 'body', bodyId: 'body_part-1' },
+    }))
+    assert(deleted.revisionState.kind === 'accepted', 'Generic body delete should commit.')
+
+    const finalHistory = store.savedPayloads.at(-1)
+    assert(finalHistory, 'Generic delete should save operation history.')
+    assert(finalHistory.entries.at(-1)?.kind === 'deleteTarget', 'Generic delete should persist as a generic delete entry.')
+
+    const restoredService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(finalHistory),
+    })
+    const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+
+    assert(
+      restoredSnapshot.presentation.objects.every((item) => item.target.kind !== 'body' || item.target.bodyId !== 'body_part-1'),
+      'Replay should apply persisted generic body deletes.',
+    )
+  }
+
+  async function testInvalidGenericDeleteReplayFailsRestore() {
+    const { service } = await createServiceWithStore({
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [{
+        kind: 'deleteTarget',
+        payload: { target: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' } },
+      }],
+    })
+
+    const state = await service.getHistoryRestoreState()
+    assert(state.kind === 'failed', 'Unsupported persisted generic delete targets should fail restore explicitly.')
+    assert(
+      state.diagnostics[0]?.reasonCode === 'mock-unsupported-delete-target',
+      'Unsupported generic delete restore failures should expose adapter diagnostics.',
+    )
+  }
+
   async function testPersistedHistoryReplaysDocumentVariables() {
     const { service, store } = await createServiceWithStore()
     const snapshot = await service.getCurrentDocumentSnapshot()
@@ -412,6 +454,8 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
   await testOnlyCommittedMutationsAreStored()
   await testPersistedHistoryReplaysSketchAndFeatureMutations()
   await testDeleteFeatureReplayMatchesFinalState()
+  await testGenericDeleteReplayMatchesFinalState()
+  await testInvalidGenericDeleteReplayFailsRestore()
   await testPersistedHistoryReplaysDocumentVariables()
   await testUnsupportedHistoryVersionFailsRestore()
   await testInvalidCursorHistoryFailsRestore()

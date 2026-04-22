@@ -4,6 +4,8 @@ import type {
   CommitSketchResponse,
   AddDocumentVariableResponse,
   CreateFeatureResponse,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
   DeleteFeatureResponse,
   DocumentVariableRecord,
   DocumentFeatureCursor,
@@ -820,6 +822,10 @@ export const deleteFeatureResponseSchema = modelingOperationResponseBaseSchema.e
   deletedFeatureId: featureIdSchema,
 }).transform((value) => value as DeleteFeatureResponse)
 
+export const deleteDocumentTargetResponseSchema = modelingOperationResponseBaseSchema.extend({
+  deletedTarget: durableRefSchema,
+}).transform((value) => value as DeleteDocumentTargetResponse)
+
 export const renameBodyResponseSchema = modelingOperationResponseBaseSchema.extend({
   bodyId: bodyIdSchema,
 }).transform((value) => value as RenameBodyResponse)
@@ -885,6 +891,10 @@ export const modelingDocumentRequestEnvelopeSchema = z.object({
 export const modelingMutationRequestEnvelopeSchema = modelingDocumentRequestEnvelopeSchema.extend({
   baseRevisionId: revisionIdSchema,
 }).passthrough()
+
+export const deleteDocumentTargetRequestSchema = modelingMutationRequestEnvelopeSchema.extend({
+  target: durableRefSchema,
+}).transform((value) => value as DeleteDocumentTargetRequest)
 
 export function parseWorkspaceSnapshot(value: unknown): DocumentSnapshot {
   return workspaceSnapshotSchema.parse(value) as DocumentSnapshot

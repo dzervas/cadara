@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 
-import { createObjectDeletePlaceholderMessage, createObjectExportModalState } from '@/app/object-export-state'
+import { createObjectExportModalState } from '@/app/object-export-state'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/app/object-export-state.spec.ts', async () => {
@@ -28,9 +28,5 @@ test('src/app/object-export-state.spec.ts', async () => {
   assert(
     !JSON.stringify(modalState).includes('not implemented'),
     'Export should not produce the previous placeholder status message.',
-  )
-  assert(
-    createObjectDeletePlaceholderMessage('Part 1') === 'Delete for Part 1 is not implemented yet.',
-    'Delete should preserve its placeholder status message.',
   )
 })

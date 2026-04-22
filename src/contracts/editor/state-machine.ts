@@ -3707,27 +3707,33 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         const message =
           event.diagnostics[0]?.message ??
           `Sketch commit rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
-
-        return {
-          state: {
-            ...state,
-            pendingCommitRequestId: null,
-            command: {
-              ...state.command,
-              phase: 'editing',
-            },
-            preview: {
-              kind: 'sketch',
-              label: message,
-              target: state.session.planeTarget,
-            },
-            session: {
-              ...state.session,
-              validationMessage: message,
-            },
+        const nextState: SketchEditorState = {
+          ...state,
+          document: event.actualRevisionId
+            ? {
+                ...state.document,
+                revisionId: event.actualRevisionId,
+              }
+            : state.document,
+          pendingCommitRequestId: null,
+          command: {
+            ...state.command,
+            phase: 'editing',
           },
-          effects: [],
+          preview: {
+            kind: 'sketch',
+            label: message,
+            target: state.session.planeTarget,
+          },
+          session: {
+            ...state.session,
+            validationMessage: message,
+          },
         }
+
+        return event.actualRevisionId
+          ? emitSnapshotFetch(nextState, state.command.commandSessionId)
+          : { state: nextState, effects: [] }
       }
 
       {

@@ -1,5 +1,9 @@
 import { test } from 'bun:test'
-import { createCreateFeatureHistoryEntry, createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
+import {
+  createCreateFeatureHistoryEntry,
+  createDeleteTargetHistoryEntry,
+  createEmptyOperationHistory,
+} from '@/contracts/modeling/operation-history'
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
   CommitSketchRequest,
@@ -409,6 +413,9 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       async deleteFeature() {
         throw new Error('Not implemented for legacy commitSketch replay test.')
       },
+      async deleteTarget() {
+        throw new Error('Not implemented for legacy commitSketch replay test.')
+      },
       async renameBody() {
         throw new Error('Not implemented for legacy commitSketch replay test.')
       },
@@ -443,9 +450,19 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     }
 
     function allocateSketchId() {
-      return currentSnapshot.document.sketches.length === 0
-        ? ('sketch_primary' as const)
-        : (`sketch_${currentSnapshot.document.sketches.length + 1}` as const)
+      if (!currentSnapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_primary')) {
+        return 'sketch_primary' as const
+      }
+
+      let maxOrdinal = 1
+      for (const sketch of currentSnapshot.document.sketches) {
+        const match = /^sketch_(\d+)$/.exec(sketch.sketchId)
+        if (match) {
+          maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10))
+        }
+      }
+
+      return `sketch_${maxOrdinal + 1}` as const
     }
 
     return {
@@ -583,6 +600,58 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       },
       async deleteFeature() {
         throw new Error('Not implemented for strict replay test.')
+      },
+      async deleteTarget(request) {
+        if (request.target.kind !== 'sketch') {
+          throw new Error('Only sketch deletes are implemented for strict replay test.')
+        }
+
+        if (!currentSnapshot.document.sketches.some((entry) => entry.sketchId === request.target.sketchId)) {
+          return {
+            contractVersion: CONTRACT_VERSION,
+            documentId: 'doc_workspace',
+            revisionId: currentSnapshot.revisionId,
+            deletedTarget: request.target,
+            revisionState: {
+              kind: 'rejected' as const,
+              reasonCode: 'occ-missing-sketch',
+            },
+            rebuildResult: {
+              kind: 'skipped' as const,
+              reasonCode: 'validationRejected' as const,
+              invalidatedTargets: [],
+              diagnostics: [],
+            },
+            changedTargets: [],
+            diagnostics: [],
+          }
+        }
+
+        const revisionId = nextRevisionId()
+        currentSnapshot = createWorkspaceSnapshot(
+          revisionId,
+          currentSnapshot.document.sketches.filter((entry) => entry.sketchId !== request.target.sketchId),
+          currentSnapshot.document.features,
+        )
+
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: 'doc_workspace',
+          revisionId,
+          deletedTarget: request.target,
+          revisionState: {
+            kind: 'accepted' as const,
+            baseRevisionId: request.baseRevisionId,
+          },
+          rebuildResult: {
+            kind: 'rebuilt' as const,
+            revisionId,
+            invalidatedTargets: [],
+            diagnostics: [],
+          },
+          changedTargets: [request.target],
+          diagnostics: [],
+        }
       },
       async renameBody() {
         throw new Error('Not implemented for strict replay test.')
@@ -784,7 +853,233 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     )
   }
 
+  async function testSketchDeleteReplayAllowsReusedAllocatorSketchId() {
+    const firstDefinition = createDraftSketchDefinition('sketch_primary')
+    const secondDefinition = createDraftSketchDefinition('sketch_2')
+    const reusedDefinition = createDraftSketchDefinition('sketch_primary')
+    const sketchRequest = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: 'rev_0001',
+      solverCorrelation: {
+        requestId: 'request_commit_restore_reuse',
+        projectionRequestId: 'request_commit_restore_reuse:project',
+        validationRequestId: 'request_commit_restore_reuse:validate',
+        solveRequestId: 'request_commit_restore_reuse:solve',
+        regionRequestId: 'request_commit_restore_reuse:regions',
+      },
+      sketchId: 'sketch_primary',
+      sketchLabel: 'Original Replay Sketch',
+      plane: {
+        key: 'xy',
+        support: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+      },
+      planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
+      planeKey: 'xy',
+      definition: firstDefinition,
+    } satisfies CommitSketchRequest
+    const secondSketchRequest = {
+      ...sketchRequest,
+      baseRevisionId: 'rev_0002',
+      solverCorrelation: {
+        requestId: 'request_commit_restore_reuse_secondary',
+        projectionRequestId: 'request_commit_restore_reuse_secondary:project',
+        validationRequestId: 'request_commit_restore_reuse_secondary:validate',
+        solveRequestId: 'request_commit_restore_reuse_secondary:solve',
+        regionRequestId: 'request_commit_restore_reuse_secondary:regions',
+      },
+      sketchId: 'sketch_2',
+      sketchLabel: 'Secondary Replay Sketch',
+      definition: secondDefinition,
+    } satisfies CommitSketchRequest
+    const reusedSketchRequest = {
+      ...sketchRequest,
+      baseRevisionId: 'rev_0004',
+      solverCorrelation: {
+        requestId: 'request_commit_restore_reuse_after_delete',
+        projectionRequestId: 'request_commit_restore_reuse_after_delete:project',
+        validationRequestId: 'request_commit_restore_reuse_after_delete:validate',
+        solveRequestId: 'request_commit_restore_reuse_after_delete:solve',
+        regionRequestId: 'request_commit_restore_reuse_after_delete:regions',
+      },
+      sketchLabel: 'Reused Replay Sketch',
+      definition: reusedDefinition,
+    } satisfies CommitSketchRequest
+    const persistedHistory = {
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        {
+          kind: 'commitSketch' as const,
+          payload: {
+            sketchId: sketchRequest.sketchId,
+            sketchLabel: sketchRequest.sketchLabel,
+            plane: sketchRequest.plane,
+            planeTarget: sketchRequest.planeTarget,
+            planeKey: sketchRequest.planeKey,
+            definition: sketchRequest.definition,
+          },
+        },
+        {
+          kind: 'commitSketch' as const,
+          payload: {
+            sketchId: secondSketchRequest.sketchId,
+            sketchLabel: secondSketchRequest.sketchLabel,
+            plane: secondSketchRequest.plane,
+            planeTarget: secondSketchRequest.planeTarget,
+            planeKey: secondSketchRequest.planeKey,
+            definition: secondSketchRequest.definition,
+          },
+        },
+        createDeleteTargetHistoryEntry({
+          contractVersion: 'modeling-contract/v1alpha1',
+          documentId: 'doc_workspace',
+          baseRevisionId: 'rev_0003',
+          target: { kind: 'sketch', sketchId: 'sketch_primary' },
+        }),
+        {
+          kind: 'commitSketch' as const,
+          payload: {
+            sketchId: reusedSketchRequest.sketchId,
+            sketchLabel: reusedSketchRequest.sketchLabel,
+            plane: reusedSketchRequest.plane,
+            planeTarget: reusedSketchRequest.planeTarget,
+            planeKey: reusedSketchRequest.planeKey,
+            definition: reusedSketchRequest.definition,
+          },
+        },
+      ],
+    }
+    const service = createModelingService(createStrictReplayAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(persistedHistory),
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+
+    assert(
+      restoreState.kind === 'restored',
+      'Sketch delete replay should remove deleted sketches from the cursor before resolving reused sketch ids.',
+    )
+    assert(restoreState.entriesReplayed === 4, 'Replay should apply create, secondary create, delete, and recreated sketch entries.')
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+
+    assert(
+      snapshot.sketches.length === 2
+        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_2')
+        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
+      'Replay should recreate the allocator-compatible sketch id after deletion.',
+    )
+    assert(
+      snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')?.label === 'Reused Replay Sketch',
+      'Replay should preserve the final reused sketch entry.',
+    )
+  }
+
+  async function testSketchDeleteReplayUsesNextOrdinalAfterMiddleDelete() {
+    function createRequest(
+      sketchId: 'sketch_primary' | 'sketch_2' | 'sketch_3' | 'sketch_4',
+      baseRevisionId: `rev_${string}`,
+      label: string,
+    ) {
+      return {
+        contractVersion: 'modeling-contract/v1alpha1',
+        documentId: 'doc_workspace',
+        baseRevisionId,
+        solverCorrelation: {
+          requestId: `request_commit_restore_gap_${sketchId}` as const,
+          projectionRequestId: `request_commit_restore_gap_${sketchId}:project` as const,
+          validationRequestId: `request_commit_restore_gap_${sketchId}:validate` as const,
+          solveRequestId: `request_commit_restore_gap_${sketchId}:solve` as const,
+          regionRequestId: `request_commit_restore_gap_${sketchId}:regions` as const,
+        },
+        sketchId,
+        sketchLabel: label,
+        plane: {
+          key: 'xy',
+          support: { kind: 'construction' as const, constructionId: 'construction_plane-xy' },
+          frame: {
+            origin: [0, 0, 0],
+            xAxis: [1, 0, 0],
+            yAxis: [0, 1, 0],
+            normal: [0, 0, 1],
+            linearUnit: 'documentLength' as const,
+            handedness: 'rightHanded' as const,
+          },
+        },
+        planeTarget: { kind: 'construction' as const, constructionId: 'construction_plane-xy' },
+        planeKey: 'xy',
+        definition: createDraftSketchDefinition(sketchId),
+      } satisfies CommitSketchRequest
+    }
+
+    function createHistoryEntry(request: CommitSketchRequest) {
+      return {
+        kind: 'commitSketch' as const,
+        payload: {
+          sketchId: request.sketchId,
+          sketchLabel: request.sketchLabel,
+          plane: request.plane,
+          planeTarget: request.planeTarget,
+          planeKey: request.planeKey,
+          definition: request.definition,
+        },
+      }
+    }
+
+    const primaryRequest = createRequest('sketch_primary', 'rev_0001', 'Primary Replay Sketch')
+    const secondRequest = createRequest('sketch_2', 'rev_0002', 'Second Replay Sketch')
+    const thirdRequest = createRequest('sketch_3', 'rev_0003', 'Third Replay Sketch')
+    const fourthRequest = createRequest('sketch_4', 'rev_0005', 'Fourth Replay Sketch')
+    const persistedHistory = {
+      ...createEmptyOperationHistory('doc_workspace'),
+      entries: [
+        createHistoryEntry(primaryRequest),
+        createHistoryEntry(secondRequest),
+        createHistoryEntry(thirdRequest),
+        createDeleteTargetHistoryEntry({
+          contractVersion: 'modeling-contract/v1alpha1',
+          documentId: 'doc_workspace',
+          baseRevisionId: 'rev_0004',
+          target: { kind: 'sketch', sketchId: 'sketch_2' },
+        }),
+        createHistoryEntry(fourthRequest),
+      ],
+    }
+    const service = createModelingService(createStrictReplayAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(persistedHistory),
+    })
+
+    const restoreState = await service.getHistoryRestoreState()
+
+    assert(
+      restoreState.kind === 'restored',
+      'Sketch delete replay should resolve allocator-compatible ids from the max remaining sketch ordinal.',
+    )
+    assert(restoreState.entriesReplayed === 5, 'Replay should apply all entries across the middle sketch delete.')
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+
+    assert(
+      !snapshot.sketches.some((entry) => entry.sketchId === 'sketch_2')
+        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_3')
+        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_4'),
+      'Replay should skip the deleted ordinal and restore the next allocated sketch id.',
+    )
+  }
+
   await testCommitSketchPersistenceNormalizesSketchIds()
   await testLegacyCommitSketchHistoryRestores()
   await testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore()
+  await testSketchDeleteReplayAllowsReusedAllocatorSketchId()
+  await testSketchDeleteReplayUsesNextOrdinalAfterMiddleDelete()
 })
