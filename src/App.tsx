@@ -4,9 +4,10 @@ import { CadWorkbench } from '@/app/cad-workbench'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { createLocalStorageOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import {
-  createIndexedDbAutomergeDocumentRepository,
   createLocalStorageDocumentRepositoryUrlStore,
 } from '@/domain/modeling/automerge-indexeddb-document-repository'
+import { createBrowserDocumentSyncWorkerClient } from '@/domain/modeling/document-sync-worker-client'
+import { createWorkerBackedDocumentRepository } from '@/domain/modeling/worker-backed-document-repository'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import { createOccPreloadController } from '@/domain/modeling/occ/preload'
 import { registerOpenCascadeAssetCache } from '@/domain/modeling/occ/asset-cache'
@@ -47,7 +48,12 @@ function App() {
     () => (typeof window === 'undefined' ? null : createBrowserOccWorkerClient()),
     [],
   )
+  const documentSyncWorkerClient = useMemo(
+    () => (typeof window === 'undefined' ? null : createBrowserDocumentSyncWorkerClient()),
+    [],
+  )
   const occWorkerDisposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const documentSyncWorkerDisposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const kernelAdapter = useMemo(
     () =>
       new OpenCascadeKernelAdapter({
@@ -83,6 +89,23 @@ function App() {
       }, 0)
     }
   }, [occWorkerClient])
+  useEffect(() => {
+    if (documentSyncWorkerDisposeTimerRef.current) {
+      clearTimeout(documentSyncWorkerDisposeTimerRef.current)
+      documentSyncWorkerDisposeTimerRef.current = null
+    }
+
+    return () => {
+      if (!documentSyncWorkerClient) {
+        return
+      }
+
+      documentSyncWorkerDisposeTimerRef.current = setTimeout(() => {
+        documentSyncWorkerClient.dispose()
+        documentSyncWorkerDisposeTimerRef.current = null
+      }, 0)
+    }
+  }, [documentSyncWorkerClient])
   const modelingService = useMemo(
     () =>
       createModelingService(kernelAdapter, {
@@ -93,15 +116,14 @@ function App() {
             ? null
             : createLocalStorageOperationHistoryStore(window.localStorage),
         documentRepository:
-          typeof window === 'undefined' || shouldDisableDevRepository()
+          typeof window === 'undefined' || shouldDisableDevRepository() || !documentSyncWorkerClient
             ? null
-            : createIndexedDbAutomergeDocumentRepository({
+            : createWorkerBackedDocumentRepository({
+                client: documentSyncWorkerClient,
                 urlStore: createLocalStorageDocumentRepositoryUrlStore(window.localStorage),
-                localPeerSync: getDevLocalPeerSyncOptions(),
-                databaseName: getDevRepositoryDatabaseName(),
               }),
       }),
-    [kernelAdapter, editorSketchSolver],
+    [kernelAdapter, editorSketchSolver, documentSyncWorkerClient],
   )
 
   return (
@@ -175,30 +197,6 @@ function OccPreloadEffect({ preloadController }: { preloadController: ReturnType
   }, [errorReporter, preloadController])
 
   return null
-}
-
-function getDevLocalPeerSyncOptions() {
-  if (typeof window === 'undefined' || !import.meta.env.DEV) {
-    return false
-  }
-
-  const params = new URLSearchParams(window.location.search)
-  if (params.get('cadLocalPeerSync') !== '1') {
-    return false
-  }
-
-  return {
-    channelName: params.get('cadLocalPeerSyncChannel') ?? 'cad-authored-documents-dev',
-    peerWaitMs: 25,
-  }
-}
-
-function getDevRepositoryDatabaseName() {
-  if (typeof window === 'undefined' || !import.meta.env.DEV) {
-    return undefined
-  }
-
-  return new URLSearchParams(window.location.search).get('cadRepositoryDbName') ?? undefined
 }
 
 function shouldDisableDevRepository() {

@@ -5,7 +5,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   DocumentFileMenu,
 } from '@/components/layout/document-file-menu'
-import { DOCUMENT_FILE_MENU_ITEMS } from '@/components/layout/document-file-menu-model'
+import {
+  DOCUMENT_FILE_MENU_ITEMS,
+  getDocumentFileMenuCommand,
+} from '@/components/layout/document-file-menu-model'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
 test('src/components/layout/document-file-menu.spec.tsx', () => {
@@ -16,8 +19,14 @@ test('src/components/layout/document-file-menu.spec.tsx', () => {
   }
 
   assert(
-    DOCUMENT_FILE_MENU_ITEMS.map((item) => item.label).join(',') === 'New,Import,Export',
-    'Document file menu model should expose New, Import, and Export in order.',
+    DOCUMENT_FILE_MENU_ITEMS.map((item) => item.label).join(',') === 'New,Open local file,Save local file,Import,Export',
+    'Document file menu model should expose New, Open local file, Save local file, Import, and Export in order.',
+  )
+
+  assert(
+    DOCUMENT_FILE_MENU_ITEMS.map((item) => getDocumentFileMenuCommand(item.id)).join(',')
+      === 'newDocument,openLocalFile,saveLocalFile,importDocument,exportDocument',
+    'Document file menu model should route each item to the expected handler command.',
   )
 
   const markup = renderToStaticMarkup(
@@ -25,6 +34,8 @@ test('src/components/layout/document-file-menu.spec.tsx', () => {
       <DocumentFileMenu
         defaultOpened
         onNewDocument={() => undefined}
+        onOpenLocalFile={() => undefined}
+        onSaveLocalFile={() => undefined}
         onImportDocument={() => undefined}
         onExportDocument={() => undefined}
       />

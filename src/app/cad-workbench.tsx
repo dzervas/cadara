@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Loader } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
@@ -75,6 +75,14 @@ import { useModelingService } from '@/hooks/use-modeling-service'
 import { ShortcutProvider } from '@/hooks/shortcut-provider'
 import { useToolActionBus, useToolActions } from '@/hooks/use-tool-actions'
 import { downloadDocumentExportResult } from '@/lib/download-export'
+import {
+  ensureLocalFileWritePermission,
+  readLocalFileText,
+  showOpenLocalDocumentPicker,
+  showSaveLocalDocumentPicker,
+  writeTextToLocalFileHandle,
+} from '@/lib/local-file-system-access'
+import { createLocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
 import {
   createWorkbenchShortcutCommandHandlers,
   getWorkbenchShortcutActiveScopes,
@@ -161,6 +169,22 @@ export function CadWorkbench() {
   const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
+
+  const showWorkbenchInfo = useCallback((message: string) => {
+    setWorkbenchStatusNotification({
+      type: 'info',
+      title: 'Workbench action',
+      message,
+    })
+  }, [])
+
+  const showWorkbenchError = useCallback((message: string) => {
+    setWorkbenchStatusNotification({
+      type: 'error',
+      title: 'Workbench action failed',
+      message,
+    })
+  }, [])
 
   const applyLoadedSnapshot = (nextSnapshot: DocumentSnapshot) => {
     snapshotRef.current = nextSnapshot
@@ -389,22 +413,6 @@ export function CadWorkbench() {
     ) {
       dispatch({ type: 'viewport.hoverCleared' })
     }
-  }
-
-  const showWorkbenchInfo = (message: string) => {
-    setWorkbenchStatusNotification({
-      type: 'info',
-      title: 'Workbench action',
-      message,
-    })
-  }
-
-  const showWorkbenchError = (message: string) => {
-    setWorkbenchStatusNotification({
-      type: 'error',
-      title: 'Workbench action failed',
-      message,
-    })
   }
 
   const showPlaceholderStatus = (message: string) => {
@@ -1213,7 +1221,7 @@ export function CadWorkbench() {
     showWorkbenchInfo(message)
   }
 
-  const reportDocumentFileActionFailure = (source: string, message: string, error: unknown) => {
+  const reportDocumentFileActionFailure = useCallback((source: string, message: string, error: unknown) => {
     showWorkbenchError(message)
     errorReporter.report(
       createAppError({
@@ -1227,7 +1235,61 @@ export function CadWorkbench() {
         visibility: 'user',
       },
     )
+  }, [errorReporter, showWorkbenchError])
+
+  const showLocalFileSyncUnsupported = () => {
+    showWorkbenchError(
+      'Local file sync requires the File System Access API. In Brave, enable brave://flags/#file-system-access-api and relaunch, or use Chrome/Edge.',
+    )
   }
+
+  useEffect(() => {
+    return modelingService.subscribeToLocalFileSyncStatus((status) => {
+      switch (status.kind) {
+        case 'binding-restored':
+          showWorkbenchInfo(`Restored local file sync for ${status.metadata.fileName}.`)
+          return
+        case 'syncing':
+          showWorkbenchInfo(`Syncing ${status.metadata.fileName}.`)
+          return
+        case 'synced':
+          showWorkbenchInfo(`Synced ${status.metadata.fileName}.`)
+          return
+        case 'persistent-binding-unavailable':
+          showWorkbenchInfo(status.message)
+          return
+        case 'permission-required':
+          showWorkbenchError(`Local file sync needs write permission for ${status.metadata.fileName}.`)
+          return
+        case 'permission-denied':
+          showWorkbenchError(status.message)
+          return
+        case 'failed':
+          showWorkbenchError(status.message)
+          return
+        case 'idle':
+          return
+      }
+    })
+  }, [modelingService, showWorkbenchError, showWorkbenchInfo])
+
+  useEffect(() => {
+    let disposed = false
+
+    void modelingService.restoreLocalFileBinding().then((metadata) => {
+      if (!disposed && metadata) {
+        showWorkbenchInfo(`Restored local file sync for ${metadata.fileName}.`)
+      }
+    }).catch((error: unknown) => {
+      if (!disposed) {
+        reportDocumentFileActionFailure('workbench.file.restoreLocalBinding', 'Local file sync restore failed.', error)
+      }
+    })
+
+    return () => {
+      disposed = true
+    }
+  }, [modelingService, reportDocumentFileActionFailure, showWorkbenchInfo])
 
   const handleNewDocument = async () => {
     try {
@@ -1266,6 +1328,104 @@ export function CadWorkbench() {
     }
   }
 
+  const handleOpenLocalFile = async () => {
+    const pickerResult = await showOpenLocalDocumentPicker()
+    if (!pickerResult.ok) {
+      if (pickerResult.reason === 'cancelled') {
+        return
+      }
+      if (pickerResult.reason === 'unsupported') {
+        showLocalFileSyncUnsupported()
+        return
+      }
+
+      reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed.', pickerResult.error)
+      return
+    }
+
+    if (!await ensureLocalFileWritePermission(pickerResult.handle)) {
+      showWorkbenchError('Local file write permission was denied.')
+      return
+    }
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(await readLocalFileText(pickerResult.handle)) as unknown
+    } catch (error: unknown) {
+      reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed. Select a valid cadara JSON document.', error)
+      return
+    }
+
+    try {
+      const result = await modelingService.importDocument({ document: payload })
+      if (!result.ok) {
+        showWorkbenchError(result.diagnostics[0]?.message ?? 'Open local file failed.')
+        return
+      }
+
+      const binding = await modelingService.bindLocalFile({
+        handle: pickerResult.handle,
+        metadata: createLocalFileBindingMetadata(modelingService.currentDocumentId, pickerResult.handle),
+      })
+      if (!binding.ok) {
+        showWorkbenchError(binding.diagnostics[0]?.message ?? 'Local file sync target could not be bound.')
+        return
+      }
+
+      refreshAfterDocumentFileAction(`Opened ${pickerResult.handle.name}. Local file sync is active.`)
+    } catch (error: unknown) {
+      reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed.', error)
+    }
+  }
+
+  const handleSaveLocalFile = async () => {
+    const pickerResult = await showSaveLocalDocumentPicker()
+    if (!pickerResult.ok) {
+      if (pickerResult.reason === 'cancelled') {
+        return
+      }
+      if (pickerResult.reason === 'unsupported') {
+        showLocalFileSyncUnsupported()
+        return
+      }
+
+      reportDocumentFileActionFailure('workbench.file.saveLocal', 'Save local file failed.', pickerResult.error)
+      return
+    }
+
+    try {
+      if (!await ensureLocalFileWritePermission(pickerResult.handle)) {
+        showWorkbenchError('Local file write permission was denied.')
+        return
+      }
+
+      const result = await modelingService.exportCurrentDocument()
+      const writeResult = await writeTextToLocalFileHandle(pickerResult.handle, String(result.payload))
+      if (!writeResult.ok) {
+        if (writeResult.reason === 'permission-denied') {
+          showWorkbenchError('Local file write permission was denied.')
+          return
+        }
+
+        reportDocumentFileActionFailure('workbench.file.saveLocal', 'Save local file failed.', writeResult.error)
+        return
+      }
+
+      const binding = await modelingService.bindLocalFile({
+        handle: pickerResult.handle,
+        metadata: createLocalFileBindingMetadata(modelingService.currentDocumentId, pickerResult.handle),
+      })
+      if (!binding.ok) {
+        showWorkbenchError(binding.diagnostics[0]?.message ?? 'Local file sync target could not be bound.')
+        return
+      }
+
+      showWorkbenchInfo(`Saved ${pickerResult.handle.name}. Local file sync is active.`)
+    } catch (error: unknown) {
+      reportDocumentFileActionFailure('workbench.file.saveLocal', 'Save local file failed.', error)
+    }
+  }
+
   const handleExportDocument = async () => {
     try {
       const result = await modelingService.exportCurrentDocument()
@@ -1282,6 +1442,8 @@ export function CadWorkbench() {
       <WorkspaceToolbar
         historyAvailability={toolbarHistoryAvailability}
         onNewDocument={handleNewDocument}
+        onOpenLocalFile={handleOpenLocalFile}
+        onSaveLocalFile={handleSaveLocalFile}
         onImportDocument={handleImportDocument}
         onExportDocument={handleExportDocument}
         onReportBug={handleReportBug}

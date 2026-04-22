@@ -1,0 +1,266 @@
+import { normalizeCollaborativeAuthoredModelDocument } from '@/domain/modeling/collaborative-authored-document'
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import {
+  createDocumentSyncWorkerFailure,
+  type DocumentSyncWorkerRequest,
+  type DocumentSyncWorkerResponse,
+  type DocumentSyncWriteStatus,
+} from '@/domain/modeling/document-sync-worker-protocol'
+import type { DocumentRepository } from '@/domain/modeling/document-repository'
+import type { LocalFileBindingRecord, LocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
+import type { DocumentRepositoryUrlStore } from '@/domain/modeling/automerge-indexeddb-document-repository'
+import { serializeLocalAuthoredDocument, writeTextToLocalFileHandle } from '@/lib/local-file-system-access'
+
+export interface DocumentSyncWorkerRuntimeOptions {
+  repository: DocumentRepository
+  repositoryUrlStore?: DocumentRepositoryUrlStore | null
+  bindingStore?: LocalFileBindingStore | null
+}
+
+export function createDocumentSyncWorkerMessageHandler(
+  options: DocumentSyncWorkerRuntimeOptions,
+  postMessage: (message: DocumentSyncWorkerResponse) => void,
+) {
+  const subscriptions = new Map<string, () => void>()
+  const bindings = new Map<string, LocalFileBindingRecord>()
+  const writeStatuses = new Map<string, DocumentSyncWriteStatus>()
+  const pendingWrites = new Map<string, { document: AuthoredModelDocument; metadata: LocalFileBindingRecord['metadata'] }>()
+  const activeWrites = new Set<string>()
+  const writeSequences = new Map<string, number>()
+
+  function nextWriteSequence(documentId: string) {
+    const sequence = (writeSequences.get(documentId) ?? 0) + 1
+    writeSequences.set(documentId, sequence)
+    return sequence
+  }
+
+  function publishWriteStatus(status: DocumentSyncWriteStatus) {
+    writeStatuses.set(status.documentId, status)
+    postMessage({ kind: 'writeStatusChanged', status })
+  }
+
+  function queueBoundFileWrite(
+    documentId: string,
+    document: AuthoredModelDocument,
+  ) {
+    const binding = bindings.get(documentId)
+    if (!binding) {
+      return
+    }
+
+    pendingWrites.set(documentId, {
+      document,
+      metadata: binding.metadata,
+    })
+    if (!activeWrites.has(documentId)) {
+      void drainBoundFileWrites(documentId)
+    }
+  }
+
+  async function drainBoundFileWrites(documentId: string) {
+    activeWrites.add(documentId)
+    try {
+      while (pendingWrites.has(documentId)) {
+        const pending = pendingWrites.get(documentId)!
+        pendingWrites.delete(documentId)
+        publishWriteStatus({
+          kind: 'syncing',
+          documentId: pending.metadata.documentId,
+          sequence: nextWriteSequence(documentId),
+          metadata: pending.metadata,
+        })
+
+        const result = await writeTextToLocalFileHandle(
+          bindings.get(documentId)!.handle,
+          serializeLocalAuthoredDocument(pending.document),
+        )
+
+        if (result.ok) {
+          publishWriteStatus({
+            kind: 'synced',
+            documentId: pending.metadata.documentId,
+            sequence: nextWriteSequence(documentId),
+            metadata: pending.metadata,
+          })
+          continue
+        }
+
+        publishWriteStatus({
+          kind: result.reason === 'permission-denied' ? 'permission-denied' : 'failed',
+          documentId: pending.metadata.documentId,
+          sequence: nextWriteSequence(documentId),
+          metadata: pending.metadata,
+          message: result.reason === 'permission-denied'
+            ? 'Local file write permission was denied.'
+            : result.error instanceof Error
+              ? result.error.message
+              : 'Local file sync failed.',
+        })
+      }
+    } finally {
+      activeWrites.delete(documentId)
+    }
+  }
+
+  return async function handleDocumentSyncWorkerMessage(request: DocumentSyncWorkerRequest) {
+    try {
+      switch (request.kind) {
+        case 'load': {
+          if (request.storageKey) {
+            options.repositoryUrlStore?.set(
+              request.documentId,
+              request.storageKey as Parameters<DocumentRepositoryUrlStore['set']>[1],
+            )
+          }
+          postMessage({
+            kind: 'loaded',
+            requestId: request.requestId,
+            result: await options.repository.load({
+              documentId: request.documentId,
+              seedDocument: request.seedDocument,
+            }),
+          })
+          return
+        }
+        case 'reset': {
+          options.repositoryUrlStore?.delete(request.documentId)
+          postMessage({
+            kind: 'reset',
+            requestId: request.requestId,
+            status: await options.repository.reset(request.documentId),
+          })
+          return
+        }
+        case 'mutate': {
+          const result = await options.repository.mutate({
+            documentId: request.documentId,
+            document: request.document,
+          })
+          if (result.ok) {
+            const normalized = normalizeCollaborativeAuthoredModelDocument(result.document)
+            queueBoundFileWrite(request.documentId, normalized.document)
+          }
+          postMessage({
+            kind: 'mutated',
+            requestId: request.requestId,
+            result,
+          })
+          return
+        }
+        case 'subscribe': {
+          const unsubscribe = options.repository.subscribe(request.documentId, (event) => {
+            const normalized = normalizeCollaborativeAuthoredModelDocument(event.document)
+            queueBoundFileWrite(request.documentId, normalized.document)
+            postMessage({
+              kind: 'documentChanged',
+              subscriptionId: request.subscriptionId,
+              event,
+            })
+          })
+          subscriptions.set(request.subscriptionId, unsubscribe)
+          postMessage({
+            kind: 'subscribed',
+            requestId: request.requestId,
+            subscriptionId: request.subscriptionId,
+          })
+          return
+        }
+        case 'unsubscribe': {
+          subscriptions.get(request.subscriptionId)?.()
+          subscriptions.delete(request.subscriptionId)
+          postMessage({
+            kind: 'unsubscribed',
+            requestId: request.requestId,
+            subscriptionId: request.subscriptionId,
+          })
+          return
+        }
+        case 'normalize': {
+          const normalized = normalizeCollaborativeAuthoredModelDocument(request.document)
+          postMessage({
+            kind: 'normalized',
+            requestId: request.requestId,
+            result: {
+              document: normalized.document,
+              diagnostics: normalized.diagnostics,
+              metadata: request.metadata,
+            },
+          })
+          return
+        }
+        case 'restoreBinding': {
+          const restored = await options.bindingStore?.load(request.documentId)
+          if (restored && !restored.ok) {
+            throw new Error(restored.reason === 'unsupported-storage' ? 'Persistent local file binding storage is unavailable.' : 'Local file binding could not be restored.')
+          }
+
+          const record = restored?.value ?? null
+          if (record) {
+            bindings.set(request.documentId, record)
+            const status: DocumentSyncWriteStatus = {
+              kind: 'binding-restored',
+              documentId: request.documentId,
+              sequence: nextWriteSequence(request.documentId),
+              metadata: record.metadata,
+            }
+            publishWriteStatus(status)
+          }
+          postMessage({
+            kind: 'bindingRestored',
+            requestId: request.requestId,
+            record,
+          })
+          return
+        }
+        case 'bindFileHandle': {
+          const record = {
+            metadata: request.metadata,
+            handle: request.handle,
+          }
+          bindings.set(request.documentId, record)
+          const saved = await options.bindingStore?.save(record)
+          const persistentBindingUnavailable = saved && !saved.ok && saved.reason === 'unsupported-storage'
+          if (saved && !saved.ok && saved.reason !== 'unsupported-storage') {
+            throw new Error('Local file binding could not be persisted.')
+          }
+
+          postMessage({
+            kind: 'fileHandleBound',
+            requestId: request.requestId,
+            metadata: request.metadata,
+          })
+          if (persistentBindingUnavailable) {
+            publishWriteStatus({
+              kind: 'persistent-binding-unavailable',
+              documentId: request.documentId,
+              sequence: nextWriteSequence(request.documentId),
+              metadata: request.metadata,
+              message: 'Local file sync is active, but this browser cannot remember the file after refresh.',
+            })
+          }
+          publishWriteStatus({
+            kind: 'synced',
+            documentId: request.documentId,
+            sequence: nextWriteSequence(request.documentId),
+            metadata: request.metadata,
+          })
+          return
+        }
+        case 'getWriteStatus': {
+          postMessage({
+            kind: 'writeStatus',
+            requestId: request.requestId,
+            status: writeStatuses.get(request.documentId) ?? {
+              kind: 'idle',
+              documentId: request.documentId,
+              sequence: 0,
+            },
+          })
+          return
+        }
+      }
+    } catch (error: unknown) {
+      postMessage(createDocumentSyncWorkerFailure(request.requestId, error))
+    }
+  }
+}

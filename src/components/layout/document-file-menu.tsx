@@ -1,12 +1,18 @@
 import { useRef, type ChangeEvent } from 'react'
 import { ActionIcon, Menu, Tooltip } from '@mantine/core'
 
-import { DOCUMENT_FILE_MENU_ITEMS } from '@/components/layout/document-file-menu-model'
+import {
+  DOCUMENT_FILE_MENU_ITEMS,
+  getDocumentFileMenuCommand,
+  type DocumentFileMenuItemId,
+} from '@/components/layout/document-file-menu-model'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 
 interface DocumentFileMenuHandlers {
   onNewDocument: () => void
+  onOpenLocalFile: () => void
+  onSaveLocalFile: () => void
   onImportDocument: (file: File) => void
   onExportDocument: () => void
 }
@@ -18,6 +24,8 @@ interface DocumentFileMenuProps extends DocumentFileMenuHandlers {
 export function DocumentFileMenu({
   defaultOpened = false,
   onNewDocument,
+  onOpenLocalFile,
+  onSaveLocalFile,
   onImportDocument,
   onExportDocument,
 }: DocumentFileMenuProps) {
@@ -35,15 +43,21 @@ export function DocumentFileMenu({
     }
   }
 
-  const handleMenuItemSelect = (itemId: (typeof DOCUMENT_FILE_MENU_ITEMS)[number]['id']) => {
-    switch (itemId) {
-      case 'new':
+  const handleMenuItemSelect = (itemId: DocumentFileMenuItemId) => {
+    switch (getDocumentFileMenuCommand(itemId)) {
+      case 'newDocument':
         onNewDocument()
         return
-      case 'import':
+      case 'openLocalFile':
+        onOpenLocalFile()
+        return
+      case 'saveLocalFile':
+        onSaveLocalFile()
+        return
+      case 'importDocument':
         openImportPicker()
         return
-      case 'export':
+      case 'exportDocument':
         onExportDocument()
         return
     }
@@ -62,7 +76,7 @@ export function DocumentFileMenu({
             label={
               <ToolbarTooltipContent
                 title="File"
-                description="Create, import, or export the current document."
+                description="Create, open, save, import, or export the current document."
               />
             }
           >

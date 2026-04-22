@@ -9,7 +9,7 @@ The workbench SHALL render an icon-only file button as the first toolbar control
 #### Scenario: Open document file menu
 - **WHEN** the user clicks the file button at the far left of the toolbar
 - **THEN** a workbench-styled menu opens
-- **AND** the menu includes New, Import, and Export document actions
+- **AND** the menu includes New, Open local file, Save local file, Import, and Export document actions
 
 #### Scenario: File button remains outside modeling tools
 - **WHEN** the file button is clicked

@@ -66,7 +66,10 @@ import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-a
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import type { DocumentRepository } from '@/domain/modeling/document-repository'
-import { COLLABORATIVE_MERGE_DIAGNOSTIC_CODES } from '@/domain/modeling/collaborative-authored-document'
+import {
+  COLLABORATIVE_MERGE_DIAGNOSTIC_CODES,
+  normalizeCollaborativeAuthoredModelDocument,
+} from '@/domain/modeling/collaborative-authored-document'
 import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { getOccDurableRefKey } from '@/domain/modeling/occ/topology'
@@ -273,7 +276,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     })
   }
 
-  function createPermissiveRestoredRepository(document: AuthoredModelDocument): DocumentRepository {
+  function createPermissiveRestoredRepository(
+    document: AuthoredModelDocument,
+    diagnostics: ReturnType<typeof normalizeCollaborativeAuthoredModelDocument>['diagnostics'] = [],
+  ): DocumentRepository {
     const metadata = {
       documentId: document.documentId,
       heads: [`test:${document.revisionId}`],
@@ -286,6 +292,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
         return {
           ok: true,
           document: structuredClone(document),
+          diagnostics,
           status,
           metadata,
         }
@@ -4416,7 +4423,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(restoredConstraint?.status === 'satisfied', 'Restored circle center constraint should remain solved against the projected vertex.')
   }
 
-  async function testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore() {
+  async function testRepositoryRestoreConsumesWorkerNormalizedCollaborativeAuthoredDocumentBeforeOccRestore() {
     const seedSnapshot = (await createAdapter().getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -4449,9 +4456,13 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
         featureId: 'feature_deleted' as AuthoredModelDocument['features'][number]['featureId'],
       },
     }
+    const normalizedRepositoryDocument = normalizeCollaborativeAuthoredModelDocument(repositoryDocument)
     const service = createModelingService(createAdapter(), {
       currentDocumentId: 'doc_workspace',
-      documentRepository: createPermissiveRestoredRepository(repositoryDocument),
+      documentRepository: createPermissiveRestoredRepository(
+        normalizedRepositoryDocument.document,
+        normalizedRepositoryDocument.diagnostics,
+      ),
     })
 
     const restoreState = await service.getHistoryRestoreState()
@@ -4513,7 +4524,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testAuthoredRestoreReportsPartialFeatureErrorsWithoutDroppingHistory()
   await testOperationHistoryReplayKeepsPartialFeatureFailuresRepairable()
   await testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures()
-  await testRepositoryRestoreNormalizesCollaborativeAuthoredDocumentBeforeOccRestore()
+  await testRepositoryRestoreConsumesWorkerNormalizedCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
   await testOccGeometryExportsRejectInvalidTargets()
 

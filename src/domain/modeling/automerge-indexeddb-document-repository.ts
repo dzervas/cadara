@@ -73,7 +73,7 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
   }
 }
 
-class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
+export class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   private readonly urls = new Map<DocumentId, AutomergeUrl>()
 
   get(documentId: DocumentId) {
@@ -369,6 +369,7 @@ export class IndexedDbAutomergeDocumentRepository implements DocumentRepository 
       documentId,
       heads: [...heads].sort(),
       source,
+      storageKey: handle.url,
     }
   }
 

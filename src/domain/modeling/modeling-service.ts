@@ -117,7 +117,11 @@ import {
   updateFeatureResponseSchema,
   workspaceSnapshotSchema,
 } from '@/contracts/modeling/runtime-schema'
-import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import {
+  createAuthoredModelDocumentFromSnapshot,
+  type AuthoredModelDocument,
+} from '@/contracts/modeling/authored-document'
+import { serializeAuthoredDocumentJson, stableJsonValue } from '@/contracts/modeling/authored-document-serialization'
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import {
   createCommitSketchHistoryEntry,
@@ -182,14 +186,17 @@ import {
   loadOrCreateOperationHistory,
   type OperationHistoryStore,
 } from '@/domain/modeling/modeling-history-persistence'
-import { normalizeCollaborativeAuthoredModelDocument } from '@/domain/modeling/collaborative-authored-document'
-import type {
-  DocumentRepository,
-  DocumentRepositoryChangeEvent,
-  DocumentRepositoryMetadata,
-  DocumentRepositoryRestoreStatus,
+import {
+  isLocalFileSyncDocumentRepository,
+  type DocumentRepository,
+  type DocumentRepositoryChangeEvent,
+  type DocumentRepositoryMetadata,
+  type DocumentRepositoryRestoreStatus,
 } from '@/domain/modeling/document-repository'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+import type { LocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
+import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
+import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -210,6 +217,13 @@ export interface ModelingService {
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
   exportCurrentDocument(): Promise<DocumentExportSuccessResult>
+  bindLocalFile(input: {
+    handle: LocalFileSystemFileHandle
+    metadata: LocalFileBindingMetadata
+  }): Promise<ModelingDocumentFileMutationResult>
+  restoreLocalFileBinding(): Promise<LocalFileBindingMetadata | null>
+  getLocalFileSyncStatus(): Promise<DocumentSyncWriteStatus | null>
+  subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void): () => void
   commitSketch(input: ModelingCommitSketchInput): AppResultAsync<ModelingCommitSketchResult>
   projectSketchExternalReferences(
     input: ModelingProjectSketchExternalReferencesInput,
@@ -4092,22 +4106,6 @@ function createExportFilename(targetLabel: string, format: DocumentExportFormat)
   return `${slug}.${getDocumentExportExtension(format)}`
 }
 
-function stableJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => stableJsonValue(entry))
-  }
-
-  if (!isRecord(value)) {
-    return value
-  }
-
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, stableJsonValue(value[key])]),
-  )
-}
-
 function stringifyCadaraDocument(document: KernelDocumentSnapshot, pretty: boolean) {
   return JSON.stringify(stableJsonValue(document), null, pretty ? 2 : 0)
 }
@@ -4532,9 +4530,11 @@ export function createModelingService(
     }
   }
 
-  async function restoreAuthoredRepositoryDocument(document: Parameters<NonNullable<ModelingKernelAdapter['restoreAuthoredModelDocument']>>[0]) {
-    const normalized = normalizeCollaborativeAuthoredModelDocument(document)
-    await adapter.restoreAuthoredModelDocument?.(normalized.document, normalized.diagnostics)
+  async function restoreAuthoredRepositoryDocument(
+    document: Parameters<NonNullable<ModelingKernelAdapter['restoreAuthoredModelDocument']>>[0],
+    diagnostics: ModelingDiagnostic[] = [],
+  ) {
+    await adapter.restoreAuthoredModelDocument?.(document, diagnostics)
   }
 
   async function getSeedAuthoredDocument() {
@@ -4748,7 +4748,7 @@ export function createModelingService(
     }
 
     repositoryChangePromise = repositoryChangePromise.then(async () => {
-      await restoreAuthoredRepositoryDocument(event.document)
+      await restoreAuthoredRepositoryDocument(event.document, event.diagnostics)
       notifyModelingDocumentChange(event)
     })
   })
@@ -4837,7 +4837,7 @@ export function createModelingService(
     rememberRepositoryMetadata(loadResult.metadata)
 
     if (loadResult.status.kind === 'restored') {
-      await restoreAuthoredRepositoryDocument(loadResult.document)
+      await restoreAuthoredRepositoryDocument(loadResult.document, loadResult.diagnostics)
       operationHistoryPayload = createEmptyOperationHistory(currentDocumentId)
       historyRestoreState = { kind: 'restored', entriesReplayed: 0, diagnostics: [] }
       return
@@ -5019,6 +5019,68 @@ export function createModelingService(
 
       return replaceCurrentAuthoredDocument(normalized.document)
     },
+    async bindLocalFile(input) {
+      await restorePromise
+      await repositoryChangePromise
+      if (!isLocalFileSyncDocumentRepository(documentRepository)) {
+        return {
+          ok: false,
+          diagnostics: [
+            createDocumentFileDiagnostic(
+              'local-file-sync-unsupported-repository',
+              'Local file sync is unavailable for the active document repository.',
+            ),
+          ],
+        }
+      }
+
+      const result = await documentRepository.bindLocalFile({
+        documentId: currentDocumentId,
+        handle: input.handle,
+        metadata: input.metadata,
+      })
+      if (!result.ok) {
+        return {
+          ok: false,
+          diagnostics: [
+            createDocumentFileDiagnostic('local-file-sync-bind-failed', result.message),
+          ],
+        }
+      }
+
+      const snapshot = validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+        currentDocumentId,
+      )
+      return { ok: true, revisionId: snapshot.document.revisionId, diagnostics: [] }
+    },
+    async restoreLocalFileBinding() {
+      await restorePromise
+      await repositoryChangePromise
+      if (!isLocalFileSyncDocumentRepository(documentRepository)) {
+        return null
+      }
+
+      return documentRepository.restoreLocalFileBinding(currentDocumentId)
+    },
+    async getLocalFileSyncStatus() {
+      if (!isLocalFileSyncDocumentRepository(documentRepository)) {
+        return null
+      }
+
+      return documentRepository.getLocalFileSyncStatus(currentDocumentId)
+    },
+    subscribeToLocalFileSyncStatus(listener) {
+      if (!isLocalFileSyncDocumentRepository(documentRepository)) {
+        return () => undefined
+      }
+
+      return documentRepository.subscribeToLocalFileSyncStatus((status) => {
+        if (status.documentId === currentDocumentId) {
+          listener(status)
+        }
+      })
+    },
     async exportCurrentDocument() {
       await restorePromise
       await repositoryChangePromise
@@ -5030,7 +5092,7 @@ export function createModelingService(
         filename: 'document.cadara',
         extension: getDocumentExportExtension('cadara'),
         mimeType: getDocumentExportMimeType('cadara'),
-        payload: JSON.stringify(stableJsonValue(document), null, 2),
+        payload: serializeAuthoredDocumentJson(document),
         diagnostics: [],
       }
     },
