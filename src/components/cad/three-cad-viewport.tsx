@@ -25,12 +25,16 @@ import {
   getAnnotationProjectionId,
   type SketchViewportFeedbackProjection,
 } from '@/components/cad/sketch-viewport-feedback-model'
+import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import {
   type PrimitiveRef,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
-import type { SketchAnnotationDescriptor, SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
+import type {
+  SketchAnnotationDescriptor,
+  SketchSessionDisplayRenderable,
+} from '@/domain/editor/sketch-session'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import type {
   SketchConstraintRef,
@@ -1151,6 +1155,12 @@ export function ThreeCadViewport({
         }}
         onSelect={(target) => selectRef.current(target)}
         onEdit={(target) => annotationEditRef.current(target)}
+        onDimensionDrag={(handle, clientX, clientY) => {
+          const point = projectSketchClientPointRef.current(clientX, clientY)
+          if (point) {
+            sketchToolPatchRef.current(createDimensionAnnotationPlacementPatch(handle, point))
+          }
+        }}
       />
     </div>
   )

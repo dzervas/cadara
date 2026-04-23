@@ -39,6 +39,17 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         ],
       },
       {
+        id: 'committed-width-overlay',
+        kind: 'dimensionLine',
+        label: 'Rectangle 1 width',
+        referenceKind: 'horizontal',
+        start: [0, 3],
+        end: [4, 3],
+        value: 4,
+        unit: 'mm',
+        labelAnchor: { kind: 'sketchPoint', point: [2, 3] },
+      },
+      {
         id: 'parallel-angle-preview',
         kind: 'angleArc',
         label: 'Angle preview',
@@ -49,6 +60,20 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         side: 'major',
         labelAnchor: { kind: 'sketchPoint', point: [0.5, 0.5] },
         dragHandle: { id: 'parallel-angle-preview-drag', kind: 'angleArc' },
+        witnessLines: [
+          {
+            id: 'parallel-angle-preview-witness-a',
+            label: 'Witness',
+            start: [0.5, 0],
+            end: [1, 0],
+          },
+          {
+            id: 'parallel-angle-preview-witness-b',
+            label: 'Witness',
+            start: [0, 0.5],
+            end: [0, 1],
+          },
+        ],
       },
       {
         id: 'rectangle-start-anchor',
@@ -97,10 +122,17 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         { id: 'overlay-geometry:distance-preview-extension-a:end', x: 100, y: 100 },
         { id: 'overlay-geometry:distance-preview-extension-b:start', x: 180, y: 140 },
         { id: 'overlay-geometry:distance-preview-extension-b:end', x: 180, y: 100 },
+        { id: 'overlay:committed-width-overlay', x: 140, y: 40 },
+        { id: 'overlay-geometry:committed-width-overlay:start', x: 100, y: 60 },
+        { id: 'overlay-geometry:committed-width-overlay:end', x: 180, y: 60 },
         { id: 'overlay:parallel-angle-preview', x: 160, y: 60 },
         { id: 'overlay-geometry:parallel-angle-preview:center', x: 200, y: 120 },
         { id: 'overlay-geometry:parallel-angle-preview:start', x: 240, y: 120 },
         { id: 'overlay-geometry:parallel-angle-preview:end', x: 200, y: 80 },
+        { id: 'overlay-geometry:parallel-angle-preview-witness-a:start', x: 220, y: 120 },
+        { id: 'overlay-geometry:parallel-angle-preview-witness-a:end', x: 240, y: 120 },
+        { id: 'overlay-geometry:parallel-angle-preview-witness-b:start', x: 200, y: 100 },
+        { id: 'overlay-geometry:parallel-angle-preview-witness-b:end', x: 200, y: 80 },
         { id: 'overlay:rectangle-start-anchor', x: 100, y: 140 },
         { id: 'overlay:rectangle-completion-cue', x: 200, y: 60 },
         { id: 'overlay:active-snap', x: 140, y: 100 },
@@ -139,6 +171,16 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
     markup.includes('data-sketch-viewport-drag-handle="distance-preview-drag"')
       && markup.includes('data-sketch-viewport-drag-handle="parallel-angle-preview-drag"'),
     'Viewport feedback should expose declared dimension preview geometry as draggable handles.',
+  )
+  assert(
+    !markup.includes('Rectangle 1 width'),
+    'Committed dimension overlays should leave visible text to the draggable annotation chip.',
+  )
+  assert(
+    markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-a"')
+      && markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-b"')
+      && markup.includes('stroke-dasharray="4 4"'),
+    'Viewport feedback should render dashed angular witness lines when the overlay declares them.',
   )
   assert(
     !markup.includes('First corner') && !markup.includes('Place corner'),

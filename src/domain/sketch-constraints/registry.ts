@@ -370,6 +370,59 @@ function lineDirectionFromCenter(
   return dot >= 0 ? lineUnit : [-lineUnit[0], -lineUnit[1]] as const
 }
 
+function projectPointOntoLineSegment(
+  line: NonNullable<SketchConstraintTargetRecord['line']>,
+  point: readonly [number, number],
+): readonly [number, number] {
+  const vector = lineVector(line)
+  const lengthSquared = vector[0] * vector[0] + vector[1] * vector[1]
+
+  if (lengthSquared <= 1e-9) {
+    return line.start
+  }
+
+  const offset: readonly [number, number] = [point[0] - line.start[0], point[1] - line.start[1]]
+  const ratio = Math.max(
+    0,
+    Math.min(1, (offset[0] * vector[0] + offset[1] * vector[1]) / lengthSquared),
+  )
+
+  return [
+    line.start[0] + vector[0] * ratio,
+    line.start[1] + vector[1] * ratio,
+  ]
+}
+
+function createAngleWitnessLines(
+  id: string,
+  first: NonNullable<SketchConstraintTargetRecord['line']>,
+  second: NonNullable<SketchConstraintTargetRecord['line']>,
+  start: readonly [number, number],
+  end: readonly [number, number],
+) {
+  return [
+    createAngleWitnessLine(`${id}-witness-a`, first, start),
+    createAngleWitnessLine(`${id}-witness-b`, second, end),
+  ].filter((line): line is NonNullable<typeof line> => line !== null)
+}
+
+function createAngleWitnessLine(
+  id: string,
+  line: NonNullable<SketchConstraintTargetRecord['line']>,
+  point: readonly [number, number],
+) {
+  const anchor = projectPointOntoLineSegment(line, point)
+
+  return distanceBetween(anchor, point) <= 1e-6
+    ? null
+    : {
+        id,
+        label: 'Witness',
+        start: anchor,
+        end: point,
+      }
+}
+
 function normalizeSignedAngleDelta(delta: number) {
   if (delta > Math.PI) {
     return delta - Math.PI * 2
@@ -735,6 +788,7 @@ function buildLineAnglePreview(input: SketchConstraintPreviewInput): readonly Sk
       end,
       radius,
       side,
+      witnessLines: createAngleWitnessLines('parallel-angle-preview', first.line, second.line, start, end),
       labelAnchor: {
         kind: 'sketchPoint',
         point: labelPoint,

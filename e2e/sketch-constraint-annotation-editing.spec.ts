@@ -26,13 +26,14 @@ test('committed distance annotation input keeps Backspace local and saves durabl
   await page.getByRole('menuitem', { name: /Distance Create aligned distance dimensions/ }).click()
   await canvas.click({ position: { x: 360, y: 260 }, force: true })
   await canvas.click({ position: { x: 460, y: 320 }, force: true })
+  await canvas.click({ position: { x: 420, y: 240 }, force: true })
 
   const floatingInput = page.locator('[data-sketch-viewport-floating-input]')
   await expect(floatingInput).toBeVisible()
   await floatingInput.locator('input').fill('24')
   await floatingInput.getByRole('button', { name: 'Commit' }).click()
 
-  const distanceGlyph = page.locator('[data-sketch-annotation-glyph="dimensionDistance"]').first()
+  const distanceGlyph = page.locator('[data-sketch-annotation-kind="dimension"]').first()
   await expect(distanceGlyph).toBeVisible()
 
   await distanceGlyph.dblclick()

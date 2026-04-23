@@ -8,6 +8,7 @@ import {
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
+import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import { bindRenderableObject } from '@/domain/workspace/render-picking'
 import * as THREE from 'three'
 
@@ -213,10 +214,27 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     )
   }
 
+  function testDimensionAnnotationDragPatchTargetsDurablePlacement() {
+    const patch = createDimensionAnnotationPlacementPatch(
+      { id: 'dimension_1-annotation-drag', dimensionId: 'dimension_1' },
+      [8, 3],
+    )
+
+    assert(
+      patch.intent === 'setDimensionAnnotationPlacement'
+        && patch.handleId === 'dimension_1-annotation-drag'
+        && patch.dimensionId === 'dimension_1'
+        && patch.point[0] === 8
+        && patch.point[1] === 3,
+      'Dimension annotation drags should route through the committed dimension placement patch path.',
+    )
+  }
+
   testDragMovesCoalesceToLatestPoint()
   testDragMoveCancellationDropsPendingFrame()
   testSketchBvhKeyIgnoresPositionalPolylineUpdates()
   testProjectionBridgeResolvesKnownTarget()
   testRenderIdleTrackerRequiresStableIdleFrames()
   testViewCubeResizeUpdatesCanvasCssSize()
+  testDimensionAnnotationDragPatchTargetsDurablePlacement()
 })

@@ -186,8 +186,8 @@ function getOverlayContent(overlay: SketchToolOverlayDescriptor) {
 function shouldRenderOverlayLabel(overlay: SketchToolOverlayDescriptor) {
   return (
     overlay.kind === 'measurement'
-    || overlay.kind === 'dimensionLine'
-    || overlay.kind === 'angleArc'
+    || (overlay.kind === 'dimensionLine' && Boolean(overlay.dragHandle))
+    || (overlay.kind === 'angleArc' && Boolean(overlay.dragHandle))
     || overlay.kind === 'referenceLabel'
     || overlay.kind === 'snapIndicator'
   )
@@ -415,6 +415,29 @@ function renderProjectedArc(
 
   return (
     <g key={id}>
+      {(overlay.witnessLines ?? []).map((line) => {
+        const witnessStart = projectionById.get(getOverlayGeometryProjectionId(line.id, 'start'))
+        const witnessEnd = projectionById.get(getOverlayGeometryProjectionId(line.id, 'end'))
+
+        if (!witnessStart || !witnessEnd) {
+          return null
+        }
+
+        return (
+          <line
+            key={line.id}
+            data-sketch-viewport-angle-witness={line.id}
+            x1={witnessStart.x}
+            y1={witnessStart.y}
+            x2={witnessEnd.x}
+            y2={witnessEnd.y}
+            stroke="var(--cad-muted-foreground)"
+            strokeDasharray="4 4"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        )
+      })}
       {visibleArc}
       <path
         data-sketch-viewport-drag-handle={dragHandle.id}

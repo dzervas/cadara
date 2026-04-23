@@ -733,6 +733,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       sketchId: 'sketch_draft',
       pointId: diagonalPointId!,
     })
+    session = pinSketchConstraintPreview(session, [5, 12])
 
     const presentation = getSketchToolPresentation(session)
     assert(presentation?.floatingInput?.label === 'Distance', 'Distance authoring should request a floating numeric input.')
@@ -744,8 +745,18 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       (entry) => entry.target.kind === 'dimension',
     )
     assert(annotation, 'Committed dimensions should be exposed as durable annotation descriptors.')
-    assert(annotation.glyphKind === 'dimensionDistance', 'Distance dimensions should expose a distinct glyph kind.')
+    assert(
+      annotation.glyphKind === 'dimensionDistance'
+        || annotation.glyphKind === 'dimensionHorizontal'
+        || annotation.glyphKind === 'dimensionVertical',
+      'Distance dimensions should expose a dimension-specific glyph kind.',
+    )
     assert(annotation.anchor.kind === 'sketchPoint', 'Dimension descriptors should expose a viewport anchor.')
+    assert(annotation.visibleLabel === '24.00', 'Committed dimensions should expose compact visible value text.')
+    assert(
+      annotation.dragHandle?.dimensionId === annotation.target.dimensionId,
+      'Committed dimensions should expose annotation-chip drag metadata for durable placement updates.',
+    )
     assert(
       annotation.affectedGeometryRefs.length === 2
         && annotation.affectedGeometryRefs.every((target) => target.kind === 'sketchPoint'),
@@ -815,6 +826,21 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       (entry) => entry.glyphKind === 'dimensionHorizontal' && entry.target.kind === 'dimension',
     )
     assert(annotation?.target.kind === 'dimension', 'Rectangle width should expose an editable horizontal dimension.')
+
+    session = patchSketchDimensionAnnotationPlacement(session, {
+      intent: 'setDimensionAnnotationPlacement',
+      dimensionId: annotation.target.dimensionId,
+      point: [5, -4],
+    })
+    const movedAnnotation = getSketchAnnotationDescriptors(session).find(
+      (entry) => entry.target.kind === 'dimension' && entry.target.dimensionId === annotation.target.dimensionId,
+    )
+    assert(
+      movedAnnotation?.anchor.kind === 'sketchPoint'
+        && Math.abs(movedAnnotation.anchor.point[0] - 5) < 1e-9
+        && Math.abs(movedAnnotation.anchor.point[1] + 4) < 1e-9,
+      'Committed dimension annotation chips should use the dynamic dimension label placement.',
+    )
 
     session = beginSketchAnnotationEdit(session, annotation.target)
     session = patchSketchConstraintValue(session, { value: 20 })
@@ -886,8 +912,10 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       entityId: circleId,
     })
     assert(
-      getSketchToolPresentation(circleSession)?.floatingInput?.label === 'Distance',
-      'Selecting one circle with Dimension should request a value for diameter authoring.',
+      getSketchToolPresentation(circleSession)?.overlays?.some((overlay) =>
+        overlay.kind === 'dimensionLine' && overlay.referenceKind === 'diameter'
+      ),
+      'Selecting one circle with Dimension should start a diameter preview before committing the value.',
     )
     circleSession = patchSketchConstraintValue(circleSession, { intent: 'setConstraintAnnotationPlacement', point: [0, 5] })
     circleSession = patchSketchConstraintValue(circleSession, { value: 12 })
@@ -904,9 +932,9 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       getSketchToolPresentation(circleSession)?.overlays?.some((overlay) =>
         overlay.kind === 'dimensionLine'
           && overlay.referenceKind === 'diameter'
-          && overlay.dragHandle?.dimensionId === diameter.dimensionId,
+          && !overlay.dragHandle,
       ),
-      'Committed diameter dimensions should render draggable dimension-line annotation geometry from stored placement.',
+      'Committed diameter dimensions should keep overlay geometry visible without reusing it as the durable drag handle.',
     )
     circleSession = patchSketchDimensionAnnotationPlacement(circleSession, {
       intent: 'setDimensionAnnotationPlacement',
@@ -1031,8 +1059,13 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
         && Math.abs(committedAngleOverlay.start[1]) < 1e-9
         && Math.abs(committedAngleOverlay.end[0] - 5) < 1e-9
         && committedAngleOverlay.side === 'major'
-        && committedAngleOverlay.dragHandle?.dimensionId === angle.dimensionId,
-      'Committed line angle dimensions should render draggable angle arcs from the true line intersection.',
+        && !committedAngleOverlay.dragHandle,
+      'Committed line angle dimensions should render durable angle arcs without using them as a second drag handle.',
+    )
+    assert(
+      committedAngleOverlay?.kind === 'angleArc'
+        && (committedAngleOverlay.witnessLines?.length ?? 0) === 0,
+      'Committed line angle dimensions should avoid extra witness geometry when the true intersection lies on both segments.',
     )
     angleSession = patchSketchDimensionAnnotationPlacement(angleSession, {
       intent: 'setDimensionAnnotationPlacement',
@@ -1068,6 +1101,57 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
         && dimensionPreview.end[0] === 8
         && dimensionPreview.end[1] === 3,
       'Distance authoring should emit a transient dimension line from one selected point to the active pointer.',
+    )
+  }
+
+  function testAngleWitnessLinesAppearForOffSegmentIntersections() {
+    let session = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [4, 0])
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [6, -3])
+    session = acceptSketchDraw(session, [6, 3])
+    const [horizontalLineId, verticalLineId] = session.definition.entityIds
+    assert(horizontalLineId && verticalLineId, 'Off-segment angle fixture should create two non-parallel line entities.')
+
+    session = beginSketchTool(session, 'dimensionDistance')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: horizontalLineId,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: verticalLineId,
+    })
+
+    const preview = getSketchToolPresentation(session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    assert(
+      preview?.kind === 'angleArc'
+        && preview.witnessLines?.some((line) =>
+          Math.abs(line.start[0] - 4) < 1e-9
+            && line.end[0] > line.start[0]
+            && line.end[0] < 6,
+        ),
+      'Angle previews should add witness geometry when the true intersection lies beyond a selected segment.',
+    )
+
+    session = patchSketchConstraintValue(session, { value: Math.PI / 2 })
+    session = patchSketchConstraintValue(session, { intent: 'commitConstraintValue' })
+    const committed = getSketchToolPresentation(session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    assert(
+      committed?.kind === 'angleArc'
+        && committed.witnessLines?.some((line) =>
+          Math.abs(line.start[0] - 4) < 1e-9
+            && line.end[0] > line.start[0]
+            && line.end[0] < 6,
+        ),
+      'Committed angle dimensions should preserve witness geometry for off-segment intersections.',
     )
   }
 
@@ -1224,6 +1308,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   testCommittedRectangleWidthEditSolvesDraftGeometry()
   testCommittedCircleRadiusEditUpdatesEntityRadius()
   testExpandedDimensionAuthoringCommitsDurablePayloads()
+  testAngleWitnessLinesAppearForOffSegmentIntersections()
   testDistancePreviewUsesPartialTargetAndPointer()
   testPointDistanceReferenceSelectionFollowsPointer()
   testDistancePreviewFollowsPointerUntilPlacementClick()

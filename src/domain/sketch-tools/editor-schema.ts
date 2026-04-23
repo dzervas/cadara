@@ -173,6 +173,7 @@ export type SketchToolOverlayDescriptor =
       side: 'minor' | 'major'
       labelAnchor: SketchToolAnchorDescriptor
       dragHandle?: SketchToolOverlayDragHandle
+      witnessLines?: readonly SketchToolPreviewLineDescriptor[]
       referenceLabel?: string
     }
   | {

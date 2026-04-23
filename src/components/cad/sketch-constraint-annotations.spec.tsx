@@ -48,6 +48,11 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
     label: 'Distance',
     detail: '10.00 aligned',
     status: 'dimension',
+    visibleLabel: '10.00',
+    dragHandle: {
+      id: 'dimension_1_distance-annotation-drag',
+      dimensionId: 'dimension_1_distance',
+    },
   }
   const horizontalAnnotation: SketchAnnotationDescriptor = {
     ...annotation,
@@ -148,6 +153,10 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
   assert(
     markup.includes('Parallel: Parallel lines') && markup.includes('Distance: 10.00 aligned'),
     'Committed annotation glyphs should preserve durable label/detail metadata for accessible labels.',
+  )
+  assert(
+    markup.includes('data-sketch-annotation-kind="dimension"') && markup.includes('>10.00<'),
+    'Committed dimensions should render as compact icon-plus-value chips.',
   )
   assert(
     markup.includes('var(--workbench-shell-danger-text)'),

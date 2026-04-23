@@ -153,6 +153,13 @@ export interface SketchAnnotationDescriptor {
   label: string
   detail: string
   status: 'constraint' | 'dimension'
+  visibleLabel?: string
+  dragHandle?: SketchDimensionAnnotationDragHandle
+}
+
+export interface SketchDimensionAnnotationDragHandle {
+  id: string
+  dimensionId: DimensionId
 }
 
 export type SketchAnnotationGlyphKind =
@@ -6472,8 +6479,29 @@ export function getSketchAnnotationDescriptors(
       label: dimension.label,
       detail: describeDimension(dimension),
       status: 'dimension' as const,
+      visibleLabel: formatDimensionVisibleLabel(dimension),
+      dragHandle: createDimensionAnnotationDragHandle(dimension),
     })),
   ]
+}
+
+function createDimensionAnnotationDragHandle(
+  dimension: DimensionDefinition,
+): SketchDimensionAnnotationDragHandle | undefined {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance':
+    case 'circleRadius':
+    case 'diameter':
+    case 'lineDistance':
+    case 'linePointDistance':
+    case 'lineAngle':
+      return { id: `${dimension.dimensionId}-annotation-drag`, dimensionId: dimension.dimensionId }
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return undefined
+  }
 }
 
 function getConstraintGlyphKind(constraint: ConstraintDefinition): SketchAnnotationGlyphKind {
@@ -6777,25 +6805,69 @@ function createDimensionAnnotationAnchor(
   switch (dimension.kind) {
     case 'distance':
     case 'horizontalDistance':
-    case 'verticalDistance':
-      return createOffsetAnnotationAnchor(getAveragePointPosition(definition, dimension.pointIds), { x: 0, y: -28 })
+    case 'verticalDistance': {
+      const first = getPointPosition(definition, dimension.pointIds[0])
+      const second = getPointPosition(definition, dimension.pointIds[1])
+      if (!first || !second) {
+        return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
+      }
+
+      const axis = dimension.kind === 'distance' ? dimension.axis : dimension.kind === 'horizontalDistance' ? 'horizontal' : 'vertical'
+      const line = createPlacedPointDimensionLine(first, second, axis, dimension.annotationPlacement)
+      return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
+    }
     case 'circleRadius':
-    case 'diameter':
-      return createOffsetAnnotationAnchor(getEntityAnchor(definition, dimension.entityId), { x: 22, y: -22 })
-    case 'lineDistance':
-    case 'lineAngle':
-      return createOffsetAnnotationAnchor(getAverageSketchPoint(
-        dimension.lines.flatMap((operand) =>
-          operand.kind === 'localEntity'
-            ? [getEntityAnchor(definition, operand.entityId)]
-            : [],
-        ).filter((point): point is SketchPoint => point !== null),
-      ), { x: 0, y: -28 })
-    case 'linePointDistance':
-      return createOffsetAnnotationAnchor(getAverageSketchPoint([
-        dimension.line.kind === 'localEntity' ? getEntityAnchor(definition, dimension.line.entityId) : null,
-        dimension.point.kind === 'localPoint' ? getPointPosition(definition, dimension.point.pointId) : null,
-      ].filter((point): point is SketchPoint => point !== null)), { x: 0, y: -28 })
+    case 'diameter': {
+      const circle = getCircleLikeGeometry(definition, dimension.entityId)
+      if (!circle) {
+        return createOffsetAnnotationAnchor(getEntityAnchor(definition, dimension.entityId), { x: 22, y: -22 })
+      }
+
+      const angle = dimension.annotationPlacement?.angleRadians ?? 0
+      const end: SketchPoint = [
+        circle.center[0] + Math.cos(angle) * circle.radius,
+        circle.center[1] + Math.sin(angle) * circle.radius,
+      ]
+      return { kind: 'sketchPoint', point: end, offset: { x: 16, y: -16 } }
+    }
+    case 'lineDistance': {
+      const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
+      const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+      if (!first || !second) {
+        return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
+      }
+
+      const line = createPlacedLineDistance(first, getSketchMidpoint(second.start, second.end), dimension.annotationPlacement)
+      return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
+    }
+    case 'linePointDistance': {
+      const lineGeometry = dimension.line.kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.line.entityId) : null
+      const point = dimension.point.kind === 'localPoint' ? getPointPosition(definition, dimension.point.pointId) : null
+      if (!lineGeometry || !point) {
+        return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
+      }
+
+      const line = createPlacedLineDistance(lineGeometry, point, dimension.annotationPlacement)
+      return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
+    }
+    case 'lineAngle': {
+      const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
+      const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+      if (!first || !second) {
+        return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
+      }
+
+      const center = getSketchLineIntersection(first, second) ?? first.start
+      const firstVector = getSketchLineDirectionFromCenter(first, center)
+      const secondVector = getSketchLineDirectionFromCenter(second, center)
+      const radius = dimension.annotationPlacement?.radius ?? 1
+      const side = dimension.annotationPlacement?.side ?? 'minor'
+      return {
+        kind: 'sketchPoint',
+        point: getSketchAngleLabelPoint(center, firstVector, secondVector, radius, side),
+        offset: { x: 12, y: -12 },
+      }
+    }
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return createOffsetAnnotationAnchor(
@@ -6830,7 +6902,6 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           end: line.end,
           value: dimension.value,
           unit: 'mm',
-          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
           labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
           extensionLines: [
             { id: `${dimension.dimensionId}-extension-a`, label: 'Extension', start: first, end: line.start },
@@ -6860,7 +6931,6 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           end,
           value: dimension.value,
           unit: 'mm',
-          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
           labelAnchor: { kind: 'sketchPoint', point: end, offset: { x: 16, y: -16 } },
         }]
       }
@@ -6881,7 +6951,6 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           end: line.end,
           value: dimension.value,
           unit: 'mm',
-          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
           labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
         }]
       }
@@ -6902,7 +6971,6 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           end: line.end,
           value: dimension.value,
           unit: 'mm',
-          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
           labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
         }]
       }
@@ -6929,7 +6997,7 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           end,
           radius,
           side,
-          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'angleArc', dimensionId: dimension.dimensionId },
+          witnessLines: createAngleWitnessLines(`${dimension.dimensionId}-overlay`, first, second, start, end),
           labelAnchor: {
             kind: 'sketchPoint',
             point: getSketchAngleLabelPoint(center, firstVector, secondVector, radius, side),
@@ -6951,6 +7019,59 @@ function getSketchMidpoint(first: SketchPoint, second: SketchPoint): SketchPoint
 function normalizeSketchVector(vector: SketchPoint): SketchPoint {
   const length = Math.hypot(vector[0], vector[1])
   return length <= 1e-6 ? [1, 0] : [vector[0] / length, vector[1] / length]
+}
+
+function projectPointOntoLineSegment(
+  line: { start: SketchPoint; end: SketchPoint },
+  point: SketchPoint,
+): SketchPoint {
+  const vector: SketchPoint = [line.end[0] - line.start[0], line.end[1] - line.start[1]]
+  const lengthSquared = vector[0] * vector[0] + vector[1] * vector[1]
+
+  if (lengthSquared <= 1e-9) {
+    return line.start
+  }
+
+  const offset: SketchPoint = [point[0] - line.start[0], point[1] - line.start[1]]
+  const ratio = Math.max(
+    0,
+    Math.min(1, (offset[0] * vector[0] + offset[1] * vector[1]) / lengthSquared),
+  )
+
+  return [
+    line.start[0] + vector[0] * ratio,
+    line.start[1] + vector[1] * ratio,
+  ]
+}
+
+function createAngleWitnessLines(
+  id: string,
+  first: { start: SketchPoint; end: SketchPoint },
+  second: { start: SketchPoint; end: SketchPoint },
+  start: SketchPoint,
+  end: SketchPoint,
+) {
+  return [
+    createAngleWitnessLine(`${id}-witness-a`, first, start),
+    createAngleWitnessLine(`${id}-witness-b`, second, end),
+  ].filter((line): line is NonNullable<typeof line> => line !== null)
+}
+
+function createAngleWitnessLine(
+  id: string,
+  line: { start: SketchPoint; end: SketchPoint },
+  point: SketchPoint,
+) {
+  const anchor = projectPointOntoLineSegment(line, point)
+
+  return Math.hypot(point[0] - anchor[0], point[1] - anchor[1]) <= 1e-6
+    ? null
+    : {
+        id,
+        label: 'Witness',
+        start: anchor,
+        end: point,
+      }
 }
 
 function getSketchCrossProduct(first: SketchPoint, second: SketchPoint) {
@@ -8278,6 +8399,24 @@ function describeDimension(dimension: DimensionDefinition) {
       return 'Arc start coincident'
     case 'arcEndPointCoincident':
       return 'Arc end coincident'
+  }
+}
+
+function formatDimensionVisibleLabel(dimension: DimensionDefinition) {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance':
+    case 'circleRadius':
+    case 'diameter':
+    case 'lineDistance':
+    case 'linePointDistance':
+      return dimension.value.toFixed(2)
+    case 'lineAngle':
+      return `${(dimension.valueRadians * 180 / Math.PI).toFixed(1)}°`
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return 'Coincident'
   }
 }
 

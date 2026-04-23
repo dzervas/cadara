@@ -202,6 +202,16 @@ function getOverlayGeometryAnchors(overlay: SketchToolOverlayDescriptor): readon
           id: getOverlayGeometryProjectionId(overlay.id, 'end'),
           anchor: getSketchPointAnchor(overlay.end),
         },
+        ...(overlay.witnessLines ?? []).flatMap((line) => [
+          {
+            id: getOverlayGeometryProjectionId(line.id, 'start'),
+            anchor: getSketchPointAnchor(line.start),
+          },
+          {
+            id: getOverlayGeometryProjectionId(line.id, 'end'),
+            anchor: getSketchPointAnchor(line.end),
+          },
+        ]),
       ]
     default:
       return []
