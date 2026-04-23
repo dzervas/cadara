@@ -1,3 +1,5 @@
+import { strToU8, zipSync } from 'fflate'
+
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { validateOperationHistoryPayload, type ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
@@ -21,6 +23,8 @@ const DEFAULT_TOTAL_INLINE_BYTE_LIMIT = 18_000
 const DEFAULT_QUERY_FIELD_BYTE_LIMIT = 900
 const DEFAULT_TOTAL_QUERY_BYTE_LIMIT = 3_600
 const DEFAULT_RECENT_OPERATION_ENTRY_LIMIT = 20
+const DOCUMENT_REPOSITORY_AUTOMERGE_URLS_STORAGE_KEY = 'cad.documentRepository.automergeUrls.v1'
+const DEFAULT_INDEXED_DB_DATABASE_NAMES = ['cad-authored-documents'] as const
 const TEXT_ENCODER = new TextEncoder()
 
 type BugReportSectionId =
@@ -309,8 +313,14 @@ export interface BugReportIssueDraftOptions {
 
 export interface BugReportDebugArtifact {
   filename: string
-  mimeType: 'application/json'
-  payload: string
+  mimeType: string
+  payload: string | Uint8Array
+}
+
+export interface BugReportStateArchiveOptions {
+  storage?: StorageLike | null
+  indexedDB?: IDBFactory | null
+  databaseNames?: readonly string[]
 }
 
 interface DownloadAnchor {
@@ -572,6 +582,42 @@ export function createBugReportArtifactFilename(generatedAt: Date) {
   return `cadara-bug-report-${timestamp}.json`
 }
 
+export async function createBugReportStateArchive(
+  result: BugReportPayloadResult,
+  options: BugReportStateArchiveOptions = {},
+): Promise<BugReportDebugArtifact> {
+  const generatedAt = new Date(result.payload.generatedAt)
+  const entries: Record<string, Uint8Array> = {
+    'README.txt': strToU8(createStateArchiveReadme()),
+    'report/compact-report.json': strToU8(stringifyJson(result.payload)),
+    'state/local-storage.json': strToU8(stringifyJson(collectLocalStorageState(options.storage ?? null))),
+    'state/indexeddb.json': strToU8(stringifyJson(await collectIndexedDbState(
+      options.indexedDB ?? getGlobalIndexedDB() ?? null,
+      options.databaseNames ?? DEFAULT_INDEXED_DB_DATABASE_NAMES,
+    ))),
+  }
+  const authoredDocument = getArchivedSectionValue(result, 'authoredDocument')
+  const operationHistory = getArchivedSectionValue(result, 'operationHistory')
+
+  if (authoredDocument !== null) {
+    entries['state/authored-document.json'] = strToU8(stringifyJson(authoredDocument))
+  }
+  if (operationHistory !== null) {
+    entries['state/operation-history.json'] = strToU8(stringifyJson(operationHistory))
+  }
+
+  return {
+    filename: createBugReportStateArchiveFilename(generatedAt),
+    mimeType: 'application/zip',
+    payload: zipSync(entries, { level: 6 }),
+  }
+}
+
+export function createBugReportStateArchiveFilename(generatedAt: Date) {
+  const timestamp = generatedAt.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  return `cadara-state-${timestamp}.zip`
+}
+
 export function createDownloadedDebugJsonPlaceholder() {
   return [
     '<details>',
@@ -586,7 +632,7 @@ export function downloadBugReportDebugArtifact(
   artifact: BugReportDebugArtifact,
   environment: BugReportDownloadEnvironment = getBugReportDownloadEnvironment(),
 ) {
-  const blob = new Blob([artifact.payload], { type: artifact.mimeType })
+  const blob = new Blob([createArtifactBlobPart(artifact.payload)], { type: artifact.mimeType })
   const url = environment.URL.createObjectURL(blob)
   const anchor = environment.document.createElement('a')
 
@@ -1084,6 +1130,227 @@ function limitTextByBytes(value: string, limit: number, marker: string) {
   return `${output}${marker}`
 }
 
+function createArtifactBlobPart(payload: string | Uint8Array): BlobPart {
+  if (typeof payload === 'string') {
+    return payload
+  }
+
+  const copy = new Uint8Array(payload.byteLength)
+  copy.set(payload)
+  return copy.buffer
+}
+
+function createStateArchiveReadme() {
+  return [
+    'Cadara debug state archive',
+    '',
+    'report/compact-report.json contains the same compact diagnostics used by the GitHub bug-report flow.',
+    'state/authored-document.json contains the authored document reconstructed from the current runtime snapshot when available.',
+    'state/operation-history.json contains the persisted operation-history fallback when available.',
+    'state/local-storage.json contains known Cadara localStorage entries.',
+    'state/indexeddb.json contains a JSON-safe dump of known Cadara IndexedDB databases when the browser allows enumeration.',
+  ].join('\n')
+}
+
+function getArchivedSectionValue(
+  result: BugReportPayloadResult,
+  sectionId: 'authoredDocument' | 'operationHistory',
+) {
+  const section = result.payload[sectionId]
+  if (section.status === 'included') {
+    return section.value
+  }
+
+  return result.artifactSections[sectionId] ?? null
+}
+
+function collectLocalStorageState(storage: StorageLike | null) {
+  if (!storage) {
+    return { status: 'unavailable' as const, reason: 'Browser localStorage is unavailable.' }
+  }
+
+  const entries: Record<string, string | null> = {}
+  const keys = new Set<string>([
+    MODELING_OPERATION_HISTORY_STORAGE_KEY,
+    DOCUMENT_REPOSITORY_AUTOMERGE_URLS_STORAGE_KEY,
+  ])
+  const enumerableStorage = storage as StorageLike & {
+    readonly length?: number
+    key?: (index: number) => string | null
+  }
+
+  if (typeof enumerableStorage.length === 'number' && typeof enumerableStorage.key === 'function') {
+    for (let index = 0; index < enumerableStorage.length; index += 1) {
+      const key = enumerableStorage.key(index)
+      if (key?.startsWith('cad.')) {
+        keys.add(key)
+      }
+    }
+  }
+
+  for (const key of [...keys].sort()) {
+    try {
+      entries[key] = storage.getItem(key)
+    } catch (error: unknown) {
+      entries[key] = `[[unavailable: ${formatUnknownError(error)}]]`
+    }
+  }
+
+  return { status: 'included' as const, entries }
+}
+
+async function collectIndexedDbState(indexedDBFactory: IDBFactory | null, databaseNames: readonly string[]) {
+  if (!indexedDBFactory) {
+    return { status: 'unavailable' as const, reason: 'IndexedDB is unavailable.' }
+  }
+
+  const databases = (indexedDBFactory as IDBFactory & {
+    databases?: () => Promise<readonly { name?: string | null; version?: number }[]>
+  }).databases
+  if (typeof databases !== 'function') {
+    return {
+      status: 'unavailable' as const,
+      reason: 'IndexedDB database enumeration is unavailable in this browser.',
+    }
+  }
+
+  try {
+    const existingDatabases = await databases.call(indexedDBFactory)
+    const existingDatabaseNames = new Set(existingDatabases.map((database) => database.name).filter(isString))
+    const selectedDatabaseNames = databaseNames.filter((databaseName) => existingDatabaseNames.has(databaseName))
+
+    return {
+      status: 'included' as const,
+      databases: await Promise.all(selectedDatabaseNames.map((databaseName) => readIndexedDbDatabase(indexedDBFactory, databaseName))),
+      missingDatabases: databaseNames.filter((databaseName) => !existingDatabaseNames.has(databaseName)),
+    }
+  } catch (error: unknown) {
+    return { status: 'failed' as const, reason: formatUnknownError(error) }
+  }
+}
+
+async function readIndexedDbDatabase(indexedDBFactory: IDBFactory, databaseName: string) {
+  const database = await openIndexedDbDatabase(indexedDBFactory, databaseName)
+  try {
+    const storeNames = Array.from(database.objectStoreNames)
+    return {
+      name: database.name,
+      version: database.version,
+      objectStores: await Promise.all(storeNames.map((storeName) => readIndexedDbObjectStore(database, storeName))),
+    }
+  } finally {
+    database.close()
+  }
+}
+
+function openIndexedDbDatabase(indexedDBFactory: IDBFactory, databaseName: string) {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDBFactory.open(databaseName)
+
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error ?? new Error(`IndexedDB database ${databaseName} could not be opened.`))
+    request.onblocked = () => reject(new Error(`IndexedDB database ${databaseName} open was blocked.`))
+  })
+}
+
+async function readIndexedDbObjectStore(database: IDBDatabase, storeName: string) {
+  const transaction = database.transaction(storeName, 'readonly')
+  const store = transaction.objectStore(storeName)
+  const keysRequest = store.getAllKeys()
+  const valuesRequest = store.getAll()
+  const [keys, values] = await Promise.all([
+    requestToPromise(keysRequest),
+    requestToPromise(valuesRequest),
+    transactionDone(transaction),
+  ]).then(([keys, values]) => [keys, values] as const)
+
+  return {
+    name: storeName,
+    records: values.map((value, index) => ({
+      key: toJsonSafeValue(keys[index]),
+      value: toJsonSafeValue(value),
+    })),
+  }
+}
+
+function requestToPromise<T>(request: IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'))
+  })
+}
+
+function transactionDone(transaction: IDBTransaction) {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed.'))
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted.'))
+  })
+}
+
+function toJsonSafeValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'bigint') {
+    return value.toString()
+  }
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  if (value instanceof ArrayBuffer) {
+    return serializeBytes('ArrayBuffer', new Uint8Array(value))
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView
+    return serializeBytes(
+      value.constructor.name,
+      new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
+    )
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => toJsonSafeValue(entry, seen))
+  }
+  if (typeof value === 'object') {
+    if (seen.has(value)) {
+      return '[[circular]]'
+    }
+
+    seen.add(value)
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, toJsonSafeValue(entry, seen)]),
+    )
+  }
+
+  return String(value)
+}
+
+function serializeBytes(type: string, bytes: Uint8Array) {
+  return {
+    type,
+    byteLength: bytes.byteLength,
+    base64: bytesToBase64(bytes),
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let index = 0; index < bytes.byteLength; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  }
+
+  return btoa(binary)
+}
+
+function formatUnknownError(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
 function getUtf8ByteLength(value: string) {
   return TEXT_ENCODER.encode(value).byteLength
 }
@@ -1120,4 +1387,8 @@ function getGlobalWindow(): WindowLike | undefined {
 
 function getGlobalDocument(): DocumentLike | undefined {
   return globalThis.document as unknown as DocumentLike | undefined
+}
+
+function getGlobalIndexedDB(): IDBFactory | undefined {
+  return globalThis.indexedDB
 }

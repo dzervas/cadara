@@ -5,6 +5,7 @@ import {
   getDocumentHistoryCursorIndex,
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
+  insertDocumentHistoryOrderEntryAfterCursor,
 } from '@/domain/modeling/document-history'
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
@@ -126,6 +127,16 @@ test('src/domain/modeling/document-history.spec.ts', async () => {
   assert(
     getNextDocumentHistoryCursor(beforeFirstSnapshot)?.kind === items[0]?.kind,
     'Redo should be available from the before-first document cursor position.',
+  )
+
+  const insertedBeforeFirst = insertDocumentHistoryOrderEntryAfterCursor(
+    items,
+    { kind: 'empty' },
+    { kind: 'sketch', sketchId: 'sketch_before_first' },
+  )
+  assert(
+    insertedBeforeFirst[0]?.kind === 'sketch' && insertedBeforeFirst[0].sketchId === 'sketch_before_first',
+    'New document-history entries inserted after the empty cursor should become the first item.',
   )
 
   const committed = await adapter.commitSketch({

@@ -104,6 +104,7 @@ import {
   createBugReportDebugArtifact,
   createBugReportIssueDraft,
   createBugReportPayload,
+  createBugReportStateArchive,
   createFallbackBugReportIssueUrl,
   downloadBugReportDebugArtifact,
   type BugReportArtifactStatus,
@@ -1337,32 +1338,35 @@ export function CadWorkbench() {
     isEnabled: () => toolbarHistoryAvailability.canRedo,
   }
 
+  const createCurrentBugReportPayload = () =>
+    createBugReportPayload({
+      build: {
+        version: appVersion,
+        commit: gitCommit,
+        mode: getBuildModeLabel(import.meta.env.MODE, import.meta.env.DEV),
+      },
+      editorState: {
+        mode,
+        activeCommand,
+        selection,
+        selectionFilter,
+        preview,
+        activeEditSession,
+        activeReferencePickerFieldId,
+        sketchSession,
+      },
+      snapshot,
+      storage: window.localStorage,
+      environment: {
+        navigator: window.navigator,
+        window,
+        document,
+      },
+    })
+
   const handleReportBug = () => {
     try {
-      const result = createBugReportPayload({
-        build: {
-          version: appVersion,
-          commit: gitCommit,
-          mode: getBuildModeLabel(import.meta.env.MODE, import.meta.env.DEV),
-        },
-        editorState: {
-          mode,
-          activeCommand,
-          selection,
-          selectionFilter,
-          preview,
-          activeEditSession,
-          activeReferencePickerFieldId,
-          sketchSession,
-        },
-        snapshot,
-        storage: window.localStorage,
-        environment: {
-          navigator: window.navigator,
-          window,
-          document,
-        },
-      })
+      const result = createCurrentBugReportPayload()
       const artifact = createBugReportDebugArtifact(result)
       let artifactStatus: BugReportArtifactStatus = { kind: 'not-needed' }
 
@@ -1416,6 +1420,33 @@ export function CadWorkbench() {
       if (!opened) {
         showWorkbenchError('GitHub bug report could not be opened. Check popup blocking for this site.')
       }
+    }
+  }
+
+  const handleDownloadBugReportState = async () => {
+    try {
+      const archive = await createBugReportStateArchive(createCurrentBugReportPayload(), {
+        storage: window.localStorage,
+        indexedDB: window.indexedDB,
+      })
+
+      downloadBugReportDebugArtifact(archive)
+      showWorkbenchInfo(`Downloaded ${archive.filename}.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Debug state archive could not be downloaded.'
+      showWorkbenchError('Debug state download failed.')
+      errorReporter.report(
+        createAppError({
+          code: 'workbench/action-failed',
+          message: 'Debug state archive generation failed.',
+          context: errorContext('reason', message),
+          cause: error,
+        }),
+        {
+          source: 'workbench.downloadBugReportState',
+          visibility: 'developer',
+        },
+      )
     }
   }
 
@@ -1926,6 +1957,7 @@ export function CadWorkbench() {
         onImportDocument={handleImportDocument}
         onExportDocument={handleExportDocument}
         onReportBug={handleReportBug}
+        onDownloadBugReportState={handleDownloadBugReportState}
       />
       <input
         ref={partImportInputRef}

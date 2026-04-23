@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { strFromU8, unzipSync } from 'fflate'
 
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import { createGeometryAssetDiagnostic } from '@/contracts/modeling/geometry-assets'
@@ -13,6 +14,8 @@ import {
   createBugReportDebugArtifact,
   createBugReportIssueDraft,
   createBugReportPayload,
+  createBugReportStateArchive,
+  createBugReportStateArchiveFilename,
   createGithubBugReportUrl,
   formatMarkdownJsonDisclosure,
 } from '@/domain/bug-reporting/report'
@@ -174,7 +177,61 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {
   const filename = createBugReportArtifactFilename(new Date('2026-01-02T03:04:05.000Z'))
   assert(filename === 'cadara-bug-report-20260102T030405Z.json', 'Artifact filenames should be deterministic and timestamped.')
   const artifact = createBugReportDebugArtifact(omittedSections, new Date('2026-01-02T03:04:05.000Z'))
-  assert(artifact?.filename === filename && artifact.payload.includes('omittedSections'), 'Debug artifact should include omitted high-value sections.')
+  assert(
+    artifact?.filename === filename && typeof artifact.payload === 'string' && artifact.payload.includes('omittedSections'),
+    'Debug artifact should include omitted high-value sections.',
+  )
+
+  const archiveFilename = createBugReportStateArchiveFilename(new Date('2026-01-02T03:04:05.000Z'))
+  assert(archiveFilename === 'cadara-state-20260102T030405Z.zip', 'State archive filenames should be deterministic and timestamped.')
+  const stateStorage = {
+    getItem: (key: string) => {
+      if (key === MODELING_OPERATION_HISTORY_STORAGE_KEY) {
+        return JSON.stringify(operationHistory)
+      }
+      if (key === 'cad.documentRepository.automergeUrls.v1') {
+        return JSON.stringify({ doc_workspace: 'automerge:debug' })
+      }
+      if (key === 'cad.extraDebugKey') {
+        return 'extra'
+      }
+      return null
+    },
+    setItem: () => undefined,
+    removeItem: () => undefined,
+    length: 3,
+    key: (index: number) => [
+      MODELING_OPERATION_HISTORY_STORAGE_KEY,
+      'cad.documentRepository.automergeUrls.v1',
+      'cad.extraDebugKey',
+    ][index] ?? null,
+  } satisfies StorageLike & { length: number; key: (index: number) => string | null }
+  const stateArchive = await createBugReportStateArchive(payloadResult, {
+    storage: stateStorage,
+    indexedDB: null,
+  })
+  const stateArchiveEntries = unzipSync(stateArchive.payload as Uint8Array)
+  const compactReport = JSON.parse(strFromU8(stateArchiveEntries['report/compact-report.json']!)) as typeof payloadResult.payload
+  const localStorageState = JSON.parse(strFromU8(stateArchiveEntries['state/local-storage.json']!)) as {
+    entries: Record<string, string | null>
+  }
+  const indexedDbState = JSON.parse(strFromU8(stateArchiveEntries['state/indexeddb.json']!)) as { status: string }
+
+  assert(
+    stateArchive.filename.startsWith('cadara-state-') && stateArchive.filename.endsWith('.zip'),
+    'State archive should use a timestamped zip filename.',
+  )
+  assert(stateArchive.mimeType === 'application/zip', 'State archive should download as a zip.')
+  assert(compactReport.generatedAt === payloadResult.payload.generatedAt, 'State archive should include the compact report payload.')
+  assert(stateArchiveEntries['README.txt'], 'State archive should include a brief manifest.')
+  assert(stateArchiveEntries['state/authored-document.json'], 'State archive should include the full authored document when available.')
+  assert(stateArchiveEntries['state/operation-history.json'], 'State archive should include operation history when available.')
+  assert(
+    localStorageState.entries['cad.documentRepository.automergeUrls.v1']?.includes('automerge:debug')
+      && localStorageState.entries['cad.extraDebugKey'] === 'extra',
+    'State archive should include known and enumerable Cadara localStorage entries.',
+  )
+  assert(indexedDbState.status === 'unavailable', 'State archive should record unavailable IndexedDB without throwing.')
 
   const issueDraft = createBugReportIssueDraft(omittedSections, {
     artifactStatus: { kind: 'downloaded', filename },

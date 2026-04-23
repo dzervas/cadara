@@ -16,7 +16,7 @@ test('src/App.preload.spec.ts', () => {
     'App mount should start OCC eager preload through the current runtime owner.',
   )
   assert(
-    source.includes('errorReporter.report') && source.includes("source: 'occ-preload'"),
+    source.includes('errorReporter.report') && /source:\s*['"]occ-preload['"]/.test(source),
     'OCC preload failures should use the existing reported error path.',
   )
   assert(

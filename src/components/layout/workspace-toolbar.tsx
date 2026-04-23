@@ -34,6 +34,7 @@ interface WorkspaceToolbarProps {
   onImportDocument?: (file: File) => void
   onExportDocument?: () => void
   onReportBug?: () => void
+  onDownloadBugReportState?: () => void | Promise<void>
 }
 
 export function WorkspaceToolbar({
@@ -45,6 +46,7 @@ export function WorkspaceToolbar({
   onImportDocument = () => undefined,
   onExportDocument = () => undefined,
   onReportBug,
+  onDownloadBugReportState,
 }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
@@ -197,7 +199,7 @@ export function WorkspaceToolbar({
             label={
               <ToolbarTooltipContent
                 title="Report bug"
-                description="Open a GitHub bug report with session diagnostics."
+                description="Open a GitHub bug report. Right-click to download diagnostics."
               />
             }
           >
@@ -208,6 +210,12 @@ export function WorkspaceToolbar({
               className="shrink-0"
               aria-label="Report bug"
               onClick={onReportBug}
+              onContextMenu={onDownloadBugReportState
+                ? (event) => {
+                    event.preventDefault()
+                    void onDownloadBugReportState()
+                  }
+                : undefined}
             >
               <WorkbenchIcon name="reportBug" className="h-4 w-4" />
             </ActionIcon>

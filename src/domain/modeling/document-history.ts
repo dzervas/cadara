@@ -149,6 +149,11 @@ export function insertDocumentHistoryOrderEntryAfterCursor(
       ? `sketch:${item.sketchId}` !== entryKey
       : `feature:${item.featureId}` !== entryKey,
   )
+  if (cursor.kind === 'empty') {
+    order.splice(0, 0, entry)
+    return order
+  }
+
   const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
   order.splice(cursorIndex < 0 ? order.length : cursorIndex + 1, 0, entry)
   return order

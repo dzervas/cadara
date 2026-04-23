@@ -1975,8 +1975,27 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     let current = baseState
     const failedFeatures: FailedFeatureRecord[] = []
     const diagnostics: ModelingDiagnostic[] = []
+    const dependencyOrderDiagnostics = new Map<FeatureId, ModelingDiagnostic[]>()
+
+    for (const diagnostic of findDocumentHistoryOrderDependencyViolations(features, baseState.historyOrder)
+      .map(createDocumentHistoryDependencyOrderDiagnostic)) {
+      if (diagnostic.target?.kind !== 'feature') {
+        continue
+      }
+
+      const featureDiagnostics = dependencyOrderDiagnostics.get(diagnostic.target.featureId) ?? []
+      featureDiagnostics.push(diagnostic)
+      dependencyOrderDiagnostics.set(diagnostic.target.featureId, featureDiagnostics)
+    }
 
     for (const feature of getAppliedFeatures(features, cursor, baseState.historyOrder)) {
+      const orderingDiagnostics = dependencyOrderDiagnostics.get(feature.featureId)
+      if (orderingDiagnostics) {
+        diagnostics.push(...orderingDiagnostics)
+        failedFeatures.push(createFailedFeatureRecord(feature))
+        continue
+      }
+
       const blockingFeature = findBlockingFeature(failedFeatures, feature)
       if (blockingFeature) {
         diagnostics.push(createDependencyBlockedDiagnostic({

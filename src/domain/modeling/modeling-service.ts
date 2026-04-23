@@ -141,8 +141,8 @@ import {
   createSetFeatureCursorHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
   createUpdateFeatureHistoryEntry,
-  type PersistedCommitSketchPayload,
   type ModelingOperationHistoryEntry,
+  type PersistedCommitSketchPayload,
   type ModelingOperationHistoryPayload,
 } from '@/contracts/modeling/operation-history'
 import { getAuthoredLiteralValue, isExpressionAuthoredValue, type MaybeAuthoredValue } from '@/contracts/modeling/authored-values'
@@ -524,6 +524,38 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
 
   const rightSet = new Set(right)
   return left.every((value) => rightSet.has(value))
+}
+
+function collectSketchDependencyIds(value: unknown, dependencyIds: Set<SketchId>) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSketchDependencyIds(item, dependencyIds)
+    }
+    return
+  }
+
+  if (!isRecord(value)) {
+    return
+  }
+
+  if (typeof value.sketchId === 'string') {
+    dependencyIds.add(value.sketchId as SketchId)
+  }
+
+  for (const child of Object.values(value)) {
+    collectSketchDependencyIds(child, dependencyIds)
+  }
+}
+
+function collectMissingFeatureSketchDependencyIds(document: AuthoredModelDocument) {
+  const documentSketchIds = new Set(document.sketches.map((sketch) => sketch.sketchId))
+  const dependencyIds = new Set<SketchId>()
+
+  for (const feature of document.features) {
+    collectSketchDependencyIds(feature.definition, dependencyIds)
+  }
+
+  return new Set([...dependencyIds].filter((sketchId) => !documentSketchIds.has(sketchId)))
 }
 
 function assertDocumentId(value: unknown): DocumentId {
@@ -4841,6 +4873,25 @@ export function createModelingService(
         historyPayload.baseRepositoryHeads !== undefined
         && sameStringSet(historyPayload.baseRepositoryHeads, restoredMetadata.heads)
       )
+      || canOperationHistoryRepairMissingSketchDependencies(historyPayload, restoredDocument)
+  }
+
+  function canOperationHistoryRepairMissingSketchDependencies(
+    historyPayload: ModelingOperationHistoryPayload,
+    restoredDocument: AuthoredModelDocument,
+  ) {
+    const missingSketchIds = collectMissingFeatureSketchDependencyIds(restoredDocument)
+    if (missingSketchIds.size === 0) {
+      return false
+    }
+
+    const replayedSketchIds = new Set(
+      historyPayload.entries
+        .filter((entry): entry is Extract<ModelingOperationHistoryEntry, { kind: 'commitSketch' }> => entry.kind === 'commitSketch')
+        .map((entry) => entry.payload.sketchId),
+    )
+
+    return [...missingSketchIds].every((sketchId) => replayedSketchIds.has(sketchId))
   }
 
   function attachRepositoryProvenance(snapshot: DocumentSnapshot): DocumentSnapshot {
@@ -5987,6 +6038,12 @@ export function createModelingService(
         null,
         0,
       )
+      return
+    }
+
+    if (loadResult.payload.baseRepositoryHeads !== undefined) {
+      canPersistOperationHistory = false
+      historyRestoreState = { kind: 'empty', entriesReplayed: 0, diagnostics: [] }
       return
     }
 

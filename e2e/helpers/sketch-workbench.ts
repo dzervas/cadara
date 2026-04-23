@@ -33,6 +33,10 @@ export class SketchWorkbenchHarness {
     await this.openPreservingStorage(withDisabledRepository(path))
   }
 
+  async openWithRepository(path = '/') {
+    await this.openPreservingStorage(withTestMode(path))
+  }
+
   async openPreservingStorage(path = '/') {
     await this.page.goto(path)
     await expect.poll(() => this.readMachineLabel(), { timeout: 30_000 }).not.toBe('')
@@ -41,6 +45,10 @@ export class SketchWorkbenchHarness {
 
   async reloadPreservingStorage(path?: string) {
     await this.openPreservingStorage(withDisabledRepository(path ?? await this.currentPath()))
+  }
+
+  async reloadPreservingRepositoryStorage(path?: string) {
+    await this.openPreservingStorage(withTestMode(path ?? await this.currentPath()))
   }
 
   toolbarButton(name: string): Locator {
@@ -204,6 +212,15 @@ export class SketchWorkbenchHarness {
 function withDisabledRepository(path: string) {
   const url = new URL(path, 'http://127.0.0.1:3000')
   url.searchParams.set('cadDisableRepository', '1')
+  url.searchParams.set('cadTestMode', '1')
+
+  return path.startsWith('http://') || path.startsWith('https://')
+    ? url.toString()
+    : `${url.pathname}${url.search}${url.hash}`
+}
+
+function withTestMode(path: string) {
+  const url = new URL(path, 'http://127.0.0.1:3000')
   url.searchParams.set('cadTestMode', '1')
 
   return path.startsWith('http://') || path.startsWith('https://')

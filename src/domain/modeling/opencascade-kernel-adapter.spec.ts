@@ -77,7 +77,7 @@ import {
   COLLABORATIVE_MERGE_DIAGNOSTIC_CODES,
   normalizeCollaborativeAuthoredModelDocument,
 } from '@/domain/modeling/collaborative-authored-document'
-import type { ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
+import { createEmptyOperationHistory, type ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { extractSolidShapes, getOccDurableRefKey } from '@/domain/modeling/occ/topology'
 import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
@@ -5408,6 +5408,220 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testPendingRepositoryFallbackTailRestoresOnlyWithRepositoryBasisAfterSketchRecreation() {
+    const store = createMemoryOperationHistoryStore()
+    const documentRepository = createMemoryDocumentRepository()
+    const mutate = documentRepository.mutate.bind(documentRepository)
+    let mutateCount = 0
+    let releaseBlockedWrites = () => {}
+    const blockedWrites = new Promise<void>((resolve) => {
+      releaseBlockedWrites = resolve
+    })
+    documentRepository.mutate = async (input) => {
+      mutateCount += 1
+      if (mutateCount >= 3) {
+        await blockedWrites
+      }
+
+      return mutate(input)
+    }
+
+    async function waitFor(condition: () => boolean, message: string) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (condition()) {
+          return
+        }
+        await Promise.resolve()
+      }
+
+      throw new Error(message)
+    }
+
+    const service = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: store,
+      documentRepository,
+      documentRepositoryPersistence: 'background',
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+    const initialSketchRequest = createSketchCommitRequest(initial.revisionId)
+    const committedSketch = await unwrapModelingResult(service.commitSketch(
+      createServiceSketchCommitInput(initialSketchRequest),
+    ))
+    assert(committedSketch.revisionState.kind === 'accepted', 'Initial replay sketch should commit.')
+    await waitFor(
+      () => {
+        const loaded = store.load()
+        return documentRepository.savedDocuments.length === 1 && loaded.ok && loaded.payload === null
+      },
+      'Initial sketch repository write should clear the fallback history before the bug setup continues.',
+    )
+
+    const sketchSnapshot = await service.getCurrentDocumentSnapshot()
+    const profileSketch = requirePrimarySketch(sketchSnapshot)
+    const extrude = await unwrapModelingResult(service.createFeature({
+      baseRevisionId: sketchSnapshot.revisionId,
+      featureLabel: 'Replay Extrude After Deleted Sketch',
+      definition: createExtrudeDefinition(profileSketch, 5),
+    }))
+    assert(extrude.revisionState.kind === 'accepted', 'Extrude should commit before deleting its sketch.')
+    await waitFor(
+      () => {
+        const loaded = store.load()
+        return documentRepository.savedDocuments.length === 2 && loaded.ok && loaded.payload === null
+      },
+      'Extrude repository write should clear the fallback history before the bug setup continues.',
+    )
+
+    const deletedSketch = await unwrapModelingResult(service.deleteTarget({
+      baseRevisionId: extrude.revisionId,
+      target: { kind: 'sketch', sketchId: committedSketch.sketchId },
+    }))
+    assert(
+      deletedSketch.revisionState.kind === 'accepted' && deletedSketch.rebuildResult.kind === 'failed',
+      'Deleting a sketch consumed by an extrude should keep the authored edit but report the expected rebuild error.',
+    )
+
+    const rollbackBeforeExtrude = await unwrapModelingResult(service.setFeatureCursor({
+      baseRevisionId: deletedSketch.revisionId,
+      cursor: { kind: 'empty' },
+    }))
+    assert(rollbackBeforeExtrude.revisionState.kind === 'accepted', 'Cursor should roll before the broken extrude.')
+
+    const replacementSketchRequest = createSketchCommitRequest(rollbackBeforeExtrude.revisionId, {
+      sketchLabel: 'Replay Replacement Sketch',
+      definition: translateSeedDefinition(12, 0),
+    })
+    const replacementSketch = await unwrapModelingResult(service.commitSketch(
+      createServiceSketchCommitInput(replacementSketchRequest),
+    ))
+    assert(replacementSketch.revisionState.kind === 'accepted', 'Replacement sketch should commit before the extrude.')
+
+    const pendingHistory = store.load()
+    assert(
+      pendingHistory.ok
+        && pendingHistory.payload
+        && pendingHistory.payload.entries.map((entry) => entry.kind).join('|') === 'deleteTarget|setFeatureCursor|commitSketch',
+      'Recreated-sketch setup should leave a repository fallback tail starting with the sketch deletion.',
+    )
+    const fallbackTail = structuredClone(pendingHistory.payload)
+    const prefixDocument = documentRepository.savedDocuments.at(-1)
+    assert(prefixDocument, 'Repository should contain the persisted sketch/extrude prefix.')
+    releaseBlockedWrites()
+
+    const impossibleOrderService = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository: createMemoryDocumentRepository([{
+        ...prefixDocument,
+        historyOrder: [
+          { kind: 'feature', featureId: extrude.featureId },
+          { kind: 'sketch', sketchId: committedSketch.sketchId },
+        ],
+        cursor: { kind: 'sketch', sketchId: committedSketch.sketchId },
+      }]),
+    })
+    const impossibleOrderSnapshot = await impossibleOrderService.getCurrentDocumentSnapshot()
+    assert(
+      impossibleOrderSnapshot.diagnostics.some((diagnostic) => diagnostic.code === 'occ-document-history-dependency-order'),
+      'Restored documents must report impossible feature-before-sketch dependency order.',
+    )
+    assert(
+      !impossibleOrderSnapshot.render.records.some((record) => record.ownerFeatureId === extrude.featureId),
+      'Restored impossible dependency order must not render the feature as valid geometry.',
+    )
+
+    const orphanedExtrudeDocument = {
+      ...prefixDocument,
+      sketches: prefixDocument.sketches.filter((sketch) => sketch.sketchId !== committedSketch.sketchId),
+      historyOrder: prefixDocument.historyOrder.filter((item) =>
+        item.kind !== 'sketch' || item.sketchId !== committedSketch.sketchId,
+      ),
+      cursor: { kind: 'empty' as const },
+    }
+    const repairMissingSketchTail = {
+      ...createEmptyOperationHistory('doc_workspace' as DocumentId, ['stale-repository-head']),
+      entries: [{
+        kind: 'commitSketch' as const,
+        payload: {
+          sketchId: committedSketch.sketchId,
+          sketchLabel: initialSketchRequest.sketchLabel,
+          plane: initialSketchRequest.plane,
+          planeTarget: initialSketchRequest.planeTarget,
+          planeKey: initialSketchRequest.planeKey,
+          definition: initialSketchRequest.definition,
+        },
+      }],
+    }
+    const restoredWithRepairableStaleHead = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(repairMissingSketchTail),
+      documentRepository: createMemoryDocumentRepository([orphanedExtrudeDocument]),
+    })
+    const repairableStaleHeadState = await restoredWithRepairableStaleHead.getHistoryRestoreState()
+    const repairableStaleHeadSnapshot = await restoredWithRepairableStaleHead.getCurrentDocumentSnapshot()
+
+    assert(
+      repairableStaleHeadState.kind === 'restored'
+        && repairableStaleHeadState.entriesReplayed === repairMissingSketchTail.entries.length,
+      'Fallback tails should repair restored repository documents missing sketch dependencies even when repository heads diverged.',
+    )
+    assert(
+      repairableStaleHeadSnapshot.presentation.documentHistory.map((item) =>
+        item.kind === 'sketch' ? item.sketchId : item.featureId,
+      ).join('|') === `${committedSketch.sketchId}|${extrude.featureId}`,
+      'Repair replay should restore the missing sketch before the extrude that consumes it.',
+    )
+
+    const restoredWithRepository = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(fallbackTail),
+      documentRepository: createMemoryDocumentRepository([prefixDocument]),
+    })
+    const repositoryRestoreState = await restoredWithRepository.getHistoryRestoreState()
+    const repositoryRestoredSnapshot = await restoredWithRepository.getCurrentDocumentSnapshot()
+
+    assert(
+      repositoryRestoreState.kind === 'restored'
+        && repositoryRestoreState.entriesReplayed === fallbackTail.entries.length,
+      'Repository-relative fallback tails should replay over their matching repository basis.',
+    )
+    assert(
+      repositoryRestoredSnapshot.sketches.some((sketch) =>
+        sketch.sketchId === replacementSketch.sketchId && sketch.label === 'Replay Replacement Sketch',
+      ),
+      'Replay should preserve the replacement sketch inserted before the extrude.',
+    )
+    assert(
+      repositoryRestoredSnapshot.features.some((feature) => feature.featureId === extrude.featureId),
+      'Replay should preserve the extrude after its consumed sketch is recreated before it.',
+    )
+    assert(
+      repositoryRestoredSnapshot.presentation.documentHistory.map((item) =>
+        item.kind === 'sketch' ? item.sketchId : item.featureId,
+      ).join('|') === `${replacementSketch.sketchId}|${extrude.featureId}`,
+      `Replay should restore the replacement sketch before the extrude that consumes it. Actual order: ${
+        repositoryRestoredSnapshot.presentation.documentHistory.map((item) =>
+          item.kind === 'sketch' ? item.sketchId : item.featureId,
+        ).join('|')
+      }; replacement sketch: ${replacementSketch.sketchId}.`,
+    )
+    assert(
+      !repositoryRestoredSnapshot.diagnostics.some((diagnostic) => diagnostic.code === 'occ-document-history-dependency-order'),
+      'A correctly ordered replacement sketch should not report document-history dependency diagnostics.',
+    )
+
+    const restoredWithoutRepository = createModelingService(createAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: createMemoryOperationHistoryStore(fallbackTail),
+    })
+    const compatibilityRestoreState = await restoredWithoutRepository.getHistoryRestoreState()
+
+    assert(
+      compatibilityRestoreState.kind === 'empty' && compatibilityRestoreState.entriesReplayed === 0,
+      'Repository-relative fallback tails should not replay against an empty compatibility-history seed.',
+    )
+  }
+
   async function testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures() {
     const createReferenceSolver = () =>
       new SketchConstraintSolverAdapter({
@@ -5618,6 +5832,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testAuthoredRestoreSkipsBrokenProjectionFeaturesBeforeLaterSketches()
   await testAuthoredRestoreReportsPartialFeatureErrorsWithoutDroppingHistory()
   await testOperationHistoryReplayKeepsPartialFeatureFailuresRepairable()
+  await testPendingRepositoryFallbackTailRestoresOnlyWithRepositoryBasisAfterSketchRecreation()
   await testAuthoredRestoreProjectsSketchReferencesAgainstPriorFeatures()
   await testRepositoryRestoreConsumesWorkerNormalizedCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
