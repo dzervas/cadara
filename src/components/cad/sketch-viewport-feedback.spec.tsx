@@ -31,6 +31,7 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         end: [4, 2],
         value: 12,
         unit: 'mm',
+        dragHandle: { id: 'distance-preview-drag', kind: 'dimensionLine' },
         labelAnchor: { kind: 'sketchPoint', point: [2, 2] },
         extensionLines: [
           { id: 'distance-preview-extension-a', label: 'Extension', start: [0, 0], end: [0, 2] },
@@ -45,7 +46,9 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         start: [1, 0],
         end: [0, 1],
         radius: 1,
+        side: 'major',
         labelAnchor: { kind: 'sketchPoint', point: [0.5, 0.5] },
+        dragHandle: { id: 'parallel-angle-preview-drag', kind: 'angleArc' },
       },
       {
         id: 'rectangle-start-anchor',
@@ -126,8 +129,16 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
     'Viewport feedback should render dimension preview line geometry from projected endpoints.',
   )
   assert(
-    markup.includes('data-sketch-viewport-geometry="angleArc"') && markup.includes('A 40 40'),
-    'Viewport feedback should render angle preview arcs from projected line references.',
+    markup.includes('data-sketch-viewport-geometry="angleArc"')
+      && markup.includes('data-sketch-viewport-arc-side="major"')
+      && markup.includes('L 200 80')
+      && !markup.includes('A 40 40'),
+    'Viewport feedback should render major angle arcs as centered sampled paths from projected line references.',
+  )
+  assert(
+    markup.includes('data-sketch-viewport-drag-handle="distance-preview-drag"')
+      && markup.includes('data-sketch-viewport-drag-handle="parallel-angle-preview-drag"'),
+    'Viewport feedback should expose declared dimension preview geometry as draggable handles.',
   )
   assert(
     !markup.includes('First corner') && !markup.includes('Place corner'),

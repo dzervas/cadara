@@ -1,6 +1,12 @@
 import type { PrimitiveRef } from '@/domain/editor/schema'
-import type { ProjectedSketchGeometryRef } from '@/contracts/sketch/schema'
-import type { ConstraintDefinition } from '@/contracts/sketch/schema'
+import type {
+  ConstraintDefinition,
+  DimensionAnnotationPlacement,
+  DimensionLineAnnotationPlacement,
+  ProjectedSketchGeometryRef,
+  SketchCurveConstraintOperand,
+  SketchPointConstraintOperand,
+} from '@/contracts/sketch/schema'
 import { distanceBetween, midpoint } from '@/domain/sketch/point-math'
 import { createRegistry } from '@/domain/tools/registry-factory'
 import type {
@@ -224,6 +230,16 @@ function pointLineDistance(
   ])
 }
 
+function pointLineSignedDistance(
+  point: readonly [number, number],
+  start: readonly [number, number],
+  end: readonly [number, number],
+) {
+  const axis = normalize([end[0] - start[0], end[1] - start[1]])
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  return (point[0] - start[0]) * normal[0] + (point[1] - start[1]) * normal[1]
+}
+
 export function selectPointToPointDimensionReference(input: {
   first: readonly [number, number]
   second: readonly [number, number]
@@ -288,9 +304,244 @@ function getDimensionLabel(
     vertical: 'Vertical',
     radius: 'Radius',
     diameter: 'Diameter',
+    lineDistance: 'Line distance',
+    pointLineDistance: 'Point-line distance',
   }[referenceKind]
 
   return value === null ? prefix : `${prefix} ${value.toFixed(2)} ${unit}`
+}
+
+function crossProduct(
+  first: readonly [number, number],
+  second: readonly [number, number],
+) {
+  return first[0] * second[1] - first[1] * second[0]
+}
+
+function lineVector(line: NonNullable<SketchConstraintTargetRecord['line']>) {
+  return [line.end[0] - line.start[0], line.end[1] - line.start[1]] as const
+}
+
+function areLinesParallel(
+  first: NonNullable<SketchConstraintTargetRecord['line']>,
+  second: NonNullable<SketchConstraintTargetRecord['line']>,
+) {
+  const firstVector = lineVector(first)
+  const secondVector = lineVector(second)
+  return Math.abs(crossProduct(normalize(firstVector), normalize(secondVector))) <= 1e-4
+}
+
+function lineIntersection(
+  first: NonNullable<SketchConstraintTargetRecord['line']>,
+  second: NonNullable<SketchConstraintTargetRecord['line']>,
+): readonly [number, number] | null {
+  const firstVector = lineVector(first)
+  const secondVector = lineVector(second)
+  const denominator = crossProduct(firstVector, secondVector)
+
+  if (Math.abs(denominator) <= 1e-9) {
+    return null
+  }
+
+  const delta: readonly [number, number] = [
+    second.start[0] - first.start[0],
+    second.start[1] - first.start[1],
+  ]
+  const t = crossProduct(delta, secondVector) / denominator
+
+  return [
+    first.start[0] + firstVector[0] * t,
+    first.start[1] + firstVector[1] * t,
+  ]
+}
+
+function lineDirectionFromCenter(
+  line: NonNullable<SketchConstraintTargetRecord['line']>,
+  center: readonly [number, number],
+  preferredPoint: readonly [number, number],
+) {
+  const towardPreferred = normalize([
+    preferredPoint[0] - center[0],
+    preferredPoint[1] - center[1],
+  ])
+  const lineUnit = normalize(lineVector(line))
+  const dot = towardPreferred[0] * lineUnit[0] + towardPreferred[1] * lineUnit[1]
+
+  return dot >= 0 ? lineUnit : [-lineUnit[0], -lineUnit[1]] as const
+}
+
+function normalizeSignedAngleDelta(delta: number) {
+  if (delta > Math.PI) {
+    return delta - Math.PI * 2
+  }
+
+  if (delta < -Math.PI) {
+    return delta + Math.PI * 2
+  }
+
+  return delta
+}
+
+function normalizePositiveAngleDelta(delta: number) {
+  const normalized = delta % (Math.PI * 2)
+  return normalized < 0 ? normalized + Math.PI * 2 : normalized
+}
+
+function getAngleArcSide(input: {
+  center: readonly [number, number]
+  startVector: readonly [number, number]
+  endVector: readonly [number, number]
+  point: readonly [number, number] | null
+}): 'minor' | 'major' {
+  if (!input.point) {
+    return 'minor'
+  }
+
+  const startAngle = Math.atan2(input.startVector[1], input.startVector[0])
+  const endAngle = Math.atan2(input.endVector[1], input.endVector[0])
+  const pointAngle = Math.atan2(input.point[1] - input.center[1], input.point[0] - input.center[0])
+  const minorDelta = normalizeSignedAngleDelta(endAngle - startAngle)
+  const minorSweep = Math.abs(minorDelta)
+
+  if (minorSweep <= 1e-9) {
+    return 'minor'
+  }
+
+  const pointSweep = minorDelta >= 0
+    ? normalizePositiveAngleDelta(pointAngle - startAngle)
+    : normalizePositiveAngleDelta(startAngle - pointAngle)
+
+  return pointSweep <= minorSweep ? 'minor' : 'major'
+}
+
+function lineDimensionOperand(target: SketchConstraintTargetRecord): SketchCurveConstraintOperand | null {
+  if (target.entity?.kind === 'lineSegment') {
+    return {
+      kind: 'localEntity',
+      entityId: target.entity.entityId,
+    }
+  }
+
+  if (target.projected?.geometry.kind === 'lineSegment') {
+    return projectedOperand(target.projected)
+  }
+
+  return null
+}
+
+function pointDimensionOperand(target: SketchConstraintTargetRecord): SketchPointConstraintOperand | null {
+  if (target.point) {
+    return {
+      kind: 'localPoint',
+      pointId: target.point.pointId,
+    }
+  }
+
+  if (target.projected?.geometry.kind === 'point') {
+    return projectedOperand(target.projected)
+  }
+
+  return null
+}
+
+function getLineDimensionPlacement(
+  line: NonNullable<SketchConstraintTargetRecord['line']>,
+  point: readonly [number, number] | null,
+): DimensionLineAnnotationPlacement | undefined {
+  if (!point) {
+    return undefined
+  }
+
+  const axis = normalize(lineVector(line))
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  return {
+    kind: 'dimensionLine',
+    offset: (point[0] - line.start[0]) * normal[0] + (point[1] - line.start[1]) * normal[1],
+  }
+}
+
+function getPointPairDimensionPlacement(input: {
+  first: readonly [number, number]
+  second: readonly [number, number]
+  pointer: readonly [number, number] | null
+  referenceKind: Extract<SketchToolDimensionReferenceKind, 'aligned' | 'horizontal' | 'vertical'>
+}): DimensionLineAnnotationPlacement | undefined {
+  if (!input.pointer) {
+    return undefined
+  }
+
+  if (input.referenceKind === 'horizontal') {
+    return { kind: 'dimensionLine', offset: input.pointer[1] - input.first[1] }
+  }
+
+  if (input.referenceKind === 'vertical') {
+    return { kind: 'dimensionLine', offset: input.pointer[0] - input.first[0] }
+  }
+
+  const axis = normalize([input.second[0] - input.first[0], input.second[1] - input.first[1]])
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  return {
+    kind: 'dimensionLine',
+    offset: (input.pointer[0] - input.first[0]) * normal[0] + (input.pointer[1] - input.first[1]) * normal[1],
+  }
+}
+
+export function inferDimensionAnnotationPlacement(
+  selectedTargets: readonly SketchConstraintTargetRecord[],
+  point: readonly [number, number] | null,
+): DimensionAnnotationPlacement | null {
+  const [first, second] = selectedTargets
+
+  if (first?.circle && !second) {
+    const direction = point
+      ? [point[0] - first.circle.center[0], point[1] - first.circle.center[1]] as const
+      : [1, 0] as const
+    return {
+      kind: 'dimensionLine',
+      offset: 0,
+      angleRadians: Math.atan2(direction[1], direction[0]),
+    }
+  }
+
+  if (first?.line && second?.line && !areLinesParallel(first.line, second.line)) {
+    const center = lineIntersection(first.line, second.line) ?? first.anchor
+    const firstVector = lineDirectionFromCenter(first.line, center, first.anchor)
+    const secondVector = lineDirectionFromCenter(second.line, center, second.anchor)
+    return {
+      kind: 'angleArc',
+      radius: Math.max(0.1, point ? distanceBetween(center, point) : 1),
+      side: getAngleArcSide({
+        center,
+        startVector: firstVector,
+        endVector: secondVector,
+        point,
+      }),
+    }
+  }
+
+  if (first?.line) {
+    return getLineDimensionPlacement(first.line, point) ?? null
+  }
+
+  if (second?.line) {
+    return getLineDimensionPlacement(second.line, point) ?? null
+  }
+
+  if (first && second) {
+    const referenceKind = selectPointToPointDimensionReference({
+      first: first.anchor,
+      second: second.anchor,
+      pointer: point,
+    })
+    return getPointPairDimensionPlacement({
+      first: first.anchor,
+      second: second.anchor,
+      pointer: point,
+      referenceKind,
+    }) ?? null
+  }
+
+  return null
 }
 
 function buildPointDimensionDescriptor(input: {
@@ -302,9 +553,12 @@ function buildPointDimensionDescriptor(input: {
   referenceKind: Extract<SketchToolDimensionReferenceKind, 'aligned' | 'horizontal' | 'vertical'>
   value: number | null
   unit: string
+  placement?: DimensionLineAnnotationPlacement | null
 }): SketchToolOverlayDescriptor {
   if (input.referenceKind === 'horizontal') {
-    const y = input.pointer?.[1] ?? input.first[1] - 1
+    const y = input.placement?.kind === 'dimensionLine'
+      ? input.first[1] + input.placement.offset
+      : input.pointer?.[1] ?? input.first[1] - 1
     const start: readonly [number, number] = [input.first[0], y]
     const end: readonly [number, number] = [input.second[0], y]
 
@@ -317,6 +571,7 @@ function buildPointDimensionDescriptor(input: {
       end,
       value: input.value,
       unit: input.unit,
+      dragHandle: { id: `${input.id}-drag`, kind: 'dimensionLine' },
       labelAnchor: {
         kind: 'sketchPoint',
         point: midpoint(start, end),
@@ -330,7 +585,9 @@ function buildPointDimensionDescriptor(input: {
   }
 
   if (input.referenceKind === 'vertical') {
-    const x = input.pointer?.[0] ?? input.first[0] + 1
+    const x = input.placement?.kind === 'dimensionLine'
+      ? input.first[0] + input.placement.offset
+      : input.pointer?.[0] ?? input.first[0] + 1
     const start: readonly [number, number] = [x, input.first[1]]
     const end: readonly [number, number] = [x, input.second[1]]
 
@@ -343,6 +600,7 @@ function buildPointDimensionDescriptor(input: {
       end,
       value: input.value,
       unit: input.unit,
+      dragHandle: { id: `${input.id}-drag`, kind: 'dimensionLine' },
       labelAnchor: {
         kind: 'sketchPoint',
         point: midpoint(start, end),
@@ -357,7 +615,9 @@ function buildPointDimensionDescriptor(input: {
 
   const axis = normalize([input.second[0] - input.first[0], input.second[1] - input.first[1]])
   const normal: readonly [number, number] = [-axis[1], axis[0]]
-  const pointerOffset = input.pointer
+  const pointerOffset = input.placement?.kind === 'dimensionLine'
+    ? input.placement.offset
+    : input.pointer
     ? (input.pointer[0] - input.first[0]) * normal[0] + (input.pointer[1] - input.first[1]) * normal[1]
     : 0
   const offset: readonly [number, number] = [normal[0] * pointerOffset, normal[1] * pointerOffset]
@@ -373,6 +633,7 @@ function buildPointDimensionDescriptor(input: {
     end,
     value: input.value,
     unit: input.unit,
+    dragHandle: { id: `${input.id}-drag`, kind: 'dimensionLine' },
     labelAnchor: {
       kind: 'sketchPoint',
       point: midpoint(start, end),
@@ -414,6 +675,9 @@ function buildPointDimensionPreview(
       referenceKind,
       value: input.value,
       unit: options.unit,
+      placement: input.annotationPlacement?.kind === 'dimensionLine'
+        ? input.annotationPlacement
+        : undefined,
     }),
   ]
 }
@@ -431,19 +695,18 @@ function buildLineAnglePreview(input: SketchConstraintPreviewInput): readonly Sk
     )
   }
 
-  const firstVector = normalize([
-    first.line.end[0] - first.line.start[0],
-    first.line.end[1] - first.line.start[1],
-  ])
-  const secondVector = normalize([
-    second.line.end[0] - second.line.start[0],
-    second.line.end[1] - second.line.start[1],
-  ])
-  const radius = Math.max(
-    0.75,
-    Math.min(distanceBetween(first.line.start, first.line.end), distanceBetween(second.line.start, second.line.end)) * 0.22,
-  )
-  const center = first.anchor
+  const center = lineIntersection(first.line, second.line) ?? first.anchor
+  const firstVector = lineDirectionFromCenter(first.line, center, first.anchor)
+  const secondVector = lineDirectionFromCenter(second.line, center, second.anchor)
+  const radius = input.annotationPlacement?.kind === 'angleArc'
+    ? input.annotationPlacement.radius
+    : Math.max(
+        0.75,
+        Math.min(distanceBetween(first.line.start, first.line.end), distanceBetween(second.line.start, second.line.end)) * 0.22,
+      )
+  const side = input.annotationPlacement?.kind === 'angleArc'
+    ? input.annotationPlacement.side
+    : 'minor'
   const start: readonly [number, number] = [
     center[0] + firstVector[0] * radius,
     center[1] + firstVector[1] * radius,
@@ -452,7 +715,11 @@ function buildLineAnglePreview(input: SketchConstraintPreviewInput): readonly Sk
     center[0] + secondVector[0] * radius,
     center[1] + secondVector[1] * radius,
   ]
-  const labelDirection = normalize([firstVector[0] + secondVector[0], firstVector[1] + secondVector[1]])
+  const labelDirection = normalize(
+    side === 'major'
+      ? [-(firstVector[0] + secondVector[0]), -(firstVector[1] + secondVector[1])]
+      : [firstVector[0] + secondVector[0], firstVector[1] + secondVector[1]],
+  )
   const labelPoint: readonly [number, number] = [
     center[0] + labelDirection[0] * radius,
     center[1] + labelDirection[1] * radius,
@@ -467,12 +734,115 @@ function buildLineAnglePreview(input: SketchConstraintPreviewInput): readonly Sk
       start,
       end,
       radius,
+      side,
       labelAnchor: {
         kind: 'sketchPoint',
         point: labelPoint,
         offset: { x: 12, y: -12 },
       },
+      dragHandle: { id: 'parallel-angle-preview-drag', kind: 'angleArc' },
       referenceLabel: formatSelectedLabels([first, second]),
+    },
+  ]
+}
+
+function buildLineDistancePreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const first = input.selectedTargets[0]
+  const second = input.selectedTargets[1] ?? input.hoverTarget
+
+  if (!first?.line || !second?.line) {
+    return buildSinglePreview('line-distance-preview', 'Line distance preview', 'Select two parallel lines', input)
+  }
+
+  const placement = input.annotationPlacement?.kind === 'dimensionLine'
+    ? input.annotationPlacement
+    : getLineDimensionPlacement(first.line, input.pointer)
+  const axis = normalize(lineVector(first.line))
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  const offset = placement?.offset ?? pointLineSignedDistance(second.anchor, first.line.start, first.line.end)
+  const start: readonly [number, number] = [
+    first.anchor[0] + normal[0] * offset,
+    first.anchor[1] + normal[1] * offset,
+  ]
+  const end: readonly [number, number] = [
+    second.anchor[0] + normal[0] * offset,
+    second.anchor[1] + normal[1] * offset,
+  ]
+
+  return [
+    {
+      id: 'line-distance-preview',
+      kind: 'dimensionLine',
+      label: getDimensionLabel('lineDistance', input.value, 'mm'),
+      referenceKind: 'lineDistance',
+      start,
+      end,
+      value: input.value,
+      unit: 'mm',
+      dragHandle: { id: 'line-distance-preview-drag', kind: 'dimensionLine' },
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: midpoint(start, end),
+        offset: { x: 0, y: -18 },
+      },
+      extensionLines: [
+        { id: 'line-distance-preview-extension-a', label: 'Extension', start: first.anchor, end: start },
+        { id: 'line-distance-preview-extension-b', label: 'Extension', start: second.anchor, end },
+      ],
+    },
+  ]
+}
+
+function buildLinePointDistancePreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const first = input.selectedTargets[0]
+  const second = input.selectedTargets[1] ?? input.hoverTarget
+  const lineTarget = first?.line ? first : second?.line ? second : null
+  const pointTarget = first && !first.line ? first : second && !second.line ? second : null
+
+  if (!lineTarget?.line || !pointTarget) {
+    return buildSinglePreview('line-point-distance-preview', 'Point-line preview', 'Select a line and a point', input)
+  }
+
+  const axis = normalize(lineVector(lineTarget.line))
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  const signedDistance = pointLineSignedDistance(pointTarget.anchor, lineTarget.line.start, lineTarget.line.end)
+  const placement = input.annotationPlacement?.kind === 'dimensionLine'
+    ? input.annotationPlacement
+    : getLineDimensionPlacement(lineTarget.line, input.pointer)
+  const offset = placement?.offset ?? signedDistance
+  const projectedPoint: readonly [number, number] = [
+    pointTarget.anchor[0] - normal[0] * signedDistance,
+    pointTarget.anchor[1] - normal[1] * signedDistance,
+  ]
+  const start: readonly [number, number] = [
+    projectedPoint[0] + normal[0] * offset,
+    projectedPoint[1] + normal[1] * offset,
+  ]
+  const end: readonly [number, number] = [
+    pointTarget.anchor[0] + normal[0] * (offset - signedDistance),
+    pointTarget.anchor[1] + normal[1] * (offset - signedDistance),
+  ]
+
+  return [
+    {
+      id: 'line-point-distance-preview',
+      kind: 'dimensionLine',
+      label: getDimensionLabel('pointLineDistance', input.value, 'mm'),
+      referenceKind: 'pointLineDistance',
+      start,
+      end,
+      value: input.value,
+      unit: 'mm',
+      dragHandle: { id: 'line-point-distance-preview-drag', kind: 'dimensionLine' },
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: midpoint(start, end),
+        offset: { x: 0, y: -18 },
+      },
+      extensionLines: [
+        { id: 'line-point-distance-preview-extension-a', label: 'Extension', start: projectedPoint, end: start },
+        { id: 'line-point-distance-preview-extension-b', label: 'Extension', start: pointTarget.anchor, end },
+      ],
     },
   ]
 }
@@ -507,8 +877,76 @@ function buildRadiusPreview(input: SketchConstraintPreviewInput): readonly Sketc
         point: end,
         offset: { x: 16, y: -16 },
       },
+      dragHandle: { id: 'radius-preview-drag', kind: 'dimensionLine' },
     },
   ]
+}
+
+function buildDiameterPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const target = input.selectedTargets[0] ?? input.hoverTarget
+
+  if (!target?.circle) {
+    return buildSinglePreview('diameter-preview', 'Diameter preview', 'Select one circle or arc', input)
+  }
+
+  const placement = input.annotationPlacement?.kind === 'dimensionLine'
+    ? input.annotationPlacement
+    : inferDimensionAnnotationPlacement([target], input.pointer)
+  const angle = placement?.kind === 'dimensionLine' && placement.angleRadians !== undefined
+    ? placement.angleRadians
+    : Math.atan2(
+        (input.pointer?.[1] ?? target.circle.center[1]) - target.circle.center[1],
+        (input.pointer?.[0] ?? target.circle.center[0] + 1) - target.circle.center[0],
+      )
+  const direction: readonly [number, number] = [Math.cos(angle), Math.sin(angle)]
+  const start: readonly [number, number] = [
+    target.circle.center[0] - direction[0] * target.circle.radius,
+    target.circle.center[1] - direction[1] * target.circle.radius,
+  ]
+  const end: readonly [number, number] = [
+    target.circle.center[0] + direction[0] * target.circle.radius,
+    target.circle.center[1] + direction[1] * target.circle.radius,
+  ]
+
+  return [
+    {
+      id: 'diameter-preview',
+      kind: 'dimensionLine',
+      label: getDimensionLabel('diameter', input.value, 'mm'),
+      referenceKind: 'diameter',
+      start,
+      end,
+      value: input.value,
+      unit: 'mm',
+      dragHandle: { id: 'diameter-preview-drag', kind: 'dimensionLine' },
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: end,
+        offset: { x: 16, y: -16 },
+      },
+    },
+  ]
+}
+
+function buildExpandedDimensionPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const first = input.selectedTargets[0]
+  const second = input.selectedTargets[1] ?? input.hoverTarget
+
+  if (first?.circle && !second) {
+    return buildDiameterPreview(input)
+  }
+
+  if (first?.line && second?.line) {
+    return areLinesParallel(first.line, second.line)
+      ? buildLineDistancePreview(input)
+      : buildLineAnglePreview(input)
+  }
+
+  if ((first?.line && second && !second.line) || (first && !first.line && second?.line)) {
+    return buildLinePointDistancePreview(input)
+  }
+
+  return buildPointDimensionPreview(input, { id: 'distance-preview', unit: 'mm' })
 }
 
 function buildSinglePreview(
@@ -1200,8 +1638,8 @@ const sketchConstraintDefinitions = [
       modes: ['sketch'],
     },
     steps: [
-      { id: 'distance-a', label: 'Select first point', acceptedKinds: ['point'] },
-      { id: 'distance-b', label: 'Select second point', acceptedKinds: ['point'] },
+      { id: 'distance-a', label: 'Select first dimension target', acceptedKinds: ['point', 'line', 'circle'] },
+      { id: 'distance-b', label: 'Select second dimension target', acceptedKinds: ['point', 'line'] },
     ],
     valueSpec: {
       label: 'Distance',
@@ -1209,16 +1647,126 @@ const sketchConstraintDefinitions = [
       min: 0.01,
       defaultValue: 10,
     },
-    resolveTarget(definition, target) {
-      return resolvePointTarget(definition, target)
+    resolveTarget(definition, target, projectedReferences) {
+      return createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget])(
+        definition,
+        target,
+        projectedReferences,
+      )
     },
     buildPreview(input) {
-      return buildPointDimensionPreview(input, { id: 'distance-preview', unit: 'mm' })
+      return buildExpandedDimensionPreview(input)
+    },
+    isReadyForValue(selectedTargets) {
+      return Boolean(selectedTargets[0]?.circle) || selectedTargets.length >= 2
+    },
+    canSelectMoreTargets(selectedTargets) {
+      return !selectedTargets[0]?.circle && selectedTargets.length < 2
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
 
-      if (!first?.point || !second?.point || input.value === null) {
+      if (!first || input.value === null) {
+        return {}
+      }
+
+      if (first.entity && (first.entity.kind === 'circle' || first.entity.kind === 'arc')) {
+        return {
+          dimensions: [
+            {
+              dimensionId: input.createDimensionId('diameter'),
+              kind: 'diameter',
+              label: `Diameter ${input.sequence}`,
+              entityId: first.entity.entityId,
+              value: input.value,
+              annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                ? input.annotationPlacement
+                : undefined,
+            },
+          ],
+        }
+      }
+
+      if (!second) {
+        return {}
+      }
+
+      const firstLine = lineDimensionOperand(first)
+      const secondLine = lineDimensionOperand(second)
+      const firstPoint = pointDimensionOperand(first)
+      const secondPoint = pointDimensionOperand(second)
+
+      if (firstLine && secondLine && first.line && second.line) {
+        if (areLinesParallel(first.line, second.line)) {
+          return {
+            dimensions: [
+              {
+                dimensionId: input.createDimensionId('line-distance'),
+                kind: 'lineDistance',
+                label: `Line distance ${input.sequence}`,
+                lines: [firstLine, secondLine],
+                value: input.value,
+                annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                  ? input.annotationPlacement
+                  : undefined,
+              },
+            ],
+          }
+        }
+
+        return {
+          dimensions: [
+            {
+              dimensionId: input.createDimensionId('line-angle'),
+              kind: 'lineAngle',
+              label: `Line angle ${input.sequence}`,
+              lines: [firstLine, secondLine],
+              valueRadians: input.value,
+              annotationPlacement: input.annotationPlacement?.kind === 'angleArc'
+                ? input.annotationPlacement
+                : undefined,
+            },
+          ],
+        }
+      }
+
+      if (firstLine && secondPoint) {
+        return {
+          dimensions: [
+            {
+              dimensionId: input.createDimensionId('line-point-distance'),
+              kind: 'linePointDistance',
+              label: `Point-line distance ${input.sequence}`,
+              line: firstLine,
+              point: secondPoint,
+              value: input.value,
+              annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                ? input.annotationPlacement
+                : undefined,
+            },
+          ],
+        }
+      }
+
+      if (firstPoint && secondLine) {
+        return {
+          dimensions: [
+            {
+              dimensionId: input.createDimensionId('line-point-distance'),
+              kind: 'linePointDistance',
+              label: `Point-line distance ${input.sequence}`,
+              line: secondLine,
+              point: firstPoint,
+              value: input.value,
+              annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                ? input.annotationPlacement
+                : undefined,
+            },
+          ],
+        }
+      }
+
+      if (!first.point || !second.point) {
         return {}
       }
 
@@ -1239,6 +1787,9 @@ const sketchConstraintDefinitions = [
             axis,
             pointIds: [first.point.pointId, second.point.pointId],
             value: input.value,
+            annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+              ? input.annotationPlacement
+              : undefined,
           },
         ],
       }
@@ -1288,6 +1839,9 @@ const sketchConstraintDefinitions = [
             label: `Horizontal distance ${input.sequence}`,
             pointIds: [first.point.pointId, second.point.pointId],
             value: input.value,
+            annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+              ? input.annotationPlacement
+              : undefined,
           },
         ],
       }
@@ -1337,6 +1891,9 @@ const sketchConstraintDefinitions = [
             label: `Vertical distance ${input.sequence}`,
             pointIds: [first.point.pointId, second.point.pointId],
             value: input.value,
+            annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+              ? input.annotationPlacement
+              : undefined,
           },
         ],
       }
@@ -1379,6 +1936,9 @@ const sketchConstraintDefinitions = [
             label: `Radius ${input.sequence}`,
             entityId: circle.entity.entityId,
             value: input.value,
+            annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+              ? input.annotationPlacement
+              : undefined,
           },
         ],
       }

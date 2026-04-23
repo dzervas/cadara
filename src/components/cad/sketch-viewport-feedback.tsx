@@ -1,4 +1,7 @@
+import type { PointerEvent as ReactPointerEvent } from 'react'
+
 import type {
+  SketchToolOverlayDragHandle,
   SketchToolFloatingInputDescriptor,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
@@ -14,13 +17,46 @@ interface SketchViewportFeedbackLayerProps {
   schema: SketchToolPresentationSchema | null
   projections: readonly SketchViewportFeedbackProjection[]
   onPatch: (patch: Record<string, unknown>) => void
+  onDragHandle?: (handle: SketchToolOverlayDragHandle, clientX: number, clientY: number) => void
 }
 
 export function SketchViewportFeedbackLayer({
   schema,
   projections,
   onPatch,
+  onDragHandle,
 }: SketchViewportFeedbackLayerProps) {
+  const dragCallbacks = {
+    onDragStart(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.dataset.sketchViewportDragging = 'true'
+      event.currentTarget.setPointerCapture(event.pointerId)
+      onDragHandle?.(handle, event.clientX, event.clientY)
+    },
+    onDragMove(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>) {
+      if (event.currentTarget.dataset.sketchViewportDragging !== 'true') {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      onDragHandle?.(handle, event.clientX, event.clientY)
+    },
+    onDragEnd(event: ReactPointerEvent<SVGElement>) {
+      if (event.currentTarget.dataset.sketchViewportDragging !== 'true') {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      delete event.currentTarget.dataset.sketchViewportDragging
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+    },
+  }
+
   if (!schema) {
     return null
   }
@@ -33,43 +69,47 @@ export function SketchViewportFeedbackLayer({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10">
-      <svg
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-      >
-        {overlays.map((overlay) => renderOverlayGeometry(overlay, projectionById))}
-      </svg>
-      {overlays.map((overlay) => {
-        const projection = projectionById.get(getOverlayProjectionId(overlay.id))
+    <>
+      <div className="pointer-events-none absolute inset-0 z-10">
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        >
+          {overlays.map((overlay) => renderOverlayGeometry(overlay, projectionById, dragCallbacks))}
+        </svg>
+        {overlays.map((overlay) => {
+          const projection = projectionById.get(getOverlayProjectionId(overlay.id))
 
-        if (!projection || !shouldRenderOverlayLabel(overlay)) {
-          return null
-        }
+          if (!projection || !shouldRenderOverlayLabel(overlay)) {
+            return null
+          }
 
-        return (
-          <div
-            key={overlay.id}
-            data-sketch-viewport-overlay={overlay.kind}
-            className={getOverlayClassName(overlay)}
-            style={{
-              left: projection.x,
-              top: projection.y,
-              transform: 'translate(-50%, -50%)',
-            }}
-          >
-            {getOverlayContent(overlay)}
-          </div>
-        )
-      })}
+          return (
+            <div
+              key={overlay.id}
+              data-sketch-viewport-overlay={overlay.kind}
+              className={getOverlayClassName(overlay)}
+              style={{
+                left: projection.x,
+                top: projection.y,
+                transform: 'translate(-50%, -50%)',
+              }}
+            >
+              {getOverlayContent(overlay)}
+            </div>
+          )
+        })}
+      </div>
       {schema.floatingInput ? (
-        <ViewportFloatingInput
-          descriptor={schema.floatingInput}
-          projection={projectionById.get(getFloatingInputProjectionId(schema.floatingInput.id))}
-          onPatch={onPatch}
-        />
+        <div className="pointer-events-none absolute inset-0 z-40">
+          <ViewportFloatingInput
+            descriptor={schema.floatingInput}
+            projection={projectionById.get(getFloatingInputProjectionId(schema.floatingInput.id))}
+            onPatch={onPatch}
+          />
+        </div>
       ) : null}
-    </div>
+    </>
   )
 }
 
@@ -156,6 +196,11 @@ function shouldRenderOverlayLabel(overlay: SketchToolOverlayDescriptor) {
 function renderOverlayGeometry(
   overlay: SketchToolOverlayDescriptor,
   projectionById: Map<string, SketchViewportFeedbackProjection>,
+  dragCallbacks: {
+    onDragStart(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>): void
+    onDragMove(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>): void
+    onDragEnd(event: ReactPointerEvent<SVGElement>): void
+  },
 ) {
   switch (overlay.kind) {
     case 'dimensionLine':
@@ -188,6 +233,8 @@ function renderOverlayGeometry(
             end: projectionById.get(getOverlayGeometryProjectionId(overlay.id, 'end')),
             stroke: 'var(--cad-accent)',
             strokeWidth: 1.5,
+            dragHandle: overlay.dragHandle,
+            dragCallbacks,
           })}
         </g>
       )
@@ -200,7 +247,7 @@ function renderOverlayGeometry(
         strokeWidth: 1,
       })
     case 'angleArc':
-      return renderProjectedArc(overlay.id, projectionById)
+      return renderProjectedArc(overlay, projectionById, dragCallbacks)
     case 'snapIndicator':
       return renderSnapIndicator(overlay, projectionById.get(getOverlayProjectionId(overlay.id)))
     default:
@@ -259,18 +306,26 @@ function renderProjectedLine({
   end,
   stroke,
   strokeWidth,
+  dragHandle,
+  dragCallbacks,
 }: {
   id: string
   start: SketchViewportFeedbackProjection | undefined
   end: SketchViewportFeedbackProjection | undefined
   stroke: string
   strokeWidth: number
+  dragHandle?: SketchToolOverlayDragHandle
+  dragCallbacks?: {
+    onDragStart(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>): void
+    onDragMove(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>): void
+    onDragEnd(event: ReactPointerEvent<SVGElement>): void
+  }
 }) {
   if (!start || !end) {
     return null
   }
 
-  return (
+  const visibleLine = (
     <line
       key={id}
       x1={start.x}
@@ -282,12 +337,43 @@ function renderProjectedLine({
       vectorEffect="non-scaling-stroke"
     />
   )
+
+  if (!dragHandle || !dragCallbacks) {
+    return visibleLine
+  }
+
+  return (
+    <g key={id}>
+      {visibleLine}
+      <line
+        data-sketch-viewport-drag-handle={dragHandle.id}
+        x1={start.x}
+        y1={start.y}
+        x2={end.x}
+        y2={end.y}
+        stroke="transparent"
+        strokeWidth="14"
+        className="pointer-events-auto cursor-grab"
+        vectorEffect="non-scaling-stroke"
+        onPointerDown={(event) => dragCallbacks.onDragStart(dragHandle, event)}
+        onPointerMove={(event) => dragCallbacks.onDragMove(dragHandle, event)}
+        onPointerUp={dragCallbacks.onDragEnd}
+        onPointerCancel={dragCallbacks.onDragEnd}
+      />
+    </g>
+  )
 }
 
 function renderProjectedArc(
-  id: string,
+  overlay: Extract<SketchToolOverlayDescriptor, { kind: 'angleArc' }>,
   projectionById: Map<string, SketchViewportFeedbackProjection>,
+  dragCallbacks: {
+    onDragStart(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>): void
+    onDragMove(handle: SketchToolOverlayDragHandle, event: ReactPointerEvent<SVGElement>): void
+    onDragEnd(event: ReactPointerEvent<SVGElement>): void
+  },
 ) {
+  const { id } = overlay
   const center = projectionById.get(getOverlayGeometryProjectionId(id, 'center'))
   const start = projectionById.get(getOverlayGeometryProjectionId(id, 'start'))
   const end = projectionById.get(getOverlayGeometryProjectionId(id, 'end'))
@@ -298,21 +384,52 @@ function renderProjectedArc(
 
   const startAngle = Math.atan2(start.y - center.y, start.x - center.x)
   const endAngle = Math.atan2(end.y - center.y, end.x - center.x)
-  const delta = normalizeArcDelta(endAngle - startAngle)
+  const delta = getArcSweepDelta(startAngle, endAngle, overlay.side)
   const radius = (Math.hypot(start.x - center.x, start.y - center.y) + Math.hypot(end.x - center.x, end.y - center.y)) / 2
-  const largeArcFlag = Math.abs(delta) > Math.PI ? 1 : 0
-  const sweepFlag = delta >= 0 ? 1 : 0
 
-  return (
+  const pathData = createCenteredArcPath({
+    center,
+    start,
+    end,
+    startAngle,
+    delta,
+    radius,
+  })
+  const visibleArc = (
     <path
       key={id}
       data-sketch-viewport-geometry="angleArc"
-      d={`M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`}
+      data-sketch-viewport-arc-side={overlay.side}
+      d={pathData}
       fill="none"
       stroke="var(--cad-accent)"
       strokeWidth="1.5"
       vectorEffect="non-scaling-stroke"
     />
+  )
+
+  const dragHandle = overlay.dragHandle
+  if (!dragHandle) {
+    return visibleArc
+  }
+
+  return (
+    <g key={id}>
+      {visibleArc}
+      <path
+        data-sketch-viewport-drag-handle={dragHandle.id}
+        d={pathData}
+        fill="none"
+        stroke="transparent"
+        strokeWidth="14"
+        className="pointer-events-auto cursor-grab"
+        vectorEffect="non-scaling-stroke"
+        onPointerDown={(event) => dragCallbacks.onDragStart(dragHandle, event)}
+        onPointerMove={(event) => dragCallbacks.onDragMove(dragHandle, event)}
+        onPointerUp={dragCallbacks.onDragEnd}
+        onPointerCancel={dragCallbacks.onDragEnd}
+      />
+    </g>
   )
 }
 
@@ -326,6 +443,45 @@ function normalizeArcDelta(delta: number) {
   }
 
   return delta
+}
+
+function getArcSweepDelta(startAngle: number, endAngle: number, side: 'minor' | 'major') {
+  const minorDelta = normalizeArcDelta(endAngle - startAngle)
+
+  if (side === 'minor') {
+    return minorDelta
+  }
+
+  return minorDelta < 0
+    ? minorDelta + Math.PI * 2
+    : minorDelta - Math.PI * 2
+}
+
+function createCenteredArcPath(input: {
+  center: SketchViewportFeedbackProjection
+  start: SketchViewportFeedbackProjection
+  end: SketchViewportFeedbackProjection
+  startAngle: number
+  delta: number
+  radius: number
+}) {
+  const segmentCount = Math.max(8, Math.ceil(Math.abs(input.delta) / (Math.PI / 24)))
+  const points = Array.from({ length: segmentCount }, (_, index) => {
+    if (index === segmentCount - 1) {
+      return input.end
+    }
+
+    const angle = input.startAngle + input.delta * (index + 1) / segmentCount
+    return {
+      x: input.center.x + Math.cos(angle) * input.radius,
+      y: input.center.y + Math.sin(angle) * input.radius,
+    }
+  })
+
+  return [
+    `M ${input.start.x} ${input.start.y}`,
+    ...points.map((point) => `L ${point.x} ${point.y}`),
+  ].join(' ')
 }
 
 function ViewportFloatingInput({

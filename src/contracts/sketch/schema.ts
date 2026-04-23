@@ -434,6 +434,22 @@ export type SketchCurveConstraintOperand =
   | LocalSketchEntityConstraintOperand
   | ProjectedSketchGeometryConstraintOperand
 
+export type DimensionLineAnnotationPlacement = {
+  kind: 'dimensionLine'
+  offset: number
+  angleRadians?: number
+}
+
+export type DimensionAngleAnnotationPlacement = {
+  kind: 'angleArc'
+  radius: number
+  side: 'minor' | 'major'
+}
+
+export type DimensionAnnotationPlacement =
+  | DimensionLineAnnotationPlacement
+  | DimensionAngleAnnotationPlacement
+
 /**
  * Authorable fill payload for sketch styles.
  */
@@ -732,6 +748,8 @@ export type DimensionDefinition =
       pointIds: readonly [SketchPointId, SketchPointId]
       /** Requested dimension value in sketch-plane units. */
       value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
     }
   | {
       dimensionId: DimensionId
@@ -742,6 +760,58 @@ export type DimensionDefinition =
       entityId: SketchEntityId
       /** Requested radius value in sketch-plane units. */
       value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
+    }
+  | {
+      dimensionId: DimensionId
+      kind: 'diameter'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Referenced circle or arc entity whose solved diameter must match `value`. */
+      entityId: SketchEntityId
+      /** Requested diameter value in sketch-plane units. */
+      value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
+    }
+  | {
+      dimensionId: DimensionId
+      kind: 'lineDistance'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Two sketch-space line references whose perpendicular separation must match `value`. */
+      lines: readonly [SketchCurveConstraintOperand, SketchCurveConstraintOperand]
+      /** Requested perpendicular distance in sketch-plane units. */
+      value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
+    }
+  | {
+      dimensionId: DimensionId
+      kind: 'linePointDistance'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Sketch-space line reference. */
+      line: SketchCurveConstraintOperand
+      /** Sketch-space point reference. */
+      point: SketchPointConstraintOperand
+      /** Requested perpendicular distance in sketch-plane units. */
+      value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
+    }
+  | {
+      dimensionId: DimensionId
+      kind: 'lineAngle'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Two non-parallel sketch-space line references whose enclosed angle must match `valueRadians`. */
+      lines: readonly [SketchCurveConstraintOperand, SketchCurveConstraintOperand]
+      /** Requested enclosed angle in radians. */
+      valueRadians: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionAngleAnnotationPlacement
     }
   | {
       dimensionId: DimensionId
@@ -752,6 +822,8 @@ export type DimensionDefinition =
       pointIds: readonly [SketchPointId, SketchPointId]
       /** Requested signed horizontal distance in sketch-plane units. */
       value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
     }
   | {
       dimensionId: DimensionId
@@ -762,6 +834,8 @@ export type DimensionDefinition =
       pointIds: readonly [SketchPointId, SketchPointId]
       /** Requested signed vertical distance in sketch-plane units. */
       value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
     }
   | {
       dimensionId: DimensionId

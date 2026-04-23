@@ -7,6 +7,7 @@ import {
   getSketchAnnotationDescriptors,
   getSketchToolPresentation,
   patchSketchConstraintValue,
+  patchSketchDimensionAnnotationPlacement,
   pinSketchConstraintPreview,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
@@ -867,6 +868,184 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     )
   }
 
+  function testExpandedDimensionAuthoringCommitsDurablePayloads() {
+    let circleSession = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+    circleSession = beginSketchTool(circleSession, 'circle')
+    circleSession = startSketchDraw(circleSession, [0, 0])
+    circleSession = acceptSketchDraw(circleSession, [5, 0])
+    const circleId = circleSession.definition.entities.find((entity) => entity.kind === 'circle')?.entityId
+    assert(circleId, 'Circle fixture should create a circle entity.')
+
+    circleSession = beginSketchTool(circleSession, 'dimensionDistance')
+    circleSession = selectSketchConstraintTarget(circleSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: circleId,
+    })
+    assert(
+      getSketchToolPresentation(circleSession)?.floatingInput?.label === 'Distance',
+      'Selecting one circle with Dimension should request a value for diameter authoring.',
+    )
+    circleSession = patchSketchConstraintValue(circleSession, { intent: 'setConstraintAnnotationPlacement', point: [0, 5] })
+    circleSession = patchSketchConstraintValue(circleSession, { value: 12 })
+    circleSession = patchSketchConstraintValue(circleSession, { intent: 'commitConstraintValue' })
+    const diameter = circleSession.definition.dimensions.find((dimension) => dimension.kind === 'diameter')
+    assert(
+      diameter?.kind === 'diameter'
+        && diameter.entityId === circleId
+        && diameter.value === 12
+        && diameter.annotationPlacement?.kind === 'dimensionLine',
+      'Diameter authoring should commit a durable diameter dimension with annotation placement.',
+    )
+    assert(
+      getSketchToolPresentation(circleSession)?.overlays?.some((overlay) =>
+        overlay.kind === 'dimensionLine'
+          && overlay.referenceKind === 'diameter'
+          && overlay.dragHandle?.dimensionId === diameter.dimensionId,
+      ),
+      'Committed diameter dimensions should render draggable dimension-line annotation geometry from stored placement.',
+    )
+    circleSession = patchSketchDimensionAnnotationPlacement(circleSession, {
+      intent: 'setDimensionAnnotationPlacement',
+      dimensionId: diameter.dimensionId,
+      point: [5, 0],
+    })
+    const movedDiameter = circleSession.definition.dimensions.find((dimension) => dimension.dimensionId === diameter.dimensionId)
+    assert(
+      movedDiameter?.kind === 'diameter'
+        && movedDiameter.annotationPlacement?.kind === 'dimensionLine'
+        && Math.abs((movedDiameter.annotationPlacement.angleRadians ?? 0)) < 1e-9,
+      'Dragging a committed diameter annotation should update its durable annotation placement.',
+    )
+
+    let lineSession = createSessionWithTwoLines()
+    const [firstLineId, secondLineId] = lineSession.definition.entityIds
+    assert(firstLineId && secondLineId, 'Line fixture should create two line entities.')
+    lineSession = beginSketchTool(lineSession, 'dimensionDistance')
+    lineSession = selectSketchConstraintTarget(lineSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: firstLineId,
+    })
+    lineSession = selectSketchConstraintTarget(lineSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: secondLineId,
+    })
+    lineSession = patchSketchConstraintValue(lineSession, { value: 6 })
+    lineSession = patchSketchConstraintValue(lineSession, { intent: 'commitConstraintValue' })
+    const lineDistance = lineSession.definition.dimensions.find((dimension) => dimension.kind === 'lineDistance')
+    assert(
+      lineDistance?.kind === 'lineDistance'
+        && lineDistance.lines.every((line) => line.kind === 'localEntity')
+        && lineDistance.value === 6,
+      'Parallel line targets should commit a durable line-to-line distance dimension.',
+    )
+
+    let pointLineSession = createSessionWithTwoLines()
+    const lineId = pointLineSession.definition.entityIds[0]
+    const pointId = pointLineSession.definition.pointIds[3]
+    assert(lineId && pointId, 'Point-line fixture should expose a line and a point.')
+    pointLineSession = beginSketchTool(pointLineSession, 'dimensionDistance')
+    pointLineSession = selectSketchConstraintTarget(pointLineSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId,
+    })
+    pointLineSession = selectSketchConstraintTarget(pointLineSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId,
+    })
+    pointLineSession = patchSketchConstraintValue(pointLineSession, { value: 4 })
+    pointLineSession = patchSketchConstraintValue(pointLineSession, { intent: 'commitConstraintValue' })
+    const pointLineDistance = pointLineSession.definition.dimensions.find((dimension) => dimension.kind === 'linePointDistance')
+    assert(
+      pointLineDistance?.kind === 'linePointDistance'
+        && pointLineDistance.line.kind === 'localEntity'
+        && pointLineDistance.point.kind === 'localPoint'
+        && pointLineDistance.value === 4,
+      'Line and point targets should commit a durable line-to-point distance dimension in either selection order.',
+    )
+
+    let angleSession = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+    angleSession = beginSketchTool(angleSession, 'line')
+    angleSession = startSketchDraw(angleSession, [0, 0])
+    angleSession = acceptSketchDraw(angleSession, [10, 0])
+    angleSession = beginSketchTool(angleSession, 'line')
+    angleSession = startSketchDraw(angleSession, [5, -5])
+    angleSession = acceptSketchDraw(angleSession, [5, 5])
+    const [horizontalLineId, verticalLineId] = angleSession.definition.entityIds
+    assert(horizontalLineId && verticalLineId, 'Angle fixture should create two non-parallel line entities.')
+    angleSession = beginSketchTool(angleSession, 'dimensionDistance')
+    angleSession = selectSketchConstraintTarget(angleSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: horizontalLineId,
+    })
+    angleSession = selectSketchConstraintTarget(angleSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: verticalLineId,
+    })
+    const anglePreview = getSketchToolPresentation(angleSession)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    assert(
+      anglePreview?.kind === 'angleArc'
+        && Math.abs(anglePreview.center[0] - 5) < 1e-9
+        && Math.abs(anglePreview.center[1]) < 1e-9
+        && Math.abs(anglePreview.start[1]) < 1e-9
+        && Math.abs(anglePreview.end[0] - 5) < 1e-9
+        && anglePreview.side === 'minor',
+      'Angle preview arc should be centered at the line intersection and start/end on the selected line references.',
+    )
+    angleSession = patchSketchConstraintValue(angleSession, {
+      intent: 'setConstraintAnnotationPlacement',
+      point: [4, -1],
+    })
+    const majorAnglePreview = getSketchToolPresentation(angleSession)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    assert(
+      majorAnglePreview?.kind === 'angleArc' && majorAnglePreview.side === 'major',
+      'Dragging an angle preview across the opposite sector should select the major complement arc.',
+    )
+    angleSession = patchSketchConstraintValue(angleSession, { value: Math.PI / 2 })
+    angleSession = patchSketchConstraintValue(angleSession, { intent: 'commitConstraintValue' })
+    const angle = angleSession.definition.dimensions.find((dimension) => dimension.kind === 'lineAngle')
+    assert(
+      angle?.kind === 'lineAngle'
+        && Math.abs(angle.valueRadians - Math.PI / 2) < 1e-9
+        && angle.lines.every((line) => line.kind === 'localEntity')
+        && angle.annotationPlacement?.side === 'major',
+      'Non-parallel line targets should commit a durable line angle dimension with the selected arc side.',
+    )
+    const committedAngleOverlay = getSketchToolPresentation(angleSession)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    assert(
+      committedAngleOverlay?.kind === 'angleArc'
+        && Math.abs(committedAngleOverlay.center[0] - 5) < 1e-9
+        && Math.abs(committedAngleOverlay.center[1]) < 1e-9
+        && Math.abs(committedAngleOverlay.start[1]) < 1e-9
+        && Math.abs(committedAngleOverlay.end[0] - 5) < 1e-9
+        && committedAngleOverlay.side === 'major'
+        && committedAngleOverlay.dragHandle?.dimensionId === angle.dimensionId,
+      'Committed line angle dimensions should render draggable angle arcs from the true line intersection.',
+    )
+    angleSession = patchSketchDimensionAnnotationPlacement(angleSession, {
+      intent: 'setDimensionAnnotationPlacement',
+      dimensionId: angle.dimensionId,
+      point: [6, 1],
+    })
+    const movedAngle = angleSession.definition.dimensions.find((dimension) => dimension.dimensionId === angle.dimensionId)
+    assert(
+      movedAngle?.kind === 'lineAngle' && movedAngle.annotationPlacement?.side === 'minor',
+      'Dragging a committed angle annotation back across the close sector should update the durable arc side.',
+    )
+  }
+
   function testDistancePreviewUsesPartialTargetAndPointer() {
     let session = createSessionWithTwoLines()
     const [firstPointId] = session.definition.pointIds
@@ -907,7 +1086,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     )
   }
 
-  function testDistancePreviewUpdatesWhenPointerChangesReference() {
+  function testDistancePreviewFollowsPointerUntilPlacementClick() {
     let session = createSessionWithTwoLines()
     const [firstPointId, , , diagonalPointId] = session.definition.pointIds
 
@@ -917,12 +1096,12 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       sketchId: 'sketch_draft',
       pointId: firstPointId!,
     })
+    session = updateSketchPointer(session, [5, 12])
     session = selectSketchConstraintTarget(session, {
       kind: 'sketchPoint',
       sketchId: 'sketch_draft',
       pointId: diagonalPointId!,
     })
-    session = updateSketchPointer(session, [5, 12])
 
     const horizontalPreview = getSketchToolPresentation(session)?.overlays?.find(
       (overlay) => overlay.id === 'distance-preview',
@@ -939,8 +1118,10 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       'Distance preview should select a horizontal reference when the pointer is above the target span.',
     )
     assert(
-      verticalPreview?.kind === 'dimensionLine' && verticalPreview.referenceKind === 'vertical',
-      'Distance preview should update to a vertical reference as the pointer moves beside the target span.',
+      session.constraintAuthoring?.isPreviewPinned === false
+        && verticalPreview?.kind === 'dimensionLine'
+        && verticalPreview.referenceKind === 'vertical',
+      'Distance preview should keep following the pointer after value entry opens.',
     )
   }
 
@@ -954,12 +1135,12 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       sketchId: 'sketch_draft',
       pointId: firstPointId!,
     })
+    session = updateSketchPointer(session, [5, 12])
     session = selectSketchConstraintTarget(session, {
       kind: 'sketchPoint',
       sketchId: 'sketch_draft',
       pointId: diagonalPointId!,
     })
-    session = updateSketchPointer(session, [5, 12])
     session = pinSketchConstraintPreview(session, [5, 12])
 
     const pinnedPreview = getSketchToolPresentation(session)?.overlays?.find(
@@ -980,6 +1161,49 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
         && afterMovePreview.start[1] === pinnedPreview.start[1],
       'Pinned constraint previews should not move while the pointer travels to the Commit button.',
     )
+
+    let targetClickSession = createSessionWithTwoLines()
+    const [targetClickLineId] = targetClickSession.definition.entityIds
+    const [targetClickFirstPointId, , , targetClickDiagonalPointId] = targetClickSession.definition.pointIds
+
+    targetClickSession = beginSketchTool(targetClickSession, 'dimensionDistance')
+    targetClickSession = selectSketchConstraintTarget(targetClickSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: targetClickFirstPointId!,
+    })
+    targetClickSession = updateSketchPointer(targetClickSession, [18, 2])
+    targetClickSession = selectSketchConstraintTarget(targetClickSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: targetClickDiagonalPointId!,
+    })
+    targetClickSession = pinSketchConstraintPreview(targetClickSession, [18, 2])
+    targetClickSession = selectSketchConstraintTarget(targetClickSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: targetClickLineId!,
+    })
+
+    const targetClickPreview = getSketchToolPresentation(targetClickSession)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    targetClickSession = updateSketchPointer(targetClickSession, [5, 12])
+
+    const afterTargetClickMovePreview = getSketchToolPresentation(targetClickSession)?.overlays?.find(
+      (overlay) => overlay.id === 'distance-preview',
+    )
+
+    assert(
+      targetClickSession.constraintAuthoring?.isPreviewPinned === true
+        && targetClickSession.constraintAuthoring.selectedTargets.length === 2
+        && targetClickPreview?.kind === 'dimensionLine'
+        && afterTargetClickMovePreview?.kind === 'dimensionLine'
+        && targetClickPreview.referenceKind === 'vertical'
+        && afterTargetClickMovePreview.referenceKind === 'vertical',
+      'Pinned dimension previews should ignore later target selections instead of replacing operands.',
+    )
   }
 
   testToolbarDefinitionsExposeConstraintFamilies()
@@ -999,8 +1223,9 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   testCommittedDimensionAnnotationReopensValueInputAndEditsDurableRecord()
   testCommittedRectangleWidthEditSolvesDraftGeometry()
   testCommittedCircleRadiusEditUpdatesEntityRadius()
+  testExpandedDimensionAuthoringCommitsDurablePayloads()
   testDistancePreviewUsesPartialTargetAndPointer()
   testPointDistanceReferenceSelectionFollowsPointer()
-  testDistancePreviewUpdatesWhenPointerChangesReference()
+  testDistancePreviewFollowsPointerUntilPlacementClick()
   testConstraintPreviewStopsMovingAfterPinClick()
 })

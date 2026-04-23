@@ -438,13 +438,38 @@ function validateDefinition(
 
     switch (dimension.kind) {
       case 'distance':
+      case 'horizontalDistance':
+      case 'verticalDistance':
         if (!points.has(dimension.pointIds[0]) || !points.has(dimension.pointIds[1])) {
           diagnostics.push(makeDiagnostic('missing-dimension-point', 'error', `Dimension ${dimension.dimensionId} references a missing point.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
         }
         break
       case 'circleRadius':
+      case 'diameter':
         if (!entities.has(dimension.entityId)) {
           diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing entity.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        break
+      case 'lineDistance':
+      case 'lineAngle':
+        for (const line of dimension.lines) {
+          if (line.kind === 'localEntity' && !entities.has(line.entityId)) {
+            diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+          }
+        }
+        break
+      case 'linePointDistance':
+        if (dimension.line.kind === 'localEntity' && !entities.has(dimension.line.entityId)) {
+          diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        if (dimension.point.kind === 'localPoint' && !points.has(dimension.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-dimension-point', 'error', `Dimension ${dimension.dimensionId} references a missing point.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        break
+      case 'arcStartPointCoincident':
+      case 'arcEndPointCoincident':
+        if (!entities.has(dimension.entityId) || !points.has(dimension.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-arc-endpoint-reference', 'error', `Dimension ${dimension.dimensionId} references missing arc or point data.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
         }
         break
     }

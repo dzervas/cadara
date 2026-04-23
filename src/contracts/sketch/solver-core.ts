@@ -1,5 +1,6 @@
 import type {
   ConstraintStatusRecord,
+  DimensionDefinition,
   DimensionStatusRecord,
   ProjectedSketchGeometryRef,
   SketchDefinition,
@@ -380,6 +381,77 @@ function pointLineSignedDistance(
 
   const delta = subtract(point, start)
   return delta[0] * unit[1] - delta[1] * unit[0]
+}
+
+function lineParallelResidual(
+  firstStart: SketchPoint2D,
+  firstEnd: SketchPoint2D,
+  secondStart: SketchPoint2D,
+  secondEnd: SketchPoint2D,
+) {
+  const firstUnit = unitVector(firstStart, firstEnd)
+  const secondUnit = unitVector(secondStart, secondEnd)
+
+  if (!firstUnit || !secondUnit) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  return firstUnit[0] * secondUnit[1] - firstUnit[1] * secondUnit[0]
+}
+
+function lineAngleRadians(
+  firstStart: SketchPoint2D,
+  firstEnd: SketchPoint2D,
+  secondStart: SketchPoint2D,
+  secondEnd: SketchPoint2D,
+) {
+  const firstUnit = unitVector(firstStart, firstEnd)
+  const secondUnit = unitVector(secondStart, secondEnd)
+
+  if (!firstUnit || !secondUnit) {
+    return null
+  }
+
+  const dot = Math.max(-1, Math.min(1, firstUnit[0] * secondUnit[0] + firstUnit[1] * secondUnit[1]))
+  return Math.acos(Math.abs(dot))
+}
+
+function resolveLineDimensionOperand(
+  values: Float64Array,
+  operand: Extract<DimensionDefinition, { kind: 'lineDistance' }>['lines'][number],
+  lineEntityMap: Map<SketchEntityId, Extract<SketchEntityDefinition, { kind: 'lineSegment' }>>,
+  pointRecords: Map<SketchPointId, SolverPointRecord>,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): { start: SketchPoint2D; end: SketchPoint2D } | null {
+  if (operand.kind === 'projectedGeometry') {
+    const projected = findProjectedGeometry(projectedReferences, operand.reference)
+    return projected?.kind === 'lineSegment'
+      ? { start: projected.startPosition, end: projected.endPosition }
+      : null
+  }
+
+  const line = lineEntityMap.get(operand.entityId)
+  const start = line ? pointRecords.get(line.startPointId) : null
+  const end = line ? pointRecords.get(line.endPointId) : null
+
+  return start && end
+    ? { start: getPoint(values, start), end: getPoint(values, end) }
+    : null
+}
+
+function resolvePointDimensionOperand(
+  values: Float64Array,
+  operand: Extract<DimensionDefinition, { kind: 'linePointDistance' }>['point'],
+  pointRecords: Map<SketchPointId, SolverPointRecord>,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): SketchPoint2D | null {
+  if (operand.kind === 'projectedGeometry') {
+    const projected = findProjectedGeometry(projectedReferences, operand.reference)
+    return projected?.kind === 'point' ? projected.position : null
+  }
+
+  const point = pointRecords.get(operand.pointId)
+  return point ? getPoint(values, point) : null
 }
 
 function pointSegmentDistance(
@@ -1639,6 +1711,105 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       continue
     }
 
+    if (dimension.kind === 'diameter') {
+      const entity = definition.entities.find((candidate) => candidate.entityId === dimension.entityId)
+      if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: dimension.dimensionId,
+        targetKind: 'dimension',
+        parameterCount,
+        evaluateResidual(values) {
+          const circleLike = getLocalCircleLike(values, entity)
+          return circleLike ? circleLike.radius * 2 - dimension.value : dimension.value
+        },
+      }))
+      continue
+    }
+
+    if (dimension.kind === 'lineDistance') {
+      const initialFirst = resolveLineDimensionOperand(initialValues, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+      const initialSecond = resolveLineDimensionOperand(initialValues, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+      if (
+        !initialFirst
+        || !initialSecond
+        || Math.abs(lineParallelResidual(initialFirst.start, initialFirst.end, initialSecond.start, initialSecond.end)) > 1e-4
+      ) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: dimension.dimensionId,
+        targetKind: 'dimension',
+        parameterCount,
+        evaluateResidual(values) {
+          const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+          const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+          if (!first || !second) {
+            return dimension.value
+          }
+
+          const parallelResidual = lineParallelResidual(first.start, first.end, second.start, second.end)
+          if (!Number.isFinite(parallelResidual) || Math.abs(parallelResidual) > 1e-4) {
+            return Math.max(1, Math.abs(parallelResidual)) + dimension.value
+          }
+
+          return Math.abs(pointLineSignedDistance(second.start, first.start, first.end)) - dimension.value
+        },
+      }))
+      continue
+    }
+
+    if (dimension.kind === 'linePointDistance') {
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: dimension.dimensionId,
+        targetKind: 'dimension',
+        parameterCount,
+        evaluateResidual(values) {
+          const line = resolveLineDimensionOperand(values, dimension.line, lineEntityMap, pointRecords, options.projectedReferences ?? [])
+          const point = resolvePointDimensionOperand(values, dimension.point, pointRecords, options.projectedReferences ?? [])
+          return line && point
+            ? Math.abs(pointLineSignedDistance(point, line.start, line.end)) - dimension.value
+            : dimension.value
+        },
+      }))
+      continue
+    }
+
+    if (dimension.kind === 'lineAngle') {
+      const initialFirst = resolveLineDimensionOperand(initialValues, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+      const initialSecond = resolveLineDimensionOperand(initialValues, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+      const initialAngle = initialFirst && initialSecond
+        ? lineAngleRadians(initialFirst.start, initialFirst.end, initialSecond.start, initialSecond.end)
+        : null
+      if (initialAngle === null || initialAngle <= DEGENERATE_NORM_EPSILON) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: dimension.dimensionId,
+        targetKind: 'dimension',
+        parameterCount,
+        evaluateResidual(values) {
+          const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+          const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
+          if (!first || !second) {
+            return dimension.valueRadians
+          }
+
+          const angle = lineAngleRadians(first.start, first.end, second.start, second.end)
+          if (angle === null || angle <= DEGENERATE_NORM_EPSILON) {
+            return dimension.valueRadians
+          }
+
+          return angle - dimension.valueRadians
+        },
+      }))
+      continue
+    }
+
     if (dimension.kind === 'arcStartPointCoincident' || dimension.kind === 'arcEndPointCoincident') {
       const arc = arcEntityMap.get(dimension.entityId)
       const arcState = entityStates.get(dimension.entityId)
@@ -1747,6 +1918,40 @@ function validateDefinition(
         'error',
         `Constraint ${constraintId} targets projected geometry ${reference.referenceId}.${reference.geometryId}, but no valid projected geometry was provided.`,
         { kind: 'constraint', constraintId },
+      ))
+    }
+  }
+  const validateProjectedDimensionTarget = (
+    dimensionId: DimensionId,
+    reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
+    expectedKinds: readonly NonNullable<ProjectedSketchGeometryRef['kind']>[],
+  ) => {
+    if (!referenceIds.has(reference.referenceId)) {
+      diagnostics.push(makeDiagnostic(
+        'missing-projected-dimension-reference',
+        'error',
+        `Dimension ${dimensionId} targets missing reference ${reference.referenceId}.`,
+        { kind: 'dimension', dimensionId },
+      ))
+      return
+    }
+
+    if (!expectedKinds.includes(reference.kind)) {
+      diagnostics.push(makeDiagnostic(
+        'invalid-projected-dimension-target-kind',
+        'error',
+        `Dimension ${dimensionId} targets ${reference.kind}, which is not valid for this dimension.`,
+        { kind: 'dimension', dimensionId },
+      ))
+      return
+    }
+
+    if (!projectedTargetExists(reference)) {
+      diagnostics.push(makeDiagnostic(
+        'missing-projected-dimension-target',
+        'error',
+        `Dimension ${dimensionId} targets projected geometry ${reference.referenceId}.${reference.geometryId}, but no valid projected geometry was provided.`,
+        { kind: 'dimension', dimensionId },
       ))
     }
   }
@@ -2105,6 +2310,43 @@ function validateDefinition(
       case 'circleRadius':
         if (!entityMap.has(dimension.entityId)) {
           diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing entity.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        break
+      case 'diameter': {
+        const entity = entityMap.get(dimension.entityId)
+        if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
+          diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing circle or arc.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        break
+      }
+      case 'lineDistance':
+      case 'lineAngle':
+        for (const line of dimension.lines) {
+          if (line.kind === 'localEntity') {
+            const entity = entityMap.get(line.entityId)
+            if (!entity || entity.kind !== 'lineSegment') {
+              diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+            }
+          } else {
+            validateProjectedDimensionTarget(dimension.dimensionId, line.reference, ['projectedLineSegment'])
+          }
+        }
+        break
+      case 'linePointDistance':
+        if (dimension.line.kind === 'localEntity') {
+          const entity = entityMap.get(dimension.line.entityId)
+          if (!entity || entity.kind !== 'lineSegment') {
+            diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+          }
+        } else {
+          validateProjectedDimensionTarget(dimension.dimensionId, dimension.line.reference, ['projectedLineSegment'])
+        }
+        if (dimension.point.kind === 'localPoint') {
+          if (!pointMap.has(dimension.point.pointId)) {
+            diagnostics.push(makeDiagnostic('missing-dimension-point', 'error', `Dimension ${dimension.dimensionId} references a missing point.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+          }
+        } else {
+          validateProjectedDimensionTarget(dimension.dimensionId, dimension.point.reference, ['projectedPoint'])
         }
         break
       case 'arcStartPointCoincident':
@@ -2809,8 +3051,14 @@ function buildDimensionStatuses(
   entityStates: Map<SketchEntityId, SolverEntityState>,
   values: Float64Array,
   perConstraint: Map<string, number>,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): DimensionStatusRecord[] {
   const entityMap = new Map(definition.entities.map((entity) => [entity.entityId, entity]))
+  const lineEntityMap = new Map(
+    definition.entities
+      .filter((entity): entity is Extract<SketchEntityDefinition, { kind: 'lineSegment' }> => entity.kind === 'lineSegment')
+      .map((entity) => [entity.entityId, entity]),
+  )
 
   return definition.dimensions.map((dimension) => {
     let solvedValue: number | null = null
@@ -2839,6 +3087,29 @@ function buildDimensionStatuses(
     } else if (dimension.kind === 'circleRadius') {
       const entity = entityMap.get(dimension.entityId)
       solvedValue = entity?.kind === 'circle' ? entity.radius : null
+    } else if (dimension.kind === 'diameter') {
+      const entity = entityMap.get(dimension.entityId)
+      if (entity?.kind === 'circle') {
+        solvedValue = entity.radius * 2
+      } else {
+        const state = entityStates.get(dimension.entityId)
+        solvedValue = state?.kind === 'arc' ? values[state.baseIndex] * 2 : null
+      }
+    } else if (dimension.kind === 'lineDistance') {
+      const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, projectedReferences)
+      const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, projectedReferences)
+      solvedValue = first && second && Math.abs(lineParallelResidual(first.start, first.end, second.start, second.end)) <= 1e-4
+        ? Math.abs(pointLineSignedDistance(second.start, first.start, first.end))
+        : null
+    } else if (dimension.kind === 'linePointDistance') {
+      const line = resolveLineDimensionOperand(values, dimension.line, lineEntityMap, pointRecords, projectedReferences)
+      const point = resolvePointDimensionOperand(values, dimension.point, pointRecords, projectedReferences)
+      solvedValue = line && point ? Math.abs(pointLineSignedDistance(point, line.start, line.end)) : null
+    } else if (dimension.kind === 'lineAngle') {
+      const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, projectedReferences)
+      const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, projectedReferences)
+      const angle = first && second ? lineAngleRadians(first.start, first.end, second.start, second.end) : null
+      solvedValue = angle !== null && angle > DEGENERATE_NORM_EPSILON ? angle : null
     } else {
       const state = entityStates.get(dimension.entityId)
       solvedValue = state?.kind === 'arc' ? 0 : null
@@ -3040,6 +3311,21 @@ function collectTranslationComponent(
         break
       }
       case 'circleRadius':
+      case 'diameter':
+        break
+      case 'lineDistance':
+      case 'lineAngle':
+        for (const line of dimension.lines) {
+          if (line.kind === 'localEntity') {
+            connectPoints(graph, getLineEntityPoints(definition, line.entityId))
+          }
+        }
+        break
+      case 'linePointDistance':
+        connectPoints(graph, [
+          ...(dimension.line.kind === 'localEntity' ? getLineEntityPoints(definition, dimension.line.entityId) : []),
+          ...(dimension.point.kind === 'localPoint' ? [dimension.point.pointId] : []),
+        ])
         break
     }
   }
@@ -3262,6 +3548,7 @@ export function solveSketchDefinitionCore(input: {
       system.entityStates,
       solved.values,
       solved.perConstraint,
+      projectedReferences,
     ),
     diagnostics,
   }
@@ -3368,6 +3655,7 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
       system.entityStates,
       solved.values,
       solved.perConstraint,
+      projectedReferences,
     ),
     diagnostics,
   }

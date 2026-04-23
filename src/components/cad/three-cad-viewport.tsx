@@ -224,6 +224,7 @@ export function ThreeCadViewport({
   const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove)
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
   const sketchToolPatchRef = useRef(onSketchToolPatch)
+  const projectSketchClientPointRef = useRef<(clientX: number, clientY: number) => readonly [number, number] | null>(() => null)
   const lodTierChangeRef = useRef(onLodTierChange)
   const {
     machineState,
@@ -739,6 +740,9 @@ export function ThreeCadViewport({
       ])
     }
 
+    projectSketchClientPointRef.current = (clientX, clientY) =>
+      projectSketchPoint(clientX, clientY, canvasElement.getBoundingClientRect())
+
     const clearHover = () => {
       lastPickedTargetRef.current = null
       if (hoverTargetRef.current !== null) {
@@ -977,6 +981,7 @@ export function ThreeCadViewport({
 
     return () => {
       cancelSketchGeometryDragMove()
+      projectSketchClientPointRef.current = () => null
       canvasElement.removeEventListener('pointerdown', handlePointerDown, true)
       canvasElement.removeEventListener('pointermove', handlePointerMove)
       canvasElement.removeEventListener('pointerleave', handlePointerLeave)
@@ -1114,6 +1119,18 @@ export function ThreeCadViewport({
         schema={sketchToolPresentation}
         projections={sketchFeedbackProjections}
         onPatch={(patch) => sketchToolPatchRef.current(patch)}
+        onDragHandle={(handle, clientX, clientY) => {
+          const point = projectSketchClientPointRef.current(clientX, clientY)
+          if (point) {
+            sketchToolPatchRef.current({
+              intent: handle.dimensionId ? 'setDimensionAnnotationPlacement' : 'setConstraintAnnotationPlacement',
+              handleId: handle.id,
+              handleKind: handle.kind,
+              dimensionId: handle.dimensionId,
+              point,
+            })
+          }
+        }}
       />
       <SketchConstraintAnnotations
         annotations={sketchAnnotations}

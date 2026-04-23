@@ -28,8 +28,14 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
   const hasViewportDrawingFeedback = !schema.selectionGuide && (schema.overlays ?? []).some(
     (overlay) => overlay.kind === 'measurement' || overlay.kind === 'completionCue',
   )
+  const hasPanelContent = schema.prompts.length > 0
+    || validation.length > 0
+    || controlGroups.length > 0
+    || measurements.length > 0
+    || hints.length > 0
+    || Boolean(schema.selectionGuide)
 
-  if (hasViewportDrawingFeedback) {
+  if (hasViewportDrawingFeedback || !hasPanelContent) {
     return null
   }
 

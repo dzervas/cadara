@@ -37,6 +37,7 @@ import {
   isEditableSketchGeometrySelection,
   moveSketchHistoryCursor,
   patchSketchConstraintValue,
+  patchSketchDimensionAnnotationPlacement,
   patchSketchDrawingToolValue,
   patchSketchEditToolValue,
   patchSketchStyleValue,
@@ -2910,6 +2911,23 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       if (state.kind !== 'editingSketch') {
         return {
           state,
+          effects: [],
+        }
+      }
+
+      if (event.patch.intent === 'setDimensionAnnotationPlacement') {
+        const session = patchSketchDimensionAnnotationPlacement(state.session, event.patch)
+
+        return {
+          state: {
+            ...state,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
           effects: [],
         }
       }

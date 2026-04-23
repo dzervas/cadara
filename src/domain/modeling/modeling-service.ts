@@ -3212,6 +3212,76 @@ function normalizeProjectedGeometryConstraintOperand(
   }
 }
 
+function normalizeSketchCurveConstraintOperand(
+  value: unknown,
+): Extract<DimensionDefinition, { kind: 'lineDistance' }>['lines'][number] {
+  if (!isRecord(value)) {
+    throw new Error('Invalid sketch curve operand payload.')
+  }
+
+  return value.kind === 'localEntity'
+    ? normalizeLocalEntityConstraintOperand(value)
+    : normalizeProjectedGeometryConstraintOperand(value)
+}
+
+function normalizeSketchPointConstraintOperand(
+  value: unknown,
+): Extract<DimensionDefinition, { kind: 'linePointDistance' }>['point'] {
+  if (!isRecord(value)) {
+    throw new Error('Invalid sketch point operand payload.')
+  }
+
+  return value.kind === 'localPoint'
+    ? normalizeLocalPointConstraintOperand(value)
+    : normalizeProjectedGeometryConstraintOperand(value)
+}
+
+function normalizeDimensionLineAnnotationPlacement(
+  value: unknown,
+): Extract<DimensionDefinition, { kind: 'distance' }>['annotationPlacement'] {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (
+    !isRecord(value)
+    || value.kind !== 'dimensionLine'
+    || typeof value.offset !== 'number'
+    || (value.angleRadians !== undefined && typeof value.angleRadians !== 'number')
+  ) {
+    throw new Error('Invalid dimension line annotation placement payload.')
+  }
+
+  return {
+    kind: 'dimensionLine',
+    offset: value.offset,
+    angleRadians: value.angleRadians,
+  }
+}
+
+function normalizeDimensionAngleAnnotationPlacement(
+  value: unknown,
+): Extract<DimensionDefinition, { kind: 'lineAngle' }>['annotationPlacement'] {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (
+    !isRecord(value)
+    || value.kind !== 'angleArc'
+    || typeof value.radius !== 'number'
+    || (value.side !== 'minor' && value.side !== 'major')
+  ) {
+    throw new Error('Invalid angle annotation placement payload.')
+  }
+
+  return {
+    kind: 'angleArc',
+    radius: value.radius,
+    side: value.side,
+  }
+}
+
 function normalizeDimensionDefinition(value: unknown): DimensionDefinition {
   if (!isRecord(value) || !isString(value.dimensionId) || !isString(value.kind) || !isString(value.label)) {
     throw new Error('Invalid dimension definition payload.')
@@ -3237,6 +3307,7 @@ function normalizeDimensionDefinition(value: unknown): DimensionDefinition {
         assertSketchPointId(value.pointIds[1]),
       ],
       value: value.value,
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
     }
   }
 
@@ -3251,6 +3322,78 @@ function normalizeDimensionDefinition(value: unknown): DimensionDefinition {
       label: value.label,
       entityId: assertSketchEntityId(value.entityId),
       value: value.value,
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
+    }
+  }
+
+  if (value.kind === 'diameter') {
+    if (!isString(value.entityId) || typeof value.value !== 'number') {
+      throw new Error('Invalid diameter dimension payload.')
+    }
+
+    return {
+      dimensionId: assertDimensionId(value.dimensionId),
+      kind: 'diameter',
+      label: value.label,
+      entityId: assertSketchEntityId(value.entityId),
+      value: value.value,
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
+    }
+  }
+
+  if (value.kind === 'lineDistance' || value.kind === 'lineAngle') {
+    if (!Array.isArray(value.lines) || value.lines.length !== 2) {
+      throw new Error('Invalid line dimension payload.')
+    }
+
+    if (value.kind === 'lineDistance') {
+      if (typeof value.value !== 'number') {
+        throw new Error('Invalid line distance dimension payload.')
+      }
+
+      return {
+        dimensionId: assertDimensionId(value.dimensionId),
+        kind: 'lineDistance',
+        label: value.label,
+        lines: [
+          normalizeSketchCurveConstraintOperand(value.lines[0]),
+          normalizeSketchCurveConstraintOperand(value.lines[1]),
+        ],
+        value: value.value,
+        annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
+      }
+    }
+
+    if (typeof value.valueRadians !== 'number') {
+      throw new Error('Invalid line angle dimension payload.')
+    }
+
+    return {
+      dimensionId: assertDimensionId(value.dimensionId),
+      kind: 'lineAngle',
+      label: value.label,
+      lines: [
+        normalizeSketchCurveConstraintOperand(value.lines[0]),
+        normalizeSketchCurveConstraintOperand(value.lines[1]),
+      ],
+      valueRadians: value.valueRadians,
+      annotationPlacement: normalizeDimensionAngleAnnotationPlacement(value.annotationPlacement),
+    }
+  }
+
+  if (value.kind === 'linePointDistance') {
+    if (!isRecord(value.line) || !isRecord(value.point) || typeof value.value !== 'number') {
+      throw new Error('Invalid point-line distance dimension payload.')
+    }
+
+    return {
+      dimensionId: assertDimensionId(value.dimensionId),
+      kind: 'linePointDistance',
+      label: value.label,
+      line: normalizeSketchCurveConstraintOperand(value.line),
+      point: normalizeSketchPointConstraintOperand(value.point),
+      value: value.value,
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
     }
   }
 
@@ -3272,6 +3415,7 @@ function normalizeDimensionDefinition(value: unknown): DimensionDefinition {
         assertSketchPointId(value.pointIds[1]),
       ],
       value: value.value,
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
     }
   }
 

@@ -121,6 +121,10 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
     'Committed annotation glyphs should render from descriptor glyph kinds.',
   )
   assert(
+    markup.includes('z-30'),
+    'Committed annotation glyphs should render above committed dimension overlay geometry.',
+  )
+  assert(
     markup.includes('/icons/sketch-parallel.svg') && markup.includes('/icons/sketch-dimension.svg'),
     'Committed annotation glyphs should use toolbar SVG assets.',
   )

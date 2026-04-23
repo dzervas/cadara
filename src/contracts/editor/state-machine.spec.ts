@@ -24,6 +24,7 @@ import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
   ConstructionId,
+  CommandSessionId,
   DocumentId,
   FeatureId,
   PickId,
@@ -2453,7 +2454,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
-  function createConstraintAuthoringEditorState(): {
+  function createConstraintAuthoringEditorState(toolId: 'dimensionDistance' | 'dimensionHorizontal' = 'dimensionDistance'): {
     state: SketchEditorState
     pointTarget: PrimitiveRef
     lineTarget: PrimitiveRef
@@ -2462,7 +2463,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = beginSketchTool(session, 'line')
     session = startSketchDraw(session, [0, 0])
     session = acceptSketchDraw(session, [10, 0])
-    session = beginSketchTool(session, 'dimensionDistance')
+    session = beginSketchTool(session, toolId)
 
     const pointTarget = session.definition.points[0]?.target
     const lineTarget = session.definition.entities[0]?.target
@@ -2492,8 +2493,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
           target: session.planeTarget,
         },
         command: {
-          commandSessionId: 'command_dimensionDistance-1',
-          toolId: 'dimensionDistance',
+          commandSessionId: `command_${toolId}-1` as CommandSessionId,
+          toolId,
           phase: 'editing',
         },
         session,
@@ -2531,7 +2532,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   function testConstraintAuthoringIgnoresInvalidViewportSelection() {
-    const { state, lineTarget } = createConstraintAuthoringEditorState()
+    const { state, lineTarget } = createConstraintAuthoringEditorState('dimensionHorizontal')
 
     const selected = transitionEditorState(state, {
       type: 'viewport.selectionRequested',

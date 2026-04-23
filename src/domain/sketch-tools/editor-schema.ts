@@ -1,4 +1,5 @@
 import type { SketchPoint } from '@/contracts/modeling/schema'
+import type { DimensionId } from '@/contracts/shared/ids'
 import type { WorkspaceVec3 } from '@/domain/workspace/sketch-plane-mapping'
 import type { SketchSnapCandidateKind, SketchSnapGlyphKind } from '@/domain/sketch-snapping/snap-candidates'
 
@@ -118,6 +119,14 @@ export type SketchToolDimensionReferenceKind =
   | 'vertical'
   | 'radius'
   | 'diameter'
+  | 'lineDistance'
+  | 'pointLineDistance'
+
+export interface SketchToolOverlayDragHandle {
+  id: string
+  kind: 'dimensionLine' | 'angleArc'
+  dimensionId?: DimensionId
+}
 
 export interface SketchToolPreviewLineDescriptor {
   id: string
@@ -143,6 +152,7 @@ export type SketchToolOverlayDescriptor =
       labelAnchor: SketchToolAnchorDescriptor
       value?: number | null
       unit?: string
+      dragHandle?: SketchToolOverlayDragHandle
       extensionLines?: readonly SketchToolPreviewLineDescriptor[]
     }
   | {
@@ -160,7 +170,9 @@ export type SketchToolOverlayDescriptor =
       start: SketchPoint
       end: SketchPoint
       radius: number
+      side: 'minor' | 'major'
       labelAnchor: SketchToolAnchorDescriptor
+      dragHandle?: SketchToolOverlayDragHandle
       referenceLabel?: string
     }
   | {

@@ -38,7 +38,7 @@ export function SketchConstraintAnnotations({
   )
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20">
+    <div className="pointer-events-none absolute inset-0 z-30">
       {annotations.map((annotation) => {
         const projection = projectionById.get(getAnnotationProjectionId(annotation.id))
 

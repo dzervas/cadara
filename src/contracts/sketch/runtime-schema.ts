@@ -249,6 +249,18 @@ const projectedSketchGeometryConstraintOperandSchema = z.object({
   reference: projectedSketchGeometryRefSchema,
 })
 
+const dimensionLineAnnotationPlacementSchema = z.object({
+  kind: z.literal('dimensionLine'),
+  offset: z.number(),
+  angleRadians: z.number().optional(),
+})
+
+const dimensionAngleAnnotationPlacementSchema = z.object({
+  kind: z.literal('angleArc'),
+  radius: positiveNumberSchema('Angle annotation radius must be positive.'),
+  side: z.union([z.literal('minor'), z.literal('major')]),
+})
+
 const constraintDefinitionSchema = z.discriminatedUnion('kind', [
   z.object({
     constraintId: constraintIdSchema,
@@ -417,6 +429,7 @@ const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
     axis: z.union([z.literal('aligned'), z.literal('horizontal'), z.literal('vertical')]),
     pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
     value: z.number(),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
   }),
   z.object({
     dimensionId: dimensionIdSchema,
@@ -424,6 +437,46 @@ const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
     label: z.string(),
     entityId: sketchEntityIdSchema,
     value: positiveNumberSchema('Circle radius dimension must be positive.'),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('diameter'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+    value: positiveNumberSchema('Diameter dimension must be positive.'),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('lineDistance'),
+    label: z.string(),
+    lines: z.tuple([
+      z.union([localSketchEntityConstraintOperandSchema, projectedSketchGeometryConstraintOperandSchema]),
+      z.union([localSketchEntityConstraintOperandSchema, projectedSketchGeometryConstraintOperandSchema]),
+    ]),
+    value: positiveNumberSchema('Line distance dimension must be positive.'),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('linePointDistance'),
+    label: z.string(),
+    line: z.union([localSketchEntityConstraintOperandSchema, projectedSketchGeometryConstraintOperandSchema]),
+    point: z.union([localSketchPointConstraintOperandSchema, projectedSketchGeometryConstraintOperandSchema]),
+    value: positiveNumberSchema('Line-point distance dimension must be positive.'),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
+    kind: z.literal('lineAngle'),
+    label: z.string(),
+    lines: z.tuple([
+      z.union([localSketchEntityConstraintOperandSchema, projectedSketchGeometryConstraintOperandSchema]),
+      z.union([localSketchEntityConstraintOperandSchema, projectedSketchGeometryConstraintOperandSchema]),
+    ]),
+    valueRadians: positiveNumberSchema('Line angle dimension must be positive.'),
+    annotationPlacement: dimensionAngleAnnotationPlacementSchema.optional(),
   }),
   z.object({
     dimensionId: dimensionIdSchema,
@@ -431,6 +484,7 @@ const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
     label: z.string(),
     pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
     value: z.number(),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
   }),
   z.object({
     dimensionId: dimensionIdSchema,
@@ -438,6 +492,7 @@ const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
     label: z.string(),
     pointIds: z.tuple([sketchPointIdSchema, sketchPointIdSchema]),
     value: z.number(),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
   }),
   z.object({
     dimensionId: dimensionIdSchema,

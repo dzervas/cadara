@@ -1,5 +1,6 @@
 import type {
   ConstraintDefinition,
+  DimensionAnnotationPlacement,
   DimensionDefinition,
   ProjectedSketchGeometryRef,
   RegionLoopRecord,
@@ -95,6 +96,7 @@ import type {
 } from '@/domain/sketch-constraints/definition'
 import {
   getSketchConstraintDefinition,
+  inferDimensionAnnotationPlacement,
   isRegisteredSketchConstraintToolId,
   resolveSketchConstraintTarget,
 } from '@/domain/sketch-constraints/registry'
@@ -133,6 +135,7 @@ export interface SketchConstraintAuthoringState {
   pointer: SketchPoint | null
   isPreviewPinned: boolean
   pendingValue: number | null
+  pendingAnnotationPlacement: DimensionAnnotationPlacement | null
 }
 
 export interface SketchAnnotationEditState {
@@ -2023,13 +2026,23 @@ export function dimensionReferencesSketchGeometry(
   deletedPointIds: ReadonlySet<SketchPointId>,
   deletedEntityIds: ReadonlySet<SketchEntityId>,
 ) {
+  const operandReferencesDeletedGeometry = (operand: { kind: string; pointId?: SketchPointId; entityId?: SketchEntityId }) =>
+    (operand.kind === 'localPoint' && operand.pointId !== undefined && deletedPointIds.has(operand.pointId))
+    || (operand.kind === 'localEntity' && operand.entityId !== undefined && deletedEntityIds.has(operand.entityId))
+
   switch (dimension.kind) {
     case 'distance':
     case 'horizontalDistance':
     case 'verticalDistance':
       return dimension.pointIds.some((pointId) => deletedPointIds.has(pointId))
     case 'circleRadius':
+    case 'diameter':
       return deletedEntityIds.has(dimension.entityId)
+    case 'lineDistance':
+    case 'lineAngle':
+      return dimension.lines.some(operandReferencesDeletedGeometry)
+    case 'linePointDistance':
+      return operandReferencesDeletedGeometry(dimension.line) || operandReferencesDeletedGeometry(dimension.point)
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return deletedEntityIds.has(dimension.entityId) || deletedPointIds.has(dimension.pointId)
@@ -2164,14 +2177,18 @@ function buildConstraintToolPresentation(
     hoverTarget: authoring.hoverTarget,
     pointer: authoring.pointer,
     value: authoring.pendingValue,
+    annotationPlacement: authoring.pendingAnnotationPlacement,
   })
   const needsValue =
-    Boolean(definition.valueSpec) && authoring.selectedTargets.length >= definition.steps.length
+    Boolean(definition.valueSpec) && isSketchConstraintReadyForValue(definition, authoring.selectedTargets)
   const promptText = needsValue
-    ? `Enter ${definition.valueSpec?.label.toLowerCase() ?? 'value'}`
+    ? authoring.isPreviewPinned
+      ? `Enter ${definition.valueSpec?.label.toLowerCase() ?? 'value'}`
+      : `Place ${definition.valueSpec?.label.toLowerCase() ?? 'value'} annotation`
     : selectionGuide.label
 
   const floatingInput: SketchToolFloatingInputDescriptor | null = needsValue && definition.valueSpec
+    && authoring.isPreviewPinned
     ? {
         id: `${authoring.toolId}-value-input`,
         label: definition.valueSpec.label,
@@ -2216,13 +2233,29 @@ function buildConstraintToolPresentation(
     completionHints: [
       {
         id: `${authoring.toolId}-completion`,
-        text: needsValue
+        text: needsValue && authoring.isPreviewPinned
           ? 'Confirm the entered value to commit the annotation'
-          : `Select ${definition.steps.length} target${definition.steps.length === 1 ? '' : 's'}`,
-        ready: needsValue ? authoring.pendingValue !== null : false,
+          : needsValue
+            ? 'Click to place the annotation'
+            : `Select ${definition.steps.length} target${definition.steps.length === 1 ? '' : 's'}`,
+        ready: needsValue && authoring.isPreviewPinned ? authoring.pendingValue !== null : false,
       },
     ],
   }
+}
+
+function isSketchConstraintReadyForValue(
+  definition: ReturnType<typeof getSketchConstraintDefinition>,
+  selectedTargets: readonly SketchConstraintTargetRecord[],
+) {
+  return definition.isReadyForValue?.(selectedTargets) ?? selectedTargets.length >= definition.steps.length
+}
+
+function canSketchConstraintSelectMoreTargets(
+  definition: ReturnType<typeof getSketchConstraintDefinition>,
+  selectedTargets: readonly SketchConstraintTargetRecord[],
+) {
+  return definition.canSelectMoreTargets?.(selectedTargets) ?? selectedTargets.length < definition.steps.length
 }
 
 function getConstraintFloatingInputAnchor(
@@ -2275,6 +2308,7 @@ function activateSketchConstraintTool(
     pointer: null,
     isPreviewPinned: false,
     pendingValue: definition.valueSpec?.defaultValue ?? null,
+    pendingAnnotationPlacement: null,
   }
 
   return {
@@ -2851,6 +2885,12 @@ export function updateSketchPointer(
     const nextAuthoring: SketchConstraintAuthoringState = {
       ...session.constraintAuthoring,
       pointer: point,
+      pendingAnnotationPlacement: isSketchConstraintReadyForValue(
+        getSketchConstraintDefinition(session.constraintAuthoring.toolId),
+        session.constraintAuthoring.selectedTargets,
+      )
+        ? inferDimensionAnnotationPlacement(session.constraintAuthoring.selectedTargets, point)
+        : session.constraintAuthoring.pendingAnnotationPlacement,
     }
 
     return {
@@ -4898,7 +4938,9 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
     const definition = getSketchConstraintDefinition(session.constraintAuthoring.toolId)
 
     if (session.status === 'awaitingValue') {
-      return `Enter ${definition.valueSpec?.label.toLowerCase() ?? 'value'}`
+      return session.constraintAuthoring.isPreviewPinned
+        ? `Enter ${definition.valueSpec?.label.toLowerCase() ?? 'value'}`
+        : `Place ${definition.valueSpec?.label.toLowerCase() ?? 'value'} annotation`
     }
 
     const step =
@@ -4989,7 +5031,8 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
 
   if (!isDrawingSketchTool(session.activeTool)) {
     if (!session.activeEditTarget) {
-      return null
+      const overlays = buildCommittedDimensionOverlays(session.definition)
+      return overlays.length > 0 ? { prompts: [], overlays } : null
     }
 
     const styledPoint = session.definition.points.find((point) => point.pointId === session.activeEditTarget?.pointId)
@@ -5044,6 +5087,19 @@ export function selectSketchConstraintTarget(
     return session
   }
 
+  const definition = getSketchConstraintDefinition(authoring.toolId)
+
+  if (
+    authoring.isPreviewPinned
+    || (
+      Boolean(definition.valueSpec)
+      && isSketchConstraintReadyForValue(definition, authoring.selectedTargets)
+      && !canSketchConstraintSelectMoreTargets(definition, authoring.selectedTargets)
+    )
+  ) {
+    return session
+  }
+
   const resolved = resolveSketchConstraintTarget(authoring.toolId, session.definition, target, session.projectedReferences)
 
   if (!resolved) {
@@ -5056,10 +5112,12 @@ export function selectSketchConstraintTarget(
 
   const nextTargets = [...authoring.selectedTargets, resolved].slice(
     0,
-    getSketchConstraintDefinition(authoring.toolId).steps.length,
+    definition.steps.length,
   )
-  const definition = getSketchConstraintDefinition(authoring.toolId)
-  const readyForValue = Boolean(definition.valueSpec) && nextTargets.length >= definition.steps.length
+  const readyForValue = Boolean(definition.valueSpec) && isSketchConstraintReadyForValue(definition, nextTargets)
+  const pendingAnnotationPlacement = readyForValue
+    ? inferDimensionAnnotationPlacement(nextTargets, authoring.pointer)
+    : null
   const nextSession: SketchSessionState = {
     ...session,
     status: readyForValue ? 'awaitingValue' : 'collectingTargets',
@@ -5068,12 +5126,14 @@ export function selectSketchConstraintTarget(
       selectedTargets: nextTargets,
       hoverTarget: null,
       isPreviewPinned: false,
+      pendingAnnotationPlacement,
     }),
     constraintAuthoring: {
       ...authoring,
       selectedTargets: nextTargets,
       hoverTarget: null,
       isPreviewPinned: false,
+      pendingAnnotationPlacement,
     },
     activeAnnotationEdit: null,
     selectedAnnotation: null,
@@ -5100,6 +5160,7 @@ export function pinSketchConstraintPreview(
     ...authoring,
     pointer: point ?? authoring.pointer,
     isPreviewPinned: true,
+    pendingAnnotationPlacement: inferDimensionAnnotationPlacement(authoring.selectedTargets, point ?? authoring.pointer),
   }
 
   return {
@@ -5160,6 +5221,25 @@ export function patchSketchConstraintValue(
     return activateSketchConstraintTool(session, authoring.toolId)
   }
 
+  if (intent === 'setConstraintAnnotationPlacement') {
+    const point = Array.isArray(patch.point)
+      && typeof patch.point[0] === 'number'
+      && typeof patch.point[1] === 'number'
+      ? [patch.point[0], patch.point[1]] as SketchPoint
+      : authoring.pointer
+    const nextAuthoring = {
+      ...authoring,
+      pointer: point,
+      pendingAnnotationPlacement: inferDimensionAnnotationPlacement(authoring.selectedTargets, point),
+    }
+
+    return {
+      ...session,
+      toolPresentation: buildConstraintToolPresentation(nextAuthoring),
+      constraintAuthoring: nextAuthoring,
+    }
+  }
+
   if ('value' in patch) {
     const nextAuthoring = {
       ...authoring,
@@ -5178,6 +5258,48 @@ export function patchSketchConstraintValue(
   }
 
   return commitSketchConstraintAuthoring(session)
+}
+
+export function patchSketchDimensionAnnotationPlacement(
+  session: SketchSessionState,
+  patch: Record<string, unknown>,
+): SketchSessionState {
+  if (patch.intent !== 'setDimensionAnnotationPlacement' || typeof patch.dimensionId !== 'string') {
+    return session
+  }
+
+  const point = Array.isArray(patch.point)
+    && typeof patch.point[0] === 'number'
+    && typeof patch.point[1] === 'number'
+    ? [patch.point[0], patch.point[1]] as SketchPoint
+    : null
+
+  if (!point) {
+    return session
+  }
+
+  const dimensionId = patch.dimensionId as DimensionId
+  const target = createSketchDimensionRef(getSessionSketchId(session), dimensionId)
+  const nextFullDefinition = updateDimensionAnnotationPlacementInDefinition(
+    session.fullDefinition,
+    target,
+    point,
+  )
+
+  if (nextFullDefinition === session.fullDefinition) {
+    return session
+  }
+
+  const nextDefinition = filterSketchDefinitionThroughCursor(nextFullDefinition, session.historyCursor)
+
+  return {
+    ...session,
+    fullDefinition: nextFullDefinition,
+    definition: nextDefinition,
+    toolPresentation: null,
+    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
+  }
 }
 
 export function patchSketchStyleValue(
@@ -5834,6 +5956,9 @@ function updateAnnotationValueInDefinition(
       case 'horizontalDistance':
       case 'verticalDistance':
       case 'circleRadius':
+      case 'diameter':
+      case 'lineDistance':
+      case 'linePointDistance':
         if (dimension.kind === 'circleRadius') {
           editedCircleRadiusEntityId = dimension.entityId
         }
@@ -5841,6 +5966,11 @@ function updateAnnotationValueInDefinition(
         return {
           ...dimension,
           value,
+        }
+      case 'lineAngle':
+        return {
+          ...dimension,
+          valueRadians: value,
         }
       case 'arcStartPointCoincident':
       case 'arcEndPointCoincident':
@@ -5876,6 +6006,134 @@ function updateAnnotationValueInDefinition(
         ),
       }
     : definition
+}
+
+function updateDimensionAnnotationPlacementInDefinition(
+  definition: SketchDefinition,
+  target: SketchDimensionRef,
+  point: SketchPoint,
+): SketchDefinition {
+  const dimensions = definition.dimensions.map((dimension) => {
+    if (dimension.dimensionId !== target.dimensionId) {
+      return dimension
+    }
+
+    const placement = inferCommittedDimensionAnnotationPlacement(definition, dimension, point)
+    if (!placement) {
+      return dimension
+    }
+
+    switch (dimension.kind) {
+      case 'distance':
+      case 'horizontalDistance':
+      case 'verticalDistance':
+      case 'circleRadius':
+      case 'diameter':
+      case 'lineDistance':
+      case 'linePointDistance':
+        return placement.kind === 'dimensionLine'
+          ? { ...dimension, annotationPlacement: placement }
+          : dimension
+      case 'lineAngle':
+        return placement.kind === 'angleArc'
+          ? { ...dimension, annotationPlacement: placement }
+          : dimension
+      case 'arcStartPointCoincident':
+      case 'arcEndPointCoincident':
+        return dimension
+    }
+  })
+  const edited = dimensions.some((dimension, index) => dimension !== definition.dimensions[index])
+
+  return edited
+    ? {
+        ...definition,
+        dimensions,
+        authoringOperations: updateAuthoringOperationsForAnnotationEdit(
+          definition.authoringOperations,
+          target,
+          { dimensions },
+        ),
+      }
+    : definition
+}
+
+function inferCommittedDimensionAnnotationPlacement(
+  definition: SketchDefinition,
+  dimension: DimensionDefinition,
+  point: SketchPoint,
+): DimensionAnnotationPlacement | null {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance': {
+      const first = getPointPosition(definition, dimension.pointIds[0])
+      const second = getPointPosition(definition, dimension.pointIds[1])
+      if (!first || !second) {
+        return null
+      }
+
+      const axis = dimension.kind === 'distance'
+        ? dimension.axis
+        : dimension.kind === 'horizontalDistance'
+          ? 'horizontal'
+          : 'vertical'
+      return getPointPairAnnotationPlacementFromPoint(first, second, axis, point)
+    }
+    case 'circleRadius':
+    case 'diameter': {
+      const circle = getCircleLikeGeometry(definition, dimension.entityId)
+      if (!circle) {
+        return null
+      }
+
+      return {
+        kind: 'dimensionLine',
+        offset: 0,
+        angleRadians: Math.atan2(point[1] - circle.center[1], point[0] - circle.center[0]),
+      }
+    }
+    case 'lineDistance': {
+      const line = dimension.lines[0].kind === 'localEntity'
+        ? getLineSegmentGeometry(definition, dimension.lines[0].entityId)
+        : null
+      return line ? getLineAnnotationPlacementFromPoint(line, point) : null
+    }
+    case 'linePointDistance': {
+      const line = dimension.line.kind === 'localEntity'
+        ? getLineSegmentGeometry(definition, dimension.line.entityId)
+        : null
+      return line ? getLineAnnotationPlacementFromPoint(line, point) : null
+    }
+    case 'lineAngle': {
+      const first = dimension.lines[0].kind === 'localEntity'
+        ? getLineSegmentGeometry(definition, dimension.lines[0].entityId)
+        : null
+      const second = dimension.lines[1].kind === 'localEntity'
+        ? getLineSegmentGeometry(definition, dimension.lines[1].entityId)
+        : null
+      if (!first || !second) {
+        return null
+      }
+
+      const center = getSketchLineIntersection(first, second) ?? first.start
+      const firstVector = getSketchLineDirectionFromCenter(first, center)
+      const secondVector = getSketchLineDirectionFromCenter(second, center)
+      return {
+        kind: 'angleArc',
+        radius: Math.max(0.1, Math.hypot(point[0] - center[0], point[1] - center[1])),
+        side: getSketchAngleArcSide({
+          center,
+          startVector: firstVector,
+          endVector: secondVector,
+          point,
+        }),
+      }
+    }
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return null
+  }
 }
 
 function buildAnnotationEditPresentation(
@@ -5988,6 +6246,31 @@ function getEditableAnnotationValue(
         min: 0.01,
         anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
       }
+    case 'diameter':
+      return {
+        label: 'Diameter',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
+    case 'lineDistance':
+    case 'linePointDistance':
+      return {
+        label: 'Distance',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
+    case 'lineAngle':
+      return {
+        label: 'Angle',
+        value: dimension.valueRadians,
+        unit: 'rad',
+        min: 0.001,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return null
@@ -6007,6 +6290,7 @@ function commitSketchConstraintAuthoring(session: SketchSessionState): SketchSes
     selectedTargets: authoring.selectedTargets,
     pointer: authoring.pointer,
     value: authoring.pendingValue,
+    annotationPlacement: authoring.pendingAnnotationPlacement,
     createConstraintId: (suffix) => createConstraintId(session.sequence + 1, suffix),
     createDimensionId: (suffix) => createDimensionId(session.sequence + 1, suffix),
   })
@@ -6253,7 +6537,13 @@ function getDimensionGlyphKind(dimension: DimensionDefinition): SketchAnnotation
     case 'verticalDistance':
       return 'dimensionVertical'
     case 'circleRadius':
+    case 'diameter':
       return 'dimensionRadius'
+    case 'lineDistance':
+    case 'linePointDistance':
+      return 'dimensionDistance'
+    case 'lineAngle':
+      return 'dimensionDistance'
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return 'dimensionCoincident'
@@ -6348,14 +6638,43 @@ function getConstraintAffectedGeometryRefs(
 function getDimensionAffectedGeometryRefs(
   sketchId: SketchId,
   dimension: DimensionDefinition,
-): readonly (SketchEntityRef | SketchPointRef)[] {
+): readonly PrimitiveRef[] {
+  const operandRef = (
+    operand: {
+      kind: string
+      pointId?: SketchPointId
+      entityId?: SketchEntityId
+      reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }
+    },
+  ): PrimitiveRef | null => {
+    if (operand.kind === 'localPoint' && operand.pointId) {
+      return createSketchPointRef(sketchId, operand.pointId)
+    }
+
+    if (operand.kind === 'localEntity' && operand.entityId) {
+      return createSketchEntityRef(sketchId, operand.entityId)
+    }
+
+    if (operand.kind === 'projectedGeometry' && operand.reference) {
+      return createProjectedPrimitiveRef(operand.reference)
+    }
+
+    return null
+  }
+
   switch (dimension.kind) {
     case 'distance':
     case 'horizontalDistance':
     case 'verticalDistance':
       return dimension.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId))
     case 'circleRadius':
+    case 'diameter':
       return [createSketchEntityRef(sketchId, dimension.entityId)]
+    case 'lineDistance':
+    case 'lineAngle':
+      return dimension.lines.map(operandRef).filter((ref): ref is PrimitiveRef => ref !== null)
+    case 'linePointDistance':
+      return [operandRef(dimension.line), operandRef(dimension.point)].filter((ref): ref is PrimitiveRef => ref !== null)
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return [
@@ -6461,7 +6780,22 @@ function createDimensionAnnotationAnchor(
     case 'verticalDistance':
       return createOffsetAnnotationAnchor(getAveragePointPosition(definition, dimension.pointIds), { x: 0, y: -28 })
     case 'circleRadius':
+    case 'diameter':
       return createOffsetAnnotationAnchor(getEntityAnchor(definition, dimension.entityId), { x: 22, y: -22 })
+    case 'lineDistance':
+    case 'lineAngle':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint(
+        dimension.lines.flatMap((operand) =>
+          operand.kind === 'localEntity'
+            ? [getEntityAnchor(definition, operand.entityId)]
+            : [],
+        ).filter((point): point is SketchPoint => point !== null),
+      ), { x: 0, y: -28 })
+    case 'linePointDistance':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        dimension.line.kind === 'localEntity' ? getEntityAnchor(definition, dimension.line.entityId) : null,
+        dimension.point.kind === 'localPoint' ? getPointPosition(definition, dimension.point.pointId) : null,
+      ].filter((point): point is SketchPoint => point !== null)), { x: 0, y: -28 })
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return createOffsetAnnotationAnchor(
@@ -6470,6 +6804,360 @@ function createDimensionAnnotationAnchor(
           dimension.pointId,
         ].filter((pointId): pointId is SketchPointId => Boolean(pointId))),
       )
+  }
+}
+
+function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly SketchToolOverlayDescriptor[] {
+  return definition.dimensions.flatMap((dimension): SketchToolOverlayDescriptor[] => {
+    switch (dimension.kind) {
+      case 'distance':
+      case 'horizontalDistance':
+      case 'verticalDistance': {
+        const first = getPointPosition(definition, dimension.pointIds[0])
+        const second = getPointPosition(definition, dimension.pointIds[1])
+        if (!first || !second) {
+          return []
+        }
+
+        const axis = dimension.kind === 'distance' ? dimension.axis : dimension.kind === 'horizontalDistance' ? 'horizontal' : 'vertical'
+        const line = createPlacedPointDimensionLine(first, second, axis, dimension.annotationPlacement)
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'dimensionLine',
+          label: dimension.label,
+          referenceKind: axis,
+          start: line.start,
+          end: line.end,
+          value: dimension.value,
+          unit: 'mm',
+          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
+          labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
+          extensionLines: [
+            { id: `${dimension.dimensionId}-extension-a`, label: 'Extension', start: first, end: line.start },
+            { id: `${dimension.dimensionId}-extension-b`, label: 'Extension', start: second, end: line.end },
+          ],
+        }]
+      }
+      case 'circleRadius':
+      case 'diameter': {
+        const circle = getCircleLikeGeometry(definition, dimension.entityId)
+        if (!circle) {
+          return []
+        }
+
+        const angle = dimension.annotationPlacement?.angleRadians ?? 0
+        const direction: SketchPoint = [Math.cos(angle), Math.sin(angle)]
+        const start: SketchPoint = dimension.kind === 'diameter'
+          ? [circle.center[0] - direction[0] * circle.radius, circle.center[1] - direction[1] * circle.radius]
+          : circle.center
+        const end: SketchPoint = [circle.center[0] + direction[0] * circle.radius, circle.center[1] + direction[1] * circle.radius]
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'dimensionLine',
+          label: dimension.label,
+          referenceKind: dimension.kind === 'diameter' ? 'diameter' : 'radius',
+          start,
+          end,
+          value: dimension.value,
+          unit: 'mm',
+          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
+          labelAnchor: { kind: 'sketchPoint', point: end, offset: { x: 16, y: -16 } },
+        }]
+      }
+      case 'lineDistance': {
+        const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
+        const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+        if (!first || !second) {
+          return []
+        }
+
+        const line = createPlacedLineDistance(first, getSketchMidpoint(second.start, second.end), dimension.annotationPlacement)
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'dimensionLine',
+          label: dimension.label,
+          referenceKind: 'lineDistance',
+          start: line.start,
+          end: line.end,
+          value: dimension.value,
+          unit: 'mm',
+          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
+          labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
+        }]
+      }
+      case 'linePointDistance': {
+        const lineGeometry = dimension.line.kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.line.entityId) : null
+        const point = dimension.point.kind === 'localPoint' ? getPointPosition(definition, dimension.point.pointId) : null
+        if (!lineGeometry || !point) {
+          return []
+        }
+
+        const line = createPlacedLineDistance(lineGeometry, point, dimension.annotationPlacement)
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'dimensionLine',
+          label: dimension.label,
+          referenceKind: 'pointLineDistance',
+          start: line.start,
+          end: line.end,
+          value: dimension.value,
+          unit: 'mm',
+          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'dimensionLine', dimensionId: dimension.dimensionId },
+          labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
+        }]
+      }
+      case 'lineAngle': {
+        const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
+        const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+        if (!first || !second) {
+          return []
+        }
+
+        const center = getSketchLineIntersection(first, second) ?? first.start
+        const firstVector = getSketchLineDirectionFromCenter(first, center)
+        const secondVector = getSketchLineDirectionFromCenter(second, center)
+        const radius = dimension.annotationPlacement?.radius ?? 1
+        const side = dimension.annotationPlacement?.side ?? 'minor'
+        const start: SketchPoint = [center[0] + firstVector[0] * radius, center[1] + firstVector[1] * radius]
+        const end: SketchPoint = [center[0] + secondVector[0] * radius, center[1] + secondVector[1] * radius]
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'angleArc',
+          label: dimension.label,
+          center,
+          start,
+          end,
+          radius,
+          side,
+          dragHandle: { id: `${dimension.dimensionId}-drag`, kind: 'angleArc', dimensionId: dimension.dimensionId },
+          labelAnchor: {
+            kind: 'sketchPoint',
+            point: getSketchAngleLabelPoint(center, firstVector, secondVector, radius, side),
+            offset: { x: 12, y: -12 },
+          },
+        }]
+      }
+      case 'arcStartPointCoincident':
+      case 'arcEndPointCoincident':
+        return []
+    }
+  })
+}
+
+function getSketchMidpoint(first: SketchPoint, second: SketchPoint): SketchPoint {
+  return [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2]
+}
+
+function normalizeSketchVector(vector: SketchPoint): SketchPoint {
+  const length = Math.hypot(vector[0], vector[1])
+  return length <= 1e-6 ? [1, 0] : [vector[0] / length, vector[1] / length]
+}
+
+function getSketchCrossProduct(first: SketchPoint, second: SketchPoint) {
+  return first[0] * second[1] - first[1] * second[0]
+}
+
+function getSketchLineIntersection(
+  first: { start: SketchPoint; end: SketchPoint },
+  second: { start: SketchPoint; end: SketchPoint },
+): SketchPoint | null {
+  const firstVector: SketchPoint = [first.end[0] - first.start[0], first.end[1] - first.start[1]]
+  const secondVector: SketchPoint = [second.end[0] - second.start[0], second.end[1] - second.start[1]]
+  const denominator = getSketchCrossProduct(firstVector, secondVector)
+
+  if (Math.abs(denominator) <= 1e-9) {
+    return null
+  }
+
+  const delta: SketchPoint = [second.start[0] - first.start[0], second.start[1] - first.start[1]]
+  const t = getSketchCrossProduct(delta, secondVector) / denominator
+
+  return [
+    first.start[0] + firstVector[0] * t,
+    first.start[1] + firstVector[1] * t,
+  ]
+}
+
+function getSketchLineDirectionFromCenter(
+  line: { start: SketchPoint; end: SketchPoint },
+  center: SketchPoint,
+): SketchPoint {
+  const midpoint = getSketchMidpoint(line.start, line.end)
+  const towardMidpoint = normalizeSketchVector([midpoint[0] - center[0], midpoint[1] - center[1]])
+  const lineUnit = normalizeSketchVector([line.end[0] - line.start[0], line.end[1] - line.start[1]])
+  const dot = towardMidpoint[0] * lineUnit[0] + towardMidpoint[1] * lineUnit[1]
+
+  return dot >= 0 ? lineUnit : [-lineUnit[0], -lineUnit[1]]
+}
+
+function normalizeSketchSignedAngleDelta(delta: number) {
+  if (delta > Math.PI) {
+    return delta - Math.PI * 2
+  }
+
+  if (delta < -Math.PI) {
+    return delta + Math.PI * 2
+  }
+
+  return delta
+}
+
+function normalizeSketchPositiveAngleDelta(delta: number) {
+  const normalized = delta % (Math.PI * 2)
+  return normalized < 0 ? normalized + Math.PI * 2 : normalized
+}
+
+function getSketchAngleArcSide(input: {
+  center: SketchPoint
+  startVector: SketchPoint
+  endVector: SketchPoint
+  point: SketchPoint
+}): 'minor' | 'major' {
+  const startAngle = Math.atan2(input.startVector[1], input.startVector[0])
+  const endAngle = Math.atan2(input.endVector[1], input.endVector[0])
+  const pointAngle = Math.atan2(input.point[1] - input.center[1], input.point[0] - input.center[0])
+  const minorDelta = normalizeSketchSignedAngleDelta(endAngle - startAngle)
+  const minorSweep = Math.abs(minorDelta)
+
+  if (minorSweep <= 1e-9) {
+    return 'minor'
+  }
+
+  const pointSweep = minorDelta >= 0
+    ? normalizeSketchPositiveAngleDelta(pointAngle - startAngle)
+    : normalizeSketchPositiveAngleDelta(startAngle - pointAngle)
+
+  return pointSweep <= minorSweep ? 'minor' : 'major'
+}
+
+function getSketchAngleLabelPoint(
+  center: SketchPoint,
+  firstVector: SketchPoint,
+  secondVector: SketchPoint,
+  radius: number,
+  side: 'minor' | 'major',
+): SketchPoint {
+  const labelDirection = normalizeSketchVector(
+    side === 'major'
+      ? [-(firstVector[0] + secondVector[0]), -(firstVector[1] + secondVector[1])]
+      : [firstVector[0] + secondVector[0], firstVector[1] + secondVector[1]],
+  )
+
+  return [
+    center[0] + labelDirection[0] * radius,
+    center[1] + labelDirection[1] * radius,
+  ]
+}
+
+function getPointPairAnnotationPlacementFromPoint(
+  first: SketchPoint,
+  second: SketchPoint,
+  axis: 'aligned' | 'horizontal' | 'vertical',
+  point: SketchPoint,
+): DimensionAnnotationPlacement {
+  if (axis === 'horizontal') {
+    return { kind: 'dimensionLine', offset: point[1] - first[1] }
+  }
+
+  if (axis === 'vertical') {
+    return { kind: 'dimensionLine', offset: point[0] - first[0] }
+  }
+
+  const axisVector = normalizeSketchVector([second[0] - first[0], second[1] - first[1]])
+  const normal: SketchPoint = [-axisVector[1], axisVector[0]]
+  return {
+    kind: 'dimensionLine',
+    offset: (point[0] - first[0]) * normal[0] + (point[1] - first[1]) * normal[1],
+  }
+}
+
+function getLineAnnotationPlacementFromPoint(
+  line: { start: SketchPoint; end: SketchPoint },
+  point: SketchPoint,
+): DimensionAnnotationPlacement {
+  return {
+    kind: 'dimensionLine',
+    offset: getSketchLineSignedDistance(point, line),
+  }
+}
+
+function getSketchLineSignedDistance(
+  point: SketchPoint,
+  line: { start: SketchPoint; end: SketchPoint },
+) {
+  const axisVector = normalizeSketchVector([line.end[0] - line.start[0], line.end[1] - line.start[1]])
+  const normal: SketchPoint = [-axisVector[1], axisVector[0]]
+  return (point[0] - line.start[0]) * normal[0] + (point[1] - line.start[1]) * normal[1]
+}
+
+function getLineSegmentGeometry(definition: SketchDefinition, entityId: SketchEntityId): { start: SketchPoint; end: SketchPoint } | null {
+  const entity = definition.entities.find((candidate) => candidate.entityId === entityId)
+  if (!entity || entity.kind !== 'lineSegment') {
+    return null
+  }
+
+  const start = getPointPosition(definition, entity.startPointId)
+  const end = getPointPosition(definition, entity.endPointId)
+  return start && end ? { start, end } : null
+}
+
+function getCircleLikeGeometry(definition: SketchDefinition, entityId: SketchEntityId): { center: SketchPoint; radius: number } | null {
+  const entity = definition.entities.find((candidate) => candidate.entityId === entityId)
+  if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
+    return null
+  }
+
+  const center = getPointPosition(definition, entity.centerPointId)
+  if (!center) {
+    return null
+  }
+
+  if (entity.kind === 'circle') {
+    return { center, radius: entity.radius }
+  }
+
+  const start = getPointPosition(definition, entity.startPointId)
+  return start ? { center, radius: Math.hypot(start[0] - center[0], start[1] - center[1]) } : null
+}
+
+function createPlacedPointDimensionLine(
+  first: SketchPoint,
+  second: SketchPoint,
+  axis: 'aligned' | 'horizontal' | 'vertical',
+  placement: DimensionAnnotationPlacement | undefined,
+): { start: SketchPoint; end: SketchPoint } {
+  if (axis === 'horizontal') {
+    const y = first[1] + (placement?.kind === 'dimensionLine' ? placement.offset : -1)
+    return { start: [first[0], y], end: [second[0], y] }
+  }
+
+  if (axis === 'vertical') {
+    const x = first[0] + (placement?.kind === 'dimensionLine' ? placement.offset : 1)
+    return { start: [x, first[1]], end: [x, second[1]] }
+  }
+
+  const axisVector = normalizeSketchVector([second[0] - first[0], second[1] - first[1]])
+  const normal: SketchPoint = [-axisVector[1], axisVector[0]]
+  const offset = placement?.kind === 'dimensionLine' ? placement.offset : 0
+  return {
+    start: [first[0] + normal[0] * offset, first[1] + normal[1] * offset],
+    end: [second[0] + normal[0] * offset, second[1] + normal[1] * offset],
+  }
+}
+
+function createPlacedLineDistance(
+  line: { start: SketchPoint; end: SketchPoint },
+  point: SketchPoint,
+  placement: DimensionAnnotationPlacement | undefined,
+): { start: SketchPoint; end: SketchPoint } {
+  const axisVector = normalizeSketchVector([line.end[0] - line.start[0], line.end[1] - line.start[1]])
+  const normal: SketchPoint = [-axisVector[1], axisVector[0]]
+  const signedDistance = (point[0] - line.start[0]) * normal[0] + (point[1] - line.start[1]) * normal[1]
+  const offset = placement?.kind === 'dimensionLine' ? placement.offset : signedDistance
+  const projected: SketchPoint = [point[0] - normal[0] * signedDistance, point[1] - normal[1] * signedDistance]
+  return {
+    start: [projected[0] + normal[0] * offset, projected[1] + normal[1] * offset],
+    end: [point[0] + normal[0] * (offset - signedDistance), point[1] + normal[1] * (offset - signedDistance)],
   }
 }
 
@@ -7579,6 +8267,13 @@ function describeDimension(dimension: DimensionDefinition) {
       return `${dimension.value.toFixed(2)} mm`
     case 'circleRadius':
       return `${dimension.value.toFixed(2)} mm`
+    case 'diameter':
+      return `${dimension.value.toFixed(2)} mm diameter`
+    case 'lineDistance':
+    case 'linePointDistance':
+      return `${dimension.value.toFixed(2)} mm`
+    case 'lineAngle':
+      return `${dimension.valueRadians.toFixed(3)} rad`
     case 'arcStartPointCoincident':
       return 'Arc start coincident'
     case 'arcEndPointCoincident':

@@ -1,6 +1,7 @@
 import type {
   ConstraintDefinition,
   DimensionDefinition,
+  DimensionAnnotationPlacement,
   SketchDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
@@ -77,6 +78,7 @@ export interface SketchConstraintPreviewInput {
   hoverTarget: SketchConstraintTargetRecord | null
   pointer: SketchPoint2D | null
   value: number | null
+  annotationPlacement?: DimensionAnnotationPlacement | null
 }
 
 export interface SketchConstraintCommitInput {
@@ -85,6 +87,7 @@ export interface SketchConstraintCommitInput {
   pointer: SketchPoint2D | null
   referenceKind?: SketchToolDimensionReferenceKind | null
   value: number | null
+  annotationPlacement?: DimensionAnnotationPlacement | null
   createConstraintId(suffix: string): import('@/contracts/shared/ids').ConstraintId
   createDimensionId(suffix: string): import('@/contracts/shared/ids').DimensionId
 }
@@ -104,6 +107,8 @@ export interface SketchConstraintDefinition<TToolId extends SketchConstraintTool
     projectedReferences?: readonly ProjectedSketchReferenceRecord[],
   ): SketchConstraintTargetRecord | null
   buildPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[]
+  isReadyForValue?(selectedTargets: readonly SketchConstraintTargetRecord[]): boolean
+  canSelectMoreTargets?(selectedTargets: readonly SketchConstraintTargetRecord[]): boolean
   createCommitContribution(input: SketchConstraintCommitInput): SketchConstraintCommitContribution
 }
 

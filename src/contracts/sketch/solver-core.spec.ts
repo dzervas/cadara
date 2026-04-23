@@ -70,6 +70,18 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     }
   }
 
+  function makeCircle(entityId: string, label: string, centerPointId: string, radius: number) {
+    return {
+      kind: 'circle' as const,
+      entityId: entityId as `sketch_entity_${string}`,
+      label,
+      target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: entityId as `sketch_entity_${string}` } as const,
+      isConstruction: false,
+      centerPointId: centerPointId as `sketch_point_${string}`,
+      radius,
+    }
+  }
+
   function cloneValues(values: Float64Array) {
     return new Float64Array(values)
   }
@@ -308,6 +320,130 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     assert(a !== undefined && b !== undefined, 'Expected solved point pair.')
     assert(Math.abs((b.solvedPosition[1] - a.solvedPosition[1]) - 3) < 1e-4, 'Vertical distance should solve to 3.')
     assertGradientMatchesFiniteDifference(definition, 'dimension_vertical_distance', 1e-6)
+  }
+
+  async function testExpandedDimensionStatuses() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_circle_center',
+        'sketch_point_arc_center',
+        'sketch_point_arc_start',
+        'sketch_point_arc_end',
+        'sketch_point_l1a',
+        'sketch_point_l1b',
+        'sketch_point_l2a',
+        'sketch_point_l2b',
+        'sketch_point_l3a',
+        'sketch_point_l3b',
+        'sketch_point_free',
+      ],
+      points: [
+        makePoint('sketch_point_circle_center', 'Circle center', 0, 0),
+        makePoint('sketch_point_arc_center', 'Arc center', 20, 0),
+        makePoint('sketch_point_arc_start', 'Arc start', 25, 0),
+        makePoint('sketch_point_arc_end', 'Arc end', 20, 5),
+        makePoint('sketch_point_l1a', 'L1A', 0, 0),
+        makePoint('sketch_point_l1b', 'L1B', 10, 0),
+        makePoint('sketch_point_l2a', 'L2A', 0, 4),
+        makePoint('sketch_point_l2b', 'L2B', 10, 4),
+        makePoint('sketch_point_l3a', 'L3A', 0, 0),
+        makePoint('sketch_point_l3b', 'L3B', 0, 10),
+        makePoint('sketch_point_free', 'Free point', 5, 3),
+      ],
+      entityIds: [
+        'sketch_entity_circle',
+        'sketch_entity_arc',
+        'sketch_entity_l1',
+        'sketch_entity_l2',
+        'sketch_entity_l3',
+      ],
+      entities: [
+        makeCircle('sketch_entity_circle', 'Circle', 'sketch_point_circle_center', 5),
+        makeArc('sketch_entity_arc', 'Arc', 'sketch_point_arc_center', 'sketch_point_arc_start', 'sketch_point_arc_end'),
+        makeLine('sketch_entity_l1', 'Line 1', 'sketch_point_l1a', 'sketch_point_l1b'),
+        makeLine('sketch_entity_l2', 'Line 2', 'sketch_point_l2a', 'sketch_point_l2b'),
+        makeLine('sketch_entity_l3', 'Line 3', 'sketch_point_l3a', 'sketch_point_l3b'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [
+        'dimension_diameter_circle',
+        'dimension_diameter_arc',
+        'dimension_line_distance',
+        'dimension_line_point',
+        'dimension_line_angle',
+        'dimension_invalid_line_distance',
+      ],
+      dimensions: [
+        {
+          dimensionId: 'dimension_diameter_circle',
+          kind: 'diameter',
+          label: 'Circle diameter',
+          entityId: 'sketch_entity_circle',
+          value: 10,
+        },
+        {
+          dimensionId: 'dimension_diameter_arc',
+          kind: 'diameter',
+          label: 'Arc diameter',
+          entityId: 'sketch_entity_arc',
+          value: 10,
+        },
+        {
+          dimensionId: 'dimension_line_distance',
+          kind: 'lineDistance',
+          label: 'Line distance',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_l1' },
+            { kind: 'localEntity', entityId: 'sketch_entity_l2' },
+          ],
+          value: 4,
+        },
+        {
+          dimensionId: 'dimension_line_point',
+          kind: 'linePointDistance',
+          label: 'Line point',
+          line: { kind: 'localEntity', entityId: 'sketch_entity_l1' },
+          point: { kind: 'localPoint', pointId: 'sketch_point_free' },
+          value: 3,
+        },
+        {
+          dimensionId: 'dimension_line_angle',
+          kind: 'lineAngle',
+          label: 'Line angle',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_l1' },
+            { kind: 'localEntity', entityId: 'sketch_entity_l3' },
+          ],
+          valueRadians: Math.PI / 2,
+        },
+        {
+          dimensionId: 'dimension_invalid_line_distance',
+          kind: 'lineDistance',
+          label: 'Invalid line distance',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_l1' },
+            { kind: 'localEntity', entityId: 'sketch_entity_l3' },
+          ],
+          value: 2,
+        },
+      ],
+    }
+
+    const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
+    const statusById = new Map(solved.solvedSnapshot.dimensionStatuses.map((status) => [status.dimensionId, status]))
+    assertClose(statusById.get('dimension_diameter_circle')?.solvedValue ?? 0, 10, 1e-6, 'Circle diameter should report solved diameter.')
+    assertClose(statusById.get('dimension_diameter_arc')?.solvedValue ?? 0, 10, 1e-4, 'Arc diameter should report solved diameter.')
+    assertClose(statusById.get('dimension_line_distance')?.solvedValue ?? 0, 4, 1e-4, 'Line distance should report perpendicular distance.')
+    assertClose(statusById.get('dimension_line_point')?.solvedValue ?? 0, 3, 1e-4, 'Line-point dimension should report perpendicular distance.')
+    assertClose(statusById.get('dimension_line_angle')?.solvedValue ?? 0, Math.PI / 2, 1e-4, 'Line angle should report enclosed angle.')
+    assert(
+      statusById.get('dimension_invalid_line_distance')?.status === 'unsatisfied',
+      'A line distance dimension between non-parallel lines should remain unsatisfied instead of becoming an angle dimension.',
+    )
   }
 
   async function testAxisQualifiedDistance() {
@@ -1202,6 +1338,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     await testEuclideanDistance()
     await testHorizontalDistance()
     await testVerticalDistance()
+    await testExpandedDimensionStatuses()
     await testAxisQualifiedDistance()
     await testHorizontalLine()
     await testVerticalLine()
