@@ -5,10 +5,13 @@ import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import {
   MARKER_SPHERE_GEOMETRY,
+  GEOMETRY_HIGHLIGHT_COLORS,
   DEFAULT_LINE_PICK_THRESHOLD,
+  bindFaceHoverPerimeterObject,
   collectRaycastPickCandidates,
   bindRenderableObject,
   collectBindings,
+  createMeshBoundaryLineSegmentsGeometry,
   createInvisiblePickMaterial,
   createMarkerPickProxy,
   createRenderableMeshMaterial,
@@ -194,6 +197,32 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     )
 
     return { group, visibleMesh, pickProxy }
+  }
+
+  function createFacePerimeterLine(renderable: RenderableEntityRecord) {
+    if (renderable.geometry.kind !== 'mesh') {
+      throw new Error('Expected mesh renderable.')
+    }
+
+    if (renderable.binding.semanticClass !== 'bodyFace' && renderable.binding.semanticClass !== 'planarFace') {
+      throw new Error('Expected face renderable.')
+    }
+
+    const line = new THREE.LineSegments(
+      createMeshBoundaryLineSegmentsGeometry(renderable.geometry),
+      new THREE.LineBasicMaterial({
+        color: GEOMETRY_HIGHLIGHT_COLORS.hover,
+        transparent: true,
+        opacity: 0,
+      }),
+    )
+    bindFaceHoverPerimeterObject(
+      line,
+      renderable.binding.target,
+      renderable.binding.semanticClass,
+      'document',
+    )
+    return line
   }
 
   function createIntersection(object: THREE.Object3D, distance: number) {
@@ -546,7 +575,7 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     assert(bindings !== null)
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], sketchTarget)
-    assertEqual(material.color.getHex(), 0xf0a14a, 'Hovered styled sketch lines should still receive hover highlight.')
+    assertEqual(material.color.getHex(), GEOMETRY_HIGHLIGHT_COLORS.hover, 'Hovered styled sketch lines should still receive hover highlight.')
     assertEqual(material.opacity, 0.98, 'Hovered styled sketch lines should still receive hover opacity.')
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], null)
@@ -554,13 +583,53 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     assertEqual(material.opacity, 0.5, 'Inactive styled sketch lines should restore authored opacity after hover.')
 
     updateWorkspaceHighlight(bindings.targetToObjects, [sketchTarget], null)
-    assertEqual(material.color.getHex(), 0xf4fbff, 'Selected styled sketch lines should still receive selected highlight.')
+    assertEqual(material.color.getHex(), GEOMETRY_HIGHLIGHT_COLORS.selected, 'Selected styled sketch lines should still receive selected highlight.')
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], null)
     assertEqual(material.color.getHex(), 0x33ffaa, 'Inactive styled sketch lines should restore authored color after selection.')
 
     sketchLine.geometry.dispose()
     material.dispose()
+  }
+
+  {
+    const faceMesh = createBoundMesh(faceRenderable)
+    const facePerimeter = createFacePerimeterLine(faceRenderable)
+    const root = new THREE.Group()
+    root.add(faceMesh)
+    root.add(facePerimeter)
+
+    const bindings = collectBindings(root)
+    assert(bindings !== null)
+
+    assert(!bindings.pickables.includes(facePerimeter), 'Face hover perimeter overlays must not be pickable.')
+
+    assert(faceMesh.material instanceof THREE.MeshStandardMaterial)
+    assert(facePerimeter.material instanceof THREE.LineBasicMaterial)
+    const baselineFaceColor = faceMesh.material.color.getHex()
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [], faceRenderable.binding.target)
+
+    assertEqual(
+      faceMesh.material.color.getHex(),
+      baselineFaceColor,
+      'Hovered face meshes must keep their surface color.',
+    )
+    assertEqual(
+      facePerimeter.material.color.getHex(),
+      GEOMETRY_HIGHLIGHT_COLORS.hover,
+      'Hovered face perimeter overlays must receive the hover color.',
+    )
+    assertEqual(facePerimeter.material.opacity, 0.98, 'Hovered face perimeter overlays must become visible.')
+
+    updateWorkspaceHighlight(bindings.targetToObjects, [faceRenderable.binding.target], faceRenderable.binding.target)
+
+    assertEqual(
+      faceMesh.material.color.getHex(),
+      GEOMETRY_HIGHLIGHT_COLORS.selected,
+      'Selected face meshes must keep whole-face selected coloring.',
+    )
+    assertEqual(facePerimeter.material.opacity, 0, 'Selected face perimeter overlays must stay hidden.')
   }
 
   {
@@ -578,13 +647,13 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     assert(faceMesh.material instanceof THREE.MeshStandardMaterial)
     assertEqual(
       faceMesh.material.color.getHex(),
-      0xf7f4ec,
+      GEOMETRY_HIGHLIGHT_COLORS.selected,
       'Selected body targets must highlight owned face renderables.',
     )
     assert(edgeLine.material instanceof THREE.LineBasicMaterial)
     assertEqual(
       edgeLine.material.color.getHex(),
-      0xf4fbff,
+      GEOMETRY_HIGHLIGHT_COLORS.selected,
       'Selected body targets must highlight owned edge renderables.',
     )
   }
@@ -619,7 +688,7 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     assert(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
     assertEqual(
       marker.visibleMesh.material.color.getHex(),
-      0xf4fbff,
+      GEOMETRY_HIGHLIGHT_COLORS.selected,
       'Selected marker mesh must receive the selected wire color.',
     )
     assert(marker.pickProxy.material instanceof THREE.MeshBasicMaterial)
@@ -639,9 +708,25 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     assert(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
     assertEqual(
       marker.visibleMesh.material.color.getHex(),
-      0xf0a14a,
+      GEOMETRY_HIGHLIGHT_COLORS.hover,
       'Annotation-related geometry must receive hover highlight without becoming selected.',
     )
+  }
+
+  {
+    const boundaryGeometry = createMeshBoundaryLineSegmentsGeometry(faceRenderable.geometry)
+    const position = boundaryGeometry.getAttribute('position')
+    assertEqual(position.count, 8, 'Two triangle quad meshes should produce four boundary line segments.')
+
+    const segmentKeys = new Set<string>()
+    for (let index = 0; index < position.count; index += 2) {
+      const start = `${position.getX(index)},${position.getY(index)},${position.getZ(index)}`
+      const end = `${position.getX(index + 1)},${position.getY(index + 1)},${position.getZ(index + 1)}`
+      segmentKeys.add(start < end ? `${start}|${end}` : `${end}|${start}`)
+    }
+
+    assert(!segmentKeys.has('0,0,0|1,1,0'), 'Face perimeter extraction must exclude internal triangulation diagonals.')
+    boundaryGeometry.dispose()
   }
 
   {

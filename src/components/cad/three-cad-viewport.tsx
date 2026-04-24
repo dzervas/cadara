@@ -42,9 +42,12 @@ import type {
 } from '@/contracts/shared/references'
 import {
   MARKER_SPHERE_GEOMETRY,
+  GEOMETRY_HIGHLIGHT_COLORS,
+  bindFaceHoverPerimeterObject,
   bindRenderableObject,
   collectBindings,
   collectRaycastPickCandidates,
+  createMeshBoundaryLineSegmentsGeometry,
   type CollectedBindings,
   createProjectedPickCandidate,
   createMarkerPickProxy,
@@ -65,6 +68,8 @@ import {
 import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
 import {
   getViewportCanvasClickIntent,
+  shouldViewportClickEventRequestConnectedSketchSelection,
+  shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
 } from '@/domain/editor/workbench-interactions'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
@@ -127,6 +132,7 @@ interface ThreeCadViewportProps {
   sketchAnnotations: SketchAnnotationDescriptor[]
   onHover: (target: PrimitiveRef) => void
   onSelect: (target: PrimitiveRef) => void
+  onConnectedSketchSelect: (target: PrimitiveRef) => void
   onDeselect: () => void
   onAnnotationEdit: (target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>) => void
   onClearHover: () => void
@@ -173,6 +179,7 @@ export function ThreeCadViewport({
   sketchAnnotations,
   onHover,
   onSelect,
+  onConnectedSketchSelect,
   onDeselect,
   onAnnotationEdit,
   onClearHover,
@@ -219,6 +226,7 @@ export function ThreeCadViewport({
   const partCameraFrameRef = useRef<ViewportCameraFrame | null>(null)
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
   const selectRef = useRef(onSelect)
+  const connectedSketchSelectRef = useRef(onConnectedSketchSelect)
   const deselectRef = useRef(onDeselect)
   const annotationEditRef = useRef(onAnnotationEdit)
   const clearHoverRef = useRef(onClearHover)
@@ -309,6 +317,7 @@ export function ThreeCadViewport({
   useEffect(() => {
     hoverRef.current = onHover
     selectRef.current = onSelect
+    connectedSketchSelectRef.current = onConnectedSketchSelect
     deselectRef.current = onDeselect
     annotationEditRef.current = onAnnotationEdit
     clearHoverRef.current = onClearHover
@@ -328,6 +337,7 @@ export function ThreeCadViewport({
     onAnnotationEdit,
     onHover,
     onSelect,
+    onConnectedSketchSelect,
     onSketchGeometryDragEnd,
     onSketchGeometryDragMove,
     onSketchGeometryDragStart,
@@ -952,6 +962,23 @@ export function ThreeCadViewport({
 
       const viewportRect = canvasElement.getBoundingClientRect()
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+
+      if (shouldViewportClickEventRequestConnectedSketchSelection({
+        activeSketchTool: sketchSession?.activeTool,
+        clickDetail: event.detail,
+        sketchStatus: sketchSession?.status,
+        target: resolvedTarget?.target ?? null,
+      })) {
+        const target = resolvedTarget?.target
+
+        if (target) {
+          lastPickedTargetRef.current = target
+          connectedSketchSelectRef.current(target)
+        }
+
+        return
+      }
+
       const intent = getViewportCanvasClickIntent({
         activeSketchTool: sketchSession?.activeTool,
         hasResolvedTarget: resolvedTarget !== null,
@@ -974,6 +1001,39 @@ export function ThreeCadViewport({
       selectRef.current(resolvedTarget.target)
     }
 
+    const handleDoubleClick = (event: MouseEvent) => {
+      if (event.button !== 0 || pointerWithinViewCube(event.clientX, event.clientY)) {
+        return
+      }
+
+      const eventTarget = event.target instanceof Node ? event.target : null
+      const isCanvasClick = eventTarget === canvasElement
+
+      if (!isCanvasClick) {
+        return
+      }
+
+      const viewportRect = canvasElement.getBoundingClientRect()
+      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+
+      if (!shouldViewportDoubleClickRequestConnectedSketchSelection({
+        activeSketchTool: sketchSession?.activeTool,
+        sketchStatus: sketchSession?.status,
+        target: resolvedTarget?.target ?? null,
+      })) {
+        return
+      }
+
+      const target = resolvedTarget?.target
+
+      if (!target) {
+        return
+      }
+
+      lastPickedTargetRef.current = target
+      connectedSketchSelectRef.current(target)
+    }
+
     const handleContextMenu = (event: Event) => event.preventDefault()
 
     canvasElement.addEventListener('pointerdown', handlePointerDown, true)
@@ -982,6 +1042,7 @@ export function ThreeCadViewport({
     canvasElement.addEventListener('contextmenu', handleContextMenu)
     window.addEventListener('pointerup', handlePointerUp, true)
     window.addEventListener('click', handleClick, true)
+    window.addEventListener('dblclick', handleDoubleClick, true)
 
     return () => {
       cancelSketchGeometryDragMove()
@@ -992,6 +1053,7 @@ export function ThreeCadViewport({
       canvasElement.removeEventListener('contextmenu', handleContextMenu)
       window.removeEventListener('pointerup', handlePointerUp, true)
       window.removeEventListener('click', handleClick, true)
+      window.removeEventListener('dblclick', handleDoubleClick, true)
     }
   }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSession])
 
@@ -1874,31 +1936,75 @@ function DocumentMeshNode({
         })
       : createRenderableMeshMaterial(renderable, origin, getDocumentRenderableMaterialOptions(entry, palette))
   }, [entry, origin, palette, renderable])
+  const facePerimeterGeometry = useMemo(() => {
+    if (
+      !geometryData
+      || (renderable.binding.semanticClass !== 'bodyFace' && renderable.binding.semanticClass !== 'planarFace')
+    ) {
+      return null
+    }
+
+    return createMeshBoundaryLineSegmentsGeometry(geometryData)
+  }, [geometryData, renderable.binding.semanticClass])
+  const facePerimeterMaterial = useMemo(() => {
+    if (!facePerimeterGeometry) {
+      return null
+    }
+
+    return new THREE.LineBasicMaterial({
+      color: GEOMETRY_HIGHLIGHT_COLORS.hover,
+      transparent: true,
+      opacity: 0,
+      depthTest: true,
+      depthWrite: false,
+    })
+  }, [facePerimeterGeometry])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
+  useEffect(() => () => facePerimeterGeometry?.dispose(), [facePerimeterGeometry])
+  useEffect(() => () => facePerimeterMaterial?.dispose(), [facePerimeterMaterial])
+  const renderOrder = isSeededDatumPlaneRenderable(renderable)
+    ? 1
+    : getRenderableRenderOrder(renderable, origin)
+
   return (
-    <mesh
-      ref={(value) => {
-        if (value) {
-          bindRenderableObject(
-            value,
-            renderable.binding.pickId,
-            renderable.binding.target,
-            renderable.binding.semanticClass,
-            origin,
-            renderable,
-          )
-        }
-      }}
-      geometry={geometry}
-      material={material}
-      renderOrder={
-        isSeededDatumPlaneRenderable(renderable)
-          ? 1
-          : getRenderableRenderOrder(renderable, origin)
-      }
-    />
+    <group>
+      <mesh
+        ref={(value) => {
+          if (value) {
+            bindRenderableObject(
+              value,
+              renderable.binding.pickId,
+              renderable.binding.target,
+              renderable.binding.semanticClass,
+              origin,
+              renderable,
+            )
+          }
+        }}
+        geometry={geometry}
+        material={material}
+        renderOrder={renderOrder}
+      />
+      {facePerimeterGeometry && facePerimeterMaterial ? (
+        <lineSegments
+          ref={(value) => {
+            if (value) {
+              bindFaceHoverPerimeterObject(
+                value,
+                renderable.binding.target,
+                renderable.binding.semanticClass as 'bodyFace' | 'planarFace',
+                origin,
+              )
+            }
+          }}
+          geometry={facePerimeterGeometry}
+          material={facePerimeterMaterial}
+          renderOrder={renderOrder + 1}
+        />
+      ) : null}
+    </group>
   )
 }
 

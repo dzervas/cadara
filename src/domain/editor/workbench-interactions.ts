@@ -103,6 +103,42 @@ export function shouldViewportStartSketchGeometryDrag(
   return activeSketchTool == null || isRegisteredSketchToolId(activeSketchTool)
 }
 
+export function shouldViewportDoubleClickRequestConnectedSketchSelection({
+  activeSketchTool,
+  sketchStatus,
+  target,
+}: {
+  activeSketchTool: SketchAuthoringToolId | null | undefined
+  sketchStatus: SketchSessionStatus | null | undefined
+  target: PrimitiveRef | null
+}) {
+  if (target?.kind !== 'sketchEntity') {
+    return false
+  }
+
+  return activeSketchTool == null
+    || (sketchStatus === 'idle' && isRegisteredSketchToolId(activeSketchTool))
+}
+
+export function shouldViewportClickEventRequestConnectedSketchSelection({
+  activeSketchTool,
+  clickDetail,
+  sketchStatus,
+  target,
+}: {
+  activeSketchTool: SketchAuthoringToolId | null | undefined
+  clickDetail: number
+  sketchStatus: SketchSessionStatus | null | undefined
+  target: PrimitiveRef | null
+}) {
+  return clickDetail > 1
+    && shouldViewportDoubleClickRequestConnectedSketchSelection({
+      activeSketchTool,
+      sketchStatus,
+      target,
+    })
+}
+
 export type ViewportCanvasClickIntent = 'clearSelection' | 'ignore' | 'selectTarget'
 
 export function getViewportCanvasClickIntent({

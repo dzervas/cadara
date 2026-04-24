@@ -250,3 +250,95 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear even
     actor.stop()
   }
 })
+
+test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch selection events', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  function waitForState(
+    actor: EditorRuntimeActor,
+    predicate: (state: EditorState) => boolean,
+  ): Promise<EditorState> {
+    const current = getEditorRuntimeState(actor)
+
+    if (predicate(current)) {
+      return Promise.resolve(current)
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timed out waiting for editor runtime state.'))
+      }, 2_000)
+      const subscription = actor.subscribe(() => {
+        const state = getEditorRuntimeState(actor)
+
+        if (!predicate(state)) {
+          return
+        }
+
+        clearTimeout(timeoutId)
+        subscription.unsubscribe()
+        resolve(state)
+      })
+    })
+  }
+
+  const adapter = new MockKernelAdapter()
+  const runtime: EditorEffectRuntime = {
+    async getCurrentDocumentSnapshot() {
+      return (await adapter.getDocumentSnapshot({
+        contractVersion: 'modeling-contract/v1alpha1',
+        documentId: 'doc_workspace',
+      })).snapshot
+    },
+    async commitSketch() {
+      return null
+    },
+    async evaluatePreview() {
+      throw new Error('Feature preview is not used by this test.')
+    },
+    async commitFeature() {
+      throw new Error('Feature commit is not used by this test.')
+    },
+  }
+  const actor = createEditorRuntimeActor(runtime)
+
+  actor.start()
+
+  try {
+    await waitForState(actor, (state) => state.document.revisionId !== null)
+
+    actor.send({ type: 'tool.activated', toolId: 'sketch' })
+    actor.send({
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+    })
+    await waitForState(actor, (state) => state.kind === 'editingSketch')
+
+    actor.send({ type: 'tool.activated', toolId: 'rectangle' })
+    actor.send({ type: 'sketch.pointerReleased', point: [0, 0] })
+    actor.send({ type: 'sketch.pointerReleased', point: [4, 3] })
+
+    const rectangleState = await waitForState(
+      actor,
+      (state) => state.kind === 'editingSketch' && state.session.definition.entities.length === 4,
+    )
+    assert(rectangleState.kind === 'editingSketch', 'Expected sketch session after rectangle creation.')
+    const rectangleEdge = rectangleState.session.definition.entities[0]?.target
+    assert(rectangleEdge?.kind === 'sketchEntity', 'Expected a selectable rectangle edge.')
+
+    actor.send({ type: 'sketch.connectedSelectionRequested', target: rectangleEdge })
+    const connected = await waitForState(actor, (state) => state.selection.length === 4)
+
+    assert(
+      connected.selection.every((target) => target.kind === 'sketchEntity'),
+      'Runtime should forward connected sketch selection events to the editor reducer.',
+    )
+  } finally {
+    actor.stop()
+  }
+})

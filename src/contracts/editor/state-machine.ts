@@ -31,6 +31,7 @@ import {
   finishSketchGeometryDrag,
   focusSketchStyleTool,
   getActiveSketchStyleToolId,
+  getConnectedSketchEntitySelectionTargets,
   getNextSketchHistoryCursor,
   getPreviousSketchHistoryCursor,
   getSketchSessionPreviewLabel,
@@ -332,6 +333,13 @@ export interface ViewportSelectionRequestedEvent {
   target: PrimitiveRef
 }
 
+/** Requests connected local sketch-entity selection from a viewport double-click. */
+export interface SketchConnectedSelectionRequestedEvent {
+  type: 'sketch.connectedSelectionRequested'
+  /** Sketch entity target that seeds the connected-component selection. */
+  target: PrimitiveRef
+}
+
 /** Clears the current editor-owned selection and hover target. */
 export interface SelectionClearedEvent {
   type: 'selection.cleared'
@@ -485,6 +493,7 @@ export type EditorEvent =
   | ViewportHoveredEvent
   | ViewportHoverClearedEvent
   | ViewportSelectionRequestedEvent
+  | SketchConnectedSelectionRequestedEvent
   | SelectionClearedEvent
   | AuthoringReopenRequestedEvent
   | SketchPointerMovedEvent
@@ -2656,6 +2665,48 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           ...state,
           selection: candidate.nextSelection,
           hoverTarget: event.target,
+        },
+        effects: [],
+      }
+    }
+    case 'sketch.connectedSelectionRequested': {
+      if (
+        state.kind !== 'editingSketch'
+        || !(
+          state.session.activeTool === null
+          || (state.session.status === 'idle' && isRegisteredSketchToolId(state.session.activeTool))
+        )
+        || state.session.constructionTargetPicking
+        || state.session.referenceTargetPicking
+        || state.session.constraintAuthoring
+        || state.session.activeEditTool
+        || state.session.activeStyleFocus
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const targets = getConnectedSketchEntitySelectionTargets(state.session, event.target)
+
+      if (targets.length === 0) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          selection: targets,
+          hoverTarget: event.target,
+          preview: {
+            kind: 'sketch',
+            label: getSketchSessionPreviewLabel(state.session),
+            target: state.session.planeTarget,
+          },
         },
         effects: [],
       }

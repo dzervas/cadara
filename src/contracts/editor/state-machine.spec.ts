@@ -31,7 +31,9 @@ import type {
   RegionId,
   RenderableId,
   RevisionId,
+  SketchEntityId,
   SketchId,
+  SketchPointId,
   SnapshotEntityId,
 } from '@/contracts/shared/ids'
 import {
@@ -58,6 +60,7 @@ import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
+import type { SketchDefinition } from '@/contracts/sketch/schema'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createAppError, ResultAsync, type AppError } from '@/contracts/errors'
 
@@ -2546,6 +2549,191 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function createConnectedSelectionEditorState(): {
+    state: SketchEditorState
+    localTarget: PrimitiveRef
+    projectedTarget: PrimitiveRef
+  } {
+    const sketchId = 'sketch_draft' as SketchId
+    const pointA = 'sketch_point_a' as SketchPointId
+    const pointB = 'sketch_point_b' as SketchPointId
+    const pointC = 'sketch_point_c' as SketchPointId
+    const entityAB = 'sketch_entity_ab' as SketchEntityId
+    const entityBC = 'sketch_entity_bc' as SketchEntityId
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [pointA, pointB, pointC],
+      points: [
+        {
+          pointId: pointA,
+          label: 'A',
+          target: { kind: 'sketchPoint', sketchId, pointId: pointA },
+          position: [0, 0],
+          isConstruction: false,
+        },
+        {
+          pointId: pointB,
+          label: 'B',
+          target: { kind: 'sketchPoint', sketchId, pointId: pointB },
+          position: [1, 0],
+          isConstruction: false,
+        },
+        {
+          pointId: pointC,
+          label: 'C',
+          target: { kind: 'sketchPoint', sketchId, pointId: pointC },
+          position: [2, 0],
+          isConstruction: false,
+        },
+      ],
+      entityIds: [entityAB, entityBC],
+      entities: [
+        {
+          kind: 'lineSegment',
+          entityId: entityAB,
+          label: 'AB',
+          target: { kind: 'sketchEntity', sketchId, entityId: entityAB },
+          isConstruction: false,
+          startPointId: pointA,
+          endPointId: pointB,
+        },
+        {
+          kind: 'lineSegment',
+          entityId: entityBC,
+          label: 'BC',
+          target: { kind: 'sketchEntity', sketchId, entityId: entityBC },
+          isConstruction: false,
+          startPointId: pointB,
+          endPointId: pointC,
+        },
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+    const session = {
+      ...createNewSketchSession(createStandardPlaneDefinition('xy')),
+      sketchId,
+      definition,
+      fullDefinition: definition,
+    }
+    const localTarget = definition.entities[0]!.target
+    const projectedTarget: PrimitiveRef = {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_projected',
+      geometryId: 'projected_geometry_line',
+      geometryKind: 'lineSegment',
+    }
+
+    return {
+      localTarget,
+      projectedTarget,
+      state: {
+        ...initialEditorState,
+        kind: 'editingSketch',
+        mode: 'sketch',
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selection: [],
+        hoverTarget: null,
+        selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+        selectionCatalog: null,
+        preview: {
+          kind: 'sketch',
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+        command: {
+          commandSessionId: 'command_sketch-connected-selection-1',
+          toolId: 'sketch',
+          phase: 'editing',
+        },
+        session,
+        pendingCommitRequestId: null,
+        pendingProjectionRequestId: null,
+      },
+    }
+  }
+
+  function testConnectedSketchSelectionEventUpdatesNormalSelectionState() {
+    const { state, localTarget } = createConnectedSelectionEditorState()
+    const selected = transitionEditorState(state, {
+      type: 'sketch.connectedSelectionRequested',
+      target: localTarget,
+    })
+
+    assert(selected.state.kind === 'editingSketch', 'Connected selection should stay in sketch editing.')
+    assert(
+      selected.state.selection.length === 2
+        && selected.state.selection.every((target) => target.kind === 'sketchEntity'),
+      'Connected selection should update the normal editor selection with the connected sketch entities.',
+    )
+  }
+
+  function testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'rectangle')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [4, 3])
+    const localTarget = session.definition.entities[0]?.target
+    assert(localTarget, 'Rectangle fixture should create a selectable sketch entity.')
+
+    const selected = transitionEditorState({
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-connected-rectangle-1',
+        toolId: 'rectangle',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+    }, {
+      type: 'sketch.connectedSelectionRequested',
+      target: localTarget,
+    })
+
+    assert(selected.state.kind === 'editingSketch', 'Connected rectangle selection should stay in sketch editing.')
+    assert(
+      selected.state.selection.length === 4
+        && selected.state.selection.every((target) => target.kind === 'sketchEntity'),
+      'Double-clicking one accepted rectangle edge while Rectangle remains active should select all four rectangle edges.',
+    )
+  }
+
+  function testConnectedSketchSelectionEventRejectsUnsupportedTargets() {
+    const { state, projectedTarget } = createConnectedSelectionEditorState()
+    const selected = transitionEditorState(state, {
+      type: 'sketch.connectedSelectionRequested',
+      target: projectedTarget,
+    })
+
+    assert(selected.state.kind === 'editingSketch', 'Unsupported connected selection should stay in sketch editing.')
+    assert(selected.state.selection.length === 0, 'Projected reference geometry should not expand through the connected selection event.')
+  }
+
   function testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation() {
     let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
     session = beginSketchTool(session, 'line')
@@ -2984,6 +3172,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testPassiveSketchStyleToolsDoNotDropSketchSession()
   testConstraintAuthoringReceivesViewportHoverAndSelection()
   testConstraintAuthoringIgnoresInvalidViewportSelection()
+  testConnectedSketchSelectionEventUpdatesNormalSelectionState()
+  testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape()
+  testConnectedSketchSelectionEventRejectsUnsupportedTargets()
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
   testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest()

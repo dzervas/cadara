@@ -11,6 +11,7 @@ import {
   deleteSelectedSketchGeometry,
   deriveSketchDisplayEntities,
   finishSketchGeometryDrag,
+  getConnectedSketchEntitySelectionTargets,
   getSketchSessionRegionDiagnostics,
   getSketchSessionDisplayRenderables,
   isSketchSvgRenderingEnabled,
@@ -314,6 +315,132 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
 
   function getMeshArea(geometry: ReturnType<typeof getLiveRegionMesh>) {
     return geometry.triangleIndices.reduce((area, triangle) => area + getTriangleArea(geometry.vertexPositions, triangle), 0)
+  }
+
+  function getConnectedEntityIds(session: ReturnType<typeof createSessionFromDefinition>, entityId: string) {
+    return getConnectedSketchEntitySelectionTargets(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_primary',
+      entityId: entityId as `sketch_entity_${string}`,
+    }).map((target) => target.entityId)
+  }
+
+  function testConnectedSketchSelectionSelectsTwoConnectedLines() {
+    const definition = makeDefinition({
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d', 'sketch_point_e'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 1, 0),
+        makePoint('sketch_point_c', 'C', 2, 0),
+        makePoint('sketch_point_d', 'D', 10, 0),
+        makePoint('sketch_point_e', 'E', 11, 0),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_bc', 'sketch_entity_de'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_de', 'DE', 'sketch_point_d', 'sketch_point_e'),
+      ],
+    })
+    const selectedEntityIds = getConnectedEntityIds(createSessionFromDefinition(definition), 'sketch_entity_ab')
+
+    assert(
+      selectedEntityIds.join(',') === 'sketch_entity_ab,sketch_entity_bc',
+      'Connected selection should select the two local entities joined by a shared endpoint.',
+    )
+  }
+
+  function testConnectedSketchSelectionSelectsRectangleFromAnyEdge() {
+    const session = createSessionFromDefinition(createSquareDefinition(false))
+    const expected = 'sketch_entity_ab,sketch_entity_bc,sketch_entity_cd,sketch_entity_da'
+
+    for (const entityId of session.definition.entityIds) {
+      assert(
+        getConnectedEntityIds(session, entityId).join(',') === expected,
+        `Connected rectangle selection from ${entityId} should select all four edges.`,
+      )
+    }
+  }
+
+  function testConnectedSketchSelectionUsesLocalEntityTargetNamespace() {
+    const session = {
+      ...createSessionFromDefinition(createSquareDefinition(false)),
+      sketchId: 'sketch_draft' as const,
+    }
+
+    const selectedEntityIds = getConnectedSketchEntitySelectionTargets(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_primary',
+      entityId: 'sketch_entity_ab',
+    }).map((selectedTarget) => selectedTarget.entityId)
+
+    assert(
+      selectedEntityIds.join(',') === 'sketch_entity_ab,sketch_entity_bc,sketch_entity_cd,sketch_entity_da',
+      'Connected selection should follow the local entity target sketch id even when the session sketch id differs.',
+    )
+    assert(
+      getConnectedSketchEntitySelectionTargets(session, {
+        kind: 'sketchEntity',
+        sketchId: 'sketch_other' as const,
+        entityId: 'sketch_entity_ab',
+      }).length === 0,
+      'Connected selection should still reject sketch entities from a different target namespace.',
+    )
+  }
+
+  function testConnectedSketchSelectionSelectsBranchingComponentAndRejectsUnsupportedTargets() {
+    const definition = makeDefinition({
+      pointIds: ['sketch_point_center', 'sketch_point_left', 'sketch_point_right', 'sketch_point_top', 'sketch_point_far'],
+      points: [
+        makePoint('sketch_point_center', 'Center', 0, 0),
+        makePoint('sketch_point_left', 'Left', -1, 0),
+        makePoint('sketch_point_right', 'Right', 1, 0),
+        makePoint('sketch_point_top', 'Top', 0, 1),
+        makePoint('sketch_point_far', 'Far', 5, 5),
+      ],
+      entityIds: ['sketch_entity_left', 'sketch_entity_right', 'sketch_entity_top', 'sketch_entity_point'],
+      entities: [
+        makeLine('sketch_entity_left', 'Left', 'sketch_point_left', 'sketch_point_center'),
+        makeLine('sketch_entity_right', 'Right', 'sketch_point_center', 'sketch_point_right'),
+        makeLine('sketch_entity_top', 'Top', 'sketch_point_center', 'sketch_point_top'),
+        {
+          kind: 'point',
+          entityId: 'sketch_entity_point',
+          label: 'Point entity',
+          target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_point' },
+          isConstruction: false,
+          pointId: 'sketch_point_far',
+        },
+      ],
+    })
+    const session = createSessionFromDefinition(definition)
+
+    assert(
+      getConnectedEntityIds(session, 'sketch_entity_right').join(',') ===
+        'sketch_entity_left,sketch_entity_right,sketch_entity_top',
+      'Connected selection should select every entity in a branching component.',
+    )
+    assert(
+      getConnectedSketchEntitySelectionTargets(session, {
+        kind: 'projectedReferenceGeometry',
+        referenceId: 'ref_projected' as const,
+        geometryId: 'projected_geometry_line' as const,
+        geometryKind: 'lineSegment',
+      }).length === 0,
+      'Projected reference geometry should not expand through connected local geometry selection.',
+    )
+    assert(
+      getConnectedSketchEntitySelectionTargets(session, {
+        kind: 'sketchPoint',
+        sketchId: 'sketch_primary',
+        pointId: 'sketch_point_center',
+      }).length === 0,
+      'Sketch points should not expand through connected local geometry selection.',
+    )
+    assert(
+      getConnectedEntityIds(session, 'sketch_entity_point').length === 0,
+      'Point entities should not expand through connected local geometry selection.',
+    )
   }
 
   function testUnconstrainedPointDragUpdatesAuthoredDefinition() {
@@ -1504,6 +1631,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testLiveRegionRenderableTriangulatesConcaveRegion()
   testLiveRegionDiagnosticsAreAvailableDuringEditing()
   testConstrainedDragRegionDerivationBenchmark()
+  testConnectedSketchSelectionSelectsTwoConnectedLines()
+  testConnectedSketchSelectionSelectsRectangleFromAnyEdge()
+  testConnectedSketchSelectionUsesLocalEntityTargetNamespace()
+  testConnectedSketchSelectionSelectsBranchingComponentAndRejectsUnsupportedTargets()
   testRectangleToolDragTranslatesWholeRectangle()
   testImmovableConstrainedDragBlocksWithoutChangingDraft()
   testSelectedEntityDeletionRemovesDependentAnnotations()

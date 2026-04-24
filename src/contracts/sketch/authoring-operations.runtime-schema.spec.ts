@@ -87,4 +87,17 @@ test('src/contracts/sketch/authoring-operations.runtime-schema.spec.ts', () => {
   assert(operation.kind === 'line', 'Round-tripped operation kind should be preserved.')
   assert(operation.targets.created?.[2]?.kind === 'entity', 'Round-tripped operation target refs should be typed.')
   assert(operation.createdGraph?.entities?.[0]?.entityId === 'sketch_entity_line', 'Round-tripped operation graph records should be preserved.')
+
+  const withUndefinedOptionalGraphs = sketchDefinitionSchema.safeParse({
+    ...withOperation,
+    authoringOperations: [{
+      ...withOperation.authoringOperations![0],
+      createdGraph: undefined,
+      removedGraph: undefined,
+    }],
+  })
+  assert(withUndefinedOptionalGraphs.success, 'Runtime schema should accept optional authoring operation graphs with undefined values.')
+  const normalizedOperation = withUndefinedOptionalGraphs.data.authoringOperations?.[0] as Record<string, unknown> | undefined
+  assert(normalizedOperation && !('createdGraph' in normalizedOperation), 'Undefined createdGraph should be omitted from normalized operations.')
+  assert(normalizedOperation && !('removedGraph' in normalizedOperation), 'Undefined removedGraph should be omitted from normalized operations.')
 })

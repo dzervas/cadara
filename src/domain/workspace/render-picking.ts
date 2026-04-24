@@ -6,10 +6,11 @@ import {
   primitiveRefEquals,
   type PrimitiveRef,
 } from '@/domain/editor/schema'
-import type { RenderableEntityRecord } from '@/contracts/render/schema'
+import type { RenderableEntityRecord, RenderMeshGeometry } from '@/contracts/render/schema'
 import type {
   ViewportRenderableOrigin,
 } from '@/domain/workspace/viewport-renderables'
+import { workbenchGeometryHighlightColors } from '@/theme/workbench-theme'
 
 export type WorkspaceSemanticClass = RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
 
@@ -51,6 +52,8 @@ interface RenderableMaterialDisplayOptions {
   polygonOffsetUnits?: number
 }
 
+type HighlightRole = 'faceHoverPerimeter'
+
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12)
 const PICK_PROXY_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 16, 16)
 const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
@@ -79,6 +82,77 @@ export const SURFACE_COLORS = {
   construction: 0xb6d6ff,
 } as const
 
+export const GEOMETRY_HIGHLIGHT_COLORS = {
+  hover: workbenchGeometryHighlightColors.hover.hex,
+  selected: workbenchGeometryHighlightColors.selected.hex,
+  hoverEmissive: workbenchGeometryHighlightColors.hoverEmissive.hex,
+  selectedEmissive: workbenchGeometryHighlightColors.selectedEmissive.hex,
+} as const
+
+export function createMeshBoundaryLineSegmentsGeometry(geometry: RenderMeshGeometry) {
+  const boundaryEdges = collectMeshBoundaryEdges(geometry)
+  const positions = new Float32Array(boundaryEdges.length * 2 * 3)
+
+  boundaryEdges.forEach(([start, end], edgeIndex) => {
+    const offset = edgeIndex * 6
+    positions.set(start, offset)
+    positions.set(end, offset + 3)
+  })
+
+  const bufferGeometry = new THREE.BufferGeometry()
+  bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  bufferGeometry.computeBoundingSphere()
+  return bufferGeometry
+}
+
+function collectMeshBoundaryEdges(geometry: RenderMeshGeometry) {
+  const edges = new Map<string, {
+    count: number
+    start: RenderMeshGeometry['vertexPositions'][number]
+    end: RenderMeshGeometry['vertexPositions'][number]
+  }>()
+
+  for (const [a, b, c] of geometry.triangleIndices) {
+    addMeshEdge(edges, geometry.vertexPositions[a], geometry.vertexPositions[b])
+    addMeshEdge(edges, geometry.vertexPositions[b], geometry.vertexPositions[c])
+    addMeshEdge(edges, geometry.vertexPositions[c], geometry.vertexPositions[a])
+  }
+
+  return [...edges.values()]
+    .filter((edge) => edge.count === 1)
+    .map((edge) => [edge.start, edge.end] as const)
+}
+
+function addMeshEdge(
+  edges: Map<string, {
+    count: number
+    start: RenderMeshGeometry['vertexPositions'][number]
+    end: RenderMeshGeometry['vertexPositions'][number]
+  }>,
+  start: RenderMeshGeometry['vertexPositions'][number] | undefined,
+  end: RenderMeshGeometry['vertexPositions'][number] | undefined,
+) {
+  if (!start || !end) {
+    return
+  }
+
+  const startKey = getRenderPointKey(start)
+  const endKey = getRenderPointKey(end)
+  const key = startKey < endKey ? `${startKey}|${endKey}` : `${endKey}|${startKey}`
+  const existing = edges.get(key)
+
+  if (existing) {
+    existing.count += 1
+    return
+  }
+
+  edges.set(key, { count: 1, start, end })
+}
+
+function getRenderPointKey(point: RenderMeshGeometry['vertexPositions'][number]) {
+  return `${point[0]}:${point[1]}:${point[2]}`
+}
+
 export function resolvePickTarget(
   intersections: THREE.Intersection<THREE.Object3D>[],
   acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
@@ -95,6 +169,10 @@ export function collectRaycastPickCandidates(
   intersections: THREE.Intersection<THREE.Object3D>[],
 ): PickCandidate[] {
   return intersections.flatMap((intersection) => {
+    if (getBoundPickExcluded(intersection.object)) {
+      return []
+    }
+
     const target = getBoundTarget(intersection.object)
     const semanticClass = getBoundSemanticClass(intersection.object)
     const origin = getBoundRenderableOrigin(intersection.object)
@@ -259,7 +337,14 @@ export function updateWorkspaceHighlight(
       const isSelected = selection.some((entry) => targetActivatesBoundTarget(entry, target))
       const isHovered = hoverTarget !== null && targetActivatesBoundTarget(hoverTarget, target)
       const isRelatedActive = relatedActiveTargets.some((entry) => targetActivatesBoundTarget(entry, target))
-      applyRenderableState(material, semanticClass, origin, isSelected || isHovered || isRelatedActive, isSelected)
+      applyRenderableState(
+        material,
+        semanticClass,
+        origin,
+        isSelected || isHovered || isRelatedActive,
+        isSelected,
+        getBoundHighlightRole(object),
+      )
     }
   }
 }
@@ -310,8 +395,14 @@ function applyRenderableState(
   origin: ViewportRenderableOrigin,
   isActive: boolean,
   isSelected: boolean,
+  highlightRole: HighlightRole | null = null,
 ) {
   const materials = Array.isArray(material) ? material : [material]
+  const shouldShowFaceHoverPerimeter = highlightRole === 'faceHoverPerimeter' && isActive && !isSelected
+  const shouldHighlightFaceSurface = highlightRole !== 'faceHoverPerimeter'
+    && (!isFaceSemanticClass(semanticClass) || isSelected || !isActive)
+  const materialIsActive = shouldShowFaceHoverPerimeter
+    || (shouldHighlightFaceSurface && (isActive || isSelected))
 
   for (const entry of materials) {
     if (
@@ -325,30 +416,30 @@ function applyRenderableState(
     const color = getHighlightColor(semanticClass, isActive, isSelected)
     const baseline = getHighlightMaterialBaseline(entry)
 
-    entry.color.setHex(isActive || isSelected ? color : baseline.color)
+    entry.color.setHex(materialIsActive ? color : baseline.color)
 
     if (entry instanceof THREE.MeshStandardMaterial) {
       entry.emissive.setHex(
-        isSelected
-          ? 0x2f6b91
-          : isActive
-            ? 0xa85a16
+        materialIsActive && isSelected
+          ? GEOMETRY_HIGHLIGHT_COLORS.selectedEmissive
+          : materialIsActive && isActive
+            ? GEOMETRY_HIGHLIGHT_COLORS.hoverEmissive
             : getRenderableMeshEmissive(semanticClass, origin),
       )
-      entry.emissiveIntensity = isSelected
+      entry.emissiveIntensity = materialIsActive && isSelected
         ? 0.32
-        : isActive
+        : materialIsActive && isActive
           ? 0.24
           : getRenderableMeshEmissiveIntensity(semanticClass, origin)
-      entry.opacity = isActive || isSelected
+      entry.opacity = materialIsActive
         ? getRenderableMeshOpacity(semanticClass, origin, isActive, isSelected)
         : baseline.opacity
     } else if (entry instanceof THREE.MeshBasicMaterial) {
-      entry.opacity = isActive || isSelected
+      entry.opacity = materialIsActive
         ? getRenderableMeshOpacity(semanticClass, origin, isActive, isSelected)
         : baseline.opacity
     } else {
-      entry.opacity = isActive || isSelected
+      entry.opacity = materialIsActive
         ? getRenderableLineOpacity(semanticClass, origin, isActive, isSelected)
         : baseline.opacity
     }
@@ -400,23 +491,11 @@ function getHighlightColor(
   isSelected: boolean,
 ) {
   if (isSelected) {
-    return isWireSemanticClass(semanticClass) ? 0xf4fbff : 0xf7f4ec
+    return GEOMETRY_HIGHLIGHT_COLORS.selected
   }
 
   if (isActive) {
-    if (semanticClass === 'construction') {
-      return 0xe7f2ff
-    }
-
-    if (semanticClass === 'region') {
-      return 0xa7e4ef
-    }
-
-    if (isWireSemanticClass(semanticClass)) {
-      return 0xf0a14a
-    }
-
-    return 0xf7c78c
+    return GEOMETRY_HIGHLIGHT_COLORS.hover
   }
 
   return getRenderableBaseColor(semanticClass)
@@ -433,6 +512,10 @@ function isWireSemanticClass(semanticClass: WorkspaceSemanticClass) {
     || semanticClass === 'sketchCurve'
     || semanticClass === 'sketchPoint'
     || semanticClass === 'sketchReference'
+}
+
+function isFaceSemanticClass(semanticClass: WorkspaceSemanticClass) {
+  return semanticClass === 'bodyFace' || semanticClass === 'planarFace'
 }
 
 function isOccludingFaceSemanticClass(semanticClass: WorkspaceSemanticClass) {
@@ -813,8 +896,23 @@ export function bindRenderableObject(
   }
 }
 
+export function bindFaceHoverPerimeterObject(
+  object: THREE.Object3D,
+  target: PrimitiveRef,
+  semanticClass: Extract<WorkspaceSemanticClass, 'bodyFace' | 'planarFace'>,
+  origin: ViewportRenderableOrigin,
+) {
+  bindRenderableObject(object, null, target, semanticClass, origin)
+  object.userData.highlightRole = 'faceHoverPerimeter' satisfies HighlightRole
+  object.userData.pickExcluded = true
+}
+
 function getBoundPickId(object: THREE.Object3D) {
   return findBoundValue<string>(object, 'pickId')
+}
+
+function getBoundPickExcluded(object: THREE.Object3D) {
+  return findBoundValue<boolean>(object, 'pickExcluded') === true
 }
 
 function getBoundPickPriority(object: THREE.Object3D) {
@@ -835,6 +933,10 @@ function getBoundSemanticClass(object: THREE.Object3D) {
 
 function getBoundRenderableOrigin(object: THREE.Object3D) {
   return findBoundValue<ViewportRenderableOrigin>(object, 'renderableOrigin')
+}
+
+function getBoundHighlightRole(object: THREE.Object3D) {
+  return findBoundValue<HighlightRole>(object, 'highlightRole') ?? null
 }
 
 function findBoundValue<T>(object: THREE.Object3D, key: string) {
@@ -885,7 +987,7 @@ export function collectBindings(root: THREE.Object3D | null): CollectedBindings 
   const targetToObjects = new Map<string, THREE.Object3D[]>()
 
   root.traverse((object) => {
-    if (object.userData.pickId !== undefined || object.userData.target !== undefined) {
+    if (!getBoundPickExcluded(object) && (object.userData.pickId !== undefined || object.userData.target !== undefined)) {
       pickables.push(object)
     }
 

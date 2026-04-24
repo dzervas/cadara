@@ -23,6 +23,25 @@ export const workbenchShellTokens = {
   panelShadow: '0 20px 50px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.04) inset',
 } as const
 
+export const workbenchGeometryHighlightColors = {
+  hover: {
+    css: '#f6b777',
+    hex: 0xf6b777,
+  },
+  selected: {
+    css: '#f0a14a',
+    hex: 0xf0a14a,
+  },
+  hoverEmissive: {
+    css: '#8f4c13',
+    hex: 0x8f4c13,
+  },
+  selectedEmissive: {
+    css: '#a85a16',
+    hex: 0xa85a16,
+  },
+} as const
+
 export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
   const defaults = defaultCssVariablesResolver(theme)
 
@@ -77,6 +96,10 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
         'color-mix(in srgb, var(--mantine-color-dark-9) 90%, transparent)',
       '--workbench-viewport-overlay-muted':
         'color-mix(in srgb, var(--mantine-color-dark-9) 82%, transparent)',
+      '--workbench-geometry-highlight-hover': workbenchGeometryHighlightColors.hover.css,
+      '--workbench-geometry-highlight-selected': workbenchGeometryHighlightColors.selected.css,
+      '--workbench-geometry-highlight-hover-emissive': workbenchGeometryHighlightColors.hoverEmissive.css,
+      '--workbench-geometry-highlight-selected-emissive': workbenchGeometryHighlightColors.selectedEmissive.css,
       '--workbench-notification-surface': 'var(--workbench-shell-overlay-strong)',
       '--workbench-notification-text': 'var(--workbench-shell-text)',
       '--workbench-notification-text-muted': 'var(--workbench-shell-text-muted)',

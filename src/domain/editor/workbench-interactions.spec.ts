@@ -8,6 +8,8 @@ import {
   getEscapeEvent,
   getNavigationReopenRequest,
   getViewportCanvasClickIntent,
+  shouldViewportClickEventRequestConnectedSketchSelection,
+  shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportClickRequestSelection,
   shouldViewportStartSketchGeometryDrag,
 } from './workbench-interactions'
@@ -142,6 +144,78 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
     assert(event?.type === 'selection.cleared', 'Escape should clear selection when no active interaction handles it.')
   }
 
+  function testViewportDoubleClickConnectedSelectionRoutingOnlyUsesIdleSketchEntities() {
+    const sketchEntityTarget = {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_primary',
+      entityId: 'sketch_entity_ab',
+    } as const
+
+    assert(
+      shouldViewportDoubleClickRequestConnectedSketchSelection({
+        activeSketchTool: null,
+        sketchStatus: 'idle',
+        target: sketchEntityTarget,
+      }),
+      'Idle sketch entity double-clicks should route to connected selection.',
+    )
+    assert(
+      shouldViewportDoubleClickRequestConnectedSketchSelection({
+        activeSketchTool: 'rectangle',
+        sketchStatus: 'idle',
+        target: sketchEntityTarget,
+      }),
+      'Idle drawing tools should allow connected selection after accepting a shape.',
+    )
+    assert(
+      !shouldViewportDoubleClickRequestConnectedSketchSelection({
+        activeSketchTool: 'line',
+        sketchStatus: 'drawing',
+        target: sketchEntityTarget,
+      }),
+      'In-progress drawing tools should keep their existing click routing.',
+    )
+    assert(
+      !shouldViewportDoubleClickRequestConnectedSketchSelection({
+        activeSketchTool: 'dimensionDistance',
+        sketchStatus: 'collectingTargets',
+        target: sketchEntityTarget,
+      }),
+      'Active constraint tools should keep target routing instead of connected selection.',
+    )
+    assert(
+      !shouldViewportDoubleClickRequestConnectedSketchSelection({
+        activeSketchTool: null,
+        sketchStatus: 'idle',
+        target: {
+          kind: 'projectedReferenceGeometry',
+          referenceId: 'ref_projected',
+          geometryId: 'projected_geometry_line',
+          geometryKind: 'lineSegment',
+        },
+      }),
+      'Projected reference geometry should not route to connected local selection.',
+    )
+    assert(
+      !shouldViewportClickEventRequestConnectedSketchSelection({
+        activeSketchTool: null,
+        clickDetail: 1,
+        sketchStatus: 'idle',
+        target: sketchEntityTarget,
+      }),
+      'Ordinary click events should not route to connected selection.',
+    )
+    assert(
+      shouldViewportClickEventRequestConnectedSketchSelection({
+        activeSketchTool: null,
+        clickDetail: 2,
+        sketchStatus: 'idle',
+        target: sketchEntityTarget,
+      }),
+      'The second click event in a double-click sequence should route to connected selection without waiting for a separate dblclick event.',
+    )
+  }
+
   function testViewportClickSelectionRoutingAllowsConstraintsOnly() {
     assert(
       shouldViewportClickRequestSelection(null),
@@ -240,6 +314,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
   testEscapeClearsActiveSketchStyleFocus()
   testEscapeDoesNothingWhenSketchIsIdle()
   testEscapeClearsSelectionWhenNoInteractionHandlesIt()
+  testViewportDoubleClickConnectedSelectionRoutingOnlyUsesIdleSketchEntities()
   testViewportClickSelectionRoutingAllowsConstraintsOnly()
   testViewportCanvasClickIntentClearsOnlyEmptyClicks()
   testViewportSketchGeometryDragCanInterruptIdleDrawingTools()

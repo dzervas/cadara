@@ -154,11 +154,17 @@ function normalizeCommitSketchDefinitionForSketchId(
       },
     })),
     authoringOperations: includeAuthoringOperations
-      ? definition.authoringOperations?.map((operation) => ({
-          ...operation,
-          createdGraph: normalizeOperationGraph(operation.createdGraph),
-          removedGraph: normalizeOperationGraph(operation.removedGraph),
-        }))
+      ? definition.authoringOperations?.map((operation) => {
+          const { createdGraph, removedGraph, ...rest } = operation
+          const normalizedCreatedGraph = normalizeOperationGraph(createdGraph)
+          const normalizedRemovedGraph = normalizeOperationGraph(removedGraph)
+
+          return {
+            ...rest,
+            ...(normalizedCreatedGraph ? { createdGraph: normalizedCreatedGraph } : {}),
+            ...(normalizedRemovedGraph ? { removedGraph: normalizedRemovedGraph } : {}),
+          }
+        })
       : undefined,
   }
 }

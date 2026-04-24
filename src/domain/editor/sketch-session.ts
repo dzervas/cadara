@@ -1949,6 +1949,72 @@ export function isEditableSketchGeometrySelection(
   return getSelectedSketchGeometryIds(session, targets) !== null
 }
 
+export function getConnectedSketchEntitySelectionTargets(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): PrimitiveRef[] {
+  if (target.kind !== 'sketchEntity') {
+    return []
+  }
+
+  const seedEntity = session.definition.entities.find((entity) =>
+    entity.kind !== 'point' && entity.entityId === target.entityId
+  )
+
+  if (!seedEntity || seedEntity.target.sketchId !== target.sketchId) {
+    return []
+  }
+
+  const entityIdsByPointId = new Map<SketchPointId, SketchEntityId[]>()
+  const pointIdsByEntityId = new Map<SketchEntityId, readonly SketchPointId[]>()
+  const targetsByEntityId = new Map<SketchEntityId, Extract<PrimitiveRef, { kind: 'sketchEntity' }>>()
+
+  for (const entity of session.definition.entities) {
+    if (entity.kind === 'point') {
+      continue
+    }
+
+    const pointIds = getEntityPointIds(entity)
+    pointIdsByEntityId.set(entity.entityId, pointIds)
+    targetsByEntityId.set(entity.entityId, entity.target)
+
+    for (const pointId of pointIds) {
+      const entityIds = entityIdsByPointId.get(pointId)
+      if (entityIds) {
+        entityIds.push(entity.entityId)
+      } else {
+        entityIdsByPointId.set(pointId, [entity.entityId])
+      }
+    }
+  }
+
+  const visitedEntityIds = new Set<SketchEntityId>()
+  const pendingEntityIds: SketchEntityId[] = [seedEntity.entityId]
+
+  while (pendingEntityIds.length > 0) {
+    const entityId = pendingEntityIds.pop()
+
+    if (!entityId || visitedEntityIds.has(entityId)) {
+      continue
+    }
+
+    visitedEntityIds.add(entityId)
+
+    for (const pointId of pointIdsByEntityId.get(entityId) ?? []) {
+      for (const connectedEntityId of entityIdsByPointId.get(pointId) ?? []) {
+        if (!visitedEntityIds.has(connectedEntityId)) {
+          pendingEntityIds.push(connectedEntityId)
+        }
+      }
+    }
+  }
+
+  return session.definition.entityIds
+    .filter((entityId) => visitedEntityIds.has(entityId))
+    .map((entityId) => targetsByEntityId.get(entityId))
+    .filter((entity): entity is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => entity !== undefined)
+}
+
 function getSelectedSketchGeometryIds(
   session: SketchSessionState,
   targets: readonly PrimitiveRef[],

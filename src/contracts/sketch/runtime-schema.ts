@@ -683,7 +683,19 @@ const sketchAuthoringOperationSchema = z.object({
   }),
   createdGraph: sketchAuthoringOperationGraphSchema.optional(),
   removedGraph: sketchAuthoringOperationGraphSchema.optional(),
-}).transform((value) => value as SketchAuthoringOperation)
+}).transform(({ createdGraph, removedGraph, ...value }) => {
+  const operation: Omit<SketchAuthoringOperation, 'createdGraph' | 'removedGraph'> & Partial<Pick<SketchAuthoringOperation, 'createdGraph' | 'removedGraph'>> = value
+
+  if (createdGraph) {
+    operation.createdGraph = createdGraph
+  }
+
+  if (removedGraph) {
+    operation.removedGraph = removedGraph
+  }
+
+  return operation as SketchAuthoringOperation
+})
 
 export const sketchDefinitionSchema = z.object({
   schemaVersion: sketchSchemaVersionSchema,

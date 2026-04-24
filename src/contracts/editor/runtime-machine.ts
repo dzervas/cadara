@@ -44,6 +44,7 @@ const editorEventTypes = [
   'viewport.hovered',
   'viewport.hoverCleared',
   'viewport.selectionRequested',
+  'sketch.connectedSelectionRequested',
   'selection.cleared',
   'authoring.reopenRequested',
   'sketch.pointerMoved',

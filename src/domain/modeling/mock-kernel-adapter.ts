@@ -350,11 +350,17 @@ function normalizeSketchDefinitionForSketchId(
         sketchId,
       },
     })),
-    authoringOperations: definition.authoringOperations?.map((operation) => ({
-      ...operation,
-      createdGraph: normalizeOperationGraph(operation.createdGraph),
-      removedGraph: normalizeOperationGraph(operation.removedGraph),
-    })),
+    authoringOperations: definition.authoringOperations?.map((operation) => {
+      const { createdGraph, removedGraph, ...rest } = operation
+      const normalizedCreatedGraph = normalizeOperationGraph(createdGraph)
+      const normalizedRemovedGraph = normalizeOperationGraph(removedGraph)
+
+      return {
+        ...rest,
+        ...(normalizedCreatedGraph ? { createdGraph: normalizedCreatedGraph } : {}),
+        ...(normalizedRemovedGraph ? { removedGraph: normalizedRemovedGraph } : {}),
+      }
+    }),
   }
 }
 
