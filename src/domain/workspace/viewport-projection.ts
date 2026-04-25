@@ -7,19 +7,18 @@ export type ViewportProjectionMode = 'orthographic' | 'perspective'
 export type ViewportCamera = THREE.OrthographicCamera | THREE.PerspectiveCamera
 
 export interface ViewportCameraFrame {
+  projectionMode: ViewportProjectionMode
   position: THREE.Vector3
   target: THREE.Vector3
   up: THREE.Vector3
-  orthographicZoom?: number
+  cameraDistance: number
+  perspectiveDistance: number
+  orthographicZoom: number
 }
 
-export interface ViewportRenderableFitFrame {
-  position: THREE.Vector3
-  target: THREE.Vector3
-  up: THREE.Vector3
+export interface ViewportRenderableFitFrame extends ViewportCameraFrame {
   radius: number
   distance: number
-  orthographicZoom?: number
 }
 
 export const DEFAULT_VIEWPORT_PROJECTION_MODE: ViewportProjectionMode = 'orthographic'
@@ -27,15 +26,18 @@ export const DEFAULT_VIEWPORT_PROJECTION_MODE: ViewportProjectionMode = 'orthogr
 const DEFAULT_CAMERA_POSITION = new THREE.Vector3(14, -16, 28)
 const DEFAULT_CAMERA_TARGET = new THREE.Vector3(0, 0, 4)
 const DEFAULT_CAMERA_UP = new THREE.Vector3(0, 0, 1)
+const DEFAULT_PERSPECTIVE_CAMERA_FOV = 45
 const ORTHOGRAPHIC_FRUSTUM_HEIGHT = 32
 const FIT_PADDING_FACTOR = 1.18
 const MIN_FIT_HALF_EXTENT = 1
 const MIN_FIT_CAMERA_DISTANCE = 8
+const MIN_CAMERA_DISTANCE = 0.0001
+const MIN_ORTHOGRAPHIC_ZOOM = 0.0001
 
 export function createViewportCamera(mode: ViewportProjectionMode, aspect: number): ViewportCamera {
   const camera = mode === 'orthographic'
     ? new THREE.OrthographicCamera(0, 0, 0, 0, 0.1, 1000)
-    : new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
+    : new THREE.PerspectiveCamera(DEFAULT_PERSPECTIVE_CAMERA_FOV, 1, 0.1, 1000)
 
   updateViewportCameraAspect(camera, aspect)
   applyViewportCameraFrameToCamera(camera, getDefaultViewportCameraFrame())
@@ -65,10 +67,16 @@ export function getViewportCameraProjectionMode(camera: ViewportCamera): Viewpor
 }
 
 export function getDefaultViewportCameraFrame(): ViewportCameraFrame {
+  const cameraDistance = DEFAULT_CAMERA_POSITION.distanceTo(DEFAULT_CAMERA_TARGET)
+
   return {
+    projectionMode: DEFAULT_VIEWPORT_PROJECTION_MODE,
     position: DEFAULT_CAMERA_POSITION.clone(),
     target: DEFAULT_CAMERA_TARGET.clone(),
     up: DEFAULT_CAMERA_UP.clone(),
+    cameraDistance,
+    perspectiveDistance: cameraDistance,
+    orthographicZoom: 1,
   }
 }
 
@@ -76,11 +84,12 @@ export function captureViewportCameraFrame(
   camera: ViewportCamera,
   controls: ViewportCameraControls,
 ): ViewportCameraFrame {
-  return {
-    position: camera.position.clone(),
-    target: controls.target.clone(),
-    up: camera.up.clone(),
-  }
+  return createViewportCameraFrame({
+    camera,
+    position: camera.position,
+    target: controls.target,
+    up: camera.up,
+  })
 }
 
 export function applyViewportCameraFrame(
@@ -89,10 +98,6 @@ export function applyViewportCameraFrame(
   frame: ViewportCameraFrame,
 ) {
   applyViewportCameraFrameToCamera(camera, frame)
-  if (camera instanceof THREE.OrthographicCamera && frame.orthographicZoom) {
-    camera.zoom = frame.orthographicZoom
-    camera.updateProjectionMatrix()
-  }
   controls.target.copy(frame.target)
   controls.update()
 }
@@ -101,10 +106,92 @@ export function applyViewportCameraFrameToCamera(
   camera: ViewportCamera,
   frame: ViewportCameraFrame,
 ) {
+  const direction = getViewportCameraFrameDirection(frame)
+  const cameraDistance = camera instanceof THREE.PerspectiveCamera
+    ? frame.perspectiveDistance
+    : frame.cameraDistance
+
   camera.up.copy(frame.up)
-  camera.position.copy(frame.position)
+  camera.position.copy(frame.target).addScaledVector(direction, cameraDistance)
+  if (camera instanceof THREE.OrthographicCamera) {
+    camera.zoom = frame.orthographicZoom
+    camera.updateProjectionMatrix()
+  }
   camera.lookAt(frame.target)
   camera.updateMatrixWorld()
+}
+
+export function cloneViewportCameraFrame(frame: ViewportCameraFrame): ViewportCameraFrame {
+  return {
+    projectionMode: frame.projectionMode,
+    position: frame.position.clone(),
+    target: frame.target.clone(),
+    up: frame.up.clone(),
+    cameraDistance: frame.cameraDistance,
+    perspectiveDistance: frame.perspectiveDistance,
+    orthographicZoom: frame.orthographicZoom,
+  }
+}
+
+export function interpolateViewportCameraFrame(
+  fromFrame: ViewportCameraFrame,
+  toFrame: ViewportCameraFrame,
+  alpha: number,
+): ViewportCameraFrame {
+  const clampedAlpha = THREE.MathUtils.clamp(alpha, 0, 1)
+  const up = fromFrame.up.clone().lerp(toFrame.up, clampedAlpha)
+  if (up.lengthSq() < 1e-8) {
+    up.copy(toFrame.up)
+  }
+  up.normalize()
+
+  return {
+    projectionMode: toFrame.projectionMode,
+    position: fromFrame.position.clone().lerp(toFrame.position, clampedAlpha),
+    target: fromFrame.target.clone().lerp(toFrame.target, clampedAlpha),
+    up,
+    cameraDistance: THREE.MathUtils.lerp(fromFrame.cameraDistance, toFrame.cameraDistance, clampedAlpha),
+    perspectiveDistance: THREE.MathUtils.lerp(fromFrame.perspectiveDistance, toFrame.perspectiveDistance, clampedAlpha),
+    orthographicZoom: THREE.MathUtils.lerp(fromFrame.orthographicZoom, toFrame.orthographicZoom, clampedAlpha),
+  }
+}
+
+export function createViewportCameraFrame(input: {
+  camera: ViewportCamera
+  position: THREE.Vector3
+  target: THREE.Vector3
+  up: THREE.Vector3
+  orthographicZoom?: number
+  perspectiveDistance?: number
+}): ViewportCameraFrame {
+  const position = input.position.clone()
+  const target = input.target.clone()
+  const cameraDistance = Math.max(position.distanceTo(target), MIN_CAMERA_DISTANCE)
+  const projectionMode = getViewportCameraProjectionMode(input.camera)
+  const orthographicZoom = input.orthographicZoom
+    ?? (input.camera instanceof THREE.OrthographicCamera
+      ? Math.max(input.camera.zoom, MIN_ORTHOGRAPHIC_ZOOM)
+      : computeOrthographicZoomForPerspectiveDistance({
+          perspectiveDistance: cameraDistance,
+          fovDegrees: input.camera.fov,
+        }))
+  const perspectiveDistance = input.perspectiveDistance
+    ?? (input.camera instanceof THREE.PerspectiveCamera
+      ? cameraDistance
+      : computePerspectiveDistanceForOrthographicZoom({
+          orthographicZoom,
+          fovDegrees: DEFAULT_PERSPECTIVE_CAMERA_FOV,
+        }))
+
+  return {
+    projectionMode,
+    position,
+    target,
+    up: input.up.clone().normalize(),
+    cameraDistance,
+    perspectiveDistance,
+    orthographicZoom,
+  }
 }
 
 export function applyViewportRenderableFitFrame(input: {
@@ -122,7 +209,7 @@ export function applyViewportRenderableFitFrame(input: {
   input.camera.near = 0.1
   input.camera.far = Math.max(1000, frame.distance + frame.radius * 4)
 
-  if (input.camera instanceof THREE.OrthographicCamera && frame.orthographicZoom) {
+  if (input.camera instanceof THREE.OrthographicCamera) {
     input.camera.zoom = frame.orthographicZoom
   }
 
@@ -179,18 +266,23 @@ export function computeViewportRenderableFitFrame(input: {
     const halfFrustumHeight = Math.max((input.camera.top - input.camera.bottom) / 2, MIN_FIT_HALF_EXTENT)
     const orthographicZoom = Math.max(
       Math.min(halfFrustumWidth / halfWidth, halfFrustumHeight / halfHeight),
-      0.0001,
+      MIN_ORTHOGRAPHIC_ZOOM,
     )
     const distance = Math.max(input.camera.position.distanceTo(input.controls.target), radius * 2, MIN_FIT_CAMERA_DISTANCE)
 
-    return {
-      target,
-      position: target.clone().addScaledVector(direction, distance),
-      up: input.camera.up.clone(),
-      radius,
-      distance,
-      orthographicZoom,
-    }
+    return Object.assign(
+      createViewportCameraFrame({
+        camera: input.camera,
+        target,
+        position: target.clone().addScaledVector(direction, distance),
+        up: input.camera.up,
+        orthographicZoom,
+      }),
+      {
+        radius,
+        distance,
+      },
+    )
   }
 
   const fovRadians = THREE.MathUtils.degToRad(input.camera.fov)
@@ -199,13 +291,52 @@ export function computeViewportRenderableFitFrame(input: {
   const fitWidthDistance = halfWidth / (Math.tan(fovRadians / 2) * safeAspect)
   const distance = Math.max(fitHeightDistance, fitWidthDistance, radius * 2, MIN_FIT_CAMERA_DISTANCE)
 
-  return {
-    target,
-    position: target.clone().addScaledVector(direction, distance),
-    up: input.camera.up.clone(),
-    radius,
-    distance,
+  return Object.assign(
+    createViewportCameraFrame({
+      camera: input.camera,
+      target,
+      position: target.clone().addScaledVector(direction, distance),
+      up: input.camera.up,
+    }),
+    {
+      radius,
+      distance,
+    },
+  )
+}
+
+function getViewportCameraFrameDirection(frame: ViewportCameraFrame) {
+  const direction = frame.position.clone().sub(frame.target)
+
+  if (direction.lengthSq() < 1e-8) {
+    return DEFAULT_CAMERA_POSITION.clone().sub(DEFAULT_CAMERA_TARGET).normalize()
   }
+
+  return direction.normalize()
+}
+
+function computeOrthographicZoomForPerspectiveDistance(input: {
+  perspectiveDistance: number
+  fovDegrees: number
+}) {
+  const visibleHeight = 2 * Math.max(input.perspectiveDistance, MIN_CAMERA_DISTANCE) * Math.tan(
+    THREE.MathUtils.degToRad(input.fovDegrees) / 2,
+  )
+
+  return Math.max(ORTHOGRAPHIC_FRUSTUM_HEIGHT / Math.max(visibleHeight, MIN_CAMERA_DISTANCE), MIN_ORTHOGRAPHIC_ZOOM)
+}
+
+function computePerspectiveDistanceForOrthographicZoom(input: {
+  orthographicZoom: number
+  fovDegrees: number
+}) {
+  const safeZoom = Math.max(input.orthographicZoom, MIN_ORTHOGRAPHIC_ZOOM)
+  const visibleHeight = ORTHOGRAPHIC_FRUSTUM_HEIGHT / safeZoom
+
+  return Math.max(
+    visibleHeight / (2 * Math.tan(THREE.MathUtils.degToRad(input.fovDegrees) / 2)),
+    MIN_CAMERA_DISTANCE,
+  )
 }
 
 function collectBodyRenderablePoints(renderables: readonly RenderableEntityRecord[]) {

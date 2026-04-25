@@ -27,6 +27,11 @@ import {
 } from '@/components/cad/sketch-viewport-feedback-model'
 import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import {
+  requestViewCubeCameraTransition,
+  resolveSketchCameraTransition,
+  type SketchCameraTransitionState,
+} from '@/components/cad/three-cad-viewport-camera-transitions'
+import {
   type PrimitiveRef,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
@@ -66,7 +71,7 @@ import {
   type PickCandidate,
   updateWorkspaceHighlight,
 } from '@/domain/workspace/render-picking'
-import { applySketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
+import { createViewportCameraTransitionController } from '@/domain/workspace/viewport-camera-transition'
 import {
   getViewportCanvasClickIntent,
   shouldViewportClickEventRequestConnectedSketchSelection,
@@ -80,6 +85,7 @@ import {
   applyViewportCameraFrame,
   applyViewportCameraFrameToCamera,
   captureViewportCameraFrame,
+  cloneViewportCameraFrame,
   createViewportCamera,
   getDefaultViewportCameraFrame,
   updateViewportCameraAspect,
@@ -96,7 +102,6 @@ import {
   type ViewNavigationCornerPresetId,
   type ViewNavigationFacePresetId,
   type ViewNavigationPresetId,
-  snapCameraToPreset,
 } from '@/domain/workspace/view-navigation'
 import {
   VIEW_CUBE_CORNER_TARGETS,
@@ -227,8 +232,12 @@ export function ThreeCadViewport({
   const bindingsSceneKeyRef = useRef<string | null>(null)
   const hoverRef = useRef(onHover)
   const hoverTargetRef = useRef(hoverTarget)
-  const sketchCameraSessionTokenRef = useRef<string | null>(null)
-  const partCameraFrameRef = useRef<ViewportCameraFrame | null>(null)
+  const cameraTransitionControllerRef = useRef(createViewportCameraTransitionController())
+  const projectionModeRef = useRef<ViewportProjectionMode>(DEFAULT_VIEWPORT_PROJECTION_MODE)
+  const sketchCameraStateRef = useRef<SketchCameraTransitionState>({
+    activeSessionToken: null,
+    preSketchFrame: null,
+  })
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
   const lastFitViewRequestIdRef = useRef(fitViewRequestId)
   const pendingFitViewRequestIdRef = useRef<number | null>(null)
@@ -254,6 +263,31 @@ export function ThreeCadViewport({
   const selectionRef = useRef(selection)
   const renderablesRef = useRef(renderables)
   const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables)
+  const requestCameraTransition = useCallback((
+    targetFrame: ViewportCameraFrame,
+    fromFrame?: ViewportCameraFrame,
+  ) => {
+    const camera = cameraRef.current
+    const controls = controlsRef.current
+    const transitionStartFrame = fromFrame ?? (camera && controls
+      ? captureViewportCameraFrame(camera, controls)
+      : null)
+
+    if (!transitionStartFrame) {
+      return
+    }
+
+    cameraTransitionControllerRef.current.start({
+      fromFrame: transitionStartFrame,
+      toFrame: targetFrame,
+    })
+
+    if (projectionModeRef.current !== targetFrame.projectionMode) {
+      pendingProjectionFrameRef.current = cloneViewportCameraFrame(transitionStartFrame)
+      projectionModeRef.current = targetFrame.projectionMode
+      setProjectionMode(targetFrame.projectionMode)
+    }
+  }, [])
   const handleControlsRef = useCallback((controls: unknown) => {
     const nextControls = controls as ViewportCameraControls | null
 
@@ -286,10 +320,12 @@ export function ThreeCadViewport({
       return
     }
 
+    cameraTransitionControllerRef.current.cancel()
     if (cameraRef.current && controlsRef.current) {
       pendingProjectionFrameRef.current = captureViewportCameraFrame(cameraRef.current, controlsRef.current)
     }
 
+    projectionModeRef.current = nextMode
     setProjectionMode(nextMode)
   }, [projectionMode])
   const scheduleSketchGeometryDragMove = useCallback((point: readonly [number, number]) => {
@@ -364,6 +400,10 @@ export function ThreeCadViewport({
   }, [bvhSceneKey, renderables, sketchDisplayRenderables])
 
   useEffect(() => {
+    projectionModeRef.current = projectionMode
+  }, [projectionMode])
+
+  useEffect(() => {
     if (lastFitViewRequestIdRef.current === fitViewRequestId) {
       return
     }
@@ -383,6 +423,7 @@ export function ThreeCadViewport({
       return
     }
 
+    cameraTransitionControllerRef.current.cancel()
     const applied = applyViewportRenderableFitFrame({
       camera,
       controls,
@@ -509,7 +550,12 @@ export function ThreeCadViewport({
         return
       }
 
-      snapView(presetId, cameraRef.current, controlsRef.current)
+      requestViewCubeCameraTransition({
+        presetId,
+        camera: cameraRef.current,
+        controls: controlsRef.current,
+        requestTransition: requestCameraTransition,
+      })
     }
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -598,7 +644,7 @@ export function ThreeCadViewport({
       renderer.dispose()
       cubeElement.removeChild(renderer.domElement)
     }
-  }, [controlsReadyVersion])
+  }, [controlsReadyVersion, requestCameraTransition])
 
   useLayoutEffect(() => {
     bindingsRef.current = collectBindings(pickRootRef.current)
@@ -618,36 +664,23 @@ export function ThreeCadViewport({
       return
     }
 
-    if (!sketchSession) {
-      if (partCameraFrameRef.current) {
-        applyViewportCameraFrame(camera, controls, partCameraFrameRef.current)
-        partCameraFrameRef.current = null
-      }
-
-      sketchCameraSessionTokenRef.current = null
-      return
-    }
-
-    const nextToken = getSketchSessionCameraToken(sketchSession)
-
-    if (sketchCameraSessionTokenRef.current === nextToken) {
-      return
-    }
-
-    if (partCameraFrameRef.current === null) {
-      partCameraFrameRef.current = captureViewportCameraFrame(camera, controls)
-    }
-
-    applySketchCameraFrame({
+    const nextTransition = resolveSketchCameraTransition({
       camera,
       controls,
-      plane: sketchSession.plane,
-      renderables: sketchDisplayRenderables,
+      sketchSession,
+      sketchDisplayRenderables,
+      state: sketchCameraStateRef.current,
     })
 
-    sketchCameraSessionTokenRef.current = nextToken
+    sketchCameraStateRef.current = nextTransition.state
+
+    if (!nextTransition.targetFrame) {
+      return
+    }
+
+    requestCameraTransition(nextTransition.targetFrame, nextTransition.fromFrame)
     window.requestAnimationFrame(updateSketchFeedbackProjections)
-  }, [sketchDisplayRenderables, sketchSession, updateSketchFeedbackProjections])
+  }, [requestCameraTransition, sketchDisplayRenderables, sketchSession, updateSketchFeedbackProjections])
 
   useEffect(() => {
     const controls = controlsRef.current
@@ -1150,6 +1183,11 @@ export function ThreeCadViewport({
           pendingFrameRef={pendingProjectionFrameRef}
           controlsReadyVersion={controlsReadyVersion}
         />
+        <ViewportCameraTransitionDriver
+          cameraRef={cameraRef}
+          controlsRef={controlsRef}
+          transitionControllerRef={cameraTransitionControllerRef}
+        />
         <ambientLight color={0xd7dfe9} intensity={0.56} />
         <hemisphereLight args={[0xe8edf5, 0x253447, 0.62]} position={[0, 0, 1]} />
         <directionalLight args={[0xf5eee2, 1.45]} position={[14, -16, 28]} />
@@ -1192,6 +1230,7 @@ export function ThreeCadViewport({
         <OrbitControls
           ref={handleControlsRef}
           makeDefault
+          onStart={() => cameraTransitionControllerRef.current.cancel()}
           target={[0, 0, 4]}
           enableDamping
           dampingFactor={0.08}
@@ -1318,6 +1357,35 @@ function ViewportProjectionCameraController({
     applyViewportCameraFrame(camera, controls, frame)
     pendingFrameRef.current = null
   }, [cameraRef, controlsReadyVersion, controlsRef, pendingFrameRef])
+
+  return null
+}
+
+function ViewportCameraTransitionDriver({
+  cameraRef,
+  controlsRef,
+  transitionControllerRef,
+}: {
+  cameraRef: RefObject<ViewportCamera | null>
+  controlsRef: RefObject<ViewportCameraControls | null>
+  transitionControllerRef: RefObject<ReturnType<typeof createViewportCameraTransitionController>>
+}) {
+  useFrame((_, delta) => {
+    const camera = cameraRef.current
+    const controls = controlsRef.current
+
+    if (!camera || !controls) {
+      return
+    }
+
+    const transitionStep = transitionControllerRef.current.advance(delta * 1000)
+
+    if (!transitionStep) {
+      return
+    }
+
+    applyViewportCameraFrame(camera, controls, transitionStep.frame)
+  })
 
   return null
 }
@@ -2408,23 +2476,6 @@ function SketchDisplayMarkerNode({
   )
 }
 
-
-function snapView(
-  presetId: ViewNavigationPresetId,
-  camera: ViewportCamera | null,
-  controls: ViewportCameraControls | null,
-) {
-  if (!camera || !controls) {
-    return
-  }
-
-  snapCameraToPreset({
-    camera,
-    controls,
-    presetId,
-  })
-}
-
 function collectProjectedVertexCandidates({
   clientX,
   clientY,
@@ -2604,16 +2655,4 @@ function getAnnotationHighlightTargets(
   })
 
   return activeAnnotations.flatMap((annotation) => annotation.affectedGeometryRefs)
-}
-
-function getSketchSessionCameraToken(
-  session: NonNullable<ReturnType<typeof useEditorState>['state']['sketchSession']>,
-) {
-  const support = session.plane.support
-  const supportToken = support.kind === 'construction'
-    ? support.constructionId
-    : `${support.bodyId}:${support.faceId}`
-  const origin = session.plane.frame.origin.join(',')
-
-  return `${session.sketchId ?? 'draft'}:${support.kind}:${supportToken}:${origin}`
 }

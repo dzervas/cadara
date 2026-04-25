@@ -1,6 +1,11 @@
 import * as THREE from 'three'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
-import type { ViewportCamera } from '@/domain/workspace/viewport-projection'
+import {
+  applyViewportCameraFrame,
+  createViewportCameraFrame,
+  type ViewportCamera,
+  type ViewportCameraFrame,
+} from '@/domain/workspace/viewport-projection'
 
 export type ViewNavigationFacePresetId =
   | 'front'
@@ -67,12 +72,15 @@ export function snapCameraToVector({
   controls,
   direction,
 }: SnapCameraToVectorOptions) {
-  const normalizedDirection = direction.clone().normalize()
-  const distance = Math.max(camera.position.distanceTo(controls.target), 12)
-
-  camera.position.copy(controls.target.clone().add(normalizedDirection.multiplyScalar(distance)))
-  camera.lookAt(controls.target)
-  controls.update()
+  applyViewportCameraFrame(
+    camera,
+    controls,
+    createViewNavigationCameraFrame({
+      camera,
+      controls,
+      direction,
+    }),
+  )
 }
 
 export function snapCameraToPreset({
@@ -80,9 +88,29 @@ export function snapCameraToPreset({
   controls,
   presetId,
 }: SnapCameraToPresetOptions) {
-  snapCameraToVector({
+  applyViewportCameraFrame(
     camera,
     controls,
-    direction: getViewNavigationDirection(presetId),
+    createViewNavigationCameraFrame({
+      camera,
+      controls,
+      direction: getViewNavigationDirection(presetId),
+    }),
+  )
+}
+
+export function createViewNavigationCameraFrame({
+  camera,
+  controls,
+  direction,
+}: SnapCameraToVectorOptions): ViewportCameraFrame {
+  const normalizedDirection = direction.clone().normalize()
+  const distance = Math.max(camera.position.distanceTo(controls.target), 12)
+
+  return createViewportCameraFrame({
+    camera,
+    position: controls.target.clone().add(normalizedDirection.multiplyScalar(distance)),
+    target: controls.target,
+    up: camera.up,
   })
 }

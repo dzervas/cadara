@@ -21,19 +21,19 @@ The system SHALL render a centered orientation label for each major navigation f
 - **AND** the labels identify the corresponding principal view direction
 
 ### Requirement: Face buttons SHALL snap the camera to principal views
-The system SHALL treat each major face as a clickable navigation target that snaps the active viewport camera to the corresponding principal orientation while preserving the shared orbit-control camera ownership.
+The system SHALL treat each major face as a clickable navigation target that animates the active viewport camera to the corresponding principal orientation while preserving the shared orbit-control camera ownership.
 
 #### Scenario: User clicks a labeled face
 - **WHEN** the user clicks the `Front`, `Back`, `Left`, `Right`, `Top`, or `Bottom` face target on the navigation cube
-- **THEN** the viewport camera snaps to the corresponding principal view direction
+- **THEN** the viewport camera animates from its current pose to the corresponding principal view direction without an instantaneous jump
 - **AND** the camera update is routed through the shared viewport navigation control path
 
 ### Requirement: Corner buttons SHALL snap the camera to isometric views
-The system SHALL expose clickable corner targets on the navigation cube, and each corner target SHALL snap the camera to the corresponding cube-corner isometric orientation.
+The system SHALL expose clickable corner targets on the navigation cube, and each corner target SHALL animate the active viewport camera to the corresponding cube-corner isometric orientation.
 
 #### Scenario: User clicks a corner target
 - **WHEN** the user clicks a corner target on the navigation cube
-- **THEN** the viewport camera snaps to the isometric orientation associated with that cube corner
+- **THEN** the viewport camera animates to the isometric orientation associated with that cube corner without an instantaneous jump
 - **AND** the corner target behaves as a button even though the cube body remains transparent
 
 ### Requirement: Projection selector SHALL be colocated with the view cube
@@ -69,7 +69,7 @@ The viewport SHALL default to orthographic camera projection and SHALL allow the
 - **AND** the viewport preserves the current orbit target, camera direction, and camera up vector
 
 #### Scenario: View cube navigation preserves active projection
-- **WHEN** the user snaps the camera with a view cube face or corner target
-- **THEN** the viewport camera snaps to the requested view direction
-- **AND** the active projection mode remains unchanged
+- **WHEN** the user animates the camera with a view cube face or corner target
+- **THEN** the viewport reaches the requested view direction without changing the active projection mode
+- **AND** subsequent orbit, pan, and view-cube navigation continue using that same projection
 

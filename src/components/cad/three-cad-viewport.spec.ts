@@ -10,14 +10,28 @@ import {
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
+import {
+  requestViewCubeCameraTransition,
+  resolveSketchCameraTransition,
+} from '@/components/cad/three-cad-viewport-camera-transitions'
 import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import { bindRenderableObject } from '@/domain/workspace/render-picking'
+import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import * as THREE from 'three'
 
 test('src/components/cad/three-cad-viewport.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
+    }
+  }
+
+  function createControls(target: THREE.Vector3): ViewportCameraControls {
+    return {
+      target,
+      update: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
     }
   }
 
@@ -252,6 +266,100 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     )
   }
 
+  function testViewCubeRequestsAnimatedTransition() {
+    const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000)
+    camera.position.set(12, -12, 12)
+    const controls = createControls(new THREE.Vector3(1, 2, 3))
+    const requests: Array<{ fromFrameProjectionMode: string, targetFrameProjectionMode: string }> = []
+
+    const result = requestViewCubeCameraTransition({
+      presetId: 'front',
+      camera,
+      controls,
+      requestTransition: (targetFrame, fromFrame) => {
+        requests.push({
+          fromFrameProjectionMode: fromFrame?.projectionMode ?? 'unknown',
+          targetFrameProjectionMode: targetFrame.projectionMode,
+        })
+      },
+    })
+
+    assert(result !== null, 'View cube clicks should produce a camera transition request when the viewport is ready.')
+    assert(requests.length === 1, 'View cube navigation should request one shared animated transition.')
+    assert(
+      requests[0]?.fromFrameProjectionMode === 'orthographic' && requests[0]?.targetFrameProjectionMode === 'orthographic',
+      'View cube navigation should preserve the active projection when requesting the transition.',
+    )
+  }
+
+  function testSketchEntryRequestsAnimatedFraming() {
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
+    camera.position.set(14, -16, 28)
+    const controls = createControls(new THREE.Vector3(0, 0, 4))
+    const sketchSession = {
+      sketchId: 'sketch_1',
+      plane: {
+        support: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        key: 'xy',
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+      },
+    } as Parameters<typeof resolveSketchCameraTransition>[0]['sketchSession']
+
+    const resolution = resolveSketchCameraTransition({
+      camera,
+      controls,
+      sketchSession,
+      sketchDisplayRenderables: [],
+      state: {
+        activeSessionToken: null,
+        preSketchFrame: null,
+      },
+    })
+
+    assert(resolution.targetFrame !== null, 'Entering sketch mode should request a transition into the sketch frame.')
+    assert(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch entry should capture the pre-entry camera pose.')
+    assert(resolution.state.activeSessionToken !== null, 'Sketch entry should scope the saved camera pose to the active session token.')
+  }
+
+  function testSketchExitRequestsRestoreTransition() {
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
+    camera.position.set(8, 8, 8)
+    const controls = createControls(new THREE.Vector3(0, 0, 0))
+
+    const resolution = resolveSketchCameraTransition({
+      camera,
+      controls,
+      sketchSession: null,
+      sketchDisplayRenderables: [],
+      state: {
+        activeSessionToken: 'sketch_1:construction:construction_plane-xy:0,0,0',
+        preSketchFrame: {
+          projectionMode: 'orthographic',
+          position: new THREE.Vector3(20, -20, 20),
+          target: new THREE.Vector3(0, 0, 4),
+          up: new THREE.Vector3(0, 0, 1),
+          cameraDistance: Math.sqrt((20 ** 2) * 3),
+          perspectiveDistance: 18,
+          orthographicZoom: 1.4,
+        },
+      },
+    })
+
+    assert(resolution.targetFrame?.projectionMode === 'orthographic', 'Sketch exit should restore the captured pre-entry projection.')
+    assert(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch exit should animate back from the current sketch camera pose.')
+    assert(
+      resolution.state.activeSessionToken === null && resolution.state.preSketchFrame === null,
+      'Sketch exit should clear the active session-scoped camera snapshot after requesting restoration.',
+    )
+  }
+
   testDragMovesCoalesceToLatestPoint()
   testDragMoveCancellationDropsPendingFrame()
   testSketchBvhKeyIgnoresPositionalPolylineUpdates()
@@ -260,4 +368,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
   testViewCubeResizeUpdatesCanvasCssSize()
   testWorkspaceScaffoldWiresDoNotWriteDepth()
   testDimensionAnnotationDragPatchTargetsDurablePlacement()
+  testViewCubeRequestsAnimatedTransition()
+  testSketchEntryRequestsAnimatedFraming()
+  testSketchExitRequestsRestoreTransition()
 })

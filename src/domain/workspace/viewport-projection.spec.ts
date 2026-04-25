@@ -72,16 +72,39 @@ test('src/domain/workspace/viewport-projection.spec.ts', () => {
     const controls = createControls(new THREE.Vector3(-2, 3, 5))
 
     orthographicCamera.position.set(6, -7, 18)
+    orthographicCamera.zoom = 2.5
+    orthographicCamera.updateProjectionMatrix()
     orthographicCamera.up.set(0, 0, 1)
     orthographicCamera.lookAt(controls.target)
 
     const frame = captureViewportCameraFrame(orthographicCamera, controls)
     applyViewportCameraFrame(perspectiveCamera, controls, frame)
+    const expectedPerspectiveDistance = (32 / 2.5) / (2 * Math.tan(THREE.MathUtils.degToRad(45) / 2))
 
     assert.equal(getViewportCameraProjectionMode(perspectiveCamera), 'perspective')
-    approxVector(perspectiveCamera.position, new THREE.Vector3(6, -7, 18))
     approxVector(controls.target, new THREE.Vector3(-2, 3, 5))
     approxVector(perspectiveCamera.up, new THREE.Vector3(0, 0, 1))
+    assert(frame.orthographicZoom === 2.5, 'Captured orthographic frames should preserve zoom for later restoration.')
+    approx(perspectiveCamera.position.distanceTo(controls.target), expectedPerspectiveDistance)
+  }
+
+  {
+    const perspectiveCamera = createViewportCamera('perspective', 16 / 9)
+    const orthographicCamera = createViewportCamera('orthographic', 16 / 9)
+    const controls = createControls(new THREE.Vector3(4, -1, 2))
+
+    perspectiveCamera.position.set(12, -9, 11)
+    perspectiveCamera.lookAt(controls.target)
+
+    const frame = captureViewportCameraFrame(perspectiveCamera, controls)
+    applyViewportCameraFrame(orthographicCamera, controls, frame)
+    const expectedOrthographicZoom = 32 / (
+      2 * perspectiveCamera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(45) / 2)
+    )
+
+    assert.equal(frame.projectionMode, 'perspective')
+    approx(orthographicCamera.zoom, expectedOrthographicZoom)
+    approxVector(controls.target, new THREE.Vector3(4, -1, 2))
   }
 
   {
@@ -89,6 +112,8 @@ test('src/domain/workspace/viewport-projection.spec.ts', () => {
 
     approxVector(frame.target, new THREE.Vector3(0, 0, 4))
     approxVector(frame.up, new THREE.Vector3(0, 0, 1))
+    assert.equal(frame.projectionMode, 'orthographic')
+    assert.equal(frame.orthographicZoom, 1)
   }
 
   {
@@ -106,10 +131,7 @@ test('src/domain/workspace/viewport-projection.spec.ts', () => {
 
     assert(frame, 'Body renderable fit should produce a camera frame.')
     approxVector(frame.target, new THREE.Vector3(1500, 2500, 480))
-    assert(
-      frame.orthographicZoom && frame.orthographicZoom < 1,
-      'Large off-origin imported bodies should reduce orthographic zoom to fit.',
-    )
+    assert(frame.orthographicZoom < 1, 'Large off-origin imported bodies should reduce orthographic zoom to fit.')
 
     const applied = applyViewportRenderableFitFrame({ camera, controls, renderables })
     assert(applied, 'Applying a body renderable fit should report success.')

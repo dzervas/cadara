@@ -2,20 +2,16 @@ import * as THREE from 'three'
 
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
-import type { ViewportCamera } from '@/domain/workspace/viewport-projection'
+import {
+  createViewportCameraFrame,
+  type ViewportCamera,
+  type ViewportCameraFrame,
+} from '@/domain/workspace/viewport-projection'
 
 const DEFAULT_HALF_EXTENT = 10
 const MIN_HALF_EXTENT = 1
 const FRAME_PADDING_FACTOR = 1.15
 const MIN_CAMERA_DISTANCE = 8
-
-interface SketchCameraFrame {
-  target: THREE.Vector3
-  position: THREE.Vector3
-  up: THREE.Vector3
-  orthographicZoom?: number
-}
 
 interface ComputeSketchCameraFrameInput {
   camera: ViewportCamera
@@ -23,38 +19,11 @@ interface ComputeSketchCameraFrameInput {
   renderables: SketchSessionDisplayRenderable[]
 }
 
-interface ApplySketchCameraFrameInput extends ComputeSketchCameraFrameInput {
-  controls: ViewportCameraControls
-}
-
-export function applySketchCameraFrame({
-  camera,
-  controls,
-  plane,
-  renderables,
-}: ApplySketchCameraFrameInput) {
-  const frame = computeSketchCameraFrame({
-    camera,
-    plane,
-    renderables,
-  })
-
-  camera.up.copy(frame.up)
-  camera.position.copy(frame.position)
-  if (camera instanceof THREE.OrthographicCamera && frame.orthographicZoom) {
-    camera.zoom = frame.orthographicZoom
-    camera.updateProjectionMatrix()
-  }
-  controls.target.copy(frame.target)
-  camera.lookAt(frame.target)
-  controls.update()
-}
-
 export function computeSketchCameraFrame({
   camera,
   plane,
   renderables,
-}: ComputeSketchCameraFrameInput): SketchCameraFrame {
+}: ComputeSketchCameraFrameInput): ViewportCameraFrame {
   const origin = toVector3(plane.frame.origin)
   const xAxis = toVector3(plane.frame.xAxis).normalize()
   const yAxis = toVector3(plane.frame.yAxis).normalize()
@@ -109,12 +78,13 @@ export function computeSketchCameraFrame({
     )
     const distance = Math.max(camera.position.distanceTo(target), MIN_CAMERA_DISTANCE)
 
-    return {
+    return createViewportCameraFrame({
+      camera,
       target,
       position: target.clone().addScaledVector(normal, distance),
       up: yAxis,
       orthographicZoom,
-    }
+    })
   }
 
   const fovRadians = THREE.MathUtils.degToRad(camera.fov)
@@ -125,11 +95,12 @@ export function computeSketchCameraFrame({
 
   const position = target.clone().addScaledVector(normal, distance)
 
-  return {
+  return createViewportCameraFrame({
+    camera,
     target,
     position,
     up: yAxis,
-  }
+  })
 }
 
 function collectRenderableWorldPoints(renderables: SketchSessionDisplayRenderable[]): THREE.Vector3[] {

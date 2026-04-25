@@ -1864,18 +1864,29 @@ function readCadaraBrepImportBodies(
 
   const oc = context.oc
   return asset.data.bodies.map((body) => {
+    const meshExportFallback = createCadaraBrepBodyMeshExportFallback(body)
     const solid = measureStepImportStage(
       context,
       ownerFeatureId,
       'occReadRestore',
-      () => restoreCadaraBrepBodyToSolid(oc, body),
+      () => {
+        try {
+          return restoreCadaraBrepBodyToSolid(oc, body)
+        } catch (error) {
+          if (isStructuredStepImportRestoreError(error) || meshExportFallback.length === 0) {
+            throw error
+          }
+
+          return restoreCadaraBrepBodyMeshFallbackToSolid(oc, body.bodyKey, meshExportFallback)
+        }
+      },
     )
     return {
       bodyKey: body.bodyKey,
       solidKey: body.solidKey,
       label: body.label,
       solid,
-      meshExportFallback: createCadaraBrepBodyMeshExportFallback(body),
+      meshExportFallback,
     }
   })
 }
@@ -1898,6 +1909,97 @@ function createCadaraBrepBodyMeshExportFallback(body: CadaraBrepGeometryAssetBod
     }
   }
   return triangles
+}
+
+function isStructuredStepImportRestoreError(error: unknown) {
+  return error instanceof Error
+    && 'code' in error
+    && typeof (error as Error & { code?: unknown }).code === 'string'
+    && (error as Error & { code: string }).code.startsWith('step-import-')
+}
+
+function restoreCadaraBrepBodyMeshFallbackToSolid(
+  oc: OpenCascadeInstance,
+  bodyKey: string,
+  triangles: OccTrackedBody['meshExportFallback'],
+) {
+  const payload = createBakedMeshPayloadFromTriangles(triangles)
+  const analyticCylinder = tryBuildAnalyticCylinderMeshSolid(oc, payload)
+  if (analyticCylinder) {
+    return analyticCylinder.solid
+  }
+
+  const path = createTempCadaraBrepMeshFallbackPath(bodyKey)
+  const shape = new oc.TopoDS_Shape()
+
+  try {
+    oc.FS.writeFile(path, new TextEncoder().encode(
+      bakedMeshGeometryToAsciiStl(payload, `cadara-step-import-${bodyKey}`),
+    ))
+
+    if (!oc.StlAPI.Read(shape, path)) {
+      throw createStepImportErrorCode(
+        'step-import-unsupported-structure',
+        `Cadara B-rep body ${bodyKey} fallback mesh could not be restored.`,
+      )
+    }
+
+    const solids = extractSolidShapes(oc, shape)
+    if (solids.length === 1) {
+      return shouldRunSameDomainMeshUnification(payload)
+        ? unifyMeshSolidFaces(oc, solids[0]!).solid
+        : summarizeMeshSolidWithoutSameDomainUnification(oc, solids[0]!, payload.indices.length).solid
+    }
+
+    if ((shape.ShapeType() as unknown as number) !== (oc.TopAbs_ShapeEnum.TopAbs_SHELL as unknown as number)) {
+      throw createStepImportErrorCode(
+        'step-import-unsupported-structure',
+        `Cadara B-rep body ${bodyKey} fallback mesh did not restore as a closed shell.`,
+      )
+    }
+
+    const solidBuilder = new oc.BRepBuilderAPI_MakeSolid_3(oc.TopoDS.Shell_1(shape))
+    if (!solidBuilder.IsDone()) {
+      throw createStepImportErrorCode(
+        'step-import-unsupported-structure',
+        `Cadara B-rep body ${bodyKey} fallback mesh could not be converted to a solid.`,
+      )
+    }
+
+    const solid = solidBuilder.Solid()
+    return shouldRunSameDomainMeshUnification(payload)
+      ? unifyMeshSolidFaces(oc, solid).solid
+      : summarizeMeshSolidWithoutSameDomainUnification(oc, solid, payload.indices.length).solid
+  } finally {
+    removeTempImportPath(oc, path)
+  }
+}
+
+function createBakedMeshPayloadFromTriangles(
+  triangles: OccTrackedBody['meshExportFallback'],
+): BakedMeshPayloadForOcc {
+  const vertices: MeshPoint[] = []
+  const indices: Array<readonly [number, number, number]> = []
+
+  triangles?.forEach((triangle, triangleIndex) => {
+    const vertexStart = triangleIndex * 3
+    vertices.push(
+      [...triangle[0]] as MeshPoint,
+      [...triangle[1]] as MeshPoint,
+      [...triangle[2]] as MeshPoint,
+    )
+    indices.push([vertexStart, vertexStart + 1, vertexStart + 2] as const)
+  })
+
+  return {
+    schemaVersion: 'baked-mesh-geometry/v1alpha1',
+    vertices,
+    indices,
+  }
+}
+
+function createTempCadaraBrepMeshFallbackPath(bodyKey: string) {
+  return `/cadara-step-import-${bodyKey}-${Date.now()}-${Math.random().toString(36).slice(2)}.stl`
 }
 
 function restoreCadaraBrepBodyToSolid(
@@ -2611,8 +2713,9 @@ function summarizeMeshSolidFaces(
 }
 
 type BakedMeshPayloadForOcc = {
-  vertices: readonly MeshPoint[]
-  indices: ReadonlyArray<readonly [number, number, number]>
+  schemaVersion: 'baked-mesh-geometry/v1alpha1'
+  vertices: MeshPoint[]
+  indices: Array<readonly [number, number, number]>
 }
 
 const MESH_SAME_DOMAIN_UNIFICATION_TRIANGLE_LIMIT = 5_000
