@@ -31,7 +31,173 @@ export interface GeometryAssetProvenance {
 }
 
 export type GeometryAssetPoint3 = readonly [number, number, number]
+export type GeometryAssetPoint2 = readonly [number, number]
 export type GeometryAssetTriangle = readonly [number, number, number]
+export type GeometryAssetParameterRange = readonly [number, number]
+
+export interface CadaraBrepBezierCurve3Record {
+  kind: 'bezier'
+  poles: GeometryAssetPoint3[]
+  weights?: number[]
+  parameterRange: GeometryAssetParameterRange
+}
+
+export interface CadaraBrepBSplineCurve3Record {
+  kind: 'bSpline'
+  degree: number
+  periodic: boolean
+  poles: GeometryAssetPoint3[]
+  weights?: number[]
+  knots: number[]
+  multiplicities: number[]
+  parameterRange: GeometryAssetParameterRange
+}
+
+export interface CadaraBrepBezierCurve2Record {
+  kind: 'bezier'
+  poles: GeometryAssetPoint2[]
+  weights?: number[]
+  parameterRange: GeometryAssetParameterRange
+}
+
+export interface CadaraBrepBSplineCurve2Record {
+  kind: 'bSpline'
+  degree: number
+  periodic: boolean
+  poles: GeometryAssetPoint2[]
+  weights?: number[]
+  knots: number[]
+  multiplicities: number[]
+  parameterRange: GeometryAssetParameterRange
+}
+
+export interface CadaraBrepBezierSurfaceRecord {
+  kind: 'bezier'
+  uPoleCount: number
+  vPoleCount: number
+  poles: GeometryAssetPoint3[]
+  weights?: number[]
+}
+
+export interface CadaraBrepBSplineSurfaceRecord {
+  kind: 'bSpline'
+  uDegree: number
+  vDegree: number
+  uPeriodic: boolean
+  vPeriodic: boolean
+  uPoleCount: number
+  vPoleCount: number
+  poles: GeometryAssetPoint3[]
+  weights?: number[]
+  uKnots: number[]
+  vKnots: number[]
+  uMultiplicities: number[]
+  vMultiplicities: number[]
+}
+
+export interface CadaraBrepSurfaceFrameRecord {
+  origin: GeometryAssetPoint3
+  zDirection: GeometryAssetPoint3
+  xDirection: GeometryAssetPoint3
+}
+
+export type CadaraBrepCurve3Record =
+  | {
+      kind: 'line'
+      origin: GeometryAssetPoint3
+      direction: GeometryAssetPoint3
+      parameterRange: GeometryAssetParameterRange
+    }
+  | {
+      kind: 'circle'
+      center: GeometryAssetPoint3
+      axisDirection: GeometryAssetPoint3
+      xDirection: GeometryAssetPoint3
+      radius: number
+      parameterRange: GeometryAssetParameterRange
+    }
+  | {
+      kind: 'ellipse'
+      center: GeometryAssetPoint3
+      axisDirection: GeometryAssetPoint3
+      xDirection: GeometryAssetPoint3
+      majorRadius: number
+      minorRadius: number
+      parameterRange: GeometryAssetParameterRange
+    }
+  | CadaraBrepBezierCurve3Record
+  | CadaraBrepBSplineCurve3Record
+
+export type CadaraBrepCurve2Record =
+  | {
+      kind: 'line'
+      origin: GeometryAssetPoint2
+      direction: GeometryAssetPoint2
+      parameterRange: GeometryAssetParameterRange
+    }
+  | {
+      kind: 'circle'
+      center: GeometryAssetPoint2
+      xDirection: GeometryAssetPoint2
+      radius: number
+      parameterRange: GeometryAssetParameterRange
+    }
+  | {
+      kind: 'ellipse'
+      center: GeometryAssetPoint2
+      xDirection: GeometryAssetPoint2
+      majorRadius: number
+      minorRadius: number
+      parameterRange: GeometryAssetParameterRange
+    }
+  | {
+      kind: 'polyline'
+      points: GeometryAssetPoint2[]
+      parameterRange: GeometryAssetParameterRange
+    }
+  | CadaraBrepBezierCurve2Record
+  | CadaraBrepBSplineCurve2Record
+
+export type CadaraBrepSurfaceRecord =
+  | {
+      kind: 'plane'
+      frame: CadaraBrepSurfaceFrameRecord
+    }
+  | {
+      kind: 'cylinder'
+      frame: CadaraBrepSurfaceFrameRecord
+      radius: number
+    }
+  | {
+      kind: 'cone'
+      frame: CadaraBrepSurfaceFrameRecord
+      radius: number
+      semiAngleRadians: number
+    }
+  | {
+      kind: 'sphere'
+      frame: CadaraBrepSurfaceFrameRecord
+      radius: number
+    }
+  | {
+      kind: 'torus'
+      frame: CadaraBrepSurfaceFrameRecord
+      majorRadius: number
+      minorRadius: number
+    }
+  | {
+      kind: 'surfaceOfRevolution'
+      axisOrigin: GeometryAssetPoint3
+      axisDirection: GeometryAssetPoint3
+      basisCurve: CadaraBrepCurve3Record
+    }
+  | {
+      kind: 'surfaceOfLinearExtrusion'
+      direction: GeometryAssetPoint3
+      basisCurve: CadaraBrepCurve3Record
+    }
+  | CadaraBrepBezierSurfaceRecord
+  | CadaraBrepBSplineSurfaceRecord
 
 export interface CadaraBrepVertexRecord {
   vertexKey: string
@@ -41,15 +207,14 @@ export interface CadaraBrepVertexRecord {
 export interface CadaraBrepEdgeRecord {
   edgeKey: string
   vertices: readonly [number, number]
-  curve: {
-    kind: 'lineSegment'
-  }
+  curve: CadaraBrepCurve3Record
 }
 
 export interface CadaraBrepCoedgeRecord {
   coedgeKey: string
   edgeIndex: number
   reversed: boolean
+  curve2d: CadaraBrepCurve2Record
 }
 
 export interface CadaraBrepLoopRecord {
@@ -59,12 +224,9 @@ export interface CadaraBrepLoopRecord {
 
 export interface CadaraBrepFaceRecord {
   faceKey: string
-  outerLoopIndex: number
-  surface: {
-    kind: 'plane'
-    origin: GeometryAssetPoint3
-    normal: GeometryAssetPoint3
-  }
+  loopIndices: number[]
+  surface: CadaraBrepSurfaceRecord
+  meshVertices: GeometryAssetPoint3[]
   triangles: GeometryAssetTriangle[]
 }
 
@@ -298,10 +460,19 @@ export function createCadaraFacetedBrepTopologyFromTriangles(
     }
 
     const index = edges.length
+    const firstPoint = vertices[low]!.point
+    const secondPoint = vertices[high]!.point
+    const direction = normalizeVector(subtractPoints(secondPoint, firstPoint))
+    const parameterRange: GeometryAssetParameterRange = [0, distanceBetweenPoints(firstPoint, secondPoint)]
     edges.push({
       edgeKey: `${keyPrefix}_edge_${index + 1}`,
       vertices: [low, high],
-      curve: { kind: 'lineSegment' },
+      curve: {
+        kind: 'line',
+        origin: firstPoint,
+        direction,
+        parameterRange,
+      },
     })
     edgeIndexByKey.set(key, index)
     return { edgeIndex: index, reversed: first !== low }
@@ -317,6 +488,8 @@ export function createCadaraFacetedBrepTopologyFromTriangles(
 
     const faceIndex = faces.length
     const coedgeIndices: number[] = []
+    const planeFrame = createPlaneFrameFromTriangle(points, normal)
+    const meshVertices = points.map((point) => normalizePoint(point))
     const edgePairs = [
       [triangleVertices[0], triangleVertices[1]],
       [triangleVertices[1], triangleVertices[2]],
@@ -325,11 +498,23 @@ export function createCadaraFacetedBrepTopologyFromTriangles(
 
     for (const [first, second] of edgePairs) {
       const edge = internEdge(first, second)
+      const startPoint = vertices[first]!.point
+      const endPoint = vertices[second]!.point
+      const startUv = projectPointToPlaneFrame(startPoint, planeFrame)
+      const endUv = projectPointToPlaneFrame(endPoint, planeFrame)
+      const uvDirection = normalizePoint2(subtractPoints2(endUv, startUv))
+      const uvLength = distanceBetweenPoints2(startUv, endUv)
       const coedgeIndex = coedges.length
       coedges.push({
         coedgeKey: `${keyPrefix}_coedge_${coedgeIndex + 1}`,
         edgeIndex: edge.edgeIndex,
         reversed: edge.reversed,
+        curve2d: {
+          kind: 'line',
+          origin: startUv,
+          direction: uvDirection,
+          parameterRange: [0, uvLength],
+        },
       })
       coedgeIndices.push(coedgeIndex)
     }
@@ -341,13 +526,13 @@ export function createCadaraFacetedBrepTopologyFromTriangles(
     })
     faces.push({
       faceKey: `${keyPrefix}_face_${faceIndex + 1}`,
-      outerLoopIndex: loopIndex,
+      loopIndices: [loopIndex],
       surface: {
         kind: 'plane',
-        origin: points[0],
-        normal,
+        frame: planeFrame,
       },
-      triangles: [triangleVertices],
+      meshVertices,
+      triangles: [[0, 1, 2]],
     })
   }
 
@@ -385,6 +570,13 @@ function normalizePoint(point: GeometryAssetPoint3): GeometryAssetPoint3 {
   ]
 }
 
+function normalizePoint2(point: GeometryAssetPoint2): GeometryAssetPoint2 {
+  return [
+    normalizeCoordinate(point[0]),
+    normalizeCoordinate(point[1]),
+  ]
+}
+
 function normalizeCoordinate(value: number) {
   return Object.is(value, -0) ? 0 : Number(value.toFixed(12))
 }
@@ -411,10 +603,70 @@ function subtractPoints(left: GeometryAssetPoint3, right: GeometryAssetPoint3): 
   return [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
 }
 
+function subtractPoints2(left: GeometryAssetPoint2, right: GeometryAssetPoint2): GeometryAssetPoint2 {
+  return [left[0] - right[0], left[1] - right[1]]
+}
+
 function crossPoints(left: GeometryAssetPoint3, right: GeometryAssetPoint3): GeometryAssetPoint3 {
   return [
     left[1] * right[2] - left[2] * right[1],
     left[2] * right[0] - left[0] * right[2],
     left[0] * right[1] - left[1] * right[0],
   ]
+}
+
+function magnitude3(point: GeometryAssetPoint3) {
+  return Math.hypot(point[0], point[1], point[2])
+}
+
+function magnitude2(point: GeometryAssetPoint2) {
+  return Math.hypot(point[0], point[1])
+}
+
+function normalizeVector(point: GeometryAssetPoint3): GeometryAssetPoint3 {
+  const length = magnitude3(point)
+  if (length <= 1e-12) {
+    return [1, 0, 0]
+  }
+  return [
+    normalizeCoordinate(point[0] / length),
+    normalizeCoordinate(point[1] / length),
+    normalizeCoordinate(point[2] / length),
+  ]
+}
+
+function createPlaneFrameFromTriangle(
+  points: readonly [GeometryAssetPoint3, GeometryAssetPoint3, GeometryAssetPoint3],
+  normal: GeometryAssetPoint3,
+): CadaraBrepSurfaceFrameRecord {
+  const xSeed = subtractPoints(points[1], points[0])
+  const xDirection = normalizeVector(xSeed)
+  return {
+    origin: normalizePoint(points[0]),
+    zDirection: normalizeVector(normal),
+    xDirection,
+  }
+}
+
+function projectPointToPlaneFrame(
+  point: GeometryAssetPoint3,
+  frame: CadaraBrepSurfaceFrameRecord,
+): GeometryAssetPoint2 {
+  const relative = subtractPoints(point, frame.origin)
+  const x = dotPoints(relative, frame.xDirection)
+  const yDirection = normalizeVector(crossPoints(frame.zDirection, frame.xDirection))
+  const y = dotPoints(relative, yDirection)
+  return normalizePoint2([x, y])
+}
+
+function dotPoints(left: GeometryAssetPoint3, right: GeometryAssetPoint3) {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+function distanceBetweenPoints(left: GeometryAssetPoint3, right: GeometryAssetPoint3) {
+  return magnitude3(subtractPoints(right, left))
+}
+
+function distanceBetweenPoints2(left: GeometryAssetPoint2, right: GeometryAssetPoint2) {
+  return magnitude2(subtractPoints2(right, left))
 }

@@ -335,6 +335,7 @@ function collectBodyTriangles(
   meshBody(state, body.shape, options)
 
   const triangles: MeshTriangle[] = []
+  let missingTriangulationFaceCount = 0
 
   for (const faceId of body.topology.faceIds) {
     const face = body.facesById.get(faceId)
@@ -347,6 +348,7 @@ function collectBodyTriangles(
     const triangulationHandle = state.oc.BRep_Tool.Triangulation(face, location, 0 as never)
 
     if (triangulationHandle.IsNull()) {
+      missingTriangulationFaceCount += 1
       continue
     }
 
@@ -370,6 +372,13 @@ function collectBodyTriangles(
         vertices,
       })
     }
+  }
+
+  if (missingTriangulationFaceCount > 0 && body.meshExportFallback) {
+    return body.meshExportFallback.map((vertices) => ({
+      normal: calculateNormal(vertices),
+      vertices,
+    }))
   }
 
   return triangles

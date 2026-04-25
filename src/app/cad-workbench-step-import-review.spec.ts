@@ -42,6 +42,12 @@ test('src/app/cad-workbench-step-import-review.spec.ts', () => {
     'STEP import commit should leave the modal and show background baking progress.',
   )
   assert(
+    source.includes('subscribeToStepImportMaterializationStatus')
+    && source.includes('data-step-import-materialization-status')
+    && source.includes('Persisted faceted presentation is visible while OCC restore continues separately.'),
+    'STEP import should surface a dedicated persistent background materialization status after import progress completes.',
+  )
+  assert(
     !source.includes("kind: 'importing'") && !source.includes('title={stepImportFlow.kind ==='),
     'STEP import should not hold the modal open in a blocking importing state.',
   )

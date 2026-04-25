@@ -28,6 +28,34 @@ The system SHALL validate translated kernel-neutral Cadara B-rep data and any pe
 - **AND** the commit does not require a full OpenCascade restore of the translated B-rep before the repository write completes
 - **AND** the active modeling adapter is handed the persisted authored document after the repository write so later snapshot refresh can materialize geometry separately
 
+### Requirement: Translated Cadara B-rep SHALL support non-blocking presentation before full OCC materialization
+The system SHALL allow persisted translated Cadara B-rep geometry to produce a visible imported-body presentation path before full OCC materialization completes.
+
+#### Scenario: Persisted translated B-rep can render without immediate OCC restore
+- **WHEN** a prepared STEP import has been baked, structurally validated, and persisted as Cadara B-rep JSON
+- **THEN** the workbench can build a faceted presentation of the imported body directly from the persisted topology triangles
+- **AND** the imported body becomes visible without waiting for a full Cadara-B-rep-to-OCC restore bridge to complete
+
+#### Scenario: OCC materialization failure does not erase persisted imported geometry
+- **WHEN** a persisted translated Cadara B-rep import later fails during OCC materialization
+- **THEN** the authored document remains valid and persisted
+- **AND** the imported body remains available through the persisted faceted presentation path
+- **AND** the feature surfaces a structured materialization diagnostic rather than silently disappearing
+
+### Requirement: Translated Cadara B-rep materialization SHALL be observable and bounded
+The system SHALL expose explicit diagnostics or telemetry-ready timing for long-running translated Cadara B-rep restore stages so import completion does not remain indefinitely pending.
+
+#### Scenario: Restore instrumentation captures materialization stages
+- **WHEN** the modeling runtime materializes persisted translated Cadara B-rep geometry
+- **THEN** the system records or reports timing for bridge-payload generation, OCC read/restore, solid construction, tracked-body setup, topology naming, and snapshot/render generation
+- **AND** diagnostics can distinguish structural asset validation from post-persist OCC materialization cost
+
+#### Scenario: Materialization exceeds bounded completion behavior
+- **WHEN** translated Cadara B-rep materialization does not finish within the system's bounded completion behavior for the import flow
+- **THEN** the workbench exits the import-progress state instead of waiting forever
+- **AND** the feature reports that richer OCC materialization is pending, degraded, or failed
+- **AND** the persisted authored document is not rolled back
+
 #### Scenario: Structured baked mesh data is invalid
 - **WHEN** a restore attempts to use persisted baked mesh JSON whose structure, hash, or validation metadata is invalid
 - **THEN** restore reports a structured geometry diagnostic

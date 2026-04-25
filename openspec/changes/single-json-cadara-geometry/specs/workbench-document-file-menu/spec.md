@@ -55,3 +55,18 @@ The workbench SHALL route STEP review and Cadara geometry baking through the Ope
 - **THEN** the STEP review modal closes
 - **AND** the workbench shows lower-right import progress labeled “Baking Cadara geometry”
 - **AND** the workbench refreshes and fits the viewport after the translated solids are committed
+
+### Requirement: Workbench SHALL complete accepted STEP import flow without waiting for full OCC materialization
+The workbench SHALL treat authored-document persistence and initial imported-body presentation as the completion point for the user-visible STEP import flow, while any heavier OCC materialization continues separately.
+
+#### Scenario: Accepted STEP import clears progress after persisted presentation is ready
+- **WHEN** a STEP import has baked translated Cadara B-rep data and persisted the authored document successfully
+- **THEN** the lower-right import progress surface completes and disappears without waiting for a full OCC materialization pass
+- **AND** the viewport refresh shows the imported body through an available persisted faceted presentation path
+- **AND** the workbench does not leave the import flow visibly pending forever
+
+#### Scenario: Background materialization degrades without blocking import completion
+- **WHEN** the workbench is still materializing a persisted STEP import through OCC after the imported body is already visible
+- **THEN** that work runs as a background phase rather than as a blocking import-progress phase
+- **AND** any failure or timeout surfaces as a visible diagnostic or status message for the imported feature
+- **AND** the already persisted imported body remains visible to the user

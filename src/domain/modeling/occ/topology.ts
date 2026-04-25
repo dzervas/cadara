@@ -52,6 +52,11 @@ export interface OccTrackedBody {
   ownerFeatureId: FeatureId | null
   topologyToken: string
   shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
+  meshExportFallback?: Array<readonly [
+    readonly [number, number, number],
+    readonly [number, number, number],
+    readonly [number, number, number],
+  ]>
   topology: {
     faceIds: FaceId[]
     edgeIds: EdgeId[]
@@ -329,6 +334,7 @@ function buildTrackedSolidBody(
     shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
     naming?: OccTopologyNamingBodyState
     seedNaming?: boolean
+    meshExportFallback?: OccTrackedBody['meshExportFallback']
   },
 ): OccTrackedBody {
   const solids = extractSolidShapes(oc, input.shape)
@@ -351,6 +357,7 @@ function buildTrackedSolidBody(
     ownerFeatureId: input.ownerFeatureId,
     topologyToken,
     shape: solid,
+    meshExportFallback: input.meshExportFallback,
     topology: {
       faceIds: faces.faceIds,
       edgeIds: edges.edgeIds,
@@ -384,6 +391,7 @@ export function trackNewSolidBody(
     ownerFeatureId: FeatureId | null
     shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
     seedNaming?: boolean
+    meshExportFallback?: OccTrackedBody['meshExportFallback']
   },
 ) {
   return buildTrackedSolidBody(oc, {
@@ -398,6 +406,7 @@ export function trackReplacementSolidBody(
     previous: Pick<OccTrackedBody, 'bodyId' | 'label' | 'topologyToken'>
     ownerFeatureId: FeatureId | null
     shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
+    meshExportFallback?: OccTrackedBody['meshExportFallback']
   },
 ) {
   return buildTrackedSolidBody(oc, {
@@ -416,6 +425,7 @@ export function reconcileReplacementSolidBody(
     ownerFeatureId: FeatureId | null
     shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
     historySources: readonly OccTopologyHistorySource[]
+    meshExportFallback?: OccTrackedBody['meshExportFallback']
   },
 ) {
   const replacement = buildTrackedSolidBody(oc, {
@@ -425,6 +435,7 @@ export function reconcileReplacementSolidBody(
     topologyToken: advanceTopologyToken(input.previous.topologyToken),
     shape: input.shape,
     seedNaming: false,
+    meshExportFallback: input.meshExportFallback,
   })
   const reconciliation = reconcileReplacementTopology(oc, {
     previous: input.previous,

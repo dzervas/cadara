@@ -41,7 +41,11 @@ import type {
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type { StepImportReviewResult } from '@/contracts/modeling/step-import'
+import type {
+  StepImportMaterializationFeatureStatus,
+  StepImportMaterializationStatus,
+  StepImportReviewResult,
+} from '@/contracts/modeling/step-import'
 import { createAppError, errorContext, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
@@ -68,6 +72,7 @@ import {
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
+import { getStepImportMaterializationStageLabel } from '@/domain/modeling/step-import-materialization'
 import { createTopologyDebugSummary } from '@/domain/modeling/topology-debug'
 import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging'
 import { useEditorState } from '@/hooks/use-editor-state'
@@ -174,6 +179,10 @@ type WorkbenchUndoEntry =
 
 const PART_IMPORT_FILE_ACCEPT = '.step,.stp,.stl,.3mf,model/step,model/stl,model/3mf'
 
+function isPartImportEnabled() {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('cadEnablePartImport') === '1'
+}
+
 function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
   return status.kind === 'binding-restored'
     || status.kind === 'syncing'
@@ -198,6 +207,35 @@ function getMeshImportWarningLabel(reconstruction: MeshReconstructionEvaluation)
   return reconstruction.resultClassification === 'facetedFallback'
     ? 'I accept the faceted fallback result and understand the original mesh file will not be saved in this document.'
     : 'I understand the original mesh file will not be saved in this document.'
+}
+
+function hasStepImportMaterializationTerminalTransition(
+  previous: StepImportMaterializationStatus | null,
+  next: StepImportMaterializationStatus | null,
+) {
+  if (previous && !next) {
+    return true
+  }
+
+  if (!previous || !next) {
+    return false
+  }
+
+  const previousById = new Map(previous.features.map((feature) => [feature.featureId, feature.state] as const))
+  return next.features.some((feature) => {
+    const prior = previousById.get(feature.featureId)
+    return prior === 'pending' && feature.state !== 'pending'
+  })
+}
+
+function formatStepImportStageDurations(feature: StepImportMaterializationFeatureStatus) {
+  const parts = Object.entries(feature.stageDurationsMs)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0)
+    .map(([stage, durationMs]) =>
+      `${getStepImportMaterializationStageLabel(stage as StepImportMaterializationFeatureStatus['currentStage'])} ${Math.round(durationMs)}ms`,
+    )
+
+  return parts.slice(0, 3).join(' · ')
 }
 
 function canUseMeshImportReviewWorker() {
@@ -245,6 +283,8 @@ export function CadWorkbench() {
   const [meshImportFlow, setMeshImportFlow] = useState<MeshImportFlowState>({ kind: 'idle' })
   const [meshImportProgress, setMeshImportProgress] = useState<MeshImportProgressState | null>(null)
   const [stepImportProgress, setStepImportProgress] = useState<StepImportProgressState | null>(null)
+  const [stepImportMaterializationStatus, setStepImportMaterializationStatus] =
+    useState<StepImportMaterializationStatus | null>(() => modelingService.getStepImportMaterializationStatus())
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -256,6 +296,7 @@ export function CadWorkbench() {
   const undoStackRef = useRef(undoStack)
   const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
+  const stepImportMaterializationStatusRef = useRef(stepImportMaterializationStatus)
   const partImportInputRef = useRef<HTMLInputElement | null>(null)
   const meshImportFileReaderRef = useRef<FileReader | null>(null)
   const meshImportReviewWorkerRef = useRef<Worker | null>(null)
@@ -264,6 +305,7 @@ export function CadWorkbench() {
   // TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
   const cloudSaveEnabled = false
   const showBrowserStorageWarning = !localFileSyncEnabled && !cloudSaveEnabled
+  const partImportEnabled = isPartImportEnabled()
 
   const showWorkbenchInfo = useCallback((message: string) => {
     setWorkbenchStatusNotification({
@@ -383,10 +425,10 @@ export function CadWorkbench() {
     })
   }, [])
 
-  const applyLoadedSnapshot = (nextSnapshot: DocumentSnapshot) => {
+  const applyLoadedSnapshot = useCallback((nextSnapshot: DocumentSnapshot) => {
     snapshotRef.current = nextSnapshot
     dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })
-  }
+  }, [dispatch])
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
 
@@ -412,6 +454,10 @@ export function CadWorkbench() {
   }, [sketchSession])
 
   useEffect(() => {
+    stepImportMaterializationStatusRef.current = stepImportMaterializationStatus
+  }, [stepImportMaterializationStatus])
+
+  useEffect(() => {
     let disposed = false
 
     void modelingService.getHistoryRestoreState().then((state) => {
@@ -430,6 +476,38 @@ export function CadWorkbench() {
       disposed = true
     }
   }, [modelingService])
+
+  useEffect(() => {
+    return modelingService.subscribeToStepImportMaterializationStatus((status) => {
+      const previous = stepImportMaterializationStatusRef.current
+      stepImportMaterializationStatusRef.current = status
+      setStepImportMaterializationStatus(status)
+
+      if (!hasStepImportMaterializationTerminalTransition(previous, status)) {
+        return
+      }
+
+      void modelingService.getCurrentDocumentSnapshot()
+        .then((nextSnapshot) => {
+          applyLoadedSnapshot(nextSnapshot)
+        })
+        .catch((error: unknown) => {
+          showWorkbenchError('Document refresh failed.')
+          errorReporter.report(
+            createAppError({
+              code: 'workbench/action-failed',
+              message: 'Document refresh failed.',
+              context: errorContext('reason', error instanceof Error ? error.message : 'Unknown failure'),
+              cause: error,
+            }),
+            {
+              source: 'workbench.file.refreshStepMaterialization',
+              visibility: 'user',
+            },
+          )
+        })
+    })
+  }, [applyLoadedSnapshot, errorReporter, modelingService, showWorkbenchError])
 
   const visibleHiddenTargetKeys = useMemo(() => {
     if (!snapshot) {
@@ -1725,7 +1803,13 @@ export function CadWorkbench() {
     showWorkbenchError('Import failed. Select STEP files together, or one STL/3MF mesh file.')
   }
 
-  useEffect(() => actionBus.subscribeToTool('importPart', openPartImportPicker), [actionBus, openPartImportPicker])
+  useEffect(() => {
+    if (!partImportEnabled) {
+      return
+    }
+
+    return actionBus.subscribeToTool('importPart', openPartImportPicker)
+  }, [actionBus, openPartImportPicker, partImportEnabled])
 
   const handleStepImportCancel = () => {
     setStepImportFlow({ kind: 'idle' })
@@ -1986,11 +2070,12 @@ export function CadWorkbench() {
           kind: 'mesh' as const,
           title: 'Importing mesh',
           fileName: meshImportProgress.fileName,
-          message: meshImportProgress.message,
-          progress: meshImportProgress.progress,
-          canCancel: meshImportProgress.canCancel,
-        }
+        message: meshImportProgress.message,
+        progress: meshImportProgress.progress,
+        canCancel: meshImportProgress.canCancel,
+      }
       : null
+  const activeStepImportMaterializationFeatures = stepImportMaterializationStatus?.features ?? []
 
   return (
     <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
@@ -1998,6 +2083,7 @@ export function CadWorkbench() {
       <WorkspaceToolbar
         historyAvailability={toolbarHistoryAvailability}
         showBrowserStorageWarning={showBrowserStorageWarning}
+        showPartImport={partImportEnabled}
         onNewDocument={handleNewDocument}
         onOpenLocalFile={handleOpenLocalFile}
         onSaveLocalFile={handleSaveLocalFile}
@@ -2006,15 +2092,17 @@ export function CadWorkbench() {
         onReportBug={handleReportBug}
         onDownloadBugReportState={handleDownloadBugReportState}
       />
-      <input
-        ref={partImportInputRef}
-        aria-label="Import part file"
-        type="file"
-        accept={PART_IMPORT_FILE_ACCEPT}
-        multiple
-        hidden
-        onChange={handlePartImportFileChange}
-      />
+      {partImportEnabled ? (
+        <input
+          ref={partImportInputRef}
+          aria-label="Import part file"
+          type="file"
+          accept={PART_IMPORT_FILE_ACCEPT}
+          multiple
+          hidden
+          onChange={handlePartImportFileChange}
+        />
+      ) : null}
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar
@@ -2324,6 +2412,83 @@ export function CadWorkbench() {
                   <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
                     {activeImportProgress.message}
                   </Text>
+                </Stack>
+              </Paper>
+            ) : null}
+            {activeStepImportMaterializationFeatures.length > 0 ? (
+              <Paper
+                role="status"
+                aria-live="polite"
+                className="fixed right-4 z-40 w-[min(400px,calc(100vw-32px))] border p-3 text-xs shadow-[var(--cad-panel-shadow)]"
+                style={{
+                  bottom: activeImportProgress ? 128 : 16,
+                  backgroundColor: 'var(--workbench-notification-surface)',
+                  borderColor: 'var(--workbench-shell-border-strong)',
+                  color: 'var(--workbench-notification-text)',
+                }}
+                data-step-import-materialization-status
+              >
+                <Stack gap={8}>
+                  <Group justify="space-between" align="flex-start" gap="sm">
+                    <Stack gap={2} className="min-w-0">
+                      <Text size="xs" fw={600} style={{ color: 'var(--workbench-notification-info-title)' }}>
+                        STEP materialization
+                      </Text>
+                      <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
+                        Persisted faceted presentation is visible while OCC restore continues separately.
+                      </Text>
+                    </Stack>
+                    <Badge
+                      size="xs"
+                      color={activeStepImportMaterializationFeatures.some((feature) => feature.state === 'failed')
+                        ? 'red'
+                        : activeStepImportMaterializationFeatures.some((feature) => feature.state === 'degraded')
+                          ? 'yellow'
+                          : 'blue'}
+                      variant="light"
+                    >
+                      {activeStepImportMaterializationFeatures.some((feature) => feature.state === 'failed')
+                        ? 'Failed'
+                        : activeStepImportMaterializationFeatures.some((feature) => feature.state === 'degraded')
+                          ? 'Degraded'
+                          : 'Pending'}
+                    </Badge>
+                  </Group>
+                  {activeStepImportMaterializationFeatures.map((feature) => (
+                    <Stack key={feature.featureId} gap={4}>
+                      <Group justify="space-between" align="flex-start" gap="sm">
+                        <Stack gap={1} className="min-w-0">
+                          <Text size="xs" fw={600} truncate="end">
+                            {feature.featureLabel}
+                          </Text>
+                          <Text size="xs" truncate="end" style={{ color: 'var(--workbench-notification-text-muted)' }}>
+                            {feature.rootFileName}
+                          </Text>
+                        </Stack>
+                        <Badge
+                          size="xs"
+                          color={feature.state === 'failed' ? 'red' : feature.state === 'degraded' ? 'yellow' : 'blue'}
+                          variant="light"
+                        >
+                          {feature.state}
+                        </Badge>
+                      </Group>
+                      <Progress
+                        value={Math.min((feature.elapsedMs / feature.timeoutMs) * 100, 100)}
+                        size="sm"
+                        color={feature.state === 'failed' ? 'red' : feature.state === 'degraded' ? 'yellow' : 'blue'}
+                        aria-label="STEP materialization background progress"
+                      />
+                      <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
+                        {feature.message}
+                      </Text>
+                      {formatStepImportStageDurations(feature) ? (
+                        <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
+                          {formatStepImportStageDurations(feature)}
+                        </Text>
+                      ) : null}
+                    </Stack>
+                  ))}
                 </Stack>
               </Paper>
             ) : null}

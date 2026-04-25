@@ -33,6 +33,15 @@ The system SHALL treat STEP/STP source content as transient import input and SHA
 - **THEN** each persisted Cadara B-rep body is represented with explicit JSON topology and geometry records such as solids, shells, faces, loops, coedges, edges, vertices, and tessellated fallback triangles
 - **AND** the persisted authored JSON does not contain OpenCascade ASCII BRep, kernel-native binary data, base64 geometry payloads, or opaque geometry strings
 
+### Requirement: Accepted STEP imports SHALL complete end to end without indefinite pending restore
+The system SHALL let an accepted STEP import finish its user-visible flow after persistence and initial visible presentation are ready, even if richer OCC materialization continues afterward.
+
+#### Scenario: Full import path completes for large manifold STEP import
+- **WHEN** the user accepts a large manifold STEP import that bakes successfully into translated Cadara B-rep geometry
+- **THEN** the authored document persists that translated geometry
+- **AND** the imported body becomes visible without requiring the original STEP files
+- **AND** the workbench import progress completes instead of remaining pending forever while OCC restore continues or degrades separately
+
 ### Requirement: Baked mesh geometry SHALL be structured JSON when persisted
 Any persisted baked mesh geometry SHALL be represented as structured, format-neutral authored JSON data rather than as filetype-specific source bytes, package entries, or separately stored geometry blob bytes.
 

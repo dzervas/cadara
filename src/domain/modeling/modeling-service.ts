@@ -228,6 +228,7 @@ import {
   createStepSolidKey,
   findExternalStepDocumentNames,
   getStepDocumentBasename,
+  type StepImportMaterializationStatus,
   type StepImportReviewFileInput,
   type StepImportReviewResult,
 } from '@/contracts/modeling/step-import'
@@ -265,6 +266,10 @@ export interface ModelingService {
     metadata: LocalFileBindingMetadata
   }): Promise<ModelingDocumentFileMutationResult>
   restoreLocalFileBinding(): Promise<LocalFileBindingMetadata | null>
+  getStepImportMaterializationStatus(): StepImportMaterializationStatus | null
+  subscribeToStepImportMaterializationStatus(
+    listener: (status: StepImportMaterializationStatus | null) => void,
+  ): () => void
   getLocalFileSyncStatus(): Promise<DocumentSyncWriteStatus | null>
   subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void): () => void
   commitSketch(input: ModelingCommitSketchInput): AppResultAsync<ModelingCommitSketchResult>
@@ -6783,6 +6788,12 @@ export function createModelingService(
       }
 
       return documentRepository.getLocalFileSyncStatus(currentDocumentId)
+    },
+    getStepImportMaterializationStatus() {
+      return adapter.getStepImportMaterializationStatus?.() ?? null
+    },
+    subscribeToStepImportMaterializationStatus(listener) {
+      return adapter.subscribeToStepImportMaterializationStatus?.(listener) ?? (() => undefined)
     },
     subscribeToLocalFileSyncStatus(listener) {
       if (!isLocalFileSyncDocumentRepository(documentRepository)) {

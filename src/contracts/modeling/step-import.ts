@@ -137,6 +137,41 @@ export type StepImportDiagnosticCode =
   | 'step-import-unreadable-referenced-file'
   | 'step-import-stale-selected-solid'
   | 'step-import-empty-selection'
+  | 'step-import-materialization-pending'
+  | 'step-import-materialization-timeout'
+  | 'step-import-materialization-failed'
+
+export type StepImportMaterializationStage =
+  | 'bridgePayload'
+  | 'occReadRestore'
+  | 'solidConstruction'
+  | 'trackedBodySetup'
+  | 'topologyNaming'
+  | 'snapshotRender'
+
+export type StepImportMaterializationState =
+  | 'pending'
+  | 'degraded'
+  | 'failed'
+
+export interface StepImportMaterializationFeatureStatus {
+  featureId: FeatureId
+  featureLabel: string
+  rootFileName: string
+  state: StepImportMaterializationState
+  currentStage: StepImportMaterializationStage | null
+  startedAtMs: number
+  elapsedMs: number
+  timeoutMs: number
+  stageDurationsMs: Partial<Record<StepImportMaterializationStage, number>>
+  message: string
+}
+
+export interface StepImportMaterializationStatus {
+  documentId: `doc_${string}`
+  revisionId: `rev_${string}`
+  features: readonly StepImportMaterializationFeatureStatus[]
+}
 
 export interface StepImportDiagnosticDetail {
   kind: 'stepImport'
@@ -147,6 +182,11 @@ export interface StepImportDiagnosticDetail {
   documentName?: string
   solidKey?: string
   skippedUnsupportedCount?: number
+  materializationState?: StepImportMaterializationState
+  materializationStage?: StepImportMaterializationStage | null
+  materializationTimeoutMs?: number
+  materializationElapsedMs?: number
+  stageDurationsMs?: Partial<Record<StepImportMaterializationStage, number>>
 }
 
 export function createStepImportDiagnostic(
@@ -162,6 +202,11 @@ export function createStepImportDiagnostic(
     solidKey?: string
     skippedUnsupportedCount?: number
     severity?: ModelingDiagnostic['severity']
+    materializationState?: StepImportMaterializationState
+    materializationStage?: StepImportMaterializationStage | null
+    materializationTimeoutMs?: number
+    materializationElapsedMs?: number
+    stageDurationsMs?: Partial<Record<StepImportMaterializationStage, number>>
   } = {},
 ): ModelingDiagnostic {
   return {
@@ -179,6 +224,13 @@ export function createStepImportDiagnostic(
       documentName: input.documentName,
       solidKey: input.solidKey,
       skippedUnsupportedCount: input.skippedUnsupportedCount,
+      materializationState: input.materializationState,
+      materializationStage: input.materializationStage,
+      materializationTimeoutMs: input.materializationTimeoutMs,
+      materializationElapsedMs: input.materializationElapsedMs,
+      stageDurationsMs: input.stageDurationsMs
+        ? { ...input.stageDurationsMs }
+        : undefined,
     },
   }
 }

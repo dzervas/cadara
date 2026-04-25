@@ -12,15 +12,16 @@ test('src/app/cad-workbench-part-import-toolbar.spec.ts', () => {
   const source = readFileSync(join(process.cwd(), 'src/app/cad-workbench.tsx'), 'utf8')
   const acceptLiteral = "const PART_IMPORT_FILE_ACCEPT = '.step,.stp,.stl,.3mf,model/step,model/stl,model/3mf'"
 
-  assert(source.includes("actionBus.subscribeToTool('importPart', openPartImportPicker)"), 'Import Part toolbar activation should open the part import picker.')
+  assert(source.includes("new URLSearchParams(window.location.search).get('cadEnablePartImport') === '1'"), 'Import Part should be gated behind the cadEnablePartImport query flag.')
+  assert(source.includes("return actionBus.subscribeToTool('importPart', openPartImportPicker)"), 'Import Part toolbar activation should open the part import picker when enabled.')
   assert(source.includes('partImportInputRef.current?.click()'), 'Import Part should use a real file input click.')
   assert(source.includes('void prepareStepImportFiles(stepFiles)'), 'Import Part should route all selected STEP files through the STEP review flow.')
   assert(source.includes('files.length === 1 && meshFiles.length === 1'), 'Import Part should keep mesh imports single-file.')
   assert(source.includes(acceptLiteral), 'Import Part picker should accept only STEP, STL, and 3MF formats.')
   assert(source.includes('accept={PART_IMPORT_FILE_ACCEPT}'), 'Import Part input should use the dedicated part import accept list.')
   assert(
-    source.includes('aria-label="Import part file"\n        type="file"\n        accept={PART_IMPORT_FILE_ACCEPT}\n        multiple\n        hidden'),
-    'Import Part input should allow selecting multiple STEP files for assemblies.',
+    source.includes("{partImportEnabled ? (\n        <input\n          ref={partImportInputRef}\n          aria-label=\"Import part file\"\n          type=\"file\"\n          accept={PART_IMPORT_FILE_ACCEPT}\n          multiple\n          hidden"),
+    'Import Part input should be rendered only when the query flag enables it and should allow selecting multiple STEP files for assemblies.',
   )
   assert(!acceptLiteral.includes('.cadara'), 'Import Part picker should not include full-document cadara imports.')
 })

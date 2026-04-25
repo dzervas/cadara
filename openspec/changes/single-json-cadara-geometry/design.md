@@ -44,6 +44,57 @@ Prepared STEP import commits validate the generated Cadara B-rep JSON structural
 
 Alternative considered: require `validateAuthoredModelDocument` to fully restore the translated B-rep through the OCC worker before repository mutation. Rejected because large faceted imports can spend minutes in the Cadara-B-rep-to-OCC bridge and topology naming setup after baking has already succeeded, leaving the import progress unresolved even though the persisted authored geometry is structurally valid.
 
+### Accepted STEP import must complete before full OCC materialization
+
+The user-visible STEP import flow cannot treat full OCC materialization as part of the synchronous "accept import" path. Once translated Cadara B-rep data has been structurally validated and persisted, the import flow needs a presentation-ready result that can clear lower-right progress and refresh the viewport without waiting for the expensive restore bridge to finish.
+
+That means the system needs two distinct phases:
+
+1. Persisted import completion:
+   - STEP review accepted
+   - Cadara B-rep baked
+   - embedded asset validated
+   - authored document persisted
+   - viewport can render the imported geometry through a direct faceted path
+
+2. Background kernel materialization:
+   - translated Cadara B-rep is restored into OCC
+   - optional topology naming and richer editability are established
+   - failures surface as diagnostics rather than an indefinitely pending import
+
+Alternative considered: keep one "import is not done until OCC restore is done" phase. Rejected because the current restore bridge can remain CPU-bound for minutes on large manifold imports, which violates the workbench requirement that accepted import progress completes deterministically.
+
+### Persisted Cadara B-rep needs a direct faceted presentation path
+
+Translated Cadara B-rep already persists explicit vertices, faces, and triangle indices. The workbench should use that persisted topology to build an immediate faceted render/export path for imported STEP bodies without routing back through `cadaraBrep -> ASCII STL -> StlAPI.Read` first.
+
+This path is intentionally presentation-first, not a claim that full analytic OCC topology has already been reconstructed. It exists so imported geometry can appear in the viewport, clear import progress, and survive reopen/refresh even when full OCC materialization remains expensive.
+
+Alternative considered: reuse only the OCC snapshot path and wait for the kernel to remesh the imported body every time. Rejected because it couples basic visibility to the slowest and least reliable part of the restore pipeline.
+
+### OCC materialization should be backgrounded and diagnosable
+
+After persistence, the OCC restore path should run as a background materialization phase with explicit timing and failure reporting for the major steps:
+
+- Cadara B-rep to transient bridge payload generation
+- OCC read/restore of that payload
+- shell/solid construction
+- tracked body creation
+- topology naming setup
+- snapshot/render generation
+
+If this phase fails or exceeds a bounded time budget, the imported faceted body should remain visible and the feature should surface a materialization diagnostic instead of leaving the workbench progress surface pending forever.
+
+Alternative considered: add timing logs only during development. Rejected because the failure mode is specifically a user-visible stuck progress state, so the system needs stable diagnostics and bounded behavior in production code paths.
+
+### Imported faceted bodies may need reduced or deferred topology naming
+
+Large translated STEP imports can create thousands of faces, edges, and vertices. Seeding selector-backed topology naming for every primitive during initial materialization is a likely hotspot and may not be necessary before the body is visible.
+
+The system should allow imported faceted bodies to defer or narrow topology naming work until a downstream editability path actually needs it, or to apply a cheaper naming strategy for presentation-only imported bodies.
+
+Alternative considered: preserve full eager topology naming behavior for imported faceted bodies. Rejected because it front-loads expensive work into the path that needs to complete quickly for the UI.
+
 ### Baked mesh is not a packageable asset
 
 `baked-mesh` must stop being stored as a standalone binary/blob asset in `.cadara`. If the application still persists mesh-derived geometry, it must be a structured JSON geometry record with vertices, indices, reconstruction provenance, and neutral units/orientation metadata. The record must not embed STL/3MF source bytes or an encoded file payload.
@@ -62,3 +113,5 @@ Alternative considered: remove STL/3MF import immediately. Rejected for this pro
 - Removing package asset storage may temporarily reduce successful mesh restore cases → Mesh persistence is intentionally being narrowed until it can be represented as authored JSON data.
 - Encoding translated B-rep JSON can increase file size → Prefer clarity and contract correctness over compact packaging.
 - Tests that assumed self-contained package blobs will fail → Update them to assert single JSON serialization and translated STEP geometry data.
+- A direct faceted presentation path can expose imported bodies before full OCC editability exists → Acceptable if diagnostics clearly distinguish "visible" from "fully materialized."
+- Background materialization introduces another asynchronous state to manage → Acceptable because the alternative is a user-visible stuck import flow with no bounded completion behavior.

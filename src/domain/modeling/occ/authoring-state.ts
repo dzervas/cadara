@@ -159,6 +159,7 @@ export function createOccAuthoringState(
     features?: readonly OccAuthoringFeatureRecord[]
     assets?: GeometryAssetManifest
     assetBlobs?: ReadonlyMap<GeometryAssetHash, Uint8Array>
+    stepImportInstrumentation?: OccFeatureExecutionContext['stepImportInstrumentation']
     historyOrder?: readonly DocumentHistoryOrderEntry[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
@@ -225,6 +226,7 @@ export function createOccAuthoringState(
     features,
     assets,
     assetBlobs,
+    stepImportInstrumentation: input.stepImportInstrumentation,
     historyOrder,
     cursor,
     diagnostics: [...(input.diagnostics ?? [])],

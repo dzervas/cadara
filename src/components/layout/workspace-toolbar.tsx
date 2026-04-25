@@ -28,6 +28,7 @@ const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
   showBrowserStorageWarning?: boolean
+  showPartImport?: boolean
   onNewDocument?: () => void
   onOpenLocalFile?: () => void
   onSaveLocalFile?: () => void
@@ -40,6 +41,7 @@ interface WorkspaceToolbarProps {
 export function WorkspaceToolbar({
   historyAvailability,
   showBrowserStorageWarning = false,
+  showPartImport = false,
   onNewDocument = () => undefined,
   onOpenLocalFile = () => undefined,
   onSaveLocalFile = () => undefined,
@@ -53,8 +55,19 @@ export function WorkspaceToolbar({
     state: { activeCommand, history, mode, sketchSession },
   } = useEditorState()
   const visibleHistory = historyAvailability ?? history
-  const visibleSections = useMemo(() => getToolbarSectionsForMode(mode), [mode])
-  const searchResults = useMemo(() => searchToolDefinitions(searchQuery), [searchQuery])
+  const visibleSections = useMemo(
+    () => getToolbarSectionsForMode(mode).map((section) => ({
+      ...section,
+      toolIds: showPartImport
+        ? section.toolIds
+        : section.toolIds.filter((toolId) => toolId !== 'importPart'),
+    })).filter((section) => section.toolIds.length > 0),
+    [mode, showPartImport],
+  )
+  const searchResults = useMemo(
+    () => searchToolDefinitions(searchQuery).filter((tool) => showPartImport || tool.id !== 'importPart'),
+    [searchQuery, showPartImport],
+  )
   const hasActiveSketchSession = sketchSession !== null
 
   const activeSketchStyleToolId = sketchSession ? getActiveSketchStyleToolId(sketchSession) : null

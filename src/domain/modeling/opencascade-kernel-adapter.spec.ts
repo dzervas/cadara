@@ -282,11 +282,25 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
 
   function createAdapter(
     createSolverAdapter: () => SketchSolverAdapter = () => new DeterministicSketchSolverAdapter(),
+    options: Partial<ConstructorParameters<typeof OpenCascadeKernelAdapter>[0]> = {},
   ) {
     return new OpenCascadeKernelAdapter({
       solverAdapter: createSolverAdapter(),
       solverAdapterFactory: () => createSolverAdapter(),
+      ...options,
     })
+  }
+
+  async function waitFor(condition: () => boolean, message: string, attempts = 1_000) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (condition()) {
+        return
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+
+    throw new Error(message)
   }
 
   function createPermissiveRestoredRepository(
@@ -1516,14 +1530,30 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     const adapter = createAdapter()
 
     await adapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    const provisionalSnapshot = (await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+    })).snapshot
+    const provisionalImportedBody = provisionalSnapshot.bodies.find((body) => body.ownerFeatureId === featureId)
+
+    assert(provisionalImportedBody, 'STEP import should rebuild into a tracked body.')
+    assert(provisionalImportedBody.label === 'Imported exact body', 'Imported STEP body should use the authored import label.')
+    assert(provisionalImportedBody.topology.faceIds.length > 0, 'STEP import should expose provisional faceted face refs immediately.')
+    assert(provisionalImportedBody.topology.edgeIds.length === 0, 'Provisional STEP presentation should defer edge refs until OCC materialization completes.')
+    assert(provisionalImportedBody.topology.vertexIds.length === 0, 'Provisional STEP presentation should defer vertex refs until OCC materialization completes.')
+
+    await waitFor(
+      () => adapter.getStepImportMaterializationStatus() === null,
+      'STEP import should eventually finish background OCC materialization.',
+    )
+
     const snapshot = (await adapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
     })).snapshot
     const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId === featureId)
 
-    assert(importedBody, 'STEP import should rebuild into a tracked body.')
-    assert(importedBody.label === 'Imported exact body', 'Imported STEP body should use the authored import label.')
+    assert(importedBody, 'STEP import should remain present after background OCC materialization completes.')
     assert(importedBody.topology.faceIds.length > 0, 'Imported STEP body should expose selectable face refs.')
     assert(importedBody.topology.edgeIds.length > 0, 'Imported STEP body should expose selectable edge refs.')
     assert(importedBody.topology.vertexIds.length > 0, 'Imported STEP body should expose selectable vertex refs.')
@@ -1603,26 +1633,51 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     })
     assert(imported.ok, 'STEP file import service should accept an OCC-rebuildable exact solid.')
 
-    const snapshot = await importService.getCurrentDocumentSnapshot()
-    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_stepImport-'))
-    assert(importedBody, 'STEP file import service refresh should expose the imported body.')
+    const provisionalSnapshot = await importService.getCurrentDocumentSnapshot()
+    const provisionalImportedBody = provisionalSnapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_stepImport-'))
+    assert(provisionalImportedBody, 'STEP file import service refresh should expose the imported body.')
 
-    const bodyRenderRecords = snapshot.render.records.filter((record) => record.ownerBodyId === importedBody.bodyId)
+    const provisionalBodyRenderRecords = provisionalSnapshot.render.records.filter((record) =>
+      record.ownerBodyId === provisionalImportedBody.bodyId,
+    )
     assert(
-      bodyRenderRecords.some((record) =>
+      provisionalBodyRenderRecords.some((record) =>
         record.binding.target.kind === 'face'
-        && record.binding.target.bodyId === importedBody.bodyId
+        && record.binding.target.bodyId === provisionalImportedBody.bodyId
         && record.geometry.kind === 'mesh',
       ),
-      'STEP file import service refresh should expose native face mesh render records.',
+      'STEP file import service refresh should expose provisional face mesh render records immediately.',
     )
+    assert(
+      provisionalBodyRenderRecords.every((record) =>
+        record.binding.target.kind !== 'edge' || record.binding.target.bodyId !== provisionalImportedBody.bodyId,
+      ),
+      'STEP file import service refresh should defer native edge polyline render records until background materialization completes.',
+    )
+    assert(
+      provisionalBodyRenderRecords.every((record) =>
+        record.binding.target.kind !== 'vertex' || record.binding.target.bodyId !== provisionalImportedBody.bodyId,
+      ),
+      'STEP file import service refresh should defer native vertex marker render records until background materialization completes.',
+    )
+
+    await waitFor(
+      () => importService.getStepImportMaterializationStatus() === null,
+      'STEP file import service should eventually finish background OCC materialization.',
+    )
+
+    const snapshot = await importService.getCurrentDocumentSnapshot()
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_stepImport-'))
+    assert(importedBody, 'STEP file import service refresh should keep the imported body after background materialization completes.')
+
+    const bodyRenderRecords = snapshot.render.records.filter((record) => record.ownerBodyId === importedBody.bodyId)
     assert(
       bodyRenderRecords.some((record) =>
         record.binding.target.kind === 'edge'
         && record.binding.target.bodyId === importedBody.bodyId
         && record.geometry.kind === 'polyline',
       ),
-      'STEP file import service refresh should expose native edge polyline render records.',
+      'STEP file import service refresh should expose native edge polyline render records after background materialization completes.',
     )
     assert(
       bodyRenderRecords.some((record) =>
@@ -1630,7 +1685,132 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
         && record.binding.target.bodyId === importedBody.bodyId
         && record.geometry.kind === 'marker',
       ),
-      'STEP file import service refresh should expose native vertex marker render records.',
+      'STEP file import service refresh should expose native vertex marker render records after background materialization completes.',
+    )
+  }
+
+  async function testPreparedStepImportShowsFacetedPresentationWhileBackgroundMaterializationIsPending() {
+    const fixture = await createExportableBodyFixture()
+    const step = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(step.ok && typeof step.payload === 'string', 'Fixture STEP export should produce importable text.')
+
+    let releaseDeferredMaterialization = () => {}
+    const deferredMaterializationGate = new Promise<void>((resolve) => {
+      releaseDeferredMaterialization = resolve
+    })
+    const importAdapter = createAdapter(
+      () => new DeterministicSketchSolverAdapter(),
+      {
+        beforeDeferredStepImportMaterialization: () => deferredMaterializationGate,
+      },
+    )
+    const importService = createModelingService(importAdapter, {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: null,
+      documentRepository: null,
+    })
+    const files = [{ fileName: 'prepared-import.step', bytes: new TextEncoder().encode(step.payload) }]
+    const review = await importService.prepareStepImportReview({ files })
+    const imported = await importService.commitPreparedStepImport({
+      files,
+      review,
+      selectedSolidKeys: [review.solids[0]!.solidKey],
+    })
+    assert(imported.ok, 'Prepared STEP import should commit while background materialization remains pending.')
+
+    const pendingStatus = importService.getStepImportMaterializationStatus()
+    assert(
+      pendingStatus?.features[0]?.state === 'pending',
+      'Prepared STEP import should report pending background materialization immediately after commit.',
+    )
+
+    const snapshot = await importService.getCurrentDocumentSnapshot()
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_stepImport-'))
+    assert(importedBody, 'Prepared STEP import should expose a provisional imported body before background materialization finishes.')
+    assert(
+      importedBody.topology.faceIds.length > 0 && importedBody.topology.edgeIds.length === 0 && importedBody.topology.vertexIds.length === 0,
+      'Provisional STEP presentation should use persisted faceted faces without waiting for full OCC edge and vertex materialization.',
+    )
+    assert(
+      snapshot.render.records.some((record) =>
+        record.ownerBodyId === importedBody.bodyId
+        && record.binding.target.kind === 'face'
+        && record.geometry.kind === 'mesh',
+      ),
+      'Prepared STEP import should render faceted face meshes while background materialization is pending.',
+    )
+
+    releaseDeferredMaterialization()
+    await waitFor(
+      () => importService.getStepImportMaterializationStatus() === null,
+      'Background STEP materialization should eventually clear its pending status.',
+    )
+  }
+
+  async function testPreparedStepImportReportsTimeoutWhileKeepingFacetedPresentationVisible() {
+    const fixture = await createExportableBodyFixture()
+    const step = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(step.ok && typeof step.payload === 'string', 'Fixture STEP export should produce importable text.')
+
+    const importAdapter = createAdapter(
+      () => new DeterministicSketchSolverAdapter(),
+      {
+        stepImportMaterializationTimeoutMs: 5,
+        beforeDeferredStepImportMaterialization: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        },
+      },
+    )
+    const importService = createModelingService(importAdapter, {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: null,
+      documentRepository: null,
+    })
+    const files = [{ fileName: 'timed-import.step', bytes: new TextEncoder().encode(step.payload) }]
+    const review = await importService.prepareStepImportReview({ files })
+    const imported = await importService.commitPreparedStepImport({
+      files,
+      review,
+      selectedSolidKeys: [review.solids[0]!.solidKey],
+    })
+    assert(imported.ok, 'Prepared STEP import should commit before timeout monitoring degrades background materialization.')
+
+    await waitFor(
+      () => importService.getStepImportMaterializationStatus()?.features.some((feature) => feature.state === 'degraded') === true,
+      'Prepared STEP import should report a degraded background materialization state after the timeout budget elapses.',
+    )
+
+    const degradedStatus = importService.getStepImportMaterializationStatus()
+    assert(
+      degradedStatus?.features[0]?.message.includes('Visible faceted presentation remains available.'),
+      'Timeout status should explain that faceted STEP presentation remains available after degradation.',
+    )
+
+    const snapshot = await importService.getCurrentDocumentSnapshot()
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_stepImport-'))
+    assert(importedBody, 'Timed STEP materialization should keep the provisional imported body visible.')
+    assert(
+      snapshot.document.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'step-import-materialization-timeout'
+        && diagnostic.featureId === importedBody.ownerFeatureId,
+      ),
+      'Timed STEP materialization should surface a structured timeout diagnostic on the snapshot while faceted presentation remains visible.',
     )
   }
 
@@ -1826,6 +2006,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     const exactAdapter = createAdapter()
 
     await exactAdapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    await waitFor(
+      () => exactAdapter.getStepImportMaterializationStatus() === null,
+      'Curved STEP import should finish background OCC materialization before curved mesh export.',
+    )
     const exactSnapshotResponse = await exactAdapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -1976,9 +2160,20 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       fileName: 'complex-filleted-chamfered.step',
       payload: originalStep.payload,
     })
+    assert(
+      imported.asset.data.kind === 'cadaraBrep'
+      && imported.asset.data.bodies.some((body) =>
+        body.topology.faces.some((face) => face.surface.kind !== 'plane'),
+      ),
+      'Complex STEP import should persist exact curved face surfaces instead of collapsing the body into planar triangle facets.',
+    )
     const importAdapter = createAdapter()
 
     await importAdapter.restoreAuthoredModelDocument(imported.document, [], createStepAssetResolver(imported.asset, imported.bytes))
+    await waitFor(
+      () => importAdapter.getStepImportMaterializationStatus() === null,
+      'Complex STEP import should finish background OCC materialization before exact re-export.',
+    )
     const importedSnapshot = (await importAdapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -2104,6 +2299,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       [],
       createStepAssetResolver(mixedImport.asset, mixedImport.bytes),
     )
+    await waitFor(
+      () => mixedAdapter.getStepImportMaterializationStatus() === null,
+      'Mixed STEP import should finish background OCC materialization before final diagnostic assertions.',
+    )
     const mixedSnapshot = (await mixedAdapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -2154,6 +2353,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       imported.document,
       [],
       createStepAssetResolver(imported.asset, imported.bytes),
+    )
+    await waitFor(
+      () => adapter.getStepImportMaterializationStatus() === null,
+      'Multi-solid STEP import should finish background OCC materialization before exact topology assertions.',
     )
     const snapshot = (await adapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
@@ -2211,6 +2414,10 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       imported.document,
       [],
       createStepAssetResolver(imported.asset, imported.bytes),
+    )
+    await waitFor(
+      () => adapter.getStepImportMaterializationStatus() === null,
+      'STEP import with stale selected solids should finish background OCC materialization before final diagnostics are asserted.',
     )
     const snapshot = (await adapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
@@ -5968,6 +6175,8 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testOccGeometryExportsProduceRealPayloads()
   await testStepImportRestoresExactBodiesFromAssetBytes()
   await testStepFileImportServiceRefreshExposesNativeRenderRecords()
+  await testPreparedStepImportShowsFacetedPresentationWhileBackgroundMaterializationIsPending()
+  await testPreparedStepImportReportsTimeoutWhileKeepingFacetedPresentationVisible()
   await testMeshImportRestoresBakedBodiesFromGeneratedAssetBytes()
   await testCylinderMeshImportRecordsUnifiedSurfaceDiagnostics()
   await testFacetedMeshImportUsesBakedAssetRenderMesh()

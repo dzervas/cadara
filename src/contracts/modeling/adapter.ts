@@ -39,7 +39,11 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
 import type { CadaraBrepGeometryAssetData, GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
-import type { StepImportReviewFileInput, StepImportReviewResult } from '@/contracts/modeling/step-import'
+import type {
+  StepImportMaterializationStatus,
+  StepImportReviewFileInput,
+  StepImportReviewResult,
+} from '@/contracts/modeling/step-import'
 
 export interface GeometryAssetResolver {
   getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>
@@ -80,6 +84,12 @@ export interface ModelingKernelAdapter {
     review?: StepImportReviewResult
     selectedSolidKeys?: readonly string[]
   }): Promise<StepImportBakeGeometryResult>
+  /** Returns live background materialization state for deferred STEP imports when supported. */
+  getStepImportMaterializationStatus?(): StepImportMaterializationStatus | null
+  /** Subscribes to background materialization state changes for deferred STEP imports when supported. */
+  subscribeToStepImportMaterializationStatus?(
+    listener: (status: StepImportMaterializationStatus | null) => void,
+  ): () => void
   /** Returns the authoritative typed snapshot for the requested document. */
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */

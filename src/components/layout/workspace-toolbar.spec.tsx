@@ -82,10 +82,32 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     'Toolbar should render standard tool buttons with local SVG assets.',
   )
   assert(
-    toolbarMarkup.includes('data-tool-id="importPart"') &&
-      toolbarMarkup.includes('aria-label="Import Part"') &&
-      toolbarMarkup.includes('/icons/import-part.svg'),
-    'Toolbar should expose part import as a real icon-only tool.',
+    !toolbarMarkup.includes('data-tool-id="importPart"') &&
+      !toolbarMarkup.includes('aria-label="Import Part"'),
+    'Toolbar should hide part import unless the explicit query-flag-backed prop enables it.',
+  )
+
+  const importEnabledToolbarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: getEditorViewState(initialEditorState),
+          dispatch: () => undefined,
+        }}
+      >
+        <ToolActionProvider actionBus={createToolActionBus()}>
+          <WorkspaceToolbar showPartImport />
+        </ToolActionProvider>
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    importEnabledToolbarMarkup.includes('data-tool-id="importPart"') &&
+      importEnabledToolbarMarkup.includes('aria-label="Import Part"') &&
+      importEnabledToolbarMarkup.includes('/icons/import-part.svg'),
+    'Toolbar should expose part import as a real icon-only tool when explicitly enabled.',
   )
   assert(
     toolbarMarkup.includes('/icons/linear-pattern.svg'),
