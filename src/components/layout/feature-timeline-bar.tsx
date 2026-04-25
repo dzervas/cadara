@@ -22,6 +22,7 @@ import {
 } from '@/domain/editor/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 import {
+  getDocumentHistoryMenuEntryDescriptors,
   getNearestTimelineAnchorIndex,
   resolveTimelineReorderDrop,
   getTimelineCursorAriaLabel,
@@ -120,6 +121,7 @@ export function FeatureTimelineBar({
   const [repairTooltip, setRepairTooltip] = useState<RepairTooltipState | null>(null)
   const suppressNextItemClickRef = useRef(false)
   const activeCursorIndex = dragCursorIndex ?? cursorIndex
+  const documentCursorActionsDisabled = cursorDisabled || !onCursorRequested
   const anchorElements = useMemo(
     () => Array.from({ length: historyItems.length + 1 }, (_, index) => index),
     [historyItems.length],
@@ -443,56 +445,78 @@ export function FeatureTimelineBar({
                   const repairMessage = primaryFeatureDiagnostic
                     ? getModelingDiagnosticRepairMessage(primaryFeatureDiagnostic)
                     : null
-                  const menuItems: WorkbenchContextMenuEntry[] = item ? [
-                    {
-                      kind: 'item',
-                      id: 'edit',
-                      label: 'Edit',
-                      commandId: 'context.edit' as const,
-                      icon: <WorkbenchIcon name="edit" className="h-3.5 w-3.5" />,
-                      onSelect: () => onReopenTarget(item.target),
-                    },
-                    {
-                      kind: 'item',
-                      id: 'rename',
-                      label: 'Rename',
-                      commandId: 'context.rename' as const,
-                      icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
-                      onSelect: () => onRenameItem(item),
-                    },
-                    ...(item.kind === 'feature' ? [
-                      {
-                        kind: 'item' as const,
-                        id: 'suppress',
-                        label: 'Suppress',
-                        commandId: 'context.suppress' as const,
-                        icon: <WorkbenchIcon name="ban" className="h-3.5 w-3.5" />,
-                        onSelect: () => onSuppressFeature(item),
-                      },
-                    ] : []),
-                    {
-                      kind: 'item',
-                      id: 'roll-cursor-here',
-                      label: 'Roll cursor here',
-                      commandId: 'context.rollCursorHere' as const,
-                      icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
-                      disabled: cursorDisabled,
-                      onSelect: () => onCursorRequested?.(getPositionCursor(anchorIndex)),
-                    },
-                    {
-                      kind: 'divider' as const,
-                      id: 'destructive-divider',
-                    },
-                    {
-                      kind: 'item' as const,
-                      id: 'delete',
-                      label: 'Delete',
-                      commandId: 'context.delete' as const,
-                      icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
-                      danger: true,
-                      onSelect: () => onDeleteItem(item),
-                    },
-                  ] : []
+                  const menuItems: WorkbenchContextMenuEntry[] = item
+                    ? getDocumentHistoryMenuEntryDescriptors({
+                        item,
+                        cursorDisabled: documentCursorActionsDisabled,
+                        cursorIndex,
+                        historyLength: historyItems.length,
+                      }).map((entry) => {
+                        switch (entry.id) {
+                          case 'edit':
+                            return {
+                              kind: 'item' as const,
+                              id: entry.id,
+                              label: entry.label,
+                              commandId: 'context.edit' as const,
+                              icon: <WorkbenchIcon name="edit" className="h-3.5 w-3.5" />,
+                              onSelect: () => onReopenTarget(item.target),
+                            }
+                          case 'rename':
+                            return {
+                              kind: 'item' as const,
+                              id: entry.id,
+                              label: entry.label,
+                              commandId: 'context.rename' as const,
+                              icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
+                              onSelect: () => onRenameItem(item),
+                            }
+                          case 'suppress':
+                            return {
+                              kind: 'item' as const,
+                              id: entry.id,
+                              label: entry.label,
+                              commandId: 'context.suppress' as const,
+                              icon: <WorkbenchIcon name="ban" className="h-3.5 w-3.5" />,
+                              onSelect: () => item.kind === 'feature' ? onSuppressFeature(item) : undefined,
+                            }
+                          case 'roll-history-here':
+                            return {
+                              kind: 'item' as const,
+                              id: entry.id,
+                              label: entry.label,
+                              commandId: 'context.rollCursorHere' as const,
+                              icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
+                              disabled: entry.disabled,
+                              onSelect: () => onCursorRequested?.(getPositionCursor(anchorIndex)),
+                            }
+                          case 'roll-to-end':
+                            return {
+                              kind: 'item' as const,
+                              id: entry.id,
+                              label: entry.label,
+                              icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
+                              disabled: entry.disabled,
+                              onSelect: () => onCursorRequested?.(getPositionCursor(historyItems.length - 1)),
+                            }
+                          case 'destructive-divider':
+                            return {
+                              kind: 'divider' as const,
+                              id: entry.id,
+                            }
+                          case 'delete':
+                            return {
+                              kind: 'item' as const,
+                              id: entry.id,
+                              label: entry.label,
+                              commandId: 'context.delete' as const,
+                              icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
+                              danger: true,
+                              onSelect: () => onDeleteItem(item),
+                            }
+                        }
+                      })
+                    : []
 
                   return (
                     <div key={`segment-${anchorIndex}`} className="flex h-14 items-center">
@@ -533,8 +557,7 @@ export function FeatureTimelineBar({
                             onDoubleClick={() => onReopenTarget(target!)}
                             className={`relative flex h-8 w-8 items-center justify-center rounded-md border transition ${
                               isAfterCursor ? 'opacity-45' : ''
-                            } ${isDraggingItem ? 'opacity-70' : ''
-                            } ${!isAllowed ? 'cursor-not-allowed' : ''}`}
+                            } ${isDraggingItem ? 'opacity-70' : ''}`}
                             style={{
                               backgroundColor: primaryFeatureDiagnostic
                                 ? 'var(--workbench-shell-danger-surface)'
@@ -553,7 +576,6 @@ export function FeatureTimelineBar({
                             aria-label={primaryFeatureDiagnostic
                               ? `Repair ${item.label}. ${repairMessage}`
                               : `Select ${item.label}. Double-click to reopen.`}
-                            aria-disabled={!isAllowed}
                             aria-grabbed={isDraggingItem}
                             title={primaryFeatureDiagnostic
                               ? repairMessage ?? getHistoryItemDescription(item)

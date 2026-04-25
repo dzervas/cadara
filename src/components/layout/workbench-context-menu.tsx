@@ -6,9 +6,11 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactElement,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
 import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
@@ -72,6 +74,7 @@ export function WorkbenchContextMenu({
     'aria-controls'?: string
     onContextMenu?: (event: MouseEvent<HTMLElement>) => void
     onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
+    onPointerDown?: (event: PointerEvent<HTMLElement>) => void
     ref?: (element: HTMLElement | null) => void
   }>
 
@@ -102,6 +105,17 @@ export function WorkbenchContextMenu({
     openAt({ x: event.clientX, y: event.clientY })
   }
 
+  const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
+    child.props.onPointerDown?.(event)
+
+    if (event.defaultPrevented || event.button !== 2) {
+      return
+    }
+
+    event.preventDefault()
+    openAt({ x: event.clientX, y: event.clientY })
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     child.props.onKeyDown?.(event)
 
@@ -122,6 +136,7 @@ export function WorkbenchContextMenu({
     ref: setTargetRef,
     onContextMenu: handleContextMenu,
     onKeyDown: handleKeyDown,
+    onPointerDown: handlePointerDown,
     'aria-haspopup': 'menu',
     'aria-controls': opened ? menuId : undefined,
   })
@@ -134,22 +149,45 @@ export function WorkbenchContextMenu({
         onChange={setOpened}
         position="bottom-start"
         closeOnItemClick
+        floatingStrategy="fixed"
+        transitionProps={{ duration: 0 }}
         withinPortal={withinPortal}
         width={190}
       >
-        <Menu.Target>
-          <span
-            aria-hidden="true"
-            style={{
-              position: 'fixed',
-              left: anchor.x,
-              top: anchor.y,
-              width: 1,
-              height: 1,
-              pointerEvents: 'none',
-            }}
-          />
-        </Menu.Target>
+        {typeof document !== 'undefined'
+          ? createPortal(
+              <Menu.Target>
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'fixed',
+                    left: anchor.x,
+                    top: anchor.y,
+                    display: 'block',
+                    width: 1,
+                    height: 1,
+                    pointerEvents: 'none',
+                  }}
+                />
+              </Menu.Target>,
+              document.body,
+            )
+          : (
+              <Menu.Target>
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'fixed',
+                    left: anchor.x,
+                    top: anchor.y,
+                    display: 'block',
+                    width: 1,
+                    height: 1,
+                    pointerEvents: 'none',
+                  }}
+                />
+              </Menu.Target>
+            )}
         <Menu.Dropdown id={menuId} aria-label={label}>
           {items.map((item) => {
             if (item.kind === 'divider') {

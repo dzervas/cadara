@@ -18,6 +18,19 @@ test('src/app/cad-workbench-history-routing.spec.ts', async () => {
     'Workbench document history UI should dispatch editor cursor requests.',
   )
   assert(
+    source.includes('onReopenTarget={handleNavigationReopen}'),
+    'Workbench document history UI should route history-row edit and double-click reopen through the shared navigation reopen callback.',
+  )
+  assert(
+    source.includes('onDocumentCursorRequested={handleTimelineCursorRequested}'),
+    'Workbench document history UI should route history-row cursor actions through the shared timeline cursor request handler.',
+  )
+  assert(
+    source.includes('const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {')
+      && source.includes("dispatch({ type: 'document.historyCursorRequested', cursor })"),
+    'Workbench timeline cursor requests should dispatch the existing editor-owned document cursor event.',
+  )
+  assert(
     source.includes("kind: 'reorderDocumentHistory'"),
     'Accepted document history reorders should create workbench undo entries.',
   )

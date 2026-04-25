@@ -9,7 +9,7 @@ import { createEffectiveKeymap } from '@/domain/shortcuts/keymap'
 import { ShortcutContext } from '@/hooks/shortcut-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
-test('src/components/layout/workbench-context-menu.spec.tsx', () => {
+test('src/components/layout/workbench-context-menu.spec.tsx', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -92,4 +92,22 @@ test('src/components/layout/workbench-context-menu.spec.tsx', () => {
   assert(markup.includes('Export'), 'Menu should render disabled item labels.')
   assert(markup.includes('Ctrl+Z'), 'Menu should render right-aligned shortcut hints for command entries.')
   assert(markup.includes('disabled'), 'Disabled menu items should render as disabled controls.')
+
+  const source = await Bun.file(new URL('./workbench-context-menu.tsx', import.meta.url)).text()
+  assert(
+    source.includes('onPointerDown: handlePointerDown') && source.includes('event.button !== 2'),
+    'Context menus should support right-button pointer opening in addition to contextmenu events.',
+  )
+  assert(
+    source.includes("transitionProps={{ duration: 0 }}"),
+    'Context menus should open without transition delay for pointer-triggered placement.',
+  )
+  assert(
+    source.includes('floatingStrategy="fixed"'),
+    'Context menus should position the Mantine dropdown with fixed strategy to match the fixed anchor trigger.',
+  )
+  assert(
+    source.includes('createPortal(') && source.includes('document.body'),
+    'Context menu anchor targets should portal to the document body so dropdown positioning stays in the viewport coordinate space.',
+  )
 })

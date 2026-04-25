@@ -8,6 +8,18 @@ import {
 
 export const TIMELINE_CURSOR_GLYPH = '↕'
 
+export type DocumentHistoryMenuEntryDescriptor =
+  | {
+      kind: 'item'
+      id: 'edit' | 'rename' | 'suppress' | 'roll-history-here' | 'roll-to-end' | 'delete'
+      label: 'Edit' | 'Rename' | 'Suppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
+      disabled?: boolean
+    }
+  | {
+      kind: 'divider'
+      id: 'destructive-divider'
+    }
+
 export function getTimelineCursorIndex(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
@@ -53,6 +65,71 @@ export function getTimelineCursorAriaLabel(
   return item
     ? `Timeline cursor after ${item.label}`
     : 'Timeline cursor before first history item'
+}
+
+export function isDocumentHistoryCursorAtTail(
+  items: readonly DocumentHistoryItemRecord[],
+  cursorIndex: number,
+) {
+  return items.length > 0 && cursorIndex === items.length - 1
+}
+
+export function isDocumentHistoryCursorIndexAtTail(
+  historyLength: number,
+  cursorIndex: number,
+) {
+  return historyLength > 0 && cursorIndex === historyLength - 1
+}
+
+export function getDocumentHistoryMenuEntryDescriptors(input: {
+  item: DocumentHistoryItemRecord
+  cursorDisabled: boolean
+  cursorIndex: number
+  historyLength: number
+}): DocumentHistoryMenuEntryDescriptor[] {
+  const { item, cursorDisabled, cursorIndex, historyLength } = input
+  const rollToEndDisabled = cursorDisabled || isDocumentHistoryCursorIndexAtTail(historyLength, cursorIndex)
+
+  return [
+    {
+      kind: 'item',
+      id: 'edit',
+      label: 'Edit',
+    },
+    {
+      kind: 'item',
+      id: 'rename',
+      label: 'Rename',
+    },
+    ...(item.kind === 'feature'
+      ? [{
+          kind: 'item' as const,
+          id: 'suppress' as const,
+          label: 'Suppress' as const,
+        }]
+      : []),
+    {
+      kind: 'item',
+      id: 'roll-history-here',
+      label: 'Roll History Here',
+      disabled: cursorDisabled,
+    },
+    {
+      kind: 'item',
+      id: 'roll-to-end',
+      label: 'Roll To End',
+      disabled: rollToEndDisabled,
+    },
+    {
+      kind: 'divider',
+      id: 'destructive-divider',
+    },
+    {
+      kind: 'item',
+      id: 'delete',
+      label: 'Delete',
+    },
+  ]
 }
 
 export function getHistoryItemOrderEntry(item: DocumentHistoryItemRecord): DocumentHistoryOrderEntry {

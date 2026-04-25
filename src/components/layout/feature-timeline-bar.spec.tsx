@@ -6,6 +6,7 @@ import { FeatureSidebar } from '@/components/layout/feature-sidebar'
 import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
 import {
+  getDocumentHistoryMenuEntryDescriptors,
   getNearestTimelineAnchorIndex,
   resolveTimelineReorderDrop,
   TIMELINE_CURSOR_GLYPH,
@@ -267,6 +268,60 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(timelineMarkup.includes('aria-haspopup="menu"'), 'Timeline history items should expose custom context menu affordances.')
   assert(!timelineMarkup.includes('Hide Fillet 1') && !timelineMarkup.includes('Show Fillet 1'), 'Timeline should not render per-feature hide controls.')
 
+  const featureHistoryItem = snapshot.presentation.documentHistory.find((item) => item.kind === 'feature')
+  const sketchHistoryItem = snapshot.presentation.documentHistory.find((item) => item.kind === 'sketch')
+  assert(featureHistoryItem, 'Timeline menu tests need a committed feature history item.')
+  assert(sketchHistoryItem, 'Timeline menu tests need a committed sketch history item.')
+
+  const featureMenuDescriptors = getDocumentHistoryMenuEntryDescriptors({
+    item: featureHistoryItem,
+    cursorDisabled: false,
+    cursorIndex: 0,
+    historyLength: snapshot.presentation.documentHistory.length,
+  })
+  const sketchMenuDescriptors = getDocumentHistoryMenuEntryDescriptors({
+    item: sketchHistoryItem,
+    cursorDisabled: false,
+    cursorIndex: 0,
+    historyLength: snapshot.presentation.documentHistory.length,
+  })
+  const tailMenuDescriptors = getDocumentHistoryMenuEntryDescriptors({
+    item: featureHistoryItem,
+    cursorDisabled: false,
+    cursorIndex: snapshot.presentation.documentHistory.length - 1,
+    historyLength: snapshot.presentation.documentHistory.length,
+  })
+  const pendingCursorMenuDescriptors = getDocumentHistoryMenuEntryDescriptors({
+    item: featureHistoryItem,
+    cursorDisabled: true,
+    cursorIndex: 0,
+    historyLength: snapshot.presentation.documentHistory.length,
+  })
+
+  assert(
+    featureMenuDescriptors
+      .filter((entry) => entry.kind === 'item')
+      .map((entry) => entry.label)
+      .join('|') === 'Edit|Rename|Suppress|Roll History Here|Roll To End|Delete',
+    'Feature history menus should expose the shared actions plus feature-only suppress.',
+  )
+  assert(
+    sketchMenuDescriptors
+      .filter((entry) => entry.kind === 'item')
+      .map((entry) => entry.label)
+      .join('|') === 'Edit|Rename|Roll History Here|Roll To End|Delete',
+    'Sketch history menus should expose the shared committed-history actions without feature-only suppress.',
+  )
+  assert(
+    tailMenuDescriptors.find((entry) => entry.id === 'roll-to-end')?.disabled === true,
+    'Timeline menus should disable Roll To End when the document cursor is already at the authored-history tail.',
+  )
+  assert(
+    pendingCursorMenuDescriptors.find((entry) => entry.id === 'roll-history-here')?.disabled === true
+      && pendingCursorMenuDescriptors.find((entry) => entry.id === 'roll-to-end')?.disabled === true,
+    'Timeline menus should disable cursor actions while a cursor mutation or refresh is pending.',
+  )
+
   const erroredTimelineSnapshot = structuredClone(snapshot)
   erroredTimelineSnapshot.document.diagnostics = [
     {
@@ -355,11 +410,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
     getNearestTimelineAnchorIndex([100, 160, 220, 280], 266) === 2,
     'Timeline cursor dragging should snap to the nearest later valid anchor when dragged near it.',
   )
-  const featureItem = snapshot.presentation.documentHistory.find((item) => item.kind === 'feature')
-  const sketchItem = snapshot.presentation.documentHistory.find((item) => item.kind === 'sketch')
-  assert(featureItem, 'Timeline reorder tests need a feature history item.')
-  assert(sketchItem, 'Timeline reorder tests need a sketch history item.')
-  const moveFeatureBeforeSketch = resolveTimelineReorderDrop(snapshot.presentation.documentHistory, featureItem, -1)
+  const moveFeatureBeforeSketch = resolveTimelineReorderDrop(snapshot.presentation.documentHistory, featureHistoryItem, -1)
   assert(
     moveFeatureBeforeSketch?.item.kind === 'feature'
       && moveFeatureBeforeSketch.beforeItem?.kind === 'sketch',
@@ -367,7 +418,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   )
   const moveSketchAfterFeature = resolveTimelineReorderDrop(
     snapshot.presentation.documentHistory,
-    sketchItem,
+    sketchHistoryItem,
     snapshot.presentation.documentHistory.length - 1,
   )
   assert(
@@ -378,8 +429,8 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(
     resolveTimelineReorderDrop(
       snapshot.presentation.documentHistory,
-      sketchItem,
-      snapshot.presentation.documentHistory.indexOf(sketchItem) - 1,
+      sketchHistoryItem,
+      snapshot.presentation.documentHistory.indexOf(sketchHistoryItem) - 1,
     ) === null,
     'Timeline drops at the existing effective position should be ignored.',
   )
@@ -423,7 +474,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
-          onDeleteDocumentItem={() => undefined}
+          onDeleteItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -448,7 +499,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
           onReopenTarget={() => undefined}
           onDocumentCursorRequested={() => undefined}
           onSketchCursorRequested={() => undefined}
-          onDeleteItem={() => undefined}
+          onDeleteDocumentItem={() => undefined}
           onRenameDocumentItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
