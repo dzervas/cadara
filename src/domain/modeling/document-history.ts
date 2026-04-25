@@ -7,7 +7,7 @@ import type {
   FeatureTreeNodeRecord,
   SketchSnapshotRecord,
 } from '@/contracts/modeling/schema'
-import type { DocumentHistoryItemId, FeatureId } from '@/contracts/shared/ids'
+import type { DocumentHistoryItemId, FeatureId, SketchId } from '@/contracts/shared/ids'
 
 export type DocumentHistoryOrderEntry =
   | { kind: 'sketch'; sketchId: NonNullable<DocumentHistoryItemRecord['sketchId']> }
@@ -346,13 +346,46 @@ export function getAppliedFeatureIdsForDocumentCursor(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ) {
-  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
-  const appliedItems = cursor.kind === 'empty' ? [] : items.slice(0, cursorIndex + 1)
-
   return new Set(
-    appliedItems
+    getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor)
       .filter((item): item is Extract<DocumentHistoryItemRecord, { kind: 'feature' }> => item.kind === 'feature')
       .map((item) => item.featureId),
+  )
+}
+
+export function getAppliedSketchIdsForDocumentCursor(
+  items: readonly DocumentHistoryItemRecord[],
+  cursor: DocumentFeatureCursor,
+): Set<SketchId> {
+  return new Set(
+    getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor)
+      .filter((item): item is Extract<DocumentHistoryItemRecord, { kind: 'sketch' }> => item.kind === 'sketch')
+      .map((item) => item.sketchId),
+  )
+}
+
+export function getAppliedDocumentHistoryItemsForDocumentCursor(
+  items: readonly DocumentHistoryItemRecord[],
+  cursor: DocumentFeatureCursor,
+): DocumentHistoryItemRecord[] {
+  if (cursor.kind === 'empty') {
+    return []
+  }
+
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
+  return cursorIndex < 0 ? [] : items.slice(0, cursorIndex + 1)
+}
+
+export function isDocumentHistoryTargetAppliedForCursor(
+  items: readonly DocumentHistoryItemRecord[],
+  cursor: DocumentFeatureCursor,
+  target: DocumentHistoryOrderEntry,
+) {
+  const targetKey = getDocumentHistoryOrderEntryKey(target)
+  return getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor).some((item) =>
+    item.kind === 'sketch'
+      ? targetKey === getDocumentHistoryOrderEntryKey({ kind: 'sketch', sketchId: item.sketchId })
+      : targetKey === getDocumentHistoryOrderEntryKey({ kind: 'feature', featureId: item.featureId }),
   )
 }
 
@@ -360,8 +393,5 @@ export function getFeatureInsertionIndexForDocumentCursor(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ) {
-  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
-  const precedingItems = cursor.kind === 'empty' ? [] : items.slice(0, cursorIndex + 1)
-
-  return precedingItems.filter((item) => item.kind === 'feature').length
+  return getAppliedFeatureIdsForDocumentCursor(items, cursor).size
 }

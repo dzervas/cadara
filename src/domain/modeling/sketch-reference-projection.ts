@@ -15,6 +15,7 @@ import type {
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import type { SketchSolveDiagnostic } from '@/contracts/sketch'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import { isDocumentHistoryTargetAppliedForCursor } from '@/domain/modeling/document-history'
 
 type Vec3 = readonly [number, number, number]
 
@@ -636,6 +637,23 @@ function projectReference(
       geometry: [],
       diagnostics: [],
     }
+  }
+
+  const source = reference.reference.source
+  if (
+    (source.kind === 'sketchPoint' || source.kind === 'sketchEntity' || source.kind === 'sketch')
+    && !isDocumentHistoryTargetAppliedForCursor(
+      snapshot.presentation.documentHistory,
+      snapshot.document.cursor,
+      { kind: 'sketch', sketchId: source.sketchId },
+    )
+  ) {
+    return failedReference(
+      reference.referenceId,
+      'missingSource',
+      'missing-sketch-source',
+      `Sketch source ${reference.referenceId} is after the requested document cursor.`,
+    )
   }
 
   if (reference.reference.kind === 'modelReference') {

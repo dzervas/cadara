@@ -37,6 +37,12 @@ The normal document history SHALL expose valid cursor anchors for committed sket
 - **THEN** authored items after that sketch are treated as after the current cursor
 - **AND** the cursor handle is displayed at the sketch item anchor
 
+#### Scenario: Cursor is placed before a sketch item
+- **WHEN** the document cursor is moved before a committed sketch item in document history
+- **THEN** the sketch remains in authored document history for later cursor movement
+- **AND** sketch-owned viewport geometry for that sketch is excluded from render, hover, and selection output
+- **AND** the sketch is excluded from the applied `Parts & Objects` state
+
 #### Scenario: Select and reopen from document history
 - **WHEN** the user selects or double-clicks a sketch item in normal document history
 - **THEN** selection and edit-reentry use the same durable sketch target as the matching `Parts & Objects` row
@@ -116,4 +122,3 @@ Document history reordering SHALL preserve the document cursor as a durable sket
 - **WHEN** the document cursor targets an authored item that is reordered
 - **THEN** the cursor still targets that same durable sketch or feature item
 - **AND** applied history is recalculated from the target's accepted position in the new order
-

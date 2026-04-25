@@ -1,10 +1,13 @@
 import { test } from 'bun:test'
 
 import {
+  getAppliedDocumentHistoryItemsForDocumentCursor,
   getDocumentHistoryCursorBeforeTarget,
   getDocumentHistoryCursorIndex,
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
+  getAppliedFeatureIdsForDocumentCursor,
+  getAppliedSketchIdsForDocumentCursor,
   insertDocumentHistoryOrderEntryAfterCursor,
 } from '@/domain/modeling/document-history'
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
@@ -85,6 +88,22 @@ test('src/domain/modeling/document-history.spec.ts', async () => {
   assert(
     getDocumentHistoryCursorIndex(items, snapshot.document.cursor) === items.length - 1,
     'Seed document cursor should start at the document history tail.',
+  )
+  assert(
+    getAppliedDocumentHistoryItemsForDocumentCursor(items, { kind: 'empty' }).length === 0,
+    'Applied document history before the first item should be empty.',
+  )
+  assert(
+    getAppliedSketchIdsForDocumentCursor(items, { kind: 'sketch', sketchId: seedSketchItem.sketchId }).has(seedSketchItem.sketchId),
+    'Applied sketch ids should include a sketch cursor target.',
+  )
+  assert(
+    getAppliedFeatureIdsForDocumentCursor(items, { kind: 'sketch', sketchId: seedSketchItem.sketchId }).size === 0,
+    'A cursor on the seed sketch should not include later feature ids.',
+  )
+  assert(
+    getAppliedFeatureIdsForDocumentCursor(items, { kind: 'feature', featureId: seedFeatureItem.featureId }).has(seedFeatureItem.featureId),
+    'Applied feature ids should include a feature cursor target.',
   )
 
   const previous = getPreviousDocumentHistoryCursor(snapshot)

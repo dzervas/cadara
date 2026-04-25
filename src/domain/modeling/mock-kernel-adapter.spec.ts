@@ -491,6 +491,48 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     )
   }
 
+  async function testRollbackCursorHidesFutureSketchPresentation() {
+    const adapter = new MockKernelAdapter()
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    const rollback = await adapter.setFeatureCursor({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+      baseRevisionId: before.snapshot.revisionId,
+      cursor: { kind: 'empty' },
+    })
+    assert(rollback.revisionState.kind === 'accepted', 'Mock cursor rollback before the first item should be accepted.')
+
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })
+    assert(
+      after.snapshot.document.sketches.some((sketch) => sketch.sketchId === 'sketch_primary'),
+      'Cursor rollback should retain future sketches in durable document state.',
+    )
+    assert(
+      !after.snapshot.document.render.records.some((record) =>
+        record.binding.target.kind === 'sketch'
+        || (
+          'sketchId' in record.binding.target
+          && record.binding.target.sketchId === 'sketch_primary'
+        ),
+      ),
+      'Cursor rollback should hide future sketch renderables.',
+    )
+    assert(
+      !after.snapshot.presentation.entities.some((entity) => entity.ownerSketchId === 'sketch_primary'),
+      'Cursor rollback should hide future sketch selection entities.',
+    )
+    assert(
+      !after.snapshot.presentation.objects.some((object) => object.ownerSketchId === 'sketch_primary'),
+      'Cursor rollback should hide future sketch object rows.',
+    )
+  }
+
   async function testAcceptedSketchCommitMutatesCommittedSnapshot() {
     const adapter = new MockKernelAdapter()
     const before = await adapter.getDocumentSnapshot({
@@ -2211,6 +2253,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
   await testAcceptedCreateMutatesCommittedSnapshot()
   await testSourceBackedSketchReferenceProjection()
   await testRollbackCursorPreservesAndInsertsFeatureAfterCursor()
+  await testRollbackCursorHidesFutureSketchPresentation()
   await testAcceptedSketchCommitMutatesCommittedSnapshot()
   await testAcceptedSketchCommitNormalizesAuthoringOperationTargets()
   await testAcceptedSketchCommitPersistsActiveProjectionData()

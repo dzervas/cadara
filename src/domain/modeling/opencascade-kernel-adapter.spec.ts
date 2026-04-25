@@ -4870,14 +4870,16 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     })
     assert(firstFeature.revisionState.kind === 'accepted', 'First restore setup feature should commit.')
 
-    const firstFeatureSnapshot = await source.getDocumentSnapshot({
-      contractVersion: CONTRACT_VERSION,
-      documentId: 'doc_workspace',
-    })
+    const secondSketch = await source.commitSketch(createSketchCommitRequest(firstFeature.revisionId, {
+      sketchLabel: 'Future Restore Sketch',
+      definition: translateSeedDefinition(16, 0),
+    }))
+    assert(secondSketch.revisionState.kind === 'accepted', 'Future restore setup sketch should commit.')
+
     const secondFeature = await source.createFeature({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
-      baseRevisionId: firstFeatureSnapshot.snapshot.revisionId,
+      baseRevisionId: secondSketch.revisionId,
       definition: createExtrudeDefinition(sketch, 8),
     })
     assert(secondFeature.revisionState.kind === 'accepted', 'Second restore setup feature should commit.')
@@ -4907,7 +4909,37 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
       emptyCursorSnapshot.features.map((feature) => feature.featureId).join('|') === `${firstFeature.featureId}|${secondFeature.featureId}`,
       'Empty cursor restore should retain future authored feature records.',
     )
+    assert(
+      emptyCursorSnapshot.sketches.some((entry) => entry.sketchId === secondSketch.sketchId),
+      'Empty cursor restore should retain future authored sketch records.',
+    )
     assert(emptyCursorSnapshot.bodies.length === 0, 'Empty cursor restore should not expose downstream feature bodies.')
+    assert(
+      !emptyCursorSnapshot.render.records.some((record) =>
+        'sketchId' in record.binding.target && record.binding.target.sketchId === secondSketch.sketchId,
+      ),
+      'Empty cursor restore should not expose future sketch renderables.',
+    )
+
+    const firstFeatureOnlySnapshot = await restore({ kind: 'feature', featureId: firstFeature.featureId })
+    assert(
+      firstFeatureOnlySnapshot.sketches.some((entry) => entry.sketchId === secondSketch.sketchId),
+      'Feature cursor restore should retain future sketch records after the cursor.',
+    )
+    assert(
+      !firstFeatureOnlySnapshot.render.records.some((record) =>
+        'sketchId' in record.binding.target && record.binding.target.sketchId === secondSketch.sketchId,
+      ),
+      'Feature cursor restore should hide future sketch renderables after the cursor.',
+    )
+    assert(
+      !firstFeatureOnlySnapshot.entities.some((entity) => entity.ownerSketchId === secondSketch.sketchId),
+      'Feature cursor restore should hide future sketch selection entities after the cursor.',
+    )
+    assert(
+      !firstFeatureOnlySnapshot.objects.some((object) => object.ownerSketchId === secondSketch.sketchId),
+      'Feature cursor restore should hide future sketch object rows after the cursor.',
+    )
 
     const sketchCursorSnapshot = await restore({ kind: 'sketch', sketchId: sketch.sketchId })
     assert(sketchCursorSnapshot.cursor.kind === 'sketch', 'Restored sketch cursor should remain on the sketch.')

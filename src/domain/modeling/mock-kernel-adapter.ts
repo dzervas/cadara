@@ -31,6 +31,7 @@ import {
   insertDocumentHistoryOrderEntryAfterCursor,
   createTailDocumentCursor,
   getAppliedFeatureIdsForDocumentCursor,
+  getAppliedSketchIdsForDocumentCursor,
   getFeatureInsertionIndexForDocumentCursor,
   isValidDocumentHistoryCursor,
   reorderDocumentHistoryOrder,
@@ -133,13 +134,61 @@ function applyCursorToMockSnapshot(snapshot: DocumentSnapshot) {
     snapshot.presentation.documentHistory,
     snapshot.document.cursor,
   )
+  const appliedSketchIds = getAppliedSketchIdsForDocumentCursor(
+    snapshot.presentation.documentHistory,
+    snapshot.document.cursor,
+  )
 
   snapshot.document.render.records = snapshot.document.render.records.filter(
-    (record) => record.ownerFeatureId === null || appliedFeatureIds.has(record.ownerFeatureId),
+    (record) =>
+      (record.ownerFeatureId === null || appliedFeatureIds.has(record.ownerFeatureId))
+      && isRenderTargetAppliedForMockCursor(record.binding.target, appliedSketchIds),
+  )
+  snapshot.presentation.entities = snapshot.presentation.entities.filter(
+    (entity) =>
+      (entity.ownerFeatureId === null || appliedFeatureIds.has(entity.ownerFeatureId))
+      && (entity.ownerSketchId === null || appliedSketchIds.has(entity.ownerSketchId)),
+  )
+  snapshot.presentation.objects = snapshot.presentation.objects.filter(
+    (object) =>
+      (object.ownerFeatureId === null || appliedFeatureIds.has(object.ownerFeatureId))
+      && (object.ownerSketchId === null || appliedSketchIds.has(object.ownerSketchId)),
+  )
+  snapshot.presentation.featureTree = snapshot.presentation.featureTree.filter(
+    (node) =>
+      node.kind === 'plane'
+      || (
+        (node.ownerFeatureId === null || appliedFeatureIds.has(node.ownerFeatureId))
+        && (node.ownerSketchId === null || appliedSketchIds.has(node.ownerSketchId))
+      ),
   )
   snapshot.render = snapshot.document.render
+  snapshot.document.entities = snapshot.presentation.entities
+  snapshot.entities = snapshot.presentation.entities
+  snapshot.document.objects = snapshot.presentation.objects
+  snapshot.objects = snapshot.presentation.objects
+  snapshot.document.featureTree = snapshot.presentation.featureTree
+  snapshot.featureTree = snapshot.presentation.featureTree
 
   return snapshot
+}
+
+function isRenderTargetAppliedForMockCursor(
+  target: DurableRef,
+  appliedSketchIds: ReadonlySet<SketchId>,
+) {
+  if (
+    target.kind === 'sketch'
+    || target.kind === 'sketchEntity'
+    || target.kind === 'sketchPoint'
+    || target.kind === 'constraint'
+    || target.kind === 'dimension'
+    || target.kind === 'region'
+  ) {
+    return appliedSketchIds.has(target.sketchId)
+  }
+
+  return true
 }
 
 function createConstructionPlaneRenderRecords(): RenderableEntityRecord[] {

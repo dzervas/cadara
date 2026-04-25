@@ -25,8 +25,8 @@ The model document cursor SHALL reference the last feature in the ordered featur
 - **WHEN** a document snapshot is created for an unrolled document with existing features
 - **THEN** the document cursor references the last feature in document feature order
 
-### Requirement: Rollback SHALL move the cursor without deleting follow-up features
-Rollback SHALL update the document cursor to an earlier feature position and SHALL preserve features that follow the cursor in document state.
+### Requirement: Rollback SHALL move the cursor without deleting follow-up authored items
+Rollback SHALL update the document cursor to an earlier history position and SHALL preserve authored sketches and features that follow the cursor in document state.
 
 #### Scenario: Roll back before later features
 - **WHEN** a document has ordered features `a-b-c-d` and rollback moves the cursor to feature `b`
@@ -35,6 +35,11 @@ Rollback SHALL update the document cursor to an earlier feature position and SHA
 #### Scenario: Rebuild uses only applied features
 - **WHEN** the document cursor is rolled back before later stored features
 - **THEN** rebuild and render output are based on features through the cursor and exclude follow-up features after the cursor from the applied model state
+
+#### Scenario: Rebuild uses only applied sketches
+- **WHEN** the document cursor is rolled back before a later stored sketch
+- **THEN** render, reference resolution, hover, and selection output are based on sketches through the cursor
+- **AND** follow-up sketches after the cursor remain stored for later cursor movement but are excluded from the applied model state
 
 ### Requirement: New features SHALL insert after the cursor
 When a new feature is committed, the system SHALL insert it immediately after the current document cursor and then move the cursor to the new feature.
@@ -160,4 +165,3 @@ When a document cursor mutation is rejected because the snapshot basis is stale,
 - **WHEN** a document cursor mutation is rejected because the requested base revision is stale
 - **THEN** the editor runtime requests a fresh document snapshot
 - **AND** it does not leave a pending cursor request that blocks later cursor movement
-

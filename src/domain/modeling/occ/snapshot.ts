@@ -62,7 +62,11 @@ import {
   OCC_KERNEL_CAPABILITIES,
   OCC_KERNEL_SETTINGS,
 } from '@/domain/modeling/opencascade-kernel-seed'
-import { createDocumentHistoryItems } from '@/domain/modeling/document-history'
+import {
+  createDocumentHistoryItems,
+  getAppliedDocumentHistoryItemsForDocumentCursor,
+  getAppliedSketchIdsForDocumentCursor,
+} from '@/domain/modeling/document-history'
 import { extractPlanarFaceData } from '@/domain/modeling/occ/planes'
 import { buildRegionProfileFace } from '@/domain/modeling/occ/sketch-profile'
 import { deleteOccObject } from '@/domain/modeling/occ/memory'
@@ -223,10 +227,13 @@ function collectFeatureConsumedTargets(definition: OccAuthoringState['features']
   return targets
 }
 
-function createFeatureConsumerMap(state: OccAuthoringState) {
+function createFeatureConsumerMap(
+  state: OccAuthoringState,
+  features: readonly OccAuthoringState['features'][number][] = state.features,
+) {
   const consumers = new Map<string, FeatureId[]>()
 
-  for (const feature of state.features) {
+  for (const feature of features) {
     const featureId = feature.featureId
     const uniqueKeys = new Set<string>()
 
@@ -408,16 +415,6 @@ function buildSnapshotPresentationRecords(
       ownerSketchId: sketch.sketchId,
       sourceFeatureId: sketch.ownerFeatureId,
     })
-    objects.push({
-      id: createObjectTreeNodeId('sketch', target),
-      label: sketch.label,
-      description: 'Authored sketch',
-      kind: 'sketch',
-      target,
-      ownerBodyId: null,
-      ownerFeatureId: sketch.ownerFeatureId,
-      ownerSketchId: sketch.sketchId,
-    })
   }
 
   for (const feature of state.features) {
@@ -452,15 +449,42 @@ function buildSnapshotPresentationRecords(
     sketches: state.sketches,
     historyOrder: state.historyOrder,
   })
+  const appliedHistoryItems = getAppliedDocumentHistoryItemsForDocumentCursor(historyItems, state.cursor)
+  const appliedSketchIds = getAppliedSketchIdsForDocumentCursor(historyItems, state.cursor)
+  const appliedFeatureIds = new Set(
+    appliedHistoryItems
+      .filter((item): item is Extract<(typeof appliedHistoryItems)[number], { kind: 'feature' }> =>
+        item.kind === 'feature',
+      )
+      .map((item) => item.featureId),
+  )
   const featureTree: FeatureTreeNodeRecord[] = [
     ...constructionFeatureTree,
-    ...historyItems.flatMap((item) => {
+    ...appliedHistoryItems.flatMap((item) => {
       const node = item.kind === 'sketch'
         ? sketchNodes.get(item.sketchId)
         : featureNodes.get(item.featureId)
       return node ? [node] : []
     }),
   ]
+
+  for (const sketch of state.sketches) {
+    if (!appliedSketchIds.has(sketch.sketchId)) {
+      continue
+    }
+
+    const target = { kind: 'sketch', sketchId: sketch.sketchId } as const
+    objects.push({
+      id: createObjectTreeNodeId('sketch', target),
+      label: sketch.label,
+      description: 'Authored sketch',
+      kind: 'sketch',
+      target,
+      ownerBodyId: null,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+    })
+  }
 
   for (const body of state.bodies) {
     const target = { kind: 'body', bodyId: body.bodyId } as const
@@ -480,6 +504,9 @@ function buildSnapshotPresentationRecords(
     features,
     featureTree,
     objects,
+    appliedSketches: state.sketches.filter((sketch) => appliedSketchIds.has(sketch.sketchId)),
+    appliedFeatures: state.features.filter((feature) => appliedFeatureIds.has(feature.featureId)),
+    appliedSketchIds,
   }
 }
 
@@ -684,21 +711,26 @@ function buildSnapshotEntities(
   state: OccAuthoringState,
   consumerMap: ReadonlyMap<string, FeatureId[]>,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+  appliedSketches: readonly SketchSnapshotRecord[],
 ) {
   return [
     ...buildConstructionEntities(state, consumerMap),
-    ...state.sketches.flatMap((sketch) => buildSketchEntities(state, sketch, consumerMap)),
+    ...appliedSketches.flatMap((sketch) => buildSketchEntities(state, sketch, consumerMap)),
     ...state.bodies.flatMap((body) => buildBodyEntities(state, body, consumerMap, faceSemanticClasses)),
   ]
 }
 
-function buildReferenceRecords(state: OccAuthoringState): ReferenceRecord[] {
+function buildReferenceRecords(
+  state: OccAuthoringState,
+  appliedSketchIds: ReadonlySet<SketchId>,
+): ReferenceRecord[] {
   const entries = [
     ...state.referenceState.liveReferencesByKey.values(),
     ...state.referenceState.invalidatedReferencesByKey.values(),
   ]
 
   return entries
+    .filter((reference) => reference.ownerSketchId === null || appliedSketchIds.has(reference.ownerSketchId))
     .slice()
     .sort((left, right) => getOccDurableRefKey(left.target).localeCompare(getOccDurableRefKey(right.target)))
     .map((reference) => ({
@@ -918,11 +950,15 @@ function buildFaceRenderRecord(
   }
 }
 
-function buildRegionRenderRecords(state: OccAuthoringState, options: OccSnapshotBuildOptions = {}) {
+function buildRegionRenderRecords(
+  state: OccAuthoringState,
+  sketches: readonly SketchSnapshotRecord[],
+  options: OccSnapshotBuildOptions = {},
+) {
   const records: RenderableEntityRecord[] = []
   const tessellationTier = getOccTessellationTier(options.lodTierId)
 
-  for (const sketch of state.sketches) {
+  for (const sketch of sketches) {
     for (const region of sketch.sketch.regions) {
       let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null
 
@@ -1642,10 +1678,14 @@ function buildSketchPointRenderRecords(
   })
 }
 
-function buildSketchRenderRecords(state: OccAuthoringState, options: OccSnapshotBuildOptions = {}) {
+function buildSketchRenderRecords(
+  state: OccAuthoringState,
+  sketches: readonly SketchSnapshotRecord[],
+  options: OccSnapshotBuildOptions = {},
+) {
   return [
-    ...buildRegionRenderRecords(state, options),
-    ...state.sketches.flatMap((sketch) => [
+    ...buildRegionRenderRecords(state, sketches, options),
+    ...sketches.flatMap((sketch) => [
       ...buildSketchCurveRenderRecords(state, sketch),
       ...buildSketchPointRenderRecords(state, sketch),
     ]),
@@ -1656,10 +1696,11 @@ export function buildOccRenderExport(
   state: OccAuthoringState,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses> = createFaceSemanticClassMap(state),
   options: OccSnapshotBuildOptions = {},
+  appliedSketches: readonly SketchSnapshotRecord[] = state.sketches,
 ) {
   const records: RenderableEntityRecord[] = [
     ...buildConstructionRenderRecords(state),
-    ...buildSketchRenderRecords(state, options),
+    ...buildSketchRenderRecords(state, appliedSketches, options),
     ...state.bodies.flatMap((body) => buildBodyRenderRecords(state, body, faceSemanticClasses, options)),
   ]
 
@@ -1675,11 +1716,18 @@ export function buildOccKernelDocumentSnapshot(
   options: OccSnapshotBuildOptions = {},
 ): KernelDocumentSnapshot {
   const producedTargetsByFeatureId = createProducedTargetsByFeatureId(state.features)
-  const consumerMap = createFeatureConsumerMap(state)
   const faceSemanticClasses = createFaceSemanticClassMap(state)
-  const { features, featureTree, objects } = buildSnapshotPresentationRecords(state, producedTargetsByFeatureId)
-  const entities = buildSnapshotEntities(state, consumerMap, faceSemanticClasses)
-  const references = buildReferenceRecords(state)
+  const {
+    features,
+    featureTree,
+    objects,
+    appliedSketches,
+    appliedFeatures,
+    appliedSketchIds,
+  } = buildSnapshotPresentationRecords(state, producedTargetsByFeatureId)
+  const consumerMap = createFeatureConsumerMap(state, appliedFeatures)
+  const entities = buildSnapshotEntities(state, consumerMap, faceSemanticClasses, appliedSketches)
+  const references = buildReferenceRecords(state, appliedSketchIds)
   const diagnostics = buildOccSnapshotDiagnostics(state, extraDiagnostics)
 
   return {
@@ -1704,7 +1752,7 @@ export function buildOccKernelDocumentSnapshot(
     entities,
     references,
     diagnostics,
-    render: buildOccRenderExport(state, faceSemanticClasses, options),
+    render: buildOccRenderExport(state, faceSemanticClasses, options, appliedSketches),
   }
 }
 
