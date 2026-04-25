@@ -47,7 +47,9 @@ import {
   selectSketchEditToolTarget,
   selectSketchAnnotation,
   selectSketchConstraintTarget,
+  shouldDeferSketchConstraintPreviewPinToSelection,
   selectSketchReferenceTarget,
+  shouldPinSketchConstraintPreviewBeforeSelection,
   startSketchDraw,
   toggleSketchConstructionTarget,
   toggleSketchSvgRendering,
@@ -366,6 +368,8 @@ export interface SketchPointerReleasedEvent {
   type: 'sketch.pointerReleased'
   /** Release location in the active sketch plane coordinate frame. */
   point: readonly [number, number]
+  /** Durable target under the release point, when the viewport could resolve one. */
+  target?: PrimitiveRef | null
 }
 
 /** Starts direct editing of a selectable sketch geometry handle. */
@@ -2564,6 +2568,33 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (
         state.kind === 'editingSketch'
+        && shouldPinSketchConstraintPreviewBeforeSelection(state.session)
+      ) {
+        const session = pinSketchConstraintPreview(
+          state.session,
+          state.session.constraintAuthoring?.pointer ?? null,
+        )
+
+        return {
+          state: {
+            ...state,
+            session,
+            command: {
+              ...state.command,
+              phase: 'collecting',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      if (
+        state.kind === 'editingSketch'
         && (event.target.kind === 'constraint' || event.target.kind === 'dimension')
       ) {
         const session = selectSketchAnnotation(state.session, event.target)
@@ -2936,7 +2967,9 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         const point = deriveSketchPointFromWorld(state.session.plane, event.point)
         const session =
           state.session.constraintAuthoring
-            ? pinSketchConstraintPreview(state.session, point)
+            ? shouldDeferSketchConstraintPreviewPinToSelection(state.session, event.target)
+              ? state.session
+              : pinSketchConstraintPreview(state.session, point)
             : state.session.status === 'drawing'
             ? acceptSketchDraw(state.session, point)
             : startSketchDraw(state.session, point)

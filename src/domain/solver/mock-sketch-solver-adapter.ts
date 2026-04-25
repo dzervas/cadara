@@ -450,6 +450,11 @@ function validateDefinition(
           diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing entity.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
         }
         break
+      case 'lineLength':
+        if (!entities.has(dimension.entityId)) {
+          diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        break
       case 'lineDistance':
       case 'lineAngle':
         for (const line of dimension.lines) {
@@ -764,6 +769,16 @@ function solveDefinition(
           dimensionId: dimension.dimensionId,
           status: entity?.kind === 'circle' ? 'driving' : 'unsatisfied',
           solvedValue: entity?.kind === 'circle' ? entity.radius : null,
+        } as const
+      }
+      case 'lineLength': {
+        const entity = entityMap.get(dimension.entityId)
+        const start = entity?.kind === 'lineSegment' ? points.get(entity.startPointId) : null
+        const end = entity?.kind === 'lineSegment' ? points.get(entity.endPointId) : null
+        return {
+          dimensionId: dimension.dimensionId,
+          status: start && end ? 'driving' : 'unsatisfied',
+          solvedValue: start && end ? distance(start.position, end.position) : null,
         } as const
       }
       default:

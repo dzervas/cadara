@@ -76,6 +76,25 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         ],
       },
       {
+        id: 'committed-angle-overlay',
+        kind: 'angleArc',
+        label: 'Angle dimension',
+        center: [0, 0],
+        start: [1.5, 0],
+        end: [0, 1.5],
+        radius: 1.5,
+        side: 'minor',
+        labelAnchor: { kind: 'sketchPoint', point: [0.75, 0.75] },
+        witnessLines: [
+          {
+            id: 'committed-angle-overlay-witness-a',
+            label: 'Witness',
+            start: [1, 0],
+            end: [1.5, 0],
+          },
+        ],
+      },
+      {
         id: 'rectangle-start-anchor',
         kind: 'anchor',
         label: 'First corner',
@@ -133,6 +152,12 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
         { id: 'overlay-geometry:parallel-angle-preview-witness-a:end', x: 240, y: 120 },
         { id: 'overlay-geometry:parallel-angle-preview-witness-b:start', x: 200, y: 100 },
         { id: 'overlay-geometry:parallel-angle-preview-witness-b:end', x: 200, y: 80 },
+        { id: 'overlay:committed-angle-overlay', x: 190, y: 70 },
+        { id: 'overlay-geometry:committed-angle-overlay:center', x: 200, y: 120 },
+        { id: 'overlay-geometry:committed-angle-overlay:start', x: 260, y: 120 },
+        { id: 'overlay-geometry:committed-angle-overlay:end', x: 200, y: 60 },
+        { id: 'overlay-geometry:committed-angle-overlay-witness-a:start', x: 240, y: 120 },
+        { id: 'overlay-geometry:committed-angle-overlay-witness-a:end', x: 260, y: 120 },
         { id: 'overlay:rectangle-start-anchor', x: 100, y: 140 },
         { id: 'overlay:rectangle-completion-cue', x: 200, y: 60 },
         { id: 'overlay:active-snap', x: 140, y: 100 },
@@ -181,6 +206,10 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
       && markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-b"')
       && markup.includes('stroke-dasharray="4 4"'),
     'Viewport feedback should render dashed angular witness lines when the overlay declares them.',
+  )
+  assert(
+    markup.includes('data-sketch-viewport-angle-witness="committed-angle-overlay-witness-a"'),
+    'Viewport feedback should render angular witness lines for committed angle arcs without preview drag handles.',
   )
   assert(
     !markup.includes('First corner') && !markup.includes('Place corner'),

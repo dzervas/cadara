@@ -299,6 +299,8 @@ function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphK
       return getToolIconSrc('dimension')
     case 'dimensionRadius':
       return getToolIconSrc('dimension')
+    case 'dimensionAngle':
+      return '/icons/drawing-angular-dim-line-to-line.svg'
     case 'dimensionCoincident':
       return getToolIconSrc('dimension')
   }

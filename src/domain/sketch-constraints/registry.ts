@@ -304,6 +304,7 @@ function getDimensionLabel(
     vertical: 'Vertical',
     radius: 'Radius',
     diameter: 'Diameter',
+    lineLength: 'Line length',
     lineDistance: 'Line distance',
     pointLineDistance: 'Point-line distance',
   }[referenceKind]
@@ -513,6 +514,52 @@ function getLineDimensionPlacement(
   }
 }
 
+type DimensionDistanceIntent =
+  | { kind: 'diameter'; valueSpec: { label: 'Diameter'; unit: 'mm'; min: 0.01; defaultValue: 10 } }
+  | { kind: 'lineLength'; valueSpec: { label: 'Length'; unit: 'mm'; min: 0.01; defaultValue: 10 } }
+  | { kind: 'lineDistance'; valueSpec: { label: 'Distance'; unit: 'mm'; min: 0.01; defaultValue: 10 } }
+  | { kind: 'linePointDistance'; valueSpec: { label: 'Distance'; unit: 'mm'; min: 0.01; defaultValue: 10 } }
+  | { kind: 'lineAngle'; valueSpec: { label: 'Angle'; unit: 'deg'; min: 0.1; defaultValue: 90 } }
+  | { kind: 'pointDistance'; valueSpec: { label: 'Distance'; unit: 'mm'; min: 0.01; defaultValue: 10 } }
+
+function getDimensionDistanceIntent(
+  selectedTargets: readonly SketchConstraintTargetRecord[],
+): DimensionDistanceIntent | null {
+  const [first, second] = selectedTargets
+
+  if (!first) {
+    return null
+  }
+
+  if (first.circle && !second) {
+    return { kind: 'diameter', valueSpec: { label: 'Diameter', unit: 'mm', min: 0.01, defaultValue: 10 } }
+  }
+
+  if (first.entity?.kind === 'lineSegment' && !second) {
+    return { kind: 'lineLength', valueSpec: { label: 'Length', unit: 'mm', min: 0.01, defaultValue: 10 } }
+  }
+
+  if (!second) {
+    return null
+  }
+
+  if (first.line && second.line) {
+    return areLinesParallel(first.line, second.line)
+      ? { kind: 'lineDistance', valueSpec: { label: 'Distance', unit: 'mm', min: 0.01, defaultValue: 10 } }
+      : { kind: 'lineAngle', valueSpec: { label: 'Angle', unit: 'deg', min: 0.1, defaultValue: 90 } }
+  }
+
+  if ((first.line && !second.line) || (!first.line && second.line)) {
+    return { kind: 'linePointDistance', valueSpec: { label: 'Distance', unit: 'mm', min: 0.01, defaultValue: 10 } }
+  }
+
+  if (first.point && second.point) {
+    return { kind: 'pointDistance', valueSpec: { label: 'Distance', unit: 'mm', min: 0.01, defaultValue: 10 } }
+  }
+
+  return null
+}
+
 function getPointPairDimensionPlacement(input: {
   first: readonly [number, number]
   second: readonly [number, number]
@@ -554,6 +601,10 @@ export function inferDimensionAnnotationPlacement(
       offset: 0,
       angleRadians: Math.atan2(direction[1], direction[0]),
     }
+  }
+
+  if (first?.line && !second) {
+    return getLineDimensionPlacement(first.line, point) ?? null
   }
 
   if (first?.line && second?.line && !areLinesParallel(first.line, second.line)) {
@@ -847,6 +898,54 @@ function buildLineDistancePreview(input: SketchConstraintPreviewInput): readonly
   ]
 }
 
+function buildLineLengthPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
+  const target = input.selectedTargets[0] ?? input.hoverTarget
+
+  if (!target?.line) {
+    return buildSinglePreview('line-length-preview', 'Line length preview', 'Select one line', input)
+  }
+
+  const placement = input.annotationPlacement?.kind === 'dimensionLine'
+    ? input.annotationPlacement
+    : getLineDimensionPlacement(target.line, input.pointer)
+  const axis = normalize(lineVector(target.line))
+  const normal: readonly [number, number] = [-axis[1], axis[0]]
+  const offset = placement?.offset ?? 0
+  const start: readonly [number, number] = [
+    target.line.start[0] + normal[0] * offset,
+    target.line.start[1] + normal[1] * offset,
+  ]
+  const end: readonly [number, number] = [
+    target.line.end[0] + normal[0] * offset,
+    target.line.end[1] + normal[1] * offset,
+  ]
+
+  return [
+    {
+      id: 'line-length-preview',
+      kind: 'dimensionLine',
+      label: getDimensionLabel('lineLength', input.value, 'mm'),
+      referenceKind: 'lineLength',
+      start,
+      end,
+      value: input.value,
+      unit: 'mm',
+      dragHandle: { id: 'line-length-preview-drag', kind: 'dimensionLine' },
+      labelAnchor: {
+        kind: 'sketchPoint',
+        point: midpoint(start, end),
+        offset: { x: 0, y: -18 },
+      },
+      extensionLines: offset === 0
+        ? []
+        : [
+            { id: 'line-length-preview-extension-a', label: 'Extension', start: target.line.start, end: start },
+            { id: 'line-length-preview-extension-b', label: 'Extension', start: target.line.end, end },
+          ],
+    },
+  ]
+}
+
 function buildLinePointDistancePreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[] {
   const first = input.selectedTargets[0]
   const second = input.selectedTargets[1] ?? input.hoverTarget
@@ -988,6 +1087,10 @@ function buildExpandedDimensionPreview(input: SketchConstraintPreviewInput): rea
 
   if (first?.circle && !second) {
     return buildDiameterPreview(input)
+  }
+
+  if (first?.line && !second) {
+    return buildLineLengthPreview(input)
   }
 
   if (first?.line && second?.line) {
@@ -1711,11 +1814,15 @@ const sketchConstraintDefinitions = [
     buildPreview(input) {
       return buildExpandedDimensionPreview(input)
     },
+    getValueSpec(selectedTargets) {
+      return getDimensionDistanceIntent(selectedTargets)?.valueSpec ?? null
+    },
     isReadyForValue(selectedTargets) {
-      return Boolean(selectedTargets[0]?.circle) || selectedTargets.length >= 2
+      return getDimensionDistanceIntent(selectedTargets) !== null
     },
     canSelectMoreTargets(selectedTargets) {
-      return !selectedTargets[0]?.circle && selectedTargets.length < 2
+      const [first, second] = selectedTargets
+      return Boolean(first?.line && !second)
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
@@ -1742,6 +1849,23 @@ const sketchConstraintDefinitions = [
       }
 
       if (!second) {
+        if (first.entity?.kind === 'lineSegment') {
+          return {
+            dimensions: [
+              {
+                dimensionId: input.createDimensionId('line-length'),
+                kind: 'lineLength',
+                label: `Line length ${input.sequence}`,
+                entityId: first.entity.entityId,
+                value: input.value,
+                annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                  ? input.annotationPlacement
+                  : undefined,
+              },
+            ],
+          }
+        }
+
         return {}
       }
 
@@ -1775,7 +1899,7 @@ const sketchConstraintDefinitions = [
               kind: 'lineAngle',
               label: `Line angle ${input.sequence}`,
               lines: [firstLine, secondLine],
-              valueRadians: input.value,
+              valueRadians: input.value * Math.PI / 180,
               annotationPlacement: input.annotationPlacement?.kind === 'angleArc'
                 ? input.annotationPlacement
                 : undefined,

@@ -181,6 +181,7 @@ export type SketchAnnotationGlyphKind =
   | 'dimensionHorizontal'
   | 'dimensionVertical'
   | 'dimensionRadius'
+  | 'dimensionAngle'
   | 'dimensionCoincident'
 
 export interface SketchGeometryDragState {
@@ -2111,6 +2112,8 @@ export function dimensionReferencesSketchGeometry(
     case 'circleRadius':
     case 'diameter':
       return deletedEntityIds.has(dimension.entityId)
+    case 'lineLength':
+      return deletedEntityIds.has(dimension.entityId)
     case 'lineDistance':
     case 'lineAngle':
       return dimension.lines.some(operandReferencesDeletedGeometry)
@@ -2240,6 +2243,7 @@ function buildConstraintToolPresentation(
   validationMessage: string | null = null,
 ): SketchToolPresentationSchema {
   const definition = getSketchConstraintDefinition(authoring.toolId)
+  const valueSpec = definition.getValueSpec?.(authoring.selectedTargets) ?? definition.valueSpec
   const selectionGuide = buildConstraintSelectionGuide(
     authoring.toolId,
     authoring.selectedTargets,
@@ -2253,21 +2257,21 @@ function buildConstraintToolPresentation(
     annotationPlacement: authoring.pendingAnnotationPlacement,
   })
   const needsValue =
-    Boolean(definition.valueSpec) && isSketchConstraintReadyForValue(definition, authoring.selectedTargets)
+    Boolean(valueSpec) && isSketchConstraintReadyForValue(definition, authoring.selectedTargets)
   const promptText = needsValue
     ? authoring.isPreviewPinned
-      ? `Enter ${definition.valueSpec?.label.toLowerCase() ?? 'value'}`
-      : `Place ${definition.valueSpec?.label.toLowerCase() ?? 'value'} annotation`
+      ? `Enter ${valueSpec?.label.toLowerCase() ?? 'value'}`
+      : `Place ${valueSpec?.label.toLowerCase() ?? 'value'} annotation`
     : selectionGuide.label
 
-  const floatingInput: SketchToolFloatingInputDescriptor | null = needsValue && definition.valueSpec
+  const floatingInput: SketchToolFloatingInputDescriptor | null = needsValue && valueSpec
     && authoring.isPreviewPinned
     ? {
         id: `${authoring.toolId}-value-input`,
-        label: definition.valueSpec.label,
+        label: valueSpec.label,
         value: authoring.pendingValue,
-        unit: definition.valueSpec.unit,
-        min: definition.valueSpec.min,
+        unit: valueSpec.unit,
+        min: valueSpec.min,
         confirmLabel: 'Commit',
         cancelLabel: 'Cancel',
         anchor: getConstraintFloatingInputAnchor(authoring, overlays),
@@ -2329,6 +2333,42 @@ function canSketchConstraintSelectMoreTargets(
   selectedTargets: readonly SketchConstraintTargetRecord[],
 ) {
   return definition.canSelectMoreTargets?.(selectedTargets) ?? selectedTargets.length < definition.steps.length
+}
+
+export function shouldPinSketchConstraintPreviewBeforeSelection(session: SketchSessionState) {
+  const authoring = session.constraintAuthoring
+  if (!authoring || session.status !== 'awaitingValue' || authoring.isPreviewPinned) {
+    return false
+  }
+
+  const definition = getSketchConstraintDefinition(authoring.toolId)
+  return isSketchConstraintReadyForValue(definition, authoring.selectedTargets)
+    && !canSketchConstraintSelectMoreTargets(definition, authoring.selectedTargets)
+}
+
+export function shouldDeferSketchConstraintPreviewPinToSelection(
+  session: SketchSessionState,
+  target: PrimitiveRef | null | undefined,
+) {
+  const authoring = session.constraintAuthoring
+
+  if (!authoring || !target || session.status !== 'awaitingValue' || authoring.isPreviewPinned) {
+    return false
+  }
+
+  const definition = getSketchConstraintDefinition(authoring.toolId)
+
+  if (!canSketchConstraintSelectMoreTargets(definition, authoring.selectedTargets)) {
+    return false
+  }
+
+  const resolved = resolveSketchConstraintTarget(authoring.toolId, session.definition, target, session.projectedReferences)
+
+  if (!resolved) {
+    return false
+  }
+
+  return !authoring.selectedTargets.some((entry) => getTargetKey(entry.target) === getTargetKey(resolved.target))
 }
 
 function getConstraintFloatingInputAnchor(
@@ -5009,11 +5049,12 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
 
   if (session.constraintAuthoring) {
     const definition = getSketchConstraintDefinition(session.constraintAuthoring.toolId)
+    const valueSpec = definition.getValueSpec?.(session.constraintAuthoring.selectedTargets) ?? definition.valueSpec
 
     if (session.status === 'awaitingValue') {
       return session.constraintAuthoring.isPreviewPinned
-        ? `Enter ${definition.valueSpec?.label.toLowerCase() ?? 'value'}`
-        : `Place ${definition.valueSpec?.label.toLowerCase() ?? 'value'} annotation`
+        ? `Enter ${valueSpec?.label.toLowerCase() ?? 'value'}`
+        : `Place ${valueSpec?.label.toLowerCase() ?? 'value'} annotation`
     }
 
     const step =
@@ -5295,6 +5336,8 @@ export function patchSketchConstraintValue(
   }
 
   if (intent === 'setConstraintAnnotationPlacement') {
+    const definition = getSketchConstraintDefinition(authoring.toolId)
+    const readyForValue = isSketchConstraintReadyForValue(definition, authoring.selectedTargets)
     const point = Array.isArray(patch.point)
       && typeof patch.point[0] === 'number'
       && typeof patch.point[1] === 'number'
@@ -5303,6 +5346,7 @@ export function patchSketchConstraintValue(
     const nextAuthoring = {
       ...authoring,
       pointer: point,
+      isPreviewPinned: readyForValue ? true : authoring.isPreviewPinned,
       pendingAnnotationPlacement: inferDimensionAnnotationPlacement(authoring.selectedTargets, point),
     }
 
@@ -6030,6 +6074,7 @@ function updateAnnotationValueInDefinition(
       case 'verticalDistance':
       case 'circleRadius':
       case 'diameter':
+      case 'lineLength':
       case 'lineDistance':
       case 'linePointDistance':
         if (dimension.kind === 'circleRadius') {
@@ -6043,7 +6088,7 @@ function updateAnnotationValueInDefinition(
       case 'lineAngle':
         return {
           ...dimension,
-          valueRadians: value,
+          valueRadians: value * Math.PI / 180,
         }
       case 'arcStartPointCoincident':
       case 'arcEndPointCoincident':
@@ -6102,6 +6147,7 @@ function updateDimensionAnnotationPlacementInDefinition(
       case 'verticalDistance':
       case 'circleRadius':
       case 'diameter':
+      case 'lineLength':
       case 'lineDistance':
       case 'linePointDistance':
         return placement.kind === 'dimensionLine'
@@ -6165,6 +6211,10 @@ function inferCommittedDimensionAnnotationPlacement(
         offset: 0,
         angleRadians: Math.atan2(point[1] - circle.center[1], point[0] - circle.center[0]),
       }
+    }
+    case 'lineLength': {
+      const line = getLineSegmentGeometry(definition, dimension.entityId)
+      return line ? getLineAnnotationPlacementFromPoint(line, point) : null
     }
     case 'lineDistance': {
       const line = dimension.lines[0].kind === 'localEntity'
@@ -6327,6 +6377,14 @@ function getEditableAnnotationValue(
         min: 0.01,
         anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
       }
+    case 'lineLength':
+      return {
+        label: 'Length',
+        value: dimension.value,
+        unit: 'mm',
+        min: 0.01,
+        anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
+      }
     case 'lineDistance':
     case 'linePointDistance':
       return {
@@ -6339,9 +6397,9 @@ function getEditableAnnotationValue(
     case 'lineAngle':
       return {
         label: 'Angle',
-        value: dimension.valueRadians,
-        unit: 'rad',
-        min: 0.001,
+        value: dimension.valueRadians * 180 / Math.PI,
+        unit: 'deg',
+        min: 0.1,
         anchor: annotation ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 }) : undefined,
       }
     case 'arcStartPointCoincident':
@@ -6560,6 +6618,7 @@ function createDimensionAnnotationDragHandle(
     case 'verticalDistance':
     case 'circleRadius':
     case 'diameter':
+    case 'lineLength':
     case 'lineDistance':
     case 'linePointDistance':
     case 'lineAngle':
@@ -6633,11 +6692,12 @@ function getDimensionGlyphKind(dimension: DimensionDefinition): SketchAnnotation
     case 'circleRadius':
     case 'diameter':
       return 'dimensionRadius'
+    case 'lineLength':
     case 'lineDistance':
     case 'linePointDistance':
       return 'dimensionDistance'
     case 'lineAngle':
-      return 'dimensionDistance'
+      return 'dimensionAngle'
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return 'dimensionCoincident'
@@ -6763,6 +6823,8 @@ function getDimensionAffectedGeometryRefs(
       return dimension.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId))
     case 'circleRadius':
     case 'diameter':
+      return [createSketchEntityRef(sketchId, dimension.entityId)]
+    case 'lineLength':
       return [createSketchEntityRef(sketchId, dimension.entityId)]
     case 'lineDistance':
     case 'lineAngle':
@@ -6896,6 +6958,15 @@ function createDimensionAnnotationAnchor(
       ]
       return { kind: 'sketchPoint', point: end, offset: { x: 16, y: -16 } }
     }
+    case 'lineLength': {
+      const lineGeometry = getLineSegmentGeometry(definition, dimension.entityId)
+      if (!lineGeometry) {
+        return createOffsetAnnotationAnchor(getEntityAnchor(definition, dimension.entityId), { x: 0, y: -28 })
+      }
+
+      const line = createPlacedLineLength(lineGeometry, dimension.annotationPlacement)
+      return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
+    }
     case 'lineDistance': {
       const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
       const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
@@ -6998,6 +7069,31 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           value: dimension.value,
           unit: 'mm',
           labelAnchor: { kind: 'sketchPoint', point: end, offset: { x: 16, y: -16 } },
+        }]
+      }
+      case 'lineLength': {
+        const lineGeometry = getLineSegmentGeometry(definition, dimension.entityId)
+        if (!lineGeometry) {
+          return []
+        }
+
+        const line = createPlacedLineLength(lineGeometry, dimension.annotationPlacement)
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'dimensionLine',
+          label: dimension.label,
+          referenceKind: 'lineLength',
+          start: line.start,
+          end: line.end,
+          value: dimension.value,
+          unit: 'mm',
+          labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
+          extensionLines: line.offset === 0
+            ? []
+            : [
+                { id: `${dimension.dimensionId}-extension-a`, label: 'Extension', start: lineGeometry.start, end: line.start },
+                { id: `${dimension.dimensionId}-extension-b`, label: 'Extension', start: lineGeometry.end, end: line.end },
+              ],
         }]
       }
       case 'lineDistance': {
@@ -7345,6 +7441,21 @@ function createPlacedLineDistance(
   return {
     start: [projected[0] + normal[0] * offset, projected[1] + normal[1] * offset],
     end: [point[0] + normal[0] * (offset - signedDistance), point[1] + normal[1] * (offset - signedDistance)],
+  }
+}
+
+function createPlacedLineLength(
+  line: { start: SketchPoint; end: SketchPoint },
+  placement: DimensionAnnotationPlacement | undefined,
+): { start: SketchPoint; end: SketchPoint; offset: number } {
+  const axisVector = normalizeSketchVector([line.end[0] - line.start[0], line.end[1] - line.start[1]])
+  const normal: SketchPoint = [-axisVector[1], axisVector[0]]
+  const offset = placement?.kind === 'dimensionLine' ? placement.offset : 0
+
+  return {
+    start: [line.start[0] + normal[0] * offset, line.start[1] + normal[1] * offset],
+    end: [line.end[0] + normal[0] * offset, line.end[1] + normal[1] * offset],
+    offset,
   }
 }
 
@@ -8448,19 +8559,21 @@ function describeConstraint(constraint: ConstraintDefinition) {
 function describeDimension(dimension: DimensionDefinition) {
   switch (dimension.kind) {
     case 'distance':
-      return `${dimension.value.toFixed(2)} ${dimension.axis}`
+      return `${dimension.value.toFixed(2)} mm distance`
     case 'horizontalDistance':
     case 'verticalDistance':
-      return `${dimension.value.toFixed(2)} mm`
+      return `${dimension.value.toFixed(2)} mm distance`
     case 'circleRadius':
-      return `${dimension.value.toFixed(2)} mm`
+      return `${dimension.value.toFixed(2)} mm radius`
     case 'diameter':
       return `${dimension.value.toFixed(2)} mm diameter`
+    case 'lineLength':
+      return `${dimension.value.toFixed(2)} mm length`
     case 'lineDistance':
     case 'linePointDistance':
-      return `${dimension.value.toFixed(2)} mm`
+      return `${dimension.value.toFixed(2)} mm distance`
     case 'lineAngle':
-      return `${dimension.valueRadians.toFixed(3)} rad`
+      return `${(dimension.valueRadians * 180 / Math.PI).toFixed(1)} deg angle`
     case 'arcStartPointCoincident':
       return 'Arc start coincident'
     case 'arcEndPointCoincident':
@@ -8475,6 +8588,7 @@ function formatDimensionVisibleLabel(dimension: DimensionDefinition) {
     case 'verticalDistance':
     case 'circleRadius':
     case 'diameter':
+    case 'lineLength':
     case 'lineDistance':
     case 'linePointDistance':
       return dimension.value.toFixed(2)

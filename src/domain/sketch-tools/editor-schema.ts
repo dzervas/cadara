@@ -119,6 +119,7 @@ export type SketchToolDimensionReferenceKind =
   | 'vertical'
   | 'radius'
   | 'diameter'
+  | 'lineLength'
   | 'lineDistance'
   | 'pointLineDistance'
 

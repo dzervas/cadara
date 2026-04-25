@@ -86,6 +86,23 @@ The workbench viewport SHALL dispatch valid click selections to active sketch co
 - **WHEN** a sketch drawing tool is active and the user clicks in the viewport to construct geometry
 - **THEN** the viewport continues to route the click through the sketch pointer construction flow instead of treating it as an ordinary selection
 
+### Requirement: Viewport SHALL pin pending dimension placement before value entry
+The viewport SHALL treat normal primary clicks during a pending dimension placement phase as placement confirmation for the floating value-entry prompt.
+
+#### Scenario: User clicks empty viewport while a dimension waits for placement
+- **WHEN** the Dimension tool has selected enough targets for a value-backed dimension
+- **AND** the pending preview is waiting for annotation placement
+- **AND** the user primary-clicks empty viewport space outside a preview drag handle
+- **THEN** the viewport pins the pending annotation placement at the clicked sketch-plane point
+- **AND** the floating value-entry prompt opens without clearing the selected dimension targets
+
+#### Scenario: User clicks existing sketch geometry while a dimension waits for placement
+- **WHEN** the Dimension tool has selected enough targets for a value-backed dimension
+- **AND** the pending preview is waiting for annotation placement
+- **AND** the user primary-clicks existing selectable sketch geometry outside a preview drag handle
+- **THEN** the viewport pins the pending annotation placement at the clicked sketch-plane point
+- **AND** the click does not replace the selected dimension targets
+
 ### Requirement: Active sketch drawing feedback SHALL render inside the viewport
 The workbench viewport SHALL render active sketch drawing measurements and numeric inputs as viewport overlays near the geometry being authored.
 

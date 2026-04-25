@@ -754,6 +754,10 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     assert(annotation.anchor.kind === 'sketchPoint', 'Dimension descriptors should expose a viewport anchor.')
     assert(annotation.visibleLabel === '24.00', 'Committed dimensions should expose compact visible value text.')
     assert(
+      annotation.detail === '24.00 mm distance',
+      'Committed distance dimension details should avoid deprecated directional role labels.',
+    )
+    assert(
       annotation.dragHandle?.dimensionId === annotation.target.dimensionId,
       'Committed dimensions should expose annotation-chip drag metadata for durable placement updates.',
     )
@@ -949,6 +953,36 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       'Dragging a committed diameter annotation should update its durable annotation placement.',
     )
 
+    let lengthSession = createSessionWithTwoLines()
+    const [lengthLineId] = lengthSession.definition.entityIds
+    assert(lengthLineId, 'Line length fixture should create a line entity.')
+    lengthSession = beginSketchTool(lengthSession, 'dimensionDistance')
+    lengthSession = selectSketchConstraintTarget(lengthSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lengthLineId,
+    })
+    const lengthPreview = getSketchToolPresentation(lengthSession)?.overlays?.find((overlay) => overlay.kind === 'dimensionLine')
+    assert(
+      lengthPreview?.kind === 'dimensionLine' && lengthPreview.referenceKind === 'lineLength',
+      'Selecting one local line with Dimension should preview an editable line-length dimension.',
+    )
+    lengthSession = pinSketchConstraintPreview(lengthSession, [5, -2])
+    assert(
+      getSketchToolPresentation(lengthSession)?.floatingInput?.label === 'Length',
+      'Pinning a single-line Dimension preview should open line-length value entry.',
+    )
+    lengthSession = patchSketchConstraintValue(lengthSession, { value: 8 })
+    lengthSession = patchSketchConstraintValue(lengthSession, { intent: 'commitConstraintValue' })
+    const lineLength = lengthSession.definition.dimensions.find((dimension) => dimension.kind === 'lineLength')
+    assert(
+      lineLength?.kind === 'lineLength'
+        && lineLength.entityId === lengthLineId
+        && lineLength.value === 8
+        && lineLength.annotationPlacement?.kind === 'dimensionLine',
+      'Single-line Dimension authoring should commit a durable line-length dimension tied to the selected edge.',
+    )
+
     let lineSession = createSessionWithTwoLines()
     const [firstLineId, secondLineId] = lineSession.definition.entityIds
     assert(firstLineId && secondLineId, 'Line fixture should create two line entities.')
@@ -1032,16 +1066,52 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
         && anglePreview.side === 'minor',
       'Angle preview arc should be centered at the line intersection and start/end on the selected line references.',
     )
-    angleSession = patchSketchConstraintValue(angleSession, {
-      intent: 'setConstraintAnnotationPlacement',
-      point: [4, -1],
-    })
+    angleSession = pinSketchConstraintPreview(angleSession, [4, -1])
     const majorAnglePreview = getSketchToolPresentation(angleSession)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
     assert(
       majorAnglePreview?.kind === 'angleArc' && majorAnglePreview.side === 'major',
       'Dragging an angle preview across the opposite sector should select the major complement arc.',
     )
-    angleSession = patchSketchConstraintValue(angleSession, { value: Math.PI / 2 })
+    assert(
+      getSketchToolPresentation(angleSession)?.floatingInput?.label === 'Angle'
+        && getSketchToolPresentation(angleSession)?.floatingInput?.unit === 'deg',
+      'Pinned non-parallel line dimensions should open degree-based angle value entry.',
+    )
+
+    let angleHandleSession = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+    angleHandleSession = beginSketchTool(angleHandleSession, 'line')
+    angleHandleSession = startSketchDraw(angleHandleSession, [0, 0])
+    angleHandleSession = acceptSketchDraw(angleHandleSession, [10, 0])
+    angleHandleSession = beginSketchTool(angleHandleSession, 'line')
+    angleHandleSession = startSketchDraw(angleHandleSession, [5, -5])
+    angleHandleSession = acceptSketchDraw(angleHandleSession, [5, 5])
+    const [handleHorizontalLineId, handleVerticalLineId] = angleHandleSession.definition.entityIds
+    assert(handleHorizontalLineId && handleVerticalLineId, 'Angle handle fixture should create two non-parallel line entities.')
+    angleHandleSession = beginSketchTool(angleHandleSession, 'dimensionDistance')
+    angleHandleSession = selectSketchConstraintTarget(angleHandleSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: handleHorizontalLineId,
+    })
+    angleHandleSession = selectSketchConstraintTarget(angleHandleSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: handleVerticalLineId,
+    })
+    angleHandleSession = patchSketchConstraintValue(angleHandleSession, {
+      intent: 'setConstraintAnnotationPlacement',
+      point: [4, -1],
+    })
+    assert(
+      angleHandleSession.constraintAuthoring?.isPreviewPinned === true
+        && getSketchToolPresentation(angleHandleSession)?.floatingInput?.label === 'Angle',
+      'Clicking or dragging an uncommitted angle preview handle should pin the preview and open value entry.',
+    )
+
+    angleSession = patchSketchConstraintValue(angleSession, { value: 90 })
     angleSession = patchSketchConstraintValue(angleSession, { intent: 'commitConstraintValue' })
     const angle = angleSession.definition.dimensions.find((dimension) => dimension.kind === 'lineAngle')
     assert(
@@ -1050,6 +1120,32 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
         && angle.lines.every((line) => line.kind === 'localEntity')
         && angle.annotationPlacement?.side === 'major',
       'Non-parallel line targets should commit a durable line angle dimension with the selected arc side.',
+    )
+    const angleAnnotation = getSketchAnnotationDescriptors(angleSession).find(
+      (entry) => entry.target.kind === 'dimension' && entry.target.dimensionId === angle.dimensionId,
+    )
+    assert(
+      angleAnnotation?.glyphKind === 'dimensionAngle'
+        && angleAnnotation.visibleLabel === '90.0°'
+        && angleAnnotation.detail === '90.0 deg angle',
+      'Committed angle dimensions should expose angle-specific glyph metadata and degree-based detail text.',
+    )
+    assert(angleAnnotation?.target.kind === 'dimension', 'Committed angle annotation should expose a dimension target.')
+    let angleEditSession = beginSketchAnnotationEdit(angleSession, angleAnnotation.target)
+    assert(
+      getSketchToolPresentation(angleEditSession)?.floatingInput?.label === 'Angle'
+        && getSketchToolPresentation(angleEditSession)?.floatingInput?.unit === 'deg'
+        && getSketchToolPresentation(angleEditSession)?.floatingInput?.value === 90,
+      'Reopened angle dimension edits should be seeded in degrees.',
+    )
+    angleEditSession = patchSketchConstraintValue(angleEditSession, { value: 90 })
+    angleEditSession = patchSketchConstraintValue(angleEditSession, { intent: 'commitAnnotationValue' })
+    const editedAngle = angleEditSession.definition.dimensions.find((dimension) => dimension.dimensionId === angle.dimensionId)
+    assert(
+      angleEditSession.status === 'idle'
+        && editedAngle?.kind === 'lineAngle'
+        && Math.abs(editedAngle.valueRadians - Math.PI / 2) < 1e-9,
+      'Committed angle dimension edits should accept degree input and preserve durable radians.',
     )
     const committedAngleOverlay = getSketchToolPresentation(angleSession)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
     assert(
@@ -1141,7 +1237,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       'Angle previews should add witness geometry when the true intersection lies beyond a selected segment.',
     )
 
-    session = patchSketchConstraintValue(session, { value: Math.PI / 2 })
+    session = patchSketchConstraintValue(session, { value: 90 })
     session = patchSketchConstraintValue(session, { intent: 'commitConstraintValue' })
     const committed = getSketchToolPresentation(session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
     assert(

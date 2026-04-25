@@ -139,7 +139,7 @@ interface ThreeCadViewportProps {
   onAnnotationEdit: (target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>) => void
   onClearHover: () => void
   onSketchMove: (point: readonly [number, number]) => void
-  onSketchRelease: (point: readonly [number, number]) => void
+  onSketchRelease: (point: readonly [number, number], target?: PrimitiveRef | null) => void
   onSketchGeometryDragStart: (target: PrimitiveRef, point: readonly [number, number]) => void
   onSketchGeometryDragMove: (point: readonly [number, number]) => void
   onSketchGeometryDragEnd: (point: readonly [number, number]) => void
@@ -935,9 +935,10 @@ export function ThreeCadViewport({
 
       const viewportRect = canvasElement.getBoundingClientRect()
       const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
 
       if (point) {
-        sketchReleaseRef.current(point)
+        sketchReleaseRef.current(point, resolvedTarget?.target ?? null)
       }
     }
 

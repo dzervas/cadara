@@ -1729,6 +1729,25 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       continue
     }
 
+    if (dimension.kind === 'lineLength') {
+      const entity = lineEntityMap.get(dimension.entityId)
+      const start = entity ? pointRecords.get(entity.startPointId) : null
+      const end = entity ? pointRecords.get(entity.endPointId) : null
+      if (!start || !end) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: dimension.dimensionId,
+        targetKind: 'dimension',
+        parameterCount,
+        evaluateResidual(values) {
+          return length(subtract(getPoint(values, end), getPoint(values, start))) - dimension.value
+        },
+      }))
+      continue
+    }
+
     if (dimension.kind === 'lineDistance') {
       const initialFirst = resolveLineDimensionOperand(initialValues, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
       const initialSecond = resolveLineDimensionOperand(initialValues, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
@@ -2316,6 +2335,13 @@ function validateDefinition(
         const entity = entityMap.get(dimension.entityId)
         if (!entity || (entity.kind !== 'circle' && entity.kind !== 'arc')) {
           diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing circle or arc.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        break
+      }
+      case 'lineLength': {
+        const entity = entityMap.get(dimension.entityId)
+        if (!entity || entity.kind !== 'lineSegment') {
+          diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
         }
         break
       }
@@ -3095,6 +3121,11 @@ function buildDimensionStatuses(
         const state = entityStates.get(dimension.entityId)
         solvedValue = state?.kind === 'arc' ? values[state.baseIndex] * 2 : null
       }
+    } else if (dimension.kind === 'lineLength') {
+      const entity = lineEntityMap.get(dimension.entityId)
+      const start = entity ? pointRecords.get(entity.startPointId) : null
+      const end = entity ? pointRecords.get(entity.endPointId) : null
+      solvedValue = start && end ? length(subtract(getPoint(values, end), getPoint(values, start))) : null
     } else if (dimension.kind === 'lineDistance') {
       const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, projectedReferences)
       const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, projectedReferences)
@@ -3312,6 +3343,9 @@ function collectTranslationComponent(
       }
       case 'circleRadius':
       case 'diameter':
+        break
+      case 'lineLength':
+        connectPoints(graph, getLineEntityPoints(definition, dimension.entityId))
         break
       case 'lineDistance':
       case 'lineAngle':

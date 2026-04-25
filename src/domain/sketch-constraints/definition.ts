@@ -107,6 +107,7 @@ export interface SketchConstraintDefinition<TToolId extends SketchConstraintTool
     projectedReferences?: readonly ProjectedSketchReferenceRecord[],
   ): SketchConstraintTargetRecord | null
   buildPreview(input: SketchConstraintPreviewInput): readonly SketchToolOverlayDescriptor[]
+  getValueSpec?(selectedTargets: readonly SketchConstraintTargetRecord[]): SketchConstraintValueSpec | null
   isReadyForValue?(selectedTargets: readonly SketchConstraintTargetRecord[]): boolean
   canSelectMoreTargets?(selectedTargets: readonly SketchConstraintTargetRecord[]): boolean
   createCommitContribution(input: SketchConstraintCommitInput): SketchConstraintCommitContribution

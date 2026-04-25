@@ -777,6 +777,18 @@ export type DimensionDefinition =
     }
   | {
       dimensionId: DimensionId
+      kind: 'lineLength'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Referenced local line segment whose solved endpoint separation must match `value`. */
+      entityId: SketchEntityId
+      /** Requested line length in sketch-plane units. */
+      value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
+    }
+  | {
+      dimensionId: DimensionId
       kind: 'lineDistance'
       /** Human-readable label owned by the producer of the sketch definition. */
       label: string

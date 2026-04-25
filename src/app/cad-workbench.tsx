@@ -1238,8 +1238,8 @@ export function CadWorkbench() {
     dispatch({ type: 'sketch.pointerMoved', point })
   }
 
-  const handleSketchRelease = (point: readonly [number, number]) => {
-    dispatch({ type: 'sketch.pointerReleased', point })
+  const handleSketchRelease = (point: readonly [number, number], target?: PrimitiveRef | null) => {
+    dispatch({ type: 'sketch.pointerReleased', point, target })
   }
 
   const handleSketchGeometryDragStart = (target: PrimitiveRef, point: readonly [number, number]) => {

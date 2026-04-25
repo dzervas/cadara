@@ -2460,6 +2460,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   function createConstraintAuthoringEditorState(toolId: 'dimensionDistance' | 'dimensionHorizontal' = 'dimensionDistance'): {
     state: SketchEditorState
     pointTarget: PrimitiveRef
+    secondPointTarget: PrimitiveRef
     lineTarget: PrimitiveRef
   } {
     let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
@@ -2469,13 +2470,16 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = beginSketchTool(session, toolId)
 
     const pointTarget = session.definition.points[0]?.target
+    const secondPointTarget = session.definition.points[1]?.target
     const lineTarget = session.definition.entities[0]?.target
 
     assert(pointTarget, 'Constraint routing fixture should create a selectable sketch point.')
+    assert(secondPointTarget, 'Constraint routing fixture should create a second selectable sketch point.')
     assert(lineTarget, 'Constraint routing fixture should create a selectable sketch entity.')
 
     return {
       pointTarget,
+      secondPointTarget,
       lineTarget,
       state: {
         ...initialEditorState,
@@ -2531,6 +2535,143 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       selected.state.session.constraintAuthoring?.selectedTargets.length === 1 &&
         primitiveRefEquals(selected.state.session.constraintAuthoring.selectedTargets[0]!.target, pointTarget),
       'Active constraint authoring should record valid viewport click targets.',
+    )
+  }
+
+  function testDimensionSelectionClickPinsReadyValuePreview() {
+    const { state, pointTarget, secondPointTarget, lineTarget } = createConstraintAuthoringEditorState()
+
+    const selectedFirst = transitionEditorState(state, {
+      type: 'viewport.selectionRequested',
+      target: pointTarget,
+    })
+    assert(selectedFirst.state.kind === 'editingSketch', 'First dimension target selection should keep sketch editing.')
+
+    const selectedSecond = transitionEditorState(selectedFirst.state, {
+      type: 'viewport.selectionRequested',
+      target: secondPointTarget,
+    })
+    assert(selectedSecond.state.kind === 'editingSketch', 'Second dimension target selection should keep sketch editing.')
+
+    const moved = transitionEditorState(selectedSecond.state, {
+      type: 'sketch.pointerMoved',
+      point: mapSketchPointToWorld(selectedSecond.state.session.plane, [5, 3]),
+    })
+    assert(moved.state.kind === 'editingSketch', 'Pointer movement over ready dimension preview should keep sketch editing.')
+
+    const clickedGeometry = transitionEditorState(moved.state, {
+      type: 'viewport.selectionRequested',
+      target: lineTarget,
+    })
+
+    assert(clickedGeometry.state.kind === 'editingSketch', 'Dimension placement click fixture should keep sketch editing.')
+    assert(
+      clickedGeometry.state.session.constraintAuthoring?.isPreviewPinned === true
+        && clickedGeometry.state.session.constraintAuthoring.selectedTargets.length === 2,
+      'Clicking geometry while a value-backed dimension is ready should pin placement instead of replacing operands.',
+    )
+    assert(
+      getSketchToolPresentation(clickedGeometry.state.session)?.floatingInput?.label === 'Distance',
+      'Pinning placement from a target click should open the floating value-entry input.',
+    )
+  }
+
+  function testDimensionReleaseOverSecondLineDefersToAngleSelection() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [10, 0])
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [5, -5])
+    session = acceptSketchDraw(session, [5, 5])
+    session = beginSketchTool(session, 'dimensionDistance')
+
+    const [firstLineTarget, secondLineTarget] = session.definition.entities.map((entity) => entity.target)
+    assert(firstLineTarget && secondLineTarget, 'Angle dimension release fixture should create two selectable lines.')
+
+    const state: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_dimension-angle-release-1' as CommandSessionId,
+        toolId: 'dimensionDistance',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+    }
+
+    const selectedFirst = transitionEditorState(state, {
+      type: 'viewport.selectionRequested',
+      target: firstLineTarget,
+    })
+    assert(selectedFirst.state.kind === 'editingSketch', 'First line selection should keep sketch editing.')
+
+    const releaseOverSecond = transitionEditorState(selectedFirst.state, {
+      type: 'sketch.pointerReleased',
+      point: mapSketchPointToWorld(selectedFirst.state.session.plane, [5, 0]),
+      target: secondLineTarget,
+    })
+    assert(releaseOverSecond.state.kind === 'editingSketch', 'Release over second line should keep sketch editing.')
+    assert(
+      releaseOverSecond.state.session.constraintAuthoring?.isPreviewPinned === false
+        && releaseOverSecond.state.session.constraintAuthoring.selectedTargets.length === 1,
+      'Pointer release over a selectable second line should not pin the first line length preview before click selection.',
+    )
+
+    const selectedSecond = transitionEditorState(releaseOverSecond.state, {
+      type: 'viewport.selectionRequested',
+      target: secondLineTarget,
+    })
+    assert(selectedSecond.state.kind === 'editingSketch', 'Second line selection should keep sketch editing.')
+
+    let anglePreview = getSketchToolPresentation(selectedSecond.state.session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    assert(
+      selectedSecond.state.session.constraintAuthoring?.selectedTargets.length === 2
+        && anglePreview?.kind === 'angleArc',
+      'Selecting the second non-parallel line should preserve the two-line angle preview.',
+    )
+
+    const moved = transitionEditorState(selectedSecond.state, {
+      type: 'sketch.pointerMoved',
+      point: mapSketchPointToWorld(selectedSecond.state.session.plane, [8, 3]),
+    })
+    assert(moved.state.kind === 'editingSketch', 'Pointer movement after angle selection should keep sketch editing.')
+    anglePreview = getSketchToolPresentation(moved.state.session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
+    const lengthPreview = getSketchToolPresentation(moved.state.session)?.overlays?.find(
+      (overlay) => overlay.kind === 'dimensionLine' && overlay.referenceKind === 'lineLength',
+    )
+    assert(
+      anglePreview?.kind === 'angleArc' && !lengthPreview,
+      'Pointer movement after two selected lines should not fall back to the first line length dimension.',
+    )
+
+    const placed = transitionEditorState(moved.state, {
+      type: 'sketch.pointerReleased',
+      point: mapSketchPointToWorld(moved.state.session.plane, [4, -1]),
+      target: null,
+    })
+    assert(placed.state.kind === 'editingSketch', 'Angle placement click should keep sketch editing.')
+    assert(
+      placed.state.session.constraintAuthoring?.isPreviewPinned === true
+        && getSketchToolPresentation(placed.state.session)?.floatingInput?.label === 'Angle',
+      'Clicking the primary viewport after angle preview should pin placement and keep the value entry open.',
     )
   }
 
@@ -3171,6 +3312,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testRemainingSketchToolsActivateWithoutDroppingSketchSession()
   testPassiveSketchStyleToolsDoNotDropSketchSession()
   testConstraintAuthoringReceivesViewportHoverAndSelection()
+  testDimensionSelectionClickPinsReadyValuePreview()
+  testDimensionReleaseOverSecondLineDefersToAngleSelection()
   testConstraintAuthoringIgnoresInvalidViewportSelection()
   testConnectedSketchSelectionEventUpdatesNormalSelectionState()
   testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape()

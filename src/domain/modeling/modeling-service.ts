@@ -3341,6 +3341,21 @@ function normalizeDimensionDefinition(value: unknown): DimensionDefinition {
     }
   }
 
+  if (value.kind === 'lineLength') {
+    if (!isString(value.entityId) || typeof value.value !== 'number') {
+      throw new Error('Invalid line length dimension payload.')
+    }
+
+    return {
+      dimensionId: assertDimensionId(value.dimensionId),
+      kind: 'lineLength',
+      label: value.label,
+      entityId: assertSketchEntityId(value.entityId),
+      value: value.value,
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(value.annotationPlacement),
+    }
+  }
+
   if (value.kind === 'lineDistance' || value.kind === 'lineAngle') {
     if (!Array.isArray(value.lines) || value.lines.length !== 2) {
       throw new Error('Invalid line dimension payload.')

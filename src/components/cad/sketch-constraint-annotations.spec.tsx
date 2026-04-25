@@ -46,12 +46,29 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
       { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_1_end' },
     ],
     label: 'Distance',
-    detail: '10.00 aligned',
+    detail: '10.00 mm distance',
     status: 'dimension',
     visibleLabel: '10.00',
     dragHandle: {
       id: 'dimension_1_distance-annotation-drag',
       dimensionId: 'dimension_1_distance',
+    },
+  }
+  const angleDimensionAnnotation: SketchAnnotationDescriptor = {
+    ...dimensionAnnotation,
+    id: 'dimension_2_angle',
+    target: {
+      kind: 'dimension',
+      sketchId: 'sketch_draft',
+      dimensionId: 'dimension_2_angle',
+    },
+    glyphKind: 'dimensionAngle',
+    label: 'Line angle',
+    detail: '90.0 deg angle',
+    visibleLabel: '90.0°',
+    dragHandle: {
+      id: 'dimension_2_angle-annotation-drag',
+      dimensionId: 'dimension_2_angle',
     },
   }
   const horizontalAnnotation: SketchAnnotationDescriptor = {
@@ -100,10 +117,11 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
 
   const markup = renderToStaticMarkup(
     <SketchConstraintAnnotations
-      annotations={[annotation, dimensionAnnotation, horizontalAnnotation, verticalAnnotation, ...newGlyphAnnotations]}
+      annotations={[annotation, dimensionAnnotation, angleDimensionAnnotation, horizontalAnnotation, verticalAnnotation, ...newGlyphAnnotations]}
       projections={[
         { id: getAnnotationProjectionId(annotation.id), x: 120, y: 80 },
         { id: getAnnotationProjectionId(dimensionAnnotation.id), x: 120, y: 80 },
+        { id: getAnnotationProjectionId(angleDimensionAnnotation.id), x: 180, y: 80 },
         { id: getAnnotationProjectionId(horizontalAnnotation.id), x: 220, y: 80 },
         { id: getAnnotationProjectionId(verticalAnnotation.id), x: 260, y: 80 },
         ...newGlyphAnnotations.map((entry, index) => ({
@@ -134,6 +152,10 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
     'Committed annotation glyphs should use toolbar SVG assets.',
   )
   assert(
+    markup.includes('/icons/drawing-angular-dim-line-to-line.svg'),
+    'Committed angle dimension annotations should use the angular dimension icon asset.',
+  )
+  assert(
     markup.includes('/icons/sketch-horizontal.svg') && markup.includes('/icons/sketch-vertical.svg'),
     'Horizontal and vertical constraint annotations should use visible public icon assets.',
   )
@@ -151,7 +173,7 @@ test('src/components/cad/sketch-constraint-annotations.spec.tsx', () => {
     'Committed annotation glyphs should offset colliding projected anchors.',
   )
   assert(
-    markup.includes('Parallel: Parallel lines') && markup.includes('Distance: 10.00 aligned'),
+    markup.includes('Parallel: Parallel lines') && markup.includes('Distance: 10.00 mm distance'),
     'Committed annotation glyphs should preserve durable label/detail metadata for accessible labels.',
   )
   assert(

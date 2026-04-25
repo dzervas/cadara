@@ -449,6 +449,14 @@ const dimensionDefinitionSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     dimensionId: dimensionIdSchema,
+    kind: z.literal('lineLength'),
+    label: z.string(),
+    entityId: sketchEntityIdSchema,
+    value: positiveNumberSchema('Line length dimension must be positive.'),
+    annotationPlacement: dimensionLineAnnotationPlacementSchema.optional(),
+  }),
+  z.object({
+    dimensionId: dimensionIdSchema,
     kind: z.literal('lineDistance'),
     label: z.string(),
     lines: z.tuple([
