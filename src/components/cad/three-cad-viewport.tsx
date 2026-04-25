@@ -76,6 +76,7 @@ import {
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import {
   DEFAULT_VIEWPORT_PROJECTION_MODE,
+  applyViewportRenderableFitFrame,
   applyViewportCameraFrame,
   applyViewportCameraFrameToCamera,
   captureViewportCameraFrame,
@@ -147,6 +148,7 @@ interface ThreeCadViewportProps {
   onLodTierChange: (tierId: OccTessellationTierId) => void
   selection: PrimitiveRef[]
   sketchToolPresentation: SketchToolPresentationSchema | null
+  fitViewRequestId: number
 }
 
 interface ViewCubeFaceVisual {
@@ -194,6 +196,7 @@ export function ThreeCadViewport({
   onLodTierChange,
   selection,
   sketchToolPresentation,
+  fitViewRequestId,
 }: ThreeCadViewportProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const viewCubeRef = useRef<HTMLDivElement | null>(null)
@@ -227,6 +230,8 @@ export function ThreeCadViewport({
   const sketchCameraSessionTokenRef = useRef<string | null>(null)
   const partCameraFrameRef = useRef<ViewportCameraFrame | null>(null)
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
+  const lastFitViewRequestIdRef = useRef(fitViewRequestId)
+  const pendingFitViewRequestIdRef = useRef<number | null>(null)
   const selectRef = useRef(onSelect)
   const connectedSketchSelectRef = useRef(onConnectedSketchSelect)
   const deselectRef = useRef(onDeselect)
@@ -357,6 +362,37 @@ export function ThreeCadViewport({
     sketchDisplayRenderablesRef.current = sketchDisplayRenderables
     bvhSceneKeyRef.current = bvhSceneKey
   }, [bvhSceneKey, renderables, sketchDisplayRenderables])
+
+  useEffect(() => {
+    if (lastFitViewRequestIdRef.current === fitViewRequestId) {
+      return
+    }
+
+    lastFitViewRequestIdRef.current = fitViewRequestId
+    pendingFitViewRequestIdRef.current = fitViewRequestId
+  }, [fitViewRequestId])
+
+  useLayoutEffect(() => {
+    if (pendingFitViewRequestIdRef.current === null) {
+      return
+    }
+
+    const camera = cameraRef.current
+    const controls = controlsRef.current
+    if (!camera || !controls) {
+      return
+    }
+
+    const applied = applyViewportRenderableFitFrame({
+      camera,
+      controls,
+      renderables: renderables.map((entry) => entry.renderable),
+    })
+
+    if (applied) {
+      pendingFitViewRequestIdRef.current = null
+    }
+  }, [bvhSceneKey, controlsReadyVersion, renderables])
 
   useLayoutEffect(() => {
     if (hoverTarget === null) {

@@ -242,6 +242,7 @@ export function CadWorkbench() {
   const [workbenchStatusNotification, setWorkbenchStatusNotification] =
     useState<WorkbenchNotificationModel | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
+  const [viewportFitRequestId, setViewportFitRequestId] = useState(0)
   const [stepImportFlow, setStepImportFlow] = useState<StepImportFlowState>({ kind: 'idle' })
   const [meshImportFlow, setMeshImportFlow] = useState<MeshImportFlowState>({ kind: 'idle' })
   const [meshImportProgress, setMeshImportProgress] = useState<MeshImportProgressState | null>(null)
@@ -1454,11 +1455,22 @@ export function CadWorkbench() {
     }
   }
 
-  const refreshAfterDocumentFileAction = (message: string) => {
+  const refreshAfterDocumentFileAction = (message: string, options: { fitView?: boolean } = {}) => {
     setHiddenTargetKeys({})
     setObjectLabelOverrides({})
     setUndoStack([])
     setRedoStack([])
+    if (options.fitView) {
+      void modelingService.getCurrentDocumentSnapshot().then((nextSnapshot) => {
+        applyLoadedSnapshot(nextSnapshot)
+        setViewportFitRequestId((current) => current + 1)
+        showWorkbenchInfo(message)
+      }).catch((error: unknown) => {
+        reportDocumentFileActionFailure('workbench.file.refresh', 'Document refresh failed.', error)
+      })
+      return
+    }
+
     dispatch({ type: 'document.refreshRequested' })
     showWorkbenchInfo(message)
   }
@@ -1785,7 +1797,7 @@ export function CadWorkbench() {
       }
 
       setStepImportFlow({ kind: 'idle' })
-      refreshAfterDocumentFileAction(`Imported ${review.review.rootFileName}.`)
+      refreshAfterDocumentFileAction(`Imported ${review.review.rootFileName}.`, { fitView: true })
     } catch (error) {
       setStepImportFlow(review)
       reportDocumentFileActionFailure('workbench.file.import-step', 'STEP import failed.', error)
@@ -2022,6 +2034,7 @@ export function CadWorkbench() {
               onLodTierChange={handleViewportLodTierChange}
               selection={visibleSelection}
               sketchToolPresentation={sketchToolPresentation}
+              fitViewRequestId={viewportFitRequestId}
             />
             {initialOccRenderPending ? (
               <div

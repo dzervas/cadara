@@ -950,6 +950,36 @@ function buildFaceRenderRecord(
   }
 }
 
+function buildCurrentFaceMapForMeshedBody(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+) {
+  const faceMap = new state.oc.TopTools_IndexedMapOfShape_1()
+  state.oc.TopExp.MapShapes_1(
+    body.shape,
+    state.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+    faceMap,
+  )
+
+  try {
+    if (faceMap.Size() !== body.topology.faceIds.length) {
+      return body.facesById
+    }
+
+    const facesById = new Map<FaceId, InstanceType<OccAuthoringState['oc']['TopoDS_Face']>>()
+    for (let index = 1; index <= faceMap.Size(); index += 1) {
+      const faceId = body.topology.faceIds[index - 1]
+      if (faceId) {
+        facesById.set(faceId, state.oc.TopoDS.Face_1(faceMap.FindKey(index)))
+      }
+    }
+
+    return facesById
+  } finally {
+    faceMap.delete()
+  }
+}
+
 function buildRegionRenderRecords(
   state: OccAuthoringState,
   sketches: readonly SketchSnapshotRecord[],
@@ -1144,8 +1174,9 @@ function buildEdgeRenderRecord(
   body: OccTrackedBody,
   edgeId: EdgeId,
   edge: InstanceType<OccAuthoringState['oc']['TopoDS_Edge']>,
+  faces: Iterable<InstanceType<OccAuthoringState['oc']['TopoDS_Face']>>,
 ): RenderableEntityRecord | null {
-  const polyline = buildEdgePolylineFromTriangulation(state, edge, body.facesById.values())
+  const polyline = buildEdgePolylineFromTriangulation(state, edge, faces)
     ?? buildEdgePolylineFromPolygon3D(state, edge)
     ?? sampleCurveByParameters(state, edge, DEFAULT_EDGE_SAMPLE_COUNT)
 
@@ -1217,16 +1248,19 @@ function buildBodyRenderRecords(
 
   const tessellationTier = getOccTessellationTier(options.lodTierId)
 
-  new state.oc.BRepMesh_IncrementalMesh_2(
+  const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
     body.shape,
     Math.max(state.modelingTolerance * 10, tessellationTier.linearDeflectionModelUnits),
     false,
     tessellationTier.angularDeflectionRadians,
     false,
   )
+  deleteOccObject(mesher)
+
+  const meshedFacesById = buildCurrentFaceMapForMeshedBody(state, body)
 
   for (const faceId of body.topology.faceIds) {
-    const face = body.facesById.get(faceId)
+    const face = meshedFacesById.get(faceId)
 
     if (!face) {
       continue
@@ -1245,7 +1279,7 @@ function buildBodyRenderRecords(
       continue
     }
 
-    const record = buildEdgeRenderRecord(state, body, edgeId, edge)
+    const record = buildEdgeRenderRecord(state, body, edgeId, edge, meshedFacesById.values())
     if (record) {
       records.push(record)
     }

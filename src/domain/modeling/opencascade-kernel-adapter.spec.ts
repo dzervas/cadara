@@ -1504,6 +1504,41 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(importedBody.topology.edgeIds.length > 0, 'Imported STEP body should expose selectable edge refs.')
     assert(importedBody.topology.vertexIds.length > 0, 'Imported STEP body should expose selectable vertex refs.')
 
+    const importedRenderRecords = snapshot.render.records.filter((record) =>
+      record.ownerBodyId === importedBody.bodyId,
+    )
+    const importedFaceRenderRecords = importedRenderRecords.filter((record) =>
+      record.binding.target.kind === 'face'
+      && record.binding.target.bodyId === importedBody.bodyId
+      && (record.binding.semanticClass === 'bodyFace' || record.binding.semanticClass === 'planarFace')
+      && record.geometry.kind === 'mesh',
+    )
+    const importedEdgeRenderRecords = importedRenderRecords.filter((record) =>
+      record.binding.target.kind === 'edge'
+      && record.binding.target.bodyId === importedBody.bodyId
+      && record.binding.semanticClass === 'featureEdge'
+      && record.geometry.kind === 'polyline',
+    )
+    const importedVertexRenderRecords = importedRenderRecords.filter((record) =>
+      record.binding.target.kind === 'vertex'
+      && record.binding.target.bodyId === importedBody.bodyId
+      && record.binding.semanticClass === 'featureVertex'
+      && record.geometry.kind === 'marker',
+    )
+
+    assert(
+      importedFaceRenderRecords.length === importedBody.topology.faceIds.length,
+      'Imported STEP body should render every native face as a selectable mesh record.',
+    )
+    assert(
+      importedEdgeRenderRecords.length === importedBody.topology.edgeIds.length,
+      'Imported STEP body should render every native edge as a selectable polyline record.',
+    )
+    assert(
+      importedVertexRenderRecords.length === importedBody.topology.vertexIds.length,
+      'Imported STEP body should render every native vertex as a selectable marker record.',
+    )
+
     const resolved = await adapter.resolveReference({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -1516,6 +1551,62 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
     assert(
       resolved.resolution.invalidation === null && resolved.resolution.ownerFeatureId === featureId,
       'Downstream feature refs should resolve imported STEP body topology.',
+    )
+  }
+
+  async function testStepFileImportServiceRefreshExposesNativeRenderRecords() {
+    const fixture = await createExportableBodyFixture()
+    const step = await fixture.adapter.exportDocument({
+      contractVersion: CONTRACT_VERSION,
+      documentId: 'doc_workspace',
+      baseRevisionId: fixture.revisionId,
+      target: { kind: 'body', bodyId: fixture.bodyId },
+      targetLabel: fixture.targetLabel,
+      format: 'step',
+      options: getDefaultDocumentExportOptions('step'),
+    })
+    assert(step.ok && typeof step.payload === 'string', 'Fixture STEP export should produce importable text.')
+
+    const importAdapter = createAdapter()
+    const importService = createModelingService(importAdapter, {
+      currentDocumentId: 'doc_workspace',
+      operationHistoryStore: null,
+      documentRepository: null,
+    })
+    const imported = await importService.importStepFile({
+      fileName: 'service-import.step',
+      bytes: new TextEncoder().encode(step.payload),
+    })
+    assert(imported.ok, 'STEP file import service should accept an OCC-rebuildable exact solid.')
+
+    const snapshot = await importService.getCurrentDocumentSnapshot()
+    const importedBody = snapshot.bodies.find((body) => body.ownerFeatureId?.startsWith('feature_stepImport-'))
+    assert(importedBody, 'STEP file import service refresh should expose the imported body.')
+
+    const bodyRenderRecords = snapshot.render.records.filter((record) => record.ownerBodyId === importedBody.bodyId)
+    assert(
+      bodyRenderRecords.some((record) =>
+        record.binding.target.kind === 'face'
+        && record.binding.target.bodyId === importedBody.bodyId
+        && record.geometry.kind === 'mesh',
+      ),
+      'STEP file import service refresh should expose native face mesh render records.',
+    )
+    assert(
+      bodyRenderRecords.some((record) =>
+        record.binding.target.kind === 'edge'
+        && record.binding.target.bodyId === importedBody.bodyId
+        && record.geometry.kind === 'polyline',
+      ),
+      'STEP file import service refresh should expose native edge polyline render records.',
+    )
+    assert(
+      bodyRenderRecords.some((record) =>
+        record.binding.target.kind === 'vertex'
+        && record.binding.target.bodyId === importedBody.bodyId
+        && record.geometry.kind === 'marker',
+      ),
+      'STEP file import service refresh should expose native vertex marker render records.',
     )
   }
 
@@ -5869,6 +5960,7 @@ test('src/domain/modeling/opencascade-kernel-adapter.spec.ts', async () => {
   await testRepositoryRestoreConsumesWorkerNormalizedCollaborativeAuthoredDocumentBeforeOccRestore()
   await testOccGeometryExportsProduceRealPayloads()
   await testStepImportRestoresExactBodiesFromAssetBytes()
+  await testStepFileImportServiceRefreshExposesNativeRenderRecords()
   await testMeshImportRestoresBakedBodiesFromGeneratedAssetBytes()
   await testCylinderMeshImportRecordsUnifiedSurfaceDiagnostics()
   await testFacetedMeshImportUsesBakedAssetRenderMesh()

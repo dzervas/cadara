@@ -6,12 +6,15 @@ import * as THREE from 'three'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import {
   DEFAULT_VIEWPORT_PROJECTION_MODE,
+  applyViewportRenderableFitFrame,
   applyViewportCameraFrame,
   captureViewportCameraFrame,
+  computeViewportRenderableFitFrame,
   createViewportCamera,
   getDefaultViewportCameraFrame,
   getViewportCameraProjectionMode,
 } from '@/domain/workspace/viewport-projection'
+import type { RenderableEntityRecord } from '@/contracts/render/schema'
 
 test('src/domain/workspace/viewport-projection.spec.ts', () => {
   function approx(actual: number, expected: number, epsilon = 1e-6) {
@@ -30,6 +33,28 @@ test('src/domain/workspace/viewport-projection.spec.ts', () => {
       update: () => undefined,
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
+    }
+  }
+
+  function createBodyMeshRenderable(points: Array<readonly [number, number, number]>): RenderableEntityRecord {
+    return {
+      id: 'renderable_body_face',
+      label: 'Imported face',
+      ownerBodyId: 'body_imported',
+      ownerFeatureId: 'feature_stepImport-1',
+      binding: {
+        pickId: 'pick_body_face',
+        pickPriority: 20,
+        target: { kind: 'face', bodyId: 'body_imported', faceId: 'face_imported_1' },
+        topology: 'face',
+        semanticClass: 'bodyFace',
+      },
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: points,
+        vertexNormals: null,
+        triangleIndices: [[0, 1, 2]],
+      },
     }
   }
 
@@ -64,5 +89,31 @@ test('src/domain/workspace/viewport-projection.spec.ts', () => {
 
     approxVector(frame.target, new THREE.Vector3(0, 0, 4))
     approxVector(frame.up, new THREE.Vector3(0, 0, 1))
+  }
+
+  {
+    const camera = createViewportCamera('orthographic', 1)
+    const controls = createControls(new THREE.Vector3(0, 0, 4))
+    const renderables = [
+      createBodyMeshRenderable([
+        [1000, 2000, -20],
+        [2000, 2000, -20],
+        [2000, 3000, 980],
+        [1000, 3000, 980],
+      ]),
+    ]
+    const frame = computeViewportRenderableFitFrame({ camera, controls, renderables })
+
+    assert(frame, 'Body renderable fit should produce a camera frame.')
+    approxVector(frame.target, new THREE.Vector3(1500, 2500, 480))
+    assert(
+      frame.orthographicZoom && frame.orthographicZoom < 1,
+      'Large off-origin imported bodies should reduce orthographic zoom to fit.',
+    )
+
+    const applied = applyViewportRenderableFitFrame({ camera, controls, renderables })
+    assert(applied, 'Applying a body renderable fit should report success.')
+    approxVector(controls.target, new THREE.Vector3(1500, 2500, 480))
+    assert(camera.far > 1000, 'Fitting a large/off-origin body should expand the camera far plane.')
   }
 })

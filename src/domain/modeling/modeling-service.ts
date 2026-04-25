@@ -6558,7 +6558,10 @@ export function createModelingService(
         return imported
       }
 
-      return replaceCurrentAuthoredDocument(imported.document, imported.assets, { fetchSnapshot: false })
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets, {
+        fetchSnapshot: false,
+        validateBeforePersist: true,
+      })
     },
     async importStepFile(input) {
       await restorePromise
@@ -6568,7 +6571,10 @@ export function createModelingService(
         return imported
       }
 
-      return replaceCurrentAuthoredDocument(imported.document, imported.assets, { fetchSnapshot: false })
+      return replaceCurrentAuthoredDocument(imported.document, imported.assets, {
+        fetchSnapshot: false,
+        validateBeforePersist: true,
+      })
     },
     async importMeshFile(input) {
       await restorePromise

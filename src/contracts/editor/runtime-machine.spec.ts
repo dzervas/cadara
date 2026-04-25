@@ -251,6 +251,81 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear even
   }
 })
 
+test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load events', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  function waitForState(
+    actor: EditorRuntimeActor,
+    predicate: (state: EditorState) => boolean,
+  ): Promise<EditorState> {
+    const current = getEditorRuntimeState(actor)
+
+    if (predicate(current)) {
+      return Promise.resolve(current)
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timed out waiting for editor runtime state.'))
+      }, 2_000)
+      const subscription = actor.subscribe(() => {
+        const state = getEditorRuntimeState(actor)
+
+        if (!predicate(state)) {
+          return
+        }
+
+        clearTimeout(timeoutId)
+        subscription.unsubscribe()
+        resolve(state)
+      })
+    })
+  }
+
+  const adapter = new MockKernelAdapter()
+  const runtime: EditorEffectRuntime = {
+    async getCurrentDocumentSnapshot() {
+      return (await adapter.getDocumentSnapshot({
+        contractVersion: 'modeling-contract/v1alpha1',
+        documentId: 'doc_workspace',
+      })).snapshot
+    },
+    async commitSketch() {
+      return null
+    },
+    async evaluatePreview() {
+      throw new Error('Feature preview is not used by this test.')
+    },
+    async commitFeature() {
+      throw new Error('Feature commit is not used by this test.')
+    },
+  }
+  const actor = createEditorRuntimeActor(runtime)
+
+  actor.start()
+
+  try {
+    await waitForState(actor, (state) => state.document.revisionId !== null)
+
+    const importedSnapshot = structuredClone(await runtime.getCurrentDocumentSnapshot())
+    importedSnapshot.revisionId = 'rev_imported'
+    importedSnapshot.document.revisionId = 'rev_imported'
+
+    actor.send({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
+    const loaded = await waitForState(actor, (state) => state.document.revisionId === 'rev_imported')
+
+    assert(loaded.snapshot?.revisionId === 'rev_imported', 'Runtime should forward direct snapshot loads to the editor reducer.')
+    assert(loaded.selectionCatalog !== null, 'Direct snapshot loads should rebuild the selection catalog.')
+  } finally {
+    actor.stop()
+  }
+})
+
 test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch selection events', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
