@@ -27,6 +27,7 @@ test('src/domain/modeling/geometry-asset-store.spec.ts', async () => {
 
   const missing = await store.get({
     ...asset.asset,
+    data: undefined,
     assetId: 'asset_missing_geometry',
     hash: `sha256:${'1'.repeat(64)}`,
   })

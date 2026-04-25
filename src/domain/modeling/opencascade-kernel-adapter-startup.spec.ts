@@ -71,6 +71,8 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
   let workerPreloads = 0
   let workerRebuilds = 0
   let workerSnapshots = 0
+  let workerStepReviews = 0
+  let workerStepBakes = 0
   let workerDocument: AuthoredModelDocument | null = null
   let workerSnapshotAssets: readonly GeometryAssetBlobInput[] = []
   const workerClient: OccWorkerSnapshotClient = {
@@ -85,6 +87,20 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
       workerDocument = document
       workerSnapshotAssets = assets
       return directInitialSnapshot as WorkspaceSnapshot
+    },
+    async prepareStepImportReview(files) {
+      workerStepReviews += 1
+      return {
+        rootFileName: files[0]?.fileName ?? 'part.step',
+        referencedDocumentNames: [],
+        resolvedSources: [{ documentName: files[0]?.fileName ?? 'part.step', fileName: files[0]?.fileName ?? 'part.step', role: 'root' }],
+        solids: [],
+        diagnostics: [],
+      }
+    },
+    async bakeStepImportGeometry() {
+      workerStepBakes += 1
+      return { ok: false, diagnostics: [] }
     },
   }
   const workerBackedAdapter = new OpenCascadeKernelAdapter({
@@ -112,6 +128,17 @@ test('src/domain/modeling/opencascade-kernel-adapter-startup.spec.ts', async () 
     workerSnapshot.snapshot === directInitialSnapshot,
     'Worker-backed snapshot routing should preserve the public snapshot response shape.',
   )
+
+  const stepReview = await workerBackedAdapter.prepareStepImportReview([
+    { fileName: 'worker.step', bytes: new Uint8Array([1, 2, 3]) },
+  ])
+  const stepBake = await workerBackedAdapter.bakeStepImportGeometry({
+    files: [{ fileName: 'worker.step', bytes: new Uint8Array([1, 2, 3]) }],
+    review: stepReview,
+  })
+  assert(workerStepReviews === 1, 'Worker-backed adapters should route STEP review through the OCC worker client.')
+  assert(workerStepBakes === 1, 'Worker-backed adapters should route STEP Cadara geometry baking through the OCC worker client.')
+  assert(stepBake.ok === false, 'Worker-backed STEP bake should preserve the worker result shape.')
 
   const restoredDocument = createAuthoredModelDocumentFromSnapshot(directInitialSnapshot)
   const asset = await createDeterministicGeometryAsset()

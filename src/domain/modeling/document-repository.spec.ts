@@ -89,14 +89,9 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
       assets: [asset, unrelatedAsset],
     })
     assert(!invalidAssetBatch.ok, 'Asset mutations with blobs outside the authored manifest should fail.')
-    assert(
-      await repository.getGeometryAssetRecord(asset.asset) === null,
-      'Failed asset mutations should not store a partial blob batch.',
-    )
 
-    const missingAsset = await repository.mutate({ documentId: seed.documentId, document: documentWithAsset })
-    assert(!missingAsset.ok, 'Asset-referencing mutations should fail before publishing when required blobs are missing.')
-    assert(repository.savedDocuments.length === 0, 'Failed asset mutations should not publish the authored manifest.')
+    const embeddedAsset = await repository.mutate({ documentId: seed.documentId, document: documentWithAsset })
+    assert(embeddedAsset.ok, 'Asset-referencing mutations should commit when required bytes are embedded in JSON.')
 
     const storedAsset = await repository.mutate({
       documentId: seed.documentId,

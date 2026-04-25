@@ -3,6 +3,7 @@ import { test } from 'bun:test'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
+import type { StepImportReviewResult } from '@/contracts/modeling/step-import'
 import type { RequestId } from '@/contracts/shared/ids'
 import { OccWorkerClient, type OccWorkerLike } from '@/domain/modeling/occ/worker-client'
 import type { OccWorkerRequest, OccWorkerResponse } from '@/domain/modeling/occ/worker-protocol'
@@ -173,9 +174,51 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
     client.dispose()
   }
 
+  async function testWorkerStepImportReviewAndBake() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+    const files = [{ fileName: 'part.step', bytes: new Uint8Array([1, 2, 3]) }]
+    const reviewPending = client.prepareStepImportReview(files)
+    const reviewRequest = worker.posted[0]
+
+    assert(reviewRequest?.kind === 'prepareStepImportReview', 'STEP review should be routed through the OCC worker.')
+    assert(reviewRequest.files[0]?.fileName === 'part.step', 'STEP review worker request should include selected files.')
+
+    const review = {
+      rootFileName: 'part.step',
+      referencedDocumentNames: [],
+      resolvedSources: [{ documentName: 'part.step', fileName: 'part.step', role: 'root' }],
+      solids: [],
+      diagnostics: [],
+    } satisfies StepImportReviewResult
+    worker.emit({
+      kind: 'stepImportReviewPrepared',
+      requestId: reviewRequest.requestId,
+      review,
+    })
+    assert((await reviewPending).rootFileName === 'part.step', 'STEP review should resolve with worker review payload.')
+
+    const bakePending = client.bakeStepImportGeometry({
+      files,
+      review,
+      selectedSolidKeys: ['part.step#solid-1'],
+    })
+    const bakeRequest = worker.posted[1]
+    assert(bakeRequest?.kind === 'bakeStepImportGeometry', 'STEP geometry bake should be routed through the OCC worker.')
+    assert(bakeRequest.selectedSolidKeys?.[0] === 'part.step#solid-1', 'STEP bake request should include selected solid keys.')
+    worker.emit({
+      kind: 'stepImportGeometryBaked',
+      requestId: bakeRequest.requestId,
+      result: { ok: false, diagnostics: [] },
+    })
+    assert((await bakePending).ok === false, 'STEP bake should resolve with worker bake result.')
+    client.dispose()
+  }
+
   await testWorkerInitializationSuccess()
   await testWorkerInitializationFailure()
   await testWorkerSnapshotOverlap()
   await testWorkerSnapshotParityShape()
   await testWorkerSnapshotTransfersGeometryAssets()
+  await testWorkerStepImportReviewAndBake()
 })

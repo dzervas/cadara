@@ -35,4 +35,14 @@ test('src/app/cad-workbench-step-import-review.spec.ts', () => {
     source.includes('selectedSolidKeys: review.selectedSolidKeys'),
     'STEP import review should commit the selected subset payload.',
   )
+  assert(
+    source.includes("setStepImportFlow({ kind: 'idle' })")
+    && source.includes('data-step-import-progress')
+    && source.includes('Baking Cadara geometry'),
+    'STEP import commit should leave the modal and show background baking progress.',
+  )
+  assert(
+    !source.includes("kind: 'importing'") && !source.includes('title={stepImportFlow.kind ==='),
+    'STEP import should not hold the modal open in a blocking importing state.',
+  )
 })

@@ -24,6 +24,7 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
     workbenchSource.includes('Local file sync requires the File System Access API.')
       && workbenchSource.includes('brave://flags/#file-system-access-api')
       && workbenchSource.includes('Open local file failed. Select a valid cadara JSON document.')
+      && workbenchSource.includes('ZIP-backed .cadara packages are no longer supported')
       && workbenchSource.includes('Local file write permission was denied.')
       && workbenchSource.includes('Local file sync target could not be bound.')
       && workbenchSource.includes('persistent-binding-unavailable'),

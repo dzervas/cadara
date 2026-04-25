@@ -1,13 +1,5 @@
 import { serializeAuthoredDocumentJson } from '@/contracts/modeling/authored-document-serialization'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import {
-  CADARA_JSON_MIME_TYPE,
-  CADARA_PACKAGE_MIME_TYPE,
-  createCadaraPackagePayload,
-  parseCadaraPayload,
-  type CadaraPackagePayload,
-} from '@/lib/cadara-package'
 
 export type LocalFileSystemPermissionMode = 'read' | 'readwrite'
 export type LocalFileSystemPermissionState = 'granted' | 'denied' | 'prompt'
@@ -71,8 +63,7 @@ export type LocalFileWriteResult =
 
 const CADARA_JSON_ACCEPT: Record<string, string[]> = {
   'application/json': ['.cadara', '.json'],
-  [CADARA_JSON_MIME_TYPE]: ['.cadara'],
-  [CADARA_PACKAGE_MIME_TYPE]: ['.cadara'],
+  'application/vnd.cadara+json': ['.cadara'],
 }
 
 export const CADARA_OPEN_FILE_PICKER_OPTIONS: LocalFileSystemOpenPickerOptions = {
@@ -167,12 +158,17 @@ export async function readLocalFileText(handle: LocalFileSystemFileHandle) {
   return (await handle.getFile()).text()
 }
 
-export async function readLocalCadaraDocument(handle: LocalFileSystemFileHandle): Promise<CadaraPackagePayload> {
+export async function readLocalCadaraDocument(handle: LocalFileSystemFileHandle): Promise<unknown> {
   return readCadaraDocumentFile(await handle.getFile())
 }
 
-export async function readCadaraDocumentFile(file: File): Promise<CadaraPackagePayload> {
-  return parseCadaraPayload(new Uint8Array(await file.arrayBuffer()))
+export async function readCadaraDocumentFile(file: File): Promise<unknown> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  if (isZipPayload(bytes)) {
+    throw new Error('ZIP-backed .cadara packages are unsupported. Select a single JSON .cadara document.')
+  }
+
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown
 }
 
 export async function queryLocalFilePermission(
@@ -235,15 +231,14 @@ export function serializeLocalAuthoredDocument(document: unknown) {
 
 export function createLocalAuthoredDocumentPayload(
   document: AuthoredModelDocument,
-  assets: readonly GeometryAssetBlobInput[] = [],
 ) {
-  return document.assets.records.length === 0
-    ? serializeAuthoredDocumentJson(document)
-    : new Uint8Array(createCadaraPackagePayload({ document, assets }))
+  return serializeAuthoredDocumentJson(document)
 }
-
-export { createCadaraPackagePayload } from '@/lib/cadara-package'
 
 function isPickerAbort(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function isZipPayload(bytes: Uint8Array) {
+  return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
 }

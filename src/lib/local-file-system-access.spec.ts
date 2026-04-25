@@ -3,7 +3,6 @@ import { test } from 'bun:test'
 import {
   CADARA_OPEN_FILE_PICKER_OPTIONS,
   CADARA_SAVE_FILE_PICKER_OPTIONS,
-  createCadaraPackagePayload,
   createLocalAuthoredDocumentPayload,
   getLocalFileSystemOpenSupport,
   readCadaraDocumentFile,
@@ -162,7 +161,7 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
     )
   }
 
-  async function testPackagedCadaraDocumentsIncludeAssets() {
+  async function testCadaraDocumentsStaySingleJsonObjects() {
     const asset = await createDeterministicGeometryAsset()
     const document = {
       contractVersion: 'modeling-contract/v1alpha1',
@@ -187,35 +186,23 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
       },
     } as AuthoredModelDocument
 
-    const payload = createLocalAuthoredDocumentPayload(document, [asset])
-    assert(payload instanceof Uint8Array, 'Documents with geometry assets should serialize as ZIP-backed cadara bytes.')
+    const payload = createLocalAuthoredDocumentPayload(document)
+    assert(typeof payload === 'string', 'Documents with geometry assets should serialize as single JSON cadara payloads.')
+    assert(!payload.startsWith('PK'), 'Cadara JSON payloads should not be ZIP-backed packages.')
 
     const parsed = await readCadaraDocumentFile(new File([payload], 'asset.cadara'))
     assert(
-      parsed.assets[0]?.asset.hash === asset.asset.hash && parsed.assets[0]?.bytes.byteLength === asset.bytes.byteLength,
-      'Cadara package reads should restore authored JSON and included geometry blobs.',
+      (parsed as AuthoredModelDocument).assets.records[0]?.hash === asset.asset.hash,
+      'Cadara JSON reads should restore authored asset records directly.',
     )
 
-    let missingAssetRejected = false
+    let zipRejected = false
     try {
-      createLocalAuthoredDocumentPayload(document, [])
+      await readCadaraDocumentFile(new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'asset.cadara'))
     } catch (error: unknown) {
-      missingAssetRejected = error instanceof Error && error.message.includes('missing geometry asset')
+      zipRejected = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
     }
-    assert(missingAssetRejected, 'Cadara package writes should reject manifests without all referenced blobs.')
-
-    const legacyPayload = createCadaraPackagePayload({
-      document: {
-        ...document,
-        assets: [asset.asset],
-      },
-      assets: [asset],
-    })
-    const legacyParsed = await readCadaraDocumentFile(new File([legacyPayload], 'legacy-asset.cadara'))
-    assert(
-      legacyParsed.assets[0]?.asset.hash === asset.asset.hash,
-      'Cadara package reads should restore blobs for legacy asset-array manifests.',
-    )
+    assert(zipRejected, 'Cadara reads should reject ZIP-backed packages without backwards-compatible extraction.')
   }
 
   assert(
@@ -230,6 +217,6 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
   await testPickerOptionsAndRouting()
   await testUnsupportedAndCancelledPickers()
   await testWritePermissionAndPersistentBindingSupport()
-  await testPackagedCadaraDocumentsIncludeAssets()
+  await testCadaraDocumentsStaySingleJsonObjects()
   testStableSerialization()
 })

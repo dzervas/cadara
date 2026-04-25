@@ -25,7 +25,7 @@ import type { MeshPoint, MeshTriangle } from '@/domain/modeling/mesh-parser'
 export const BAKED_MESH_GEOMETRY_MEDIA_TYPE = 'application/vnd.cadara.baked-mesh+json'
 const BAKED_MESH_GEOMETRY_SCHEMA_VERSION = 'baked-mesh-geometry/v1alpha1'
 
-interface BakedMeshGeometryPayload {
+export interface BakedMeshGeometryPayload {
   schemaVersion: typeof BAKED_MESH_GEOMETRY_SCHEMA_VERSION
   vertices: MeshPoint[]
   indices: Array<readonly [number, number, number]>
@@ -136,6 +136,12 @@ export async function createBakedMeshGeometryAsset(input: {
       sourceStored: false,
       generator: `${MESH_RECONSTRUCTION_ALGORITHM_ID}/v${MESH_RECONSTRUCTION_ALGORITHM_VERSION}`,
       reconstruction,
+    },
+    data: {
+      kind: 'bakedMeshGeometry',
+      schemaVersion: normalized.payload.schemaVersion,
+      vertices: normalized.payload.vertices,
+      indices: normalized.payload.indices,
     },
     ownerFeatureIds: [input.ownerFeatureId],
   }

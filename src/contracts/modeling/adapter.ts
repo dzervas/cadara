@@ -38,12 +38,16 @@ import type {
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
-import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
+import type { CadaraBrepGeometryAssetData, GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
 import type { StepImportReviewFileInput, StepImportReviewResult } from '@/contracts/modeling/step-import'
 
 export interface GeometryAssetResolver {
   getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>
 }
+
+export type StepImportBakeGeometryResult =
+  | { ok: true; data: CadaraBrepGeometryAssetData }
+  | { ok: false; diagnostics: readonly ModelingDiagnostic[] }
 
 /**
  * Public modeling-kernel boundary for durable document queries and feature
@@ -70,6 +74,12 @@ export interface ModelingKernelAdapter {
   exportAuthoredModelDocument?(documentId: AuthoredDocument['documentId']): Promise<AuthoredDocument>
   /** Prepares a STEP import review without mutating authored document history. */
   prepareStepImportReview?(files: readonly StepImportReviewFileInput[]): Promise<StepImportReviewResult>
+  /** Translates transient STEP source files into Cadara-owned B-rep JSON for persistence. */
+  bakeStepImportGeometry?(input: {
+    files: readonly StepImportReviewFileInput[]
+    review?: StepImportReviewResult
+    selectedSolidKeys?: readonly string[]
+  }): Promise<StepImportBakeGeometryResult>
   /** Returns the authoritative typed snapshot for the requested document. */
   getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
   /** Commits a durable sketch definition against an explicit base revision. */

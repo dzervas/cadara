@@ -1,7 +1,6 @@
 import { test } from 'bun:test'
 
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/domain/modeling/document-sync-worker-client'
 import type {
@@ -189,11 +188,10 @@ test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
       requestId: 'request_document_sync_asset_mutate' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
       document: documentWithAsset,
-      assets: [asset],
     })
     assert(
       posted.some((message) => message.kind === 'mutated' && message.requestId === 'request_document_sync_asset_mutate' && message.result.ok),
-      'Worker shell should pass mutation asset blobs into the repository.',
+      'Worker shell should mutate documents with embedded geometry asset data.',
     )
 
     await handle({
@@ -203,7 +201,7 @@ test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
     })
     assert(
       posted.some((message) => message.kind === 'geometryAssetRecord' && message.bytes?.byteLength === asset.bytes.byteLength),
-      'Worker shell should proxy verified asset record bytes from the repository.',
+      'Worker shell should proxy verified embedded asset bytes from the repository.',
     )
   }
 

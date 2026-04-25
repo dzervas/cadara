@@ -100,7 +100,7 @@ import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
-import { prepareStepImportReviewWithOpenCascade } from '@/domain/modeling/occ/features'
+import { bakeStepImportGeometryWithOpenCascade, prepareStepImportReviewWithOpenCascade } from '@/domain/modeling/occ/features'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { OccWorkerSnapshotClient } from '@/domain/modeling/occ/worker-client'
 import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
@@ -1359,8 +1359,25 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   async prepareStepImportReview(files: readonly StepImportReviewFileInput[]): Promise<StepImportReviewResult> {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.prepareStepImportReview(files)
+    }
+
     const oc = await this.loadOpenCascadeInstance()
     return prepareStepImportReviewWithOpenCascade(oc, files)
+  }
+
+  async bakeStepImportGeometry(input: {
+    files: readonly StepImportReviewFileInput[]
+    review?: StepImportReviewResult
+    selectedSolidKeys?: readonly string[]
+  }) {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.bakeStepImportGeometry(input)
+    }
+
+    const oc = await this.loadOpenCascadeInstance()
+    return bakeStepImportGeometryWithOpenCascade(oc, input)
   }
 
   setSnapshotLodTier(tierId: OccTessellationTierId) {

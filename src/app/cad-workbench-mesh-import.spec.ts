@@ -37,6 +37,10 @@ test('src/app/cad-workbench-mesh-import.spec.ts', () => {
     'Mesh import review should warn before accepting faceted fallback.',
   )
   assert(
+    source.includes('Probably Broken'),
+    'Mesh import review modal should show the temporary Probably Broken chip.',
+  )
+  assert(
     source.includes('modelingService.importPreparedMeshFile') &&
       source.includes('assetInput: review.assetInput'),
     'Mesh import commit should use the worker-prepared baked mesh asset instead of reparsing source bytes.',

@@ -26,10 +26,17 @@ import {
   type StepImportReviewResult,
   type StepImportDiagnosticCode,
   type StepImportFeatureParameters,
-  type StepImportSourceAssetReference,
 } from '@/contracts/modeling/step-import'
 import type { MeshImportDiagnosticCode, MeshImportFeatureParameters } from '@/contracts/modeling/mesh-import'
-import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
+import type {
+  CadaraBrepFacetedTriangleInput,
+  CadaraBrepGeometryAssetBody,
+  CadaraBrepGeometryAssetData,
+  GeometryAssetHash,
+  GeometryAssetPoint3,
+  GeometryAssetRecord,
+} from '@/contracts/modeling/geometry-assets'
+import { createCadaraFacetedBrepTopologyFromTriangles } from '@/contracts/modeling/geometry-assets'
 import {
   DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
   type MeshReconstructionProvenance,
@@ -86,6 +93,7 @@ import {
   parseBakedMeshGeometry,
 } from '@/domain/modeling/baked-mesh-geometry'
 import type { MeshPoint } from '@/domain/modeling/mesh-parser'
+import { deleteOccObject } from '@/domain/modeling/occ/memory'
 
 export interface OccFeatureExecutionContext {
   oc: OpenCascadeInstance
@@ -499,8 +507,8 @@ function createMeshImportErrorCode(code: MeshImportDiagnosticCode, message: stri
   return error
 }
 
-function createTempStepImportPath(asset: GeometryAssetRecord) {
-  return `/cadara-import-${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}.step`
+function createTempCadaraBrepStlPath(rootKey: string, index: number) {
+  return `/cadara-brep-${rootKey}-${index + 1}.stl`
 }
 
 function escapeStepString(value: string) {
@@ -547,7 +555,7 @@ function findStepImportAsset(
   context: OccFeatureExecutionContext,
   parameters: StepImportFeatureParameters,
 ) {
-  return context.assets.records.find((asset) => asset.assetId === parameters.assetId && asset.format === 'step') ?? null
+  return context.assets.records.find((asset) => asset.assetId === parameters.assetId && asset.format === 'cadara-brep') ?? null
 }
 
 function findMeshImportAsset(
@@ -576,15 +584,6 @@ function transferStepImportRoots(
 
   reader.ClearShapes()
   return reader.TransferRoots(progress)
-}
-
-function formatExternalStepDocumentNames(names: readonly string[]) {
-  const visibleNames = names.slice(0, 3).join(', ')
-  const remainingCount = names.length - 3
-
-  return remainingCount > 0
-    ? `${visibleNames}, and ${remainingCount} more`
-    : visibleNames
 }
 
 function createDefaultStepSolidLabel(documentName: string, solidOrdinal: number, solidCount: number) {
@@ -768,95 +767,292 @@ export function prepareStepImportReviewWithOpenCascade(
   }
 }
 
-function readStepImportShape(
-  context: OccFeatureExecutionContext,
-  asset: GeometryAssetRecord,
-  parameters: StepImportFeatureParameters,
+export function bakeStepImportGeometryWithOpenCascade(
+  oc: OpenCascadeInstance,
+  input: {
+    files: readonly StepImportReviewFileInput[]
+    review?: StepImportReviewResult
+    selectedSolidKeys?: readonly string[]
+  },
 ) {
-  const bytes = context.assetBlobs.get(asset.hash)
-  if (!bytes) {
-    throw createStepImportErrorCode('step-import-missing-asset', `STEP asset ${asset.assetId} bytes are missing.`)
+  const resolved = resolveReviewStepFiles(input.files)
+  if (!resolved.rootFile || resolved.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+    return { ok: false as const, diagnostics: resolved.diagnostics }
   }
 
-  const oc = context.oc
-  const sourceFiles = parameters.sourceFiles
-  const rootSource = sourceFiles?.find((source) => source.role === 'root' && source.assetId === asset.assetId)
-  const rootDocumentName = rootSource?.documentName ?? asset.provenance.stepDocumentName ?? asset.provenance.sourceName ?? `${asset.assetId}.step`
-  const path = sourceFiles
-    ? createTempStepImportPathForDocument(`${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}`, rootDocumentName)
-    : createTempStepImportPath(asset)
   const reader = new oc.STEPControl_Reader_1()
   const progress = new oc.Message_ProgressRange_1()
   const writtenPaths: string[] = []
+  const rootKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
   try {
-    if (sourceFiles) {
-      const documentPathByName = new Map<string, string>()
-      const sourceAssetById = new Map(context.assets.records.map((sourceAsset) => [sourceAsset.assetId, sourceAsset]))
-      const resolvedSources: Array<{
-        source: StepImportSourceAssetReference
-        asset: GeometryAssetRecord
-        bytes: Uint8Array
-        path: string
-      }> = []
+    const rootSource = resolved.resolvedSources.find((source) => source.role === 'root')!
+    const documentPathByName = new Map<string, string>()
+    const resolvedSources: Array<StepImportReviewResolvedSource & { bytes: Uint8Array; path: string }> = []
 
-      for (const source of sourceFiles) {
-        const sourceAsset = sourceAssetById.get(source.assetId)
-        if (!sourceAsset || sourceAsset.format !== 'step') {
-          throw createStepImportErrorCode(
-            'step-import-missing-reference',
-            `STEP reference ${source.documentName} is not in the authored document manifest.`,
-          )
+    for (const source of resolved.resolvedSources) {
+      const file = input.files.find((entry) => entry.fileName === source.fileName)
+      if (!file) {
+        return {
+          ok: false as const,
+          diagnostics: [
+            createStepImportDiagnostic('step-import-missing-reference', `STEP source ${source.fileName} is no longer available.`),
+          ],
         }
-        const sourceBytes = context.assetBlobs.get(sourceAsset.hash)
-        if (!sourceBytes) {
-          throw createStepImportErrorCode(
-            source.role === 'root' ? 'step-import-missing-asset' : 'step-import-unreadable-referenced-file',
-            `STEP reference ${source.documentName} bytes are missing.`,
-          )
-        }
-
-        const sourcePath = source.role === 'root'
-          ? path
-          : createTempStepImportPathForDocument(`${asset.assetId}-${asset.hash.replace(/^sha256:/, '').slice(0, 12)}`, source.documentName)
-        documentPathByName.set(getStepDocumentBasename(source.documentName), sourcePath)
-        resolvedSources.push({ source, asset: sourceAsset, bytes: sourceBytes, path: sourcePath })
       }
-
-      for (const resolved of resolvedSources) {
-        const nextBytes = resolved.source.role === 'root'
-          ? rewriteStepDocumentReferences(resolved.bytes, documentPathByName)
-          : resolved.bytes
-        oc.FS.writeFile(resolved.path, nextBytes)
-        writtenPaths.push(resolved.path)
-      }
-    } else {
-      oc.FS.writeFile(path, bytes)
-      writtenPaths.push(path)
+      const path = createTempStepImportPathForDocument(rootKey, source.documentName)
+      documentPathByName.set(getStepDocumentBasename(source.documentName), path)
+      resolvedSources.push({ ...source, bytes: file.bytes, path })
     }
 
-    const readStatus = reader.ReadFile(path)
+    for (const source of resolvedSources) {
+      const bytes = source.role === 'root'
+        ? rewriteStepDocumentReferences(source.bytes, documentPathByName)
+        : source.bytes
+      oc.FS.writeFile(source.path, bytes)
+      writtenPaths.push(source.path)
+    }
+
+    const rootPath = resolvedSources.find((source) => source.role === 'root')!.path
+    const readStatus = reader.ReadFile(rootPath)
     if (!isOccDoneStatus(readStatus)) {
-      throw createStepImportErrorCode('step-import-unreadable-file', `STEP asset ${asset.assetId} could not be read.`)
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic('step-import-unreadable-file', `STEP source ${rootSource.fileName} could not be read.`),
+        ],
+      }
     }
 
     const transferredRoots = transferStepImportRoots(reader, progress)
     if (transferredRoots <= 0 || reader.NbShapes() <= 0) {
-      throw createStepImportErrorCode('step-import-unsupported-structure', `STEP asset ${asset.assetId} contains no transferable shape roots.`)
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic('step-import-unsupported-structure', `STEP source ${rootSource.fileName} contains no transferable shape roots.`),
+        ],
+      }
+    }
+
+    const shape = reader.OneShape()
+    const solids = extractSolidShapes(oc, shape)
+    const selectedSolidKeys = new Set(input.selectedSolidKeys ?? [])
+    const reviewLabels = new Map(input.review?.solids.map((solid) => [solid.solidKey, solid.label]) ?? [])
+    const rootDocumentName = input.review?.rootFileName ?? rootSource.documentName
+    let bodies: CadaraBrepGeometryAssetData['bodies']
+    try {
+      bodies = solids.flatMap((solid, index): CadaraBrepGeometryAssetData['bodies'] => {
+        const solidOrdinal = index + 1
+        const solidKey = createStepSolidKey({ documentName: rootDocumentName, solidOrdinal })
+        if (selectedSolidKeys.size > 0 && !selectedSolidKeys.has(solidKey)) {
+          return []
+        }
+
+        return [{
+          bodyKey: `body_${solidOrdinal}`,
+          label: reviewLabels.get(solidKey) ?? createDefaultStepSolidLabel(rootDocumentName, solidOrdinal, solids.length),
+          solidKey,
+          topology: createCadaraFacetedBrepTopologyFromShape(oc, solid, `${rootKey}_${solidOrdinal}`),
+        }]
+      })
+    } catch (error) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic(
+            'step-import-unsupported-structure',
+            error instanceof Error ? error.message : `STEP source ${rootSource.fileName} could not be converted to Cadara B-rep topology.`,
+          ),
+        ],
+      }
+    }
+
+    if (bodies.length === 0) {
+      return {
+        ok: false as const,
+        diagnostics: [
+          createStepImportDiagnostic('step-import-no-solids', `STEP source ${rootSource.fileName} contains no selected solid bodies.`),
+        ],
+      }
     }
 
     return {
-      shape: reader.OneShape(),
-      topLevelShapeCount: reader.NbShapes(),
-      externalDocumentNames: findExternalStepDocumentNames(bytes),
-      rootDocumentName,
+      ok: true as const,
+      data: {
+        kind: 'cadaraBrep' as const,
+        schemaVersion: 'cadara-brep/v1alpha1' as const,
+        source: {
+          importedFormat: 'step' as const,
+          sourceStored: false as const,
+          rootDocumentName,
+        },
+        bodies,
+      },
     }
   } finally {
-    for (const writtenPath of writtenPaths) {
-      removeTempImportPath(oc, writtenPath)
+    for (const path of writtenPaths) {
+      removeTempImportPath(oc, path)
     }
     reader.delete()
   }
+}
+
+function createCadaraFacetedBrepTopologyFromShape(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+  keyPrefix: string,
+) {
+  const mesher = new oc.BRepMesh_IncrementalMesh_2(shape, 0.1, false, 0.5, false)
+  deleteOccObject(mesher)
+
+  const triangles = extractFacetedTrianglesFromShape(oc, shape)
+  if (triangles.length === 0) {
+    throw new Error('Translated STEP solid did not produce faceted Cadara B-rep triangles.')
+  }
+
+  return createCadaraFacetedBrepTopologyFromTriangles(triangles, keyPrefix)
+}
+
+function extractFacetedTrianglesFromShape(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+): CadaraBrepFacetedTriangleInput[] {
+  const triangles: CadaraBrepFacetedTriangleInput[] = []
+  const faceMap = new oc.TopTools_IndexedMapOfShape_1()
+  oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE as never, faceMap)
+
+  try {
+    for (let faceIndex = 1; faceIndex <= faceMap.Size(); faceIndex += 1) {
+      const face = oc.TopoDS.Face_1(faceMap.FindKey(faceIndex))
+      const location = new oc.TopLoc_Location_1()
+      const triangulationHandle = oc.BRep_Tool.Triangulation(face, location, 0 as never)
+      if (triangulationHandle.IsNull()) {
+        continue
+      }
+
+      const triangulation = triangulationHandle.get()
+      const reversed = isShapeOrientationReversed(oc, face)
+      for (let triangleIndex = 1; triangleIndex <= triangulation.NbTriangles(); triangleIndex += 1) {
+        const triangle = triangulation.Triangle(triangleIndex)
+        const first = pointFromTriangulationNode(triangulation.Node(triangle.Value(1)), location)
+        const second = pointFromTriangulationNode(triangulation.Node(triangle.Value(2)), location)
+        const third = pointFromTriangulationNode(triangulation.Node(triangle.Value(3)), location)
+        triangles.push(reversed ? [first, third, second] : [first, second, third])
+      }
+    }
+  } finally {
+    faceMap.delete()
+  }
+
+  return triangles
+}
+
+function pointFromTriangulationNode(
+  point: { Transformed(theT: InstanceType<OpenCascadeInstance['gp_Trsf']>): { X(): number; Y(): number; Z(): number } },
+  location: InstanceType<OpenCascadeInstance['TopLoc_Location']>,
+): GeometryAssetPoint3 {
+  const transformed = point.Transformed(location.Transformation())
+  return [transformed.X(), transformed.Y(), transformed.Z()]
+}
+
+function isShapeOrientationReversed(
+  oc: OpenCascadeInstance,
+  shape: { Orientation_1(): unknown },
+) {
+  return (shape.Orientation_1() as { value?: number }).value
+    === (oc.TopAbs_Orientation.TopAbs_REVERSED as { value?: number }).value
+}
+
+function readCadaraBrepImportBodies(
+  context: OccFeatureExecutionContext,
+  asset: GeometryAssetRecord,
+) {
+  if (asset.data?.kind !== 'cadaraBrep') {
+    throw createStepImportErrorCode('step-import-missing-asset', `STEP import asset ${asset.assetId} does not contain translated Cadara B-rep data.`)
+  }
+
+  const oc = context.oc
+  return asset.data.bodies.map((body, index) => {
+    const path = createTempCadaraBrepStlPath(asset.assetId, index)
+    const shape = new oc.TopoDS_Shape()
+    try {
+      oc.FS.writeFile(path, new TextEncoder().encode(cadaraBrepBodyToAsciiStl(body)))
+      if (!oc.StlAPI.Read(shape, path)) {
+        throw createStepImportErrorCode('step-import-unreadable-file', `Cadara B-rep body ${body.bodyKey} could not be read.`)
+      }
+      const solids = extractSolidShapes(oc, shape)
+      if (solids.length === 1) {
+        return {
+          bodyKey: body.bodyKey,
+          solidKey: body.solidKey,
+          label: body.label,
+          solid: solids[0]!,
+        }
+      }
+
+      if ((shape.ShapeType() as unknown as number) !== (oc.TopAbs_ShapeEnum.TopAbs_SHELL as unknown as number)) {
+        throw createStepImportErrorCode('step-import-unsupported-structure', `Cadara B-rep body ${body.bodyKey} must restore exactly one solid.`)
+      }
+      const solidBuilder = new oc.BRepBuilderAPI_MakeSolid_3(oc.TopoDS.Shell_1(shape))
+      if (!solidBuilder.IsDone()) {
+        throw createStepImportErrorCode('step-import-unsupported-structure', `Cadara B-rep body ${body.bodyKey} could not be converted to a solid.`)
+      }
+      return {
+        bodyKey: body.bodyKey,
+        solidKey: body.solidKey,
+        label: body.label,
+        solid: solidBuilder.Solid(),
+      }
+    } finally {
+      removeTempImportPath(oc, path)
+    }
+  })
+}
+
+function cadaraBrepBodyToAsciiStl(body: CadaraBrepGeometryAssetBody) {
+  const lines = [`solid ${sanitizeStepImportStlName(body.bodyKey)}`]
+  for (const face of body.topology.faces) {
+    for (const [firstIndex, secondIndex, thirdIndex] of face.triangles) {
+      const first = body.topology.vertices[firstIndex]?.point
+      const second = body.topology.vertices[secondIndex]?.point
+      const third = body.topology.vertices[thirdIndex]?.point
+      if (!first || !second || !third) {
+        throw createStepImportErrorCode('step-import-unreadable-file', `Cadara B-rep body ${body.bodyKey} contains an invalid triangle index.`)
+      }
+      lines.push(
+        `facet normal ${formatStepImportStlNumber(face.surface.normal[0])} ${formatStepImportStlNumber(face.surface.normal[1])} ${formatStepImportStlNumber(face.surface.normal[2])}`,
+        ' outer loop',
+        `  vertex ${formatStepImportStlPoint(first)}`,
+        `  vertex ${formatStepImportStlPoint(second)}`,
+        `  vertex ${formatStepImportStlPoint(third)}`,
+        ' endloop',
+        'endfacet',
+      )
+    }
+  }
+  lines.push(`endsolid ${sanitizeStepImportStlName(body.bodyKey)}`)
+  return `${lines.join('\n')}\n`
+}
+
+function sanitizeStepImportStlName(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'cadara_brep'
+}
+
+function formatStepImportStlPoint(point: GeometryAssetPoint3) {
+  return `${formatStepImportStlNumber(point[0])} ${formatStepImportStlNumber(point[1])} ${formatStepImportStlNumber(point[2])}`
+}
+
+function formatStepImportStlNumber(value: number) {
+  if (!Number.isFinite(value)) {
+    throw createStepImportErrorCode('step-import-unreadable-file', 'Cadara B-rep geometry contains a non-finite number.')
+  }
+  return Number.isInteger(value) ? value.toFixed(1) : String(Number(value.toPrecision(12)))
+}
+
+function getCadaraBrepRootDocumentName(asset: GeometryAssetRecord) {
+  return asset.data?.kind === 'cadaraBrep'
+    ? asset.data.source.rootDocumentName ?? asset.provenance.stepDocumentName ?? asset.provenance.sourceName ?? asset.assetId
+    : asset.provenance.stepDocumentName ?? asset.provenance.sourceName ?? asset.assetId
 }
 
 function transformShape(
@@ -924,30 +1120,6 @@ function applyStepImportTransforms(
   }
 
   return transformed
-}
-
-function countUnsupportedStepShapes(
-  oc: OpenCascadeInstance,
-  shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
-): number {
-  if ((shape.ShapeType() as unknown as number) === (oc.TopAbs_ShapeEnum.TopAbs_SOLID as unknown as number)) {
-    return 0
-  }
-
-  const iterator = new oc.TopoDS_Iterator_2(shape, false, false)
-  let childCount = 0
-  let unsupportedCount = 0
-  try {
-    while (iterator.More()) {
-      childCount += 1
-      unsupportedCount += countUnsupportedStepShapes(oc, iterator.Value())
-      iterator.Next()
-    }
-  } finally {
-    iterator.delete()
-  }
-
-  return childCount === 0 ? 1 : unsupportedCount
 }
 
 function createEmptyMeshSurfaceCounts(): MeshUnificationSurfaceTypeCounts {
@@ -1240,28 +1412,21 @@ function executeStepImportFeature(
     throw createStepImportErrorCode('step-import-missing-asset', `STEP import asset ${parameters.assetId} is not in the authored document manifest.`)
   }
 
-  const imported = readStepImportShape(context, asset, parameters)
-  const solids = extractSolidShapes(context.oc, imported.shape)
-  if (solids.length === 0) {
-    if (imported.externalDocumentNames.length > 0) {
-      throw createStepImportErrorCode(
-        'step-import-no-solids',
-        `STEP asset ${asset.assetId} references external STEP files (${formatExternalStepDocumentNames(imported.externalDocumentNames)}) but contains no embedded solid bodies.`,
-      )
-    }
-
-    throw createStepImportErrorCode('step-import-no-solids', `STEP asset ${asset.assetId} does not contain supported solid bodies.`)
+  const importedBodies = readCadaraBrepImportBodies(context, asset)
+  if (importedBodies.length === 0) {
+    throw createStepImportErrorCode('step-import-no-solids', `STEP import asset ${asset.assetId} does not contain supported solid bodies.`)
   }
 
-  const discoveredSolids = solids.map((solid, index) => {
+  const rootDocumentName = getCadaraBrepRootDocumentName(asset)
+  const discoveredSolids = importedBodies.map((body, index) => {
     const solidOrdinal = index + 1
     return {
-      solid,
-      solidKey: createStepSolidKey({
-        documentName: imported.rootDocumentName,
+      solid: body.solid,
+      solidKey: body.solidKey ?? createStepSolidKey({
+        documentName: rootDocumentName,
         solidOrdinal,
       }),
-      label: createDefaultStepSolidLabel(imported.rootDocumentName, solidOrdinal, solids.length),
+      label: body.label || createDefaultStepSolidLabel(rootDocumentName, solidOrdinal, importedBodies.length),
     }
   })
 
@@ -1304,7 +1469,6 @@ function executeStepImportFeature(
       shape: transformed,
     })
   })
-  const skippedUnsupportedCount = countUnsupportedStepShapes(context.oc, imported.shape)
 
   return {
     bodies: [...context.bodies, ...bodies],
@@ -1314,15 +1478,7 @@ function executeStepImportFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations: new Map(),
-    diagnostics: skippedUnsupportedCount > 0
-      ? [
-          createStepImportDiagnostic(
-            'step-import-unsupported-structure',
-            `STEP import skipped ${skippedUnsupportedCount} unsupported non-solid shape${skippedUnsupportedCount === 1 ? '' : 's'}.`,
-            { asset, skippedUnsupportedCount, severity: 'warning' },
-          ),
-        ]
-      : [],
+    diagnostics: [],
   }
 }
 

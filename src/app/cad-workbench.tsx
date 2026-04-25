@@ -136,13 +136,6 @@ type StepImportFlowState =
     selectedSolidKeys: readonly string[]
     label: string
   }
-  | {
-    kind: 'importing'
-    files: readonly { fileName: string; bytes: Uint8Array }[]
-    review: StepImportReviewResult
-    selectedSolidKeys: readonly string[]
-    label: string
-  }
 type MeshImportFlowState =
   | { kind: 'idle' }
   | {
@@ -158,6 +151,11 @@ type MeshImportProgressState = {
   message: string
   progress: number
   canCancel: boolean
+}
+type StepImportProgressState = {
+  fileName: string
+  message: string
+  progress: number
 }
 type WorkbenchUndoEntry =
   | {
@@ -246,6 +244,7 @@ export function CadWorkbench() {
   const [stepImportFlow, setStepImportFlow] = useState<StepImportFlowState>({ kind: 'idle' })
   const [meshImportFlow, setMeshImportFlow] = useState<MeshImportFlowState>({ kind: 'idle' })
   const [meshImportProgress, setMeshImportProgress] = useState<MeshImportProgressState | null>(null)
+  const [stepImportProgress, setStepImportProgress] = useState<StepImportProgressState | null>(null)
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -1461,7 +1460,7 @@ export function CadWorkbench() {
     setUndoStack([])
     setRedoStack([])
     if (options.fitView) {
-      void modelingService.getCurrentDocumentSnapshot().then((nextSnapshot) => {
+      return modelingService.getCurrentDocumentSnapshot().then((nextSnapshot) => {
         applyLoadedSnapshot(nextSnapshot)
         setViewportFitRequestId((current) => current + 1)
         showWorkbenchInfo(message)
@@ -1473,6 +1472,7 @@ export function CadWorkbench() {
 
     dispatch({ type: 'document.refreshRequested' })
     showWorkbenchInfo(message)
+    return Promise.resolve()
   }
 
   const reportDocumentFileActionFailure = useCallback((source: string, message: string, error: unknown) => {
@@ -1678,8 +1678,11 @@ export function CadWorkbench() {
 
     try {
       payload = await readCadaraDocumentFile(file)
-    } catch {
-      showWorkbenchError('Import failed. Select a valid cadara JSON document.')
+    } catch (error: unknown) {
+      const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
+        ? 'Import failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
+        : 'Import failed. Select a valid cadara JSON document.'
+      showWorkbenchError(message)
       return
     }
 
@@ -1777,12 +1780,11 @@ export function CadWorkbench() {
     }
 
     const review = stepImportFlow
-    setStepImportFlow({
-      kind: 'importing',
-      files: review.files,
-      review: review.review,
-      selectedSolidKeys: review.selectedSolidKeys,
-      label: review.label,
+    setStepImportFlow({ kind: 'idle' })
+    setStepImportProgress({
+      fileName: review.review.rootFileName,
+      message: 'Baking Cadara geometry',
+      progress: 72,
     })
     try {
       const result = await modelingService.commitPreparedStepImport({
@@ -1792,14 +1794,21 @@ export function CadWorkbench() {
       })
       if (!result.ok) {
         setStepImportFlow(review)
+        setStepImportProgress(null)
         showWorkbenchError(result.diagnostics[0]?.message ?? 'STEP import failed.')
         return
       }
 
-      setStepImportFlow({ kind: 'idle' })
-      refreshAfterDocumentFileAction(`Imported ${review.review.rootFileName}.`, { fitView: true })
+      setStepImportProgress({
+        fileName: review.review.rootFileName,
+        message: 'Refreshing imported solids',
+        progress: 94,
+      })
+      await refreshAfterDocumentFileAction(`Imported ${review.review.rootFileName}.`, { fitView: true })
+      setStepImportProgress(null)
     } catch (error) {
       setStepImportFlow(review)
+      setStepImportProgress(null)
       reportDocumentFileActionFailure('workbench.file.import-step', 'STEP import failed.', error)
     }
   }
@@ -1867,7 +1876,10 @@ export function CadWorkbench() {
     try {
       payload = await readLocalCadaraDocument(pickerResult.handle)
     } catch (error: unknown) {
-      reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed. Select a valid cadara JSON document.', error)
+      const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
+        ? 'Open local file failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
+        : 'Open local file failed. Select a valid cadara JSON document.'
+      reportDocumentFileActionFailure('workbench.file.openLocal', message, error)
       return
     }
 
@@ -1960,6 +1972,25 @@ export function CadWorkbench() {
   const stepImportDisabled = stepReview
     ? selectedStepSolidCount === 0 || stepReview.review.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
     : true
+  const activeImportProgress = stepImportProgress
+    ? {
+        kind: 'step' as const,
+        title: 'Importing STEP',
+        fileName: stepImportProgress.fileName,
+        message: stepImportProgress.message,
+        progress: stepImportProgress.progress,
+        canCancel: false,
+      }
+    : meshImportProgress
+      ? {
+          kind: 'mesh' as const,
+          title: 'Importing mesh',
+          fileName: meshImportProgress.fileName,
+          message: meshImportProgress.message,
+          progress: meshImportProgress.progress,
+          canCancel: meshImportProgress.canCancel,
+        }
+      : null
 
   return (
     <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
@@ -2104,8 +2135,8 @@ export function CadWorkbench() {
             <Modal
               centered
               opened={stepImportFlow.kind !== 'idle'}
-              onClose={stepImportFlow.kind === 'importing' || stepImportFlow.kind === 'preparing' ? () => undefined : handleStepImportCancel}
-              title={stepImportFlow.kind === 'importing' ? 'Importing STEP' : 'Import STEP'}
+              onClose={stepImportFlow.kind === 'preparing' ? () => undefined : handleStepImportCancel}
+              title="Import STEP"
               size="lg"
             >
               {stepImportFlow.kind !== 'idle' ? (
@@ -2173,21 +2204,14 @@ export function CadWorkbench() {
                       ) : null}
                     </>
                   ) : null}
-                  {stepImportFlow.kind === 'importing' ? (
-                    <Group gap="xs">
-                      <Loader color="gray" size="sm" />
-                      <Text size="sm">Importing exact solids</Text>
-                    </Group>
-                  ) : (
-                    <Group justify="flex-end">
-                      <Button variant="subtle" color="gray" onClick={handleStepImportCancel}>
-                        Cancel
-                      </Button>
-                      <Button onClick={handleStepImportAccept} disabled={stepImportFlow.kind !== 'review' || stepImportDisabled}>
-                        Import
-                      </Button>
-                    </Group>
-                  )}
+                  <Group justify="flex-end">
+                    <Button variant="subtle" color="gray" onClick={handleStepImportCancel}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleStepImportAccept} disabled={stepImportFlow.kind !== 'review' || stepImportDisabled}>
+                      Import
+                    </Button>
+                  </Group>
                 </Stack>
               ) : null}
             </Modal>
@@ -2195,7 +2219,12 @@ export function CadWorkbench() {
               centered
               opened={meshImportFlow.kind !== 'idle'}
               onClose={handleMeshImportCancel}
-              title="Import Mesh"
+              title={(
+                <Group gap="xs">
+                  <Text span fw={600}>Import Mesh</Text>
+                  <Badge size="xs" color="yellow" variant="light">Probably Broken</Badge>
+                </Group>
+              )}
             >
               {meshImportFlow.kind !== 'idle' ? (
                 <Stack gap="sm">
@@ -2257,7 +2286,7 @@ export function CadWorkbench() {
                 </Stack>
               ) : null}
             </Modal>
-            {meshImportProgress ? (
+            {activeImportProgress ? (
               <Paper
                 role="status"
                 aria-live="polite"
@@ -2267,32 +2296,33 @@ export function CadWorkbench() {
                   borderColor: 'var(--workbench-shell-border-strong)',
                   color: 'var(--workbench-notification-text)',
                 }}
-                data-mesh-import-progress
+                data-mesh-import-progress={activeImportProgress.kind === 'mesh' ? true : undefined}
+                data-step-import-progress={activeImportProgress.kind === 'step' ? true : undefined}
               >
                 <Stack gap={8}>
                   <Group justify="space-between" align="flex-start" gap="sm">
                     <Stack gap={2} className="min-w-0">
                       <Text size="xs" fw={600} truncate="end" style={{ color: 'var(--workbench-notification-info-title)' }}>
-                        Importing mesh
+                        {activeImportProgress.title}
                       </Text>
                       <Text size="xs" truncate="end" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                        {meshImportProgress.fileName}
+                        {activeImportProgress.fileName}
                       </Text>
                     </Stack>
-                    {meshImportProgress.canCancel ? (
+                    {activeImportProgress.canCancel ? (
                       <Button size="xs" variant="default" onClick={cancelMeshImportPreparation}>
                         Cancel
                       </Button>
                     ) : null}
                   </Group>
                   <Progress
-                    value={meshImportProgress.progress}
+                    value={activeImportProgress.progress}
                     size="sm"
                     color="gray"
-                    aria-label="Mesh import progress"
+                    aria-label={activeImportProgress.kind === 'step' ? 'STEP import progress' : 'Mesh import progress'}
                   />
                   <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                    {meshImportProgress.message}
+                    {activeImportProgress.message}
                   </Text>
                 </Stack>
               </Paper>

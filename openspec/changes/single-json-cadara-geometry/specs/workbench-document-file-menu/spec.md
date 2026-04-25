@@ -41,3 +41,17 @@ The workbench import surface SHALL allow users to select STL and 3MF files for m
 - **WHEN** the workbench shows the STL or 3MF import review modal
 - **THEN** a “Probably Broken” chip appears near the modal title
 - **AND** the chip is visible before commit and cancel actions
+
+### Requirement: Workbench SHALL run STEP import baking off the UI thread
+The workbench SHALL route STEP review and Cadara geometry baking through the OpenCascade worker when worker support is available, so accepted imports do not keep the STEP modal open while large STEP files are translated.
+
+#### Scenario: User imports STEP file with worker support
+- **WHEN** the user chooses Import and selects a `.step` or `.stp` file in a browser that supports module workers
+- **THEN** STEP review and Cadara geometry baking are requested through the OpenCascade worker
+- **AND** the workbench does not initialize or run OpenCascade STEP baking on the UI thread for that import
+
+#### Scenario: STEP import commit is pending
+- **WHEN** the user accepts a STEP import review
+- **THEN** the STEP review modal closes
+- **AND** the workbench shows lower-right import progress labeled “Baking Cadara geometry”
+- **AND** the workbench refreshes and fits the viewport after the translated solids are committed

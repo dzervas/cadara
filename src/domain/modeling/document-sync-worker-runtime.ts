@@ -77,10 +77,7 @@ export function createDocumentSyncWorkerMessageHandler(
         try {
           result = await writeTextToLocalFileHandle(
             bindings.get(documentId)!.handle,
-            createLocalAuthoredDocumentPayload(
-              pending.document,
-              await collectRepositoryAssetBlobs(options.repository, pending.document),
-            ),
+            createLocalAuthoredDocumentPayload(pending.document),
           )
         } catch (error: unknown) {
           publishWriteStatus({
@@ -302,22 +299,4 @@ export function createDocumentSyncWorkerMessageHandler(
       postMessage(createDocumentSyncWorkerFailure(request.requestId, error))
     }
   }
-}
-
-async function collectRepositoryAssetBlobs(
-  repository: DocumentRepository,
-  document: AuthoredModelDocument,
-) {
-  if (!isGeometryAssetDocumentRepository(repository) || document.assets.records.length === 0) {
-    return []
-  }
-
-  const assets = []
-  for (const asset of document.assets.records) {
-    const bytes = await repository.getGeometryAssetRecord(asset)
-    if (bytes) {
-      assets.push({ asset, bytes })
-    }
-  }
-  return assets
 }

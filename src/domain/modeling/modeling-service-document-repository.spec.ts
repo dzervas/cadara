@@ -27,7 +27,6 @@ import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { createBakedMeshGeometryAsset } from '@/domain/modeling/baked-mesh-geometry'
 import type { MeshTriangle } from '@/domain/modeling/mesh-parser'
-import { parseCadaraPayload } from '@/lib/cadara-package'
 
 test('src/domain/modeling/modeling-service-document-repository.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -1064,9 +1063,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       records: [asset.asset],
     }
 
-    const result = await service.importDocument({ document: { document, assets: [asset] } })
+    const result = await service.importDocument({ document })
 
-    assert(result.ok, 'Package import should accept authored documents with included geometry assets.')
+    assert(result.ok, 'JSON import should accept authored documents with embedded geometry data.')
     assert(adapter.sawAssetBytes, 'Imported asset bytes should be stored before adapter restore resolves assets.')
     assert(
       await documentRepository.getGeometryAssetRecord(asset.asset) !== null,
@@ -1077,10 +1076,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       'Adapter authored exports should preserve restored geometry asset manifests.',
     )
     const exportResult = await service.exportCurrentDocument()
-    assert(exportResult.payload instanceof Uint8Array, 'Current document export should package documents with geometry assets.')
+    assert(typeof exportResult.payload === 'string', 'Current document export should serialize documents with geometry assets as JSON.')
     assert(
-      parseCadaraPayload(exportResult.payload).assets[0]?.bytes.byteLength === asset.bytes.byteLength,
-      'Current document export should include stored geometry asset blobs in the cadara package.',
+	      (JSON.parse(exportResult.payload) as AuthoredModelDocument).assets.records[0]?.data?.kind === 'cadaraBrep',
+	      'Current document export should include translated Cadara B-rep geometry inside the cadara JSON.',
     )
 
     const snapshotAfterImport = await service.getCurrentDocumentSnapshot()
@@ -1096,7 +1095,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
   }
 
-  async function testStepFileImportStoresSourceBytesAsFeatureAsset() {
+  async function testStepFileImportStoresTranslatedBrepAsFeatureAsset() {
     const documentRepository = createMemoryDocumentRepository()
     const service = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -1115,7 +1114,12 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const feature = savedDocument?.features.find((entry) => entry.definition.kind === 'stepImport')
 
     assert(savedDocument, 'STEP file import should persist an authored document.')
-    assert(asset?.format === 'step', 'STEP file import should store the original source bytes as a STEP geometry asset.')
+	    assert(asset?.format === 'cadara-brep', 'STEP file import should store translated Cadara B-rep geometry, not original STEP source bytes.')
+	    assert(asset.data?.kind === 'cadaraBrep', 'STEP file import should persist Cadara B-rep JSON data.')
+    assert(
+      asset.data.bodies.every((body) => body.topology.faces.length > 0 && body.topology.edges.length > 0 && body.topology.vertices.length > 0),
+      'STEP file import should persist explicit Cadara topology records.',
+    )
     assert(feature?.definition.kind === 'stepImport', 'STEP file import should persist a STEP import feature.')
     assert(
       feature.definition.parameters.assetId === asset.assetId,
@@ -1126,12 +1130,12 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       'STEP import feature should default its label from the source filename.',
     )
     assert(
-      (await documentRepository.getGeometryAssetRecord(asset))?.byteLength === bytes.byteLength,
-      'STEP source bytes should be retrievable from the repository after import.',
+	      (await documentRepository.getGeometryAssetRecord(asset))?.byteLength === asset.byteLength,
+	      'Translated Cadara B-rep bytes should be retrievable from the repository after import.',
     )
   }
 
-  async function testPreparedMultiFileStepImportStoresSourceAssetSet() {
+  async function testPreparedMultiFileStepImportStoresTranslatedBrep() {
     const documentRepository = createMemoryDocumentRepository()
     const service = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -1160,16 +1164,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const feature = savedDocument?.features.find((entry) => entry.definition.kind === 'stepImport')
     assert(savedDocument, 'Prepared STEP import should persist the authored document.')
     assert(feature?.definition.kind === 'stepImport', 'Prepared STEP import should persist a STEP import feature.')
-    assert(savedDocument.assets.records.length === 2, 'Prepared STEP import should retain root and referenced STEP assets.')
+	    assert(savedDocument.assets.records.length === 1, 'Prepared STEP import should retain one translated Cadara B-rep asset.')
+	    assert(savedDocument.assets.records[0]?.data?.kind === 'cadaraBrep', 'Prepared STEP import should store translated B-rep JSON.')
     assert(
-      savedDocument.assets.records.some((asset) =>
-        asset.provenance.selectedFileName === 'part.step' && asset.provenance.stepDocumentName === 'part.step',
-      ),
-      'Referenced STEP asset provenance should preserve selected and STEP document names.',
-    )
-    assert(
-      feature.definition.parameters.sourceFiles?.length === 2,
-      'Prepared STEP feature parameters should record the retained source file set.',
+	      feature.definition.parameters.sourceFiles?.length === 1,
+	      'Prepared STEP feature parameters should reference the translated root geometry asset.',
     )
     assert(
       feature.definition.parameters.selectedSolids?.[0]?.solidKey === review.solids[0]!.solidKey,
@@ -1177,10 +1176,15 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
 
     const exportResult = await service.exportCurrentDocument()
-    assert(exportResult.payload instanceof Uint8Array, 'Current document export should package prepared STEP imports.')
+    assert(typeof exportResult.payload === 'string', 'Current document export should serialize prepared STEP imports as JSON.')
     assert(
-      parseCadaraPayload(exportResult.payload).assets.length === 2,
-      'Cadara package export should include every retained STEP source asset.',
+      !exportResult.payload.toLowerCase().includes('opencascade'),
+      'Cadara JSON export should not contain kernel-specific B-rep serialization fields.',
+    )
+    const exportedDocument = JSON.parse(exportResult.payload) as AuthoredModelDocument
+    assert(
+	      exportedDocument.assets.records.length === 1 && exportedDocument.assets.records.every((record) => record.data?.kind === 'cadaraBrep'),
+	      'Cadara JSON export should include translated STEP geometry, not retained STEP source.',
     )
 
     const reopenedRepository = createMemoryDocumentRepository()
@@ -1188,12 +1192,60 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       currentDocumentId: 'doc_workspace',
       documentRepository: reopenedRepository,
     })
-    const reopenResult = await reopenedService.importDocument({ document: parseCadaraPayload(exportResult.payload) })
-    assert(reopenResult.ok, 'Packaged multi-file STEP imports should reopen without original local files.')
+    const reopenResult = await reopenedService.importDocument({ document: exportedDocument })
+    assert(reopenResult.ok, 'JSON multi-file STEP imports should reopen without original local files.')
     assert(
-      reopenedRepository.savedDocuments.at(-1)?.assets.records.length === 2,
-      'Reopened multi-file STEP import should preserve packaged source asset records.',
+	      reopenedRepository.savedDocuments.at(-1)?.assets.records.length === 1,
+	      'Reopened multi-file STEP import should preserve translated Cadara B-rep records.',
     )
+  }
+
+  async function testPreparedStepImportSkipsPrePersistKernelValidation() {
+    const documentRepository = createMemoryDocumentRepository()
+    class StepImportValidationProbeAdapter extends MockKernelAdapter {
+      validateCalls = 0
+      restoredStepAfterPersist = false
+
+      async validateAuthoredModelDocument() {
+        this.validateCalls += 1
+        throw new Error('Prepared STEP import should not run full kernel validation before persistence.')
+      }
+
+      override async restoreAuthoredModelDocument(
+        document: AuthoredModelDocument,
+        diagnostics: readonly ModelingDiagnostic[] = [],
+        assetResolver?: GeometryAssetResolver,
+      ) {
+        if (document.features.some((feature) => feature.definition.kind === 'stepImport')) {
+          this.restoredStepAfterPersist = documentRepository.savedDocuments.length > 0
+        }
+
+        await super.restoreAuthoredModelDocument(document, diagnostics, assetResolver)
+      }
+    }
+    const adapter = new StepImportValidationProbeAdapter()
+    const service = createModelingService(adapter, {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const files = [
+      {
+        fileName: 'part.step',
+        bytes: new TextEncoder().encode('ISO-10303-21;\nEND-ISO-10303-21;\n'),
+      },
+    ]
+
+    const review = await service.prepareStepImportReview({ files })
+    const result = await service.commitPreparedStepImport({
+      files,
+      review,
+      selectedSolidKeys: [review.solids[0]!.solidKey],
+    })
+
+    assert(result.ok, 'Prepared STEP import should persist after structural asset validation.')
+    assert(adapter.validateCalls === 0, 'Prepared STEP import should not run pre-persist kernel rebuild validation.')
+    assert(adapter.restoredStepAfterPersist, 'Prepared STEP import should restore the active adapter only after repository persistence.')
+    assert(documentRepository.savedDocuments.length === 1, 'Prepared STEP import should persist the translated document once.')
   }
 
   async function testPreparedStepImportReportsMissingSiblingAsWarning() {
@@ -1331,7 +1383,8 @@ endsolid cube
 
     assert(savedDocument, 'Mesh file import should persist an authored document.')
     assert(asset, 'Mesh file import should persist a generated asset record.')
-    assert(asset?.format === 'baked-mesh', 'Mesh file import should store a generated baked geometry asset.')
+    assert(asset?.format === 'baked-mesh', 'Mesh file import should store structured baked geometry data.')
+    assert(asset.data?.kind === 'bakedMeshGeometry', 'Baked mesh geometry should be embedded as structured JSON data.')
     assert(asset.provenance.kind === 'generated', 'Baked mesh asset should be generated, not an imported source asset.')
     assert(asset.provenance.sourceStored === false, 'Baked mesh asset manifest should record that the source mesh is not stored.')
     assert(asset.provenance.reconstruction?.algorithmId, 'Baked mesh asset manifest should record reconstruction algorithm provenance.')
@@ -1349,8 +1402,8 @@ endsolid cube
       !JSON.stringify(savedDocument).includes(sourceText),
       'Saved authored document should not contain original STL source bytes.',
     )
-    const storedAsset = await documentRepository.getGeometryAssetRecord(asset)
-    assert(storedAsset?.byteLength !== sourceBytes.byteLength, 'Stored baked asset bytes should not be the original STL payload.')
+    const restoredAssetBytes = await documentRepository.getGeometryAssetRecord(asset)
+    assert(restoredAssetBytes?.byteLength !== sourceBytes.byteLength, 'Restored baked mesh bytes should be derived from JSON data, not the original STL payload.')
   }
 
   async function testPreparedMeshFileImportStoresGeneratedAssetBytes() {
@@ -1389,14 +1442,15 @@ endsolid cube
     assert(result.ok, 'Prepared mesh file import should commit an authored document mutation.')
     const savedDocument = documentRepository.savedDocuments.at(-1)
     const asset = savedDocument?.assets.records[0]
-    assert(asset?.format === 'baked-mesh', 'Prepared mesh import should persist a generated baked mesh asset record.')
+    assert(asset?.format === 'baked-mesh', 'Prepared mesh import should persist structured baked mesh data.')
+    assert(asset.data?.kind === 'bakedMeshGeometry', 'Prepared mesh import should preserve structured baked mesh JSON data.')
     assert(
       asset.ownerFeatureIds[0]?.startsWith('feature_meshImport-'),
       'Prepared mesh import should rewrite asset ownership to the committed feature id.',
     )
     assert(
       (await documentRepository.getGeometryAssetRecord(asset))?.byteLength === prepared.assetInput.bytes.byteLength,
-      'Prepared mesh import should store generated asset bytes for later restores.',
+      'Prepared mesh import should restore generated mesh bytes from embedded JSON data.',
     )
     assert(resetCount === 0, 'Prepared mesh import should not reset the repository before writing the replacement document.')
   }
@@ -1547,8 +1601,9 @@ endsolid open
   await testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict()
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
-  await testStepFileImportStoresSourceBytesAsFeatureAsset()
-  await testPreparedMultiFileStepImportStoresSourceAssetSet()
+  await testStepFileImportStoresTranslatedBrepAsFeatureAsset()
+  await testPreparedMultiFileStepImportStoresTranslatedBrep()
+  await testPreparedStepImportSkipsPrePersistKernelValidation()
   await testPreparedStepImportReportsMissingSiblingAsWarning()
   await testMeshFileImportStoresOnlyGeneratedBakedAsset()
   await testPreparedMeshFileImportStoresGeneratedAssetBytes()

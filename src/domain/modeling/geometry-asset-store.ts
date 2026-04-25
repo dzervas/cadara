@@ -6,6 +6,7 @@ import type {
 } from '@/contracts/modeling/geometry-assets'
 import {
   createGeometryAssetDiagnostic,
+  getEmbeddedGeometryAssetBytes,
   type GeometryAssetDiagnosticCode,
 } from '@/contracts/modeling/geometry-assets'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
@@ -50,7 +51,7 @@ export class MemoryGeometryAssetStore implements GeometryAssetStore {
   }
 
   async get(asset: GeometryAssetRecord): Promise<GeometryAssetStoreGetResult> {
-    const bytes = this.blobs.get(asset.hash)
+    const bytes = this.blobs.get(asset.hash) ?? getEmbeddedGeometryAssetBytes(asset)
     if (!bytes) {
       return {
         ok: false,
@@ -67,7 +68,7 @@ export class MemoryGeometryAssetStore implements GeometryAssetStore {
   }
 
   async has(asset: GeometryAssetRecord): Promise<GeometryAssetStoreHasResult> {
-    const bytes = this.blobs.get(asset.hash)
+    const bytes = this.blobs.get(asset.hash) ?? getEmbeddedGeometryAssetBytes(asset)
     if (!bytes) {
       return { ok: true, available: false }
     }
@@ -122,7 +123,7 @@ export class IndexedDbGeometryAssetStore implements GeometryAssetStore {
 
   async get(asset: GeometryAssetRecord): Promise<GeometryAssetStoreGetResult> {
     try {
-      const bytes = await this.read(asset.hash)
+      const bytes = await this.read(asset.hash) ?? getEmbeddedGeometryAssetBytes(asset)
       if (!bytes) {
         return {
           ok: false,
@@ -142,7 +143,7 @@ export class IndexedDbGeometryAssetStore implements GeometryAssetStore {
 
   async has(asset: GeometryAssetRecord): Promise<GeometryAssetStoreHasResult> {
     try {
-      const bytes = await this.read(asset.hash)
+      const bytes = await this.read(asset.hash) ?? getEmbeddedGeometryAssetBytes(asset)
       if (!bytes) {
         return { ok: true, available: false }
       }

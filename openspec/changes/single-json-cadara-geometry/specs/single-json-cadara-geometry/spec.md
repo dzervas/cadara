@@ -13,18 +13,25 @@ The `.cadara` format SHALL be a single serialized authored model document JSON o
 - **THEN** the system rejects the payload as unsupported by the current document contract
 - **AND** no backwards-compatible package extraction path is used
 
-### Requirement: Retained STEP source data SHALL be JSON document data
-The system SHALL retain STEP/STP source content needed for exact import rebuilds inside the single authored document JSON object using a kernel-contract representation that can reproduce the source bytes for OCC.
+### Requirement: STEP imports SHALL persist translated Cadara B-rep data
+The system SHALL treat STEP/STP source content as transient import input and SHALL persist the translated Cadara B-rep geometry needed for rebuild inside the single authored document JSON object.
 
 #### Scenario: Save STEP-backed document
 - **WHEN** a document contains a STEP import feature
-- **THEN** the exported `.cadara` JSON contains the retained STEP source data required by the feature
+- **THEN** the exported `.cadara` JSON contains translated Cadara B-rep data required by the feature
 - **AND** reopening the JSON document can rebuild the STEP import without selecting the original local STEP file
+- **AND** the JSON does not contain the original STEP source text or bytes
+- **AND** the persisted geometry does not contain kernel-specific serialized B-rep strings or kernel-specific field names
 
 #### Scenario: Save multi-file STEP-backed document
 - **WHEN** a document contains a multi-file STEP import with retained referenced source files
-- **THEN** the exported `.cadara` JSON contains every required STEP source payload and reference name mapping inside the JSON object
-- **AND** rebuild can resolve root and referenced STEP documents from the JSON document data
+- **THEN** the exported `.cadara` JSON contains the selected translated Cadara B-rep bodies inside the JSON object
+- **AND** rebuild does not require resolving original root or referenced STEP documents
+
+#### Scenario: Persist kernel-neutral Cadara B-rep
+- **WHEN** a STEP import is saved
+- **THEN** each persisted Cadara B-rep body is represented with explicit JSON topology and geometry records such as solids, shells, faces, loops, coedges, edges, vertices, and tessellated fallback triangles
+- **AND** the persisted authored JSON does not contain OpenCascade ASCII BRep, kernel-native binary data, base64 geometry payloads, or opaque geometry strings
 
 ### Requirement: Baked mesh geometry SHALL be structured JSON when persisted
 Any persisted baked mesh geometry SHALL be represented as structured, format-neutral authored JSON data rather than as filetype-specific source bytes, package entries, or separately stored geometry blob bytes.

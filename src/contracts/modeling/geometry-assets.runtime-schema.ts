@@ -37,6 +37,162 @@ export const geometryAssetHashSchema = z
   .regex(/^sha256:[a-f0-9]{64}$/, 'Geometry asset hash must be a sha256:<hex> content hash.')
   .transform((value) => value as GeometryAssetHash)
 
+const point3Schema = z.tuple([z.number(), z.number(), z.number()])
+const triangleIndexSchema = z.tuple([
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+])
+const indexPairSchema = z.tuple([
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+])
+
+const cadaraBrepTopologySchema = z.object({
+  vertices: z.array(z.object({
+    vertexKey: stringSchema.min(1),
+    point: point3Schema,
+  }).strict()).min(4),
+  edges: z.array(z.object({
+    edgeKey: stringSchema.min(1),
+    vertices: indexPairSchema,
+    curve: z.object({
+      kind: z.literal('lineSegment'),
+    }).strict(),
+  }).strict()).min(6),
+  coedges: z.array(z.object({
+    coedgeKey: stringSchema.min(1),
+    edgeIndex: z.number().int().nonnegative(),
+    reversed: z.boolean(),
+  }).strict()).min(1),
+  loops: z.array(z.object({
+    loopKey: stringSchema.min(1),
+    coedgeIndices: z.array(z.number().int().nonnegative()).min(3),
+  }).strict()).min(1),
+  faces: z.array(z.object({
+    faceKey: stringSchema.min(1),
+    outerLoopIndex: z.number().int().nonnegative(),
+    surface: z.object({
+      kind: z.literal('plane'),
+      origin: point3Schema,
+      normal: point3Schema,
+    }).strict(),
+    triangles: z.array(triangleIndexSchema).min(1),
+  }).strict()).min(4),
+  shells: z.array(z.object({
+    shellKey: stringSchema.min(1),
+    faceIndices: z.array(z.number().int().nonnegative()).min(4),
+    closed: z.literal(true),
+  }).strict()).min(1),
+  solids: z.array(z.object({
+    solidKey: stringSchema.min(1),
+    shellIndices: z.array(z.number().int().nonnegative()).min(1),
+  }).strict()).min(1),
+}).strict().superRefine((topology, ctx) => {
+  for (const [index, edge] of topology.edges.entries()) {
+    for (const vertexIndex of edge.vertices) {
+      if (vertexIndex >= topology.vertices.length) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Cadara B-rep edge references a missing vertex.',
+          path: ['edges', index, 'vertices'],
+        })
+      }
+    }
+  }
+
+  for (const [index, coedge] of topology.coedges.entries()) {
+    if (coedge.edgeIndex >= topology.edges.length) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Cadara B-rep coedge references a missing edge.',
+        path: ['coedges', index, 'edgeIndex'],
+      })
+    }
+  }
+
+  for (const [index, loop] of topology.loops.entries()) {
+    for (const coedgeIndex of loop.coedgeIndices) {
+      if (coedgeIndex >= topology.coedges.length) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Cadara B-rep loop references a missing coedge.',
+          path: ['loops', index, 'coedgeIndices'],
+        })
+      }
+    }
+  }
+
+  for (const [index, face] of topology.faces.entries()) {
+    if (face.outerLoopIndex >= topology.loops.length) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Cadara B-rep face references a missing loop.',
+        path: ['faces', index, 'outerLoopIndex'],
+      })
+    }
+    for (const triangle of face.triangles) {
+      for (const vertexIndex of triangle) {
+        if (vertexIndex >= topology.vertices.length) {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Cadara B-rep face triangle references a missing vertex.',
+            path: ['faces', index, 'triangles'],
+          })
+        }
+      }
+    }
+  }
+
+  for (const [index, shell] of topology.shells.entries()) {
+    for (const faceIndex of shell.faceIndices) {
+      if (faceIndex >= topology.faces.length) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Cadara B-rep shell references a missing face.',
+          path: ['shells', index, 'faceIndices'],
+        })
+      }
+    }
+  }
+
+  for (const [index, solid] of topology.solids.entries()) {
+    for (const shellIndex of solid.shellIndices) {
+      if (shellIndex >= topology.shells.length) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Cadara B-rep solid references a missing shell.',
+          path: ['solids', index, 'shellIndices'],
+        })
+      }
+    }
+  }
+})
+
+const geometryAssetDataSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('cadaraBrep'),
+    schemaVersion: z.literal('cadara-brep/v1alpha1'),
+    source: z.object({
+      importedFormat: z.literal('step'),
+      sourceStored: z.literal(false),
+      rootDocumentName: stringSchema.min(1).optional(),
+    }).strict(),
+    bodies: z.array(z.object({
+      bodyKey: stringSchema.min(1),
+      label: stringSchema.min(1),
+      solidKey: stringSchema.min(1).optional(),
+      topology: cadaraBrepTopologySchema,
+    }).strict()).min(1),
+  }).strict(),
+  z.object({
+    kind: z.literal('bakedMeshGeometry'),
+    schemaVersion: z.literal('baked-mesh-geometry/v1alpha1'),
+    vertices: z.array(point3Schema),
+    indices: z.array(triangleIndexSchema),
+  }).strict(),
+])
+
 export const geometryAssetRecordSchema = z.object({
   schemaVersion: geometryAssetSchemaVersionSchema,
   assetId: geometryAssetIdSchema,
@@ -48,6 +204,7 @@ export const geometryAssetRecordSchema = z.object({
     z.literal('3mf'),
     z.literal('baked-occ'),
     z.literal('baked-mesh'),
+    z.literal('cadara-brep'),
   ]),
   mediaType: stringSchema.min(1),
   provenance: z.object({
@@ -61,8 +218,33 @@ export const geometryAssetRecordSchema = z.object({
     generator: stringSchema.min(1).optional(),
     reconstruction: createMeshReconstructionProvenanceSchema(geometryAssetHashSchema).optional(),
   }).strict(),
+  data: geometryAssetDataSchema.optional(),
   ownerFeatureIds: z.array(featureIdSchema),
-}).strict().transform((value) => value as GeometryAssetRecord)
+}).strict().superRefine((record, ctx) => {
+  if (record.format === 'cadara-brep' && record.data?.kind !== 'cadaraBrep') {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'STEP-imported geometry must be stored as translated Cadara B-rep JSON data.',
+      path: ['data'],
+    })
+  }
+
+  if (record.format === 'baked-mesh' && record.data?.kind !== 'bakedMeshGeometry') {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Baked mesh geometry must be stored as structured JSON data.',
+      path: ['data'],
+    })
+  }
+
+  if (record.format !== 'cadara-brep' && record.format !== 'baked-mesh') {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Only translated Cadara B-rep geometry and structured baked mesh geometry may be retained in authored documents.',
+      path: ['format'],
+    })
+  }
+}).transform((value) => value as GeometryAssetRecord)
 
 export const geometryAssetManifestSchema = z.object({
   schemaVersion: geometryAssetManifestSchemaVersionSchema,
@@ -117,4 +299,5 @@ function sameAssetContentMetadata(left: GeometryAssetRecord, right: GeometryAsse
     && (left.provenance.sourceStored ?? null) === (right.provenance.sourceStored ?? null)
     && (left.provenance.generator ?? null) === (right.provenance.generator ?? null)
     && JSON.stringify(left.provenance.reconstruction ?? null) === JSON.stringify(right.provenance.reconstruction ?? null)
+    && JSON.stringify(left.data ?? null) === JSON.stringify(right.data ?? null)
 }

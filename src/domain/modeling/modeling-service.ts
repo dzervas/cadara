@@ -95,8 +95,13 @@ import type {
   AdvancedSolidFeatureParameters,
   UpToOffsetDirection,
 } from '@/contracts/modeling/schema'
-import type { GeometryAssetBlobInput, GeometryAssetDiagnosticDetail, GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
-import { normalizeGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
+import type { CadaraBrepGeometryAssetData, GeometryAssetBlobInput, GeometryAssetDiagnosticDetail, GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
+import {
+  createCadaraFacetedBrepTopologyFromTriangles,
+  createGeometryAssetDiagnostic,
+  encodeGeometryAssetData,
+  normalizeGeometryAssetManifest,
+} from '@/contracts/modeling/geometry-assets'
 import {
   documentExportRequestSchema,
   documentExportResultSchema,
@@ -207,7 +212,6 @@ import {
   createLocalAuthoredDocumentPayload,
   type LocalFileSystemFileHandle,
 } from '@/lib/local-file-system-access'
-import { CADARA_PACKAGE_MIME_TYPE, isCadaraPackagePayload } from '@/lib/cadara-package'
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 import {
   createBakedMeshGeometryAsset,
@@ -4025,24 +4029,6 @@ function buildDocumentRequest(documentId: DocumentSnapshot['documentId']): GetDo
   }
 }
 
-async function collectRepositoryAssetBlobs(
-  repository: DocumentRepository | null,
-  document: AuthoredModelDocument,
-) {
-  if (!isGeometryAssetDocumentRepository(repository) || document.assets.records.length === 0) {
-    return [] as GeometryAssetBlobInput[]
-  }
-
-  const assets: GeometryAssetBlobInput[] = []
-  for (const asset of document.assets.records) {
-    const bytes = await repository.getGeometryAssetRecord(asset)
-    if (bytes) {
-      assets.push({ asset, bytes })
-    }
-  }
-  return assets
-}
-
 function assertKernelContractVersion(contractVersion: GetDocumentSnapshotResponse['snapshot']['contractVersion']) {
   if (contractVersion !== CONTRACT_VERSION) {
     throw new Error('Kernel contract version does not match the active modeling service.')
@@ -5186,6 +5172,83 @@ export function createModelingService(
     }
   }
 
+  async function validateEmbeddedGeometryAssetsForPersistence(
+    document: AuthoredModelDocument,
+    assets: readonly GeometryAssetBlobInput[],
+  ) {
+    const diagnostics: ModelingDiagnostic[] = []
+    const providedAssetsById = new Map(assets.map((asset) => [asset.asset.assetId, asset]))
+
+    for (const asset of document.assets.records) {
+      if (asset.format !== 'cadara-brep' && asset.format !== 'baked-mesh') {
+        continue
+      }
+
+      if (!asset.data) {
+        diagnostics.push(createGeometryAssetDiagnostic(
+          'geometry-asset-corrupt',
+          asset,
+          `Geometry asset ${asset.assetId} is missing embedded authored geometry data.`,
+        ))
+        continue
+      }
+
+      const embeddedBytes = encodeGeometryAssetData(asset.data)
+      const embeddedHash = await hashGeometryAssetBytes(embeddedBytes)
+      if (embeddedBytes.byteLength !== asset.byteLength || embeddedHash !== asset.hash) {
+        diagnostics.push(createGeometryAssetDiagnostic(
+          'geometry-asset-corrupt',
+          asset,
+          `Geometry asset ${asset.assetId} embedded data does not match its recorded hash or byte length.`,
+        ))
+      }
+
+      const providedAsset = providedAssetsById.get(asset.assetId)
+      if (providedAsset) {
+        const providedHash = await hashGeometryAssetBytes(providedAsset.bytes)
+        if (
+          providedAsset.asset.hash !== asset.hash
+          || providedAsset.asset.byteLength !== asset.byteLength
+          || providedAsset.bytes.byteLength !== asset.byteLength
+          || providedHash !== asset.hash
+        ) {
+          diagnostics.push(createGeometryAssetDiagnostic(
+            'geometry-asset-corrupt',
+            asset,
+            `Geometry asset ${asset.assetId} prepared bytes do not match its embedded authored geometry data.`,
+          ))
+        }
+      }
+    }
+
+    const recordsById = new Map(document.assets.records.map((asset) => [asset.assetId, asset]))
+    for (const feature of document.features) {
+      if (feature.definition.kind !== 'stepImport') {
+        continue
+      }
+
+      const asset = recordsById.get(feature.definition.parameters.assetId)
+      const solidKeys = new Set(asset?.data?.kind === 'cadaraBrep'
+        ? asset.data.bodies.flatMap((body) => body.solidKey ? [body.solidKey] : [])
+        : [])
+      for (const selected of feature.definition.parameters.selectedSolids ?? []) {
+        if (!solidKeys.has(selected.solidKey)) {
+          diagnostics.push(createStepImportDiagnostic(
+            'step-import-stale-selected-solid',
+            `STEP selected solid ${selected.solidKey} is not present in the translated Cadara B-rep asset.`,
+            {
+              assetId: feature.definition.parameters.assetId,
+              featureId: feature.featureId,
+              solidKey: selected.solidKey,
+            },
+          ))
+        }
+      }
+    }
+
+    return diagnostics
+  }
+
   function createNextAuthoredRevisionId(revisionId: RevisionId): RevisionId {
     const match = /^rev_(\d+)$/.exec(revisionId)
     if (!match) {
@@ -5225,14 +5288,108 @@ export function createModelingService(
     return `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}` as GeometryAssetId
   }
 
-  function createMultiFileStepImportAssetId(hash: GeometryAssetHash, index: number): GeometryAssetId {
-    return `asset_step_import_${hash.replace(/^sha256:/, '').slice(0, 16)}_${index + 1}` as GeometryAssetId
-  }
-
   function createStepImportLabel(fileName: string) {
     const trimmed = fileName.trim()
     const baseName = trimmed.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
     return baseName && baseName.length > 0 ? baseName : 'STEP Import'
+  }
+
+  function createFallbackCadaraBrepData(fileName: string): CadaraBrepGeometryAssetData {
+    return {
+      kind: 'cadaraBrep',
+      schemaVersion: 'cadara-brep/v1alpha1',
+      source: {
+        importedFormat: 'step',
+        sourceStored: false,
+        rootDocumentName: fileName,
+      },
+      bodies: [
+        {
+          bodyKey: 'body_1',
+          label: createStepImportLabel(fileName),
+          solidKey: createStepSolidKey({ documentName: fileName, solidOrdinal: 1 }),
+          topology: createCadaraFacetedBrepTopologyFromTriangles(createFallbackCubeTriangles(), 'fallback_step_import'),
+        },
+      ],
+    }
+  }
+
+  function createFallbackCubeTriangles() {
+    const points = [
+      [-0.5, -0.5, -0.5],
+      [0.5, -0.5, -0.5],
+      [0.5, 0.5, -0.5],
+      [-0.5, 0.5, -0.5],
+      [-0.5, -0.5, 0.5],
+      [0.5, -0.5, 0.5],
+      [0.5, 0.5, 0.5],
+      [-0.5, 0.5, 0.5],
+    ] as const
+    return [
+      [points[0], points[2], points[1]],
+      [points[0], points[3], points[2]],
+      [points[4], points[5], points[6]],
+      [points[4], points[6], points[7]],
+      [points[0], points[1], points[5]],
+      [points[0], points[5], points[4]],
+      [points[1], points[2], points[6]],
+      [points[1], points[6], points[5]],
+      [points[2], points[3], points[7]],
+      [points[2], points[7], points[6]],
+      [points[3], points[0], points[4]],
+      [points[3], points[4], points[7]],
+    ] as const
+  }
+
+  async function createStepImportAssetInput(input: {
+    files: readonly StepImportReviewFileInput[]
+    ownerFeatureId: FeatureId
+    sourceFileName: string
+    rootDocumentName: string
+    review?: StepImportReviewResult
+    selectedSolidKeys?: readonly string[]
+  }): Promise<GeometryAssetBlobInput | { ok: false; diagnostics: readonly ModelingDiagnostic[] }> {
+    const baked = adapter.bakeStepImportGeometry
+      ? await adapter.bakeStepImportGeometry({
+          files: input.files,
+          review: input.review,
+          selectedSolidKeys: input.selectedSolidKeys,
+        })
+      : { ok: true as const, data: createFallbackCadaraBrepData(input.rootDocumentName) }
+    if (!baked.ok) {
+      return { ok: false, diagnostics: baked.diagnostics }
+    }
+
+    const bytes = encodeGeometryAssetData(baked.data)
+    const hash = await hashGeometryAssetBytes(bytes)
+    const sourceHash = await hashGeometryAssetBytes(input.files[0]?.bytes ?? bytes)
+    const asset: GeometryAssetRecord = {
+      schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
+      assetId: createStepImportAssetId(hash),
+      hash,
+      byteLength: bytes.byteLength,
+      format: 'cadara-brep',
+      mediaType: 'application/vnd.cadara.brep+json',
+      provenance: {
+        kind: 'imported',
+        sourceName: input.sourceFileName,
+        selectedFileName: input.sourceFileName,
+        stepDocumentName: input.rootDocumentName,
+        sourceHash,
+        sourceFormat: 'step',
+        sourceStored: false,
+      },
+      data: baked.data,
+      ownerFeatureIds: [input.ownerFeatureId],
+    }
+
+    return { asset, bytes }
+  }
+
+  function isStepImportAssetFailure(
+    result: GeometryAssetBlobInput | { ok: false; diagnostics: readonly ModelingDiagnostic[] },
+  ): result is { ok: false; diagnostics: readonly ModelingDiagnostic[] } {
+    return 'ok' in result
   }
 
   function createFallbackStepImportReview(files: readonly StepImportReviewFileInput[]): StepImportReviewResult {
@@ -5342,28 +5499,19 @@ export function createModelingService(
       }
     }
 
-    const sourceDocument = await exportAuthoredDocumentForRepository()
-    const bytes = input.bytes.slice()
-    const hash = await hashGeometryAssetBytes(bytes)
-    const featureId = allocateStepImportFeatureId(sourceDocument)
-    const label = createStepImportLabel(input.fileName)
-    const asset: GeometryAssetRecord = {
-      schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
-      assetId: createStepImportAssetId(hash),
-      hash,
-      byteLength: bytes.byteLength,
-      format: 'step',
-      mediaType: 'model/step',
-      provenance: {
-        kind: 'imported',
-        sourceName: input.fileName,
-        selectedFileName: input.fileName,
-        stepDocumentName: input.fileName,
-        sourceHash: hash,
-        sourceFormat: 'step',
-      },
-      ownerFeatureIds: [featureId],
-    }
+	    const sourceDocument = await exportAuthoredDocumentForRepository()
+	    const featureId = allocateStepImportFeatureId(sourceDocument)
+	    const label = createStepImportLabel(input.fileName)
+	    const assetInput = await createStepImportAssetInput({
+	      files: [{ fileName: input.fileName, bytes: input.bytes.slice() }],
+	      ownerFeatureId: featureId,
+	      sourceFileName: input.fileName,
+	      rootDocumentName: input.fileName,
+	    })
+	    if (isStepImportAssetFailure(assetInput)) {
+	      return { ok: false as const, diagnostics: [...assetInput.diagnostics] }
+	    }
+	    const { asset, bytes } = assetInput
 
     const document: AuthoredModelDocument = {
       ...sourceDocument,
@@ -5463,10 +5611,7 @@ export function createModelingService(
     const featureId = allocateStepImportFeatureId(sourceDocument)
     const label = createStepImportLabel(input.review.rootFileName)
     const filesByName = new Map(input.files.map((file) => [file.fileName, file]))
-    const assets: GeometryAssetBlobInput[] = []
-    const sourceFiles = []
-
-    for (const [index, source] of input.review.resolvedSources.entries()) {
+    for (const source of input.review.resolvedSources) {
       const file = filesByName.get(source.fileName)
       if (!file) {
         return {
@@ -5480,36 +5625,9 @@ export function createModelingService(
           ],
         }
       }
-
-      const bytes = file.bytes.slice()
-      const hash = await hashGeometryAssetBytes(bytes)
-      const asset: GeometryAssetRecord = {
-        schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
-        assetId: createMultiFileStepImportAssetId(hash, index),
-        hash,
-        byteLength: bytes.byteLength,
-        format: 'step',
-        mediaType: 'model/step',
-        provenance: {
-          kind: 'imported',
-          sourceName: source.fileName,
-          selectedFileName: source.fileName,
-          stepDocumentName: source.documentName,
-          sourceHash: hash,
-          sourceFormat: 'step',
-        },
-        ownerFeatureIds: [featureId],
-      }
-      assets.push({ asset, bytes })
-      sourceFiles.push({
-        role: source.role,
-        assetId: asset.assetId,
-        selectedFileName: source.fileName,
-        documentName: source.documentName,
-      })
     }
 
-    const rootSource = sourceFiles.find((source) => source.role === 'root')
+    const rootSource = input.review.resolvedSources.find((source) => source.role === 'root')
     if (!rootSource) {
       return {
         ok: false as const,
@@ -5521,19 +5639,24 @@ export function createModelingService(
         ],
       }
     }
-
-    const rootAsset = assets.find((entry) => entry.asset.assetId === rootSource.assetId)?.asset
-    if (!rootAsset) {
-      return {
-        ok: false as const,
-        diagnostics: [
-          createStepImportDiagnostic(
-            'step-import-missing-reference',
-            'Import failed. STEP root source asset was not prepared.',
-          ),
-        ],
-      }
+    const assetInput = await createStepImportAssetInput({
+      files: input.files,
+      ownerFeatureId: featureId,
+      sourceFileName: rootSource.fileName,
+      rootDocumentName: rootSource.documentName,
+      review: input.review,
+      selectedSolidKeys: input.selectedSolidKeys,
+    })
+    if (isStepImportAssetFailure(assetInput)) {
+      return { ok: false as const, diagnostics: [...assetInput.diagnostics] }
     }
+    const { asset: rootAsset, bytes } = assetInput
+    const sourceFiles = [{
+	      role: 'root' as const,
+	      assetId: rootAsset.assetId,
+	      selectedFileName: rootSource.fileName,
+	      documentName: rootSource.documentName,
+	    }]
 
     const document: AuthoredModelDocument = {
       ...sourceDocument,
@@ -5547,8 +5670,8 @@ export function createModelingService(
             kind: 'stepImport',
             featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
             parameters: {
-              assetId: rootAsset.assetId,
-              sourceFiles,
+	              assetId: rootAsset.assetId,
+	              sourceFiles,
               selectedSolids: selectedSolids.map((solid) => ({
                 solidKey: solid.solidKey,
                 label: solid.label,
@@ -5579,17 +5702,17 @@ export function createModelingService(
         { kind: 'feature', featureId },
       ],
       cursor: { kind: 'feature', featureId },
-      assets: normalizeGeometryAssetManifest({
-        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
-        records: [...sourceDocument.assets.records, ...assets.map((entry) => entry.asset)],
-      }),
+	      assets: normalizeGeometryAssetManifest({
+	        schemaVersion: GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION,
+	        records: [...sourceDocument.assets.records, rootAsset],
+	      }),
     }
 
     return {
-      ok: true as const,
-      document,
-      assets,
-    }
+	      ok: true as const,
+	      document,
+	      assets: [{ asset: rootAsset, bytes }],
+	    }
   }
 
   async function createMeshImportAuthoredDocument(input: ModelingImportMeshFileInput) {
@@ -5805,6 +5928,7 @@ export function createModelingService(
     const provenance = preparedAsset.provenance
     if (
       preparedAsset.format !== 'baked-mesh'
+      || preparedAsset.data?.kind !== 'bakedMeshGeometry'
       || provenance.kind !== 'generated'
       || provenance.sourceStored !== false
       || (provenance.sourceFormat !== 'stl' && provenance.sourceFormat !== '3mf')
@@ -5925,7 +6049,7 @@ export function createModelingService(
   async function replaceCurrentAuthoredDocument(
     document: AuthoredModelDocument,
     assets: readonly GeometryAssetBlobInput[] = [],
-    options: { fetchSnapshot?: boolean; validateBeforePersist?: boolean } = {},
+    options: { fetchSnapshot?: boolean; validateBeforePersist?: boolean; validateEmbeddedAssetsBeforePersist?: boolean } = {},
   ): Promise<ModelingDocumentFileMutationResult> {
     if (!adapter.restoreAuthoredModelDocument) {
       return {
@@ -5976,6 +6100,16 @@ export function createModelingService(
               error instanceof Error ? error.message : 'Imported document could not be restored.',
             ),
           ],
+        }
+      }
+    }
+
+    if (options.validateEmbeddedAssetsBeforePersist) {
+      const diagnostics = await validateEmbeddedGeometryAssetsForPersistence(activeDocument, assets)
+      if (diagnostics.length > 0) {
+        return {
+          ok: false,
+          diagnostics,
         }
       }
     }
@@ -6531,15 +6665,12 @@ export function createModelingService(
     async importDocument(input) {
       await restorePromise
       await repositoryChangePromise
-      const imported = isCadaraPackagePayload(input.document)
-        ? input.document
-        : { document: input.document, assets: input.assets ?? [] }
-      const normalized = normalizeImportedDocument(imported.document)
+      const normalized = normalizeImportedDocument(input.document)
       if (!normalized.ok) {
         return normalized
       }
 
-      return replaceCurrentAuthoredDocument(normalized.document, imported.assets)
+      return replaceCurrentAuthoredDocument(normalized.document, input.assets ?? [])
     },
     async prepareStepImportReview(input) {
       await restorePromise
@@ -6560,7 +6691,7 @@ export function createModelingService(
 
       return replaceCurrentAuthoredDocument(imported.document, imported.assets, {
         fetchSnapshot: false,
-        validateBeforePersist: true,
+        validateEmbeddedAssetsBeforePersist: true,
       })
     },
     async importStepFile(input) {
@@ -6573,7 +6704,7 @@ export function createModelingService(
 
       return replaceCurrentAuthoredDocument(imported.document, imported.assets, {
         fetchSnapshot: false,
-        validateBeforePersist: true,
+        validateEmbeddedAssetsBeforePersist: true,
       })
     },
     async importMeshFile(input) {
@@ -6668,15 +6799,14 @@ export function createModelingService(
       await restorePromise
       await repositoryChangePromise
       const document = await exportAuthoredDocumentForRepository()
-      const assets = await collectRepositoryAssetBlobs(documentRepository, document)
 
       return {
         ok: true,
         format: 'cadara',
         filename: 'document.cadara',
         extension: getDocumentExportExtension('cadara'),
-        mimeType: assets.length > 0 ? CADARA_PACKAGE_MIME_TYPE : getDocumentExportMimeType('cadara'),
-        payload: createLocalAuthoredDocumentPayload(document, assets),
+        mimeType: getDocumentExportMimeType('cadara'),
+        payload: createLocalAuthoredDocumentPayload(document),
         diagnostics: [],
       }
     },

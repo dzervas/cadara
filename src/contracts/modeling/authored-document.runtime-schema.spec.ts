@@ -8,12 +8,14 @@ import { CONTRACT_VERSION, MESH_IMPORT_FEATURE_SCHEMA_VERSION, STEP_IMPORT_FEATU
 import type { BodyId } from '@/contracts/shared/ids'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import { createBakedMeshGeometryAsset } from '@/domain/modeling/baked-mesh-geometry'
 import {
   DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
   MESH_RECONSTRUCTION_ALGORITHM_ID,
   MESH_RECONSTRUCTION_ALGORITHM_VERSION,
   type MeshReconstructionProvenance,
 } from '@/contracts/modeling/mesh-reconstruction'
+import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
 import { createStepImportDiagnostic } from '@/contracts/modeling/step-import'
 
 test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async () => {
@@ -206,15 +208,25 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
   })
   assert(!invalidStepImportScale.ok, 'Authored validation should reject non-positive STEP import placement scale.')
 
-  const bakedMeshAsset = await createDeterministicGeometryAsset({
-    assetId: 'asset_baked_mesh_contract',
-    ownerFeatureIds: ['feature_meshImport-1'],
+  const bakedMeshAsset = await createBakedMeshGeometryAsset({
+    triangles: [
+      [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+      [[0, 0, 0], [0, 0, 1], [1, 0, 0]],
+      [[0, 0, 0], [0, 1, 0], [0, 0, 1]],
+      [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+    ],
+    sourceFileName: 'bracket.stl',
+    sourceFormat: 'stl',
+    sourceHash: `sha256:${'a'.repeat(64)}` as GeometryAssetHash,
+    ownerFeatureId: 'feature_meshImport-1',
+    acceptFacetedFallback: true,
   })
+  assert(bakedMeshAsset.ok, 'Baked mesh contract fixture should bake successfully.')
   const meshReconstruction: MeshReconstructionProvenance = {
     algorithmId: MESH_RECONSTRUCTION_ALGORITHM_ID,
     algorithmVersion: MESH_RECONSTRUCTION_ALGORITHM_VERSION,
     settings: DEFAULT_MESH_RECONSTRUCTION_SETTINGS,
-    sourceHash: bakedMeshAsset.asset.hash,
+    sourceHash: bakedMeshAsset.assetInput.asset.hash,
     resultClassification: 'facetedFallback',
     qualityMetrics: {
       triangleCount: 4,
@@ -232,19 +244,21 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
       cylindricalRegions: 0,
     },
   }
-  bakedMeshAsset.asset.format = 'baked-mesh'
-  bakedMeshAsset.asset.mediaType = 'application/vnd.cadara.baked-mesh+json'
-  bakedMeshAsset.asset.provenance = {
+  const bakedMeshAssetRecord = {
+    ...bakedMeshAsset.assetInput.asset,
+    assetId: 'asset_baked_mesh_contract',
+    provenance: {
     kind: 'generated',
     sourceName: 'bracket.stl',
-    sourceHash: bakedMeshAsset.asset.hash,
+    sourceHash: bakedMeshAsset.assetInput.asset.hash,
     sourceFormat: 'stl',
     sourceStored: false,
     generator: `${MESH_RECONSTRUCTION_ALGORITHM_ID}/v${MESH_RECONSTRUCTION_ALGORITHM_VERSION}`,
     reconstruction: meshReconstruction,
-  }
+    },
+  } satisfies typeof bakedMeshAsset.assetInput.asset
   const meshImportDocument = structuredClone(authoredDocument)
-  meshImportDocument.assets.records = [bakedMeshAsset.asset]
+  meshImportDocument.assets.records = [bakedMeshAssetRecord]
   meshImportDocument.features = [
     ...meshImportDocument.features,
     {
@@ -254,11 +268,11 @@ test('src/contracts/modeling/authored-document.runtime-schema.spec.ts', async ()
         kind: 'meshImport',
         featureTypeVersion: MESH_IMPORT_FEATURE_SCHEMA_VERSION,
         parameters: {
-          assetId: bakedMeshAsset.asset.assetId,
+          assetId: bakedMeshAssetRecord.assetId,
           source: {
             originalFileName: 'bracket.stl',
             sourceFormat: 'stl',
-            sourceHash: bakedMeshAsset.asset.hash,
+            sourceHash: bakedMeshAsset.assetInput.asset.hash,
             sourceStored: false,
           },
           resolvedSettings: {
