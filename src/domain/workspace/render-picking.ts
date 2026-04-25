@@ -89,6 +89,19 @@ export const GEOMETRY_HIGHLIGHT_COLORS = {
   selectedEmissive: workbenchGeometryHighlightColors.selectedEmissive.hex,
 } as const
 
+export function applyWireMaterialDepthPolicy<TMaterial extends THREE.Material | THREE.Material[]>(
+  material: TMaterial,
+): TMaterial {
+  const materials = Array.isArray(material) ? material : [material]
+
+  materials.forEach((entry) => {
+    entry.depthTest = true
+    entry.depthWrite = false
+  })
+
+  return material
+}
+
 export function createMeshBoundaryLineSegmentsGeometry(geometry: RenderMeshGeometry) {
   const boundaryEdges = collectMeshBoundaryEdges(geometry)
   const positions = new Float32Array(boundaryEdges.length * 2 * 3)
@@ -745,11 +758,11 @@ export function createRenderableLineMaterial(
   origin: ViewportRenderableOrigin,
   displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
-  return new THREE.LineBasicMaterial({
+  return applyWireMaterialDepthPolicy(new THREE.LineBasicMaterial({
     color: displayOptions.color ?? getRenderableBaseColor(renderable.binding.semanticClass),
     transparent: true,
     opacity: getRenderableLineOpacity(renderable.binding.semanticClass, origin, false, false),
-  })
+  }))
 }
 
 export function createRenderableMarkerMaterial(

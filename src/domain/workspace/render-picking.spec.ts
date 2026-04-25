@@ -14,6 +14,7 @@ import {
   createMeshBoundaryLineSegmentsGeometry,
   createInvisiblePickMaterial,
   createMarkerPickProxy,
+  createRenderableLineMaterial,
   createRenderableMeshMaterial,
   createProjectedPickCandidate,
   getVisibleMarkerRadius,
@@ -589,6 +590,13 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
     assertEqual(material.color.getHex(), 0x33ffaa, 'Inactive styled sketch lines should restore authored color after selection.')
 
     sketchLine.geometry.dispose()
+    material.dispose()
+  }
+
+  {
+    const material = createRenderableLineMaterial(edgeRenderable, 'document')
+    assertEqual(material.depthTest, true, 'Committed edges should still depth-test against nearer faces.')
+    assertEqual(material.depthWrite, false, 'Committed edges must not write depth and destabilize coplanar wires.')
     material.dispose()
   }
 

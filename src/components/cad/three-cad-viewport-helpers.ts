@@ -5,8 +5,13 @@ import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,
 } from '@/domain/editor/schema'
-import { getBoundTarget } from '@/domain/workspace/render-picking'
+import {
+  applyWireMaterialDepthPolicy,
+  getBoundTarget,
+} from '@/domain/workspace/render-picking'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+
+export const WORKSPACE_SCAFFOLD_RENDER_ORDER = 0
 
 interface MutableRef<T> {
   current: T
@@ -77,6 +82,15 @@ export function resizeViewCubeRenderer(input: {
   input.renderer.setSize(cubeSize, cubeSize, true)
 
   return cubeSize
+}
+
+export function configureWorkspaceScaffoldWireObject<TObject extends THREE.Object3D & {
+  material: THREE.Material | THREE.Material[]
+}>(object: TObject): TObject {
+  object.renderOrder = WORKSPACE_SCAFFOLD_RENDER_ORDER
+  applyWireMaterialDepthPolicy(object.material)
+
+  return object
 }
 
 export function createViewportBvhSceneKey(

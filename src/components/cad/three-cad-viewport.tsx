@@ -43,6 +43,7 @@ import type {
 import {
   MARKER_SPHERE_GEOMETRY,
   GEOMETRY_HIGHLIGHT_COLORS,
+  applyWireMaterialDepthPolicy,
   bindFaceHoverPerimeterObject,
   bindRenderableObject,
   collectBindings,
@@ -111,6 +112,7 @@ import {
   cancelCoalescedSketchGeometryDragMove,
   createRenderIdleTracker,
   createViewportBvhSceneKey,
+  configureWorkspaceScaffoldWireObject,
   projectSceneTargetCentroidToViewport,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
@@ -1793,9 +1795,11 @@ function WorkspaceSceneScaffold() {
   const grid = useMemo(() => {
     const helper = new THREE.GridHelper(100, 100, 0x5a7594, 0x34465a)
     helper.rotation.x = Math.PI / 2
-    return helper
+    return configureWorkspaceScaffoldWireObject(helper)
   }, [])
-  const axes = useMemo(() => new THREE.AxesHelper(7), [])
+  const axes = useMemo(() => {
+    return configureWorkspaceScaffoldWireObject(new THREE.AxesHelper(7))
+  }, [])
 
   useEffect(() => () => {
     grid.geometry.dispose()
@@ -1951,13 +1955,11 @@ function DocumentMeshNode({
       return null
     }
 
-    return new THREE.LineBasicMaterial({
+    return applyWireMaterialDepthPolicy(new THREE.LineBasicMaterial({
       color: GEOMETRY_HIGHLIGHT_COLORS.hover,
       transparent: true,
       opacity: 0,
-      depthTest: true,
-      depthWrite: false,
-    })
+    }))
   }, [facePerimeterGeometry])
 
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -2028,16 +2030,12 @@ function DocumentPolylineNode({
     const displayPoints = geometryData.isClosed && points.length > 0 ? [...points, points[0].clone()] : points
     const nextGeometry = new THREE.BufferGeometry().setFromPoints(displayPoints)
     const nextMaterial = isSeededDatumPlaneRenderable(renderable)
-      ? new THREE.LineBasicMaterial({
+      ? applyWireMaterialDepthPolicy(new THREE.LineBasicMaterial({
           color: 0x7f8a98,
           transparent: true,
           opacity: 0.4,
-          depthTest: true,
-          depthWrite: false,
-        })
+        }))
       : createRenderableLineMaterial(renderable, origin, getDocumentRenderableMaterialOptions(entry, palette, diagnostic))
-    nextMaterial.depthTest = true
-    nextMaterial.depthWrite = false
     const nextLine = new THREE.Line(nextGeometry, nextMaterial)
     nextLine.renderOrder = isSeededDatumPlaneRenderable(renderable)
       ? 2
@@ -2253,13 +2251,11 @@ function SketchDisplayPolylineNode({
     opacity,
   } = materialConfig
   const material = useMemo(
-    () => linePattern === 'dashed'
+    () => applyWireMaterialDepthPolicy(linePattern === 'dashed'
       ? new THREE.LineDashedMaterial({
           color,
           transparent: true,
           opacity,
-          depthTest: true,
-          depthWrite: false,
           linewidth: lineWidth,
           dashSize,
           gapSize,
@@ -2268,10 +2264,8 @@ function SketchDisplayPolylineNode({
           color,
           transparent: true,
           opacity,
-          depthTest: true,
-          depthWrite: false,
           linewidth: lineWidth,
-        }),
+        })),
     [color, dashSize, gapSize, linePattern, lineWidth, opacity],
   )
   const line = useMemo(() => {

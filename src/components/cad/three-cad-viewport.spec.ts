@@ -2,6 +2,8 @@ import { test } from 'bun:test'
 
 import {
   cancelCoalescedSketchGeometryDragMove,
+  WORKSPACE_SCAFFOLD_RENDER_ORDER,
+  configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
   createViewportBvhSceneKey,
   projectSceneTargetCentroidToViewport,
@@ -214,6 +216,26 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     )
   }
 
+  function testWorkspaceScaffoldWiresDoNotWriteDepth() {
+    const grid = configureWorkspaceScaffoldWireObject(new THREE.GridHelper(10, 10))
+    const axes = configureWorkspaceScaffoldWireObject(new THREE.AxesHelper(4))
+    const materials = [
+      ...(Array.isArray(grid.material) ? grid.material : [grid.material]),
+      ...(Array.isArray(axes.material) ? axes.material : [axes.material]),
+    ]
+
+    assert(grid.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Grid should render before model and sketch wires.')
+    assert(axes.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Axes should render before model and sketch wires.')
+    assert(
+      materials.every((material) => material.depthTest && !material.depthWrite),
+      'Scaffold wire materials should depth-test without writing depth.',
+    )
+
+    grid.geometry.dispose()
+    axes.geometry.dispose()
+    materials.forEach((material) => material.dispose())
+  }
+
   function testDimensionAnnotationDragPatchTargetsDurablePlacement() {
     const patch = createDimensionAnnotationPlacementPatch(
       { id: 'dimension_1-annotation-drag', dimensionId: 'dimension_1' },
@@ -236,5 +258,6 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
   testProjectionBridgeResolvesKnownTarget()
   testRenderIdleTrackerRequiresStableIdleFrames()
   testViewCubeResizeUpdatesCanvasCssSize()
+  testWorkspaceScaffoldWiresDoNotWriteDepth()
   testDimensionAnnotationDragPatchTargetsDurablePlacement()
 })
