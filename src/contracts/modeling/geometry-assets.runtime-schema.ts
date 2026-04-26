@@ -12,6 +12,7 @@ import {
   literalVersionSchema,
   stringSchema,
 } from '@/contracts/shared/runtime-schema'
+import { importBindingSchema } from '@/contracts/import/base-validation'
 import type {
   GeometryAssetHash,
   GeometryAssetManifest,
@@ -464,6 +465,7 @@ export const geometryAssetRecordSchema = z.object({
     sourceStored: z.literal(false).optional(),
     generator: stringSchema.min(1).optional(),
     reconstruction: createMeshReconstructionProvenanceSchema(geometryAssetHashSchema).optional(),
+    importBinding: importBindingSchema.optional(),
   }).strict(),
   data: geometryAssetDataSchema.optional(),
   ownerFeatureIds: z.array(featureIdSchema),

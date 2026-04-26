@@ -34,6 +34,11 @@ export type GeometryAssetSchemaVersion = 'geometry-asset/v1alpha1'
 export type GeometryAssetManifestSchemaVersion = 'geometry-asset-manifest/v1alpha1'
 
 /**
+ * Versioned schema for import-provider contract payload families.
+ */
+export type ImportContractSchemaVersion = 'import-contract/v1alpha1'
+
+/**
  * Versioned schema for extrude feature definitions.
  */
 export type ExtrudeFeatureSchemaVersion = 'feature-type/extrude/v1alpha1'
@@ -120,6 +125,11 @@ export const GEOMETRY_ASSET_SCHEMA_VERSION: GeometryAssetSchemaVersion = 'geomet
  * Current authored geometry asset manifest schema version literal.
  */
 export const GEOMETRY_ASSET_MANIFEST_SCHEMA_VERSION: GeometryAssetManifestSchemaVersion = 'geometry-asset-manifest/v1alpha1'
+
+/**
+ * Current import-provider contract schema version literal.
+ */
+export const IMPORT_CONTRACT_SCHEMA_VERSION: ImportContractSchemaVersion = 'import-contract/v1alpha1'
 
 /**
  * Current extrude feature schema version literal.

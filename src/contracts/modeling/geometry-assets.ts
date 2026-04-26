@@ -7,6 +7,7 @@ import {
 } from '@/contracts/shared/versioning'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { MeshReconstructionProvenance } from '@/contracts/modeling/mesh-reconstruction'
+import type { ImportBinding } from '@/contracts/import/binding'
 
 export type GeometryAssetHash = `sha256:${string}`
 export type GeometryAssetFormat = 'step' | 'stl' | '3mf' | 'baked-occ' | 'baked-mesh' | 'cadara-brep'
@@ -28,6 +29,8 @@ export interface GeometryAssetProvenance {
   sourceStored?: false
   generator?: string
   reconstruction?: MeshReconstructionProvenance
+  /** Carries external source metadata for refresh/relink without a separate manifest. */
+  importBinding?: ImportBinding
 }
 
 export type GeometryAssetPoint3 = readonly [number, number, number]
