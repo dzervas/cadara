@@ -31,11 +31,9 @@ export function ToolDropdownButton({
     : active
       ? 'var(--workbench-shell-accent-surface)'
       : 'transparent'
-  const controlBorder = disabled
-    ? 'var(--workbench-shell-border)'
-    : active
-      ? 'var(--workbench-shell-accent)'
-      : 'transparent'
+  const controlBorder = active
+    ? 'var(--workbench-shell-accent)'
+    : 'transparent'
   const controlColor = disabled
     ? 'var(--workbench-shell-text-dim)'
     : 'var(--workbench-shell-text)'
@@ -92,8 +90,8 @@ export function ToolDropdownButton({
     <Menu.Dropdown
       style={{
         backgroundColor: 'var(--workbench-shell-overlay-strong)',
-        borderColor: 'var(--workbench-shell-border)',
-        boxShadow: 'var(--workbench-panel-shadow)',
+        border: 'none',
+        boxShadow: 'var(--workbench-shell-elevation-md)',
       }}
     >
       {dropdownItems}

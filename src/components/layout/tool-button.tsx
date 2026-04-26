@@ -41,11 +41,9 @@ export function ToolButton({
   const controlBackground = disabled
     ? 'var(--workbench-shell-control-surface)'
     : emphasisBackground
-  const controlBorder = disabled
-    ? 'var(--workbench-shell-border)'
-    : active || isSuccessAction
-      ? emphasisBorder
-      : 'transparent'
+  const controlBorder = active || isSuccessAction
+    ? emphasisBorder
+    : 'transparent'
   const controlColor = disabled
     ? 'var(--workbench-shell-text-dim)'
     : emphasisColor

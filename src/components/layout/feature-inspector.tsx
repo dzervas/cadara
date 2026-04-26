@@ -1,4 +1,5 @@
-import { ActionIcon, Button, Paper, Select, Text, ThemeIcon, Tooltip } from '@mantine/core'
+import type React from 'react'
+import { ActionIcon, Button, Paper, Select, Text, Tooltip } from '@mantine/core'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
@@ -26,7 +27,11 @@ import {
   createFeatureEditorClearReferencePatch,
   createFeatureEditorRemoveReferenceItemPatch,
 } from '@/domain/feature-authoring/form-events'
-import type { FeatureEditorFormField, FeatureNumericField } from '@/domain/feature-authoring/form-schema'
+import type {
+  FeatureEditorFormField,
+  FeatureEditorFormSection,
+  FeatureNumericField,
+} from '@/domain/feature-authoring/form-schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureInspectorProps {
@@ -50,7 +55,8 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
       {diagnostics.map((diagnostic, index) => (
         <div
           key={`${diagnostic.code}-${diagnostic.message}-${index}`}
-          className="rounded-lg border border-[var(--workbench-shell-border)] bg-[var(--workbench-shell-surface)] px-3 py-2"
+          className="rounded-[6px] px-3 py-2"
+          style={{ background: 'var(--workbench-shell-overlay-soft)' }}
         >
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
             {diagnostic.severity}
@@ -101,16 +107,135 @@ function isPrimitiveRefValue(value: unknown): value is PrimitiveRef {
   return !!value && typeof value === 'object' && 'kind' in value
 }
 
-function fieldBorderClass(field: Pick<FeatureEditorFormField, 'error'>, isActive = false) {
+function fieldSurfaceStyle(field: Pick<FeatureEditorFormField, 'error'>, isActive = false): React.CSSProperties {
   if (field.error) {
-    return 'border-[var(--workbench-shell-danger-border)] text-[var(--workbench-shell-danger-text)]'
+    return {
+      background: 'var(--workbench-shell-danger-surface)',
+      boxShadow: '0 0 0 1px var(--workbench-shell-danger-border)',
+      color: 'var(--workbench-shell-danger-text)',
+    }
   }
 
   if (isActive) {
-    return 'border-[var(--mantine-color-workbench-4)] text-[var(--mantine-color-workbench-4)]'
+    return {
+      background: 'var(--workbench-shell-overlay-strong)',
+      boxShadow: '0 0 0 1px var(--workbench-shell-accent)',
+      color: 'var(--mantine-color-workbench-4)',
+    }
   }
 
-  return 'border-[var(--mantine-color-dark-5)] text-[var(--mantine-color-dark-0)]'
+  return {
+    background: 'var(--workbench-shell-overlay-soft)',
+    color: 'var(--mantine-color-dark-0)',
+  }
+}
+
+function compactInputStyles(input: { hasError?: boolean; disabled?: boolean } = {}) {
+  return {
+    input: {
+      backgroundColor: 'transparent',
+      border: 0,
+      color: input.disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
+      fontFamily: 'var(--mantine-font-family-monospace)',
+      fontSize: 12.5,
+      height: 28,
+      minHeight: 28,
+      paddingInline: 4,
+    },
+  }
+}
+
+function compactActionIconStyles(input: { active?: boolean; danger?: boolean } = {}) {
+  return {
+    root: {
+      backgroundColor: 'transparent',
+      border: 0,
+      color: input.danger
+        ? 'var(--workbench-shell-danger-text)'
+        : input.active
+          ? 'var(--workbench-shell-accent)'
+          : 'var(--workbench-shell-text-muted)',
+      flex: '0 0 auto',
+      opacity: input.active ? 1 : 0.72,
+    },
+  }
+}
+
+function compactFieldLabel(label: string) {
+  return label
+    .replace(/\s*\(degrees\)$/i, '')
+    .replace(/\s+mode$/i, '')
+    .replace(/\s+targets$/i, '')
+}
+
+function getNumericUnit(field: FeatureNumericField) {
+  return field.input === 'angleDegrees' ? '°' : null
+}
+
+interface VisualFormSection {
+  id: string
+  title: string
+  hint?: string
+  fields: readonly FeatureEditorFormField[]
+}
+
+function getSectionSelectedCount(fields: readonly FeatureEditorFormField[]) {
+  return fields.reduce((count, field) => count + (field.advancedParticipant?.selectedCount ?? 0), 0)
+}
+
+function isProfileReferenceCollection(
+  field: FeatureEditorFormField,
+): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
+  return field.kind === 'referenceCollection' && field.advancedParticipant?.role === 'profile'
+}
+
+function getReferenceSectionTitle(section: FeatureEditorFormSection) {
+  const participantRole = section.fields.find((field) => field.advancedParticipant)?.advancedParticipant?.role
+
+  if (participantRole === 'profile') {
+    return 'Profile'
+  }
+
+  return section.title
+}
+
+function isOutputField(field: FeatureEditorFormField) {
+  return field.label === 'Operation' || field.id.endsWith('-operation') || field.id.endsWith('-operation-intent')
+    || field.id.endsWith('-target-bodies')
+}
+
+function isEmptyDiagnosticsSection(section: FeatureEditorFormSection) {
+  return section.fields.every((field) => field.kind === 'diagnostics' && field.diagnostics.length === 0)
+}
+
+function getVisualFormSections(sections: readonly FeatureEditorFormSection[]): VisualFormSection[] {
+  return sections.flatMap((section) => {
+    if (isEmptyDiagnosticsSection(section)) {
+      return []
+    }
+
+    if (section.id === 'references') {
+      const selectedCount = getSectionSelectedCount(section.fields)
+      const isProfileSection = section.fields.some(isProfileReferenceCollection)
+      return [{
+        id: section.id,
+        title: getReferenceSectionTitle(section),
+        hint: !isProfileSection && selectedCount > 0 ? `${selectedCount} selected` : undefined,
+        fields: section.fields,
+      }]
+    }
+
+    if (section.id === 'parameters') {
+      const geometryFields = section.fields.filter((field) => !isOutputField(field))
+      const outputFields = section.fields.filter(isOutputField)
+      return [
+        ...(geometryFields.length > 0 ? [{ id: `${section.id}-geometry`, title: 'Geometry', fields: geometryFields }] : []),
+        ...(outputFields.length > 0 ? [{ id: `${section.id}-output`, title: 'Output', fields: outputFields }] : []),
+      ]
+    }
+
+    return [{ id: section.id, title: section.title, fields: section.fields }]
+  })
 }
 
 function FieldMessage(props: { helper?: string; error?: { message: string } | null }) {
@@ -166,15 +291,8 @@ function ExpressionAffordance(props: {
       aria-label={`Edit ${props.fieldLabel} expression`}
       aria-pressed={props.active}
       variant="default"
-      size={40}
-      styles={{
-        root: {
-          backgroundColor: 'var(--workbench-shell-surface)',
-          borderColor: props.active ? 'var(--mantine-color-workbench-5)' : 'var(--workbench-shell-border)',
-          color: props.active ? 'var(--mantine-color-workbench-4)' : 'var(--workbench-shell-text-muted)',
-          flex: '0 0 auto',
-        },
-      }}
+      size={28}
+      styles={compactActionIconStyles({ active: props.active })}
     >
       <FunctionIcon />
     </ActionIcon>
@@ -192,7 +310,7 @@ export function FeatureExpressionEditorControl(props: {
   onClear: () => void
 }) {
   return (
-    <div className="flex items-start gap-2">
+    <div className="flex items-center gap-1">
       <div className="relative min-w-0 flex-1">
         <Input
           id={props.id}
@@ -208,7 +326,8 @@ export function FeatureExpressionEditorControl(props: {
           }}
           aria-invalid={props.hasError || undefined}
           error={props.hasError}
-          className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] pr-20 ${fieldBorderClass({ error: props.hasError ? { message: '' } : null })}`}
+          className="h-7 rounded-[3px] pr-16"
+          styles={compactInputStyles({ hasError: props.hasError })}
         />
         {props.preview.ok ? (
           <span className="pointer-events-none absolute right-2 top-1/2 max-w-[45%] -translate-y-1/2 truncate rounded bg-[var(--workbench-shell-overlay)] px-2 py-0.5 text-xs text-[var(--mantine-color-dark-1)]">
@@ -224,15 +343,8 @@ export function FeatureExpressionEditorControl(props: {
         aria-label={`Clear ${props.fieldLabel} expression`}
         variant="default"
         color="red"
-        size={40}
-        styles={{
-          root: {
-            backgroundColor: 'var(--workbench-shell-surface)',
-            borderColor: 'var(--workbench-shell-danger-border)',
-            color: 'var(--workbench-shell-danger-text)',
-            flex: '0 0 auto',
-          },
-        }}
+        size={28}
+        styles={compactActionIconStyles({ danger: true })}
       >
         <WorkbenchIcon name="close" className="h-4 w-4" />
       </ActionIcon>
@@ -335,51 +447,62 @@ function ExpressionFieldShellInner(props: {
     setEditingExpression(false)
   }
 
+  const rowStyle = fieldSurfaceStyle({ error: fieldError }, activeExpression || editingExpression)
+
   return (
-    <section className="space-y-2">
-      <label
-        className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]"
-        htmlFor={editingExpression ? `${props.field.id}-expression` : props.field.id}
+    <section className="space-y-1">
+      <div
+        className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+        style={rowStyle}
       >
-        {props.field.label}
-      </label>
+        <label
+          className="flex w-[88px] shrink-0 items-center pl-2 pr-2 text-[11px] font-medium text-[var(--workbench-shell-text-dim)]"
+          htmlFor={editingExpression ? `${props.field.id}-expression` : props.field.id}
+        >
+          {compactFieldLabel(props.field.label)}
+        </label>
 
-      {editingExpression ? (
-        <FeatureExpressionEditorControl
-          id={`${props.field.id}-expression`}
-          fieldLabel={props.field.label}
-          expressionText={expressionText}
-          preview={preview}
-          hasError={hasError}
-          onAccept={acceptExpression}
-          onChangeText={setExpressionText}
-          onClear={clearExpression}
-        />
-      ) : (
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            {props.renderControl({
-              id: props.field.id,
-              value: normalValue,
-              disabled: !!props.field.disabled || activeExpression,
-              hasError,
-              onBlur: props.controllerField.onBlur,
-              onLiteralChange: patchLiteral,
-            })}
+        {editingExpression ? (
+          <div className="min-w-0 flex-1 py-0">
+            <FeatureExpressionEditorControl
+              id={`${props.field.id}-expression`}
+              fieldLabel={props.field.label}
+              expressionText={expressionText}
+              preview={preview}
+              hasError={hasError}
+              onAccept={acceptExpression}
+              onChangeText={setExpressionText}
+              onClear={clearExpression}
+            />
           </div>
-          <ExpressionAffordance
-            fieldLabel={props.field.label}
-            active={activeExpression}
-            disabled={props.field.disabled}
-            onClick={() => {
-              setExpressionText(activeExpression ? sourceState.expressionText ?? '' : normalValue)
-              setEditingExpression(true)
-            }}
-          />
-        </div>
-      )}
+        ) : (
+          <>
+            <div className="min-w-0 flex-1">
+              {props.renderControl({
+                id: props.field.id,
+                value: normalValue,
+                disabled: !!props.field.disabled || activeExpression,
+                hasError,
+                onBlur: props.controllerField.onBlur,
+                onLiteralChange: patchLiteral,
+              })}
+            </div>
+            <ExpressionAffordance
+              fieldLabel={props.field.label}
+              active={activeExpression}
+              disabled={props.field.disabled}
+              onClick={() => {
+                setExpressionText(activeExpression ? sourceState.expressionText ?? '' : normalValue)
+                setEditingExpression(true)
+              }}
+            />
+          </>
+        )}
+      </div>
 
-      <FieldMessage helper={formatParticipantHelper(props.field)} error={fieldError} />
+      <div className="px-2">
+        <FieldMessage helper={formatParticipantHelper(props.field)} error={fieldError} />
+      </div>
     </section>
   )
 }
@@ -410,15 +533,8 @@ function NumericField(props: {
           aria-label={`Flip ${props.field.label} direction`}
           aria-pressed={!isForward}
           variant="default"
-          size={40}
-          styles={{
-            root: {
-              backgroundColor: 'var(--workbench-shell-surface)',
-              borderColor: isForward ? 'var(--workbench-shell-border)' : 'var(--mantine-color-workbench-5)',
-              color: isForward ? 'var(--workbench-shell-text-muted)' : 'var(--mantine-color-workbench-4)',
-              flex: '0 0 auto',
-            },
-          }}
+          size={28}
+          styles={compactActionIconStyles({ active: !isForward })}
           title={currentLabel}
         >
           <WorkbenchIcon name="flipDirection" className="h-4 w-4" />
@@ -434,7 +550,7 @@ function NumericField(props: {
       documentVariables={props.documentVariables}
       onPatch={props.onPatch}
       renderControl={({ id, value, disabled, hasError, onBlur, onLiteralChange }) => (
-        <div className="flex items-start gap-2">
+        <div className="flex min-w-0 items-center">
           <div className="min-w-0 flex-1">
             <Input
               id={id}
@@ -446,9 +562,15 @@ function NumericField(props: {
               onChange={(event) => onLiteralChange(event.target.value)}
               aria-invalid={hasError || undefined}
               error={hasError}
-              className={`h-10 rounded-md bg-[var(--workbench-shell-surface)] ${fieldBorderClass({ error: hasError ? props.field.error ?? { message: '' } : null })}`}
+              className="h-7 rounded-[3px]"
+              styles={compactInputStyles({ disabled, hasError })}
             />
           </div>
+          {getNumericUnit(props.field) ? (
+            <span className="flex h-7 items-center px-1 font-mono text-[10.5px] text-[var(--workbench-shell-text-dim)]">
+              {getNumericUnit(props.field)}
+            </span>
+          ) : null}
           {renderDirectionToggle()}
         </div>
       )}
@@ -489,15 +611,21 @@ function EnumField(props: {
           comboboxProps={{ withinPortal: true }}
           styles={{
             input: {
-              backgroundColor: 'var(--workbench-shell-surface)',
-              borderColor: hasError ? 'var(--workbench-shell-danger-border)' : 'var(--workbench-shell-border)',
+              backgroundColor: 'transparent',
+              border: 0,
               color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
-              height: 40,
+              fontSize: 12.5,
+              height: 28,
+              minHeight: 28,
+              paddingLeft: 4,
+            },
+            section: {
+              color: 'var(--workbench-shell-text-muted)',
             },
             dropdown: {
               backgroundColor: 'var(--workbench-shell-overlay-strong)',
-              borderColor: 'var(--workbench-shell-border)',
-              boxShadow: 'var(--workbench-panel-shadow)',
+              border: 'none',
+              boxShadow: 'var(--workbench-shell-elevation-md)',
             },
             option: {
               color: 'var(--workbench-shell-text)',
@@ -519,19 +647,22 @@ function ReferenceCard(props: {
   onClear?: () => void
   clearDisabled?: boolean
 }) {
-  const className = `w-full rounded-md border bg-[var(--workbench-shell-surface)] px-3 py-3 text-left transition ${fieldBorderClass({ error: props.error }, props.isActive)}`
+  const surfaceStyle = fieldSurfaceStyle({ error: props.error }, props.isActive)
+  const className = 'w-full rounded-[3px] px-2 py-1.5 text-left transition hover:bg-[var(--workbench-shell-overlay)]'
   const labelContent = (
-    <>
-      <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.title}</p>
-      <p className={`mt-1 text-sm ${props.error ? 'text-[var(--workbench-shell-danger-text)]' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
+    <div className="flex min-h-6 min-w-0 items-center gap-2">
+      <p className="w-[88px] shrink-0 truncate text-[11px] font-medium text-[var(--workbench-shell-text-dim)]">
+        {compactFieldLabel(props.title)}
+      </p>
+      <p className={`min-w-0 flex-1 truncate text-[12.5px] ${props.error ? 'text-[var(--workbench-shell-danger-text)]' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
         {props.value}
       </p>
-    </>
+    </div>
   )
 
   if (props.onActivate) {
     return (
-      <Paper className={className}>
+      <Paper className={className} style={surfaceStyle}>
         <div className="flex items-start justify-between gap-2">
           <button type="button" onClick={props.onActivate} className="min-w-0 flex-1 text-left" aria-pressed={props.isActive}>
             {labelContent}
@@ -542,22 +673,16 @@ function ReferenceCard(props: {
               onClick={props.onClear}
               disabled={props.clearDisabled}
               aria-label={`Clear ${props.title}`}
-              variant="default"
-              color="red"
-              size={28}
-              styles={{
-                root: {
-                  backgroundColor: 'var(--workbench-shell-surface)',
-                  borderColor: 'var(--workbench-shell-border)',
-                  color: 'var(--workbench-shell-text-muted)',
-                },
-              }}
+              variant="subtle"
+              color="gray"
+              size={24}
+              styles={compactActionIconStyles()}
             >
               <WorkbenchIcon name="close" className="h-3.5 w-3.5" />
             </ActionIcon>
           ) : null}
         </div>
-        <div className="mt-2">
+        <div className="mt-1 px-2">
           <FieldMessage helper={props.helper} error={props.error} />
         </div>
       </Paper>
@@ -565,7 +690,7 @@ function ReferenceCard(props: {
   }
 
   return (
-    <Paper className={className}>
+    <Paper className={className} style={surfaceStyle}>
       <div className="flex items-start justify-between gap-2">
         <div>{labelContent}</div>
         {props.onClear ? (
@@ -574,22 +699,16 @@ function ReferenceCard(props: {
             onClick={props.onClear}
             disabled={props.clearDisabled}
             aria-label={`Clear ${props.title}`}
-            variant="default"
-            color="red"
-            size={28}
-            styles={{
-              root: {
-                backgroundColor: 'var(--workbench-shell-surface)',
-                borderColor: 'var(--workbench-shell-border)',
-                color: 'var(--workbench-shell-text-muted)',
-              },
-            }}
+            variant="subtle"
+            color="gray"
+            size={24}
+            styles={compactActionIconStyles()}
           >
             <WorkbenchIcon name="close" className="h-3.5 w-3.5" />
           </ActionIcon>
         ) : null}
       </div>
-      <div className="mt-2">
+      <div className="mt-1 px-2">
         <FieldMessage helper={props.helper} error={props.error} />
       </div>
     </Paper>
@@ -628,9 +747,59 @@ function ReferenceCollectionCard(props: {
           field.onChange(next)
         }
 
+        if (isProfileReferenceCollection(props.field)) {
+          return (
+            <div>
+              {hasSelection ? (
+                <div className="space-y-1">
+                  {selected.map((target) => (
+                    <div
+                      key={getPrimitiveRefLabel(target)}
+                      className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
+                      style={{ background: 'var(--workbench-shell-overlay)' }}
+                    >
+                      <span className="min-w-0 truncate text-[12px] text-[var(--mantine-color-dark-0)]">
+                        {getPrimitiveRefLabel(target)}
+                      </span>
+                      <ActionIcon
+                        component="button"
+                        onClick={() => {
+                          field.onChange(selected.filter((entry) => !primitiveRefEquals(entry, target)))
+                          props.onPatch(createFeatureEditorRemoveReferenceItemPatch(props.field, target))
+                        }}
+                        aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
+                        variant="default"
+                        color="red"
+                        size={22}
+                        styles={compactActionIconStyles()}
+                      >
+                        <WorkbenchIcon name="close" className="h-3 w-3" />
+                      </ActionIcon>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={props.onActivate}
+                className="mt-1 flex h-6 w-full items-center justify-center rounded-[3px] text-[11px] text-[var(--workbench-shell-text-muted)] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+                aria-pressed={props.isActive}
+              >
+                + Add Profile
+              </button>
+              {props.field.error ? (
+                <div className="mt-1 px-1">
+                  <FieldMessage error={props.field.error} />
+                </div>
+              ) : null}
+            </div>
+          )
+        }
+
         return (
           <Paper
-            className={`rounded-md border bg-[var(--workbench-shell-surface)] px-3 py-3 ${fieldBorderClass(props.field, props.isActive)}`}
+            className="rounded-[3px] px-2 py-1.5 transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+            style={fieldSurfaceStyle(props.field, props.isActive)}
           >
             <div className="flex items-start justify-between gap-2">
               <button
@@ -639,8 +808,8 @@ function ReferenceCollectionCard(props: {
                 className="min-w-0 flex-1 text-left"
                 aria-pressed={props.isActive}
               >
-                <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.field.label}</p>
-                <p className={`mt-1 text-sm ${props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
+                <p className="sr-only">{props.field.label}</p>
+                <p className={`min-h-6 truncate text-[12.5px] leading-6 ${props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
                   {hasSelection ? `${selected.length} selected` : props.field.emptyLabel}
                 </p>
               </button>
@@ -654,26 +823,21 @@ function ReferenceCollectionCard(props: {
                 aria-label={`Clear ${props.field.label}`}
                 variant="default"
                 color="red"
-                size={28}
-                styles={{
-                  root: {
-                    backgroundColor: 'var(--workbench-shell-surface)',
-                    borderColor: 'var(--workbench-shell-border)',
-                    color: 'var(--workbench-shell-text-muted)',
-                  },
-                }}
+                size={24}
+                styles={compactActionIconStyles()}
               >
                 <WorkbenchIcon name="close" className="h-3.5 w-3.5" />
               </ActionIcon>
             </div>
             {hasSelection ? (
-              <div className="mt-3 space-y-2">
+              <div className="mt-1 space-y-1">
                 {selected.map((target) => (
                   <div
                     key={getPrimitiveRefLabel(target)}
-                    className="flex items-center justify-between gap-2 rounded-md border border-[var(--workbench-shell-border)] bg-[var(--workbench-shell-overlay)] px-2 py-2"
+                    className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
+                    style={{ background: 'var(--workbench-shell-overlay)' }}
                   >
-                    <span className="min-w-0 truncate text-xs text-[var(--mantine-color-dark-0)]">
+                    <span className="min-w-0 truncate text-[12px] text-[var(--mantine-color-dark-0)]">
                       {props.field.picker.itemLabel ?? props.field.label}: {getPrimitiveRefLabel(target)}
                     </span>
                     {props.field.picker.allowsMultiple ? (
@@ -688,14 +852,8 @@ function ReferenceCollectionCard(props: {
                               }}
                               aria-label={`Move ${getPrimitiveRefLabel(target)} earlier`}
                               variant="default"
-                              size={24}
-                              styles={{
-                                root: {
-                                  backgroundColor: 'var(--workbench-shell-surface)',
-                                  borderColor: 'var(--workbench-shell-border)',
-                                  color: 'var(--workbench-shell-text-muted)',
-                                },
-                              }}
+                              size={22}
+                              styles={compactActionIconStyles()}
                             >
                               <WorkbenchIcon name="check" className="h-3 w-3 rotate-180" />
                             </ActionIcon>
@@ -707,14 +865,8 @@ function ReferenceCollectionCard(props: {
                               }}
                               aria-label={`Move ${getPrimitiveRefLabel(target)} later`}
                               variant="default"
-                              size={24}
-                              styles={{
-                                root: {
-                                  backgroundColor: 'var(--workbench-shell-surface)',
-                                  borderColor: 'var(--workbench-shell-border)',
-                                  color: 'var(--workbench-shell-text-muted)',
-                                },
-                              }}
+                              size={22}
+                              styles={compactActionIconStyles()}
                             >
                               <WorkbenchIcon name="check" className="h-3 w-3" />
                             </ActionIcon>
@@ -729,14 +881,8 @@ function ReferenceCollectionCard(props: {
                           aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
                           variant="default"
                           color="red"
-                          size={24}
-                          styles={{
-                            root: {
-                              backgroundColor: 'var(--workbench-shell-surface)',
-                              borderColor: 'var(--workbench-shell-border)',
-                              color: 'var(--workbench-shell-text-muted)',
-                            },
-                          }}
+                          size={22}
+                          styles={compactActionIconStyles()}
                         >
                           <WorkbenchIcon name="close" className="h-3 w-3" />
                         </ActionIcon>
@@ -746,7 +892,14 @@ function ReferenceCollectionCard(props: {
                 ))}
               </div>
             ) : null}
-            <div className="mt-2">
+            <button
+              type="button"
+              onClick={props.onActivate}
+              className="mt-1 flex h-6 w-full items-center justify-center rounded-[3px] text-[11px] text-[var(--workbench-shell-text-muted)] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+            >
+              + Pick from viewport
+            </button>
+            <div className="mt-1 px-1">
               <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
             </div>
           </Paper>
@@ -809,8 +962,8 @@ export function FeatureFormFieldRenderer(props: {
       )
     case 'optionGroup':
       return (
-        <div className="space-y-2 border-l border-[var(--workbench-shell-border)] pl-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+        <div className="space-y-1 rounded-[3px] px-2 py-1.5" style={{ background: 'var(--workbench-shell-overlay-soft)' }}>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
             {props.field.label}
           </p>
           <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
@@ -834,8 +987,8 @@ export function FeatureFormFieldRenderer(props: {
         : field.variants.filter((variant) => variant.value === field.discriminant.value)
 
       return (
-        <div className="space-y-2 border-l border-[var(--workbench-shell-border)] pl-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+        <div className="space-y-1 rounded-[3px] px-2 py-1.5" style={{ background: 'var(--workbench-shell-overlay-soft)' }}>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
             {field.label}
           </p>
           <FieldMessage helper={formatParticipantHelper(field)} error={field.error} />
@@ -848,7 +1001,7 @@ export function FeatureFormFieldRenderer(props: {
             onPatch={props.onPatch}
           />
           {variants.map((variant) => (
-            <div key={variant.value} className="space-y-2">
+            <div key={variant.value} className="space-y-1">
               {field.showInactiveFields ? (
                 <p className="text-[11px] text-[var(--mantine-color-dark-2)]">{variant.label}</p>
               ) : null}
@@ -935,60 +1088,102 @@ export function FeatureInspector({
       ? featureSnapshot?.label ?? activeEditSession.featureId ?? `Edit ${activeEditSession.featureType}`
       : `Create ${activeEditSession.featureType[0]!.toUpperCase()}${activeEditSession.featureType.slice(1)}`
 
+  const featureIdShortCode = activeEditSession.mode === 'edit' && activeEditSession.featureId
+    ? `F${activeEditSession.featureId.slice(-2).toUpperCase()}`
+    : null
+  const visualSections = getVisualFormSections(formSchema.sections)
+
   return (
     <Paper
       component="aside"
-      className="flex h-full max-h-full w-[320px] min-w-0 max-w-full flex-col overflow-hidden"
+      className="flex max-h-[70vh] w-[320px] min-w-0 max-w-full flex-col overflow-hidden rounded-[6px]"
       style={{
-        background: 'var(--workbench-shell-surface-panel)',
-        border: '1px solid var(--workbench-shell-border)',
+        background: 'var(--workbench-shell-surface-panel-elev)',
+        boxShadow: 'var(--workbench-shell-elevation-md)',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <header className="px-4 py-4" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
+      <header className="px-3 pb-2.5 pt-3">
         <div className="flex items-center gap-2">
-          <ThemeIcon variant="light" color="workbench" size={20}>
-            <WorkbenchIcon name="layers" className="h-4 w-4" />
-          </ThemeIcon>
-          <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
-            Feature Session
-          </Text>
+          <span
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded"
+            style={{ background: 'var(--workbench-shell-accent-surface)', color: 'var(--workbench-shell-accent)' }}
+          >
+            <WorkbenchIcon name="layers" className="h-3.5 w-3.5" />
+          </span>
+          <Text size="13px" fw={500} c="dark.0" className="min-w-0 flex-1 truncate">{title}</Text>
+          {featureIdShortCode ? (
+            <Text size="11px" ff="monospace" c="dimmed" className="shrink-0">{featureIdShortCode}</Text>
+          ) : null}
         </div>
-        <Text mt={8} size="sm" fw={500} c="dark.0">{title}</Text>
       </header>
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
-        {formSchema.sections.map((section) => (
-          <section key={section.id} className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]">
-              {section.title}
-            </p>
-            {section.fields.map((field) => (
-              <FeatureFormFieldRenderer
-                key={field.id}
-                control={form.control}
-                field={field}
-                documentVariables={documentVariables}
-                activeReferencePickerFieldId={activeReferencePickerFieldId}
-                onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
-                onPatch={onPatch}
-              />
-            ))}
-          </section>
-        ))}
+      <div className="flex-1 overflow-y-auto pb-1">
+        {visualSections.map((section) => {
+          const profileReferenceField = section.fields.find(isProfileReferenceCollection)
+          const hasProfileSelection = (profileReferenceField?.value.length ?? 0) > 0
+
+          return (
+            <section key={section.id} className="pb-1">
+              <div className="flex items-center justify-between px-3 pb-1 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.20em] text-[var(--mantine-color-dark-3)]">
+                  {section.title}
+                </p>
+                {profileReferenceField ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      form.setValue(profileReferenceField.id, [])
+                      onPatch(createFeatureEditorClearReferencePatch(profileReferenceField))
+                    }}
+                    disabled={!hasProfileSelection}
+                    aria-label={`Clear ${profileReferenceField.label}`}
+                    className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium text-[var(--workbench-shell-text-muted)] transition-colors enabled:hover:bg-[var(--workbench-shell-overlay)] disabled:opacity-40"
+                  >
+                    Clear
+                  </button>
+                ) : section.hint ? (
+                  <p className="font-mono text-[10px] text-[var(--workbench-shell-text-dim)]">
+                    {section.hint}
+                  </p>
+                ) : null}
+              </div>
+              <div className="space-y-0.5 px-2">
+                {section.fields.map((field) => (
+                  <FeatureFormFieldRenderer
+                    key={field.id}
+                    control={form.control}
+                    field={field}
+                    documentVariables={documentVariables}
+                    activeReferencePickerFieldId={activeReferencePickerFieldId}
+                    onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
+                    onPatch={onPatch}
+                  />
+                ))}
+              </div>
+            </section>
+          )
+        })}
       </div>
 
-      <footer className="grid grid-cols-2 gap-2 px-4 py-4" style={{ borderTop: '1px solid var(--workbench-shell-border)' }}>
+      <footer className="flex items-center gap-2 px-3 py-2.5">
+        <span
+          className="flex items-center gap-1.5 text-[10px] font-mono"
+          style={{ color: 'var(--workbench-shell-success)' }}
+        >
+          <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
+          idle
+        </span>
+        <div className="flex-1" />
         <Button
           type="button"
           onClick={onCancel}
-          variant="default"
-          leftSection={<WorkbenchIcon name="ban" className="h-4 w-4" />}
+          variant="subtle"
+          color="gray"
+          size="xs"
           styles={{
             root: {
-              backgroundColor: 'var(--workbench-shell-surface)',
-              borderColor: 'var(--workbench-shell-border)',
               color: 'var(--workbench-shell-text-muted)',
             },
           }}
@@ -998,14 +1193,11 @@ export function FeatureInspector({
         <Button
           type="button"
           onClick={onCommit}
-          variant="light"
-          color="workbench"
-          leftSection={<WorkbenchIcon name="check" className="h-4 w-4" />}
+          size="xs"
           styles={{
             root: {
-              backgroundColor: 'var(--workbench-shell-accent-surface)',
-              borderColor: 'var(--workbench-shell-accent)',
-              color: 'var(--workbench-shell-text)',
+              backgroundColor: 'var(--workbench-shell-accent)',
+              color: 'var(--mantine-color-dark-9)',
             },
           }}
         >

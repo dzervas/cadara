@@ -54,6 +54,24 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
       '--workbench-shell-surface': 'var(--mantine-color-dark-9)',
       '--workbench-shell-surface-strong': 'var(--mantine-color-dark-9)',
       '--workbench-shell-surface-panel': 'var(--workbench-shell-surface-strong)',
+      '--workbench-shell-surface-panel-elev':
+        'color-mix(in oklch, var(--workbench-shell-surface-panel) 92%, white 8%)',
+      '--workbench-shell-overlay-soft': 'rgba(255, 255, 255, 0.025)',
+      '--workbench-shell-elevation-md':
+        '0 12px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04)',
+      '--workbench-shell-elevation-timeline':
+        '0 14px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05)',
+      '--workbench-shell-elevation-sidebar':
+        '4px 0 20px rgba(0, 0, 0, 0.2)',
+      '--workbench-shell-elevation-toolbar':
+        '0 4px 16px rgba(0, 0, 0, 0.25)',
+      '--workbench-shell-scrubber-track': 'rgba(255, 255, 255, 0.06)',
+      '--workbench-shell-scrubber-track-glow':
+        '0 0 10px color-mix(in oklch, var(--workbench-shell-accent) 12%, transparent)',
+      '--workbench-shell-scrubber-glow':
+        '0 0 0 4px color-mix(in oklch, var(--workbench-shell-accent) 30%, transparent), 0 4px 10px rgba(0, 0, 0, 0.45)',
+      '--workbench-shell-scrubber-ring':
+        '0 0 0 2px var(--workbench-shell-surface-panel), 0 4px 10px rgba(0, 0, 0, 0.45)',
       '--workbench-shell-overlay':
         'color-mix(in srgb, var(--mantine-color-dark-9) 90%, transparent)',
       '--workbench-shell-overlay-strong':
@@ -167,8 +185,8 @@ export const workbenchTheme = createTheme({
       styles: {
         dropdown: {
           backgroundColor: 'var(--workbench-shell-overlay-strong)',
-          borderColor: 'var(--workbench-shell-border)',
-          boxShadow: 'var(--workbench-panel-shadow)',
+          border: 'none',
+          boxShadow: 'var(--workbench-shell-elevation-md)',
         },
         item: {
           color: 'var(--workbench-shell-text)',

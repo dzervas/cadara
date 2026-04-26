@@ -1,25 +1,16 @@
-import { ToolIcon } from '@/components/ui/tool-icon'
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
-import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
-import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
+import { FeatureTimelineBar, SketchHistoryTimelineBar } from '@/components/layout/feature-timeline-bar'
 import {
-  getSketchHistoryCursorForIndex,
-  getSketchHistoryCursorIndex,
-  getSketchHistoryItems,
   type SketchHistoryCursor,
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
 import type {
   DocumentFeatureCursor,
+  DocumentHistoryItemRecord,
   DocumentHistoryOrderEntry,
   DocumentSnapshot,
 } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
-import type { DocumentHistoryItemRecord } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
-import { getPrimitiveRefKey, selectionFilterAllowsTarget } from '@/domain/editor/schema'
-import { getSketchHistoryItemToolIcon } from '@/domain/tools/tool-icon-resolvers'
-import { useEditorState } from '@/hooks/use-editor-state'
 
 interface HistoryTimelineShellProps {
   snapshot: DocumentSnapshot | null
@@ -58,11 +49,7 @@ export function HistoryTimelineShell({
 
   return (
     <div
-      className="relative min-h-[64px] shrink-0 overflow-hidden border-t"
-      style={{
-        backgroundColor: 'var(--workbench-shell-overlay-strong)',
-        borderColor: 'var(--workbench-shell-border)',
-      }}
+      className="relative shrink-0 overflow-visible"
       data-history-mode={activeMode}
     >
       <div
@@ -103,168 +90,5 @@ export function HistoryTimelineShell({
         </div>
       ) : null}
     </div>
-  )
-}
-
-interface SketchHistoryTimelineBarProps {
-  session: SketchSessionState
-  visibleSelection: PrimitiveRef[]
-  onSelectTarget: (target: PrimitiveRef) => void
-  onCursorRequested?: (cursor: SketchHistoryCursor) => void
-}
-
-function getSketchHistoryIcon(kind: ReturnType<typeof getSketchHistoryItems>[number]['kind']) {
-  switch (kind) {
-    case 'operation':
-      return <WorkbenchIcon name="history" className="h-4 w-4" />
-    case 'entity':
-      return <WorkbenchIcon name="pencilRuler" className="h-4 w-4" />
-    case 'constraint':
-      return <WorkbenchIcon name="slider" className="h-4 w-4" />
-    case 'dimension':
-      return <WorkbenchIcon name="ruler" className="h-4 w-4" />
-  }
-}
-
-function SketchHistoryTimelineBar({
-  session,
-  visibleSelection,
-  onSelectTarget,
-  onCursorRequested,
-}: SketchHistoryTimelineBarProps) {
-  const {
-    state: { selection, selectionFilter, selectionCatalog },
-    dispatch,
-  } = useEditorState()
-  const items = getSketchHistoryItems(session.fullDefinition)
-  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
-
-  return (
-    <section
-      className="flex min-h-[64px] items-center gap-3 px-3 py-2"
-      aria-label="Sketch history"
-      data-history-kind="sketch"
-    >
-      <button
-        type="button"
-        className="flex h-9 w-8 shrink-0 items-center justify-center rounded-md border text-[12px]"
-        style={{
-          backgroundColor: cursorIndex < 0 ? 'var(--workbench-shell-accent-surface)' : 'transparent',
-          borderColor: cursorIndex < 0 ? 'var(--workbench-shell-border-strong)' : 'var(--workbench-shell-border)',
-          color: 'var(--workbench-shell-text)',
-        }}
-        aria-label="Place sketch history cursor before first item"
-        aria-current={cursorIndex < 0 ? 'step' : undefined}
-        onClick={() => onCursorRequested?.({ kind: 'empty' })}
-      >
-        <WorkbenchIcon name="target" className="h-3.5 w-3.5" />
-      </button>
-      <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="flex min-h-10 min-w-max items-center gap-1 pr-6">
-          {items.length === 0 ? (
-            <span
-              className="flex h-8 items-center rounded-md border border-dashed px-3 text-xs"
-              style={{
-                borderColor: 'var(--mantine-color-dark-5)',
-                color: 'var(--mantine-color-dark-2)',
-              }}
-            >
-              Empty sketch history
-            </span>
-          ) : null}
-          {items.map((item, index) => {
-            const targetKey = item.target ? getPrimitiveRefKey(item.target) : null
-            const isSelected = targetKey !== null && visibleSelection.some((entry) => getPrimitiveRefKey(entry) === targetKey)
-            const isAllowed = item.target !== null && selectionFilterAllowsTarget(selectionFilter, selection, item.target, selectionCatalog)
-            const isAfterCursor = index > cursorIndex
-            const itemToolIcon = getSketchHistoryItemToolIcon(item, session.fullDefinition)
-            const description =
-              item.kind === 'operation'
-                ? 'Sketch operation'
-                : item.kind === 'entity' ? 'Sketch entity' : item.kind === 'constraint' ? 'Sketch constraint' : 'Sketch dimension'
-            const menuItems: WorkbenchContextMenuEntry[] = [
-              {
-                kind: 'item',
-                id: 'select',
-                label: 'Select',
-                commandId: 'context.selectTarget',
-                icon: <WorkbenchIcon name="mousePointer" className="h-3.5 w-3.5" />,
-                disabled: !isAllowed,
-                onSelect: () => {
-                  if (item.target) {
-                    onSelectTarget(item.target)
-                  }
-                },
-              },
-              {
-                kind: 'item',
-                id: 'move-cursor-here',
-                label: 'Move cursor here',
-                commandId: 'context.rollCursorHere',
-                icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
-                onSelect: () => onCursorRequested?.(getSketchHistoryCursorForIndex(items, index)),
-              },
-              {
-                kind: 'divider',
-                id: 'destructive-divider',
-              },
-              {
-                kind: 'item',
-                id: 'delete',
-                label: 'Delete',
-                commandId: 'context.delete',
-                icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
-                disabled: item.target === null,
-                danger: true,
-                onSelect: () => {
-                  if (!item.target) {
-                    return
-                  }
-
-                  dispatch({ type: 'viewport.selectionRequested', target: item.target })
-                  dispatch({ type: 'sketch.annotationDeleteRequested' })
-                },
-              },
-            ]
-
-            return (
-              <WorkbenchContextMenu key={item.id} label={`${item.label} actions`} items={menuItems}>
-                <button
-                  type="button"
-                  className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${
-                    isAfterCursor ? 'opacity-45' : ''
-                  } ${!isAllowed ? 'cursor-not-allowed' : ''}`}
-                  style={{
-                    backgroundColor: isSelected
-                      ? 'var(--workbench-shell-accent-surface)'
-                      : index === cursorIndex
-                        ? 'var(--workbench-shell-control-surface)'
-                        : 'transparent',
-                    borderColor: isSelected || index === cursorIndex
-                      ? 'var(--workbench-shell-border-strong)'
-                      : 'transparent',
-                    color: 'var(--workbench-shell-text)',
-                  }}
-                  aria-label={`Select ${item.label}. Double-click to move sketch history cursor.`}
-                  aria-current={index === cursorIndex ? 'step' : undefined}
-                  aria-disabled={!isAllowed}
-                  title={`${description}${isAfterCursor ? '. After current cursor' : ''}. Double-click to move sketch history cursor.`}
-                  data-delete-supported={item.target ? 'true' : undefined}
-                  onClick={() => {
-                    if (!isAllowed || !item.target) {
-                      return
-                    }
-                    onSelectTarget(item.target)
-                  }}
-                  onDoubleClick={() => onCursorRequested?.(getSketchHistoryCursorForIndex(items, index))}
-                >
-                  {itemToolIcon ? <ToolIcon icon={itemToolIcon} className="h-4 w-4" /> : getSketchHistoryIcon(item.kind)}
-                </button>
-              </WorkbenchContextMenu>
-            )
-          })}
-        </div>
-      </div>
-    </section>
   )
 }

@@ -229,21 +229,19 @@ export function FeatureSidebar({
       className="flex h-full min-h-0 flex-col overflow-hidden"
       style={{
         background: 'var(--workbench-shell-surface-panel)',
-        borderRight: '1px solid var(--workbench-shell-border)',
+        boxShadow: 'var(--workbench-shell-elevation-sidebar)',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
       <section
         className="grid min-h-0 flex-[1.35] grid-rows-[minmax(0,1.1fr)_minmax(0,0.9fr)] overflow-hidden"
-        style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
       >
         <div
           className="flex min-h-0 flex-col overflow-hidden"
-          style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
         >
-          <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
-            <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
+          <header className="px-4 py-3">
+            <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.20em' }}>
               Parts & Objects
             </Text>
           </header>
@@ -362,8 +360,8 @@ export function FeatureSidebar({
         </div>
 
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <header className="flex items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
-            <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
+          <header className="flex items-center justify-between gap-2 px-4 py-3">
+            <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.20em' }}>
               Variables
             </Text>
             <Tooltip label="Add variable" withArrow>
@@ -536,10 +534,9 @@ export function FeatureSidebar({
 
       <section
         className="flex min-h-0 max-h-56 flex-[0.85] flex-col overflow-hidden"
-        style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}
       >
-        <header className="px-4 py-3" style={{ borderBottom: '1px solid var(--workbench-shell-border)' }}>
-          <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
+        <header className="px-4 py-3">
+          <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.20em' }}>
             Document Diagnostics
           </Text>
         </header>

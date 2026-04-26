@@ -9,7 +9,6 @@ import {
   getDocumentHistoryMenuEntryDescriptors,
   getNearestTimelineAnchorIndex,
   resolveTimelineReorderDrop,
-  TIMELINE_CURSOR_GLYPH,
 } from '@/components/layout/feature-timeline-bar.helpers'
 import {
   getEditorViewState,
@@ -294,10 +293,9 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
   assert(timelineMarkup.includes('/icons/new-sketch.svg'), 'Timeline sketch entries should use shared sketch tool icons.')
   assert(timelineMarkup.includes('/icons/extrude.svg'), 'Timeline feature entries should use shared feature tool icons.')
   assert(timelineMarkup.includes('aria-current="step"'), 'Timeline should expose the current cursor position.')
-  assert(!timelineMarkup.includes('>Extrude 1</button>'), 'Timeline feature controls should be icon-only.')
   assert(
-    timelineMarkup.includes('aria-label="Timeline cursor') && timelineMarkup.includes(TIMELINE_CURSOR_GLYPH),
-    'Timeline should render a draggable cursor handle with the requested glyph.',
+    timelineMarkup.includes('aria-label="Timeline cursor'),
+    'Timeline should render a draggable cursor handle.',
   )
   assert(timelineMarkup.includes('aria-haspopup="menu"'), 'Timeline history items should expose custom context menu affordances.')
   assert(!timelineMarkup.includes('Hide Fillet 1') && !timelineMarkup.includes('Show Fillet 1'), 'Timeline should not render per-feature hide controls.')

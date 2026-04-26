@@ -117,7 +117,7 @@ export function WorkspaceToolbar({
       // py={4}
       style={{
         backgroundColor: 'var(--workbench-shell-surface-strong)',
-        borderBottom: '1px solid var(--workbench-shell-border)',
+        boxShadow: 'var(--workbench-shell-elevation-toolbar)',
       }}
     >
       <div className="flex min-w-0 items-center gap-3">
@@ -142,7 +142,7 @@ export function WorkspaceToolbar({
                 {index < visibleSections.length - 1 ? (
                   <Divider
                     orientation="vertical"
-                    style={{ borderColor: 'var(--workbench-shell-border-strong)', height: 'auto' }}
+                    style={{ borderColor: 'var(--workbench-shell-overlay-strong)', height: 'auto', opacity: 0.6 }}
                   />
                 ) : null}
               </div>

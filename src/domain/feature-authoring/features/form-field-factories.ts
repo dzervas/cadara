@@ -24,10 +24,10 @@ export function createBooleanOperationFields(input: {
       label: 'Operation',
       value: input.operation,
       options: [
-        { value: 'newBody', label: 'newBody' },
-        { value: 'join', label: 'join' },
-        { value: 'cut', label: 'cut' },
-        { value: 'intersect', label: 'intersect' },
+        { value: 'newBody', label: 'New body' },
+        { value: 'join', label: 'Join' },
+        { value: 'cut', label: 'Cut' },
+        { value: 'intersect', label: 'Intersect' },
       ],
       authoredValue: expressionCapableAuthoredValue(input.operationValue, {
         kind: 'enumString',
@@ -83,10 +83,10 @@ export function createAdvancedOperationIntentFields(input: {
       label: 'Operation',
       value: input.operationIntent,
       options: [
-        { value: 'create', label: 'create' },
-        { value: 'add', label: 'add' },
-        { value: 'subtract', label: 'subtract' },
-        { value: 'intersect', label: 'intersect' },
+        { value: 'create', label: 'Create' },
+        { value: 'add', label: 'Add' },
+        { value: 'subtract', label: 'Subtract' },
+        { value: 'intersect', label: 'Intersect' },
       ],
       authoredValue: expressionCapableAuthoredValue(input.operationValue, {
         kind: 'enumString',
@@ -168,4 +168,3 @@ export function createReferenceCollectionField(input: {
     ...(input.ordering ? { ordering: input.ordering } : {}),
   }
 }
-
