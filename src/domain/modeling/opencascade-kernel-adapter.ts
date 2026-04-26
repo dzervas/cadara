@@ -49,24 +49,8 @@ import type {
 } from '@/contracts/modeling/schema'
 import {
   type AuthoredModelDocument,
-  type AuthoredDocumentHistoryOrderEntry,
 } from '@/contracts/modeling/authored-document'
-import type { GeometryAssetBlobInput, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
-import {
-  createStepImportDiagnostic,
-  createStepSolidKey,
-  type StepImportFeatureParameters,
-  type StepImportMaterializationFeatureStatus,
-  type StepImportMaterializationStage,
-  type StepImportMaterializationStatus,
-  type StepImportReviewFileInput,
-  type StepImportReviewResult,
-  type StepImportDiagnosticCode,
-} from '@/contracts/modeling/step-import'
-import {
-  createMeshImportDiagnostic,
-  type MeshImportDiagnosticCode,
-} from '@/contracts/modeling/mesh-import'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
 import type {
   BodyId,
@@ -106,12 +90,6 @@ import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
-import {
-  augmentWorkspaceSnapshotWithStepImportPresentation,
-  DEFAULT_STEP_IMPORT_MATERIALIZATION_TIMEOUT_MS,
-  getStepImportMaterializationStageLabel,
-} from '@/domain/modeling/step-import-materialization'
-import { bakeStepImportGeometryWithOpenCascade, prepareStepImportReviewWithOpenCascade } from '@/domain/modeling/occ/features'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { OccWorkerSnapshotClient } from '@/domain/modeling/occ/worker-client'
 import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/sketch-reference-projection'
@@ -151,8 +129,6 @@ interface OpenCascadeKernelAdapterOptions {
   workerSnapshotClient?: OccWorkerSnapshotClient | null
   documentId?: DocumentId
   tolerances?: SolverTolerancePolicy
-  stepImportMaterializationTimeoutMs?: number
-  beforeDeferredStepImportMaterialization?: () => Promise<void>
 }
 
 interface OccKernelRuntimeState {
@@ -163,151 +139,6 @@ interface OccKernelRuntimeState {
 interface WorkerRestoredAuthoredDocument {
   document: AuthoredModelDocument
   assets: readonly GeometryAssetBlobInput[]
-}
-
-interface DeferredStepImportRestoreState extends WorkerRestoredAuthoredDocument {
-  diagnostics: readonly ModelingDiagnostic[]
-  deferredFeatureIds: ReadonlySet<FeatureId>
-}
-
-function hasFacetedFallbackMeshImport(document: AuthoredModelDocument) {
-  return document.features.some((feature) =>
-    feature.definition.kind === 'meshImport'
-    && feature.definition.parameters.reconstruction?.resultClassification === 'facetedFallback',
-  )
-}
-
-function getDocumentHistoryOrder(document: AuthoredModelDocument): AuthoredDocumentHistoryOrderEntry[] {
-  return document.historyOrder ?? [
-    ...document.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
-    ...document.features.map((feature) => ({ kind: 'feature' as const, featureId: feature.featureId })),
-  ]
-}
-
-function getAppliedFeatureIdsForDocument(document: AuthoredModelDocument) {
-  if (document.cursor.kind === 'empty') {
-    return new Set<FeatureId>()
-  }
-
-  const historyOrder = getDocumentHistoryOrder(document)
-  const cursorIndex = historyOrder.findIndex((item) =>
-    document.cursor.kind === 'sketch'
-      ? item.kind === 'sketch' && item.sketchId === document.cursor.sketchId
-      : document.cursor.kind === 'feature' && item.kind === 'feature' && item.featureId === document.cursor.featureId,
-  )
-  if (cursorIndex < 0) {
-    return document.cursor.kind === 'feature'
-      ? new Set(document.features.map((feature) => feature.featureId))
-      : new Set<FeatureId>()
-  }
-
-  return new Set(
-    historyOrder
-      .slice(0, cursorIndex + 1)
-      .filter((item): item is Extract<(typeof historyOrder)[number], { kind: 'feature' }> => item.kind === 'feature')
-      .map((item) => item.featureId),
-  )
-}
-
-function getDeferredStepImportFeatures(document: AuthoredModelDocument) {
-  const appliedFeatureIds = getAppliedFeatureIdsForDocument(document)
-  const deferredFeatures: { feature: AuthoredModelDocument['features'][number]; rootFileName: string }[] = []
-
-  for (const feature of document.features) {
-    if (feature.definition.kind !== 'stepImport' || !appliedFeatureIds.has(feature.featureId)) {
-      continue
-    }
-
-    const parameters = feature.definition.parameters as StepImportFeatureParameters
-    const asset = document.assets.records.find((record) => record.assetId === parameters.assetId)
-    deferredFeatures.push({
-      feature,
-      rootFileName: asset?.provenance.selectedFileName
-        ?? asset?.provenance.stepDocumentName
-        ?? asset?.provenance.sourceName
-        ?? feature.label,
-    })
-  }
-
-  return deferredFeatures
-}
-
-function isCadaraBrepAsset(asset: GeometryAssetRecord): asset is GeometryAssetRecord & {
-  data: Extract<NonNullable<GeometryAssetRecord['data']>, { kind: 'cadaraBrep' }>
-} {
-  return asset.data?.kind === 'cadaraBrep'
-}
-
-function getCadaraBrepRootDocumentName(asset: GeometryAssetRecord & {
-  data: Extract<NonNullable<GeometryAssetRecord['data']>, { kind: 'cadaraBrep' }>
-}) {
-  return asset.data.source.rootDocumentName
-    ?? asset.provenance.stepDocumentName
-    ?? asset.provenance.selectedFileName
-    ?? asset.provenance.sourceName
-    ?? 'step-import.step'
-}
-
-function collectPersistedStepImportRestoreDiagnostics(document: AuthoredModelDocument) {
-  const appliedFeatureIds = getAppliedFeatureIdsForDocument(document)
-  const diagnostics: ModelingDiagnostic[] = []
-
-  for (const feature of document.features) {
-    if (feature.definition.kind !== 'stepImport' || !appliedFeatureIds.has(feature.featureId)) {
-      continue
-    }
-
-    const parameters = feature.definition.parameters as StepImportFeatureParameters
-    if (!parameters.selectedSolids) {
-      continue
-    }
-
-    if (parameters.selectedSolids.length === 0) {
-      const asset = document.assets.records.find((record) => record.assetId === parameters.assetId)
-      diagnostics.push(createStepImportDiagnostic(
-        'step-import-empty-selection',
-        'STEP import cannot commit an empty solid selection.',
-        {
-          asset,
-          featureId: feature.featureId,
-          selectedFileName: asset?.provenance.selectedFileName,
-          sourceName: asset?.provenance.sourceName,
-        },
-      ))
-      continue
-    }
-
-    const asset = document.assets.records.find((record) => record.assetId === parameters.assetId)
-    if (!asset || !isCadaraBrepAsset(asset)) {
-      continue
-    }
-
-    const rootDocumentName = getCadaraBrepRootDocumentName(asset)
-    const discoveredKeys = new Set(asset.data.bodies.map((body, index) =>
-      body.solidKey ?? createStepSolidKey({
-        documentName: rootDocumentName,
-        solidOrdinal: index + 1,
-      }),
-    ))
-    const missingSelection = parameters.selectedSolids.find((solid) => !discoveredKeys.has(solid.solidKey))
-    if (!missingSelection) {
-      continue
-    }
-
-    diagnostics.push(createStepImportDiagnostic(
-      'step-import-stale-selected-solid',
-      `STEP selected solid ${missingSelection.solidKey} is no longer present.`,
-      {
-        asset,
-        featureId: feature.featureId,
-        selectedFileName: asset.provenance.selectedFileName,
-        sourceName: asset.provenance.sourceName,
-        solidKey: missingSelection.solidKey,
-      },
-    ))
-  }
-
-  return diagnostics
 }
 
 const DEFAULT_SOLVER_TOLERANCES: SolverTolerancePolicy = {
@@ -327,34 +158,7 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   ...Object.values(OCC_CONTRACT_GAP_CODES),
   'unsupported-profile-group',
   'advanced-feature-unsupported-kernel-case',
-  'step-import-unreadable-file',
-  'step-import-unsupported-structure',
-  'step-import-no-solids',
-  'step-import-missing-asset',
-  'step-import-missing-reference',
-  'step-import-ambiguous-reference',
-  'step-import-unreadable-referenced-file',
-  'step-import-stale-selected-solid',
-  'step-import-empty-selection',
-  'mesh-import-missing-baked-asset',
-  'mesh-import-conversion-failed',
 ])
-const STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<StepImportDiagnosticCode>([
-  'step-import-unreadable-file',
-  'step-import-unsupported-structure',
-  'step-import-no-solids',
-  'step-import-missing-asset',
-  'step-import-missing-reference',
-  'step-import-ambiguous-reference',
-  'step-import-unreadable-referenced-file',
-  'step-import-stale-selected-solid',
-  'step-import-empty-selection',
-])
-const MESH_IMPORT_REBUILD_DIAGNOSTIC_CODES = new Set<MeshImportDiagnosticCode>([
-  'mesh-import-missing-baked-asset',
-  'mesh-import-conversion-failed',
-])
-
 function assertSupportedModelingRequest(
   request: {
     contractVersion: string
@@ -579,41 +383,7 @@ function createRebuildFailureDiagnostic(
   affectedFeatureIds: FeatureId[],
   affectedTargets: NonNullable<ModelingDiagnostic['target']>[],
   feature?: OccAuthoringFeatureRecord,
-  error?: unknown,
 ): ModelingDiagnostic {
-  if (feature?.definition.kind === 'stepImport' && STEP_IMPORT_REBUILD_DIAGNOSTIC_CODES.has(code as StepImportDiagnosticCode)) {
-    const stepError = error as Partial<{
-      documentName: string
-      selectedFileName: string
-      solidKey: string
-    }>
-    return createStepImportDiagnostic(
-      code as StepImportDiagnosticCode,
-      message.replace(new RegExp(`^${code}:\\s*`), ''),
-      {
-        assetId: feature.definition.parameters.assetId,
-        featureId: feature.featureId,
-        documentName: stepError?.documentName,
-        selectedFileName: stepError?.selectedFileName,
-        solidKey: stepError?.solidKey,
-      },
-    )
-  }
-
-  if (feature?.definition.kind === 'meshImport' && MESH_IMPORT_REBUILD_DIAGNOSTIC_CODES.has(code as MeshImportDiagnosticCode)) {
-    return createMeshImportDiagnostic(
-      code as MeshImportDiagnosticCode,
-      message.replace(new RegExp(`^${code}:\\s*`), ''),
-      {
-        featureId: feature.featureId,
-        sourceFormat: feature.definition.parameters.source.sourceFormat,
-        sourceHash: feature.definition.parameters.source.sourceHash,
-        conversionPhase: 'restore',
-        rejectionReason: message.replace(new RegExp(`^${code}:\\s*`), ''),
-      },
-    )
-  }
-
   const diagnostic = createDiagnostic(
     code,
     'error',
@@ -1444,8 +1214,6 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
     }
     case 'split':
     case 'deleteSolid':
-    case 'stepImport':
-    case 'meshImport':
       return []
     default:
       return definition.parameters.participants.flatMap((participant) => [...participant.targets])
@@ -1504,16 +1272,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly workerSnapshotClient: OccWorkerSnapshotClient | null
   private readonly documentId: DocumentId
   private readonly tolerances: SolverTolerancePolicy
-  private readonly stepImportMaterializationTimeoutMs: number
-  private readonly beforeDeferredStepImportMaterialization?: () => Promise<void>
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null
   private runtimeState: OccKernelRuntimeState | null = null
   private workerRestoredDocument: WorkerRestoredAuthoredDocument | null = null
-  private deferredStepImportRestore: DeferredStepImportRestoreState | null = null
-  private deferredStepImportTaskToken = 0
-  private stepImportMaterializationStatus: StepImportMaterializationStatus | null = null
-  private readonly stepImportMaterializationListeners = new Set<(status: StepImportMaterializationStatus | null) => void>()
   private snapshotLodTierId: OccTessellationTierId = 'startup'
 
   constructor(options: OpenCascadeKernelAdapterOptions) {
@@ -1524,8 +1286,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.workerSnapshotClient = options.workerSnapshotClient ?? null
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID
     this.tolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES
-    this.stepImportMaterializationTimeoutMs = options.stepImportMaterializationTimeoutMs ?? DEFAULT_STEP_IMPORT_MATERIALIZATION_TIMEOUT_MS
-    this.beforeDeferredStepImportMaterialization = options.beforeDeferredStepImportMaterialization
   }
 
   preloadRuntime(): Promise<void> {
@@ -1534,42 +1294,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     return this.getRuntimeState().then(() => undefined)
-  }
-
-  async prepareStepImportReview(files: readonly StepImportReviewFileInput[]): Promise<StepImportReviewResult> {
-    if (this.workerSnapshotClient) {
-      return this.workerSnapshotClient.prepareStepImportReview(files)
-    }
-
-    const oc = await this.loadOpenCascadeInstance()
-    return prepareStepImportReviewWithOpenCascade(oc, files)
-  }
-
-  async bakeStepImportGeometry(input: {
-    files: readonly StepImportReviewFileInput[]
-    review?: StepImportReviewResult
-    selectedSolidKeys?: readonly string[]
-  }) {
-    if (this.workerSnapshotClient) {
-      return this.workerSnapshotClient.bakeStepImportGeometry(input)
-    }
-
-    const oc = await this.loadOpenCascadeInstance()
-    return bakeStepImportGeometryWithOpenCascade(oc, input)
-  }
-
-  getStepImportMaterializationStatus() {
-    return this.stepImportMaterializationStatus
-      ? structuredClone(this.stepImportMaterializationStatus)
-      : null
-  }
-
-  subscribeToStepImportMaterializationStatus(listener: (status: StepImportMaterializationStatus | null) => void) {
-    this.stepImportMaterializationListeners.add(listener)
-    listener(this.getStepImportMaterializationStatus())
-    return () => {
-      this.stepImportMaterializationListeners.delete(listener)
-    }
   }
 
   setSnapshotLodTier(tierId: OccTessellationTierId) {
@@ -1589,97 +1313,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return this.solverAdapter
   }
 
-  private emitStepImportMaterializationStatus() {
-    const status = this.getStepImportMaterializationStatus()
-    for (const listener of this.stepImportMaterializationListeners) {
-      listener(status)
-    }
-  }
-
-  private setStepImportMaterializationStatus(status: StepImportMaterializationStatus | null) {
-    this.stepImportMaterializationStatus = status ? structuredClone(status) : null
-    this.emitStepImportMaterializationStatus()
-  }
-
-  private createPendingStepImportMaterializationStatus(document: AuthoredModelDocument) {
-    const deferredFeatures = getDeferredStepImportFeatures(document)
-    if (deferredFeatures.length === 0) {
-      return null
-    }
-
-    const startedAtMs = Date.now()
-    return {
-      documentId: document.documentId,
-      revisionId: document.revisionId,
-      features: deferredFeatures.map(({ feature, rootFileName }) => ({
-        featureId: feature.featureId,
-        featureLabel: feature.label,
-        rootFileName,
-        state: 'pending',
-        currentStage: null,
-        startedAtMs,
-        elapsedMs: 0,
-        timeoutMs: this.stepImportMaterializationTimeoutMs,
-        stageDurationsMs: {},
-        message: `${feature.label}: visible faceted presentation is ready while OCC materialization waits to start.`,
-      }) satisfies StepImportMaterializationFeatureStatus),
-    } satisfies StepImportMaterializationStatus
-  }
-
-  private updateStepImportMaterializationFeature(
-    featureId: FeatureId,
-    updater: (feature: StepImportMaterializationFeatureStatus) => StepImportMaterializationFeatureStatus,
-  ) {
-    if (!this.stepImportMaterializationStatus) {
-      return
-    }
-
-    const updated = this.stepImportMaterializationStatus.features.map((feature) =>
-      feature.featureId === featureId ? updater(feature) : feature,
-    )
-    this.setStepImportMaterializationStatus({
-      ...this.stepImportMaterializationStatus,
-      features: updated,
-    })
-  }
-
-  private refreshStepImportMaterializationState(featureId: FeatureId, currentStage: StepImportMaterializationStage | null) {
-    this.updateStepImportMaterializationFeature(featureId, (feature) => {
-      const elapsedMs = Math.max(Date.now() - feature.startedAtMs, feature.elapsedMs)
-      const state = feature.state === 'failed'
-        ? feature.state
-        : elapsedMs >= feature.timeoutMs
-          ? 'degraded'
-          : 'pending'
-
-      return {
-        ...feature,
-        state,
-        currentStage,
-        elapsedMs,
-        message: state === 'degraded'
-          ? `${feature.featureLabel}: OCC materialization exceeded ${Math.round(feature.timeoutMs / 1000)}s during ${getStepImportMaterializationStageLabel(currentStage)}. Visible faceted presentation remains available.`
-          : `${feature.featureLabel}: ${getStepImportMaterializationStageLabel(currentStage)} in background. Visible faceted presentation remains available.`,
-      }
-    })
-  }
-
-  private markStepImportMaterializationFailed(featureId: FeatureId, stage: StepImportMaterializationStage | null, error: unknown) {
-    this.updateStepImportMaterializationFeature(featureId, (feature) => {
-      const elapsedMs = Math.max(Date.now() - feature.startedAtMs, feature.elapsedMs)
-      const reason = error instanceof Error && error.message.trim() ? error.message : 'STEP materialization failed.'
-      return {
-        ...feature,
-        state: 'failed',
-        currentStage: stage,
-        elapsedMs,
-        message: `${feature.featureLabel}: background OCC materialization failed during ${getStepImportMaterializationStageLabel(stage)}. ${reason} Visible faceted presentation remains available.`,
-      }
-    })
-  }
-
   private async getRuntimeState() {
-    if (this.workerRestoredDocument && !this.deferredStepImportRestore) {
+    if (this.workerRestoredDocument) {
       const restored = this.workerRestoredDocument
       this.workerRestoredDocument = null
       await this.restoreAuthoredModelDocumentOnMainThread(
@@ -1817,33 +1452,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): Promise<void> {
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
     const assets = createGeometryAssetBlobInputs(document, assetBlobs)
-    const deferredFeatureIds = new Set(getDeferredStepImportFeatures(document).map(({ feature }) => feature.featureId))
-
     this.workerRestoredDocument = null
-    this.deferredStepImportTaskToken += 1
-
-    if (deferredFeatureIds.size > 0) {
-      this.deferredStepImportRestore = {
-        document: structuredClone(document),
-        assets,
-        diagnostics: [...diagnostics],
-        deferredFeatureIds,
-      }
-      this.setStepImportMaterializationStatus(this.createPendingStepImportMaterializationStatus(document))
-      await this.restoreAuthoredModelDocumentOnMainThread(
-        document,
-        diagnostics,
-        createInMemoryGeometryAssetResolver(assets),
-        {
-          deferredFeatureIds,
-        },
-      )
-      this.scheduleDeferredStepImportMaterialization()
-      return
-    }
-
-    this.deferredStepImportRestore = null
-    this.setStepImportMaterializationStatus(null)
 
     if (this.workerSnapshotClient) {
       this.runtimeState = null
@@ -1867,19 +1476,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
-    if (getDeferredStepImportFeatures(document).length > 0) {
-      const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
-      const assets = createGeometryAssetBlobInputs(document, assetBlobs)
-      await this.restoreAuthoredModelDocument(document, diagnostics, createInMemoryGeometryAssetResolver(assets))
-      return
-    }
-
     if (this.workerSnapshotClient) {
       const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
       const assets = createGeometryAssetBlobInputs(document, assetBlobs)
-      if (!hasFacetedFallbackMeshImport(document)) {
-        await this.workerSnapshotClient.rebuildDocument(document, assets)
-      }
+      await this.workerSnapshotClient.rebuildDocument(document, assets)
 
       this.runtimeState = null
       this.initializationPromise = null
@@ -1893,127 +1493,18 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     await this.restoreAuthoredModelDocumentOnMainThread(document, diagnostics, assetResolver)
   }
 
-  private scheduleDeferredStepImportMaterialization() {
-    const deferred = this.deferredStepImportRestore
-    if (!deferred || deferred.deferredFeatureIds.size === 0) {
-      return
-    }
-
-    const token = this.deferredStepImportTaskToken
-    const resolver = createInMemoryGeometryAssetResolver(deferred.assets)
-    const instrumentation: NonNullable<OccAuthoringState['stepImportInstrumentation']> = {
-      onStageStart: (featureId, stage) => {
-        if (token !== this.deferredStepImportTaskToken) {
-          return
-        }
-        this.refreshStepImportMaterializationState(featureId, stage)
-      },
-      onStageComplete: (featureId, stage, durationMs) => {
-        if (token !== this.deferredStepImportTaskToken) {
-          return
-        }
-        this.updateStepImportMaterializationFeature(featureId, (feature) => {
-          const elapsedMs = Math.max(Date.now() - feature.startedAtMs, feature.elapsedMs)
-          const stageDurationsMs = {
-            ...feature.stageDurationsMs,
-            [stage]: (feature.stageDurationsMs[stage] ?? 0) + durationMs,
-          }
-          const state = elapsedMs >= feature.timeoutMs ? 'degraded' : feature.state === 'failed' ? 'failed' : 'pending'
-          return {
-            ...feature,
-            state,
-            currentStage: stage,
-            elapsedMs,
-            stageDurationsMs,
-            message: state === 'degraded'
-              ? `${feature.featureLabel}: OCC materialization exceeded ${Math.round(feature.timeoutMs / 1000)}s during ${getStepImportMaterializationStageLabel(stage)}. Visible faceted presentation remains available.`
-              : `${feature.featureLabel}: ${getStepImportMaterializationStageLabel(stage)} in background. Visible faceted presentation remains available.`,
-          }
-        })
-      },
-    }
-    const timeoutHandles = [...deferred.deferredFeatureIds].map((featureId) =>
-      setTimeout(() => {
-        if (token !== this.deferredStepImportTaskToken) {
-          return
-        }
-
-        const currentStage = this.stepImportMaterializationStatus?.features.find((feature) => feature.featureId === featureId)?.currentStage ?? null
-        this.refreshStepImportMaterializationState(featureId, currentStage)
-      }, this.stepImportMaterializationTimeoutMs),
-    )
-
-    setTimeout(() => {
-      void (async () => {
-        try {
-          await this.beforeDeferredStepImportMaterialization?.()
-          if (token !== this.deferredStepImportTaskToken) {
-            return
-          }
-
-          const runtimeState = await this.restoreAuthoredModelDocumentOnMainThread(
-            deferred.document,
-            deferred.diagnostics,
-            resolver,
-            {
-              deferredFeatureIds: new Set<FeatureId>(),
-              stepImportInstrumentation: instrumentation,
-              replaceRuntimeState: false,
-            },
-          )
-          if (token !== this.deferredStepImportTaskToken) {
-            return
-          }
-
-          for (const featureId of deferred.deferredFeatureIds) {
-            instrumentation.onStageStart(featureId, 'snapshotRender')
-          }
-          const snapshotStartedAt = Date.now()
-          buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
-            lodTierId: this.snapshotLodTierId,
-          })
-          const snapshotDurationMs = Date.now() - snapshotStartedAt
-          for (const featureId of deferred.deferredFeatureIds) {
-            instrumentation.onStageComplete(featureId, 'snapshotRender', snapshotDurationMs)
-          }
-          if (token !== this.deferredStepImportTaskToken) {
-            return
-          }
-
-          this.deferredStepImportRestore = null
-          this.replaceRuntimeState(runtimeState)
-          this.setStepImportMaterializationStatus(null)
-        } catch (error) {
-          if (token !== this.deferredStepImportTaskToken) {
-            return
-          }
-
-          for (const featureId of deferred.deferredFeatureIds) {
-            const currentStage = this.stepImportMaterializationStatus?.features.find((feature) => feature.featureId === featureId)?.currentStage ?? null
-            this.markStepImportMaterializationFailed(featureId, currentStage, error)
-          }
-        } finally {
-          for (const timeoutHandle of timeoutHandles) {
-            clearTimeout(timeoutHandle)
-          }
-        }
-      })()
-    }, 0)
-  }
-
   private async restoreAuthoredModelDocumentOnMainThread(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
     options: {
       deferredFeatureIds?: ReadonlySet<FeatureId>
-      stepImportInstrumentation?: OccAuthoringState['stepImportInstrumentation']
       replaceRuntimeState?: boolean
     } = {},
   ): Promise<OccKernelRuntimeState> {
     const oc = await this.loadOpenCascadeInstance()
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
-    const restoreDiagnostics = [...diagnostics, ...collectPersistedStepImportRestoreDiagnostics(document)]
+    const restoreDiagnostics = [...diagnostics]
     const historyOrder = createAuthoredHistoryRestoreOrder(document)
     const sketchById = new Map(document.sketches.map((sketch) => [sketch.sketchId, sketch]))
     const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
@@ -2035,7 +1526,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
       assets: document.assets,
       assetBlobs,
-      stepImportInstrumentation: options.stepImportInstrumentation,
       historyOrder,
       diagnostics: restoreDiagnostics,
       cursor: { kind: 'empty' },
@@ -2092,7 +1582,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
       assets: document.assets,
       assetBlobs,
-      stepImportInstrumentation: options.stepImportInstrumentation,
       historyOrder,
       diagnostics: restoreDiagnostics,
       cursor: { kind: 'empty' },
@@ -2108,7 +1597,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         features,
         cursor: document.cursor,
         deferredFeatureIds: options.deferredFeatureIds,
-        stepImportInstrumentation: options.stepImportInstrumentation,
       },
     ).state
     authoringState = {
@@ -2425,15 +1913,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder?: OccAuthoringState['historyOrder']
       cursor?: OccAuthoringState['cursor']
       deferredFeatureIds?: ReadonlySet<FeatureId>
-      stepImportInstrumentation?: OccAuthoringState['stepImportInstrumentation']
     },
   ): RebuildAttempt {
     const features = input.features ?? runtimeState.authoringState.features
     const cursor = input.cursor ?? runtimeState.authoringState.cursor
     const deferredFeatureIds = input.deferredFeatureIds
-      ?? (this.deferredStepImportRestore?.document.revisionId === runtimeState.authoringState.revisionId
-        ? this.deferredStepImportRestore.deferredFeatureIds
-        : undefined)
     const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
       documentId: this.documentId,
       revisionId: input.revisionId,
@@ -2444,7 +1928,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
-      stepImportInstrumentation: input.stepImportInstrumentation ?? runtimeState.authoringState.stepImportInstrumentation,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
@@ -2533,7 +2016,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           [feature.featureId],
           uniqueTargets(consumedTargets),
           feature,
-          error,
         ))
         failedFeatures.push(createFailedFeatureRecord(feature))
       }
@@ -2565,19 +2047,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId)
-
-    if (this.deferredStepImportRestore && this.runtimeState) {
-      return {
-        contractVersion: CONTRACT_VERSION,
-        snapshot: augmentWorkspaceSnapshotWithStepImportPresentation(
-          buildOccWorkspaceSnapshot(this.runtimeState.authoringState, [], {
-            lodTierId: this.snapshotLodTierId,
-          }),
-          this.deferredStepImportRestore.document,
-          this.stepImportMaterializationStatus,
-        ),
-      }
-    }
 
     if (this.workerSnapshotClient && this.workerRestoredDocument) {
       return {

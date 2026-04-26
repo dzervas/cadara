@@ -1,10 +1,8 @@
 import { z } from 'zod'
 
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import type { CadaraBrepGeometryAssetData } from '@/contracts/modeling/geometry-assets'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type { ModelingDiagnostic, WorkspaceSnapshot } from '@/contracts/modeling/schema'
-import type { StepImportReviewFileInput, StepImportReviewResult } from '@/contracts/modeling/step-import'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RequestId } from '@/contracts/shared/ids'
 import type { PackedWorkspaceSnapshot } from '@/domain/modeling/occ/mesh-transport'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
@@ -38,18 +36,6 @@ export type OccWorkerRequest =
       assets?: readonly GeometryAssetBlobInput[]
     }
   | {
-      kind: 'prepareStepImportReview'
-      requestId: RequestId
-      files: readonly StepImportReviewFileInput[]
-    }
-  | {
-      kind: 'bakeStepImportGeometry'
-      requestId: RequestId
-      files: readonly StepImportReviewFileInput[]
-      review?: StepImportReviewResult
-      selectedSolidKeys?: readonly string[]
-    }
-  | {
       kind: 'cancel'
       requestId: RequestId
       cancelsRequestId: RequestId
@@ -68,18 +54,6 @@ export type OccWorkerResponse =
       kind: 'workspaceSnapshotBuilt'
       requestId: RequestId
       snapshot: WorkspaceSnapshot | PackedWorkspaceSnapshot
-    }
-  | {
-      kind: 'stepImportReviewPrepared'
-      requestId: RequestId
-      review: StepImportReviewResult
-    }
-  | {
-      kind: 'stepImportGeometryBaked'
-      requestId: RequestId
-      result:
-        | { ok: true; data: CadaraBrepGeometryAssetData }
-        | { ok: false; diagnostics: readonly ModelingDiagnostic[] }
     }
   | OccWorkerFailureMessage
 
@@ -110,18 +84,6 @@ export const occWorkerRequestEnvelopeSchema = z.discriminatedUnion('kind', [
     document: z.unknown(),
     lodTierId: z.enum(['startup', 'normal', 'fine']).optional(),
     assets: z.array(z.unknown()).optional(),
-  }),
-  z.object({
-    kind: z.literal('prepareStepImportReview'),
-    requestId: requestIdSchema,
-    files: z.array(z.unknown()),
-  }),
-  z.object({
-    kind: z.literal('bakeStepImportGeometry'),
-    requestId: requestIdSchema,
-    files: z.array(z.unknown()),
-    review: z.unknown().optional(),
-    selectedSolidKeys: z.array(z.string()).optional(),
   }),
   z.object({
     kind: z.literal('cancel'),

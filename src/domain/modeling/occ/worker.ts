@@ -7,10 +7,6 @@ import {
   type OpenCascadeInstance,
 } from '@/domain/modeling/occ/runtime'
 import {
-  bakeStepImportGeometryWithOpenCascade,
-  prepareStepImportReviewWithOpenCascade,
-} from '@/domain/modeling/occ/features'
-import {
   normalizeOccWorkerFailure,
   occWorkerRequestEnvelopeSchema,
   type OccWorkerAssetConfig,
@@ -107,28 +103,6 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
         requestId: request.requestId,
         snapshot: packed.snapshot,
       }, packed.transferList)
-      return
-    }
-    case 'prepareStepImportReview': {
-      const oc = await getWorkerOpenCascadeInstance()
-      postOccWorkerMessage({
-        kind: 'stepImportReviewPrepared',
-        requestId: request.requestId,
-        review: prepareStepImportReviewWithOpenCascade(oc, request.files),
-      })
-      return
-    }
-    case 'bakeStepImportGeometry': {
-      const oc = await getWorkerOpenCascadeInstance()
-      postOccWorkerMessage({
-        kind: 'stepImportGeometryBaked',
-        requestId: request.requestId,
-        result: bakeStepImportGeometryWithOpenCascade(oc, {
-          files: request.files,
-          review: request.review,
-          selectedSolidKeys: request.selectedSolidKeys,
-        }),
-      })
       return
     }
     case 'cancel':

@@ -19,7 +19,6 @@ import type {
   GeometryAssetRecord,
 } from '@/contracts/modeling/geometry-assets'
 import { normalizeGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
-import { createMeshReconstructionProvenanceSchema } from '@/contracts/modeling/mesh-reconstruction.runtime-schema'
 
 const geometryAssetSchemaVersionSchema = literalVersionSchema<GeometryAssetSchemaVersion>(
   GEOMETRY_ASSET_SCHEMA_VERSION,
@@ -464,7 +463,6 @@ export const geometryAssetRecordSchema = z.object({
     sourceFormat: z.union([z.literal('step'), z.literal('stl'), z.literal('3mf')]).optional(),
     sourceStored: z.literal(false).optional(),
     generator: stringSchema.min(1).optional(),
-    reconstruction: createMeshReconstructionProvenanceSchema(geometryAssetHashSchema).optional(),
     importBinding: importBindingSchema.optional(),
   }).strict(),
   data: geometryAssetDataSchema.optional(),
@@ -547,6 +545,5 @@ function sameAssetContentMetadata(left: GeometryAssetRecord, right: GeometryAsse
     && (left.provenance.sourceFormat ?? null) === (right.provenance.sourceFormat ?? null)
     && (left.provenance.sourceStored ?? null) === (right.provenance.sourceStored ?? null)
     && (left.provenance.generator ?? null) === (right.provenance.generator ?? null)
-    && JSON.stringify(left.provenance.reconstruction ?? null) === JSON.stringify(right.provenance.reconstruction ?? null)
     && JSON.stringify(left.data ?? null) === JSON.stringify(right.data ?? null)
 }

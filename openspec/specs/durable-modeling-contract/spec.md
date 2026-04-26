@@ -222,30 +222,6 @@ The modeling contract SHALL return a generated snapshot containing every feature
 - **THEN** the modeling contract returns a normal generated snapshot for the current authored history
 - **AND** stale repair diagnostics for the fixed feature are removed
 
-### Requirement: STEP import features SHALL produce durable exact body targets
-The modeling contract SHALL expose STEP import results as durable exact body targets and subshape targets compatible with downstream feature references.
-
-#### Scenario: Select imported face for downstream feature
-- **WHEN** a restored STEP import produces a body with faces
-- **THEN** the selection catalog includes durable body and face targets for that imported body
-- **AND** feature definitions that accept body or face refs can reference those targets normally
-
-### Requirement: Baked mesh imports SHALL expose durable body topology
-The modeling contract SHALL expose accepted mesh import results as durable body topology derived from the baked geometry asset.
-
-#### Scenario: Restore baked mesh import
-- **WHEN** a document containing an accepted mesh import is restored
-- **THEN** the snapshot contains durable body targets for the baked geometry result
-- **AND** no durable target requires access to the original STL or 3MF source file
-
-### Requirement: Analytic and faceted baked results SHALL expose consistent durable body refs
-The modeling contract SHALL expose durable body and subshape references for both analytic recovered results and accepted faceted fallback results.
-
-#### Scenario: Select baked fallback body
-- **WHEN** a faceted fallback result is restored from a baked geometry asset
-- **THEN** the snapshot exposes durable body topology for selectable targets
-- **AND** downstream features either accept those targets or reject unsupported faceted topology with structured diagnostics
-
 ### Requirement: Generic document deletion SHALL remove supported durable targets
 The modeling contract SHALL provide one durable deletion mutation that accepts supported document history items and supported parts or objects by stable durable identity, validates the request against the current document revision, commits accepted deletion through the document mutation boundary, and returns a rebuilt snapshot result.
 

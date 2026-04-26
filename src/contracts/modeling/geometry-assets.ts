@@ -6,7 +6,6 @@ import {
   type GeometryAssetSchemaVersion,
 } from '@/contracts/shared/versioning'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
-import type { MeshReconstructionProvenance } from '@/contracts/modeling/mesh-reconstruction'
 import type { ImportBinding } from '@/contracts/import/binding'
 
 export type GeometryAssetHash = `sha256:${string}`
@@ -28,7 +27,6 @@ export interface GeometryAssetProvenance {
   sourceFormat?: 'step' | 'stl' | '3mf'
   sourceStored?: false
   generator?: string
-  reconstruction?: MeshReconstructionProvenance
   /** Carries external source metadata for refresh/relink without a separate manifest. */
   importBinding?: ImportBinding
 }

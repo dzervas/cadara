@@ -50,7 +50,6 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
-  STEP_IMPORT_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 import {
   OCC_CONTRACT_GAP_CODES,
@@ -79,7 +78,6 @@ import {
   getOccTessellationTier,
   type OccTessellationTierId,
 } from '@/domain/modeling/occ/tessellation'
-import { parseBakedMeshGeometry } from '@/domain/modeling/baked-mesh-geometry'
 
 const FACE_PICK_PRIORITY = 20
 const SKETCH_CURVE_PICK_PRIORITY = 12
@@ -222,9 +220,6 @@ function collectFeatureConsumedTargets(definition: OccAuthoringState['features']
       targets.push(definition.parameters.bodyTarget, ...definition.parameters.faceTargets)
       booleanScope = definition.parameters.booleanScope
       break
-    case 'stepImport':
-    case 'meshImport':
-      break
     default:
       targets.push(...definition.parameters.participants.flatMap((participant) => [...participant.targets]))
       break
@@ -366,18 +361,6 @@ function createSnapshotFeatureDefinition(
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
-      }
-    case 'stepImport':
-      return {
-        kind: 'stepImport',
-        featureTypeVersion: STEP_IMPORT_FEATURE_SCHEMA_VERSION,
-        parameters: structuredClone(definition.parameters),
-      }
-    case 'meshImport':
-      return {
-        kind: 'meshImport',
-        featureTypeVersion: definition.featureTypeVersion,
-        parameters: structuredClone(definition.parameters),
       }
     default:
       return {
@@ -1274,11 +1257,6 @@ function buildBodyRenderRecords(
   options: OccSnapshotBuildOptions = {},
 ) {
   const records: RenderableEntityRecord[] = []
-  const facetedMeshRecord = buildFacetedMeshImportRenderRecord(state, body)
-  if (facetedMeshRecord) {
-    return [facetedMeshRecord]
-  }
-
   const tessellationTier = getOccTessellationTier(options.lodTierId)
 
   const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
@@ -1329,54 +1307,6 @@ function buildBodyRenderRecords(
   }
 
   return records
-}
-
-function buildFacetedMeshImportRenderRecord(
-  state: OccAuthoringState,
-  body: OccTrackedBody,
-): RenderableEntityRecord | null {
-  const feature = state.features.find((entry) => entry.featureId === body.ownerFeatureId)
-  const definition = feature?.definition
-  if (
-    !definition
-    || definition.kind !== 'meshImport'
-    || definition.parameters.reconstruction?.resultClassification !== 'facetedFallback'
-  ) {
-    return null
-  }
-
-  const asset = state.assets.records.find((record) =>
-    record.assetId === definition.parameters.assetId
-    && record.format === 'baked-mesh',
-  )
-  const bytes = asset ? state.assetBlobs.get(asset.hash) : null
-  const faceId = body.topology.faceIds[0]
-  if (!bytes || !faceId) {
-    return null
-  }
-
-  const payload = parseBakedMeshGeometry(bytes)
-  const target = createFaceTarget(body.bodyId, faceId)
-
-  return {
-    id: createRenderableId(target),
-    label: `${body.label} faceted mesh`,
-    ownerBodyId: body.bodyId,
-    ownerFeatureId: body.ownerFeatureId,
-    binding: {
-      pickId: createPickId(target),
-      pickPriority: FACE_PICK_PRIORITY,
-      target,
-      topology: 'face',
-      semanticClass: 'bodyFace',
-    },
-    geometry: {
-      kind: 'mesh',
-      vertexPositions: payload.vertices,
-      vertexNormals: null,
-      triangleIndices: payload.indices,
-    },
-  }
 }
 
 function sampleCirclePoints(

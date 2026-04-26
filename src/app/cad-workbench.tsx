@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Alert, Badge, Button, Checkbox, Group, Loader, Modal, Paper, Progress, ScrollArea, Stack, Text } from '@mantine/core'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Loader } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
@@ -41,12 +41,6 @@ import type {
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
-import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type {
-  StepImportMaterializationFeatureStatus,
-  StepImportMaterializationStatus,
-  StepImportReviewResult,
-} from '@/contracts/modeling/step-import'
 import { createAppError, errorContext, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
@@ -81,7 +75,6 @@ import {
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
-import { getStepImportMaterializationStageLabel } from '@/domain/modeling/step-import-materialization'
 import { createTopologyDebugSummary } from '@/domain/modeling/topology-debug'
 import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging'
 import { useEditorState } from '@/hooks/use-editor-state'
@@ -126,51 +119,10 @@ import {
 import { getBuildModeLabel } from '@/components/layout/build-metadata'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
-import { getBinaryStlTriangleCount } from '@/domain/modeling/mesh-parser'
-import {
-  createMeshSizeLimitEvaluation,
-  type MeshReconstructionEvaluation,
-} from '@/domain/modeling/baked-mesh-geometry'
-import type {
-  MeshImportReviewWorkerRequest,
-  MeshImportReviewWorkerResponse,
-} from '@/domain/modeling/mesh-import-review-worker-protocol'
-import type { RequestId } from '@/contracts/shared/ids'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
-type StepImportFlowState =
-  | { kind: 'idle' }
-  | { kind: 'preparing'; fileNames: readonly string[]; label: string }
-  | {
-    kind: 'review'
-    files: readonly { fileName: string; bytes: Uint8Array }[]
-    review: StepImportReviewResult
-    selectedSolidKeys: readonly string[]
-    label: string
-  }
-type MeshImportFlowState =
-  | { kind: 'idle' }
-  | {
-    kind: 'review'
-    fileName: string
-    assetInput: GeometryAssetBlobInput | null
-    label: string
-    warningAccepted: boolean
-    reconstruction: MeshReconstructionEvaluation
-  }
-type MeshImportProgressState = {
-  fileName: string
-  message: string
-  progress: number
-  canCancel: boolean
-}
-type StepImportProgressState = {
-  fileName: string
-  message: string
-  progress: number
-}
 type WorkbenchUndoEntry =
   | {
       kind: 'updateVariable'
@@ -186,66 +138,12 @@ type WorkbenchUndoEntry =
       label: string
     }
 
-const PART_IMPORT_FILE_ACCEPT = '.step,.stp,.stl,.3mf,model/step,model/stl,model/3mf'
-
-function isPartImportEnabled() {
-  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('cadEnablePartImport') === '1'
-}
-
 function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
   return status.kind === 'binding-restored'
     || status.kind === 'syncing'
     || status.kind === 'synced'
     || status.kind === 'persistent-binding-unavailable'
 }
-
-function formatMeshReconstructionClassification(classification: MeshReconstructionEvaluation['resultClassification']) {
-  switch (classification) {
-    case 'analytic':
-      return 'analytic'
-    case 'facetedFallback':
-      return 'faceted fallback'
-    case 'rejected':
-      return 'rejected'
-    case 'meshBodyException':
-      return 'mesh body exception'
-  }
-}
-
-function getMeshImportWarningLabel(reconstruction: MeshReconstructionEvaluation) {
-  return reconstruction.resultClassification === 'facetedFallback'
-    ? 'I accept the faceted fallback result and understand the original mesh file will not be saved in this document.'
-    : 'I understand the original mesh file will not be saved in this document.'
-}
-
-function hasStepImportMaterializationTerminalTransition(
-  previous: StepImportMaterializationStatus | null,
-  next: StepImportMaterializationStatus | null,
-) {
-  if (previous && !next) {
-    return true
-  }
-
-  if (!previous || !next) {
-    return false
-  }
-
-  const previousById = new Map(previous.features.map((feature) => [feature.featureId, feature.state] as const))
-  return next.features.some((feature) => {
-    const prior = previousById.get(feature.featureId)
-    return prior === 'pending' && feature.state !== 'pending'
-  })
-}
-
-function formatStepImportStageDurations(feature: StepImportMaterializationFeatureStatus) {
-  const parts = Object.entries(feature.stageDurationsMs)
-    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0)
-    .map(([stage, durationMs]) =>
-      `${getStepImportMaterializationStageLabel(stage as StepImportMaterializationFeatureStatus['currentStage'])} ${Math.round(durationMs)}ms`,
-    )
-
-  return parts.slice(0, 3).join(' · ')
-  }
 
 function sameBooleanRecord(left: Record<string, boolean>, right: Record<string, boolean>) {
   const leftKeys = Object.keys(left)
@@ -256,14 +154,6 @@ function sameBooleanRecord(left: Record<string, boolean>, right: Record<string, 
   }
 
   return leftKeys.every((key) => left[key] === right[key])
-}
-
-function canUseMeshImportReviewWorker() {
-  return typeof Worker !== 'undefined' && typeof URL !== 'undefined'
-}
-
-function createMeshImportReviewWorker() {
-  return new Worker(new URL('../domain/modeling/mesh-import-review.worker.ts', import.meta.url), { type: 'module' })
 }
 
 export function CadWorkbench() {
@@ -301,12 +191,6 @@ export function CadWorkbench() {
     useState<WorkbenchNotificationModel | null>(null)
   const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
   const [viewportFitRequestId, setViewportFitRequestId] = useState(0)
-  const [stepImportFlow, setStepImportFlow] = useState<StepImportFlowState>({ kind: 'idle' })
-  const [meshImportFlow, setMeshImportFlow] = useState<MeshImportFlowState>({ kind: 'idle' })
-  const [meshImportProgress, setMeshImportProgress] = useState<MeshImportProgressState | null>(null)
-  const [stepImportProgress, setStepImportProgress] = useState<StepImportProgressState | null>(null)
-  const [stepImportMaterializationStatus, setStepImportMaterializationStatus] =
-    useState<StepImportMaterializationStatus | null>(() => modelingService.getStepImportMaterializationStatus())
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
@@ -318,16 +202,10 @@ export function CadWorkbench() {
   const undoStackRef = useRef(undoStack)
   const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
-  const stepImportMaterializationStatusRef = useRef(stepImportMaterializationStatus)
-  const partImportInputRef = useRef<HTMLInputElement | null>(null)
-  const meshImportFileReaderRef = useRef<FileReader | null>(null)
-  const meshImportReviewWorkerRef = useRef<Worker | null>(null)
-  const meshImportTaskSequenceRef = useRef(0)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
   // TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
   const cloudSaveEnabled = false
   const showBrowserStorageWarning = !localFileSyncEnabled && !cloudSaveEnabled
-  const partImportEnabled = isPartImportEnabled()
 
   const showWorkbenchInfo = useCallback((message: string) => {
     setWorkbenchStatusNotification({
@@ -345,119 +223,12 @@ export function CadWorkbench() {
     })
   }, [])
 
-  const openPartImportPicker = useCallback(() => {
-    partImportInputRef.current?.click()
-  }, [])
-
-  const cancelMeshImportPreparation = useCallback(() => {
-    meshImportTaskSequenceRef.current += 1
-    meshImportFileReaderRef.current?.abort()
-    meshImportFileReaderRef.current = null
-    meshImportReviewWorkerRef.current?.terminate()
-    meshImportReviewWorkerRef.current = null
-    setMeshImportProgress(null)
-  }, [])
-
-  const readMeshImportFileBytes = useCallback((file: File) =>
-    new Promise<Uint8Array>((resolve, reject) => {
-      const reader = new FileReader()
-      meshImportFileReaderRef.current = reader
-      const cleanup = () => {
-        if (meshImportFileReaderRef.current === reader) {
-          meshImportFileReaderRef.current = null
-        }
-      }
-
-      reader.addEventListener('load', () => {
-        cleanup()
-        if (!(reader.result instanceof ArrayBuffer)) {
-          reject(new Error('Mesh file could not be read.'))
-          return
-        }
-
-        resolve(new Uint8Array(reader.result))
-      })
-      reader.addEventListener('error', () => {
-        cleanup()
-        reject(reader.error ?? new Error('Mesh file could not be read.'))
-      })
-      reader.addEventListener('abort', () => {
-        cleanup()
-        reject(new Error('Mesh import cancelled.'))
-      })
-      reader.readAsArrayBuffer(file)
-    }), [])
-
-  const reviewMeshImportWithWorker = useCallback((
-    fileName: string,
-    bytes: Uint8Array,
-    taskSequence: number,
-  ) => {
-    if (!canUseMeshImportReviewWorker()) {
-      return Promise.reject(new Error('Mesh import worker is not available.'))
-    }
-
-    meshImportReviewWorkerRef.current?.terminate()
-    const worker = createMeshImportReviewWorker()
-    meshImportReviewWorkerRef.current = worker
-    const requestId = `request_mesh_import_review_${taskSequence}` as RequestId
-    const request: MeshImportReviewWorkerRequest = {
-      kind: 'reviewMeshImport',
-      requestId,
-      fileName,
-      bytes,
-    }
-
-    return new Promise<Extract<MeshImportReviewWorkerResponse, { kind: 'completed' }>['result']>((resolve, reject) => {
-      const cleanup = () => {
-        worker.removeEventListener('message', handleMessage)
-        if (meshImportReviewWorkerRef.current === worker) {
-          meshImportReviewWorkerRef.current = null
-        }
-      }
-      const handleMessage = (event: MessageEvent<MeshImportReviewWorkerResponse>) => {
-        const message = event.data
-        if (message.requestId !== requestId || meshImportTaskSequenceRef.current !== taskSequence) {
-          return
-        }
-
-        if (message.kind === 'progress') {
-          setMeshImportProgress({
-            fileName,
-            message: message.message,
-            progress: message.progress,
-            canCancel: true,
-          })
-          return
-        }
-
-        cleanup()
-        worker.terminate()
-
-        if (message.kind === 'failure') {
-          reject(new Error(message.message))
-          return
-        }
-
-        resolve(message.result)
-      }
-
-      worker.addEventListener('message', handleMessage)
-      worker.postMessage(request, [bytes.buffer as ArrayBuffer])
-    })
-  }, [])
-
   const applyLoadedSnapshot = useCallback((nextSnapshot: DocumentSnapshot) => {
     snapshotRef.current = nextSnapshot
     dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })
   }, [dispatch])
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
-
-  useEffect(() => () => {
-    meshImportFileReaderRef.current?.abort()
-    meshImportReviewWorkerRef.current?.terminate()
-  }, [])
 
   useEffect(() => {
     snapshotRef.current = snapshot
@@ -474,10 +245,6 @@ export function CadWorkbench() {
   useEffect(() => {
     sketchSessionRef.current = sketchSession
   }, [sketchSession])
-
-  useEffect(() => {
-    stepImportMaterializationStatusRef.current = stepImportMaterializationStatus
-  }, [stepImportMaterializationStatus])
 
   useEffect(() => {
     let disposed = false
@@ -499,37 +266,6 @@ export function CadWorkbench() {
     }
   }, [modelingService])
 
-  useEffect(() => {
-    return modelingService.subscribeToStepImportMaterializationStatus((status) => {
-      const previous = stepImportMaterializationStatusRef.current
-      stepImportMaterializationStatusRef.current = status
-      setStepImportMaterializationStatus(status)
-
-      if (!hasStepImportMaterializationTerminalTransition(previous, status)) {
-        return
-      }
-
-      void modelingService.getCurrentDocumentSnapshot()
-        .then((nextSnapshot) => {
-          applyLoadedSnapshot(nextSnapshot)
-        })
-        .catch((error: unknown) => {
-          showWorkbenchError('Document refresh failed.')
-          errorReporter.report(
-            createAppError({
-              code: 'workbench/action-failed',
-              message: 'Document refresh failed.',
-              context: errorContext('reason', error instanceof Error ? error.message : 'Unknown failure'),
-              cause: error,
-            }),
-            {
-              source: 'workbench.file.refreshStepMaterialization',
-              visibility: 'user',
-            },
-          )
-        })
-    })
-  }, [applyLoadedSnapshot, errorReporter, modelingService, showWorkbenchError])
 
   const visibleObjectTargetKeys = useMemo(
     () => new Set((snapshot?.presentation.objects ?? []).map((item) => getPrimitiveRefKey(item.target))),
@@ -1738,119 +1474,7 @@ export function CadWorkbench() {
     }
   }
 
-  const createStepImportLabel = (fileName: string) => {
-    const baseName = fileName.split(/[\\/]/).pop()?.replace(/\.(?:step|stp)$/i, '').trim()
-    return baseName && baseName.length > 0 ? baseName : 'STEP Import'
-  }
-
-  const createMeshImportLabel = (fileName: string) => {
-    const baseName = fileName.split(/[\\/]/).pop()?.replace(/\.(?:stl|3mf)$/i, '').trim()
-    return baseName && baseName.length > 0 ? baseName : 'Mesh Import'
-  }
-
-  const getImportFileName = (file: File) => {
-    const fileWithRelativePath = file as File & { webkitRelativePath?: string }
-    return fileWithRelativePath.webkitRelativePath?.trim() || file.name
-  }
-
-  const prepareStepImportFiles = async (files: readonly File[]) => {
-    const label = createStepImportLabel(files[0] ? getImportFileName(files[0]) : 'STEP Import')
-    setStepImportFlow({ kind: 'preparing', fileNames: files.map(getImportFileName), label })
-    const stepFiles = await Promise.all(files.map(async (file) => ({
-      fileName: getImportFileName(file),
-      bytes: new Uint8Array(await file.arrayBuffer()),
-    })))
-    const review = await modelingService.prepareStepImportReview({ files: stepFiles })
-    setStepImportFlow({
-      kind: 'review',
-      files: stepFiles,
-      review,
-      selectedSolidKeys: review.solids.filter((solid) => solid.importable).map((solid) => solid.solidKey),
-      label,
-    })
-  }
-
   const handleImportDocument = async (file: File) => {
-    if (/\.(?:step|stp)$/i.test(file.name)) {
-      try {
-        await prepareStepImportFiles([file])
-      } catch (error) {
-        reportDocumentFileActionFailure('workbench.file.prepare-step-import', 'STEP import failed.', error)
-      }
-      return
-    }
-
-    if (/\.(?:stl|3mf)$/i.test(file.name)) {
-      const taskSequence = meshImportTaskSequenceRef.current + 1
-      meshImportTaskSequenceRef.current = taskSequence
-      meshImportReviewWorkerRef.current?.terminate()
-      meshImportReviewWorkerRef.current = null
-      setMeshImportFlow({ kind: 'idle' })
-      setMeshImportProgress({
-        fileName: file.name,
-        message: 'Reading mesh file',
-        progress: 8,
-        canCancel: true,
-      })
-      try {
-        if (/\.stl$/i.test(file.name)) {
-          const headerBytes = new Uint8Array(await file.slice(0, 84).arrayBuffer())
-          if (meshImportTaskSequenceRef.current !== taskSequence) {
-            return
-          }
-
-          const triangleCount = getBinaryStlTriangleCount({ headerBytes, byteLength: file.size })
-          const limitEvaluation = triangleCount === null
-            ? null
-            : createMeshSizeLimitEvaluation({ triangleCount })
-          if (limitEvaluation) {
-            setMeshImportProgress(null)
-            setMeshImportFlow({
-              kind: 'review',
-              fileName: file.name,
-              assetInput: null,
-              label: createMeshImportLabel(file.name),
-              warningAccepted: false,
-              reconstruction: limitEvaluation,
-            })
-            return
-          }
-        }
-
-        setMeshImportProgress({
-          fileName: file.name,
-          message: 'Loading mesh bytes',
-          progress: 15,
-          canCancel: true,
-        })
-        const bytes = await readMeshImportFileBytes(file)
-        if (meshImportTaskSequenceRef.current !== taskSequence) {
-          return
-        }
-
-        const review = await reviewMeshImportWithWorker(file.name, bytes, taskSequence)
-        if (meshImportTaskSequenceRef.current !== taskSequence) {
-          return
-        }
-
-        setMeshImportProgress(null)
-        setMeshImportFlow({
-          kind: 'review',
-          fileName: file.name,
-          assetInput: review.assetInput,
-          label: createMeshImportLabel(file.name),
-          warningAccepted: false,
-          reconstruction: review.reconstruction,
-        })
-      } catch (error) {
-        if (meshImportTaskSequenceRef.current === taskSequence) {
-          setMeshImportProgress(null)
-          showWorkbenchError(error instanceof Error ? error.message : 'Mesh import failed.')
-        }
-      }
-      return
-    }
-
     let payload: unknown
 
     try {
@@ -1873,166 +1497,6 @@ export function CadWorkbench() {
       refreshAfterDocumentFileAction(`Imported ${file.name}.`)
     } catch (error) {
       reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
-    }
-  }
-
-  const handlePartImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.currentTarget.files ?? [])
-    event.currentTarget.value = ''
-
-    if (files.length === 0) {
-      return
-    }
-
-    const stepFiles = files.filter((file) => /\.(?:step|stp)$/i.test(getImportFileName(file)))
-    const meshFiles = files.filter((file) => /\.(?:stl|3mf)$/i.test(getImportFileName(file)))
-
-    if (stepFiles.length === files.length) {
-      void prepareStepImportFiles(stepFiles).catch((error) => {
-        reportDocumentFileActionFailure('workbench.file.prepare-step-import', 'STEP import failed.', error)
-      })
-      return
-    }
-
-    if (files.length === 1 && meshFiles.length === 1) {
-      void handleImportDocument(files[0]!)
-      return
-    }
-
-    showWorkbenchError('Import failed. Select STEP files together, or one STL/3MF mesh file.')
-  }
-
-  useEffect(() => {
-    if (!partImportEnabled) {
-      return
-    }
-
-    return actionBus.subscribeToTool('importPart', openPartImportPicker)
-  }, [actionBus, openPartImportPicker, partImportEnabled])
-
-  const handleStepImportCancel = () => {
-    setStepImportFlow({ kind: 'idle' })
-  }
-
-  const handleStepImportSolidToggle = (solidKey: string, checked: boolean) => {
-    setStepImportFlow((current) => {
-      if (current.kind !== 'review') {
-        return current
-      }
-
-      const selected = new Set(current.selectedSolidKeys)
-      if (checked) {
-        selected.add(solidKey)
-      } else {
-        selected.delete(solidKey)
-      }
-
-      return { ...current, selectedSolidKeys: [...selected] }
-    })
-  }
-
-  const handleStepImportSelectAll = (checked: boolean) => {
-    setStepImportFlow((current) =>
-      current.kind === 'review'
-        ? {
-            ...current,
-            selectedSolidKeys: checked
-              ? current.review.solids.filter((solid) => solid.importable).map((solid) => solid.solidKey)
-              : [],
-          }
-        : current,
-    )
-  }
-
-  const handleMeshImportCancel = () => {
-    cancelMeshImportPreparation()
-    setMeshImportFlow({ kind: 'idle' })
-  }
-
-  const handleMeshImportWarningAcceptedChange = (accepted: boolean) => {
-    setMeshImportFlow((current) =>
-      current.kind === 'review'
-        ? { ...current, warningAccepted: accepted }
-        : current,
-    )
-  }
-
-  const handleStepImportAccept = async () => {
-    if (stepImportFlow.kind !== 'review') {
-      return
-    }
-
-    const review = stepImportFlow
-    setStepImportFlow({ kind: 'idle' })
-    setStepImportProgress({
-      fileName: review.review.rootFileName,
-      message: 'Baking Cadara geometry',
-      progress: 72,
-    })
-    try {
-      const result = await modelingService.commitPreparedStepImport({
-        files: review.files,
-        review: review.review,
-        selectedSolidKeys: review.selectedSolidKeys,
-      })
-      if (!result.ok) {
-        setStepImportFlow(review)
-        setStepImportProgress(null)
-        showWorkbenchError(result.diagnostics[0]?.message ?? 'STEP import failed.')
-        return
-      }
-
-      setStepImportProgress({
-        fileName: review.review.rootFileName,
-        message: 'Refreshing imported solids',
-        progress: 94,
-      })
-      await refreshAfterDocumentFileAction(`Imported ${review.review.rootFileName}.`, { fitView: true })
-      setStepImportProgress(null)
-    } catch (error) {
-      setStepImportFlow(review)
-      setStepImportProgress(null)
-      reportDocumentFileActionFailure('workbench.file.import-step', 'STEP import failed.', error)
-    }
-  }
-
-  const handleMeshImportAccept = async () => {
-    if (meshImportFlow.kind !== 'review' || !meshImportFlow.warningAccepted || !meshImportFlow.assetInput) {
-      return
-    }
-
-    const review = meshImportFlow
-    const assetInput = meshImportFlow.assetInput
-    setMeshImportFlow({ kind: 'idle' })
-    setMeshImportProgress({
-      fileName: review.fileName,
-      message: 'Committing prepared mesh',
-      progress: 92,
-      canCancel: false,
-    })
-    try {
-      const result = await modelingService.importPreparedMeshFile({
-        fileName: review.fileName,
-        assetInput,
-      })
-      if (!result.ok) {
-        setMeshImportFlow(review)
-        setMeshImportProgress(null)
-        showWorkbenchError(result.diagnostics[0]?.message ?? 'Mesh import failed.')
-        return
-      }
-
-      setMeshImportProgress(null)
-      setExplicitHiddenTargetKeys({})
-      setExplicitlyShownAutoHiddenTargetKeys({})
-      setObjectLabelOverrides({})
-      setUndoStack([])
-      setRedoStack([])
-      showWorkbenchInfo(`Imported ${review.fileName}. Mesh rebuild will run when the viewport refreshes.`)
-    } catch (error) {
-      setMeshImportFlow(review)
-      setMeshImportProgress(null)
-      reportDocumentFileActionFailure('workbench.file.import-mesh', 'Mesh import failed.', error)
     }
   }
 
@@ -2147,43 +1611,13 @@ export function CadWorkbench() {
     }
   }
 
-  const stepReview = stepImportFlow.kind === 'review' ? stepImportFlow : null
-  const stepImportableSolids = stepReview?.review.solids.filter((solid) => solid.importable) ?? []
-  const selectedStepSolidKeys = new Set(stepReview?.selectedSolidKeys ?? [])
-  const selectedStepSolidCount = stepImportableSolids.filter((solid) => selectedStepSolidKeys.has(solid.solidKey)).length
-  const allStepSolidsSelected = stepImportableSolids.length > 0 && selectedStepSolidCount === stepImportableSolids.length
-  const someStepSolidsSelected = selectedStepSolidCount > 0 && selectedStepSolidCount < stepImportableSolids.length
-  const stepImportDisabled = stepReview
-    ? selectedStepSolidCount === 0 || stepReview.review.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
-    : true
-  const activeImportProgress = stepImportProgress
-    ? {
-        kind: 'step' as const,
-        title: 'Importing STEP',
-        fileName: stepImportProgress.fileName,
-        message: stepImportProgress.message,
-        progress: stepImportProgress.progress,
-        canCancel: false,
-      }
-    : meshImportProgress
-      ? {
-          kind: 'mesh' as const,
-          title: 'Importing mesh',
-          fileName: meshImportProgress.fileName,
-        message: meshImportProgress.message,
-        progress: meshImportProgress.progress,
-        canCancel: meshImportProgress.canCancel,
-      }
-      : null
-  const activeStepImportMaterializationFeatures = stepImportMaterializationStatus?.features ?? []
-
   return (
     <ShortcutProvider activeScopes={shortcutActiveScopes} commandHandlers={shortcutCommandHandlers}>
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[var(--cad-background)] text-[var(--cad-foreground)]">
       <WorkspaceToolbar
         historyAvailability={toolbarHistoryAvailability}
         showBrowserStorageWarning={showBrowserStorageWarning}
-        showPartImport={partImportEnabled}
+        showPartImport={false}
         onNewDocument={handleNewDocument}
         onOpenLocalFile={handleOpenLocalFile}
         onSaveLocalFile={handleSaveLocalFile}
@@ -2192,17 +1626,6 @@ export function CadWorkbench() {
         onReportBug={handleReportBug}
         onDownloadBugReportState={handleDownloadBugReportState}
       />
-      {partImportEnabled ? (
-        <input
-          ref={partImportInputRef}
-          aria-label="Import part file"
-          type="file"
-          accept={PART_IMPORT_FILE_ACCEPT}
-          multiple
-          hidden
-          onChange={handlePartImportFileChange}
-        />
-      ) : null}
       <div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar
@@ -2327,278 +1750,6 @@ export function CadWorkbench() {
                   onCancel={cancelFeature}
                 />
               </WorkbenchInspectorOverlay>
-            ) : null}
-            <Modal
-              centered
-              opened={stepImportFlow.kind !== 'idle'}
-              onClose={stepImportFlow.kind === 'preparing' ? () => undefined : handleStepImportCancel}
-              title="Import STEP"
-              size="lg"
-            >
-              {stepImportFlow.kind !== 'idle' ? (
-                <Stack gap="sm">
-                  <Text size="sm" fw={600}>{stepImportFlow.label}</Text>
-                  {stepImportFlow.kind === 'preparing' ? (
-                    <Group gap="xs">
-                      <Loader color="gray" size="sm" />
-                      <Text size="sm">Preparing review</Text>
-                    </Group>
-                  ) : null}
-                  {stepImportFlow.kind === 'review' ? (
-                    <>
-                      <Group gap="xs">
-                        <Text size="xs" c="dimmed">{stepImportFlow.review.rootFileName}</Text>
-                        <Badge size="xs" variant="outline">{stepImportFlow.files.length} file{stepImportFlow.files.length === 1 ? '' : 's'}</Badge>
-                      </Group>
-                      {stepImportFlow.review.diagnostics.length > 0 ? (
-                        <Stack gap={6}>
-                          {stepImportFlow.review.diagnostics.map((diagnostic) => (
-                            <Alert
-                              key={`${diagnostic.code}-${diagnostic.message}`}
-                              color={diagnostic.severity === 'error' ? 'red' : 'yellow'}
-                              variant="light"
-                              py={6}
-                            >
-                              <Text size="xs">{diagnostic.message}</Text>
-                            </Alert>
-                          ))}
-                        </Stack>
-                      ) : null}
-                      <Stack gap={6}>
-                        <Checkbox
-                          checked={allStepSolidsSelected}
-                          indeterminate={someStepSolidsSelected}
-                          disabled={stepImportableSolids.length === 0}
-                          onChange={(event) => handleStepImportSelectAll(event.currentTarget.checked)}
-                          label={`${selectedStepSolidCount}/${stepImportableSolids.length} solids selected`}
-                        />
-                        <ScrollArea.Autosize mah={260} type="auto">
-                          <Stack gap={4}>
-                            {stepImportFlow.review.solids.map((solid) => (
-                              <Group
-                                key={solid.solidKey}
-                                justify="space-between"
-                                gap="sm"
-                                className="rounded border border-[var(--workbench-shell-border)] px-2 py-1"
-                              >
-                                <Checkbox
-                                  checked={selectedStepSolidKeys.has(solid.solidKey)}
-                                  disabled={!solid.importable}
-                                  onChange={(event) => handleStepImportSolidToggle(solid.solidKey, event.currentTarget.checked)}
-                                  label={solid.label}
-                                />
-                                <Text size="xs" c="dimmed" truncate="end" className="max-w-[220px]">
-                                  {solid.sourceFileName}
-                                </Text>
-                              </Group>
-                            ))}
-                          </Stack>
-                        </ScrollArea.Autosize>
-                      </Stack>
-                      {selectedStepSolidCount === 0 ? (
-                        <Text size="xs" c="red">At least one solid must be selected.</Text>
-                      ) : null}
-                    </>
-                  ) : null}
-                  <Group justify="flex-end">
-                    <Button variant="subtle" color="gray" onClick={handleStepImportCancel}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleStepImportAccept} disabled={stepImportFlow.kind !== 'review' || stepImportDisabled}>
-                      Import
-                    </Button>
-                  </Group>
-                </Stack>
-              ) : null}
-            </Modal>
-            <Modal
-              centered
-              opened={meshImportFlow.kind !== 'idle'}
-              onClose={handleMeshImportCancel}
-              title={(
-                <Group gap="xs">
-                  <Text span fw={600}>Import Mesh</Text>
-                  <Badge size="xs" color="yellow" variant="light">Probably Broken</Badge>
-                </Group>
-              )}
-            >
-              {meshImportFlow.kind !== 'idle' ? (
-                <Stack gap="sm">
-                  <Text size="sm" fw={600}>{meshImportFlow.label}</Text>
-                  <Text size="xs" c="dimmed">{meshImportFlow.fileName}</Text>
-                  <Stack gap={4}>
-                    <Text size="xs">Source: STL or 3MF triangles</Text>
-                    <Text size="xs">
-                      Result: {formatMeshReconstructionClassification(meshImportFlow.reconstruction.resultClassification)}
-                    </Text>
-                    <Text size="xs">Source stored: false</Text>
-                    <Text size="xs">
-                      Settings: {meshImportFlow.reconstruction.settings.qualityPreset};
-                      tolerance {meshImportFlow.reconstruction.settings.linearTolerance};
-                      mesh body fallback {meshImportFlow.reconstruction.settings.meshBodyFallback}
-                    </Text>
-                    <Text size="xs">
-                      Quality: {meshImportFlow.reconstruction.qualityMetrics.triangleCount} triangles;
-                      {` ${meshImportFlow.reconstruction.qualityMetrics.planarRegionCount}`} planar regions;
-                      {` ${meshImportFlow.reconstruction.qualityMetrics.cylindricalRegionCount}`} cylindrical regions;
-                      confidence {Math.round(meshImportFlow.reconstruction.qualityMetrics.analyticConfidence * 100)}%
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      Faceted fallback is currently capped at {meshImportFlow.reconstruction.settings.maxFacetedTriangles.toLocaleString()} triangles because persistent mesh bodies are disabled.
-                    </Text>
-                    {meshImportFlow.reconstruction.resultClassification === 'facetedFallback' ? (
-                      <Text size="xs" c="yellow">
-                        The saved result will be faceted baked geometry. Re-import the original file to try different reconstruction settings later.
-                      </Text>
-                    ) : null}
-                    {meshImportFlow.reconstruction.resultClassification === 'rejected'
-                    || meshImportFlow.reconstruction.resultClassification === 'meshBodyException' ? (
-                      <Text size="xs" c="red">
-                        {meshImportFlow.reconstruction.rejectionReason ?? 'Mesh reconstruction rejected this source.'}
-                      </Text>
-                    ) : null}
-                  </Stack>
-                  <Checkbox
-                    checked={meshImportFlow.warningAccepted}
-                    onChange={(event) => handleMeshImportWarningAcceptedChange(event.currentTarget.checked)}
-                    label={getMeshImportWarningLabel(meshImportFlow.reconstruction)}
-                  />
-                  <Group justify="flex-end">
-                    <Button variant="subtle" color="gray" onClick={handleMeshImportCancel}>
-                      Cancel
-                    </Button>
-                    <Button
-                      onClick={handleMeshImportAccept}
-                      disabled={
-                        !meshImportFlow.warningAccepted
-                        || !meshImportFlow.assetInput
-                        || meshImportFlow.reconstruction.resultClassification === 'rejected'
-                        || meshImportFlow.reconstruction.resultClassification === 'meshBodyException'
-                      }
-                    >
-                      Import
-                    </Button>
-                  </Group>
-                </Stack>
-              ) : null}
-            </Modal>
-            {activeImportProgress ? (
-              <Paper
-                role="status"
-                aria-live="polite"
-                className="fixed bottom-4 right-4 z-40 w-[min(360px,calc(100vw-32px))] border p-3 text-xs shadow-[var(--cad-panel-shadow)]"
-                style={{
-                  backgroundColor: 'var(--workbench-notification-surface)',
-                  borderColor: 'var(--workbench-shell-border-strong)',
-                  color: 'var(--workbench-notification-text)',
-                }}
-                data-mesh-import-progress={activeImportProgress.kind === 'mesh' ? true : undefined}
-                data-step-import-progress={activeImportProgress.kind === 'step' ? true : undefined}
-              >
-                <Stack gap={8}>
-                  <Group justify="space-between" align="flex-start" gap="sm">
-                    <Stack gap={2} className="min-w-0">
-                      <Text size="xs" fw={600} truncate="end" style={{ color: 'var(--workbench-notification-info-title)' }}>
-                        {activeImportProgress.title}
-                      </Text>
-                      <Text size="xs" truncate="end" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                        {activeImportProgress.fileName}
-                      </Text>
-                    </Stack>
-                    {activeImportProgress.canCancel ? (
-                      <Button size="xs" variant="default" onClick={cancelMeshImportPreparation}>
-                        Cancel
-                      </Button>
-                    ) : null}
-                  </Group>
-                  <Progress
-                    value={activeImportProgress.progress}
-                    size="sm"
-                    color="gray"
-                    aria-label={activeImportProgress.kind === 'step' ? 'STEP import progress' : 'Mesh import progress'}
-                  />
-                  <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                    {activeImportProgress.message}
-                  </Text>
-                </Stack>
-              </Paper>
-            ) : null}
-            {activeStepImportMaterializationFeatures.length > 0 ? (
-              <Paper
-                role="status"
-                aria-live="polite"
-                className="fixed right-4 z-40 w-[min(400px,calc(100vw-32px))] border p-3 text-xs shadow-[var(--cad-panel-shadow)]"
-                style={{
-                  bottom: activeImportProgress ? 128 : 16,
-                  backgroundColor: 'var(--workbench-notification-surface)',
-                  borderColor: 'var(--workbench-shell-border-strong)',
-                  color: 'var(--workbench-notification-text)',
-                }}
-                data-step-import-materialization-status
-              >
-                <Stack gap={8}>
-                  <Group justify="space-between" align="flex-start" gap="sm">
-                    <Stack gap={2} className="min-w-0">
-                      <Text size="xs" fw={600} style={{ color: 'var(--workbench-notification-info-title)' }}>
-                        STEP materialization
-                      </Text>
-                      <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                        Persisted faceted presentation is visible while OCC restore continues separately.
-                      </Text>
-                    </Stack>
-                    <Badge
-                      size="xs"
-                      color={activeStepImportMaterializationFeatures.some((feature) => feature.state === 'failed')
-                        ? 'red'
-                        : activeStepImportMaterializationFeatures.some((feature) => feature.state === 'degraded')
-                          ? 'yellow'
-                          : 'blue'}
-                      variant="light"
-                    >
-                      {activeStepImportMaterializationFeatures.some((feature) => feature.state === 'failed')
-                        ? 'Failed'
-                        : activeStepImportMaterializationFeatures.some((feature) => feature.state === 'degraded')
-                          ? 'Degraded'
-                          : 'Pending'}
-                    </Badge>
-                  </Group>
-                  {activeStepImportMaterializationFeatures.map((feature) => (
-                    <Stack key={feature.featureId} gap={4}>
-                      <Group justify="space-between" align="flex-start" gap="sm">
-                        <Stack gap={1} className="min-w-0">
-                          <Text size="xs" fw={600} truncate="end">
-                            {feature.featureLabel}
-                          </Text>
-                          <Text size="xs" truncate="end" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                            {feature.rootFileName}
-                          </Text>
-                        </Stack>
-                        <Badge
-                          size="xs"
-                          color={feature.state === 'failed' ? 'red' : feature.state === 'degraded' ? 'yellow' : 'blue'}
-                          variant="light"
-                        >
-                          {feature.state}
-                        </Badge>
-                      </Group>
-                      <Progress
-                        value={Math.min((feature.elapsedMs / feature.timeoutMs) * 100, 100)}
-                        size="sm"
-                        color={feature.state === 'failed' ? 'red' : feature.state === 'degraded' ? 'yellow' : 'blue'}
-                        aria-label="STEP materialization background progress"
-                      />
-                      <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                        {feature.message}
-                      </Text>
-                      {formatStepImportStageDurations(feature) ? (
-                        <Text size="xs" style={{ color: 'var(--workbench-notification-text-muted)' }}>
-                          {formatStepImportStageDurations(feature)}
-                        </Text>
-                      ) : null}
-                    </Stack>
-                  ))}
-                </Stack>
-              </Paper>
             ) : null}
             <DocumentExportModal
               opened={objectExportModal !== null}

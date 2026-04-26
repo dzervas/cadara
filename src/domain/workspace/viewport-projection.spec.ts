@@ -41,7 +41,7 @@ test('src/domain/workspace/viewport-projection.spec.ts', () => {
       id: 'renderable_body_face',
       label: 'Imported face',
       ownerBodyId: 'body_imported',
-      ownerFeatureId: 'feature_stepImport-1',
+      ownerFeatureId: 'feature_extrude-1',
       binding: {
         pickId: 'pick_body_face',
         pickPriority: 20,

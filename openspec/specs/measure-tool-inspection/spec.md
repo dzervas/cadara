@@ -1,4 +1,9 @@
-## ADDED Requirements
+# measure-tool-inspection Specification
+
+## Purpose
+Define the transient Measure tool workflow, its selection-driven readouts, and the retained viewport feedback used for temporary geometric inspection without durable document edits.
+
+## Requirements
 
 ### Requirement: Measure tool SHALL run as a transient measurement-selection workflow
 The system SHALL activate `Measure` as a part-mode temporary inspect workflow that accepts measurable geometry targets, keeps the results transient, and derives its output from the current active measurement selection instead of durable document edits.

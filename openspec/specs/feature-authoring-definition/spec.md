@@ -131,22 +131,6 @@ Combine SHALL be implemented as a registered feature authoring definition that o
 - **WHEN** preview or commit needs a Combine feature definition
 - **THEN** the Combine authoring definition translates the draft into the public typed modeling contract without importing kernel-specific modules
 
-### Requirement: Feature authoring SHALL define STEP import settings
-Feature authoring SHALL expose a typed STEP import definition containing the STEP asset reference and resolved import settings.
-
-#### Scenario: Build STEP import definition
-- **WHEN** the user accepts a STEP import
-- **THEN** the authoring layer builds a feature definition with file asset id, unit/scale decision, orientation, placement transform, and label
-- **AND** the definition does not embed STEP bytes directly
-
-### Requirement: Feature authoring SHALL represent mesh import provenance
-Feature authoring SHALL record mesh import provenance and baked asset references without embedding source mesh data.
-
-#### Scenario: Build mesh import definition
-- **WHEN** a mesh import is accepted
-- **THEN** the feature definition includes baked asset id, source format, original filename, source hash, resolved scale/orientation settings, and `sourceStored: false`
-- **AND** the definition excludes raw mesh bytes and triangle arrays
-
 ### Requirement: Mesh reconstruction UI SHALL expose quality diagnostics and settings
 Feature authoring for mesh import SHALL expose reconstruction settings and result diagnostics needed to make an informed commit decision.
 

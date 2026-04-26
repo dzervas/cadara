@@ -64,16 +64,6 @@ export type RevolveFeatureSchemaVersion = 'feature-type/revolve/v1alpha1'
 export type ShellFeatureSchemaVersion = 'feature-type/shell/v1alpha1'
 
 /**
- * Versioned schema for STEP import feature definitions.
- */
-export type StepImportFeatureSchemaVersion = 'feature-type/step-import/v1alpha1'
-
-/**
- * Versioned schema for baked mesh import feature definitions.
- */
-export type MeshImportFeatureSchemaVersion = 'feature-type/mesh-import/v1alpha1'
-
-/**
  * Closed union of all feature-definition schema versions.
  */
 export type FeatureTypeVersion =
@@ -82,8 +72,6 @@ export type FeatureTypeVersion =
   | PlaneFeatureSchemaVersion
   | RevolveFeatureSchemaVersion
   | ShellFeatureSchemaVersion
-  | StepImportFeatureSchemaVersion
-  | MeshImportFeatureSchemaVersion
 
 /**
  * Legacy generic feature-definition schema version retained for transitional callers.
@@ -155,16 +143,6 @@ export const REVOLVE_FEATURE_SCHEMA_VERSION: RevolveFeatureSchemaVersion = 'feat
  * Current shell feature schema version literal.
  */
 export const SHELL_FEATURE_SCHEMA_VERSION: ShellFeatureSchemaVersion = 'feature-type/shell/v1alpha1'
-
-/**
- * Current STEP import feature schema version literal.
- */
-export const STEP_IMPORT_FEATURE_SCHEMA_VERSION: StepImportFeatureSchemaVersion = 'feature-type/step-import/v1alpha1'
-
-/**
- * Current baked mesh import feature schema version literal.
- */
-export const MESH_IMPORT_FEATURE_SCHEMA_VERSION: MeshImportFeatureSchemaVersion = 'feature-type/mesh-import/v1alpha1'
 
 /**
  * Legacy alias retained for older callers that still import one generic
