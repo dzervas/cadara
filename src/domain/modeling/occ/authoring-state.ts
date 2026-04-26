@@ -5,6 +5,7 @@ import {
   type GeometryAssetManifest,
   type GeometryAssetRecord,
 } from '@/contracts/modeling/geometry-assets'
+import type { EmbeddedBinaryAssetRecord } from '@/contracts/modeling/embedded-binary-assets'
 import type { DocumentFeatureCursor, DocumentVariableRecord, FeatureDefinition, ModelingDiagnostic, SketchSnapshotRecord, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { BodyId, ConstructionId, FeatureId, SketchId } from '@/contracts/shared/ids'
@@ -46,6 +47,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   features: readonly OccAuthoringFeatureRecord[]
   assets: GeometryAssetManifest
   assetBlobs: ReadonlyMap<GeometryAssetHash, Uint8Array>
+  embeddedBinaryAssets: readonly EmbeddedBinaryAssetRecord[]
   historyOrder: readonly DocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   diagnostics: readonly ModelingDiagnostic[]
@@ -159,6 +161,7 @@ export function createOccAuthoringState(
     features?: readonly OccAuthoringFeatureRecord[]
     assets?: GeometryAssetManifest
     assetBlobs?: ReadonlyMap<GeometryAssetHash, Uint8Array>
+    embeddedBinaryAssets?: readonly EmbeddedBinaryAssetRecord[]
     historyOrder?: readonly DocumentHistoryOrderEntry[]
     cursor?: DocumentFeatureCursor
     constructions?: OccFeatureExecutionContext['constructions']
@@ -192,6 +195,7 @@ export function createOccAuthoringState(
   const features = [...(input.features ?? [])]
   const assets = structuredClone(input.assets ?? createEmptyGeometryAssetManifest())
   const assetBlobs = new Map(input.assetBlobs ?? [])
+  const embeddedBinaryAssets = structuredClone(input.embeddedBinaryAssets ?? [])
   const sketches = input.sketches ?? []
   const historyOrder = input.historyOrder ?? [
     ...sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
@@ -225,6 +229,7 @@ export function createOccAuthoringState(
     features,
     assets,
     assetBlobs,
+    embeddedBinaryAssets,
     historyOrder,
     cursor,
     diagnostics: [...(input.diagnostics ?? [])],

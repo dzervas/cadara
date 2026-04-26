@@ -90,6 +90,7 @@ import {
   type AuthoredModelDocument as RepositoryAuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
 import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
+import type { EmbeddedBinaryAssetRecord } from '@/contracts/modeling/embedded-binary-assets'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, getAdvancedParticipant, isAdvancedSolidFeatureKind } from '@/contracts/modeling/advanced-solid'
@@ -2867,6 +2868,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   private currentRevisionId: RevisionId = REVISION_ID
   private revisionSequence = 1
   private authoredAssets = createEmptyGeometryAssetManifest()
+  private authoredEmbeddedBinaryAssets: EmbeddedBinaryAssetRecord[] = []
 
   constructor(options?: { solverAdapter?: SketchSolverAdapter }) {
     this.solverAdapter = options?.solverAdapter ?? new MockSketchSolverAdapter()
@@ -2890,6 +2892,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     return {
       ...createAuthoredModelDocumentFromSnapshot(snapshot),
       assets: structuredClone(this.authoredAssets),
+      embeddedBinaryAssets: structuredClone(this.authoredEmbeddedBinaryAssets),
     }
   }
 
@@ -2899,6 +2902,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   ): Promise<void> {
     const snapshot = structuredClone(await this.getSnapshot())
     this.authoredAssets = structuredClone(document.assets)
+    this.authoredEmbeddedBinaryAssets = structuredClone(document.embeddedBinaryAssets)
     const featureTargets = new Map(snapshot.document.features.map((feature) => [feature.featureId, feature.producedTargets]))
     const featureById = new Map(document.features.map((feature) => [feature.featureId, feature]))
     const orderedFeatures = document.featureOrder

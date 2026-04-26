@@ -9,6 +9,7 @@ import type {
 import type { BodyId, DocumentId, FeatureId, RevisionId, SketchId } from '@/contracts/shared/ids'
 import type { GeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
+import type { EmbeddedBinaryAssetRecord } from '@/contracts/modeling/embedded-binary-assets'
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
@@ -54,6 +55,7 @@ export interface AuthoredModelDocument {
   cursor: DocumentFeatureCursor
   bodyLabels: AuthoredBodyLabelRecord[]
   assets: GeometryAssetManifest
+  embeddedBinaryAssets: EmbeddedBinaryAssetRecord[]
 }
 
 export interface AuthoredModelDocumentDiagnostic {
@@ -98,5 +100,6 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: DocumentSnapsh
       label: body.label,
     })),
     assets: createEmptyGeometryAssetManifest(),
+    embeddedBinaryAssets: [],
   }
 }

@@ -123,6 +123,7 @@ import {
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
 } from '@/domain/workspace/sketch-plane-mapping'
+import { getEmbeddedBinaryAssetObjectUrl } from '@/domain/modeling/embedded-binary-asset-registry'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 import {
@@ -2811,6 +2812,7 @@ function SketchDisplayMeshNode({
   palette: SketchRenderingPalette
 }) {
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
+  const texture = useEmbeddedBinaryTexture(renderable.textureFill?.embeddedBinaryId ?? null)
   const geometry = useMemo(() => {
     if (!geometryData) {
       throw new Error('Display renderable is missing mesh geometry.')
@@ -2830,20 +2832,38 @@ function SketchDisplayMeshNode({
     } else {
       nextGeometry.computeVertexNormals()
     }
+    if (renderable.textureFill) {
+      nextGeometry.setAttribute(
+        'uv',
+        new THREE.Float32BufferAttribute(renderable.textureFill.uvCoordinates.flat(), 2),
+      )
+    }
     return nextGeometry
-  }, [geometryData])
+  }, [geometryData, renderable.textureFill])
   const materialConfig = useMemo(
     () => getSketchDisplayMeshMaterialConfig(renderable, applyStyles, palette),
     [applyStyles, palette, renderable],
   )
   const material = useMemo(() => {
-    const nextMaterial = new THREE.MeshBasicMaterial(materialConfig)
+    const nextMaterial = renderable.textureFill
+      ? new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          map: texture,
+          transparent: true,
+          opacity: renderable.textureFill.opacity,
+          side: THREE.DoubleSide,
+        })
+      : new THREE.MeshBasicMaterial(materialConfig)
     nextMaterial.depthWrite = false
     return nextMaterial
-  }, [materialConfig])
+  }, [materialConfig, renderable.textureFill, texture])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
+  if (renderable.textureFill && !texture) {
+    return null
+  }
+
   return (
     <mesh
       ref={(value) => {
@@ -2859,8 +2879,54 @@ function SketchDisplayMeshNode({
       }}
       geometry={geometry}
       material={material}
+      renderOrder={renderable.textureFill ? -1 : 0}
     />
   )
+}
+
+function useEmbeddedBinaryTexture(assetId: string | null) {
+  const [texture, setTexture] = useState<{ assetId: string, texture: THREE.Texture } | null>(null)
+
+  useEffect(() => {
+    if (!assetId) {
+      return
+    }
+
+    const url = getEmbeddedBinaryAssetObjectUrl(assetId)
+    if (!url) {
+      return
+    }
+
+    let cancelled = false
+    let loadedTexture: THREE.Texture | null = null
+    const loader = new THREE.TextureLoader()
+    loader.load(
+      url,
+      (loaded) => {
+        if (cancelled) {
+          loaded.dispose()
+          return
+        }
+
+        loaded.colorSpace = THREE.SRGBColorSpace
+        loaded.needsUpdate = true
+        loadedTexture = loaded
+        setTexture((current) => {
+          current?.texture.dispose()
+          return { assetId, texture: loaded }
+        })
+      },
+      undefined,
+      () => undefined,
+    )
+
+    return () => {
+      cancelled = true
+      loadedTexture?.dispose()
+    }
+  }, [assetId])
+
+  return texture?.assetId === assetId ? texture.texture : null
 }
 
 function updatePolylineGeometryBuffer(

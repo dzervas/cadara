@@ -232,6 +232,23 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     verticalAlign: z.union([z.literal('baseline'), z.literal('middle'), z.literal('top'), z.literal('bottom')]),
     style: sketchStyleDefinitionSchema.optional(),
   }),
+  z.object({
+    kind: z.literal('imageReference'),
+    entityId: sketchEntityIdSchema,
+    label: z.string(),
+    target: sketchEntityRefSchema,
+    isConstruction: z.literal(true),
+    cornerPointIds: z.tuple([
+      sketchPointIdSchema,
+      sketchPointIdSchema,
+      sketchPointIdSchema,
+      sketchPointIdSchema,
+    ]),
+    embeddedBinaryId: z.string().trim().min(1, 'Image reference asset ID must not be empty.'),
+    pixelWidth: positiveNumberSchema('Image reference pixel width must be positive.'),
+    pixelHeight: positiveNumberSchema('Image reference pixel height must be positive.'),
+    style: sketchStyleDefinitionSchema.optional(),
+  }),
 ]).transform((value) => value as SketchEntityDefinition)
 
 const localSketchPointConstraintOperandSchema = z.object({

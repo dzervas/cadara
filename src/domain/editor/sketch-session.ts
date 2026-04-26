@@ -264,6 +264,17 @@ export interface SketchSessionDisplayRenderable {
   strokeStyle?: SketchDisplayStrokeStyle
   constraintDisplay?: SketchConstraintDisplayTargetState
   diagnosticStyle?: SketchDisplayDiagnosticStyle
+  textureFill?: {
+    kind: 'embeddedImage'
+    embeddedBinaryId: string
+    uvCoordinates: readonly [
+      readonly [number, number],
+      readonly [number, number],
+      readonly [number, number],
+      readonly [number, number],
+    ]
+    opacity: number
+  }
 }
 
 export type SketchConstraintDisplayState = 'constrained' | 'underconstrained' | 'overconstrained'
@@ -900,6 +911,8 @@ function getEntityPointIds(entity: SketchEntityDefinition) {
       return entity.controlPointIds
     case 'profileText':
       return [entity.anchorPointId]
+    case 'imageReference':
+      return entity.cornerPointIds
   }
 }
 
@@ -1544,6 +1557,25 @@ function mapDefinitionEntityToDraftEntity(
           status: 'accepted',
           label: entity.label,
           isConstruction: entity.isConstruction,
+        }]
+      : []
+  }
+
+  if (entity.kind === 'imageReference') {
+    const corners = entity.cornerPointIds.flatMap((pointId) => {
+      const point = pointById.get(pointId)
+      return point ? [point] : []
+    })
+    return corners.length === entity.cornerPointIds.length
+      ? [{
+          id: entity.entityId,
+          kind: 'polyline',
+          points: corners,
+          isClosed: true,
+          entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
+          status: 'accepted',
+          label: entity.label,
+          isConstruction: true,
         }]
       : []
   }
@@ -7692,6 +7724,8 @@ function getEntityAnchor(definition: SketchDefinition, entityId: SketchEntityId)
       return getAveragePointPosition(definition, entity.controlPointIds)
     case 'profileText':
       return getPointPosition(definition, entity.anchorPointId)
+    case 'imageReference':
+      return getAveragePointPosition(definition, entity.cornerPointIds)
   }
 }
 
@@ -7724,6 +7758,8 @@ function getEntityAnchorPointId(
       return entity.controlPointIds[0] ?? null
     case 'profileText':
       return entity.anchorPointId
+    case 'imageReference':
+      return entity.cornerPointIds[0] ?? null
   }
 }
 
@@ -7796,6 +7832,18 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       strokeStyle: style?.strokeStyle,
     }, constraintDisplaySummary)
   })
+  const imageReferenceRenderables = displayDefinition.entities.flatMap((entity, index) =>
+    entity.kind === 'imageReference'
+      ? [withSketchConstraintDisplay(
+          createDisplayRenderableForImageReferenceEntity(
+            session,
+            entity,
+            index,
+          ),
+          constraintDisplaySummary,
+        )]
+      : [],
+  )
   const entityRenderables = deriveSketchDisplayEntities(session).map((entity, index) =>
     withSketchConstraintDisplay(
       createDisplayRenderableForEntity(
@@ -7811,6 +7859,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   return [
     ...regionRenderables,
     ...pointRenderables,
+    ...imageReferenceRenderables,
     ...entityRenderables,
     ...entityRenderables.flatMap(createOverconstraintDiagnosticRenderable),
     ...displayDefinition.references.flatMap((reference, index) => {
@@ -8123,6 +8172,48 @@ function createDisplayRenderableForEntity(
     role: 'local',
     paintStyle: style?.paintStyle,
     strokeStyle: style?.strokeStyle,
+  }
+}
+
+function createDisplayRenderableForImageReferenceEntity(
+  session: SketchSessionState,
+  entity: Extract<SketchDefinition['entities'][number], { kind: 'imageReference' }>,
+  index: number,
+): SketchSessionDisplayRenderable {
+  const pointById = new Map(session.definition.points.map((point) => [point.pointId, point.position] as const))
+  const corners = entity.cornerPointIds.map((pointId) => {
+    const position = pointById.get(pointId)
+    if (!position) {
+      throw new Error(`Image reference ${entity.entityId} is missing corner point ${pointId}.`)
+    }
+
+    return mapSketchPointToWorld(session.plane, position)
+  })
+
+  return {
+    id: `renderable_sketch_image_reference_${index}` as RenderableId,
+    label: entity.label,
+    target: createSketchEntityRef(session.sketchId ?? ('sketch_draft' as SketchId), entity.entityId),
+    geometry: {
+      kind: 'mesh',
+      vertexPositions: corners,
+      vertexNormals: corners.map(() => session.plane.frame.normal),
+      triangleIndices: [[0, 1, 2], [0, 2, 3]],
+    },
+    linePattern: 'solid',
+    role: 'local',
+    semanticClass: 'sketchCurve',
+    textureFill: {
+      kind: 'embeddedImage',
+      embeddedBinaryId: entity.embeddedBinaryId,
+      uvCoordinates: [
+        [0, 1],
+        [1, 1],
+        [1, 0],
+        [0, 0],
+      ],
+      opacity: 0.55,
+    },
   }
 }
 

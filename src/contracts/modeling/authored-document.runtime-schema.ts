@@ -24,6 +24,7 @@ import {
   legacyGeometryAssetManifestSchema,
 } from '@/contracts/modeling/geometry-assets.runtime-schema'
 import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
+import { embeddedBinaryAssetRecordSchema } from '@/contracts/modeling/embedded-binary-assets.runtime-schema'
 import type {
   AuthoredModelDocument,
   AuthoredModelDocumentMigrationResult,
@@ -93,6 +94,7 @@ export const authoredModelDocumentSchema = z.object({
     geometryAssetManifestSchema,
     legacyGeometryAssetManifestSchema,
   ]).optional(),
+  embeddedBinaryAssets: z.array(embeddedBinaryAssetRecordSchema).optional(),
 }).strict().superRefine((value, ctx) => {
   const featureIds = value.features.map((feature) => feature.featureId)
   const featureIdSet = new Set(featureIds)
@@ -193,6 +195,7 @@ export const authoredModelDocumentSchema = z.object({
     ...value,
     historyOrder,
     assets: value.assets ?? createEmptyGeometryAssetManifest(),
+    embeddedBinaryAssets: value.embeddedBinaryAssets ?? [],
     contractVersion: CONTRACT_VERSION,
     schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   } as AuthoredModelDocument

@@ -225,6 +225,7 @@ function createAuthoredModelDocumentFromAuthoringState(
       label: body.label,
     })),
     assets: structuredClone(state.assets),
+    embeddedBinaryAssets: [...structuredClone(state.embeddedBinaryAssets)],
   }
 }
 
@@ -1526,6 +1527,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
       assets: document.assets,
       assetBlobs,
+      embeddedBinaryAssets: document.embeddedBinaryAssets,
       historyOrder,
       diagnostics: restoreDiagnostics,
       cursor: { kind: 'empty' },
@@ -1582,6 +1584,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: new Map(document.bodyLabels.map((label) => [label.bodyId, label.label])),
       assets: document.assets,
       assetBlobs,
+      embeddedBinaryAssets: document.embeddedBinaryAssets,
       historyOrder,
       diagnostics: restoreDiagnostics,
       cursor: { kind: 'empty' },
@@ -1683,6 +1686,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
+      embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,
@@ -1928,6 +1932,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
+      embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder: input.historyOrder ?? runtimeState.authoringState.historyOrder,

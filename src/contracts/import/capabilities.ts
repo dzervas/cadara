@@ -4,6 +4,8 @@ import type {
   GeometryAssetProvenance,
 } from '@/contracts/modeling/geometry-assets'
 import type { GeometryAssetId } from '@/contracts/shared/ids'
+import type { ContractVersion } from '@/contracts/shared/versioning'
+import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
 
 /**
  * TODO: replace `unknown` with a shared neutral vector primitive union once
@@ -77,7 +79,14 @@ export interface ImportAssetCapabilities {
   }): Promise<string>
 }
 
+export interface ImportMutationContextCapabilities {
+  contractVersion: ContractVersion
+  documentId: DocumentId
+  baseRevisionId: RevisionId
+}
+
 export interface ImportCapabilities {
+  context: ImportMutationContextCapabilities
   modeling: ImportModelingCapabilities
   sketch: ImportSketchCapabilities
   assets: ImportAssetCapabilities

@@ -499,6 +499,7 @@ function isAdvancedSketchEntity(entity: SketchEntityDefinition) {
     || entity.kind === 'conic'
     || entity.kind === 'bezierCurve'
     || entity.kind === 'profileText'
+    || entity.kind === 'imageReference'
 }
 
 function localArcData(input: {
@@ -2105,6 +2106,21 @@ function validateDefinition(
         diagnostics.push(makeDiagnostic('invalid-profile-text-height', 'error', `Profile text ${entity.entityId} height must be greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
       }
     }
+
+    if (entity.kind === 'imageReference') {
+      const uniqueCornerIds = new Set(entity.cornerPointIds)
+      if (uniqueCornerIds.size !== entity.cornerPointIds.length) {
+        diagnostics.push(makeDiagnostic('invalid-image-reference-corners', 'error', `Image reference ${entity.entityId} requires four distinct corner points.`, { kind: 'entity', entityId: entity.entityId }))
+      } else if (entity.cornerPointIds.some((pointId) => !pointMap.has(pointId))) {
+        diagnostics.push(makeDiagnostic('missing-image-reference-corner', 'error', `Image reference ${entity.entityId} references a missing corner point.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+      if (entity.embeddedBinaryId.trim().length === 0) {
+        diagnostics.push(makeDiagnostic('missing-image-reference-asset', 'error', `Image reference ${entity.entityId} must reference an embedded binary asset.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+      if (entity.pixelWidth <= 0 || entity.pixelHeight <= 0) {
+        diagnostics.push(makeDiagnostic('invalid-image-reference-dimensions', 'error', `Image reference ${entity.entityId} pixel dimensions must be greater than zero.`, { kind: 'entity', entityId: entity.entityId }))
+      }
+    }
   }
 
   for (const point of definition.points) {
@@ -2912,6 +2928,10 @@ function buildSolvedEntities(
       continue
     }
 
+    if (entity.kind === 'imageReference') {
+      continue
+    }
+
     const center = pointRecords.get(entity.centerPointId)
     const arcState = entityStates.get(entity.entityId)
     if (!center || !arcState || arcState.kind !== 'arc') {
@@ -3187,6 +3207,8 @@ function getEntityPoints(entity: SketchEntityDefinition): readonly SketchPointId
       return entity.controlPointIds
     case 'profileText':
       return [entity.anchorPointId]
+    case 'imageReference':
+      return entity.cornerPointIds
   }
 }
 

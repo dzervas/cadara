@@ -408,6 +408,27 @@ export type SketchEntityDefinition =
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition
     }
+  | {
+      kind: 'imageReference'
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef
+      /** Image references are always construction-only. */
+      isConstruction: boolean
+      /** Ordered quad corners in top-left, top-right, bottom-right, bottom-left winding. */
+      cornerPointIds: readonly [SketchPointId, SketchPointId, SketchPointId, SketchPointId]
+      /** Durable embedded binary asset handle for the referenced image bytes. */
+      embeddedBinaryId: string
+      /** Original image width in pixels. */
+      pixelWidth: number
+      /** Original image height in pixels. */
+      pixelHeight: number
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition
+    }
 
 export type LocalSketchPointConstraintOperand = {
   kind: 'localPoint'

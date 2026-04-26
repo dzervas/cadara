@@ -127,6 +127,7 @@ function getSketchEntityToolIcon(entity: SketchEntityDefinition): ToolIconId | n
     case 'conic':
     case 'bezierCurve':
     case 'profileText':
+    case 'imageReference':
       return 'spline'
     case 'point':
       return null

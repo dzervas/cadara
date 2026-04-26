@@ -107,6 +107,11 @@ function collectRenderableWorldPoints(renderables: SketchSessionDisplayRenderabl
   const points: THREE.Vector3[] = []
 
   for (const renderable of renderables) {
+    if (renderable.geometry.kind === 'mesh') {
+      points.push(...renderable.geometry.vertexPositions.map((point) => toVector3(point)))
+      continue
+    }
+
     if (renderable.geometry.kind === 'marker') {
       points.push(toVector3(renderable.geometry.position))
       continue
