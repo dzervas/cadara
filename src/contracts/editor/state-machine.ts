@@ -64,6 +64,12 @@ import {
 } from '@/domain/editor/sketch-session'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import {
+  createSectionViewSession,
+  flipSectionViewRetainedSide,
+  type SectionViewSession,
+  type Vec3,
+} from '@/domain/section-view/session'
+import {
   defaultSelectionFilter,
   getDefaultSelectionFilterForMode,
   getPrimitiveRefKey,
@@ -250,6 +256,16 @@ export interface FeatureEditorState extends EditorStateBase {
 }
 
 /**
+ * Active temporary section-view inspection state.
+ * The editor owns the accepted planar seed, section plane, and retained-side state.
+ */
+export interface SectionViewEditorState extends EditorStateBase {
+  kind: 'inspectingSection'
+  command: EditorActiveCommand
+  section: SectionViewSession
+}
+
+/**
  * Canonical Phase 1 editor machine state.
  * Impossible combinations such as an active sketch tool with no sketch session
  * or a preview-ready feature without a feature edit session are unrepresentable.
@@ -259,6 +275,7 @@ export type EditorState =
   | SelectionCommandEditorState
   | SketchEditorState
   | FeatureEditorState
+  | SectionViewEditorState
 
 /**
  * Snapshot payload emitted back into the editor runtime after a document refresh.
@@ -333,6 +350,8 @@ export interface ViewportSelectionRequestedEvent {
   type: 'viewport.selectionRequested'
   /** Durable target the user is attempting to select. */
   target: PrimitiveRef
+  /** Current viewport camera position when the selection came from the viewport. */
+  cameraPosition?: Vec3
 }
 
 /** Requests connected local sketch-entity selection from a viewport double-click. */
@@ -462,6 +481,25 @@ export interface FormReferencePickerCancelledEvent {
   type: 'form.referencePickerCancelled'
 }
 
+/** Updates the active section plane offset along its normal. */
+export interface SectionOffsetUpdatedEvent {
+  type: 'section.offsetUpdated'
+  commandSessionId: CommandSessionId
+  offset: number
+}
+
+/** Flips which half-space is retained for the active section. */
+export interface SectionFlipRequestedEvent {
+  type: 'section.flipRequested'
+  commandSessionId: CommandSessionId
+}
+
+/** Clears the active section-view session. */
+export interface SectionClearedEvent {
+  type: 'section.cleared'
+  commandSessionId: CommandSessionId
+}
+
 /** Completes a snapshot fetch with the resulting typed snapshot payload. */
 export interface SnapshotLoadedEvent {
   type: 'effect.snapshotLoaded'
@@ -516,6 +554,9 @@ export type EditorEvent =
   | FormFeaturePatchedEvent
   | FormReferencePickerActivatedEvent
   | FormReferencePickerCancelledEvent
+  | SectionOffsetUpdatedEvent
+  | SectionFlipRequestedEvent
+  | SectionClearedEvent
   | SnapshotLoadedEvent
   | SnapshotFailedEvent
   | {
@@ -1237,6 +1278,38 @@ function createFeatureEditingState(
     activeReferencePickerFieldId: null,
     pendingPreviewRequestId: null,
     pendingCommitRequestId: null,
+  }
+}
+
+function createSectionViewEditingState(
+  state: SelectionCommandEditorState,
+  section: SectionViewSession,
+): SectionViewEditorState {
+  return {
+    kind: 'inspectingSection',
+    mode: 'part',
+    document: state.document,
+    snapshot: state.snapshot,
+    previewRenderables: null,
+    selection: [section.seed],
+    hoverTarget: section.seed,
+    selectionFilter: state.selectionFilter,
+    selectionCatalog: state.selectionCatalog,
+    preview: {
+      kind: 'selection',
+      label: 'Section view active',
+      target: section.seed,
+    },
+    nextCommandSequence: state.nextCommandSequence,
+    nextRequestSequence: state.nextRequestSequence,
+    pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    editSessionCursorContext: null,
+    command: {
+      ...state.command,
+      phase: 'editing',
+    },
+    section,
   }
 }
 
@@ -2021,6 +2094,21 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (event.toolId === 'sectionView') {
+        const selectionFilter = getSelectionFilterForCommand(event.toolId, 'part')
+
+        return {
+          state: createCommandState(
+            state,
+            event.toolId,
+            'part',
+            selectionFilter,
+            createSelectionPreview(state, selectionFilter),
+          ),
+          effects: [],
+        }
+      }
+
       if (isFeatureTool(event.toolId)) {
         const selectionFilter = getSelectionFilterForFeatureType(event.toolId)
         const nextState = createCommandState(
@@ -2208,6 +2296,71 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       return {
         state,
+        effects: [],
+      }
+    case 'section.offsetUpdated':
+      if (
+        state.kind !== 'inspectingSection'
+        || state.command.commandSessionId !== event.commandSessionId
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          section: {
+            ...state.section,
+            offset: event.offset,
+          },
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+        },
+        effects: [],
+      }
+    case 'section.flipRequested':
+      if (
+        state.kind !== 'inspectingSection'
+        || state.command.commandSessionId !== event.commandSessionId
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          section: {
+            ...state.section,
+            retainedSide: flipSectionViewRetainedSide(state.section.retainedSide),
+          },
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+        },
+        effects: [],
+      }
+    case 'section.cleared':
+      if (
+        state.kind !== 'inspectingSection'
+        || state.command.commandSessionId !== event.commandSessionId
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: toIdleState(state, 'part'),
         effects: [],
       }
     case 'viewport.hoverCleared':
@@ -2446,6 +2599,44 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         )
       }
 
+      if (state.kind === 'selectionCommand' && state.command.toolId === 'sectionView') {
+        if (
+          (event.target.kind !== 'construction' && event.target.kind !== 'face' && event.target.kind !== 'region')
+          || !event.cameraPosition
+        ) {
+          return {
+            state: withPreview(state, {
+              kind: 'selection',
+              label: 'Section view requires a viewport-picked planar face, closed region, or construction plane.',
+              target: state.selection[0] ?? null,
+            }),
+            effects: [],
+          }
+        }
+
+        const section = createSectionViewSession({
+          snapshot: state.snapshot,
+          seed: event.target,
+          cameraPosition: event.cameraPosition,
+        })
+
+        if (!section) {
+          return {
+            state: withPreview(state, {
+              kind: 'selection',
+              label: 'Selected target does not resolve to a usable section plane.',
+              target: event.target,
+            }),
+            effects: [],
+          }
+        }
+
+        return {
+          state: createSectionViewEditingState(state, section),
+          effects: [],
+        }
+      }
+
       if (state.kind === 'editingFeature') {
         const activeReferenceField = getActiveReferencePickerField(state)
         const nextSelection = [event.target]
@@ -2653,6 +2844,13 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
               target: session.planeTarget,
             },
           },
+          effects: [],
+        }
+      }
+
+      if (state.kind === 'inspectingSection') {
+        return {
+          state,
           effects: [],
         }
       }
@@ -4526,6 +4724,8 @@ export interface EditorViewState {
   activeReferencePickerFieldId: string | null
   /** Active sketch session, or null when not editing a sketch. */
   sketchSession: SketchSessionState | null
+  /** Active temporary section-view session, or null when inactive. */
+  activeSectionView?: SectionViewSession | null
   /** Last loaded document snapshot owned by the machine. */
   snapshot: DocumentSnapshot | null
   /** Most recent accepted preview renderables, or null when none are active. */
@@ -4582,6 +4782,7 @@ export function getEditorViewState(state: EditorState): EditorViewState {
     activeEditSession: state.kind === 'editingFeature' ? state.session : null,
     activeReferencePickerFieldId: state.kind === 'editingFeature' ? state.activeReferencePickerFieldId : null,
     sketchSession: state.kind === 'editingSketch' ? state.session : null,
+    activeSectionView: state.kind === 'inspectingSection' ? state.section : null,
     snapshot: state.snapshot,
     previewRenderables: state.previewRenderables,
     history: getEditorHistoryAvailability(state),

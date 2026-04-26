@@ -40,6 +40,8 @@ export interface WorkbenchStateDebuggerModel {
   selectionDetail: WorkbenchStateDebuggerSelectionDetail
   hoverTarget: string
   topologyDebug: TopologyDebugSummary
+  sectionOffset?: number | null
+  sectionRetainedSide?: string | null
 }
 
 interface WorkbenchStateDebuggerProps {
@@ -132,6 +134,8 @@ export function WorkbenchStateDebugger({ state, defaultExpanded = false }: Workb
               value={state.selectionDetail.relatedLabels.length > 0 ? state.selectionDetail.relatedLabels.join(', ') : 'none'}
             />
             <DebuggerRow label="Target" value={state.selectionDetail.targetLabel} />
+            <DebuggerRow label="Section offset" value={state.sectionOffset ?? 'none'} />
+            <DebuggerRow label="Section side" value={state.sectionRetainedSide ?? 'none'} />
           </div>
 
           <details className="border-t border-[var(--cad-border)] pt-2">

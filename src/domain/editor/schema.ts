@@ -85,6 +85,7 @@ export type SelectionFilterKind =
   | 'all'
   | 'sketchSession'
   | 'sketchStart'
+  | 'sectionViewSeed'
   | 'extrudeProfile'
   | 'revolveReferences'
   | 'sweepReferences'
@@ -214,6 +215,28 @@ export const sketchStartSelectionFilter: SelectionFilter = {
           description: 'Select one construction plane, one planar face, or one existing sketch.',
           acceptedKinds: ['construction', 'face', 'sketch'],
           acceptedSemantics: ['constructionPlane', 'planarFace', 'planarReference', 'existingSketch'],
+        },
+      ],
+    },
+  ],
+}
+
+export const sectionViewSelectionFilter: SelectionFilter = {
+  kind: 'sectionViewSeed',
+  allowedKinds: ['construction', 'face', 'region'],
+  label: 'Section view seeds',
+  requirements: [
+    {
+      id: 'section-view-seed',
+      label: 'Section seed',
+      description: 'Section view accepts one planar face, closed region, or construction plane.',
+      slots: [
+        {
+          id: 'section-view-seed',
+          label: 'Section seed',
+          description: 'Select one planar face, closed region, or construction plane.',
+          acceptedKinds: ['construction', 'face', 'region'],
+          acceptedSemantics: ['constructionPlane', 'planarFace', 'regionProfile'],
         },
       ],
     },
@@ -913,6 +936,8 @@ export function getSelectionFilterForCommand(
   switch (toolId) {
     case 'sketch':
       return sketchStartSelectionFilter
+    case 'sectionView':
+      return sectionViewSelectionFilter
     case 'projectReference':
       return sketchReferenceSelectionFilter
     default:

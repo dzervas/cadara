@@ -272,6 +272,7 @@ export function CadWorkbench() {
     machineState,
     state: {
       activeCommand,
+      activeSectionView,
       selection,
       hoverTarget,
       sketchSession,
@@ -637,6 +638,8 @@ export function CadWorkbench() {
     },
     hoverTarget: visibleHoverTarget ? getPrimitiveRefLabel(visibleHoverTarget) : 'none',
     topologyDebug: createTopologyDebugSummary(snapshot),
+    sectionOffset: activeSectionView?.offset ?? null,
+    sectionRetainedSide: activeSectionView?.retainedSide ?? null,
   }
 
   useEffect(() => {
@@ -677,8 +680,11 @@ export function CadWorkbench() {
     dispatch({ type: 'viewport.hovered', target })
   }
 
-  const handleViewportSelect = (target: PrimitiveRef) => {
-    dispatch({ type: 'viewport.selectionRequested', target })
+  const handleViewportSelect = (
+    target: PrimitiveRef,
+    cameraPosition?: readonly [number, number, number],
+  ) => {
+    dispatch({ type: 'viewport.selectionRequested', target, cameraPosition })
   }
 
   const handleViewportConnectedSketchSelect = (target: PrimitiveRef) => {
@@ -1373,6 +1379,40 @@ export function CadWorkbench() {
 
   const handleSketchGeometryDragEnd = (point: readonly [number, number]) => {
     dispatch({ type: 'sketch.geometryDragEnded', point })
+  }
+
+  const handleSectionOffsetChange = (offset: number) => {
+    if (!activeCommand) {
+      return
+    }
+
+    dispatch({
+      type: 'section.offsetUpdated',
+      commandSessionId: activeCommand.commandSessionId,
+      offset,
+    })
+  }
+
+  const handleSectionFlip = () => {
+    if (!activeCommand) {
+      return
+    }
+
+    dispatch({
+      type: 'section.flipRequested',
+      commandSessionId: activeCommand.commandSessionId,
+    })
+  }
+
+  const handleSectionClear = () => {
+    if (!activeCommand) {
+      return
+    }
+
+    dispatch({
+      type: 'section.cleared',
+      commandSessionId: activeCommand.commandSessionId,
+    })
   }
 
   const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2182,6 +2222,7 @@ export function CadWorkbench() {
               renderables={viewportRenderables.documentRenderables}
               sketchDisplayRenderables={viewportRenderables.sketchDisplayRenderables}
               sketchAnnotations={sketchAnnotations}
+              activeSectionView={activeSectionView ?? null}
               hoverTarget={visibleHoverTarget}
               onHover={handleViewportHover}
               onSelect={handleViewportSelect}
@@ -2194,6 +2235,9 @@ export function CadWorkbench() {
               onSketchGeometryDragStart={handleSketchGeometryDragStart}
               onSketchGeometryDragMove={handleSketchGeometryDragMove}
               onSketchGeometryDragEnd={handleSketchGeometryDragEnd}
+              onSectionOffsetChange={handleSectionOffsetChange}
+              onSectionFlip={handleSectionFlip}
+              onSectionClear={handleSectionClear}
               onSketchToolPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
               onLodTierChange={handleViewportLodTierChange}
               selection={visibleSelection}

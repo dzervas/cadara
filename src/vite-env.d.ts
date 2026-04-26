@@ -7,6 +7,11 @@ interface ImportMetaEnv {
 interface Window {
   __cadTestState?: import('@/components/layout/workbench-state-debugger').WorkbenchStateDebuggerModel
   __cadProjectToScreen?: (objectId: string) => { x: number, y: number } | null
+  __cadProjectSectionHandleToScreen?: () => {
+    handle: { x: number, y: number }
+    normal: { x: number, y: number } | null
+    offset: number
+  } | null
   __cadSelectTarget?: (targetId: string) => boolean
 }
 

@@ -52,6 +52,9 @@ const editorEventTypes = [
   'sketch.geometryDragStarted',
   'sketch.geometryDragMoved',
   'sketch.geometryDragEnded',
+  'section.offsetUpdated',
+  'section.flipRequested',
+  'section.cleared',
   'sketch.toolPatched',
   'sketch.activeToolCleared',
   'sketch.historyCursorRequested',
@@ -137,6 +140,8 @@ function workflowGuardName(kind: WorkflowKind) {
       return 'isEditingSketchWorkflow'
     case 'editingFeature':
       return 'isEditingFeatureWorkflow'
+    case 'inspectingSection':
+      return 'isInspectingSectionWorkflow'
     default:
       return 'isIdleWorkflow'
   }
@@ -196,6 +201,7 @@ function createWorkflowRedirects(currentKind: WorkflowKind): WorkflowRedirect[] 
     'selectionCommand',
     'editingSketch',
     'editingFeature',
+    'inspectingSection',
   ]
 
   return workflowKinds
@@ -354,6 +360,7 @@ const editorRuntimeMachine = setup({
     isSelectionCommandWorkflow: ({ context }) => context.machineState.kind === 'selectionCommand',
     isEditingSketchWorkflow: ({ context }) => context.machineState.kind === 'editingSketch',
     isEditingFeatureWorkflow: ({ context }) => context.machineState.kind === 'editingFeature',
+    isInspectingSectionWorkflow: ({ context }) => context.machineState.kind === 'inspectingSection',
   },
 }).createMachine({
   id: 'editorRuntime',
@@ -373,6 +380,7 @@ const editorRuntimeMachine = setup({
     selectionCommand: createWorkflowState('selectionCommand'),
     editingSketch: createWorkflowState('editingSketch'),
     editingFeature: createWorkflowState('editingFeature'),
+    inspectingSection: createWorkflowState('inspectingSection'),
   },
 })
 

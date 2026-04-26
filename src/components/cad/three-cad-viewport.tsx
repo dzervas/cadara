@@ -1,4 +1,4 @@
-import { ActionIcon, Menu, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Menu, Tooltip } from '@mantine/core'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Bvh, OrbitControls } from '@react-three/drei'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
@@ -36,6 +36,7 @@ import {
   primitiveRefEquals,
   selectionFilterAllowsTarget,
 } from '@/domain/editor/schema'
+import { getSectionPlaneOrigin, type SectionViewSession, type Vec3 } from '@/domain/section-view/session'
 import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
@@ -107,6 +108,14 @@ import {
   VIEW_CUBE_CORNER_TARGETS,
   VIEW_CUBE_FACE_TARGETS,
 } from '@/domain/workspace/view-cube-navigation'
+import {
+  createSectionCapRenderables,
+  createSectionClippingPlane,
+  createSectionHatchTexture,
+  getSectionPlaneBasis,
+  getSectionRenderableBounds,
+  type SectionCapRenderable,
+} from '@/domain/section-view/rendering'
 import { projectSketchFeedbackAnchor } from '@/domain/workspace/sketch-feedback-projection'
 import {
   mapWorldPointToWorkspaceSketch,
@@ -119,7 +128,9 @@ import {
   createRenderIdleTracker,
   createViewportBvhSceneKey,
   configureWorkspaceScaffoldWireObject,
+  projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
+  resolveSectionScreenDragOffset,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
@@ -134,12 +145,13 @@ const VIEWPORT_PROJECTION_OPTIONS: Array<{ mode: ViewportProjectionMode, label: 
 ]
 
 interface ThreeCadViewportProps {
+  activeSectionView: SectionViewSession | null
   hoverTarget: PrimitiveRef | null
   renderables: ViewportRenderableRecord[]
   sketchDisplayRenderables: SketchSessionDisplayRenderable[]
   sketchAnnotations: SketchAnnotationDescriptor[]
   onHover: (target: PrimitiveRef) => void
-  onSelect: (target: PrimitiveRef) => void
+  onSelect: (target: PrimitiveRef, cameraPosition?: Vec3) => void
   onConnectedSketchSelect: (target: PrimitiveRef) => void
   onDeselect: () => void
   onAnnotationEdit: (target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>) => void
@@ -149,6 +161,9 @@ interface ThreeCadViewportProps {
   onSketchGeometryDragStart: (target: PrimitiveRef, point: readonly [number, number]) => void
   onSketchGeometryDragMove: (point: readonly [number, number]) => void
   onSketchGeometryDragEnd: (point: readonly [number, number]) => void
+  onSectionOffsetChange: (offset: number) => void
+  onSectionFlip: () => void
+  onSectionClear: () => void
   onSketchToolPatch: (patch: Record<string, unknown>) => void
   onLodTierChange: (tierId: OccTessellationTierId) => void
   selection: PrimitiveRef[]
@@ -182,6 +197,7 @@ interface ViewCubeSceneState {
 }
 
 export function ThreeCadViewport({
+  activeSectionView,
   hoverTarget,
   renderables,
   sketchDisplayRenderables,
@@ -197,6 +213,9 @@ export function ThreeCadViewport({
   onSketchGeometryDragStart,
   onSketchGeometryDragMove,
   onSketchGeometryDragEnd,
+  onSectionOffsetChange,
+  onSectionFlip,
+  onSectionClear,
   onSketchToolPatch,
   onLodTierChange,
   selection,
@@ -221,6 +240,12 @@ export function ThreeCadViewport({
   const sketchHitPointRef = useRef(new THREE.Vector3())
   const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null)
+  const sectionDragRef = useRef<{
+    pointerId: number
+    sectionAtDragStart: SectionViewSession
+    dragStartClientPoint: { x: number; y: number }
+  } | null>(null)
+  const sectionDragOffsetRef = useRef<number | null>(null)
   const pendingSketchGeometryDragPointRef = useRef<readonly [number, number] | null>(null)
   const pendingSketchGeometryDragFrameIdRef = useRef<number | null>(null)
   const pendingSketchGeometryDragRef = useRef<{
@@ -251,6 +276,9 @@ export function ThreeCadViewport({
   const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart)
   const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove)
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
+  const sectionOffsetChangeRef = useRef(onSectionOffsetChange)
+  const sectionFlipRef = useRef(onSectionFlip)
+  const sectionClearRef = useRef(onSectionClear)
   const sketchToolPatchRef = useRef(onSketchToolPatch)
   const projectSketchClientPointRef = useRef<(clientX: number, clientY: number) => readonly [number, number] | null>(() => null)
   const lodTierChangeRef = useRef(onLodTierChange)
@@ -261,6 +289,7 @@ export function ThreeCadViewport({
   const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(mode, sketchSession !== null)
   const sketchRenderingPalette = useMemo(() => resolveSketchRenderingPalette(), [])
   const selectionRef = useRef(selection)
+  const sectionViewRef = useRef(activeSectionView)
   const renderablesRef = useRef(renderables)
   const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables)
   const requestCameraTransition = useCallback((
@@ -356,6 +385,25 @@ export function ThreeCadViewport({
     [renderables, sketchDisplayRenderables],
   )
   const bvhSceneKeyRef = useRef(bvhSceneKey)
+  const activeSectionClippingPlane = useMemo(
+    () => activeSectionView ? createSectionClippingPlane(activeSectionView) : null,
+    [activeSectionView],
+  )
+  const activeSectionCaps = useMemo(
+    () => activeSectionView
+      ? createSectionCapRenderables(
+          renderables
+            .filter((entry) => entry.renderable.geometry.kind === 'mesh')
+            .map((entry) => entry.renderable),
+          activeSectionView,
+        )
+      : [],
+    [activeSectionView, renderables],
+  )
+  const activeSectionBounds = useMemo(
+    () => getSectionRenderableBounds(renderables.map((entry) => entry.renderable)),
+    [renderables],
+  )
 
   useEffect(() => {
     hoverRef.current = onHover
@@ -369,12 +417,17 @@ export function ThreeCadViewport({
     sketchGeometryDragStartRef.current = onSketchGeometryDragStart
     sketchGeometryDragMoveRef.current = onSketchGeometryDragMove
     sketchGeometryDragEndRef.current = onSketchGeometryDragEnd
+    sectionOffsetChangeRef.current = onSectionOffsetChange
+    sectionFlipRef.current = onSectionFlip
+    sectionClearRef.current = onSectionClear
     sketchToolPatchRef.current = onSketchToolPatch
     lodTierChangeRef.current = onLodTierChange
     selectionRef.current = selection
+    sectionViewRef.current = activeSectionView
     selectionFilterRef.current = selectionFilter
     selectionCatalogRef.current = selectionCatalog
   }, [
+    activeSectionView,
     onClearHover,
     onDeselect,
     onAnnotationEdit,
@@ -386,6 +439,9 @@ export function ThreeCadViewport({
     onSketchGeometryDragStart,
     onSketchMove,
     onSketchRelease,
+    onSectionClear,
+    onSectionFlip,
+    onSectionOffsetChange,
     onSketchToolPatch,
     onLodTierChange,
     selection,
@@ -394,10 +450,11 @@ export function ThreeCadViewport({
   ])
 
   useLayoutEffect(() => {
+    sectionViewRef.current = activeSectionView
     renderablesRef.current = renderables
     sketchDisplayRenderablesRef.current = sketchDisplayRenderables
     bvhSceneKeyRef.current = bvhSceneKey
-  }, [bvhSceneKey, renderables, sketchDisplayRenderables])
+  }, [activeSectionView, bvhSceneKey, renderables, sketchDisplayRenderables])
 
   useEffect(() => {
     projectionModeRef.current = projectionMode
@@ -790,6 +847,74 @@ export function ThreeCadViewport({
       return resolveAllCandidates(candidates, acceptsTarget)
     }
 
+    const getViewportCameraPosition = (): Vec3 | null => {
+      const camera = cameraRef.current
+
+      return camera
+        ? [camera.position.x, camera.position.y, camera.position.z]
+        : null
+    }
+
+    const getSectionHandleHitFromClientPoint = (
+      clientX: number,
+      clientY: number,
+      viewportRect: DOMRectReadOnly,
+    ) => {
+      const activeSection = sectionViewRef.current
+      const camera = cameraRef.current
+
+      if (!activeSection || !camera) {
+        return null
+      }
+
+      const handlePosition = getSectionPlaneOrigin(activeSection)
+      const projectedHandleCenter = projectWorldPointToViewport({
+        camera,
+        point: handlePosition,
+        viewport: {
+          width: viewportRect.width,
+          height: viewportRect.height,
+        },
+      })
+
+      if (!projectedHandleCenter) {
+        return null
+      }
+
+      const boundsSize = activeSectionBounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(24, 24, 24)
+      const planeSize = Math.max(boundsSize.length() * 0.6, 12)
+      const handleRadius = Math.max(planeSize * 0.045, 0.6)
+      const handleEdgePoint: Vec3 = [
+        handlePosition[0] + activeSection.plane.frame.xAxis[0] * handleRadius,
+        handlePosition[1] + activeSection.plane.frame.xAxis[1] * handleRadius,
+        handlePosition[2] + activeSection.plane.frame.xAxis[2] * handleRadius,
+      ]
+      const projectedHandleEdge = projectWorldPointToViewport({
+        camera,
+        point: handleEdgePoint,
+        viewport: {
+          width: viewportRect.width,
+          height: viewportRect.height,
+        },
+      })
+      const pixelRadius = projectedHandleEdge
+        ? Math.hypot(
+            projectedHandleEdge.x - projectedHandleCenter.x,
+            projectedHandleEdge.y - projectedHandleCenter.y,
+          )
+        : 0
+      const hitRadiusPx = Math.max(pixelRadius, 14)
+      const localClientX = clientX - viewportRect.left
+      const localClientY = clientY - viewportRect.top
+
+      return Math.hypot(
+        projectedHandleCenter.x - localClientX,
+        projectedHandleCenter.y - localClientY,
+      ) <= hitRadiusPx
+        ? true
+        : null
+    }
+
     const projectSketchPoint = (
       clientX: number,
       clientY: number,
@@ -838,6 +963,34 @@ export function ThreeCadViewport({
 
     const handlePointerMove = (event: PointerEvent) => {
       const viewportRect = canvasElement.getBoundingClientRect()
+
+      if (sectionDragRef.current !== null) {
+        const offset = resolveSectionScreenDragOffset({
+          camera: cameraRef.current,
+          viewport: {
+            width: viewportRect.width,
+            height: viewportRect.height,
+          },
+          sectionAtDragStart: sectionDragRef.current.sectionAtDragStart,
+          dragStartClientPoint: {
+            x: sectionDragRef.current.dragStartClientPoint.x - viewportRect.left,
+            y: sectionDragRef.current.dragStartClientPoint.y - viewportRect.top,
+          },
+          currentClientPoint: {
+            x: event.clientX - viewportRect.left,
+            y: event.clientY - viewportRect.top,
+          },
+        })
+
+        if (offset !== null && offset !== sectionDragOffsetRef.current) {
+          sectionDragOffsetRef.current = offset
+          sectionOffsetChangeRef.current(offset)
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
 
       if (sketchGeometryDragRef.current) {
         const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
@@ -915,9 +1068,32 @@ export function ThreeCadViewport({
         return
       }
 
+      const viewportRect = canvasElement.getBoundingClientRect()
+
       primaryPointerDownRef.current = {
         x: event.clientX,
         y: event.clientY,
+      }
+
+      const sectionHandleHit = getSectionHandleHitFromClientPoint(event.clientX, event.clientY, viewportRect)
+
+      if (sectionHandleHit && sectionViewRef.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        sectionDragRef.current = {
+          pointerId: event.pointerId,
+          sectionAtDragStart: sectionViewRef.current,
+          dragStartClientPoint: {
+            x: event.clientX,
+            y: event.clientY,
+          },
+        }
+        sectionDragOffsetRef.current = sectionViewRef.current.offset
+        canvasElement.setPointerCapture(event.pointerId)
+        if (controlsRef.current) {
+          ;(controlsRef.current as ViewportCameraControls & { enabled?: boolean }).enabled = false
+        }
+        return
       }
 
       if (
@@ -927,7 +1103,6 @@ export function ThreeCadViewport({
         return
       }
 
-      const viewportRect = canvasElement.getBoundingClientRect()
       const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)?.target
       const dragTarget = resolvedTarget?.kind === 'sketchPoint'
@@ -956,6 +1131,22 @@ export function ThreeCadViewport({
       }
 
       const activeSketchDrag = sketchGeometryDragRef.current
+      const activeSectionDrag = sectionDragRef.current !== null
+
+      if (activeSectionDrag) {
+        const pointerId = sectionDragRef.current?.pointerId
+        sectionDragRef.current = null
+        sectionDragOffsetRef.current = null
+        if (pointerId !== undefined && canvasElement.hasPointerCapture(pointerId)) {
+          canvasElement.releasePointerCapture(pointerId)
+        }
+        if (controlsRef.current) {
+          ;(controlsRef.current as ViewportCameraControls & { enabled?: boolean }).enabled = true
+        }
+        primaryPointerDownRef.current = null
+        return
+      }
+
       if (activeSketchDrag) {
         const viewportRect = canvasElement.getBoundingClientRect()
         const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
@@ -1012,7 +1203,7 @@ export function ThreeCadViewport({
     }
 
     const handlePointerLeave = () => {
-      if (!sketchGeometryDragRef.current) {
+      if (sectionDragRef.current === null && !sketchGeometryDragRef.current) {
         cancelSketchGeometryDragMove()
         primaryPointerDownRef.current = null
         pendingSketchGeometryDragRef.current = null
@@ -1033,6 +1224,16 @@ export function ThreeCadViewport({
       }
 
       const viewportRect = canvasElement.getBoundingClientRect()
+      const sectionHandleHit = getSectionHandleHitFromClientPoint(event.clientX, event.clientY, viewportRect)
+
+      if (sectionViewRef.current) {
+        if (sectionHandleHit) {
+          return
+        }
+
+        return
+      }
+
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
 
       if (shouldViewportClickEventRequestConnectedSketchSelection({
@@ -1070,7 +1271,7 @@ export function ThreeCadViewport({
       }
 
       lastPickedTargetRef.current = resolvedTarget.target
-      selectRef.current(resolvedTarget.target)
+      selectRef.current(resolvedTarget.target, getViewportCameraPosition() ?? undefined)
     }
 
     const handleDoubleClick = (event: MouseEvent) => {
@@ -1119,6 +1320,14 @@ export function ThreeCadViewport({
     return () => {
       cancelSketchGeometryDragMove()
       projectSketchClientPointRef.current = () => null
+      if (sectionDragRef.current && canvasElement.hasPointerCapture(sectionDragRef.current.pointerId)) {
+        canvasElement.releasePointerCapture(sectionDragRef.current.pointerId)
+      }
+      sectionDragRef.current = null
+      sectionDragOffsetRef.current = null
+      primaryPointerDownRef.current = null
+      sketchGeometryDragRef.current = null
+      pendingSketchGeometryDragRef.current = null
       canvasElement.removeEventListener('pointerdown', handlePointerDown, true)
       canvasElement.removeEventListener('pointermove', handlePointerMove)
       canvasElement.removeEventListener('pointerleave', handlePointerLeave)
@@ -1127,7 +1336,7 @@ export function ThreeCadViewport({
       window.removeEventListener('click', handleClick, true)
       window.removeEventListener('dblclick', handleDoubleClick, true)
     }
-  }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSession])
+  }, [activeSectionBounds, cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSession])
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -1154,6 +1363,50 @@ export function ThreeCadViewport({
     }
   }, [])
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return
+    }
+
+    window.__cadProjectSectionHandleToScreen = () => {
+      const viewportElement = viewportRef.current
+      const section = sectionViewRef.current
+      const camera = cameraRef.current
+      const rect = viewportElement?.getBoundingClientRect()
+
+      if (!section || !camera || !rect) {
+        return null
+      }
+
+      const handle = projectWorldPointToViewport({
+        camera,
+        point: getSectionPlaneOrigin(section),
+        viewport: {
+          width: rect.width,
+          height: rect.height,
+        },
+      })
+      const normal = projectWorldPointToViewport({
+        camera,
+        point: [
+          section.plane.frame.origin[0] + section.plane.frame.normal[0] * (section.offset + 1),
+          section.plane.frame.origin[1] + section.plane.frame.normal[1] * (section.offset + 1),
+          section.plane.frame.origin[2] + section.plane.frame.normal[2] * (section.offset + 1),
+        ],
+        viewport: {
+          width: rect.width,
+          height: rect.height,
+        },
+      })
+
+      return handle ? { handle, normal, offset: section.offset } : null
+    }
+
+    return () => {
+      delete window.__cadProjectSectionHandleToScreen
+    }
+  }, [activeSectionView])
+
   const isEditorRenderIdle = machineState.kind === 'idle'
 
   return (
@@ -1161,7 +1414,7 @@ export function ThreeCadViewport({
       <Canvas
         className="h-full w-full"
         frameloop="always"
-        gl={{ antialias: true, alpha: true }}
+        gl={{ antialias: true, alpha: true, localClippingEnabled: true }}
         orthographic
         camera={{ near: 0.1, far: 1000, position: [14, -16, 28] }}
         onCreated={({ camera, gl, raycaster }) => {
@@ -1215,6 +1468,7 @@ export function ThreeCadViewport({
                 key={`${entry.origin}:${entry.renderable.id}`}
                 entry={entry}
                 palette={sketchRenderingPalette}
+                clippingPlane={activeSectionClippingPlane}
               />
             ))}
             {sketchDisplayRenderables.map((renderable) => (
@@ -1227,6 +1481,15 @@ export function ThreeCadViewport({
             ))}
           </group>
         </Bvh>
+        {activeSectionView ? (
+          <>
+            <SectionCapLayer caps={activeSectionCaps} />
+            <SectionViewOverlay
+              bounds={activeSectionBounds}
+              section={activeSectionView}
+            />
+          </>
+        ) : null}
         <OrbitControls
           ref={handleControlsRef}
           makeDefault
@@ -1258,6 +1521,25 @@ export function ThreeCadViewport({
           projectionMode={projectionMode}
           onProjectionModeChange={handleProjectionModeChange}
         />
+        {activeSectionView ? (
+          <div className="pointer-events-auto flex items-center gap-2">
+            <Button
+              size="compact-xs"
+              variant="filled"
+              color="gray"
+              onClick={() => sectionFlipRef.current()}
+            >
+              Flip
+            </Button>
+            <Button
+              size="compact-xs"
+              variant="default"
+              onClick={() => sectionClearRef.current()}
+            >
+              Clear
+            </Button>
+          </div>
+        ) : null}
       </div>
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}
@@ -1942,6 +2224,157 @@ function WorkspaceSceneScaffold() {
   )
 }
 
+function SectionCapLayer({
+  caps,
+}: {
+  caps: SectionCapRenderable[]
+}) {
+  const hatchTexture = useMemo(() => createSectionHatchTexture(), [])
+
+  useEffect(() => () => hatchTexture.dispose(), [hatchTexture])
+
+  return (
+    <>
+      {caps.map((cap) => (
+        <SectionCapMesh key={cap.id} cap={cap} hatchTexture={hatchTexture} />
+      ))}
+    </>
+  )
+}
+
+function SectionCapMesh({
+  cap,
+  hatchTexture,
+}: {
+  cap: SectionCapRenderable
+  hatchTexture: THREE.Texture
+}) {
+  const geometry = useMemo(() => {
+    const nextGeometry = new THREE.BufferGeometry()
+    nextGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(cap.vertexPositions.flat(), 3),
+    )
+    nextGeometry.setAttribute(
+      'normal',
+      new THREE.Float32BufferAttribute(cap.vertexNormals.flat(), 3),
+    )
+    nextGeometry.setAttribute(
+      'uv',
+      new THREE.Float32BufferAttribute(
+        cap.textureCoordinates.flatMap(([u, v]) => [u / 6, v / 6]),
+        2,
+      ),
+    )
+    nextGeometry.setIndex(cap.triangleIndices.flat())
+    return nextGeometry
+  }, [cap])
+  const fillMaterial = useMemo(() => new THREE.MeshStandardMaterial({
+    color: 0xd9dce1,
+    metalness: 0.04,
+    roughness: 0.88,
+    side: THREE.DoubleSide,
+    flatShading: true,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  }), [])
+  const hatchMaterial = useMemo(() => new THREE.MeshBasicMaterial({
+    map: hatchTexture,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
+  }), [hatchTexture])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => fillMaterial.dispose(), [fillMaterial])
+  useEffect(() => () => hatchMaterial.dispose(), [hatchMaterial])
+
+  return (
+    <group renderOrder={9}>
+      <mesh geometry={geometry} material={fillMaterial} renderOrder={9} />
+      <mesh geometry={geometry} material={hatchMaterial} renderOrder={10} />
+    </group>
+  )
+}
+
+function SectionViewOverlay({
+  bounds,
+  section,
+}: {
+  bounds: THREE.Box3 | null
+  section: SectionViewSession
+}) {
+  const planeOrigin = useMemo(() => getSectionPlaneOrigin(section), [section])
+  const basis = useMemo(() => getSectionPlaneBasis(section.plane.frame), [section.plane.frame])
+  const quaternion = useMemo(
+    () => new THREE.Quaternion().setFromRotationMatrix(basis.matrix),
+    [basis.matrix],
+  )
+  const planeSize = useMemo(() => {
+    const size = bounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(24, 24, 24)
+    return Math.max(size.length() * 0.6, 12)
+  }, [bounds])
+  const handleRadius = Math.max(planeSize * 0.045, 0.6)
+  const outlinePoints = useMemo(() => {
+    const half = planeSize / 2
+
+    return [
+      new THREE.Vector3(-half, -half, 0),
+      new THREE.Vector3(half, -half, 0),
+      new THREE.Vector3(half, half, 0),
+      new THREE.Vector3(-half, half, 0),
+    ]
+  }, [planeSize])
+  const outlineGeometry = useMemo(
+    () => new THREE.BufferGeometry().setFromPoints(outlinePoints),
+    [outlinePoints],
+  )
+  const outlineMaterial = useMemo(() => new THREE.LineBasicMaterial({
+    color: 0xbcd0e6,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+  }), [])
+
+  useEffect(() => () => outlineGeometry.dispose(), [outlineGeometry])
+  useEffect(() => () => outlineMaterial.dispose(), [outlineMaterial])
+
+  return (
+    <group
+      position={planeOrigin}
+      quaternion={quaternion}
+      renderOrder={8}
+    >
+      <mesh renderOrder={8}>
+        <planeGeometry args={[planeSize, planeSize]} />
+        <meshBasicMaterial
+          color={0xa8bdd4}
+          transparent
+          opacity={0.07}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+      <lineLoop geometry={outlineGeometry} material={outlineMaterial} renderOrder={9} />
+      <mesh renderOrder={10}>
+        <sphereGeometry args={[handleRadius, 16, 16]} />
+        <meshStandardMaterial
+          color={0xe4edf6}
+          emissive={0x5d8ebf}
+          emissiveIntensity={0.36}
+          roughness={0.3}
+          metalness={0.12}
+        />
+      </mesh>
+    </group>
+  )
+}
+
 function getDocumentRenderableMaterialOptions(
   entry: ViewportRenderableRecord,
   palette: SketchRenderingPalette,
@@ -1976,13 +2409,15 @@ function getDocumentRenderableMaterialOptions(
 function DocumentRenderableNode({
   entry,
   palette,
+  clippingPlane,
 }: {
   entry: ViewportRenderableRecord
   palette: SketchRenderingPalette
+  clippingPlane: THREE.Plane | null
 }) {
   switch (entry.renderable.geometry.kind) {
     case 'mesh':
-      return <DocumentMeshNode entry={entry} palette={palette} />
+      return <DocumentMeshNode entry={entry} palette={palette} clippingPlane={clippingPlane} />
     case 'polyline':
       return (
         <>
@@ -2000,9 +2435,11 @@ function DocumentRenderableNode({
 function DocumentMeshNode({
   entry,
   palette,
+  clippingPlane,
 }: {
   entry: ViewportRenderableRecord
   palette: SketchRenderingPalette
+  clippingPlane: THREE.Plane | null
 }) {
   const { renderable, origin } = entry
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
@@ -2028,7 +2465,7 @@ function DocumentMeshNode({
     return nextGeometry
   }, [geometryData, renderable.id])
   const material = useMemo(() => {
-    return isSeededDatumPlaneRenderable(renderable)
+    const nextMaterial = isSeededDatumPlaneRenderable(renderable)
       ? new THREE.MeshStandardMaterial({
           color: 0x9ea8b5,
           transparent: true,
@@ -2044,7 +2481,15 @@ function DocumentMeshNode({
           polygonOffsetUnits: 1,
         })
       : createRenderableMeshMaterial(renderable, origin, getDocumentRenderableMaterialOptions(entry, palette))
-  }, [entry, origin, palette, renderable])
+
+    if (clippingPlane) {
+      nextMaterial.clippingPlanes = [clippingPlane]
+      nextMaterial.clipShadows = true
+      nextMaterial.needsUpdate = true
+    }
+
+    return nextMaterial
+  }, [clippingPlane, entry, origin, palette, renderable])
   const facePerimeterGeometry = useMemo(() => {
     if (
       !geometryData

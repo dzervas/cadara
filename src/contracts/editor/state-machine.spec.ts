@@ -116,6 +116,211 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
+  function createSectionSelectionSnapshot(): DocumentSnapshot {
+    const base = createSnapshot()
+    const plane = createStandardPlaneDefinition('xy')
+
+    return {
+      ...base,
+      sketches: [
+        {
+          ownerDocumentId: 'doc_workspace',
+          ownerRevisionId: 'rev_1',
+          ownerFeatureId: null,
+          ownerSketchId: 'sketch_a',
+          ownerBodyId: null,
+          sketchId: 'sketch_a',
+          label: 'Sketch A',
+          plane,
+          planeTarget: plane.support,
+          planeKey: plane.key,
+          sketch: {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: 'rev_1',
+            ownerFeatureId: null,
+            ownerSketchId: 'sketch_a',
+            ownerBodyId: null,
+            sketchId: 'sketch_a',
+            label: 'Sketch A',
+            planeSupport: plane.support,
+            definition: {
+              schemaVersion: 'sketch-definition/v1alpha1',
+              referenceIds: [],
+              references: [],
+              pointIds: [],
+              points: [],
+              entityIds: [],
+              entities: [],
+              constraintIds: [],
+              constraints: [],
+              dimensionIds: [],
+              dimensions: [],
+            },
+            solvedSnapshot: {
+              schemaVersion: 'solved-sketch/v1alpha1',
+              status: {
+                solveState: 'solved',
+                constraintState: 'underConstrained',
+              },
+              solvedEntities: [],
+              solvedPoints: [],
+              constraintStatuses: [],
+              dimensionStatuses: [],
+              diagnostics: [],
+            },
+            regions: [],
+          },
+        },
+      ],
+      document: {
+        ...base.document,
+        sketches: [
+          {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: 'rev_1',
+            ownerFeatureId: null,
+            ownerSketchId: 'sketch_a',
+            ownerBodyId: null,
+            sketchId: 'sketch_a',
+            label: 'Sketch A',
+            plane,
+            planeTarget: plane.support,
+            planeKey: plane.key,
+            sketch: {
+              ownerDocumentId: 'doc_workspace',
+              ownerRevisionId: 'rev_1',
+              ownerFeatureId: null,
+              ownerSketchId: 'sketch_a',
+              ownerBodyId: null,
+              sketchId: 'sketch_a',
+              label: 'Sketch A',
+              planeSupport: plane.support,
+              definition: {
+                schemaVersion: 'sketch-definition/v1alpha1',
+                referenceIds: [],
+                references: [],
+                pointIds: [],
+                points: [],
+                entityIds: [],
+                entities: [],
+                constraintIds: [],
+                constraints: [],
+                dimensionIds: [],
+                dimensions: [],
+              },
+              solvedSnapshot: {
+                schemaVersion: 'solved-sketch/v1alpha1',
+                status: {
+                  solveState: 'solved',
+                  constraintState: 'underConstrained',
+                },
+                solvedEntities: [],
+                solvedPoints: [],
+                constraintStatuses: [],
+                dimensionStatuses: [],
+                diagnostics: [],
+              },
+              regions: [],
+            },
+          },
+        ],
+        entities: [
+          ...base.document.entities,
+          {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: 'rev_1',
+            ownerFeatureId: null,
+            ownerSketchId: null,
+            ownerBodyId: 'body_a',
+            id: 'snapshot_entity_face_top' as SnapshotEntityId,
+            label: 'Top face',
+            target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+            relatedTargets: [],
+            consumedByFeatureIds: [],
+            selectionSemantics: ['face', 'planarFace', 'planarReference'],
+          },
+          {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: 'rev_1',
+            ownerFeatureId: null,
+            ownerSketchId: 'sketch_a',
+            ownerBodyId: null,
+            id: 'snapshot_entity_region_a' as SnapshotEntityId,
+            label: 'Sketch region',
+            target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_profile_a' as RegionId },
+            relatedTargets: [],
+            consumedByFeatureIds: [],
+            selectionSemantics: ['regionProfile'],
+          },
+        ],
+        render: {
+          schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
+          records: [
+            {
+              id: 'renderable_face_top' as RenderableId,
+              label: 'Top face',
+              ownerBodyId: 'body_a',
+              ownerFeatureId: null,
+              binding: {
+                pickId: 'pick_face_top' as PickId,
+                pickPriority: 8,
+                target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+                topology: 'face',
+                semanticClass: 'planarFace',
+              },
+              geometry: {
+                kind: 'mesh',
+                vertexPositions: [
+                  [0, 0, 0],
+                  [4, 0, 0],
+                  [0, 4, 0],
+                ],
+                vertexNormals: [
+                  [0, 0, 1],
+                  [0, 0, 1],
+                  [0, 0, 1],
+                ],
+                triangleIndices: [[0, 1, 2]],
+              },
+            },
+          ],
+        },
+      },
+      presentation: {
+        ...base.presentation,
+        entities: [
+          ...base.presentation.entities,
+          {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: 'rev_1',
+            ownerFeatureId: null,
+            ownerSketchId: null,
+            ownerBodyId: 'body_a',
+            id: 'snapshot_entity_face_top' as SnapshotEntityId,
+            label: 'Top face',
+            target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+            relatedTargets: [],
+            consumedByFeatureIds: [],
+            selectionSemantics: ['face', 'planarFace', 'planarReference'],
+          },
+          {
+            ownerDocumentId: 'doc_workspace',
+            ownerRevisionId: 'rev_1',
+            ownerFeatureId: null,
+            ownerSketchId: 'sketch_a',
+            ownerBodyId: null,
+            id: 'snapshot_entity_region_a' as SnapshotEntityId,
+            label: 'Sketch region',
+            target: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_profile_a' as RegionId },
+            relatedTargets: [],
+            consumedByFeatureIds: [],
+            selectionSemantics: ['regionProfile'],
+          },
+        ],
+      },
+    }
+  }
+
   function createSnapshot(): DocumentSnapshot {
     return {
       contractVersion: 'modeling-contract/v1alpha1',
@@ -570,6 +775,138 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     assert(openResult.effects.length === 1, 'Selecting a planar face should emit one open-session effect.')
     assert(openResult.effects[0]?.type === 'sketch.openSession', 'Planar-face sketch selection should open a sketch session.')
+  }
+
+  function testSectionViewActivationCollectsPlanarSeeds() {
+    const snapshot = createSectionSelectionSnapshot()
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot,
+        selectionCatalog: buildSelectionTargetCatalog(snapshot),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sectionView',
+      },
+    )
+
+    assert(activated.state.kind === 'selectionCommand', 'Section View activation should arm a selection command.')
+    assert(activated.state.command.toolId === 'sectionView', 'Section View activation should preserve the tool id.')
+    assert(activated.effects.length === 0, 'Section View activation should stay local until a seed is selected.')
+
+    for (const target of [
+      { kind: 'construction', constructionId: 'construction_plane-xy' },
+      { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+      { kind: 'region', sketchId: 'sketch_a', regionId: 'region_profile_a' as RegionId },
+    ] as const) {
+      const selected = transitionEditorState(activated.state, {
+        type: 'viewport.selectionRequested',
+        target,
+        cameraPosition: [0, 0, 20],
+      })
+
+      assert(selected.state.kind === 'inspectingSection', `Section View should accept ${target.kind} seeds.`)
+      assert(selected.state.section.seed.kind === target.kind, `Section View should store the ${target.kind} seed.`)
+      assert(selected.state.section.offset === 0, 'Accepted section seeds should start from the seed plane.')
+      assert(selected.state.section.retainedSide === 'negative', 'Positive-Z camera should retain the opposite half-space by default.')
+    }
+  }
+
+  function testSectionViewRejectsUnsupportedOrCameraLessSeeds() {
+    const snapshot = createSectionSelectionSnapshot()
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot,
+        selectionCatalog: buildSelectionTargetCatalog(snapshot),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sectionView',
+      },
+    )
+
+    const invalidTarget = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'body', bodyId: 'body_a' },
+      cameraPosition: [0, 0, 20],
+    })
+
+    assert(
+      invalidTarget.state.kind === 'selectionCommand',
+      'Unsupported section seeds should keep the editor in seed-collection mode.',
+    )
+
+    const missingCamera = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+    })
+
+    assert(
+      missingCamera.state.kind === 'selectionCommand',
+      'Section View should require viewport camera context before accepting a seed.',
+    )
+    assert(
+      missingCamera.state.preview?.label.includes('viewport-picked'),
+      'Camera-less section seed attempts should explain that viewport selection context is required.',
+    )
+  }
+
+  function testSectionViewFlipAndClearPreservePlanePosition() {
+    const snapshot = createSectionSelectionSnapshot()
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot,
+        selectionCatalog: buildSelectionTargetCatalog(snapshot),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sectionView',
+      },
+    )
+    const selected = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+      cameraPosition: [0, 0, 20],
+    })
+
+    assert(selected.state.kind === 'inspectingSection', 'Accepted section seeds should enter active section inspection.')
+    const moved = transitionEditorState(selected.state, {
+      type: 'section.offsetUpdated',
+      commandSessionId: selected.state.command.commandSessionId,
+      offset: 7.5,
+    })
+    const flipped = transitionEditorState(moved.state, {
+      type: 'section.flipRequested',
+      commandSessionId: moved.state.kind === 'inspectingSection'
+        ? moved.state.command.commandSessionId
+        : ('command_unreachable' as CommandSessionId),
+    })
+
+    assert(flipped.state.kind === 'inspectingSection', 'Flipping should keep the section active.')
+    assert(flipped.state.section.offset === 7.5, 'Flipping should preserve the current plane position.')
+    assert(flipped.state.section.retainedSide === 'positive', 'Flipping should invert the retained half-space.')
+
+    const cleared = transitionEditorState(flipped.state, {
+      type: 'section.cleared',
+      commandSessionId: flipped.state.command.commandSessionId,
+    })
+
+    assert(cleared.state.kind === 'idle', 'Clearing an active section should exit the command session.')
   }
 
   function testSketchSessionPreservesStoredPlaneDefinition() {
@@ -3297,6 +3634,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
   testSketchActivationAcceptsPlanarFaces()
+  testSectionViewActivationCollectsPlanarSeeds()
+  testSectionViewRejectsUnsupportedOrCameraLessSeeds()
+  testSectionViewFlipAndClearPreservePlanePosition()
   testSketchSessionPreservesStoredPlaneDefinition()
   testFeaturePreviewIgnoresStaleResponseIds()
   testRevolveActivationStartsFeaturePreviewFlow()

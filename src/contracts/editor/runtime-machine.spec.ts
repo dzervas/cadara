@@ -417,3 +417,92 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch sel
     actor.stop()
   }
 })
+
+test('src/contracts/editor/runtime-machine.spec.ts forwards active section offset updates', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  function waitForState(
+    actor: EditorRuntimeActor,
+    predicate: (state: EditorState) => boolean,
+  ): Promise<EditorState> {
+    const current = getEditorRuntimeState(actor)
+
+    if (predicate(current)) {
+      return Promise.resolve(current)
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timed out waiting for editor runtime state.'))
+      }, 2_000)
+      const subscription = actor.subscribe(() => {
+        const state = getEditorRuntimeState(actor)
+
+        if (!predicate(state)) {
+          return
+        }
+
+        clearTimeout(timeoutId)
+        subscription.unsubscribe()
+        resolve(state)
+      })
+    })
+  }
+
+  const adapter = new MockKernelAdapter()
+  const runtime: EditorEffectRuntime = {
+    async getCurrentDocumentSnapshot() {
+      return (await adapter.getDocumentSnapshot({
+        contractVersion: 'modeling-contract/v1alpha1',
+        documentId: 'doc_workspace',
+      })).snapshot
+    },
+    async commitSketch() {
+      return null
+    },
+    async evaluatePreview() {
+      throw new Error('Feature preview is not used by this test.')
+    },
+    async commitFeature() {
+      throw new Error('Feature commit is not used by this test.')
+    },
+  }
+  const actor = createEditorRuntimeActor(runtime)
+
+  actor.start()
+
+  try {
+    await waitForState(actor, (state) => state.document.revisionId !== null)
+
+    actor.send({ type: 'tool.activated', toolId: 'sectionView' })
+    actor.send({
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+      cameraPosition: [0, 0, 20],
+    })
+
+    const selected = await waitForState(actor, (state) => state.kind === 'inspectingSection')
+    assert(selected.kind === 'inspectingSection', 'Expected an active section after picking a valid section seed.')
+
+    actor.send({
+      type: 'section.offsetUpdated',
+      commandSessionId: selected.command.commandSessionId,
+      offset: 6,
+    })
+
+    const moved = await waitForState(
+      actor,
+      (state) => state.kind === 'inspectingSection' && state.section.offset === 6,
+    )
+
+    assert(moved.kind === 'inspectingSection', 'Section offset forwarding should keep the section workflow active.')
+    assert(moved.section.offset === 6, 'Runtime should forward section offset updates to the editor reducer.')
+  } finally {
+    actor.stop()
+  }
+})

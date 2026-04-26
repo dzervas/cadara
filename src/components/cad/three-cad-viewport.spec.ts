@@ -6,7 +6,9 @@ import {
   configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
   createViewportBvhSceneKey,
+  projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
+  resolveSectionScreenDragOffset,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from '@/components/cad/three-cad-viewport-helpers'
@@ -17,6 +19,7 @@ import {
 import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import { bindRenderableObject } from '@/domain/workspace/render-picking'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import * as THREE from 'three'
 
 test('src/components/cad/three-cad-viewport.spec.ts', () => {
@@ -178,6 +181,105 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     if (mesh.material instanceof THREE.Material) {
       mesh.material.dispose()
     }
+  }
+
+  function testWorldPointProjectionMapsViewportCoordinates() {
+    const camera = new THREE.PerspectiveCamera(45, 2, 0.1, 100)
+    camera.position.set(0, 0, 10)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+
+    const centeredPoint = projectWorldPointToViewport({
+      camera,
+      point: [0, 0, 0],
+      viewport: { width: 240, height: 120 },
+    })
+    const offsetPoint = projectWorldPointToViewport({
+      camera,
+      point: [1, 0, 0],
+      viewport: { width: 240, height: 120 },
+    })
+    const hiddenPoint = projectWorldPointToViewport({
+      camera,
+      point: [0, 0, 20],
+      viewport: { width: 240, height: 120 },
+    })
+
+    assert(centeredPoint !== null, 'World-point projection should resolve visible points.')
+    assert(Math.abs(centeredPoint.x - 120) < 0.001, 'Projection should center the world origin horizontally.')
+    assert(Math.abs(centeredPoint.y - 60) < 0.001, 'Projection should center the world origin vertically.')
+    assert(offsetPoint !== null && offsetPoint.x > centeredPoint.x, 'Projection should preserve horizontal ordering for visible points.')
+    assert(hiddenPoint === null, 'Projection should reject points that fall behind the active camera.')
+  }
+
+  function testSectionScreenDragOffsetTracksProjectedNormalMotion() {
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
+    camera.position.set(8, -10, 6)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+
+    const section = {
+      seed: { kind: 'construction', constructionId: 'construction_plane-xy' },
+      plane: createStandardPlaneDefinition('xy'),
+      offset: 0,
+      retainedSide: 'positive',
+    } as const
+
+    const center = projectWorldPointToViewport({
+      camera,
+      point: [0, 0, 0],
+      viewport: { width: 200, height: 200 },
+    })
+    const normalPoint = projectWorldPointToViewport({
+      camera,
+      point: [0, 0, 1],
+      viewport: { width: 200, height: 200 },
+    })
+
+    assert(center !== null && normalPoint !== null, 'Section drag projection should be testable with visible handle points.')
+
+    const axisDelta = {
+      x: normalPoint.x - center.x,
+      y: normalPoint.y - center.y,
+    }
+    const axisLength = Math.hypot(axisDelta.x, axisDelta.y)
+    const axisUnit = { x: axisDelta.x / axisLength, y: axisDelta.y / axisLength }
+    const offset = resolveSectionScreenDragOffset({
+      camera,
+      viewport: { width: 200, height: 200 },
+      sectionAtDragStart: section,
+      dragStartClientPoint: center,
+      currentClientPoint: {
+        x: center.x + axisUnit.x * axisLength * 2,
+        y: center.y + axisUnit.y * axisLength * 2,
+      },
+    })
+
+    assert(offset !== null, 'Section drag projection should resolve a numeric offset for visible axis motion.')
+    assert(Math.abs(offset - 2) < 0.05, 'Section drag projection should convert two projected world units into offset motion along the section normal.')
+  }
+
+  function testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint() {
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
+    camera.position.set(0, 0, 10)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+
+    const offset = resolveSectionScreenDragOffset({
+      camera,
+      viewport: { width: 200, height: 200 },
+      sectionAtDragStart: {
+        seed: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        plane: createStandardPlaneDefinition('xy'),
+        offset: 0,
+        retainedSide: 'positive',
+      },
+      dragStartClientPoint: { x: 100, y: 100 },
+      currentClientPoint: { x: 100, y: 80 },
+    })
+
+    assert(offset !== null, 'Section drag projection should still resolve an offset when the section normal is view-aligned.')
+    assert(Math.abs(offset) > 0.001, 'Section drag projection fallback should produce visible motion for aligned views.')
   }
 
   function testRenderIdleTrackerRequiresStableIdleFrames() {
@@ -364,6 +466,9 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
   testDragMoveCancellationDropsPendingFrame()
   testSketchBvhKeyIgnoresPositionalPolylineUpdates()
   testProjectionBridgeResolvesKnownTarget()
+  testWorldPointProjectionMapsViewportCoordinates()
+  testSectionScreenDragOffsetTracksProjectedNormalMotion()
+  testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint()
   testRenderIdleTrackerRequiresStableIdleFrames()
   testViewCubeResizeUpdatesCanvasCssSize()
   testWorkspaceScaffoldWiresDoNotWriteDepth()
