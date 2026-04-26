@@ -885,6 +885,39 @@ test('src/domain/workspace/render-picking.spec.ts', async () => {
   }
 
   {
+    const faceMesh = createBoundMesh(faceRenderable)
+    const edgeLine = createBoundLine(edgeRenderable)
+
+    const measureBoundary = resolvePickTarget(
+      [
+        createIntersection(faceMesh, 1),
+        createIntersection(edgeLine, 1.001),
+      ],
+      null,
+      { wireOcclusionTolerance: 0.001 },
+    )
+    assertDeepEqual(
+      measureBoundary?.target,
+      edgeRenderable.binding.target,
+      'Custom wire occlusion tolerances should still allow truly same-surface wires to resolve ahead of faces.',
+    )
+
+    const measureOccluded = resolvePickTarget(
+      [
+        createIntersection(faceMesh, 1),
+        createIntersection(edgeLine, 1.002),
+      ],
+      null,
+      { wireOcclusionTolerance: 0.001 },
+    )
+    assertDeepEqual(
+      measureOccluded?.target,
+      faceRenderable.binding.target,
+      'Tighter wire occlusion tolerances should block hidden wires that sit behind a visible face.',
+    )
+  }
+
+  {
     const constructionRenderable: RenderableEntityRecord = {
       id: 'renderable_construction_boundary',
       label: 'XY Plane',

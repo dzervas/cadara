@@ -7,6 +7,7 @@ import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
+import { MeasurementPanel } from '@/components/layout/measurement-panel'
 import { DocumentExportModal } from '@/components/layout/document-export-modal'
 import { WorkbenchInspectorOverlay } from '@/components/layout/workbench-inspector-overlay'
 import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
@@ -74,6 +75,7 @@ import {
   getSelectionDetail,
   getTargetContributingFeatureIds,
 } from '@/domain/modeling/document-snapshot-view'
+import { deriveMeasurementViewModel } from '@/domain/measure/measurement'
 import {
   createDocumentHistoryOrder,
   getNextDocumentHistoryCursor,
@@ -646,6 +648,14 @@ export function CadWorkbench() {
     sectionOffset: activeSectionView?.offset ?? null,
     sectionRetainedSide: activeSectionView?.retainedSide ?? null,
   }
+  const measurementViewModel = useMemo(
+    () => deriveMeasurementViewModel({
+      activeToolId: activeCommand?.toolId ?? null,
+      selection: visibleSelection,
+      snapshot,
+    }),
+    [activeCommand?.toolId, snapshot, visibleSelection],
+  )
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -2229,6 +2239,7 @@ export function CadWorkbench() {
               sketchAnnotations={sketchAnnotations}
               activeSectionView={activeSectionView ?? null}
               hoverTarget={visibleHoverTarget}
+              measurementWitnesses={measurementViewModel?.witnesses ?? []}
               onHover={handleViewportHover}
               onSelect={handleViewportSelect}
               onConnectedSketchSelect={handleViewportConnectedSketchSelect}
@@ -2301,7 +2312,10 @@ export function CadWorkbench() {
                 {sketchSession?.validationMessage ?? sketchRegionDiagnosticMessage}
               </div>
             ) : null}
-            <WorkbenchStateDebugger state={debuggerState} />
+            <div className="absolute bottom-4 left-4 z-20 flex items-end gap-3">
+              <WorkbenchStateDebugger state={debuggerState} />
+              <MeasurementPanel measurement={measurementViewModel} />
+            </div>
             {activeEditSession ? (
               <WorkbenchInspectorOverlay>
                 <FeatureInspector

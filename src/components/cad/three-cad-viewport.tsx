@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Menu, Tooltip } from '@mantine/core'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Bvh, OrbitControls } from '@react-three/drei'
+import { Bvh, Line, OrbitControls } from '@react-three/drei'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
 
@@ -46,6 +46,7 @@ import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from '@/contracts/shared/references'
+import type { MeasurementWitness } from '@/domain/measure/measurement'
 import {
   MARKER_SPHERE_GEOMETRY,
   GEOMETRY_HIGHLIGHT_COLORS,
@@ -61,7 +62,6 @@ import {
   createRenderableLineMaterial,
   createRenderableMarkerMaterial,
   createRenderableMeshMaterial,
-  DEFAULT_LINE_PICK_THRESHOLD,
   DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
   DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
   getRenderableRenderOrder,
@@ -95,6 +95,7 @@ import {
   type ViewportProjectionMode,
 } from '@/domain/workspace/viewport-projection'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+import { getMeasurementWitnessStyleConfig } from '@/components/cad/measurement-witness-style'
 import {
   selectViewportLodTierForRenderables,
   type OccTessellationTierId,
@@ -128,6 +129,7 @@ import {
   createRenderIdleTracker,
   createViewportBvhSceneKey,
   configureWorkspaceScaffoldWireObject,
+  getViewportPickTuning,
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
   resolveSectionScreenDragOffset,
@@ -147,6 +149,7 @@ const VIEWPORT_PROJECTION_OPTIONS: Array<{ mode: ViewportProjectionMode, label: 
 interface ThreeCadViewportProps {
   activeSectionView: SectionViewSession | null
   hoverTarget: PrimitiveRef | null
+  measurementWitnesses: readonly MeasurementWitness[]
   renderables: ViewportRenderableRecord[]
   sketchDisplayRenderables: SketchSessionDisplayRenderable[]
   sketchAnnotations: SketchAnnotationDescriptor[]
@@ -199,6 +202,7 @@ interface ViewCubeSceneState {
 export function ThreeCadViewport({
   activeSectionView,
   hoverTarget,
+  measurementWitnesses,
   renderables,
   sketchDisplayRenderables,
   sketchAnnotations,
@@ -812,7 +816,8 @@ export function ThreeCadViewport({
 
       updatePointerFromClientPoint(pointerRef.current, viewportRect, clientX, clientY)
       raycasterRef.current.setFromCamera(pointerRef.current, camera)
-      raycasterRef.current.params.Line.threshold = DEFAULT_LINE_PICK_THRESHOLD
+      const pickTuning = getViewportPickTuning(selectionFilterRef.current)
+      raycasterRef.current.params.Line.threshold = pickTuning.linePickThreshold
       ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = false
 
       const intersections = raycasterRef.current.intersectObjects(bindings.pickables, true)
@@ -844,7 +849,7 @@ export function ThreeCadViewport({
         }),
       ]
 
-      return resolveAllCandidates(candidates, acceptsTarget)
+      return resolveAllCandidates(candidates, acceptsTarget, pickTuning.resolutionOptions)
     }
 
     const getViewportCameraPosition = (): Vec3 | null => {
@@ -1481,6 +1486,7 @@ export function ThreeCadViewport({
             ))}
           </group>
         </Bvh>
+        <MeasurementWitnessLayer witnesses={measurementWitnesses} />
         {activeSectionView ? (
           <>
             <SectionCapLayer caps={activeSectionCaps} />
@@ -1585,6 +1591,68 @@ export function ThreeCadViewport({
         }}
       />
     </div>
+  )
+}
+
+function MeasurementWitnessLayer({
+  witnesses,
+}: {
+  witnesses: readonly MeasurementWitness[]
+}) {
+  const style = getMeasurementWitnessStyleConfig()
+
+  if (witnesses.length === 0) {
+    return null
+  }
+
+  return (
+    <group renderOrder={28}>
+      {witnesses.map((witness) => {
+        if (witness.kind === 'polyline') {
+          const linePoints = witness.isClosed && witness.points.length > 1
+            ? [...witness.points, witness.points[0]!]
+            : witness.points
+
+          return (
+            <group key={witness.id} renderOrder={28}>
+              <Line
+                points={linePoints}
+                color={style.halo.color}
+                lineWidth={style.halo.lineWidth}
+                transparent
+                opacity={style.halo.opacity}
+                depthWrite={false}
+              />
+              <Line
+                points={linePoints}
+                color={style.core.color}
+                lineWidth={style.core.lineWidth}
+                transparent
+                opacity={style.core.opacity}
+                depthWrite={false}
+              />
+            </group>
+          )
+        }
+
+        return (
+          <mesh
+            key={witness.id}
+            geometry={MARKER_SPHERE_GEOMETRY}
+            position={witness.position}
+            scale={getVisibleMarkerRadius(witness.radius) * style.marker.scale}
+            renderOrder={29}
+          >
+            <meshBasicMaterial
+              color={style.marker.color}
+              transparent
+              opacity={style.marker.opacity}
+              depthWrite={false}
+            />
+          </mesh>
+        )
+      })}
+    </group>
   )
 }
 

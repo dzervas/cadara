@@ -47,6 +47,7 @@ export interface WorkbenchStateDebuggerModel {
 interface WorkbenchStateDebuggerProps {
   state: WorkbenchStateDebuggerModel
   defaultExpanded?: boolean
+  className?: string
 }
 
 function DebuggerRow(props: { label: string; value: string | number }) {
@@ -57,13 +58,17 @@ function DebuggerRow(props: { label: string; value: string | number }) {
   )
 }
 
-export function WorkbenchStateDebugger({ state, defaultExpanded = false }: WorkbenchStateDebuggerProps) {
+export function WorkbenchStateDebugger({
+  state,
+  defaultExpanded = false,
+  className = '',
+}: WorkbenchStateDebuggerProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
   const pointerPassthrough = isCadTestMode()
 
   return (
     <div
-      className={`absolute bottom-4 left-4 max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)] ${
+      className={`${className} max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)] ${
         pointerPassthrough ? 'pointer-events-none' : 'pointer-events-auto'
       }`}
     >

@@ -83,6 +83,7 @@ export interface CommandTargetRequirement {
 
 export type SelectionFilterKind =
   | 'all'
+  | 'measureTargets'
   | 'sketchSession'
   | 'sketchStart'
   | 'sectionViewSeed'
@@ -193,6 +194,28 @@ export const sketchReferenceSelectionFilter: SelectionFilter = {
           description: 'Select one model face, edge, vertex, existing sketch, sketch entity, or sketch point.',
           acceptedKinds: ['face', 'edge', 'vertex', 'sketch', 'sketchEntity', 'sketchPoint'],
           acceptedSemantics: ['face', 'edge', 'vertex', 'existingSketch', 'sketchEntity', 'sketchPoint'],
+        },
+      ],
+    },
+  ],
+}
+
+export const measureSelectionFilter: SelectionFilter = {
+  kind: 'measureTargets',
+  allowedKinds: ['body', 'face', 'edge', 'vertex', 'sketchEntity', 'sketchPoint', 'projectedReferenceGeometry', 'region'],
+  label: 'Measurement targets',
+  requirements: [
+    {
+      id: 'measure-target',
+      label: 'Measurement target',
+      description: 'Select one measurable body, topology target, sketch primitive, projected curve, or region.',
+      slots: [
+        {
+          id: 'measure-target-primary',
+          label: 'Measurement target',
+          description: 'Select one measurable target to inspect or pair.',
+          acceptedKinds: ['body', 'face', 'edge', 'vertex', 'sketchEntity', 'sketchPoint', 'projectedReferenceGeometry', 'region'],
+          acceptedSemantics: ['body', 'face', 'edge', 'vertex', 'sketchEntity', 'sketchPoint', 'projectedReferenceGeometry', 'regionProfile'],
         },
       ],
     },
@@ -934,6 +957,8 @@ export function getSelectionFilterForCommand(
   mode: ToolbarMode,
 ): SelectionFilter {
   switch (toolId) {
+    case 'measure':
+      return measureSelectionFilter
     case 'sketch':
       return sketchStartSelectionFilter
     case 'sectionView':
@@ -1203,6 +1228,8 @@ export function getSelectionPreviewLabel(
           ? 'shell reference'
         : filter.kind === 'planeReferences'
           ? 'plane reference'
+          : filter.kind === 'measureTargets'
+            ? 'measurement target'
           : filter.kind === 'sketchStart'
             ? 'sketch reference'
             : 'selection'

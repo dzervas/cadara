@@ -35,7 +35,7 @@ export interface PickCandidate extends PickResult {
   stableKey: string
 }
 
-interface PickResolutionOptions {
+export interface PickResolutionOptions {
   wireOcclusionTolerance?: number
   sameLayerTolerance?: number
 }

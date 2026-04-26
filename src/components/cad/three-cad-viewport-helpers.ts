@@ -6,14 +6,19 @@ import { getSectionPlaneOrigin } from '@/domain/section-view/session'
 import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,
+  type SelectionFilter,
 } from '@/domain/editor/schema'
 import {
+  DEFAULT_LINE_PICK_THRESHOLD,
   applyWireMaterialDepthPolicy,
   getBoundTarget,
+  type PickResolutionOptions,
 } from '@/domain/workspace/render-picking'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 
 export const WORKSPACE_SCAFFOLD_RENDER_ORDER = 0
+const MEASURE_LINE_PICK_THRESHOLD = 0.12
+const MEASURE_WIRE_OCCLUSION_TOLERANCE = 0.001
 
 interface MutableRef<T> {
   current: T
@@ -103,6 +108,25 @@ export function configureWorkspaceScaffoldWireObject<TObject extends THREE.Objec
   applyWireMaterialDepthPolicy(object.material)
 
   return object
+}
+
+export function getViewportPickTuning(selectionFilter: SelectionFilter | null): {
+  linePickThreshold: number
+  resolutionOptions: PickResolutionOptions
+} {
+  if (selectionFilter?.kind === 'measureTargets') {
+    return {
+      linePickThreshold: MEASURE_LINE_PICK_THRESHOLD,
+      resolutionOptions: {
+        wireOcclusionTolerance: MEASURE_WIRE_OCCLUSION_TOLERANCE,
+      },
+    }
+  }
+
+  return {
+    linePickThreshold: DEFAULT_LINE_PICK_THRESHOLD,
+    resolutionOptions: {},
+  }
 }
 
 export function createViewportBvhSceneKey(

@@ -86,6 +86,7 @@ import {
   type SelectionFilter,
   type SelectionTargetCatalog,
 } from '@/domain/editor/schema'
+import { resolveMeasureSelectionCandidate } from '@/domain/measure/measurement'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import {
   getDocumentHistoryCursorBeforeTarget,
@@ -2109,6 +2110,21 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (event.toolId === 'measure') {
+        const selectionFilter = getSelectionFilterForCommand(event.toolId, 'part')
+
+        return {
+          state: createCommandState(
+            state,
+            event.toolId,
+            'part',
+            selectionFilter,
+            createSelectionPreview(state, selectionFilter),
+          ),
+          effects: [],
+        }
+      }
+
       if (isFeatureTool(event.toolId)) {
         const selectionFilter = getSelectionFilterForFeatureType(event.toolId)
         const nextState = createCommandState(
@@ -2851,6 +2867,39 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       if (state.kind === 'inspectingSection') {
         return {
           state,
+          effects: [],
+        }
+      }
+
+      if (state.kind === 'selectionCommand' && state.command.toolId === 'measure') {
+        const candidate = resolveMeasureSelectionCandidate(state.snapshot, state.selection, event.target)
+
+        if (!candidate.accepted) {
+          return {
+            state: withPreview(state, {
+              kind: 'selection',
+              label: candidate.reason ?? getSelectionFilterRejectionLabel(state.selectionFilter, event.target),
+              target: state.selection[0] ?? null,
+            }),
+            effects: [],
+          }
+        }
+
+        return {
+          state: {
+            ...state,
+            selection: candidate.nextSelection,
+            hoverTarget: event.target,
+            command: {
+              ...state.command,
+              phase: 'collecting',
+            },
+            preview: {
+              kind: 'selection',
+              label: getSelectionPreviewLabel(state.selectionFilter, event.target, 'select'),
+              target: event.target,
+            },
+          },
           effects: [],
         }
       }

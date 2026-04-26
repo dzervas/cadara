@@ -916,6 +916,63 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(cleared.state.kind === 'idle', 'Clearing an active section should exit the command session.')
   }
 
+  async function testMeasureActivationPairsSelectionsAndCleansUp() {
+    const snapshot = await createMockWorkspaceSnapshot()
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot,
+        selectionCatalog: buildSelectionTargetCatalog(snapshot),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'measure',
+      },
+    )
+
+    assert(activated.state.kind === 'selectionCommand', 'Measure activation should start a transient selection command.')
+    assert(activated.state.mode === 'part', 'Measure activation should force the workbench into part mode.')
+    assert(activated.state.selectionFilter.label === 'Measurement targets', 'Measure activation should install the measurement selection filter.')
+
+    const firstSelection = transitionEditorState(activated.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-0' },
+    })
+    assert(firstSelection.state.selection.length === 1, 'Measure should accept a first measurable target.')
+
+    const pairedSelection = transitionEditorState(firstSelection.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
+    })
+    assert(pairedSelection.state.selection.length === 2, 'Measure should pair supported two-target selections.')
+
+    const replacedSelection = transitionEditorState(pairedSelection.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'body', bodyId: 'body_part-1' },
+    })
+    assert(
+      replacedSelection.state.selection.length === 1
+        && replacedSelection.state.selection[0]?.kind === 'body',
+      'Selecting a fresh single-target body should replace an existing pairwise measurement.',
+    )
+
+    const clearedSelection = transitionEditorState(replacedSelection.state, { type: 'selection.cleared' })
+    assert(
+      clearedSelection.state.kind === 'selectionCommand' && clearedSelection.state.selection.length === 0,
+      'Selection clearing should remove active measurement targets without exiting the command.',
+    )
+
+    const cancelled = transitionEditorState(clearedSelection.state, {
+      type: 'command.cancelled',
+      commandSessionId: clearedSelection.state.command.commandSessionId,
+    })
+    assert(cancelled.state.kind === 'idle', 'Measure cancellation should return the editor to idle.')
+  }
+
   function testSketchSessionPreservesStoredPlaneDefinition() {
     const yzPlane: SketchPlaneDefinition = {
       support: { kind: 'construction', constructionId: 'construction_plane-yz' as ConstructionId },
@@ -3648,6 +3705,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testSectionViewActivationCollectsPlanarSeeds()
   testSectionViewRejectsUnsupportedOrCameraLessSeeds()
   testSectionViewFlipAndClearPreservePlanePosition()
+  await testMeasureActivationPairsSelectionsAndCleansUp()
   testSketchSessionPreservesStoredPlaneDefinition()
   testFeaturePreviewIgnoresStaleResponseIds()
   testRevolveActivationStartsFeaturePreviewFlow()

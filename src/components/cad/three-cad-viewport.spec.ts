@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 
 import {
   cancelCoalescedSketchGeometryDragMove,
+  getViewportPickTuning,
   WORKSPACE_SCAFFOLD_RENDER_ORDER,
   configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
@@ -18,6 +19,7 @@ import {
 } from '@/components/cad/three-cad-viewport-camera-transitions'
 import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import { bindRenderableObject } from '@/domain/workspace/render-picking'
+import { measureSelectionFilter } from '@/domain/editor/schema'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import * as THREE from 'three'
@@ -352,6 +354,25 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     materials.forEach((material) => material.dispose())
   }
 
+  function testMeasurePickTuningTightensWirePassThroughTolerance() {
+    const defaultTuning = getViewportPickTuning(null)
+    const measureTuning = getViewportPickTuning(measureSelectionFilter)
+
+    assert(
+      defaultTuning.linePickThreshold > measureTuning.linePickThreshold,
+      'Measure picking should reduce the line threshold to avoid selecting hidden wires through faces.',
+    )
+    assert(
+      (measureTuning.resolutionOptions.wireOcclusionTolerance ?? Number.POSITIVE_INFINITY) < Number.POSITIVE_INFINITY,
+      'Measure picking should install an explicit wire occlusion tolerance override.',
+    )
+    assert(
+      (measureTuning.resolutionOptions.wireOcclusionTolerance ?? 0)
+        < (defaultTuning.resolutionOptions.wireOcclusionTolerance ?? Number.POSITIVE_INFINITY),
+      'Measure picking should use a tighter face-over-wire occlusion tolerance than the default picker.',
+    )
+  }
+
   function testDimensionAnnotationDragPatchTargetsDurablePlacement() {
     const patch = createDimensionAnnotationPlacementPatch(
       { id: 'dimension_1-annotation-drag', dimensionId: 'dimension_1' },
@@ -472,6 +493,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
   testRenderIdleTrackerRequiresStableIdleFrames()
   testViewCubeResizeUpdatesCanvasCssSize()
   testWorkspaceScaffoldWiresDoNotWriteDepth()
+  testMeasurePickTuningTightensWirePassThroughTolerance()
   testDimensionAnnotationDragPatchTargetsDurablePlacement()
   testViewCubeRequestsAnimatedTransition()
   testSketchEntryRequestsAnimatedFraming()
