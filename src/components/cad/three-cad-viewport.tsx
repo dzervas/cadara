@@ -2852,6 +2852,9 @@ function SketchDisplayMeshNode({
           transparent: true,
           opacity: renderable.textureFill.opacity,
           side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
         })
       : new THREE.MeshBasicMaterial(materialConfig)
     nextMaterial.depthWrite = false

@@ -59,6 +59,7 @@ import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-his
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createModelingService } from '@/domain/modeling/modeling-service'
+import { createImageImportProvider } from '@/domain/import/providers/image-import-provider'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
@@ -469,6 +470,72 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
           },
         ],
       },
+    }
+  }
+
+  async function createImageImportSession() {
+    const provider = createImageImportProvider()
+    const source = {
+      name: 'reference.png',
+      origin: {
+        kind: 'localFile' as const,
+        fileName: 'reference.png',
+        pathHint: '/tmp/reference.png',
+      },
+      mediaType: 'image/png',
+      bytes: Uint8Array.from([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x04, 0x00, 0x00, 0x00, 0xB5, 0x1C, 0x0C,
+        0x02, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0xDA, 0x63, 0xFC, 0xFF, 0x1F, 0x00,
+        0x03, 0x03, 0x02, 0x00, 0xEF, 0xA7, 0x99, 0x64,
+        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
+        0xAE, 0x42, 0x60, 0x82,
+      ]),
+      fingerprint: `sha256:${'1'.repeat(64)}` as const,
+    }
+    const review = await provider.review({
+      source,
+      capabilities: {
+        context: {
+          contractVersion: CONTRACT_VERSION,
+          documentId: 'doc_workspace',
+          baseRevisionId: 'rev_1',
+        },
+        modeling: {
+          async bakeGeometry() {
+            throw new Error('Not used in image import session tests.')
+          },
+          async reconstructMeshToBrep() {
+            throw new Error('Not used in image import session tests.')
+          },
+        },
+        sketch: {
+          async convertVectorToSketch() {
+            throw new Error('Not used in image import session tests.')
+          },
+        },
+        assets: {
+          async registerGeometryAsset() {
+            throw new Error('Not used in image import session tests.')
+          },
+          async storeEmbeddedBinary() {
+            return 'asset_embedded_image_reference'
+          },
+        },
+      },
+    })
+    const selections = provider.createDefaultSelections(review)
+
+    return {
+      providerId: provider.id,
+      resolvedSource: source,
+      review,
+      selections,
+      formSchema: provider.getReviewFormSchema(review, selections),
+      diagnostics: [],
     }
   }
 
@@ -1718,6 +1785,84 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(
       switched.state.activeReferencePickerFieldId === null,
       'Switching to another feature session should clear active picker state.',
+    )
+  }
+
+  async function testImportSessionAutoArmsSinglePlanePicker() {
+    const importSession = await createImageImportSession()
+    const result = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: 'import.fileSelected',
+        session: importSession,
+      },
+    )
+
+    assert(result.state.kind === 'importing', 'Import file selection should enter the importing state.')
+    assert(
+      result.state.activeReferencePickerFieldId === 'image-plane',
+      'A single import plane picker should arm automatically when the import session opens.',
+    )
+    assert(
+      result.state.selectionFilter?.label === 'Plane references',
+      'Auto-armed import plane pickers should switch the editor into plane-selection mode immediately.',
+    )
+    assert(
+      result.state.command.phase === 'collecting',
+      'Auto-armed import plane pickers should keep the import command in selection-collection mode.',
+    )
+  }
+
+  async function testImportPlaneSelectionCompletesSinglePlanePicker() {
+    const importSession = await createImageImportSession()
+    const opened = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace',
+          revisionId: 'rev_1',
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: 'import.fileSelected',
+        session: importSession,
+      },
+    )
+
+    assert(opened.state.kind === 'importing', 'Import file selection should enter the importing state.')
+
+    const selected = transitionEditorState(opened.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+    })
+
+    assert(selected.state.kind === 'importing', 'Plane selection should keep the editor inside the import session.')
+    assert(
+      selected.state.session.selections.planeTarget?.kind === 'construction'
+        && selected.state.session.selections.planeTarget.constructionId === 'construction_plane-xy',
+      'Import plane selection should patch the selected construction plane into import selections.',
+    )
+    assert(
+      selected.state.activeReferencePickerFieldId === null,
+      'Single import plane picks should complete the active picker after a valid selection.',
+    )
+    assert(
+      selected.state.selectionFilter?.label === getDefaultSelectionFilterForMode('part')?.label,
+      'Completing the import plane pick should restore the default part-mode selection filter.',
+    )
+    assert(
+      selected.state.command.phase === 'editing',
+      'Completing the import plane pick should return the import command to editing mode.',
     )
   }
 
@@ -3903,6 +4048,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testMirrorAndTransformActivationStartFeatureSessions()
   testActiveReferencePickerRoutesSingleAndMultiSelections()
   testReferencePickerCancellationAndSessionCleanup()
+  await testImportSessionAutoArmsSinglePlanePicker()
+  await testImportPlaneSelectionCompletesSinglePlanePicker()
   testSelectionClearEventClearsSelectionAndPreservesActiveState()
   testSketchToolClearStaysInSketchEditing()
   testRemainingSketchToolsActivateWithoutDroppingSketchSession()

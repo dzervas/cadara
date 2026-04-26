@@ -137,7 +137,7 @@ test('tool icon assets stay centralized outside toolbar, sidebar, and history co
     sketchSplit: 'sketch_split_icon.svg',
     sketchSlot: 'sketch-slot.svg',
     finishSketch: 'check_mark.svg',
-    importPart: 'import-part.svg',
+    import: 'import-part.svg',
     search: 'search.svg',
     plane: 'c-plane.svg',
     combine: 'boolean-bodies.svg',

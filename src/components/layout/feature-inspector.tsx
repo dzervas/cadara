@@ -756,7 +756,7 @@ function ReferenceCollectionCard(props: {
   )
 }
 
-function FeatureFormFieldRenderer(props: {
+export function FeatureFormFieldRenderer(props: {
   control: Control<FeatureEditorFormValues>
   field: FeatureEditorFormField
   documentVariables: readonly DocumentVariableRecord[]

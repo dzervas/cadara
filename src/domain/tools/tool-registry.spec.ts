@@ -10,15 +10,15 @@ test('src/domain/tools/tool-registry.spec.ts', () => {
     }
   }
 
-  const importPart = getToolById('importPart')
+  const importTool = getToolById('import')
   const partToolIds = getToolbarSectionsForMode('part').flatMap((section) => section.toolIds)
   const sketchToolIds = getToolbarSectionsForMode('sketch').flatMap((section) => section.toolIds)
 
-  assert(importPart.group === 'import', 'Import Part should register in the import toolbar group.')
-  assert(importPart.tooltip.includes('STEP') && importPart.tooltip.includes('STL') && importPart.tooltip.includes('3MF'), 'Import Part should describe supported part formats.')
-  assert(toolIconAssetFileNames[importPart.icon] === 'import-part.svg', 'Import Part should use the requested public SVG asset.')
-  assert(partToolIds.includes('importPart'), 'Import Part should be visible in part mode.')
-  assert(!sketchToolIds.includes('importPart'), 'Import Part should not be visible while sketching.')
-  assert(searchToolDefinitions('mesh').some((tool) => tool.id === 'importPart'), 'Tool search should discover Import Part by mesh intent.')
-  assert(searchToolDefinitions('step').some((tool) => tool.id === 'importPart'), 'Tool search should discover Import Part by STEP intent.')
+  assert(importTool.group === 'import', 'Import should register in the import toolbar group.')
+  assert(importTool.tooltip.includes('image') && importTool.tooltip.includes('mesh'), 'Import should describe generic supported file categories.')
+  assert(toolIconAssetFileNames[importTool.icon] === 'import-part.svg', 'Import should use the requested public SVG asset.')
+  assert(partToolIds.includes('import'), 'Import should be visible in part mode.')
+  assert(!sketchToolIds.includes('import'), 'Import should not be visible while sketching.')
+  assert(searchToolDefinitions('image').some((tool) => tool.id === 'import'), 'Tool search should discover Import by image intent.')
+  assert(searchToolDefinitions('mesh').some((tool) => tool.id === 'import'), 'Tool search should discover Import by mesh intent.')
 })

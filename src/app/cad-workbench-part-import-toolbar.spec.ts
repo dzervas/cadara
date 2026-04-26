@@ -11,6 +11,6 @@ test('src/app/cad-workbench-part-import-toolbar.spec.ts', () => {
 
   const source = readFileSync(join(process.cwd(), 'src/app/cad-workbench.tsx'), 'utf8')
 
-  assert(source.includes('showPartImport={false}'), 'Workbench toolbar should keep part import disabled.')
-  assert(!source.includes('partImportInputRef'), 'Workbench should not keep the legacy part import input wiring.')
+  assert(!source.includes('showPartImport='), 'Workbench should no longer gate the import tool behind a toolbar prop.')
+  assert(source.includes('handleToolbarImport'), 'Workbench should wire the import tool through the shared toolbar action flow.')
 })

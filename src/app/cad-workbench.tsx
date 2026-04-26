@@ -5,6 +5,7 @@ import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
 import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
+import { ImportInspector } from '@/components/layout/import-inspector'
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
 import { MeasurementPanel } from '@/components/layout/measurement-panel'
@@ -33,6 +34,7 @@ import {
   getDocumentHistoryOrderRestoreMoves,
   getWorkbenchHistoryAvailability,
 } from '@/app/workbench-history'
+import type { ImportProvider } from '@/contracts/import/provider'
 import type {
   DocumentFeatureCursor,
   DocumentHistoryOrderEntry,
@@ -77,6 +79,14 @@ import {
 } from '@/domain/modeling/document-history'
 import { createTopologyDebugSummary } from '@/domain/modeling/topology-debug'
 import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging'
+import {
+  applyImportPreparedActions,
+  createImportCapabilities,
+  createImportSession,
+  prepareImportActions,
+  resolveLocalFileImportSource,
+} from '@/domain/import/orchestrator'
+import { getAcceptedImportFileTypes, getImportProviderById, matchImportProviders } from '@/domain/import/provider-registry'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useErrorReporter } from '@/hooks/use-error-reporter'
 import { useFeatureEditing } from '@/hooks/use-feature-editing'
@@ -92,6 +102,7 @@ import {
   showSaveLocalDocumentPicker,
   writeTextToLocalFileHandle,
 } from '@/lib/local-file-system-access'
+import { showOpenImportFilePicker } from '@/lib/import-file-picker'
 import { createLocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
 import {
   createWorkbenchShortcutCommandHandlers,
@@ -156,6 +167,26 @@ function sameBooleanRecord(left: Record<string, boolean>, right: Record<string, 
   return leftKeys.every((key) => left[key] === right[key])
 }
 
+function promptForImportProvider(
+  providers: readonly ImportProvider<unknown, unknown>[],
+) {
+  if (typeof window === 'undefined') {
+    return providers[0] ?? null
+  }
+
+  const message = providers
+    .map((provider, index) => `${index + 1}. ${provider.label}`)
+    .join('\n')
+  const response = window.prompt(`Multiple importers match this file.\n${message}\n\nChoose a provider number:`)
+  const selectedIndex = Number.parseInt(response ?? '', 10)
+
+  if (!Number.isFinite(selectedIndex) || selectedIndex < 1 || selectedIndex > providers.length) {
+    return null
+  }
+
+  return providers[selectedIndex - 1] ?? null
+}
+
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
   const { triggerTool } = useToolActions()
@@ -170,6 +201,7 @@ export function CadWorkbench() {
       hoverTarget,
       sketchSession,
       activeEditSession,
+      activeImportSession,
       mode,
       preview,
       selectionFilter,
@@ -321,6 +353,119 @@ export function CadWorkbench() {
   const editableFeatureSnapshot = activeFeatureSnapshot ?? null
 
   const { commitFeature, cancelFeature } = useFeatureEditing()
+  const handleImportCommit = useCallback(async () => {
+    if (!activeImportSession || !snapshot) {
+      return
+    }
+
+    const provider = getImportProviderById(activeImportSession.providerId)
+    if (!provider) {
+      showWorkbenchError('The selected import provider is no longer registered.')
+      return
+    }
+
+    dispatch({ type: 'import.commitRequested' })
+
+    try {
+      const capabilities = createImportCapabilities(modelingService, snapshot)
+      const actions = await prepareImportActions({
+        provider,
+        source: activeImportSession.resolvedSource,
+        review: activeImportSession.review,
+        selections: activeImportSession.selections,
+        capabilities,
+      })
+      const result = await applyImportPreparedActions({
+        modelingService,
+        baseRevisionId: snapshot.revisionId,
+        actions,
+      })
+
+      if (result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+        dispatch({ type: 'import.failed', diagnostics: result.diagnostics })
+        showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
+        return
+      }
+
+      const nextSnapshot = await modelingService.getCurrentDocumentSnapshot()
+      applyLoadedSnapshot(nextSnapshot)
+      dispatch({ type: 'import.committed' })
+      if (result.createdEntityIds.sketchIds.length === 1) {
+        dispatch({
+          type: 'authoring.reopenRequested',
+          target: {
+            kind: 'sketch',
+            sketchId: result.createdEntityIds.sketchIds[0]!,
+          },
+          toolId: 'sketch',
+        })
+      }
+      showWorkbenchInfo(`Imported ${activeImportSession.resolvedSource.name}.`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Import failed.'
+      dispatch({
+        type: 'import.failed',
+        diagnostics: [{
+          code: 'import-commit-failed',
+          severity: 'error',
+          message,
+          target: null,
+          detail: null,
+        }],
+      })
+      showWorkbenchError(message)
+    }
+  }, [activeImportSession, applyLoadedSnapshot, dispatch, modelingService, showWorkbenchError, showWorkbenchInfo, snapshot])
+
+  const handleToolbarImport = useCallback(async () => {
+    if (activeEditSession || activeImportSession) {
+      return
+    }
+
+    if (!snapshot) {
+      showWorkbenchError('The current document is still loading.')
+      return
+    }
+
+    const pickerResult = await showOpenImportFilePicker({
+      acceptedFileTypes: getAcceptedImportFileTypes(),
+    })
+
+    if (!pickerResult.ok) {
+      if (pickerResult.reason === 'failed') {
+        showWorkbenchError('Import file selection failed.')
+      }
+      return
+    }
+
+    const resolvedSource = await resolveLocalFileImportSource(pickerResult.file)
+    const matchedProviders = matchImportProviders(resolvedSource)
+
+    if (matchedProviders.length === 0) {
+      showWorkbenchError(`No importer is available for ${resolvedSource.name}.`)
+      return
+    }
+
+    const provider = matchedProviders.length === 1
+      ? matchedProviders[0]!
+      : promptForImportProvider(matchedProviders)
+
+    if (!provider) {
+      return
+    }
+
+    try {
+      const session = await createImportSession({
+        provider,
+        source: resolvedSource,
+        capabilities: createImportCapabilities(modelingService, snapshot),
+      })
+      dispatch({ type: 'import.fileSelected', session })
+    } catch (error: unknown) {
+      showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
+    }
+  }, [activeEditSession, activeImportSession, dispatch, modelingService, showWorkbenchError, snapshot])
+
   const viewportRenderables = useMemo(
     () => {
       return composeViewportRenderables({
@@ -789,10 +934,14 @@ export function CadWorkbench() {
     const unsubscribeRedo = actionBus.subscribeToTool('redo', () => {
       void performWorkbenchRedo()
     })
+    const unsubscribeImport = actionBus.subscribeToTool('import', () => {
+      void handleToolbarImport()
+    })
 
     return () => {
       unsubscribeUndo()
       unsubscribeRedo()
+      unsubscribeImport()
     }
   })
 
@@ -1617,7 +1766,6 @@ export function CadWorkbench() {
       <WorkspaceToolbar
         historyAvailability={toolbarHistoryAvailability}
         showBrowserStorageWarning={showBrowserStorageWarning}
-        showPartImport={false}
         onNewDocument={handleNewDocument}
         onOpenLocalFile={handleOpenLocalFile}
         onSaveLocalFile={handleSaveLocalFile}
@@ -1739,7 +1887,11 @@ export function CadWorkbench() {
               <WorkbenchStateDebugger state={debuggerState} />
               <MeasurementPanel measurement={measurementViewModel} />
             </div>
-            {activeEditSession ? (
+            {activeImportSession ? (
+              <WorkbenchInspectorOverlay>
+                <ImportInspector onCommit={() => void handleImportCommit()} />
+              </WorkbenchInspectorOverlay>
+            ) : activeEditSession ? (
               <WorkbenchInspectorOverlay>
                 <FeatureInspector
                   featureSnapshot={editableFeatureSnapshot}

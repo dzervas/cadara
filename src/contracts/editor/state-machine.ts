@@ -20,6 +20,10 @@ import {
   type FeatureEditSessionState,
 } from '@/domain/editor/feature-editing'
 import { createFeatureEditorReferenceSelectionPatch } from '@/domain/feature-authoring/form-events'
+import type {
+  FeatureEditorFormField,
+  FeatureEditorFormSchema,
+} from '@/domain/feature-authoring/form-schema'
 import {
   acceptSketchDraw,
   adoptCompatibleSketchEditToolTargets,
@@ -88,6 +92,7 @@ import {
   type SelectionFilter,
   type SelectionTargetCatalog,
 } from '@/domain/editor/schema'
+import { getImportProviderById } from '@/domain/import/provider-registry'
 import { resolveMeasureSelectionCandidate } from '@/domain/measure/measurement'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import {
@@ -104,6 +109,8 @@ import type {
   ModelingDiagnostic,
   SnapshotMutationBasis,
 } from '@/contracts/modeling/schema'
+import type { ImportReviewEnvelope } from '@/contracts/import/review'
+import type { ResolvedImportSource } from '@/contracts/import/source'
 import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { DurableRef } from '@/contracts/shared/references'
@@ -258,6 +265,22 @@ export interface FeatureEditorState extends EditorStateBase {
   pendingCommitRequestId: RequestId | null
 }
 
+export interface ImportSessionState {
+  providerId: string
+  resolvedSource: ResolvedImportSource
+  review: ImportReviewEnvelope<unknown>
+  selections: unknown
+  formSchema: FeatureEditorFormSchema
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ImportEditorState extends EditorStateBase {
+  kind: 'importing'
+  command: EditorActiveCommand
+  session: ImportSessionState
+  activeReferencePickerFieldId: string | null
+}
+
 /**
  * Active temporary section-view inspection state.
  * The editor owns the accepted planar seed, section plane, and retained-side state.
@@ -278,6 +301,7 @@ export type EditorState =
   | SelectionCommandEditorState
   | SketchEditorState
   | FeatureEditorState
+  | ImportEditorState
   | SectionViewEditorState
 
 /**
@@ -484,6 +508,38 @@ export interface FormReferencePickerCancelledEvent {
   type: 'form.referencePickerCancelled'
 }
 
+export interface ImportFileSelectedEvent {
+  type: 'import.fileSelected'
+  session: ImportSessionState
+}
+
+export interface ImportProviderSelectedEvent {
+  type: 'import.providerSelected'
+  providerId: string
+}
+
+export interface ImportSelectionPatchedEvent {
+  type: 'import.selectionPatched'
+  patch: Record<string, unknown>
+}
+
+export interface ImportCommitRequestedEvent {
+  type: 'import.commitRequested'
+}
+
+export interface ImportCancelledEvent {
+  type: 'import.cancelled'
+}
+
+export interface ImportCommittedEvent {
+  type: 'import.committed'
+}
+
+export interface ImportFailedEvent {
+  type: 'import.failed'
+  diagnostics: ModelingDiagnostic[]
+}
+
 /** Updates the active section plane offset along its normal. */
 export interface SectionOffsetUpdatedEvent {
   type: 'section.offsetUpdated'
@@ -557,6 +613,13 @@ export type EditorEvent =
   | FormFeaturePatchedEvent
   | FormReferencePickerActivatedEvent
   | FormReferencePickerCancelledEvent
+  | ImportFileSelectedEvent
+  | ImportProviderSelectedEvent
+  | ImportSelectionPatchedEvent
+  | ImportCommitRequestedEvent
+  | ImportCancelledEvent
+  | ImportCommittedEvent
+  | ImportFailedEvent
   | SectionOffsetUpdatedEvent
   | SectionFlipRequestedEvent
   | SectionClearedEvent
@@ -1295,6 +1358,13 @@ function adoptSelectionForFilter(
 }
 
 function createSelectionPreview(state: EditorState, filter: SelectionFilter | null): CommandPreview | null {
+  return createSelectionPreviewForSelection(state.selection, filter)
+}
+
+function createSelectionPreviewForSelection(
+  selection: PrimitiveRef[],
+  filter: SelectionFilter | null,
+): CommandPreview | null {
   if (!filter) {
     return null
   }
@@ -1302,7 +1372,7 @@ function createSelectionPreview(state: EditorState, filter: SelectionFilter | nu
   return {
     kind: 'selection',
     label: `Awaiting ${filter.label.toLowerCase()}`,
-    target: state.selection[0] ?? null,
+    target: selection[0] ?? null,
   }
 }
 
@@ -1349,6 +1419,54 @@ function createFeatureEditingState(
   }
 }
 
+function createImportSelectionPreview(
+  session: ImportSessionState,
+  prefix = 'Import',
+): CommandPreview {
+  const provider = getImportProviderById(session.providerId)
+
+  return {
+    kind: 'selection',
+    label: provider ? `${prefix} ${provider.label}` : `${prefix} session`,
+    target: null,
+  }
+}
+
+function createImportingState(
+  state: EditorState,
+  session: ImportSessionState,
+): ImportEditorState {
+  const defaultReferenceField = getDefaultImportSelectionField(session)
+  const selectionFilter = defaultReferenceField?.picker.selectionFilter ?? getDefaultSelectionFilterForMode('part')
+
+  return {
+    kind: 'importing',
+    mode: 'part',
+    document: state.document,
+    snapshot: state.snapshot,
+    previewRenderables: state.previewRenderables,
+    selection: [],
+    hoverTarget: null,
+    selectionFilter,
+    selectionCatalog: state.selectionCatalog,
+    preview: defaultReferenceField
+      ? createSelectionPreviewForSelection([], selectionFilter)
+      : createImportSelectionPreview(session),
+    nextCommandSequence: state.nextCommandSequence + 1,
+    nextRequestSequence: state.nextRequestSequence,
+    pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    editSessionCursorContext: null,
+    command: {
+      commandSessionId: nextCommandSessionId(state, 'import'),
+      toolId: 'import',
+      phase: defaultReferenceField ? 'collecting' : 'editing',
+    },
+    session,
+    activeReferencePickerFieldId: defaultReferenceField?.id ?? null,
+  }
+}
+
 function createSectionViewEditingState(
   state: SelectionCommandEditorState,
   section: SectionViewSession,
@@ -1390,6 +1508,149 @@ function getActiveReferencePickerField(state: FeatureEditorState) {
   return field?.kind === 'referencePicker' || field?.kind === 'referenceCollection'
     ? field
     : null
+}
+
+function findFormFieldById(
+  schema: FeatureEditorFormSchema,
+  fieldId: string,
+): FeatureEditorFormField | null {
+  for (const section of schema.sections) {
+    for (const field of section.fields) {
+      const matched = findNestedFormFieldById(field, fieldId)
+      if (matched) {
+        return matched
+      }
+    }
+  }
+
+  return null
+}
+
+function findNestedFormFieldById(
+  field: FeatureEditorFormField,
+  fieldId: string,
+): FeatureEditorFormField | null {
+  if (field.id === fieldId) {
+    return field
+  }
+
+  if (field.kind === 'optionGroup') {
+    for (const nestedField of field.fields) {
+      const matched = findNestedFormFieldById(nestedField, fieldId)
+      if (matched) {
+        return matched
+      }
+    }
+  }
+
+  if (field.kind === 'discriminatedOptionGroup') {
+    const discriminantMatch = findNestedFormFieldById(field.discriminant, fieldId)
+    if (discriminantMatch) {
+      return discriminantMatch
+    }
+
+    for (const variant of field.variants) {
+      for (const nestedField of variant.fields) {
+        const matched = findNestedFormFieldById(nestedField, fieldId)
+        if (matched) {
+          return matched
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function getImportSessionFormField(
+  session: ImportSessionState,
+  fieldId: string,
+) {
+  return findFormFieldById(session.formSchema, fieldId)
+}
+
+function getImportSelectionFields(session: ImportSessionState) {
+  const fields: Array<Extract<FeatureEditorFormField, { kind: 'referencePicker' | 'referenceCollection' }>> = []
+
+  for (const section of session.formSchema.sections) {
+    for (const field of section.fields) {
+      collectImportSelectionFields(field, fields)
+    }
+  }
+
+  return fields
+}
+
+function collectImportSelectionFields(
+  field: FeatureEditorFormField,
+  fields: Array<Extract<FeatureEditorFormField, { kind: 'referencePicker' | 'referenceCollection' }>>,
+) {
+  if (field.kind === 'referencePicker' || field.kind === 'referenceCollection') {
+    fields.push(field)
+    return
+  }
+
+  if (field.kind === 'optionGroup') {
+    for (const nestedField of field.fields) {
+      collectImportSelectionFields(nestedField, fields)
+    }
+
+    return
+  }
+
+  if (field.kind === 'discriminatedOptionGroup') {
+    collectImportSelectionFields(field.discriminant, fields)
+
+    for (const variant of field.variants) {
+      for (const nestedField of variant.fields) {
+        collectImportSelectionFields(nestedField, fields)
+      }
+    }
+  }
+}
+
+function getDefaultImportSelectionField(session: ImportSessionState) {
+  const visibleFields = getImportSelectionFields(session).filter((field) => !field.hidden)
+  return visibleFields.length === 1 ? visibleFields[0] : null
+}
+
+function getActiveImportReferencePickerField(state: ImportEditorState) {
+  if (!state.activeReferencePickerFieldId) {
+    return null
+  }
+
+  const field = getImportSessionFormField(state.session, state.activeReferencePickerFieldId)
+  return field?.kind === 'referencePicker' || field?.kind === 'referenceCollection'
+    ? field
+    : null
+}
+
+function createImportViewportSelectionPatch(
+  state: ImportEditorState,
+  field: ReturnType<typeof getActiveImportReferencePickerField>,
+  target: PrimitiveRef,
+) {
+  if (!field) {
+    return null
+  }
+
+  const patch = createFeatureEditorReferenceSelectionPatch(field, target)
+
+  if (field.kind !== 'referencePicker') {
+    return patch
+  }
+
+  const sketchSession = state.snapshot
+    ? openSketchSessionFromSelection([target], state.snapshot)
+    : null
+
+  return {
+    ...patch,
+    [field.patch.patchKey]: {
+      target,
+      plane: sketchSession?.plane ?? null,
+    },
+  }
 }
 
 function createPreviewFailedDiagnostics(
@@ -2011,7 +2272,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         return transitionEditorState(state, { type: 'history.redoRequested' })
       }
 
-      if (event.toolId === 'importPart') {
+      if (event.toolId === 'import') {
         return {
           state,
           effects: [],
@@ -2427,6 +2688,121 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         state,
         effects: [],
       }
+    case 'import.fileSelected':
+      return {
+        state: createImportingState(state, event.session),
+        effects: [],
+      }
+    case 'import.providerSelected':
+      return {
+        state,
+        effects: [],
+      }
+    case 'import.selectionPatched': {
+      if (state.kind !== 'importing') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const provider = getImportProviderById(state.session.providerId)
+      if (!provider) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const nextSelections = provider.applySelectionPatch(
+        state.session.review,
+        state.session.selections,
+        event.patch,
+      )
+      const nextSession = {
+        ...state.session,
+        selections: nextSelections,
+        formSchema: provider.getReviewFormSchema(state.session.review, nextSelections),
+      }
+
+      return {
+        state: {
+          ...state,
+          session: nextSession,
+          preview: createImportSelectionPreview(nextSession, 'Selected'),
+          command: {
+            ...state.command,
+            phase: 'collecting',
+          },
+        },
+        effects: [],
+      }
+    }
+    case 'import.commitRequested':
+      if (state.kind !== 'importing') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          command: {
+            ...state.command,
+            phase: 'awaitingEffect',
+          },
+        },
+        effects: [],
+      }
+    case 'import.cancelled':
+      if (state.kind !== 'importing') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: toIdleState(state, 'part'),
+        effects: [],
+      }
+    case 'import.committed':
+      if (state.kind !== 'importing') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: toIdleState(state, 'part'),
+        effects: [],
+      }
+    case 'import.failed':
+      if (state.kind !== 'importing') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          session: {
+            ...state.session,
+            diagnostics: event.diagnostics,
+          },
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+          preview: createImportSelectionPreview(state.session, 'Import failed'),
+        },
+        effects: [],
+      }
     case 'section.offsetUpdated':
       if (
         state.kind !== 'inspectingSection'
@@ -2545,6 +2921,8 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
               ? createSelectionPreview(state, state.selectionFilter)
               : state.kind === 'editingFeature'
                 ? createFeatureSelectionPreview(state.session)
+                : state.kind === 'importing'
+                  ? createImportSelectionPreview(state.session)
                 : state.preview,
         ),
         effects: [],
@@ -2693,6 +3071,8 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
               ? createSelectionPreview(clearedState, state.selectionFilter)
               : state.kind === 'editingFeature'
                 ? createFeatureSelectionPreview(state.session)
+                : state.kind === 'importing'
+                  ? createImportSelectionPreview(state.session)
                 : state.preview,
         ),
         effects: [],
@@ -2792,6 +3172,54 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           activeReferencePickerFieldId: activeReferenceField?.id ?? state.activeReferencePickerFieldId,
           pendingPreviewRequestId: null,
         })
+      }
+
+      if (state.kind === 'importing') {
+        const activeReferenceField = getActiveImportReferencePickerField(state)
+          ?? getDefaultImportSelectionField(state.session)
+        const nextPatch = createImportViewportSelectionPatch(state, activeReferenceField, event.target)
+        const provider = getImportProviderById(state.session.providerId)
+
+        if (!provider || !nextPatch) {
+          return {
+            state,
+            effects: [],
+          }
+        }
+
+        const nextSelections = provider.applySelectionPatch(
+          state.session.review,
+          state.session.selections,
+          nextPatch,
+        )
+        const nextSession = {
+          ...state.session,
+          selections: nextSelections,
+          formSchema: provider.getReviewFormSchema(state.session.review, nextSelections),
+        }
+
+        return {
+          state: {
+            ...state,
+            selection: [event.target],
+            hoverTarget: event.target,
+            session: nextSession,
+            selectionFilter:
+              activeReferenceField?.kind === 'referencePicker'
+                ? getDefaultSelectionFilterForMode('part')
+                : state.selectionFilter,
+            command: {
+              ...state.command,
+              phase: activeReferenceField?.kind === 'referencePicker' ? 'editing' : 'collecting',
+            },
+            preview: createImportSelectionPreview(nextSession, 'Selected'),
+            activeReferencePickerFieldId:
+              activeReferenceField?.kind === 'referencePicker'
+                ? null
+                : activeReferenceField?.id ?? state.activeReferencePickerFieldId,
+          },
+          effects: [],
+        }
       }
 
       if (state.kind === 'editingSketch' && getActiveSketchStyleToolId(state.session)) {
@@ -3602,14 +4030,16 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       })
     }
     case 'form.referencePickerActivated': {
-      if (state.kind !== 'editingFeature') {
+      if (state.kind !== 'editingFeature' && state.kind !== 'importing') {
         return {
           state,
           effects: [],
         }
       }
 
-      const field = getFeatureEditorFormField(state.session, event.fieldId)
+      const field = state.kind === 'editingFeature'
+        ? getFeatureEditorFormField(state.session, event.fieldId)
+        : getImportSessionFormField(state.session, event.fieldId)
 
       if (field?.kind !== 'referencePicker' && field?.kind !== 'referenceCollection') {
         return {
@@ -3635,7 +4065,10 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
     }
     case 'form.referencePickerCancelled': {
-      if (state.kind !== 'editingFeature' || !state.activeReferencePickerFieldId) {
+      if (
+        (state.kind !== 'editingFeature' && state.kind !== 'importing')
+        || !state.activeReferencePickerFieldId
+      ) {
         return {
           state,
           effects: [],
@@ -3648,8 +4081,14 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           activeReferencePickerFieldId: null,
           selection: [],
           hoverTarget: null,
-          selectionFilter: getSelectionFilterForFeatureType(state.session.featureType),
-          preview: createFeatureSelectionPreview(state.session),
+          selectionFilter:
+            state.kind === 'editingFeature'
+              ? getSelectionFilterForFeatureType(state.session.featureType)
+              : getDefaultSelectionFilterForMode('part'),
+          preview:
+            state.kind === 'editingFeature'
+              ? createFeatureSelectionPreview(state.session)
+              : createImportSelectionPreview(state.session),
           command: {
             ...state.command,
             phase: 'editing',
@@ -4882,7 +5321,9 @@ export interface EditorViewState {
   preview: CommandPreview | null
   /** Active feature edit session, or null when not editing a feature. */
   activeEditSession: FeatureEditSessionState | null
-  /** Active feature form reference picker field id, or null when no field is collecting selections. */
+  /** Active import session, or null when no import review session is open. */
+  activeImportSession: ImportSessionState | null
+  /** Active form reference picker field id, or null when no field is collecting selections. */
   activeReferencePickerFieldId: string | null
   /** Active sketch session, or null when not editing a sketch. */
   sketchSession: SketchSessionState | null
@@ -4942,7 +5383,11 @@ export function getEditorViewState(state: EditorState): EditorViewState {
     hoverTarget: state.hoverTarget,
     preview: state.preview,
     activeEditSession: state.kind === 'editingFeature' ? state.session : null,
-    activeReferencePickerFieldId: state.kind === 'editingFeature' ? state.activeReferencePickerFieldId : null,
+    activeImportSession: state.kind === 'importing' ? state.session : null,
+    activeReferencePickerFieldId:
+      state.kind === 'editingFeature' || state.kind === 'importing'
+        ? state.activeReferencePickerFieldId
+        : null,
     sketchSession: state.kind === 'editingSketch' ? state.session : null,
     activeSectionView: state.kind === 'inspectingSection' ? state.section : null,
     snapshot: state.snapshot,

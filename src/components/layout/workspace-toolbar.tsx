@@ -28,7 +28,6 @@ const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
   showBrowserStorageWarning?: boolean
-  showPartImport?: boolean
   onNewDocument?: () => void
   onOpenLocalFile?: () => void
   onSaveLocalFile?: () => void
@@ -41,7 +40,6 @@ interface WorkspaceToolbarProps {
 export function WorkspaceToolbar({
   historyAvailability,
   showBrowserStorageWarning = false,
-  showPartImport = false,
   onNewDocument = () => undefined,
   onOpenLocalFile = () => undefined,
   onSaveLocalFile = () => undefined,
@@ -52,21 +50,16 @@ export function WorkspaceToolbar({
 }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
   const {
-    state: { activeCommand, history, mode, sketchSession },
+    state: { activeCommand, activeEditSession, activeImportSession, history, mode, sketchSession },
   } = useEditorState()
   const visibleHistory = historyAvailability ?? history
   const visibleSections = useMemo(
-    () => getToolbarSectionsForMode(mode).map((section) => ({
-      ...section,
-      toolIds: showPartImport
-        ? section.toolIds
-        : section.toolIds.filter((toolId) => toolId !== 'importPart'),
-    })).filter((section) => section.toolIds.length > 0),
-    [mode, showPartImport],
+    () => getToolbarSectionsForMode(mode),
+    [mode],
   )
   const searchResults = useMemo(
-    () => searchToolDefinitions(searchQuery).filter((tool) => showPartImport || tool.id !== 'importPart'),
-    [searchQuery, showPartImport],
+    () => searchToolDefinitions(searchQuery),
+    [searchQuery],
   )
   const hasActiveSketchSession = sketchSession !== null
 
@@ -76,6 +69,7 @@ export function WorkspaceToolbar({
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
     (tool.id === 'undo' && !visibleHistory.canUndo)
     || (tool.id === 'redo' && !visibleHistory.canRedo)
+    || (tool.id === 'import' && (activeEditSession !== null || activeImportSession !== null))
     || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
 
   const renderTool = (tool: RegisteredToolDefinition) => {

@@ -62,7 +62,7 @@ export const toolGroups = {
   import: {
     id: 'import',
     name: 'Import',
-    tooltip: 'Import external part geometry.',
+    tooltip: 'Import external files into the active part workspace.',
     modes: ['part'],
   },
   patterns: {
@@ -197,11 +197,11 @@ export const toolDefinitions = [
   },
   ...featureToolDefinitions,
   {
-    id: 'importPart',
+    id: 'import',
     group: 'import',
-    name: 'Import Part',
-    tooltip: 'Import a STEP, STL, or 3MF mesh file.',
-    icon: 'importPart',
+    name: 'Import',
+    tooltip: 'Import an image, mesh, or other supported external file.',
+    icon: 'import',
     modes: ['part'],
   },
   {
@@ -378,7 +378,7 @@ const toolbarSections = [
     label: 'Import',
     align: 'center',
     modes: ['part'],
-    toolIds: ['importPart'],
+    toolIds: ['import'],
   },
   {
     id: 'features',

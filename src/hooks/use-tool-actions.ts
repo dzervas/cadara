@@ -42,7 +42,7 @@ export function useToolActions() {
         return
       }
 
-      if (toolId === 'importPart') {
+      if (toolId === 'import') {
         actionBus.triggerTool(toolId, machineState.mode, metadata)
         return
       }

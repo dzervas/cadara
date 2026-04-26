@@ -5,6 +5,7 @@ import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-ker
 import { createImageImportProvider } from '@/domain/import/providers/image-import-provider'
 import { matchImportProviders } from '@/domain/import/provider-registry'
 import type { ImportCapabilities } from '@/contracts/import/capabilities'
+import { planeSelectionFilter } from '@/domain/editor/schema'
 
 const PNG_1X1_BYTES = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nmWQAAAAASUVORK5CYII='), (value) => value.charCodeAt(0))
 
@@ -44,6 +45,37 @@ test('src/domain/import/providers/image-import-provider.spec.ts', async () => {
   })
   assert(review.diagnostics.length === 0, 'Valid PNG review should not emit diagnostics.')
   assert(review.providerReview.pixelWidth === 1 && review.providerReview.pixelHeight === 1, 'Review should extract image dimensions from raster bytes.')
+  assert(review.providerReview.fileSizeBytes === PNG_1X1_BYTES.byteLength, 'Review should retain the source byte size for the review UI.')
+
+  const defaultSelections = provider.createDefaultSelections(review)
+  assert(
+    defaultSelections.plane === null
+      && defaultSelections.planeTarget === null
+      && defaultSelections.planeKey === null,
+    'Default image import selections should start with no plane selected.',
+  )
+
+  const reviewSchema = provider.getReviewFormSchema(review, defaultSelections)
+  const planeField = reviewSchema.sections
+    .flatMap((section) => section.fields)
+    .find((field) => field.id === 'image-plane')
+  assert(planeField?.kind === 'referencePicker', 'Review schema should expose a plane picker field.')
+  assert(planeField?.picker.selectionFilter === planeSelectionFilter, 'Plane picker should reuse the shared plane/face selection filter.')
+  assert(planeField?.error?.message === 'Select one sketch plane.', 'Plane picker should surface a missing-plane validation error before commit.')
+
+  const selectedPlane = createStandardPlaneDefinition('xy')
+  const patchedSelections = provider.applySelectionPatch(review, defaultSelections, {
+    planeSelection: {
+      target: selectedPlane.support,
+      plane: selectedPlane,
+    },
+  })
+  assert(
+    patchedSelections.plane?.key === 'xy'
+      && patchedSelections.planeTarget?.kind === 'construction'
+      && patchedSelections.planeKey === 'xy',
+    'Plane selection patches should resolve plane, plane target, and plane key together.',
+  )
 
   const plane = createStandardPlaneDefinition('xy')
   const prepared = await provider.prepare({
@@ -67,7 +99,7 @@ test('src/domain/import/providers/image-import-provider.spec.ts', async () => {
   assert(prepared.commitSketches?.length === 1, 'Prepare should return one sketch commit request.')
   const commit = prepared.commitSketches?.[0]
   assert(commit?.definition.points.length === 4, 'Prepared sketch should contain four image corner points.')
-  assert(commit?.definition.constraints.length === 4, 'Prepared sketch should contain four fix-point constraints.')
+  assert(commit?.definition.constraints.length === 0, 'Prepared sketch should leave image corners unconstrained so sketch geometry can drive them.')
   const entity = commit?.definition.entities[0]
   assert(entity?.kind === 'imageReference', 'Prepared sketch should contain an image reference entity.')
   assert(entity?.cornerPointIds.length === 4, 'Prepared image reference should preserve four corner point IDs.')

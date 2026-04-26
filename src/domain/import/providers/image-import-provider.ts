@@ -4,7 +4,7 @@ import type { ImportProvider } from '@/contracts/import/provider'
 import type { ImportReviewEnvelope } from '@/contracts/import/review'
 import type { ResolvedImportSource } from '@/contracts/import/source'
 import type { ImportCapabilities } from '@/contracts/import/capabilities'
-import type { CommitSketchRequest, SketchPoint } from '@/contracts/modeling/schema'
+import type { CommitSketchRequest, ModelingDiagnostic, SketchPoint } from '@/contracts/modeling/schema'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
 import type {
@@ -13,6 +13,10 @@ import type {
   SketchPlaneSupportRef,
 } from '@/contracts/shared/sketch-plane'
 import { CONTRACT_VERSION, IMPORT_CONTRACT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+import type { PrimitiveRef } from '@/domain/editor/schema'
+import { planeSelectionFilter } from '@/domain/editor/schema'
+import { createStandardPlaneDefinition, deriveStandardPlaneKeyFromConstructionId } from '@/domain/modeling/opencascade-kernel-seed'
 
 const DEFAULT_IMAGE_EXTENT = 200
 const IMAGE_ENTITY_ID = 'sketch_entity_image_reference'
@@ -21,12 +25,6 @@ const IMAGE_POINT_IDS = [
   'sketch_point_image_reference_tr',
   'sketch_point_image_reference_br',
   'sketch_point_image_reference_bl',
-] as const
-const IMAGE_CONSTRAINT_IDS = [
-  'constraint_image_reference_tl',
-  'constraint_image_reference_tr',
-  'constraint_image_reference_br',
-  'constraint_image_reference_bl',
 ] as const
 const IMAGE_UV_WINDING = [
   [0, 1],
@@ -49,17 +47,27 @@ export interface ImageImportReview {
   pixelWidth: number
   pixelHeight: number
   sourceName: string
+  fileSizeBytes: number
 }
 
 export interface ImageImportSelections {
-  plane: SketchPlaneDefinition
-  planeTarget: SketchPlaneSupportRef
+  plane: SketchPlaneDefinition | null
+  planeTarget: SketchPlaneSupportRef | null
   planeKey: SketchPlaneKey | null
 }
 
 export class ImageImportProvider implements ImportProvider<ImageImportReview, ImageImportSelections> {
   readonly id = 'imageReference'
   readonly label = 'Image Reference'
+  readonly acceptedFileTypes = [
+    { extension: 'png', mediaType: 'image/png' },
+    { extension: 'jpg', mediaType: 'image/jpeg' },
+    { extension: 'jpeg', mediaType: 'image/jpeg' },
+    { extension: 'webp', mediaType: 'image/webp' },
+    { extension: 'bmp', mediaType: 'image/bmp' },
+    { extension: 'tif', mediaType: 'image/tiff' },
+    { extension: 'tiff', mediaType: 'image/tiff' },
+  ] as const
 
   accepts(source: ResolvedImportSource) {
     const extension = getFileExtension(source.name)
@@ -81,6 +89,7 @@ export class ImageImportProvider implements ImportProvider<ImageImportReview, Im
           pixelWidth: width,
           pixelHeight: height,
           sourceName: input.source.name,
+          fileSizeBytes: input.source.bytes.byteLength,
         },
         proposedActionKinds: ['commitSketch'],
         diagnostics: [],
@@ -91,6 +100,7 @@ export class ImageImportProvider implements ImportProvider<ImageImportReview, Im
           pixelWidth: 0,
           pixelHeight: 0,
           sourceName: input.source.name,
+          fileSizeBytes: input.source.bytes.byteLength,
         },
         proposedActionKinds: ['commitSketch'],
         diagnostics: [{
@@ -104,6 +114,109 @@ export class ImageImportProvider implements ImportProvider<ImageImportReview, Im
     }
   }
 
+  createDefaultSelections(): ImageImportSelections {
+    return {
+      plane: null,
+      planeTarget: null,
+      planeKey: null,
+    }
+  }
+
+  getReviewFormSchema(
+    review: ImportReviewEnvelope<ImageImportReview>,
+    selections: ImageImportSelections,
+  ): FeatureEditorFormSchema {
+    const diagnostics = toModelingDiagnostics(review.diagnostics)
+
+    return {
+      sections: [
+        {
+          id: 'image-summary',
+          title: 'Summary',
+          fields: [
+            {
+              id: 'image-dimensions',
+              kind: 'summary',
+              label: 'Dimensions',
+              value: `${review.providerReview.pixelWidth} × ${review.providerReview.pixelHeight}px`,
+            },
+            {
+              id: 'image-source-name',
+              kind: 'summary',
+              label: 'Source',
+              value: review.providerReview.sourceName,
+            },
+            {
+              id: 'image-source-size',
+              kind: 'summary',
+              label: 'File size',
+              value: formatFileSize(review.providerReview.fileSizeBytes),
+            },
+          ],
+        },
+        {
+          id: 'image-references',
+          title: 'References',
+          fields: [
+            {
+              id: 'image-plane',
+              kind: 'referencePicker',
+              label: 'Sketch plane',
+              helper: 'Select one construction plane or planar face for the image reference sketch.',
+              value: selections.planeTarget,
+              emptyLabel: 'Pick a construction plane or planar face',
+              picker: {
+                mode: 'replace',
+                allowsMultiple: false,
+                selectionFilter: planeSelectionFilter,
+                itemLabel: 'Plane reference',
+              },
+              patch: { patchKey: 'planeSelection' },
+              error: selections.planeTarget ? null : { message: 'Select one sketch plane.' },
+            },
+          ],
+        },
+        ...(diagnostics.length > 0
+          ? [{
+              id: 'image-diagnostics',
+              title: 'Diagnostics',
+              fields: [{
+                id: 'image-review-diagnostics',
+                kind: 'diagnostics' as const,
+                label: 'Review diagnostics',
+                diagnostics,
+              }],
+            }]
+          : []),
+      ],
+    }
+  }
+
+  applySelectionPatch(
+    _review: ImportReviewEnvelope<ImageImportReview>,
+    selections: ImageImportSelections,
+    patch: Record<string, unknown>,
+  ): ImageImportSelections {
+    if (!Object.prototype.hasOwnProperty.call(patch, 'planeSelection')) {
+      return selections
+    }
+
+    const planeSelection = toPlaneSelectionPatch(patch.planeSelection)
+    if (!planeSelection) {
+      return {
+        plane: null,
+        planeTarget: null,
+        planeKey: null,
+      }
+    }
+
+    return {
+      plane: planeSelection.plane,
+      planeTarget: planeSelection.target,
+      planeKey: planeSelection.plane.key,
+    }
+  }
+
   async prepare(input: {
     source: ResolvedImportSource
     review: ImportReviewEnvelope<ImageImportReview>
@@ -112,6 +225,22 @@ export class ImageImportProvider implements ImportProvider<ImageImportReview, Im
   }): Promise<ImportPreparedActions> {
     if (input.review.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
       return { diagnostics: [...input.review.diagnostics] }
+    }
+
+    if (!input.selections.plane || !input.selections.planeTarget) {
+      return {
+        diagnostics: [{
+          severity: 'error',
+          code: 'image-plane-required',
+          message: 'Select one sketch plane before committing the image import.',
+        }],
+      }
+    }
+
+    const selections = {
+      plane: input.selections.plane,
+      planeTarget: input.selections.planeTarget,
+      planeKey: input.selections.planeKey,
     }
 
     const embeddedBinaryId = await input.capabilities.assets.storeEmbeddedBinary({
@@ -131,7 +260,7 @@ export class ImageImportProvider implements ImportProvider<ImageImportReview, Im
     return {
       commitSketches: [createCommitSketchRequest({
         capabilities: input.capabilities,
-        selections: input.selections,
+        selections,
         sketchLabel: deriveSketchLabel(review.sourceName),
         definition,
       })],
@@ -147,7 +276,10 @@ export function createImageImportProvider() {
 
 function createCommitSketchRequest(input: {
   capabilities: ImportCapabilities
-  selections: ImageImportSelections
+  selections: ImageImportSelections & {
+    plane: SketchPlaneDefinition
+    planeTarget: SketchPlaneSupportRef
+  }
   sketchLabel: string
   definition: SketchDefinition
 }): CommitSketchRequest {
@@ -206,14 +338,8 @@ function createImageReferenceSketchDefinition(input: {
       pixelWidth: input.pixelWidth,
       pixelHeight: input.pixelHeight,
     }],
-    constraintIds: [...IMAGE_CONSTRAINT_IDS],
-    constraints: IMAGE_CONSTRAINT_IDS.map((constraintId, index) => ({
-      constraintId,
-      kind: 'fixPoint',
-      label: `Fix image corner ${index + 1}`,
-      pointId: IMAGE_POINT_IDS[index]!,
-      position: corners[index]!,
-    })),
+    constraintIds: [],
+    constraints: [],
     dimensionIds: [],
     dimensions: [],
     styleIds: [],
@@ -300,6 +426,67 @@ function inferMediaTypeFromName(name: string) {
     default:
       return null
   }
+}
+
+function toModelingDiagnostics(
+  diagnostics: ImportReviewEnvelope<ImageImportReview>['diagnostics'],
+): ModelingDiagnostic[] {
+  return diagnostics.map((diagnostic) => ({
+    code: diagnostic.code ?? 'import-review-diagnostic',
+    severity: diagnostic.severity,
+    message: diagnostic.message,
+    target: null,
+    detail: null,
+  }))
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function toPlaneSelectionPatch(value: unknown): {
+  plane: SketchPlaneDefinition
+  target: SketchPlaneSupportRef
+} | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const target = (value as {
+    target?: PrimitiveRef | null
+  }).target
+  const plane = (value as {
+    plane?: SketchPlaneDefinition | null
+  }).plane
+
+  if (!target || !plane) {
+    return null
+  }
+
+  if (target.kind === 'construction') {
+    const planeKey = deriveStandardPlaneKeyFromConstructionId(target.constructionId)
+    return {
+      target,
+      plane: planeKey ? createStandardPlaneDefinition(planeKey) : plane,
+    }
+  }
+
+  if (target.kind === 'face') {
+    return {
+      target,
+      plane,
+    }
+  }
+
+  return null
 }
 
 export function readRasterImageDimensions(bytes: Uint8Array) {

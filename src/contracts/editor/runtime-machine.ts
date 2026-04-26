@@ -67,6 +67,13 @@ const editorEventTypes = [
   'form.featurePatched',
   'form.referencePickerActivated',
   'form.referencePickerCancelled',
+  'import.fileSelected',
+  'import.providerSelected',
+  'import.selectionPatched',
+  'import.commitRequested',
+  'import.cancelled',
+  'import.committed',
+  'import.failed',
   'effect.snapshotLoaded',
   'effect.snapshotFailed',
   'effect.sketchSessionOpened',
@@ -140,6 +147,8 @@ function workflowGuardName(kind: WorkflowKind) {
       return 'isEditingSketchWorkflow'
     case 'editingFeature':
       return 'isEditingFeatureWorkflow'
+    case 'importing':
+      return 'isImportingWorkflow'
     case 'inspectingSection':
       return 'isInspectingSectionWorkflow'
     default:
@@ -201,6 +210,7 @@ function createWorkflowRedirects(currentKind: WorkflowKind): WorkflowRedirect[] 
     'selectionCommand',
     'editingSketch',
     'editingFeature',
+    'importing',
     'inspectingSection',
   ]
 
@@ -360,6 +370,7 @@ const editorRuntimeMachine = setup({
     isSelectionCommandWorkflow: ({ context }) => context.machineState.kind === 'selectionCommand',
     isEditingSketchWorkflow: ({ context }) => context.machineState.kind === 'editingSketch',
     isEditingFeatureWorkflow: ({ context }) => context.machineState.kind === 'editingFeature',
+    isImportingWorkflow: ({ context }) => context.machineState.kind === 'importing',
     isInspectingSectionWorkflow: ({ context }) => context.machineState.kind === 'inspectingSection',
   },
 }).createMachine({
@@ -380,6 +391,7 @@ const editorRuntimeMachine = setup({
     selectionCommand: createWorkflowState('selectionCommand'),
     editingSketch: createWorkflowState('editingSketch'),
     editingFeature: createWorkflowState('editingFeature'),
+    importing: createWorkflowState('importing'),
     inspectingSection: createWorkflowState('inspectingSection'),
   },
 })
