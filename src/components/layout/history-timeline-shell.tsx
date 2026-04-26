@@ -49,7 +49,7 @@ export function HistoryTimelineShell({
 
   return (
     <div
-      className="relative shrink-0 overflow-visible"
+      className="pointer-events-none relative shrink-0 overflow-visible"
       data-history-mode={activeMode}
     >
       <div

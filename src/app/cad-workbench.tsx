@@ -1883,10 +1883,6 @@ export function CadWorkbench() {
                 {sketchSession?.validationMessage ?? sketchRegionDiagnosticMessage}
               </div>
             ) : null}
-            <div className="absolute bottom-4 left-4 z-20 flex items-end gap-3">
-              <WorkbenchStateDebugger state={debuggerState} />
-              <MeasurementPanel measurement={measurementViewModel} />
-            </div>
             {activeImportSession ? (
               <WorkbenchInspectorOverlay>
                 <ImportInspector onCommit={() => void handleImportCommit()} />
@@ -1911,23 +1907,29 @@ export function CadWorkbench() {
               onDownload={downloadDocumentExportResult}
               onClose={() => setObjectExportModal(null)}
             />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3">
+              <div className="flex items-end gap-3 px-4">
+                <WorkbenchStateDebugger state={debuggerState} />
+                <MeasurementPanel measurement={measurementViewModel} />
+              </div>
+              <HistoryTimelineShell
+                snapshot={snapshot}
+                sketchSession={sketchSession}
+                historyHighlightFeatureIds={historyHighlightFeatureIds}
+                visibleSelection={visibleSelection}
+                onSelectTarget={handleShellSelect}
+                onReopenTarget={handleNavigationReopen}
+                onDocumentCursorRequested={handleTimelineCursorRequested}
+                documentCursorDisabled={!history.canUndo && !history.canRedo}
+                onDocumentHistoryReorder={handleDocumentHistoryReorder}
+                documentHistoryReorderDisabled={Boolean(sketchSession) || isDocumentHistoryReorderRunning || isUndoRedoRunning || (!history.canUndo && !history.canRedo)}
+                onSketchCursorRequested={(cursor) => dispatch({ type: 'sketch.historyCursorRequested', cursor })}
+                onDeleteDocumentItem={handleDocumentHistoryDelete}
+                onRenameDocumentItem={handleDocumentHistoryRename}
+                onSuppressFeature={handleFeatureSuppressPlaceholder}
+              />
+            </div>
           </main>
-          <HistoryTimelineShell
-            snapshot={snapshot}
-            sketchSession={sketchSession}
-            historyHighlightFeatureIds={historyHighlightFeatureIds}
-            visibleSelection={visibleSelection}
-            onSelectTarget={handleShellSelect}
-            onReopenTarget={handleNavigationReopen}
-            onDocumentCursorRequested={handleTimelineCursorRequested}
-            documentCursorDisabled={!history.canUndo && !history.canRedo}
-            onDocumentHistoryReorder={handleDocumentHistoryReorder}
-            documentHistoryReorderDisabled={Boolean(sketchSession) || isDocumentHistoryReorderRunning || isUndoRedoRunning || (!history.canUndo && !history.canRedo)}
-            onSketchCursorRequested={(cursor) => dispatch({ type: 'sketch.historyCursorRequested', cursor })}
-            onDeleteDocumentItem={handleDocumentHistoryDelete}
-            onRenameDocumentItem={handleDocumentHistoryRename}
-            onSuppressFeature={handleFeatureSuppressPlaceholder}
-          />
         </div>
       </div>
     </div>

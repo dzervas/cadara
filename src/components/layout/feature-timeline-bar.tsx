@@ -367,7 +367,7 @@ function HistoryTimelineSurface({
 
   return (
     <section
-      className="relative shrink-0 overflow-visible rounded-[8px] px-4 pt-3"
+      className="pointer-events-auto relative shrink-0 overflow-visible rounded-[8px] px-4 pt-3"
       style={{
         backgroundColor: 'var(--workbench-shell-overlay-strong)',
         boxShadow: 'var(--workbench-shell-elevation-timeline)',
