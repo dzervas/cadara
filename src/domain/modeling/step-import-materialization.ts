@@ -164,6 +164,7 @@ function createRenderableFaceMesh(
       label: `${bodyLabel} ${target.faceId}`,
       target,
       relatedTargets: [{ kind: 'body', bodyId } satisfies BodyRef],
+      contributingFeatureIds: [ownerFeatureId],
       consumedByFeatureIds: [],
       selectionSemantics: semanticClass === 'planarFace' ? ['face', 'planarFace'] : ['face'],
     } satisfies SnapshotEntityRecord,
@@ -403,6 +404,7 @@ export function augmentWorkspaceSnapshotWithStepImportPresentation(
         label: importedBody.label,
         target: bodyTarget,
         relatedTargets: [],
+        contributingFeatureIds: [feature.featureId],
         consumedByFeatureIds: [],
         selectionSemantics: ['body'],
       } satisfies SnapshotEntityRecord)

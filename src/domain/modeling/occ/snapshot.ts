@@ -115,6 +115,18 @@ function createSnapshotEntityId(target: DurableRef) {
   return `snapshot_entity_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as SnapshotEntityId
 }
 
+function orderContributorFeatureIds(
+  state: Pick<OccAuthoringState, 'features'>,
+  featureIds: readonly FeatureId[],
+) {
+  if (featureIds.length <= 1) {
+    return [...featureIds]
+  }
+
+  const featureOrder = new Map(state.features.map((feature, index) => [feature.featureId, index]))
+  return [...featureIds].sort((left, right) => (featureOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (featureOrder.get(right) ?? Number.MAX_SAFE_INTEGER))
+}
+
 function createRenderableId(target: DurableRef) {
   return `renderable_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as RenderableId
 }
@@ -559,6 +571,7 @@ function buildBodyEntities(
       label: body.label,
       target: bodyTarget,
       relatedTargets: [],
+      contributingFeatureIds: orderContributorFeatureIds(state, body.contributingFeatureIds),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(bodyTarget)) ?? [],
       selectionSemantics: ['body'],
     },
@@ -583,6 +596,7 @@ function buildBodyEntities(
       label: `${body.label} ${faceId}`,
       target,
       relatedTargets: [bodyTarget],
+      contributingFeatureIds: orderContributorFeatureIds(state, body.faceContributingFeatureIdsById.get(faceId) ?? []),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: [...semantics.entity],
     })
@@ -600,6 +614,7 @@ function buildBodyEntities(
       label: `${body.label} ${edgeId}`,
       target,
       relatedTargets: [bodyTarget],
+      contributingFeatureIds: orderContributorFeatureIds(state, body.edgeContributingFeatureIdsById.get(edgeId) ?? []),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: ['edge'],
     })
@@ -617,6 +632,7 @@ function buildBodyEntities(
       label: `${body.label} ${vertexId}`,
       target,
       relatedTargets: [bodyTarget],
+      contributingFeatureIds: orderContributorFeatureIds(state, body.vertexContributingFeatureIdsById.get(vertexId) ?? []),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: ['vertex'],
     })
@@ -639,6 +655,7 @@ function buildConstructionEntities(
     label: construction.label,
     target: construction.target,
     relatedTargets: [],
+    contributingFeatureIds: [],
     consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(construction.target)) ?? [],
     selectionSemantics: ['constructionPlane', 'planarReference'],
   }))
@@ -661,6 +678,7 @@ function buildSketchEntities(
       label: sketch.label,
       target: sketchTarget,
       relatedTargets: [],
+      contributingFeatureIds: [],
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(sketchTarget)) ?? [],
       selectionSemantics: ['existingSketch'],
     },
@@ -677,6 +695,7 @@ function buildSketchEntities(
       label: region.label,
       target: region.target,
       relatedTargets: [sketchTarget],
+      contributingFeatureIds: [],
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(region.target)) ?? [],
       selectionSemantics: ['existingSketch'],
     })
@@ -694,6 +713,7 @@ function buildSketchEntities(
       label: entity.label,
       target,
       relatedTargets: [sketchTarget],
+      contributingFeatureIds: [],
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: ['sketchEntity'],
     })
@@ -711,6 +731,7 @@ function buildSketchEntities(
       label: point.label,
       target,
       relatedTargets: [sketchTarget],
+      contributingFeatureIds: [],
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: [],
     })

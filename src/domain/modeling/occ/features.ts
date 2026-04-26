@@ -86,6 +86,7 @@ import {
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,
   reconcileReplacementSolidBody,
+  trackDerivedSolidBody,
   trackNewSolidBody,
   trackReplacementSolidBody,
   type OccTrackedBody,
@@ -5676,7 +5677,11 @@ function buildShellFeatureShape(
     throw new Error('OCC shell build failed.')
   }
 
-  return shell.Shape()
+  return {
+    sourceBody,
+    builder: shell,
+    shape: shell.Shape(),
+  }
 }
 
 function executeShellFeature(
@@ -5684,8 +5689,33 @@ function executeShellFeature(
   ownerFeatureId: FeatureId,
   parameters: ShellFeatureParameters,
 ): OccFeatureExecutionResult {
-  const featureShape = buildShellFeatureShape(context, parameters)
-  const result = applyBooleanPolicy(context, ownerFeatureId, parameters.operation, parameters.booleanScope, featureShape)
+  const shellResult = buildShellFeatureShape(context, parameters)
+
+  if (parameters.operation === 'newBody') {
+    const newBody = trackDerivedSolidBody(context.oc, {
+      previous: shellResult.sourceBody,
+      bodyId: `body_${ownerFeatureId}` as BodyId,
+      label: ownerFeatureId,
+      ownerFeatureId,
+      shape: shellResult.shape,
+      historySources: [shellResult.builder],
+    })
+
+    return {
+      bodies: [
+        ...context.bodies,
+        newBody,
+      ],
+      constructions: [...context.constructions],
+      constructionPlanes: new Map(context.constructionPlanes),
+      producedTargets: [{ kind: 'body', bodyId: newBody.bodyId }],
+      entities: [],
+      renderRecords: [],
+      historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
+    }
+  }
+
+  const result = applyBooleanPolicy(context, ownerFeatureId, parameters.operation, parameters.booleanScope, shellResult.shape)
 
   return {
     bodies: result.bodies,
@@ -5784,6 +5814,7 @@ export function createConstructionPresentationArtifacts(
     label: construction.label,
     target: { kind: 'construction', constructionId: construction.constructionId },
     relatedTargets: [],
+    contributingFeatureIds: [],
     consumedByFeatureIds: [],
     selectionSemantics: ['constructionPlane', 'planarReference'],
   }

@@ -2,6 +2,7 @@ import type {
   BodyId,
   EdgeId,
   FaceId,
+  FeatureId,
   VertexId,
 } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
@@ -36,24 +37,34 @@ export interface OccTopologyNamingBodyState {
 
 interface EnumeratedReplacementTopology {
   topology: OccTrackedBody['topology']
+  contributingFeatureIds: FeatureId[]
   facesById: Map<FaceId, OccFace>
+  faceContributingFeatureIdsById: Map<FaceId, FeatureId[]>
   edgesById: Map<EdgeId, OccEdge>
+  edgeContributingFeatureIdsById: Map<EdgeId, FeatureId[]>
   verticesById: Map<VertexId, OccVertex>
+  vertexContributingFeatureIdsById: Map<VertexId, FeatureId[]>
 }
 
 interface TrackedTopologyInput {
   bodyId: BodyId
+  ownerFeatureId: FeatureId | null
   topology: OccTrackedBody['topology']
   shape: OccShape
   facesById: Map<FaceId, OccFace>
+  faceContributingFeatureIdsById: Map<FaceId, FeatureId[]>
   edgesById: Map<EdgeId, OccEdge>
+  edgeContributingFeatureIdsById: Map<EdgeId, FeatureId[]>
   verticesById: Map<VertexId, OccVertex>
+  vertexContributingFeatureIdsById: Map<VertexId, FeatureId[]>
 }
 
 export interface OccTopologyReconciliationResult extends EnumeratedReplacementTopology {
   naming: OccTopologyNamingBodyState
   invalidations: Map<string, OccReferenceInvalidationRecord>
 }
+
+export type OccGeneratedTopologyContributorResult = EnumeratedReplacementTopology
 
 const TOPOLOGY_DELETED_REASON = 'occ-topology-deleted'
 const TOPOLOGY_AMBIGUOUS_REASON = 'occ-topology-ambiguous'
@@ -481,6 +492,52 @@ function registerInvalidation(
   })
 }
 
+function mergeContributorIds(...lists: readonly (readonly FeatureId[])[]) {
+  const merged: FeatureId[] = []
+
+  for (const list of lists) {
+    for (const featureId of list) {
+      if (!merged.includes(featureId)) {
+        merged.push(featureId)
+      }
+    }
+  }
+
+  return merged
+}
+
+function appendContributorId(
+  contributors: readonly FeatureId[],
+  ownerFeatureId: FeatureId | null,
+) {
+  if (!ownerFeatureId || contributors.includes(ownerFeatureId)) {
+    return [...contributors]
+  }
+
+  return [...contributors, ownerFeatureId]
+}
+
+function deriveBodyContributorIds(input: {
+  ownerFeatureId: FeatureId | null
+  faces: ReadonlyMap<FaceId, readonly FeatureId[]>
+  edges: ReadonlyMap<EdgeId, readonly FeatureId[]>
+  vertices: ReadonlyMap<VertexId, readonly FeatureId[]>
+}) {
+  const merged = mergeContributorIds(
+    ...[
+      ...input.faces.values(),
+      ...input.edges.values(),
+      ...input.vertices.values(),
+    ],
+  )
+
+  if (input.ownerFeatureId && !merged.includes(input.ownerFeatureId)) {
+    merged.push(input.ownerFeatureId)
+  }
+
+  return merged
+}
+
 function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccFace | OccEdge | OccVertex>(
   oc: OpenCascadeInstance,
   input: {
@@ -492,6 +549,8 @@ function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccF
     freshShapesById: ReadonlyMap<Id, Shape>
     finalShapeMap: InstanceType<OpenCascadeInstance['TopTools_IndexedMapOfShape']>
     historySources: readonly OccTopologyHistorySource[]
+    previousContributingFeatureIdsById: ReadonlyMap<Id, readonly FeatureId[]>
+    ownerFeatureId: FeatureId | null
     previousLabelsByKey: ReadonlyMap<string, OccLabel>
     previousSelectorLabelsByKey: ReadonlyMap<string, OccLabel>
     nextLabelsByKey: Map<string, OccLabel>
@@ -504,6 +563,9 @@ function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccF
 ) {
   const claimsByIndex = new Map<number, Id[]>()
   const resultById = new Map<Id, Shape>()
+  const contributingFeatureIdsById = new Map<Id, FeatureId[]>()
+  const preservedIndexById = new Map<Id, number>()
+  const inheritedContributorIdsByIndex = new Map<number, FeatureId[]>()
   const shapeByIndex = new Map<number, Shape>()
 
   for (const shape of input.freshShapesById.values()) {
@@ -516,6 +578,7 @@ function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccF
 
   for (const previousId of input.previousIds) {
     const previousShape = input.previousShapesById.get(previousId)
+    const previousContributorIds = input.previousContributingFeatureIdsById.get(previousId) ?? []
 
     if (!previousShape) {
       continue
@@ -541,6 +604,31 @@ function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccF
     if (resolution.finalIndexes.length === 1) {
       const [index] = resolution.finalIndexes
       claimsByIndex.set(index!, [...(claimsByIndex.get(index!) ?? []), previousId])
+      preservedIndexById.set(previousId, index!)
+    }
+
+    const inheritedResolution = resolveFinalSuccessors(
+      oc,
+      previousShape,
+      input.finalShapeMap,
+      input.historySources,
+    )
+
+    for (const index of inheritedResolution.finalIndexes) {
+      if (preservedIndexById.get(previousId) === index) {
+        continue
+      }
+
+      inheritedContributorIdsByIndex.set(
+        index,
+        mergeContributorIds(
+          inheritedContributorIdsByIndex.get(index) ?? [],
+          [...previousContributorIds],
+        ),
+      )
+    }
+
+    if (resolution.finalIndexes.length === 1) {
       continue
     }
 
@@ -598,6 +686,7 @@ function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccF
     }
 
     resultById.set(id, shape)
+    contributingFeatureIdsById.set(id, [...(input.previousContributingFeatureIdsById.get(id) ?? [])])
     claimedIndexes.add(index)
   }
 
@@ -615,9 +704,19 @@ function reconcileKind<Id extends FaceId | EdgeId | VertexId, Shape extends OccF
       createSelectorLabel(oc, input.bodyLabel, freshShape, input.contextShape),
     )
     resultById.set(freshId, freshShape)
+    contributingFeatureIdsById.set(
+      freshId,
+      appendContributorId(
+        inheritedContributorIdsByIndex.get(index) ?? [],
+        input.ownerFeatureId,
+      ),
+    )
   }
 
-  return resultById
+  return {
+    resultById,
+    contributingFeatureIdsById,
+  }
 }
 
 function createTopologyFromMaps(
@@ -629,6 +728,175 @@ function createTopologyFromMaps(
     faceIds: [...facesById.keys()],
     edgeIds: [...edgesById.keys()],
     vertexIds: [...verticesById.keys()],
+  }
+}
+
+function deriveGeneratedKindContributorIds<Id extends FaceId | EdgeId | VertexId, Shape extends OccFace | OccEdge | OccVertex>(
+  oc: OpenCascadeInstance,
+  input: {
+    kind: 'face' | 'edge' | 'vertex'
+    bodyId: BodyId
+    previousIds: readonly Id[]
+    previousShapesById: ReadonlyMap<Id, Shape>
+    previousContributingFeatureIdsById: ReadonlyMap<Id, readonly FeatureId[]>
+    previousSelectorLabelsByKey: ReadonlyMap<string, OccLabel>
+    freshShapesById: ReadonlyMap<Id, Shape>
+    finalShapeMap: InstanceType<OpenCascadeInstance['TopTools_IndexedMapOfShape']>
+    historySources: readonly OccTopologyHistorySource[]
+    ownerFeatureId: FeatureId | null
+    validLabels: OccLabelMap
+  },
+) {
+  const claimsByIndex = new Map<number, Id[]>()
+  const preservedContributorIdsByIndex = new Map<number, FeatureId[]>()
+  const inheritedContributorIdsByIndex = new Map<number, FeatureId[]>()
+  const contributingFeatureIdsById = new Map<Id, FeatureId[]>()
+
+  for (const previousId of input.previousIds) {
+    const previousShape = input.previousShapesById.get(previousId)
+    const previousContributorIds = input.previousContributingFeatureIdsById.get(previousId) ?? []
+
+    if (!previousShape) {
+      continue
+    }
+
+    const key = topologyRefKey(targetFor(input.kind as never, input.bodyId, previousId as never))
+    const selectorFinalIndexes = resolveSelectorFinalSuccessors(
+      oc,
+      input.previousSelectorLabelsByKey.get(key),
+      input.validLabels,
+      input.finalShapeMap,
+    )
+    const preservedResolution = selectorFinalIndexes.length > 0
+      ? { finalIndexes: selectorFinalIndexes, deleted: false }
+      : resolveFinalSuccessors(
+          oc,
+          previousShape,
+          input.finalShapeMap,
+          input.historySources,
+        )
+
+    if (preservedResolution.finalIndexes.length === 1) {
+      const [index] = preservedResolution.finalIndexes
+      claimsByIndex.set(index!, [...(claimsByIndex.get(index!) ?? []), previousId])
+    }
+
+    const inheritedResolution = resolveFinalSuccessors(
+      oc,
+      previousShape,
+      input.finalShapeMap,
+      input.historySources,
+    )
+
+    for (const index of inheritedResolution.finalIndexes) {
+      inheritedContributorIdsByIndex.set(
+        index,
+        mergeContributorIds(
+          inheritedContributorIdsByIndex.get(index) ?? [],
+          [...previousContributorIds],
+        ),
+      )
+    }
+  }
+
+  for (const [index, ids] of claimsByIndex) {
+    if (ids.length !== 1) {
+      continue
+    }
+
+    preservedContributorIdsByIndex.set(
+      index,
+      [...(input.previousContributingFeatureIdsById.get(ids[0]!) ?? [])],
+    )
+  }
+
+  for (const [freshId, freshShape] of input.freshShapesById) {
+    const index = input.finalShapeMap.FindIndex(freshShape)
+    const preservedContributorIds = index > 0 ? preservedContributorIdsByIndex.get(index) : undefined
+    contributingFeatureIdsById.set(
+      freshId,
+      preservedContributorIds
+        ? [...preservedContributorIds]
+        : appendContributorId(index > 0 ? inheritedContributorIdsByIndex.get(index) ?? [] : [], input.ownerFeatureId),
+    )
+  }
+
+  return contributingFeatureIdsById
+}
+
+export function deriveGeneratedTopologyContributors(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody
+    generated: TrackedTopologyInput
+    historySources: readonly OccTopologyHistorySource[]
+  },
+): OccGeneratedTopologyContributorResult {
+  const previousNaming = input.previous.naming ?? createInitialNamingState(oc, input.previous)
+  const validLabels = createValidLabelMap(oc, previousNaming)
+  const faceShapeMap = buildShapeMap(oc, 'face', input.generated.shape)
+  const edgeShapeMap = buildShapeMap(oc, 'edge', input.generated.shape)
+  const vertexShapeMap = buildShapeMap(oc, 'vertex', input.generated.shape)
+
+  const faceContributingFeatureIdsById = deriveGeneratedKindContributorIds(oc, {
+    kind: 'face',
+    bodyId: input.previous.bodyId,
+    previousIds: input.previous.topology.faceIds,
+    previousShapesById: input.previous.facesById,
+    previousContributingFeatureIdsById: input.previous.faceContributingFeatureIdsById,
+    previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
+    freshShapesById: input.generated.facesById,
+    finalShapeMap: faceShapeMap,
+    historySources: input.historySources,
+    ownerFeatureId: input.generated.ownerFeatureId,
+    validLabels,
+  })
+  const edgeContributingFeatureIdsById = deriveGeneratedKindContributorIds(oc, {
+    kind: 'edge',
+    bodyId: input.previous.bodyId,
+    previousIds: input.previous.topology.edgeIds,
+    previousShapesById: input.previous.edgesById,
+    previousContributingFeatureIdsById: input.previous.edgeContributingFeatureIdsById,
+    previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
+    freshShapesById: input.generated.edgesById,
+    finalShapeMap: edgeShapeMap,
+    historySources: input.historySources,
+    ownerFeatureId: input.generated.ownerFeatureId,
+    validLabels,
+  })
+  const vertexContributingFeatureIdsById = deriveGeneratedKindContributorIds(oc, {
+    kind: 'vertex',
+    bodyId: input.previous.bodyId,
+    previousIds: input.previous.topology.vertexIds,
+    previousShapesById: input.previous.verticesById,
+    previousContributingFeatureIdsById: input.previous.vertexContributingFeatureIdsById,
+    previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
+    freshShapesById: input.generated.verticesById,
+    finalShapeMap: vertexShapeMap,
+    historySources: input.historySources,
+    ownerFeatureId: input.generated.ownerFeatureId,
+    validLabels,
+  })
+
+  faceShapeMap.delete()
+  edgeShapeMap.delete()
+  vertexShapeMap.delete()
+  validLabels.delete()
+
+  return {
+    topology: createTopologyFromMaps(input.generated.facesById, input.generated.edgesById, input.generated.verticesById),
+    contributingFeatureIds: deriveBodyContributorIds({
+      ownerFeatureId: input.generated.ownerFeatureId,
+      faces: faceContributingFeatureIdsById,
+      edges: edgeContributingFeatureIdsById,
+      vertices: vertexContributingFeatureIdsById,
+    }),
+    facesById: input.generated.facesById,
+    faceContributingFeatureIdsById,
+    edgesById: input.generated.edgesById,
+    edgeContributingFeatureIdsById,
+    verticesById: input.generated.verticesById,
+    vertexContributingFeatureIdsById,
   }
 }
 
@@ -661,6 +929,8 @@ export function reconcileReplacementTopology(
     freshShapesById: input.replacement.facesById,
     finalShapeMap: faceShapeMap,
     historySources: input.historySources,
+    previousContributingFeatureIdsById: input.previous.faceContributingFeatureIdsById,
+    ownerFeatureId: input.replacement.ownerFeatureId,
     previousLabelsByKey: previousNaming.topologyLabelsByKey,
     previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
     nextLabelsByKey,
@@ -679,6 +949,8 @@ export function reconcileReplacementTopology(
     freshShapesById: input.replacement.edgesById,
     finalShapeMap: edgeShapeMap,
     historySources: input.historySources,
+    previousContributingFeatureIdsById: input.previous.edgeContributingFeatureIdsById,
+    ownerFeatureId: input.replacement.ownerFeatureId,
     previousLabelsByKey: previousNaming.topologyLabelsByKey,
     previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
     nextLabelsByKey,
@@ -697,6 +969,8 @@ export function reconcileReplacementTopology(
     freshShapesById: input.replacement.verticesById,
     finalShapeMap: vertexShapeMap,
     historySources: input.historySources,
+    previousContributingFeatureIdsById: input.previous.vertexContributingFeatureIdsById,
+    ownerFeatureId: input.replacement.ownerFeatureId,
     previousLabelsByKey: previousNaming.topologyLabelsByKey,
     previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
     nextLabelsByKey,
@@ -713,10 +987,19 @@ export function reconcileReplacementTopology(
   validLabels.delete()
 
   return {
-    topology: createTopologyFromMaps(facesById, edgesById, verticesById),
-    facesById,
-    edgesById,
-    verticesById,
+    topology: createTopologyFromMaps(facesById.resultById, edgesById.resultById, verticesById.resultById),
+    contributingFeatureIds: deriveBodyContributorIds({
+      ownerFeatureId: input.replacement.ownerFeatureId,
+      faces: facesById.contributingFeatureIdsById,
+      edges: edgesById.contributingFeatureIdsById,
+      vertices: verticesById.contributingFeatureIdsById,
+    }),
+    facesById: facesById.resultById,
+    faceContributingFeatureIdsById: facesById.contributingFeatureIdsById,
+    edgesById: edgesById.resultById,
+    edgeContributingFeatureIdsById: edgesById.contributingFeatureIdsById,
+    verticesById: verticesById.resultById,
+    vertexContributingFeatureIdsById: verticesById.contributingFeatureIdsById,
     naming: {
       strategy: OCC_TOPOLOGY_NAMING_STRATEGY,
       document: previousNaming.document,

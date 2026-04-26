@@ -5,6 +5,7 @@ import type {
   FeatureSnapshotRecord,
   SnapshotEntityRecord,
 } from '@/contracts/modeling/schema'
+import type { FeatureId } from '@/contracts/shared/ids'
 import type { SelectionTargetCatalog } from '@/domain/editor/schema'
 
 export interface DocumentSelectionDetail {
@@ -29,6 +30,17 @@ function getBodyLabel(snapshot: DocumentSnapshot, bodyId: DocumentSelectionDetai
 export function getEntityRecordForTarget(snapshot: DocumentSnapshot, target: PrimitiveRef) {
   const targetKey = getPrimitiveRefKey(target)
   return snapshot.presentation.entities.find((entity) => getPrimitiveRefKey(entity.target) === targetKey) ?? null
+}
+
+export function getTargetContributingFeatureIds(
+  snapshot: DocumentSnapshot,
+  target: PrimitiveRef | null,
+): FeatureId[] {
+  if (!target) {
+    return []
+  }
+
+  return [...(getEntityRecordForTarget(snapshot, target)?.contributingFeatureIds ?? [])]
 }
 
 function getOwnerLabel(snapshot: DocumentSnapshot, entity: SnapshotEntityRecord) {

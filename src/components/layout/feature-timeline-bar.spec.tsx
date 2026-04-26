@@ -275,6 +275,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
       <EditorContext.Provider value={editorValue}>
         <FeatureTimelineBar
           snapshot={snapshot}
+          historyHighlightFeatureIds={[]}
           visibleSelection={[{ kind: 'feature', featureId: 'feature_extrude-1' }]}
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
@@ -390,6 +391,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
       <EditorContext.Provider value={editorValue}>
         <FeatureTimelineBar
           snapshot={erroredTimelineSnapshot}
+          historyHighlightFeatureIds={[]}
           visibleSelection={[]}
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
@@ -473,6 +475,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
       <EditorContext.Provider value={editorValue}>
         <FeatureTimelineBar
           snapshot={snapshot}
+          historyHighlightFeatureIds={[]}
           visibleSelection={[]}
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
@@ -503,6 +506,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
       <EditorContext.Provider value={editorValue}>
         <FeatureTimelineBar
           snapshot={sketchCursorSnapshot}
+          historyHighlightFeatureIds={[]}
           visibleSelection={[{ kind: 'sketch', sketchId: 'sketch_primary' }]}
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
@@ -527,6 +531,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
         <HistoryTimelineShell
           snapshot={snapshot}
           sketchSession={sketchSession}
+          historyHighlightFeatureIds={[]}
           visibleSelection={[]}
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}

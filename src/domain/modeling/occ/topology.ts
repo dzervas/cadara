@@ -20,6 +20,7 @@ import type { DocumentId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 import {
+  deriveGeneratedTopologyContributors,
   reconcileReplacementTopology,
   seedOccTopologyNaming,
   type OccTopologyHistorySource,
@@ -62,9 +63,13 @@ export interface OccTrackedBody {
     edgeIds: EdgeId[]
     vertexIds: VertexId[]
   }
+  contributingFeatureIds: FeatureId[]
   facesById: Map<FaceId, InstanceType<OpenCascadeInstance['TopoDS_Face']>>
+  faceContributingFeatureIdsById: Map<FaceId, FeatureId[]>
   edgesById: Map<EdgeId, InstanceType<OpenCascadeInstance['TopoDS_Edge']>>
+  edgeContributingFeatureIdsById: Map<EdgeId, FeatureId[]>
   verticesById: Map<VertexId, InstanceType<OpenCascadeInstance['TopoDS_Vertex']>>
+  vertexContributingFeatureIdsById: Map<VertexId, FeatureId[]>
   naming?: OccTopologyNamingBodyState
 }
 
@@ -324,6 +329,18 @@ function enumerateVertices(
   return { vertexIds, verticesById }
 }
 
+function createSeedContributorIds(ownerFeatureId: FeatureId | null) {
+  return ownerFeatureId ? [ownerFeatureId] : []
+}
+
+function createContributorMap<Id extends FaceId | EdgeId | VertexId>(
+  ids: readonly Id[],
+  ownerFeatureId: FeatureId | null,
+) {
+  const seed = createSeedContributorIds(ownerFeatureId)
+  return new Map(ids.map((id) => [id, [...seed]]))
+}
+
 function buildTrackedSolidBody(
   oc: OpenCascadeInstance,
   input: {
@@ -363,9 +380,13 @@ function buildTrackedSolidBody(
       edgeIds: edges.edgeIds,
       vertexIds: vertices.vertexIds,
     },
+    contributingFeatureIds: createSeedContributorIds(input.ownerFeatureId),
     facesById: faces.facesById,
+    faceContributingFeatureIdsById: createContributorMap(faces.faceIds, input.ownerFeatureId),
     edgesById: edges.edgesById,
+    edgeContributingFeatureIdsById: createContributorMap(edges.edgeIds, input.ownerFeatureId),
     verticesById: vertices.verticesById,
+    vertexContributingFeatureIdsById: createContributorMap(vertices.vertexIds, input.ownerFeatureId),
     naming: input.naming,
   } satisfies OccTrackedBody
 
@@ -398,6 +419,41 @@ export function trackNewSolidBody(
     ...input,
     topologyToken: createInitialTopologyToken(),
   })
+}
+
+export function trackDerivedSolidBody(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody
+    bodyId: BodyId
+    label: string
+    ownerFeatureId: FeatureId | null
+    shape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>
+    historySources: readonly OccTopologyHistorySource[]
+    meshExportFallback?: OccTrackedBody['meshExportFallback']
+  },
+) {
+  const generated = buildTrackedSolidBody(oc, {
+    bodyId: input.bodyId,
+    label: input.label,
+    ownerFeatureId: input.ownerFeatureId,
+    topologyToken: createInitialTopologyToken(),
+    shape: input.shape,
+    meshExportFallback: input.meshExportFallback,
+  })
+  const contributors = deriveGeneratedTopologyContributors(oc, {
+    previous: input.previous,
+    generated,
+    historySources: input.historySources,
+  })
+
+  return {
+    ...generated,
+    contributingFeatureIds: contributors.contributingFeatureIds,
+    faceContributingFeatureIdsById: contributors.faceContributingFeatureIdsById,
+    edgeContributingFeatureIdsById: contributors.edgeContributingFeatureIdsById,
+    vertexContributingFeatureIdsById: contributors.vertexContributingFeatureIdsById,
+  } satisfies OccTrackedBody
 }
 
 export function trackReplacementSolidBody(
@@ -447,9 +503,13 @@ export function reconcileReplacementSolidBody(
     body: {
       ...replacement,
       topology: reconciliation.topology,
+      contributingFeatureIds: reconciliation.contributingFeatureIds,
       facesById: reconciliation.facesById,
+      faceContributingFeatureIdsById: reconciliation.faceContributingFeatureIdsById,
       edgesById: reconciliation.edgesById,
+      edgeContributingFeatureIdsById: reconciliation.edgeContributingFeatureIdsById,
       verticesById: reconciliation.verticesById,
+      vertexContributingFeatureIdsById: reconciliation.vertexContributingFeatureIdsById,
       naming: reconciliation.naming,
     } satisfies OccTrackedBody,
     historyInvalidations: reconciliation.invalidations,

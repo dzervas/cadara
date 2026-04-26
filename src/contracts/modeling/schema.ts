@@ -942,6 +942,8 @@ export interface SnapshotEntityRecord extends SnapshotOwnershipRecord {
   target: PrimitiveRef
   /** Other durable targets that should be surfaced alongside `target`. */
   relatedTargets: PrimitiveRef[]
+  /** Committed authored-history feature ids that contributed to this target's geometry. */
+  contributingFeatureIds: FeatureId[]
   /** Durable features that consume or depend on this entity. */
   consumedByFeatureIds: FeatureId[]
   /**

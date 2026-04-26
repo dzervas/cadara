@@ -2544,7 +2544,8 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Docume
 }
 
 function entity(
-  input: Omit<SnapshotEntityRecord, 'ownerDocumentId' | 'ownerRevisionId' | 'selectionSemantics'> & {
+  input: Omit<SnapshotEntityRecord, 'ownerDocumentId' | 'ownerRevisionId' | 'selectionSemantics' | 'contributingFeatureIds'> & {
+    contributingFeatureIds?: SnapshotEntityRecord['contributingFeatureIds']
     selectionSemantics?: SnapshotEntityRecord['selectionSemantics']
   },
 ): SnapshotEntityRecord {
@@ -2553,6 +2554,7 @@ function entity(
     ownerDocumentId: DOCUMENT_ID,
     ownerRevisionId: REVISION_ID,
     ...input,
+    contributingFeatureIds: input.contributingFeatureIds ?? (input.ownerFeatureId ? [input.ownerFeatureId] : []),
     selectionSemantics,
   }
 }

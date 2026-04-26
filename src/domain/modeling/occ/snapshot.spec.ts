@@ -24,6 +24,7 @@ import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
+  SHELL_FEATURE_SCHEMA_VERSION,
 } from '@/contracts/shared/versioning'
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
@@ -42,7 +43,7 @@ import {
   rebuildOccAuthoringState,
 } from '@/domain/modeling/occ/authoring-state'
 import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
-import { toGpPnt } from '@/domain/modeling/occ/planes'
+import { extractPlanarFaceData, toGpPnt } from '@/domain/modeling/occ/planes'
 import { trackNewSolidBody } from '@/domain/modeling/occ/topology'
 import {
   OCC_KERNEL_DOCUMENT_ID,
@@ -305,6 +306,28 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       ownerFeatureId: 'feature_seed',
       shape: box.Shape(),
     })
+  }
+
+  function findPlanarFaceByAxis(
+    oc: Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>,
+    body: NonNullable<ReturnType<typeof rebuildOccAuthoringState>['bodies'][number]>,
+    axis: 'x' | 'y' | 'z',
+    coordinate: number,
+  ) {
+    const axisIndex = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+    const faceId = body.topology.faceIds.find((candidate) => {
+      const face = body.facesById.get(candidate)
+      if (!face) {
+        return false
+      }
+
+      const plane = extractPlanarFaceData(oc, face)
+      return Math.abs(Math.abs(plane.frame.normal[axisIndex] ?? 0) - 1) < 0.001
+        && Math.abs(plane.frame.origin[axisIndex] - coordinate) < 0.001
+    })
+
+    assert(faceId, `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`)
+    return faceId
   }
 
   function createSnapshotAdapter(snapshot: GetDocumentSnapshotResponse['snapshot']): ModelingKernelAdapter {
@@ -586,6 +609,96 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     assert(
       autoHiddenSketchTargetKeys[`sketch:${sketch.sketchId}`] !== true,
       'Planar-face-only profiles should not derive auto-hidden sketch rows.',
+    )
+  }
+
+  async function testShellSnapshotEntitiesExposeContributorAncestry() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase6_shell_contributors' as SketchId, plane, {
+      width: 10,
+      height: 8,
+    })
+    const extrudeFeatureId = 'feature_phase6_shell_extrude' as FeatureId
+    const shellFeatureId = 'feature_phase6_shell' as FeatureId
+    const extrudeDefinition: FeatureDefinition = {
+      kind: 'extrude',
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
+        startExtent: { kind: 'profilePlane' },
+        endExtent: { kind: 'blind', direction: 'positive', distance: 6 },
+        operation: 'newBody',
+        booleanScope: { kind: 'standalone' },
+      },
+    }
+    const initialState = createOccAuthoringState(oc, {
+      sketches: [sketch],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+    const extrudeState = rebuildOccAuthoringState(initialState, [{ featureId: extrudeFeatureId, definition: extrudeDefinition }])
+    const extrudeBody = extrudeState.bodies[0]
+
+    assert(extrudeBody, 'Shell contributor coverage requires the extrude body to exist.')
+
+    const removableFaceId = findPlanarFaceByAxis(oc, extrudeBody, 'z', 6)
+    const shellDefinition: FeatureDefinition = {
+      kind: 'shell',
+      featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        bodyTarget: { kind: 'body', bodyId: extrudeBody.bodyId },
+        faceTargets: [{ kind: 'face', bodyId: extrudeBody.bodyId, faceId: removableFaceId }],
+        thickness: 1,
+        operation: 'newBody',
+        booleanScope: { kind: 'standalone' },
+      },
+    }
+    const authoredFeatures = [
+      { featureId: extrudeFeatureId, definition: extrudeDefinition },
+      { featureId: shellFeatureId, definition: shellDefinition },
+    ] as const
+    const shelledState = rebuildOccAuthoringState(initialState, authoredFeatures)
+    const shelledBody = shelledState.bodies.find((body) => body.ownerFeatureId === shellFeatureId)
+
+    assert(shelledBody, 'Shelled contributor coverage requires the replacement body to exist.')
+
+    const preservedBackFaceId = findPlanarFaceByAxis(oc, shelledBody, 'y', 8)
+    const innerBackFaceId = findPlanarFaceByAxis(oc, shelledBody, 'y', 7)
+    const snapshot = buildOccWorkspaceSnapshot(shelledState)
+    const reloadedSnapshot = buildOccWorkspaceSnapshot(
+      rebuildOccAuthoringState(
+        createOccAuthoringState(oc, {
+          sketches: [sketch],
+          modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        }),
+        authoredFeatures,
+      ),
+    )
+    const findFaceEntity = (currentSnapshot: typeof snapshot, faceId: string) => currentSnapshot.presentation.entities.find((entity) =>
+      entity.target.kind === 'face' && entity.target.bodyId === shelledBody.bodyId && entity.target.faceId === faceId,
+    )
+    const preservedBackFace = findFaceEntity(snapshot, preservedBackFaceId)
+    const innerBackFace = findFaceEntity(snapshot, innerBackFaceId)
+    const reloadedPreservedBackFace = findFaceEntity(reloadedSnapshot, preservedBackFaceId)
+    const reloadedInnerBackFace = findFaceEntity(reloadedSnapshot, innerBackFaceId)
+
+    assert(preservedBackFace, 'Shelled snapshots must expose the preserved back face entity.')
+    assert(innerBackFace, 'Shelled snapshots must expose the inner shell face entity.')
+    assert(
+      preservedBackFace.contributingFeatureIds.join('|') === extrudeFeatureId,
+      'Preserved back faces should keep only the original extrude contributor ancestry.',
+    )
+    assert(
+      innerBackFace.contributingFeatureIds.join('|') === `${extrudeFeatureId}|${shellFeatureId}`,
+      'Inner shell faces should expose authored-order extrude and shell contributor ancestry.',
+    )
+    assert(
+      reloadedPreservedBackFace?.contributingFeatureIds.join('|') === preservedBackFace.contributingFeatureIds.join('|'),
+      'Reloaded snapshots should preserve contributor ancestry for preserved shell topology.',
+    )
+    assert(
+      reloadedInnerBackFace?.contributingFeatureIds.join('|') === innerBackFace.contributingFeatureIds.join('|'),
+      'Reloaded snapshots should preserve contributor ancestry for inner shell topology.',
     )
   }
 
@@ -985,6 +1098,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
   await testSketchOwnedProfilesMarkConsumedSketchOwnership()
   await testPlanarFaceProfilesDoNotInventConsumedSketchOwnership()
+  await testShellSnapshotEntitiesExposeContributorAncestry()
   await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport()
   await testNestedSketchRegionsExportSeparateMeshes()
   await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()

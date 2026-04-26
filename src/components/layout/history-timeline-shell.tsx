@@ -9,7 +9,12 @@ import {
   type SketchHistoryCursor,
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
-import type { DocumentFeatureCursor, DocumentHistoryOrderEntry, DocumentSnapshot } from '@/contracts/modeling/schema'
+import type {
+  DocumentFeatureCursor,
+  DocumentHistoryOrderEntry,
+  DocumentSnapshot,
+} from '@/contracts/modeling/schema'
+import type { FeatureId } from '@/contracts/shared/ids'
 import type { DocumentHistoryItemRecord } from '@/contracts/modeling/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getPrimitiveRefKey, selectionFilterAllowsTarget } from '@/domain/editor/schema'
@@ -19,6 +24,7 @@ import { useEditorState } from '@/hooks/use-editor-state'
 interface HistoryTimelineShellProps {
   snapshot: DocumentSnapshot | null
   sketchSession: SketchSessionState | null
+  historyHighlightFeatureIds: readonly FeatureId[]
   onSelectTarget: (target: PrimitiveRef) => void
   onReopenTarget: (target: PrimitiveRef) => void
   onDocumentCursorRequested?: (cursor: DocumentFeatureCursor) => void
@@ -35,6 +41,7 @@ interface HistoryTimelineShellProps {
 export function HistoryTimelineShell({
   snapshot,
   sketchSession,
+  historyHighlightFeatureIds,
   onSelectTarget,
   onReopenTarget,
   onDocumentCursorRequested,
@@ -68,6 +75,7 @@ export function HistoryTimelineShell({
       >
         <FeatureTimelineBar
           snapshot={snapshot}
+          historyHighlightFeatureIds={historyHighlightFeatureIds}
           visibleSelection={visibleSelection}
           onSelectTarget={onSelectTarget}
           onReopenTarget={onReopenTarget}

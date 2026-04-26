@@ -11,6 +11,7 @@ import type {
   DocumentSnapshot,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
+import type { FeatureId } from '@/contracts/shared/ids'
 import {
   getModelingDiagnosticRepairMessage,
   isFeatureScopedModelingDiagnostic,
@@ -38,6 +39,7 @@ type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }
 
 interface FeatureTimelineBarProps {
   snapshot: DocumentSnapshot | null
+  historyHighlightFeatureIds: readonly FeatureId[]
   onSelectTarget: (target: PrimitiveRef) => void
   onReopenTarget: (target: PrimitiveRef) => void
   onCursorRequested?: (cursor: DocumentFeatureCursor) => void
@@ -91,6 +93,7 @@ interface RepairTooltipState {
 
 export function FeatureTimelineBar({
   snapshot,
+  historyHighlightFeatureIds,
   onSelectTarget,
   onReopenTarget,
   onCursorRequested,
@@ -106,6 +109,10 @@ export function FeatureTimelineBar({
     state: { selection, selectionFilter, selectionCatalog },
   } = useEditorState()
   const historyItems = useMemo(() => snapshot?.presentation.documentHistory ?? [], [snapshot])
+  const historyHighlightFeatureIdSet = useMemo(
+    () => new Set(historyHighlightFeatureIds),
+    [historyHighlightFeatureIds],
+  )
   const diagnosticsByFeatureId = useMemo(
     () => getFeatureDiagnosticsById(snapshot?.document.diagnostics ?? []),
     [snapshot],
@@ -438,6 +445,8 @@ export function FeatureTimelineBar({
                       : false
                   const isAfterCursor = item ? anchorIndex > cursorIndex : false
                   const isDraggingItem = itemDragState?.active && itemDragState.item.id === item?.id
+                  const isHistoryHighlighted = item?.kind === 'feature'
+                    && historyHighlightFeatureIdSet.has(item.featureId)
                   const itemFeatureDiagnostics = item?.kind === 'feature'
                     ? diagnosticsByFeatureId.get(item.featureId) ?? []
                     : []
@@ -561,12 +570,12 @@ export function FeatureTimelineBar({
                             style={{
                               backgroundColor: primaryFeatureDiagnostic
                                 ? 'var(--workbench-shell-danger-surface)'
-                                : isSelected
+                                : isSelected || isHistoryHighlighted
                                 ? 'var(--workbench-shell-accent-surface)'
                                 : 'transparent',
                               borderColor: primaryFeatureDiagnostic
                                 ? 'var(--workbench-shell-danger-border)'
-                                : isSelected
+                                : isSelected || isHistoryHighlighted
                                 ? 'var(--workbench-shell-border-strong)'
                                 : 'transparent',
                               color: primaryFeatureDiagnostic
@@ -581,6 +590,8 @@ export function FeatureTimelineBar({
                               ? repairMessage ?? getHistoryItemDescription(item)
                               : `${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`}
                             data-feature-error={primaryFeatureDiagnostic ? 'true' : undefined}
+                            data-derived-highlighted={isHistoryHighlighted ? 'true' : undefined}
+                            data-history-feature-id={item.kind === 'feature' ? item.featureId : undefined}
                             data-delete-supported="true"
                             data-repair-guidance={primaryFeatureDiagnostic ? repairMessage ?? undefined : undefined}
                             aria-describedby={primaryFeatureDiagnostic ? tooltipId : undefined}

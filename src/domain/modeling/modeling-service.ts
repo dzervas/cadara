@@ -3932,6 +3932,7 @@ function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
       !isString(entry.id) ||
       !isString(entry.label) ||
       !Array.isArray(entry.relatedTargets) ||
+      !Array.isArray(entry.contributingFeatureIds) ||
       !Array.isArray(entry.consumedByFeatureIds) ||
       !Array.isArray(entry.selectionSemantics)
     ) {
@@ -3944,6 +3945,7 @@ function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
       label: entry.label,
       target: assertDurableRef(entry.target),
       relatedTargets: entry.relatedTargets.map((target) => assertDurableRef(target)),
+      contributingFeatureIds: entry.contributingFeatureIds.map((featureId) => assertFeatureId(featureId)),
       consumedByFeatureIds: entry.consumedByFeatureIds.map((featureId) => assertFeatureId(featureId)),
       selectionSemantics: entry.selectionSemantics.map((semantic) => {
         if (

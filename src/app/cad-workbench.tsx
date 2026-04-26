@@ -72,6 +72,7 @@ import {
 import {
   getFeatureSnapshot,
   getSelectionDetail,
+  getTargetContributingFeatureIds,
 } from '@/domain/modeling/document-snapshot-view'
 import {
   createDocumentHistoryOrder,
@@ -562,6 +563,10 @@ export function CadWorkbench() {
   const visibleSelection = useMemo(
     () => selection.filter((target) => !isTargetHidden(target, effectiveHiddenTargetKeys)),
     [effectiveHiddenTargetKeys, selection],
+  )
+  const historyHighlightFeatureIds = useMemo(
+    () => snapshot ? getTargetContributingFeatureIds(snapshot, visibleSelection[0] ?? null) : [],
+    [snapshot, visibleSelection],
   )
   const visibleHoverTarget =
     hoverTarget && !isTargetHidden(hoverTarget, effectiveHiddenTargetKeys) ? hoverTarget : null
@@ -2593,6 +2598,7 @@ export function CadWorkbench() {
           <HistoryTimelineShell
             snapshot={snapshot}
             sketchSession={sketchSession}
+            historyHighlightFeatureIds={historyHighlightFeatureIds}
             visibleSelection={visibleSelection}
             onSelectTarget={handleShellSelect}
             onReopenTarget={handleNavigationReopen}
