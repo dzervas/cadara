@@ -10,6 +10,7 @@ import {
 } from '@/domain/modeling/modeling-service'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
+import { getAutoHiddenSketchTargetKeys } from '@/domain/editor/visibility'
 
 test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -206,12 +207,24 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
     const restoreState = await restoredService.getHistoryRestoreState()
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+    const originalAutoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(originalSnapshot)
+    const restoredAutoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(restoredSnapshot)
 
     assert(restoreState.kind === 'restored', 'Valid persisted history should restore explicitly.')
     assert(restoreState.entriesReplayed === finalHistory.entries.length, 'Restore should replay every entry in order.')
     assert(
       restoredSnapshot.sketches.some((entry) => entry.sketchId === 'sketch_history'),
       'Replay should rebuild persisted sketches.',
+    )
+    assert(
+      originalAutoHiddenSketchTargetKeys['sketch:sketch_primary'] === true
+        && restoredAutoHiddenSketchTargetKeys['sketch:sketch_primary'] === true,
+      'Replay should auto-hide the same consumed committed sketch rows after rebuild.',
+    )
+    assert(
+      Object.keys(restoredAutoHiddenSketchTargetKeys).join(',')
+        === Object.keys(originalAutoHiddenSketchTargetKeys).join(','),
+      'Replay should preserve the derived consumed-sketch auto-hide set.',
     )
     assert(
       restoredSnapshot.features.map((feature) => feature.featureId).join(',')

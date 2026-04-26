@@ -36,6 +36,7 @@ import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import {
   buildOccWorkspaceSnapshot,
 } from '@/domain/modeling/occ/snapshot'
+import { getAutoHiddenSketchTargetKeys } from '@/domain/editor/visibility'
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
@@ -499,6 +500,95 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
     )
   }
 
+  async function testSketchOwnedProfilesMarkConsumedSketchOwnership() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch, region } = createRectangleSketch('sketch_phase6_consumed_region' as SketchId, plane)
+    const rebuilt = rebuildOccAuthoringState(
+      createOccAuthoringState(oc, {
+        sketches: [sketch],
+        modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      }),
+      [{
+        featureId: 'feature_phase6_region_consumer' as FeatureId,
+        definition: {
+          kind: 'extrude',
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
+            startExtent: { kind: 'profilePlane' },
+            endExtent: { kind: 'blind', direction: 'positive', distance: 5 },
+            operation: 'newBody',
+            booleanScope: { kind: 'standalone' },
+          },
+        },
+      }],
+    )
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
+    const sketchKey = `sketch:${sketch.sketchId}`
+    const sketchEntity = snapshot.presentation.entities.find(
+      (entity) => entity.target.kind === 'sketch' && entity.target.sketchId === sketch.sketchId,
+    )
+    const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot)
+
+    assert(sketchEntity, 'Region-consumer coverage must expose the committed sketch entity row.')
+    assert(
+      sketchEntity.consumedByFeatureIds.includes('feature_phase6_region_consumer' as FeatureId),
+      'Sketch-owned region profiles should mark the owning sketch as consumed.',
+    )
+    assert(
+      autoHiddenSketchTargetKeys[sketchKey] === true,
+      'Derived auto-hide should treat sketch-owned consumed profiles as consumed sketch rows.',
+    )
+  }
+
+  async function testPlanarFaceProfilesDoNotInventConsumedSketchOwnership() {
+    const oc = await getDefaultOpenCascadeInstance()
+    const plane = createStandardPlaneDefinition('xy')
+    const { sketch } = createRectangleSketch('sketch_phase6_face_profile' as SketchId, plane)
+    const body = await createBoxBody({ bodyId: 'body_phase6_face_profile' as BodyId })
+    const faceId = body.topology.faceIds[0]
+
+    assert(faceId, 'Planar-face profile coverage requires at least one body face.')
+
+    const rebuilt = rebuildOccAuthoringState(
+      createOccAuthoringState(oc, {
+        sketches: [sketch],
+        bodies: [body],
+        modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      }),
+      [{
+        featureId: 'feature_phase6_face_consumer' as FeatureId,
+        definition: {
+          kind: 'extrude',
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [{ kind: 'face', bodyId: body.bodyId, faceId }],
+            startExtent: { kind: 'profilePlane' },
+            endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+            operation: 'newBody',
+            booleanScope: { kind: 'standalone' },
+          },
+        },
+      }],
+    )
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
+    const sketchEntity = snapshot.presentation.entities.find(
+      (entity) => entity.target.kind === 'sketch' && entity.target.sketchId === sketch.sketchId,
+    )
+    const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot)
+
+    assert(sketchEntity, 'Planar-face profile coverage must keep the unrelated sketch entity available.')
+    assert(
+      sketchEntity.consumedByFeatureIds.length === 0,
+      'Planar-face-only profiles should not mark unrelated committed sketches as consumed.',
+    )
+    assert(
+      autoHiddenSketchTargetKeys[`sketch:${sketch.sketchId}`] !== true,
+      'Planar-face-only profiles should not derive auto-hidden sketch rows.',
+    )
+  }
+
   async function testConstructionSketchGeometryIsOmittedFromDocumentRenderExport() {
     const oc = await getDefaultOpenCascadeInstance()
     const plane = createStandardPlaneDefinition('xy')
@@ -893,6 +983,8 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
   }
 
   await testWorkspaceSnapshotBuildsContractValidRenderExport()
+  await testSketchOwnedProfilesMarkConsumedSketchOwnership()
+  await testPlanarFaceProfilesDoNotInventConsumedSketchOwnership()
   await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport()
   await testNestedSketchRegionsExportSeparateMeshes()
   await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()

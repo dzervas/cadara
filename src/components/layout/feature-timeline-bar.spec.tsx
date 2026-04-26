@@ -237,6 +237,39 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
     'Hidden sidebar objects should not render a separate hidden status label.',
   )
 
+  const hiddenSketchKey = getPrimitiveRefKey({ kind: 'sketch', sketchId: 'sketch_primary' })
+  const hiddenSketchMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureSidebar
+          snapshot={snapshot}
+          hiddenTargetKeys={{ [hiddenSketchKey]: true }}
+          invalidVariableValueIds={{}}
+          objectLabelOverrides={{}}
+          visibleSelection={[]}
+          onAddVariable={() => undefined}
+          onInspectDiagnostic={() => undefined}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+          onUpdateVariable={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  assert(
+    hiddenSketchMarkup.includes('aria-label="Show Sketch 1"'),
+    'Consumed sketch rows should keep a show action available from Parts & Objects while hidden.',
+  )
+  assert(
+    hiddenSketchMarkup.includes('Hidden in the viewport'),
+    'Hidden sketch rows should present the same hidden-state treatment used by the viewport filter.',
+  )
+
   const timelineMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <EditorContext.Provider value={editorValue}>

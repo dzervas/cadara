@@ -64,6 +64,12 @@ import {
   getNavigationReopenRequest,
 } from '@/domain/editor/workbench-interactions'
 import {
+  getAutoHiddenSketchTargetKeys,
+  getWorkbenchVisibilityState,
+  reconcileVisibilityIntentKeys,
+  toggleWorkbenchTargetVisibility,
+} from '@/domain/editor/visibility'
+import {
   getFeatureSnapshot,
   getSelectionDetail,
 } from '@/domain/modeling/document-snapshot-view'
@@ -236,6 +242,17 @@ function formatStepImportStageDurations(feature: StepImportMaterializationFeatur
     )
 
   return parts.slice(0, 3).join(' · ')
+  }
+
+function sameBooleanRecord(left: Record<string, boolean>, right: Record<string, boolean>) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every((key) => left[key] === right[key])
 }
 
 function canUseMeshImportReviewWorker() {
@@ -271,7 +288,8 @@ export function CadWorkbench() {
   const snapshot = machineState.snapshot
   const initialOccRenderPending = isInitialOccRenderPending(machineState)
   const previewRenderables = machineState.previewRenderables
-  const [hiddenTargetKeys, setHiddenTargetKeys] = useState<Record<string, boolean>>({})
+  const [explicitHiddenTargetKeys, setExplicitHiddenTargetKeys] = useState<Record<string, boolean>>({})
+  const [explicitlyShownAutoHiddenTargetKeys, setExplicitlyShownAutoHiddenTargetKeys] = useState<Record<string, boolean>>({})
   const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
   const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null)
@@ -509,26 +527,43 @@ export function CadWorkbench() {
     })
   }, [applyLoadedSnapshot, errorReporter, modelingService, showWorkbenchError])
 
-  const visibleHiddenTargetKeys = useMemo(() => {
-    if (!snapshot) {
-      return hiddenTargetKeys
-    }
+  const visibleObjectTargetKeys = useMemo(
+    () => new Set((snapshot?.presentation.objects ?? []).map((item) => getPrimitiveRefKey(item.target))),
+    [snapshot],
+  )
+  const autoHiddenSketchTargetKeys = useMemo(() => getAutoHiddenSketchTargetKeys(snapshot), [snapshot])
 
-    const validTargetKeys = new Set([
-      ...(snapshot?.presentation.objects ?? []).map((item) => getPrimitiveRefKey(item.target)),
-    ])
+  const effectiveHiddenTargetKeys = useMemo(
+    () => getWorkbenchVisibilityState({
+      snapshot,
+      explicitHiddenTargetKeys,
+      explicitlyShownAutoHiddenTargetKeys,
+    }).effectiveHiddenTargetKeys,
+    [explicitHiddenTargetKeys, explicitlyShownAutoHiddenTargetKeys, snapshot],
+  )
 
-    return Object.fromEntries(
-      Object.entries(hiddenTargetKeys).filter(([key, hidden]) => hidden && validTargetKeys.has(key)),
-    )
-  }, [hiddenTargetKeys, snapshot])
+  useEffect(() => {
+    setExplicitHiddenTargetKeys((current) => {
+      const reconciled = reconcileVisibilityIntentKeys(current, visibleObjectTargetKeys)
+      return sameBooleanRecord(current, reconciled) ? current : reconciled
+    })
+  }, [visibleObjectTargetKeys])
+
+  useEffect(() => {
+    const allowedAutoHiddenTargetKeys = new Set(Object.keys(autoHiddenSketchTargetKeys))
+
+    setExplicitlyShownAutoHiddenTargetKeys((current) => {
+      const reconciled = reconcileVisibilityIntentKeys(current, allowedAutoHiddenTargetKeys)
+      return sameBooleanRecord(current, reconciled) ? current : reconciled
+    })
+  }, [autoHiddenSketchTargetKeys])
 
   const visibleSelection = useMemo(
-    () => selection.filter((target) => !isTargetHidden(target, visibleHiddenTargetKeys)),
-    [selection, visibleHiddenTargetKeys],
+    () => selection.filter((target) => !isTargetHidden(target, effectiveHiddenTargetKeys)),
+    [effectiveHiddenTargetKeys, selection],
   )
   const visibleHoverTarget =
-    hoverTarget && !isTargetHidden(hoverTarget, visibleHiddenTargetKeys) ? hoverTarget : null
+    hoverTarget && !isTargetHidden(hoverTarget, effectiveHiddenTargetKeys) ? hoverTarget : null
 
   const primarySelection = visibleSelection[0] ?? visibleHoverTarget ?? null
   const selectionDetail =
@@ -549,10 +584,10 @@ export function CadWorkbench() {
         snapshotSketches: snapshot?.document.sketches ?? [],
         previewRenderables,
         sketchSession,
-        hiddenTargetKeys: visibleHiddenTargetKeys,
+        hiddenTargetKeys: effectiveHiddenTargetKeys,
       })
     },
-    [previewRenderables, sketchSession, snapshot, visibleHiddenTargetKeys],
+    [effectiveHiddenTargetKeys, previewRenderables, sketchSession, snapshot],
   )
   const sketchToolPresentation = sketchSession ? getSketchToolPresentation(sketchSession) : null
   const sketchAnnotations = sketchSession ? getSketchAnnotationDescriptors(sketchSession) : []
@@ -680,20 +715,28 @@ export function CadWorkbench() {
   }
 
   const handleTargetVisibilityToggle = (target: PrimitiveRef) => {
-    const targetKey = getPrimitiveRefKey(target)
-    const nextHidden = !hiddenTargetKeys[targetKey]
+    const nextVisibility = toggleWorkbenchTargetVisibility({
+      target,
+      explicitHiddenTargetKeys,
+      explicitlyShownAutoHiddenTargetKeys,
+      effectiveHiddenTargetKeys,
+      autoHiddenSketchTargetKeys,
+    })
+    const nextEffectiveHiddenTargetKeys = getWorkbenchVisibilityState({
+      snapshot,
+      explicitHiddenTargetKeys: nextVisibility.explicitHiddenTargetKeys,
+      explicitlyShownAutoHiddenTargetKeys: nextVisibility.explicitlyShownAutoHiddenTargetKeys,
+    }).effectiveHiddenTargetKeys
 
-    setHiddenTargetKeys((current) => ({
-      ...current,
-      [targetKey]: nextHidden,
-    }))
+    setExplicitHiddenTargetKeys(nextVisibility.explicitHiddenTargetKeys)
+    setExplicitlyShownAutoHiddenTargetKeys(nextVisibility.explicitlyShownAutoHiddenTargetKeys)
 
     if (
-      nextHidden
+      nextEffectiveHiddenTargetKeys[getPrimitiveRefKey(target)] === true
       && hoverTarget
       && (
         primitiveRefEquals(hoverTarget, target)
-        || isTargetHidden(hoverTarget, { ...hiddenTargetKeys, [targetKey]: true })
+        || isTargetHidden(hoverTarget, nextEffectiveHiddenTargetKeys)
       )
     ) {
       dispatch({ type: 'viewport.hoverCleared' })
@@ -1533,7 +1576,8 @@ export function CadWorkbench() {
   }
 
   const refreshAfterDocumentFileAction = (message: string, options: { fitView?: boolean } = {}) => {
-    setHiddenTargetKeys({})
+    setExplicitHiddenTargetKeys({})
+    setExplicitlyShownAutoHiddenTargetKeys({})
     setObjectLabelOverrides({})
     setUndoStack([])
     setRedoStack([])
@@ -1924,7 +1968,8 @@ export function CadWorkbench() {
       }
 
       setMeshImportProgress(null)
-      setHiddenTargetKeys({})
+      setExplicitHiddenTargetKeys({})
+      setExplicitlyShownAutoHiddenTargetKeys({})
       setObjectLabelOverrides({})
       setUndoStack([])
       setRedoStack([])
@@ -2107,7 +2152,7 @@ export function CadWorkbench() {
         <div className="relative min-h-0 shrink-0 overflow-hidden" style={{ width: leftSidebarWidth }}>
           <FeatureSidebar
             snapshot={snapshot}
-            hiddenTargetKeys={visibleHiddenTargetKeys}
+            hiddenTargetKeys={effectiveHiddenTargetKeys}
             invalidVariableValueMessages={invalidVariableValueMessages}
             objectLabelOverrides={objectLabelOverrides}
             onAddVariable={handleVariableAdd}

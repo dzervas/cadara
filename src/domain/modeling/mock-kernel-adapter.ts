@@ -469,6 +469,16 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
   }
 }
 
+function getConsumedEntityKeysForTarget(target: DurableRef) {
+  const keys = [getPrimitiveRefKey(target)]
+
+  if (target.kind === 'region') {
+    keys.push(getPrimitiveRefKey({ kind: 'sketch', sketchId: target.sketchId }))
+  }
+
+  return keys
+}
+
 function createUnsupportedFeatureDiagnostic(
   target: FeatureDefinition,
   message: string,
@@ -2620,7 +2630,7 @@ function updateFeatureEntityRelationship(
   featureId: FeatureId,
   changedTargets: DurableRef[],
 ) {
-  const changedKeys = new Set(changedTargets.map((target) => getPrimitiveRefKey(target)))
+  const changedKeys = new Set(changedTargets.flatMap((target) => getConsumedEntityKeysForTarget(target)))
 
   for (const entityRecord of snapshot.presentation.entities) {
     const entityKey = getPrimitiveRefKey(entityRecord.target)

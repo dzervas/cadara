@@ -227,6 +227,16 @@ function collectFeatureConsumedTargets(definition: OccAuthoringState['features']
   return targets
 }
 
+function getFeatureConsumerKeys(target: DurableRef) {
+  const keys = [getOccDurableRefKey(target)]
+
+  if (target.kind === 'region') {
+    keys.push(getOccDurableRefKey({ kind: 'sketch', sketchId: target.sketchId }))
+  }
+
+  return keys
+}
+
 function createFeatureConsumerMap(
   state: OccAuthoringState,
   features: readonly OccAuthoringState['features'][number][] = state.features,
@@ -238,7 +248,9 @@ function createFeatureConsumerMap(
     const uniqueKeys = new Set<string>()
 
     for (const target of collectFeatureConsumedTargets(feature.definition)) {
-      uniqueKeys.add(getOccDurableRefKey(target))
+      for (const key of getFeatureConsumerKeys(target)) {
+        uniqueKeys.add(key)
+      }
     }
 
     for (const key of uniqueKeys) {
