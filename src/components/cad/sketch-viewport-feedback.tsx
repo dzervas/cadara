@@ -114,7 +114,7 @@ export function SketchViewportFeedbackLayer({
 }
 
 function getOverlayClassName(overlay: SketchToolOverlayDescriptor) {
-  const baseClassName = 'absolute max-w-[180px] whitespace-nowrap rounded border px-2 py-1 text-[11px] leading-none shadow-[var(--cad-panel-shadow)]'
+  const baseClassName = 'pointer-events-none absolute max-w-[180px] whitespace-nowrap rounded border px-2 py-1 text-[11px] leading-none shadow-[var(--cad-panel-shadow)]'
 
   if (overlay.kind === 'completionCue') {
     return `${baseClassName} border-[var(--cad-border)] bg-[var(--cad-surface-overlay)] text-[var(--cad-muted-foreground)]`

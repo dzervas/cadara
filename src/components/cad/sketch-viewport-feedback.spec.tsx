@@ -177,6 +177,10 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
     'Viewport feedback should place measurement labels at projected screen positions.',
   )
   assert(
+    markup.includes('pointer-events-none absolute'),
+    'Viewport feedback should keep transient overlay labels non-interactive so canvas clicks pass through.',
+  )
+  assert(
     markup.includes('data-sketch-viewport-floating-input="distance-value-input"'),
     'Viewport feedback should render floating numeric input from projected anchors.',
   )

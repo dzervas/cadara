@@ -94,6 +94,7 @@ import {
   type ViewportCameraFrame,
   type ViewportProjectionMode,
 } from '@/domain/workspace/viewport-projection'
+import { computeSketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 import { getMeasurementWitnessStyleConfig } from '@/components/cad/measurement-witness-style'
 import {
@@ -293,6 +294,7 @@ export function ThreeCadViewport({
   const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(mode, sketchSession !== null)
   const sketchRenderingPalette = useMemo(() => resolveSketchRenderingPalette(), [])
   const selectionRef = useRef(selection)
+  const sketchSessionRef = useRef(sketchSession)
   const sectionViewRef = useRef(activeSectionView)
   const renderablesRef = useRef(renderables)
   const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables)
@@ -408,6 +410,7 @@ export function ThreeCadViewport({
     () => getSectionRenderableBounds(renderables.map((entry) => entry.renderable)),
     [renderables],
   )
+  const activeSectionBoundsRef = useRef(activeSectionBounds)
 
   useEffect(() => {
     hoverRef.current = onHover
@@ -427,6 +430,7 @@ export function ThreeCadViewport({
     sketchToolPatchRef.current = onSketchToolPatch
     lodTierChangeRef.current = onLodTierChange
     selectionRef.current = selection
+    sketchSessionRef.current = sketchSession
     sectionViewRef.current = activeSectionView
     selectionFilterRef.current = selectionFilter
     selectionCatalogRef.current = selectionCatalog
@@ -449,16 +453,18 @@ export function ThreeCadViewport({
     onSketchToolPatch,
     onLodTierChange,
     selection,
+    sketchSession,
     selectionCatalog,
     selectionFilter,
   ])
 
   useLayoutEffect(() => {
+    activeSectionBoundsRef.current = activeSectionBounds
     sectionViewRef.current = activeSectionView
     renderablesRef.current = renderables
     sketchDisplayRenderablesRef.current = sketchDisplayRenderables
     bvhSceneKeyRef.current = bvhSceneKey
-  }, [activeSectionView, bvhSceneKey, renderables, sketchDisplayRenderables])
+  }, [activeSectionBounds, activeSectionView, bvhSceneKey, renderables, sketchDisplayRenderables])
 
   useEffect(() => {
     projectionModeRef.current = projectionMode
@@ -558,6 +564,11 @@ export function ThreeCadViewport({
       }),
     )
   }, [sketchAnnotations, sketchSession?.plane, sketchToolPresentation])
+  const updateSketchFeedbackProjectionsRef = useRef(updateSketchFeedbackProjections)
+
+  useEffect(() => {
+    updateSketchFeedbackProjectionsRef.current = updateSketchFeedbackProjections
+  }, [updateSketchFeedbackProjections])
 
   useEffect(() => {
     const cubeElement = viewCubeRef.current
@@ -741,7 +752,7 @@ export function ThreeCadViewport({
 
     requestCameraTransition(nextTransition.targetFrame, nextTransition.fromFrame)
     window.requestAnimationFrame(updateSketchFeedbackProjections)
-  }, [requestCameraTransition, sketchDisplayRenderables, sketchSession, updateSketchFeedbackProjections])
+  }, [controlsReadyVersion, requestCameraTransition, sketchDisplayRenderables, sketchSession, updateSketchFeedbackProjections])
 
   useEffect(() => {
     const controls = controlsRef.current
@@ -886,7 +897,7 @@ export function ThreeCadViewport({
         return null
       }
 
-      const boundsSize = activeSectionBounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(24, 24, 24)
+      const boundsSize = activeSectionBoundsRef.current?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(24, 24, 24)
       const planeSize = Math.max(boundsSize.length() * 0.6, 12)
       const handleRadius = Math.max(planeSize * 0.045, 0.6)
       const handleEdgePoint: Vec3 = [
@@ -926,15 +937,25 @@ export function ThreeCadViewport({
       viewportRect: DOMRectReadOnly,
     ): readonly [number, number] | null => {
       const camera = cameraRef.current
+      const activeSketchSession = sketchSessionRef.current
+      const controls = controlsRef.current
 
-      if (!camera || !sketchSession) {
+      if (!camera || !activeSketchSession || !controls) {
         return null
+      }
+
+      const transitionTargetFrame = cameraTransitionControllerRef.current.getTargetFrame()
+
+      if (transitionTargetFrame) {
+        applyViewportCameraFrame(camera, controls, transitionTargetFrame)
+        cameraTransitionControllerRef.current.cancel()
+        window.requestAnimationFrame(() => updateSketchFeedbackProjectionsRef.current())
       }
 
       updatePointerFromClientPoint(pointerRef.current, viewportRect, clientX, clientY)
       raycasterRef.current.setFromCamera(pointerRef.current, camera)
 
-      const { frame } = sketchSession.plane
+      const { frame } = activeSketchSession.plane
       sketchPlaneRef.current.set(
         new THREE.Vector3(frame.normal[0], frame.normal[1], frame.normal[2]),
         -(
@@ -945,10 +966,23 @@ export function ThreeCadViewport({
       )
 
       if (!raycasterRef.current.ray.intersectPlane(sketchPlaneRef.current, sketchHitPointRef.current)) {
-        return null
+        const fallbackFrame = computeSketchCameraFrame({
+          camera,
+          plane: activeSketchSession.plane,
+          renderables: sketchDisplayRenderablesRef.current,
+        })
+
+        applyViewportCameraFrame(camera, controls, fallbackFrame)
+        cameraTransitionControllerRef.current.cancel()
+        window.requestAnimationFrame(() => updateSketchFeedbackProjectionsRef.current())
+        raycasterRef.current.setFromCamera(pointerRef.current, camera)
+
+        if (!raycasterRef.current.ray.intersectPlane(sketchPlaneRef.current, sketchHitPointRef.current)) {
+          return null
+        }
       }
 
-      return mapWorldPointToWorkspaceSketch(sketchSession.plane, [
+      return mapWorldPointToWorkspaceSketch(activeSketchSession.plane, [
         sketchHitPointRef.current.x,
         sketchHitPointRef.current.y,
         sketchHitPointRef.current.z,
@@ -1057,7 +1091,9 @@ export function ThreeCadViewport({
         clearHover()
       }
 
-      if (!sketchSession) {
+      const activeSketchSession = sketchSessionRef.current
+
+      if (!activeSketchSession) {
         return
       }
 
@@ -1101,9 +1137,11 @@ export function ThreeCadViewport({
         return
       }
 
+      const activeSketchSession = sketchSessionRef.current
+
       if (
-        !sketchSession
-        || !shouldViewportStartSketchGeometryDrag(sketchSession.activeTool, sketchSession.status)
+        !activeSketchSession
+        || !shouldViewportStartSketchGeometryDrag(activeSketchSession.activeTool, activeSketchSession.status)
       ) {
         return
       }
@@ -1194,7 +1232,9 @@ export function ThreeCadViewport({
         return
       }
 
-      if (dragDistance > 6 || !sketchSession) {
+      const activeSketchSession = sketchSessionRef.current
+
+      if (dragDistance > 6 || !activeSketchSession) {
         return
       }
 
@@ -1242,9 +1282,9 @@ export function ThreeCadViewport({
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
 
       if (shouldViewportClickEventRequestConnectedSketchSelection({
-        activeSketchTool: sketchSession?.activeTool,
+        activeSketchTool: sketchSessionRef.current?.activeTool,
         clickDetail: event.detail,
-        sketchStatus: sketchSession?.status,
+        sketchStatus: sketchSessionRef.current?.status,
         target: resolvedTarget?.target ?? null,
       })) {
         const target = resolvedTarget?.target
@@ -1258,7 +1298,7 @@ export function ThreeCadViewport({
       }
 
       const intent = getViewportCanvasClickIntent({
-        activeSketchTool: sketchSession?.activeTool,
+        activeSketchTool: sketchSessionRef.current?.activeTool,
         hasResolvedTarget: resolvedTarget !== null,
         isBackgroundDatumTarget: resolvedTarget?.renderable
           ? isSeededDatumPlaneRenderable(resolvedTarget.renderable)
@@ -1295,8 +1335,8 @@ export function ThreeCadViewport({
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
 
       if (!shouldViewportDoubleClickRequestConnectedSketchSelection({
-        activeSketchTool: sketchSession?.activeTool,
-        sketchStatus: sketchSession?.status,
+        activeSketchTool: sketchSessionRef.current?.activeTool,
+        sketchStatus: sketchSessionRef.current?.status,
         target: resolvedTarget?.target ?? null,
       })) {
         return
@@ -1341,7 +1381,7 @@ export function ThreeCadViewport({
       window.removeEventListener('click', handleClick, true)
       window.removeEventListener('dblclick', handleDoubleClick, true)
     }
-  }, [activeSectionBounds, cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSession])
+  }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove])
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
