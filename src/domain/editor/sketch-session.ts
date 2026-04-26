@@ -107,7 +107,7 @@ import type {
 } from '@/domain/sketch-tools/definition'
 import { sampleArcPoints } from '@/domain/sketch-tools/geometry'
 import { getSketchToolDefinition } from '@/domain/sketch-tools/registry'
-import type { SketchEditToolId } from '@/domain/sketch-edit-tools/definition'
+import type { SketchEditToolId, SketchEditToolSelectionRequirement } from '@/domain/sketch-edit-tools/definition'
 import { getSketchEditToolDefinition, isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import type { SketchSnapCandidate, SketchSnapSourceRef } from '@/domain/sketch-snapping/snap-candidates'
 import {
@@ -2859,7 +2859,110 @@ function midpointSketchPoints(left: SketchPoint, right: SketchPoint): SketchPoin
   return [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2]
 }
 
-function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditToolId): SketchSessionState {
+function getSketchEditSelectionKindForEntity(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+): SketchEditToolSelectionRequirement['acceptedKinds'][number] | null {
+  const entity = definition.entities.find((entry) => entry.entityId === entityId)
+
+  if (!entity) {
+    return null
+  }
+
+  switch (entity.kind) {
+    case 'point':
+      return 'point'
+    case 'lineSegment':
+      return 'line'
+    case 'circle':
+      return 'circle'
+    case 'arc':
+      return 'arc'
+    case 'spline':
+      return 'spline'
+    default:
+      return null
+  }
+}
+
+function getSketchEditSelectionKindForProjectedGeometry(
+  target: Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>,
+): SketchEditToolSelectionRequirement['acceptedKinds'][number] | null {
+  switch (target.geometryKind) {
+    case 'lineSegment':
+      return 'line'
+    case 'circle':
+      return 'circle'
+    case 'arc':
+      return 'arc'
+    case 'spline':
+      return 'spline'
+    default:
+      return null
+  }
+}
+
+function canAppendSketchEditToolActivationTarget(
+  session: SketchSessionState,
+  toolId: SketchEditToolId,
+  selectedTargets: readonly PrimitiveRef[],
+  target: PrimitiveRef,
+) {
+  const metadata = getSketchEditToolDefinition(toolId).metadata
+
+  if (selectedTargets.some((selected) => primitiveRefEquals(selected, target))) {
+    return false
+  }
+
+  if (!metadata.selection.allowsMultiple && selectedTargets.length >= metadata.selection.requiredCount) {
+    return false
+  }
+
+  if (
+    selectedTargets.some((selected) => selected.kind === 'projectedReferenceGeometry')
+    || target.kind === 'projectedReferenceGeometry'
+  ) {
+    const selectionKind = target.kind === 'projectedReferenceGeometry'
+      ? getSketchEditSelectionKindForProjectedGeometry(target)
+      : null
+    return toolId === 'offset'
+      && selectedTargets.length === 0
+      && target.kind === 'projectedReferenceGeometry'
+      && selectionKind !== null
+      && metadata.selection.acceptedKinds.includes(selectionKind)
+  }
+
+  if (target.kind !== 'sketchEntity') {
+    return false
+  }
+
+  const selectionKind = getSketchEditSelectionKindForEntity(session.definition, target.entityId)
+  return selectionKind !== null && metadata.selection.acceptedKinds.includes(selectionKind)
+}
+
+export function adoptCompatibleSketchEditToolTargets(
+  session: SketchSessionState,
+  toolId: SketchEditToolId,
+  targets: readonly PrimitiveRef[],
+): PrimitiveRef[] {
+  const adoptedTargets: PrimitiveRef[] = []
+
+  for (const target of targets) {
+    if (!canAppendSketchEditToolActivationTarget(session, toolId, adoptedTargets, target)) {
+      return []
+    }
+
+    adoptedTargets.push(target)
+  }
+
+  return adoptedTargets
+}
+
+function beginSketchEditTool(
+  session: SketchSessionState,
+  toolId: SketchEditToolId,
+  initialSelectedTargets: readonly PrimitiveRef[] = [],
+): SketchSessionState {
   const activeEditTool: SketchEditToolState = {
     toolId,
     hoverTarget: null,
@@ -2870,7 +2973,7 @@ function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditTool
     toolValue: toolId === 'sketchSlot' ? 2 : 1,
   }
 
-  return {
+  let nextSession: SketchSessionState = {
     ...session,
     activeTool: toolId,
     activeEditTool,
@@ -2892,9 +2995,21 @@ function beginSketchEditTool(session: SketchSessionState, toolId: SketchEditTool
     activeSnap: null,
     drawStartSnap: null,
   }
+
+  const adoptedTargets = adoptCompatibleSketchEditToolTargets(session, toolId, initialSelectedTargets)
+
+  for (const target of adoptedTargets) {
+    nextSession = selectSketchEditToolTarget(nextSession, target)
+  }
+
+  return nextSession
 }
 
-export function beginSketchTool(session: SketchSessionState, toolId: SketchAuthoringToolId): SketchSessionState {
+export function beginSketchTool(
+  session: SketchSessionState,
+  toolId: SketchAuthoringToolId,
+  initialSelectedTargets: readonly PrimitiveRef[] = [],
+): SketchSessionState {
   if (toolId === 'construction') {
     return beginSketchConstructionTool(session)
   }
@@ -2912,7 +3027,7 @@ export function beginSketchTool(session: SketchSessionState, toolId: SketchAutho
   }
 
   if (isRegisteredSketchEditToolId(toolId)) {
-    return beginSketchEditTool(session, toolId)
+    return beginSketchEditTool(session, toolId, initialSelectedTargets)
   }
 
   const toolDefinition = getSketchToolDefinition(toolId)

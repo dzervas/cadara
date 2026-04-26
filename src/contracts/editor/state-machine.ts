@@ -5,6 +5,7 @@ import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/
 import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import {
   applySelectionToFeatureEditSession,
+  adoptCompatibleFeatureSelection,
   buildFeatureDefinition,
   createCommitMissingInputsDiagnostics,
   createFeatureEditSession,
@@ -21,6 +22,7 @@ import {
 import { createFeatureEditorReferenceSelectionPatch } from '@/domain/feature-authoring/form-events'
 import {
   acceptSketchDraw,
+  adoptCompatibleSketchEditToolTargets,
   beginSketchAnnotationEdit,
   beginSketchGeometryDrag,
   beginSketchTool,
@@ -1227,6 +1229,71 @@ function createCommandState(
   }
 }
 
+function withActivationSelection<TState extends EditorState>(
+  state: TState,
+  selection: readonly PrimitiveRef[],
+): TState {
+  return {
+    ...state,
+    selection: [...selection],
+    hoverTarget: selection[selection.length - 1] ?? null,
+  }
+}
+
+function adoptOrderedSelection(
+  currentSelection: readonly PrimitiveRef[],
+  tryAppend: (
+    adoptedSelection: readonly PrimitiveRef[],
+    target: PrimitiveRef,
+  ) => PrimitiveRef[] | null,
+): PrimitiveRef[] {
+  const adoptedSelection: PrimitiveRef[] = []
+
+  for (const target of currentSelection) {
+    const nextSelection = tryAppend(adoptedSelection, target)
+
+    if (!nextSelection || nextSelection.length !== adoptedSelection.length + 1) {
+      return []
+    }
+
+    if (
+      adoptedSelection.some((selectedTarget, index) =>
+        !primitiveRefEquals(selectedTarget, nextSelection[index]!),
+      )
+    ) {
+      return []
+    }
+
+    if (!primitiveRefEquals(nextSelection[adoptedSelection.length]!, target)) {
+      return []
+    }
+
+    adoptedSelection.push(target)
+  }
+
+  return adoptedSelection
+}
+
+function adoptSelectionForFilter(
+  currentSelection: readonly PrimitiveRef[],
+  selectionFilter: SelectionFilter | null,
+  selectionCatalog: SelectionTargetCatalog | null,
+): PrimitiveRef[] {
+  return adoptOrderedSelection(
+    currentSelection,
+    (adoptedSelection, target) => {
+      const candidate = resolveSelectionCandidate(
+        selectionFilter,
+        [...adoptedSelection],
+        target,
+        selectionCatalog,
+      )
+
+      return candidate.accepted ? candidate.nextSelection : null
+    },
+  )
+}
+
 function createSelectionPreview(state: EditorState, filter: SelectionFilter | null): CommandPreview | null {
   if (!filter) {
     return null
@@ -1975,10 +2042,46 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (
         state.kind === 'editingSketch' &&
+        isRegisteredSketchEditToolId(event.toolId)
+      ) {
+        const adoptedSelection = adoptCompatibleSketchEditToolTargets(
+          state.session,
+          event.toolId,
+          state.selection,
+        )
+        const activationState = withActivationSelection(state, adoptedSelection)
+        const session = beginSketchTool(
+          activationState.session,
+          event.toolId,
+          adoptedSelection,
+        )
+
+        return {
+          state: {
+            ...activationState,
+            mode: 'sketch',
+            selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+            command: {
+              ...activationState.command,
+              toolId: event.toolId,
+              phase: 'editing',
+            },
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      if (
+        state.kind === 'editingSketch' &&
         (
           isRegisteredSketchToolId(event.toolId)
           || isRegisteredSketchConstraintToolId(event.toolId)
-          || isRegisteredSketchEditToolId(event.toolId)
           || event.toolId === 'dimension'
           || event.toolId === 'construction'
           || event.toolId === 'projectReference'
@@ -2035,12 +2138,17 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
 
       if (event.toolId === 'sketch') {
+        const adoptedSelection = adoptSelectionForFilter(
+          state.selection,
+          sketchStartSelectionFilter,
+          state.selectionCatalog,
+        )
         const nextState = createCommandState(
-          state,
+          withActivationSelection(state, adoptedSelection),
           event.toolId,
           state.mode,
           sketchStartSelectionFilter,
-          createSelectionPreview(state, sketchStartSelectionFilter),
+          createSelectionPreview(withActivationSelection(state, adoptedSelection), sketchStartSelectionFilter),
         )
 
         const selectedTarget = nextState.selection[0] ?? null
@@ -2127,12 +2235,17 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (isFeatureTool(event.toolId)) {
         const selectionFilter = getSelectionFilterForFeatureType(event.toolId)
+        const activationSelection =
+          state.selection.length === 1 && state.selection[0]?.kind === 'feature'
+            ? state.selection
+            : adoptCompatibleFeatureSelection(event.toolId, state.selection)
+        const activationState = withActivationSelection(state, activationSelection)
         const nextState = createCommandState(
-          state,
+          activationState,
           event.toolId,
           'part',
           selectionFilter,
-          createSelectionPreview(state, selectionFilter),
+          createSelectionPreview(activationState, selectionFilter),
         )
 
         const selectedTarget = nextState.selection[0] ?? null
@@ -2171,7 +2284,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
         const session = createFeatureEditSession({
           featureType: event.toolId,
-          selectedTarget,
+          selectedTargets: nextState.selection,
         })
 
         return emitFeaturePreview(createFeatureEditingState(nextState, nextState.command, session))

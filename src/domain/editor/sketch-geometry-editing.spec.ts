@@ -1196,6 +1196,32 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
   }
 
+  function testOffsetActivationSeedsCompatiblePreselectionAndClearsInvalidSelection() {
+    const definition = createSquareDefinition(false)
+    const selectedTargets = definition.entities.slice(0, 2).map((entity) => entity.target)
+    const activated = beginSketchTool(createSessionFromDefinition(definition), 'offset', selectedTargets)
+
+    assert(activated.activeEditTool?.toolId === 'offset', 'Offset activation should open the offset edit tool.')
+    assert(
+      activated.activeEditTool?.selectedTargets.length === selectedTargets.length,
+      'Offset activation should seed compatible preselected targets into the edit tool state.',
+    )
+    assert(
+      activated.toolStagedEntities.some((entity) => entity.status === 'preview'),
+      'Offset activation should build preview geometry from compatible preselection.',
+    )
+
+    const cleared = beginSketchTool(createSessionFromDefinition(definition), 'offset', [
+      definition.points[0]!.target,
+    ])
+
+    assert(
+      cleared.activeEditTool?.selectedTargets.length === 0,
+      'Offset activation should clear incompatible preselected targets instead of carrying them into the edit tool.',
+    )
+    assert(cleared.toolStagedEntities.length === 0, 'Cleared offset activation should not leave preview geometry behind.')
+  }
+
   function testOffsetCreatesContinuousOuterAndInnerSquares() {
     const definition = createSquareDefinition(false)
     let outerSession = beginSketchTool(createSessionFromDefinition(definition), 'offset')
@@ -1644,6 +1670,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   testTrimSplitsLineAtClearIntersections()
   testTrimHandlesCircleArcAndSplineTargets()
   testOffsetAddsLineCopyAndRejectsInvalidDistance()
+  testOffsetActivationSeedsCompatiblePreselectionAndClearsInvalidSelection()
   testOffsetCreatesContinuousOuterAndInnerSquares()
   testOffsetCreatesContinuousOpenAngle()
   testOffsetAddsCircleArcAndSplineCopies()

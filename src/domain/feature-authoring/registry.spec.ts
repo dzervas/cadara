@@ -1622,3 +1622,43 @@ test('feature authoring preserves multiple selected profile references in order'
   assert(sweepProfiles?.[0] === profileA, 'Sweep profile participants should preserve the first selected profile.')
   assert(sweepProfiles?.[1] === profileB, 'Sweep profile participants should preserve the appended selected profile.')
 })
+
+test('feature session creation replays ordered activation-time selections', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const targetBody = { kind: 'body' as const, bodyId: 'body_target' as const }
+  const toolBody = { kind: 'body' as const, bodyId: 'body_tool' as const }
+  const planeTarget = { kind: 'construction' as const, constructionId: 'construction_plane-xy' as const }
+
+  const combineSession = createFeatureEditSession({
+    featureType: 'combine',
+    selectedTargets: [targetBody, toolBody],
+  })
+
+  assert(
+    combineSession.draft.targetBodyTargets[0]?.bodyId === targetBody.bodyId,
+    'Feature session creation should seed the first adopted selection into the initial draft.',
+  )
+  assert(
+    combineSession.draft.toolBodyTargets[0]?.bodyId === toolBody.bodyId,
+    'Feature session creation should replay later adopted selections through feature authoring applySelection.',
+  )
+
+  const mirrorSession = createFeatureEditSession({
+    featureType: 'mirror',
+    selectedTargets: [targetBody, planeTarget],
+  })
+
+  assert(
+    mirrorSession.draft.bodyTargets[0]?.bodyId === targetBody.bodyId,
+    'Mirror activation should preserve the first adopted body target.',
+  )
+  assert(
+    mirrorSession.draft.planeTarget?.constructionId === planeTarget.constructionId,
+    'Mirror activation should replay later adopted targets in order so the mirror plane is seeded.',
+  )
+})

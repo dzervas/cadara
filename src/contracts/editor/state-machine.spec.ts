@@ -482,6 +482,17 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     return response.snapshot
   }
 
+  function createOffsetFixtureSketchSession() {
+    let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+    session = acceptSketchDraw(session, [2, 0])
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [2, 0])
+    session = acceptSketchDraw(session, [2, 2])
+    return session
+  }
+
   function cloneSnapshotWithCursor(
     snapshot: DocumentSnapshot,
     cursor: DocumentSnapshot['document']['cursor'],
@@ -757,6 +768,56 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         `Primary construction plane ${constructionId} should emit sketch.openSession.`,
       )
     }
+  }
+
+  function testSketchActivationReusesCompatiblePreselectionAndClearsInvalidSelection() {
+    const snapshot = createSectionSelectionSnapshot()
+    const selectionCatalog = buildSelectionTargetCatalog(snapshot)
+
+    const reused = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: snapshot.documentId,
+          revisionId: snapshot.revisionId,
+        },
+        snapshot,
+        selectionCatalog,
+        selection: [{ kind: 'face', bodyId: 'body_a', faceId: 'face_top' }],
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sketch',
+      },
+    )
+
+    assert(reused.state.kind === 'selectionCommand', 'Sketch activation should still route through the sketch selection command.')
+    assert(reused.state.selection.length === 1, 'Sketch activation should preserve one compatible preselected sketch target.')
+    assert(reused.effects[0]?.type === 'sketch.openSession', 'Sketch activation should immediately open from a compatible preselected target.')
+
+    const cleared = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: snapshot.documentId,
+          revisionId: snapshot.revisionId,
+        },
+        snapshot,
+        selectionCatalog,
+        selection: [
+          { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
+          { kind: 'construction', constructionId: 'construction_plane-xy' },
+        ],
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sketch',
+      },
+    )
+
+    assert(cleared.state.kind === 'selectionCommand', 'Sketch activation should remain in selection mode after clearing incompatible preselection.')
+    assert(cleared.state.selection.length === 0, 'Sketch activation should clear incompatible multi-target preselection.')
+    assert(cleared.effects.length === 0, 'Sketch activation should wait for a new pick after clearing incompatible preselection.')
   }
 
   function testSketchActivationAcceptsPlanarFaces() {
@@ -1425,6 +1486,58 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
     assert(deleteSolidActivation.effects.length === 1, 'Delete-solid activation with a selected body should emit one preview effect.')
     assert(deleteSolidActivation.effects[0]?.type === 'feature.evaluatePreview', 'Delete-solid activation should request a preview effect.')
+  }
+
+  function testFeatureActivationReusesCompatibleSelectionAndClearsInvalidSelection() {
+    const baseState = {
+      ...initialEditorState,
+      document: {
+        documentId: 'doc_workspace' as const,
+        revisionId: 'rev_1' as const,
+      },
+      snapshot: createSnapshot(),
+      selectionCatalog: {
+        ...createRegionSelectionCatalog(),
+        selectableTargetKeys: [...createRegionSelectionCatalog().selectableTargetKeys, 'body:body_b'],
+      },
+    }
+
+    const reused = transitionEditorState(
+      {
+        ...baseState,
+        selection: [
+          { kind: 'body', bodyId: 'body_a' },
+          { kind: 'body', bodyId: 'body_b' },
+        ],
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'combine',
+      },
+    )
+
+    assert(reused.state.kind === 'editingFeature', 'Compatible feature preselection should enter feature editing.')
+    assert(reused.state.selection.length === 2, 'Compatible feature activation should preserve the adopted selection.')
+    assert(
+      reused.state.session.draft.targetBodyTargets[0]?.bodyId === 'body_a'
+        && reused.state.session.draft.toolBodyTargets[0]?.bodyId === 'body_b',
+      'Feature activation should seed the first adopted target and replay later adopted targets in order.',
+    )
+
+    const cleared = transitionEditorState(
+      {
+        ...baseState,
+        selection: [{ kind: 'body', bodyId: 'body_a' }],
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'extrude',
+      },
+    )
+
+    assert(cleared.state.kind === 'editingFeature', 'Incompatible feature preselection should still enter the feature create flow.')
+    assert(cleared.state.selection.length === 0, 'Incompatible feature preselection should be cleared during activation.')
+    assert(cleared.state.session.draft.profileTargets.length === 0, 'Cleared feature activation should not partially seed the draft.')
   }
 
   function testMirrorAndTransformActivationStartFeatureSessions() {
@@ -2735,6 +2848,78 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
+  function testSketchEditToolActivationReusesCompatibleSelectionAndClearsInvalidSelection() {
+    const session = createOffsetFixtureSketchSession()
+    const selectedTargets = session.definition.entities.map((entity) => entity.target)
+    const baseState: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: selectedTargets,
+      hoverTarget: selectedTargets[selectedTargets.length - 1] ?? null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: createSelectionCatalog(),
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      nextCommandSequence: initialEditorState.nextCommandSequence,
+      nextRequestSequence: initialEditorState.nextRequestSequence,
+      pendingSnapshotRequestId: null,
+      pendingHistoryCursorRequestId: null,
+      editSessionCursorContext: null,
+      command: {
+        commandSessionId: 'command_sketch-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+    }
+
+    const reused = transitionEditorState(baseState, {
+      type: 'tool.activated',
+      toolId: 'offset',
+    })
+
+    assert(reused.state.kind === 'editingSketch', 'Sketch edit-tool activation should remain in sketch editing.')
+    assert(reused.state.selection.length === selectedTargets.length, 'Compatible sketch edit-tool activation should preserve current selection.')
+    assert(
+      reused.state.session.activeEditTool?.selectedTargets.length === selectedTargets.length,
+      'Compatible sketch edit-tool activation should seed the active edit tool from the adopted selection.',
+    )
+    assert(
+      reused.state.session.toolStagedEntities.some((entity) => entity.status === 'preview'),
+      'Compatible sketch edit-tool activation should derive preview geometry from the adopted selection.',
+    )
+
+    const cleared = transitionEditorState(
+      {
+        ...baseState,
+        selection: [session.definition.points[0]!.target],
+        hoverTarget: session.definition.points[0]!.target,
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'offset',
+      },
+    )
+
+    assert(cleared.state.kind === 'editingSketch', 'Invalid sketch edit-tool activation should stay in sketch editing.')
+    assert(cleared.state.selection.length === 0, 'Invalid sketch edit-tool activation should clear incompatible selection.')
+    assert(
+      cleared.state.session.activeEditTool?.selectedTargets.length === 0,
+      'Invalid sketch edit-tool activation should start with an empty edit-tool target set.',
+    )
+  }
+
   function testPassiveSketchStyleToolsDoNotDropSketchSession() {
     const activated = transitionEditorState(
       {
@@ -3701,6 +3886,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
   testSketchActivationEmitsCorrelatedOpenEffect()
   testSketchActivationAcceptsAllPrimaryConstructionPlanes()
+  testSketchActivationReusesCompatiblePreselectionAndClearsInvalidSelection()
   testSketchActivationAcceptsPlanarFaces()
   testSectionViewActivationCollectsPlanarSeeds()
   testSectionViewRejectsUnsupportedOrCameraLessSeeds()
@@ -3713,12 +3899,14 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testShellActivationSeedsBodyFromSelectedFace()
   testThickenActivationSeedsFaceTargetsFromSelection()
   testSplitAndDeleteSolidActivationStartFeatureSessions()
+  testFeatureActivationReusesCompatibleSelectionAndClearsInvalidSelection()
   testMirrorAndTransformActivationStartFeatureSessions()
   testActiveReferencePickerRoutesSingleAndMultiSelections()
   testReferencePickerCancellationAndSessionCleanup()
   testSelectionClearEventClearsSelectionAndPreservesActiveState()
   testSketchToolClearStaysInSketchEditing()
   testRemainingSketchToolsActivateWithoutDroppingSketchSession()
+  testSketchEditToolActivationReusesCompatibleSelectionAndClearsInvalidSelection()
   testPassiveSketchStyleToolsDoNotDropSketchSession()
   testConstraintAuthoringReceivesViewportHoverAndSelection()
   testDimensionSelectionClickPinsReadyValuePreview()

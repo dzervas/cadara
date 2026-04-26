@@ -84,19 +84,61 @@ export function getSelectionFilterForFeatureType(
   return getFeatureAuthoringDefinition(featureType).selectionFilter
 }
 
+function featureDraftChanged(
+  previousSession: FeatureEditSessionState,
+  nextSession: FeatureEditSessionState,
+) {
+  return JSON.stringify(previousSession.draft) !== JSON.stringify(nextSession.draft)
+}
+
+export function adoptCompatibleFeatureSelection(
+  featureType: FeatureEditSessionState['featureType'],
+  selectedTargets: readonly PrimitiveRef[],
+): PrimitiveRef[] {
+  let session = createFeatureEditSession({ featureType, selectedTarget: null })
+  const adoptedTargets: PrimitiveRef[] = []
+
+  for (const target of selectedTargets) {
+    const nextSession = adoptedTargets.length === 0
+      ? createFeatureEditSession({ featureType, selectedTarget: target })
+      : applySelectionToFeatureEditSession(session, target)
+
+    if (!featureDraftChanged(session, nextSession)) {
+      return []
+    }
+
+    adoptedTargets.push(target)
+    session = nextSession
+  }
+
+  return adoptedTargets
+}
+
 export function createFeatureEditSession(input: {
   featureType: FeatureEditSessionState['featureType']
-  selectedTarget: PrimitiveRef | null
+  selectedTarget?: PrimitiveRef | null
+  selectedTargets?: readonly PrimitiveRef[]
   featureId?: FeatureId | null
 }): FeatureEditSessionState {
   const featureId = input.featureId ?? null
   const definition = getFeatureAuthoringDefinition(input.featureType)
+  const selectedTargets = input.selectedTargets ?? (input.selectedTarget ? [input.selectedTarget] : [])
+  const selectedTarget = selectedTargets[0] ?? input.selectedTarget ?? null
 
-  return createSessionForDefinition(
+  let session = createSessionForDefinition(
     input.featureType,
     createBaseFeatureSession(input.featureType, featureId),
-    definition.createDraft({ selectedTarget: input.selectedTarget }),
+    definition.createDraft({ selectedTarget }),
   ) as FeatureEditSessionState
+
+  for (const target of selectedTargets.slice(1)) {
+    session = {
+      ...session,
+      draft: definition.applySelection(session.draft, target),
+    } as FeatureEditSessionState
+  }
+
+  return session
 }
 
 export function hydrateFeatureEditSession(
