@@ -41,6 +41,7 @@ import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
 } from '@/domain/editor/sketch-session'
+import { createReferenceImageDataUrl } from '@/domain/reference-image/rendering'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
 import type {
   SketchConstraintRef,
@@ -123,7 +124,6 @@ import {
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
 } from '@/domain/workspace/sketch-plane-mapping'
-import { getEmbeddedBinaryAssetObjectUrl } from '@/domain/modeling/embedded-binary-asset-registry'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 import {
@@ -2812,7 +2812,17 @@ function SketchDisplayMeshNode({
   palette: SketchRenderingPalette
 }) {
   const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
-  const texture = useEmbeddedBinaryTexture(renderable.textureFill?.embeddedBinaryId ?? null)
+  const textureUrl = useMemo(() => {
+    if (!renderable.textureFill) {
+      return null
+    }
+
+    return createReferenceImageDataUrl({
+      mediaType: renderable.textureFill.mediaType,
+      base64Data: renderable.textureFill.base64Data,
+    })
+  }, [renderable.textureFill])
+  const texture = useImageTexture(textureUrl)
   const geometry = useMemo(() => {
     if (!geometryData) {
       throw new Error('Display renderable is missing mesh geometry.')
@@ -2887,15 +2897,10 @@ function SketchDisplayMeshNode({
   )
 }
 
-function useEmbeddedBinaryTexture(assetId: string | null) {
-  const [texture, setTexture] = useState<{ assetId: string, texture: THREE.Texture } | null>(null)
+function useImageTexture(url: string | null) {
+  const [texture, setTexture] = useState<{ url: string, texture: THREE.Texture } | null>(null)
 
   useEffect(() => {
-    if (!assetId) {
-      return
-    }
-
-    const url = getEmbeddedBinaryAssetObjectUrl(assetId)
     if (!url) {
       return
     }
@@ -2916,7 +2921,7 @@ function useEmbeddedBinaryTexture(assetId: string | null) {
         loadedTexture = loaded
         setTexture((current) => {
           current?.texture.dispose()
-          return { assetId, texture: loaded }
+          return { url, texture: loaded }
         })
       },
       undefined,
@@ -2927,9 +2932,9 @@ function useEmbeddedBinaryTexture(assetId: string | null) {
       cancelled = true
       loadedTexture?.dispose()
     }
-  }, [assetId])
+  }, [url])
 
-  return texture?.assetId === assetId ? texture.texture : null
+  return texture?.url === url ? texture.texture : null
 }
 
 function updatePolylineGeometryBuffer(

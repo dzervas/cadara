@@ -100,13 +100,14 @@ function getSketchOperationToolIcon(kind: NonNullable<SketchDefinition['authorin
       return 'constraintCoincident'
     case 'dimension':
       return 'dimension'
+    case 'referenceImage':
+      return 'import'
     case 'delete':
     case 'edit':
     case 'derived':
     case 'point':
     case 'construction':
     case 'reference':
-    case 'anchorPoint':
     case 'inscribedPolygon':
     case 'circumscribedPolygon':
     case 'operation':
@@ -128,7 +129,6 @@ function getSketchEntityToolIcon(entity: SketchEntityDefinition): ToolIconId | n
     case 'conic':
     case 'bezierCurve':
     case 'profileText':
-    case 'imageReference':
       return 'spline'
     case 'point':
       return null
@@ -160,7 +160,6 @@ function getSketchConstraintToolIcon(constraint: ConstraintDefinition): ToolIcon
     case 'normal':
     case 'normalProjectedCurve':
       return 'constraintNormal'
-    case 'pointOnImage':
     case 'pointOnCurve':
     case 'pointOnProjectedCurve':
       return 'constraintPierce'

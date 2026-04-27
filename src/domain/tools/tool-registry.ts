@@ -172,6 +172,14 @@ export const toolDefinitions = [
     modes: ['sketch'],
   },
   {
+    id: 'importImage',
+    group: 'sketchOps',
+    name: 'Import Image',
+    tooltip: 'Import one or more reference images into the active sketch.',
+    icon: 'import',
+    modes: ['sketch'],
+  },
+  {
     id: 'svgRendering',
     group: 'svgStyle',
     name: 'SVG Rendering',
@@ -321,7 +329,7 @@ const toolbarSections = [
     label: 'Draw',
     align: 'center',
     modes: ['sketch'],
-    toolIds: ['anchorPoint', 'point', 'line', 'rectangle', 'circle', 'centerPointArc', 'ellipse', 'inscribedPolygon', 'spline', 'profileText'],
+    toolIds: ['point', 'line', 'rectangle', 'circle', 'centerPointArc', 'ellipse', 'inscribedPolygon', 'spline', 'profileText'],
   },
   {
     id: 'constraints',
@@ -364,6 +372,7 @@ const toolbarSections = [
       'sketchSlot',
       'construction',
       'projectReference',
+      'importImage',
     ],
   },
   {

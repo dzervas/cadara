@@ -145,7 +145,7 @@ export function createViewportBvhSceneKey(
         renderable.semanticClass ?? 'default',
         renderable.target ? JSON.stringify(renderable.target) : 'none',
         getSketchStructuralGeometryToken(renderable.geometry),
-        renderable.textureFill?.embeddedBinaryId ?? 'no-texture',
+        renderable.textureFill?.sourceKey ?? 'no-texture',
       ].join(':')
     }),
   ].join('|')

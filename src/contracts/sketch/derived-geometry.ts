@@ -48,8 +48,6 @@ function getEntityPointIds(entity: SketchEntityDefinition): readonly SketchPoint
       return entity.controlPointIds
     case 'profileText':
       return [entity.anchorPointId]
-    case 'imageReference':
-      return entity.cornerPointIds
   }
 }
 

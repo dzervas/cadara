@@ -23,6 +23,7 @@ import type {
   VertexRef,
 } from '@/contracts/shared/references'
 import type { SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
+import type { ReferenceImageOperationState } from '@/contracts/reference-image/schema'
 
 /**
  * Declarative sketch-space point coordinates expressed in sketch plane units.
@@ -56,7 +57,7 @@ export type SketchStrokeJoin = 'miter' | 'round' | 'bevel'
 
 export type SketchDerivedTransformKind = 'mirror' | 'linearPattern' | 'circularPattern' | 'transform'
 export type SketchAuthoringOperationKind =
-  | 'anchorPoint'
+  | 'referenceImage'
   | 'point'
   | 'line'
   | 'midpointLine'
@@ -89,10 +90,14 @@ export type SketchAuthoringOperationKind =
 export type SketchAuthoringOperationMemberRef =
   | { kind: 'point'; pointId: SketchPointId }
   | { kind: 'entity'; entityId: SketchEntityId }
+  | { kind: 'operation'; operationId: SketchAuthoringOperationId }
   | { kind: 'constraint'; constraintId: ConstraintId }
   | { kind: 'dimension'; dimensionId: DimensionId }
   | { kind: 'style'; styleId: SketchStyleId }
   | { kind: 'derivation'; derivationId: string }
+
+export type SketchAuthoringOperationOwnedState =
+  | ReferenceImageOperationState
 
 export interface SketchAuthoringOperationGraphSnapshot {
   points?: readonly SketchPointDefinition[]
@@ -109,13 +114,11 @@ export interface SketchAuthoringOperationTargets {
   edited?: readonly SketchAuthoringOperationMemberRef[]
 }
 
-export interface SketchAuthoringOperation {
+interface SketchAuthoringOperationBase {
   /** Durable sketch-local operation identity used by sketch history cursors. */
   operationId: SketchAuthoringOperationId
   /** Human-readable row label shown in sketch-local history. */
   label: string
-  /** User intent or fallback operation category. */
-  kind: SketchAuthoringOperationKind
   /** Typed references to graph members affected by this operation. */
   targets: SketchAuthoringOperationTargets
   /** Metadata-only records needed to rebuild sketch-local cursor states. */
@@ -123,6 +126,25 @@ export interface SketchAuthoringOperation {
   /** Metadata-only records removed by delete operations. */
   removedGraph?: SketchAuthoringOperationGraphSnapshot
 }
+
+export type SketchAuthoringOperation =
+  | (SketchAuthoringOperationBase & {
+      /** User intent or fallback operation category. */
+      kind: 'referenceImage'
+      /** Explicit operation-local state owned outside the flat sketch graph. */
+      ownedState: SketchAuthoringOperationOwnedState
+    })
+  | (SketchAuthoringOperationBase & {
+      /** Edit rows may carry operation-owned state updates for existing targets. */
+      kind: 'edit'
+      /** Optional replacement state for edited operation-owned records. */
+      ownedState?: SketchAuthoringOperationOwnedState
+    })
+  | (SketchAuthoringOperationBase & {
+      /** User intent or fallback operation category. */
+      kind: Exclude<SketchAuthoringOperationKind, 'referenceImage' | 'edit'>
+      ownedState?: never
+    })
 
 export interface SketchDerivedEntityOutput {
   /** Seed entity driving this derived output. */
@@ -409,27 +431,6 @@ export type SketchEntityDefinition =
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition
     }
-  | {
-      kind: 'imageReference'
-      /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
-      /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
-      /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
-      /** Image references are always construction-only. */
-      isConstruction: boolean
-      /** Ordered quad corners in top-left, top-right, bottom-right, bottom-left winding. */
-      cornerPointIds: readonly [SketchPointId, SketchPointId, SketchPointId, SketchPointId]
-      /** Durable embedded binary asset handle for the referenced image bytes. */
-      embeddedBinaryId: string
-      /** Original image width in pixels. */
-      pixelWidth: number
-      /** Original image height in pixels. */
-      pixelHeight: number
-      /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
-    }
 
 export type LocalSketchPointConstraintOperand = {
   kind: 'localPoint'
@@ -596,20 +597,6 @@ export type ConstraintDefinition =
       point: LocalSketchPointConstraintOperand
       /** Local editable line, circle, or arc target. */
       curve: LocalSketchEntityConstraintOperand
-    }
-  | {
-      constraintId: ConstraintId
-      kind: 'pointOnImage'
-      /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
-      /** Local editable point pinned to the image quad. */
-      pointId: SketchPointId
-      /** Referenced image entity whose quad defines the pinned location. */
-      imageEntityId: SketchEntityId
-      /** Normalized horizontal coordinate where 0 is left and 1 is right. */
-      u: number
-      /** Normalized vertical coordinate where 0 is top and 1 is bottom. */
-      v: number
     }
   | {
       constraintId: ConstraintId

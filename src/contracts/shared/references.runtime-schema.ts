@@ -11,6 +11,7 @@ import {
   featureIdSchema,
   loopIdSchema,
   regionIdSchema,
+  sketchAuthoringOperationIdSchema,
   sketchEntityIdSchema,
   sketchIdSchema,
   sketchPointIdSchema,
@@ -63,6 +64,12 @@ export const sketchPointRefSchema = z.object({
   pointId: sketchPointIdSchema,
 })
 
+export const sketchOperationRefSchema = z.object({
+  kind: z.literal('sketchOperation'),
+  sketchId: sketchIdSchema,
+  operationId: sketchAuthoringOperationIdSchema,
+})
+
 export const sketchConstraintRefSchema = z.object({
   kind: z.literal('constraint'),
   sketchId: sketchIdSchema,
@@ -100,6 +107,7 @@ export const durableRefSchema = z.discriminatedUnion('kind', [
   sketchRefSchema,
   sketchEntityRefSchema,
   sketchPointRefSchema,
+  sketchOperationRefSchema,
   sketchConstraintRefSchema,
   sketchDimensionRefSchema,
   featureRefSchema,

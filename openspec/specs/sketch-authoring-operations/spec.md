@@ -1,10 +1,11 @@
 # sketch-authoring-operations Specification
 
 ## Purpose
-TBD - created by archiving change durable-sketch-authoring-operations. Update Purpose after archive.
+Defines how sketches persist ordered authoring operations alongside the live flat sketch graph, including limited operation-owned state for approved special cases.
+
 ## Requirements
 ### Requirement: Sketch definitions SHALL persist authoring operations
-The sketch authored contract SHALL persist an ordered collection of sketch authoring operations alongside the flat sketch graph. Each operation SHALL identify the accepted user intent, carry a durable operation id and display label, and reference the graph members it created, removed, replaced, or edited.
+The sketch authored contract SHALL persist an ordered collection of sketch authoring operations alongside the flat sketch graph. Each operation SHALL identify the accepted user intent, carry a durable operation id and display label, and reference the graph members it created, removed, replaced, or edited. Explicitly approved operation kinds MAY also persist operation-owned state that is not represented as ordinary local sketch graph records.
 
 #### Scenario: Constructor operation is persisted
 - **WHEN** the user completes a rectangle constructor in an active sketch
@@ -16,17 +17,26 @@ The sketch authored contract SHALL persist an ordered collection of sketch autho
 - **THEN** the reopened sketch definition exposes the same ordered authoring operations
 - **AND** operation rows retain their durable operation ids and display labels
 
-### Requirement: Authoring operations SHALL be metadata over a flat sketch graph
-Sketch authoring operations SHALL NOT define solver-owned geometry or constraints. The current flat sketch graph SHALL remain the source of truth for solver input, region extraction, rendering, picking, selection, and commit payloads.
+#### Scenario: Reference-image operation persists operation-owned state
+- **WHEN** the user creates a committed `referenceImage` operation
+- **THEN** the sketch definition persists that operation in the authoring operation list
+- **AND** the operation may own image-specific persisted state without translating that state into local sketch points, entities, or constraints
 
-#### Scenario: Solver ignores operation metadata
-- **WHEN** two sketch definitions contain the same live flat graph but different authoring operation metadata
-- **THEN** the sketch solver receives the same graph records for both definitions
-- **AND** the solved sketch result is not changed by operation labels, kinds, or historical target references
+### Requirement: Authoring operations SHALL be metadata over a flat sketch graph
+Sketch authoring operations SHALL remain distinct from the flat local sketch graph. The current flat sketch graph SHALL remain the source of truth for local solver input, region extraction, and local sketch geometry editing. Explicitly approved special operations MAY own isolated operation-local state for rendering or dedicated editing workflows without materializing that state as local sketch geometry.
+
+#### Scenario: Solver ignores operation-owned image payload
+- **WHEN** a sketch contains a committed `referenceImage` operation with operation-owned image data
+- **THEN** the local sketch solver receives no image-owned local sketch points, entities, or constraints from that operation
 
 #### Scenario: Complex operation is not re-derived
 - **WHEN** a sketch contains four line entities and constraints that geometrically resemble a rectangle but no rectangle authoring operation
 - **THEN** the system does not synthesize a rectangle operation by inspecting the flat graph
+
+#### Scenario: Reference-image operation is not rebuilt from local graph records
+- **WHEN** a sketch contains a committed `referenceImage` operation
+- **THEN** the system reads that image operation from its own persisted operation state
+- **AND** it does not infer the image operation by reconstructing hidden local sketch geometry
 
 ### Requirement: Deleted sketch graph members SHALL be absent from current document state
 When a sketch operation deletes geometry, constraints, or dimensions, the deleted members SHALL be removed from the current flat sketch graph and SHALL NOT participate in solver input, rendering, picking, selection, commit payloads, or active document state. Prior authoring operations MAY retain historical references to the deleted member ids.
@@ -72,4 +82,3 @@ Constraints inferred from accepted snap or constructor intent SHALL be recorded 
 - **WHEN** the user manually adds a coincident constraint to existing sketch geometry
 - **THEN** the sketch definition appends a separate constraint authoring operation
 - **AND** that operation references the created constraint or dimension records
-

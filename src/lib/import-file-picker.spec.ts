@@ -16,7 +16,7 @@ test('src/lib/import-file-picker.spec.ts', async () => {
     { extension: 'png', mediaType: 'image/png' },
     { extension: '.jpg', mediaType: 'image/jpeg' },
     { extension: 'png', mediaType: 'image/png' },
-  ])
+  ], { multiple: true })
 
   assert(
     configuration.openPickerOptions.types[0]?.accept['image/png']?.includes('.png')
@@ -29,10 +29,12 @@ test('src/lib/import-file-picker.spec.ts', async () => {
       && configuration.inputAccept.includes('.jpg'),
     'Import picker configuration should build an input accept string from extensions and MIME types.',
   )
+  assert(configuration.openPickerOptions.multiple, 'Import picker configuration should forward the multiple-selection flag.')
 
   const pngFile = new File(['png'], 'reference.png', { type: 'image/png' })
   const pickerResult = await showOpenImportFilePicker({
     acceptedFileTypes: [{ extension: 'png', mediaType: 'image/png' }],
+    multiple: true,
     environment: {
       isSecureContext: true,
       async showOpenFilePicker(options) {
@@ -40,6 +42,7 @@ test('src/lib/import-file-picker.spec.ts', async () => {
           options.types[0]?.accept['image/png']?.includes('.png'),
           'Native import picker should receive the aggregated accept map.',
         )
+        assert(options.multiple, 'Native import picker should receive the multiple-selection flag.')
         return [{
           name: 'reference.png',
           async getFile() {
@@ -52,14 +55,16 @@ test('src/lib/import-file-picker.spec.ts', async () => {
       },
     },
   })
-  assert(pickerResult.ok && pickerResult.file === pngFile, 'Native import picker should resolve the selected file handle to a File object.')
+  assert(pickerResult.ok && pickerResult.files[0] === pngFile, 'Native import picker should resolve the selected file handle to a File object.')
 
   type ChangeHandler = () => void
 
   let changeHandler: ChangeHandler | null = null
+  let fallbackInputMultiple = false
   const fallbackFile = new File(['jpg'], 'reference.jpg', { type: 'image/jpeg' })
   const fallbackResult = await showOpenImportFilePicker({
     acceptedFileTypes: [{ extension: 'jpg', mediaType: 'image/jpeg' }],
+    multiple: true,
     environment: {
       isSecureContext: true,
       document: {
@@ -81,6 +86,7 @@ test('src/lib/import-file-picker.spec.ts', async () => {
             removeEventListener() {},
             remove() {},
             click() {
+              fallbackInputMultiple = input.multiple
               changeHandler?.()
             },
           }
@@ -91,5 +97,6 @@ test('src/lib/import-file-picker.spec.ts', async () => {
     },
   })
 
-  assert(fallbackResult.ok && fallbackResult.file === fallbackFile, 'Fallback import picker should resolve the selected input file when the native picker is unavailable.')
+  assert(fallbackInputMultiple, 'Fallback import picker should forward the multiple-selection flag to the input element.')
+  assert(fallbackResult.ok && fallbackResult.files[0] === fallbackFile, 'Fallback import picker should resolve the selected input file when the native picker is unavailable.')
 })

@@ -1,7 +1,7 @@
 # import-toolbar-and-session Specification
 
 ## Purpose
-TBD - created by archiving change import-toolbar-and-review-ui. Update Purpose after archive.
+Defines the generic part-mode import toolbar flow and the boundaries between part import sessions and sketch-owned image import behavior.
 
 ## Requirements
 ### Requirement: The toolbar SHALL have a single generic import button
@@ -83,6 +83,19 @@ The `ImportInspector` component SHALL render in the sidebar when the editor is i
 - **AND** selecting geometry in the viewport patches the field value through `applySelectionPatch()`
 
 #### Scenario: Commit button reflects readiness
-- **WHEN** the provider's selections are incomplete (e.g., no plane selected for image import)
+- **WHEN** the provider's selections are incomplete
 - **THEN** the commit button is disabled
 - **AND** the form shows field-level error indicators for missing required values
+
+### Requirement: Reference-image creation SHALL not use the generic part import session
+The raster image tracing workflow SHALL be owned by the sketch-mode `Import Image` tool and SHALL NOT use the generic part-mode import inspector or `importing` session.
+
+#### Scenario: Sketch image import bypasses the part import inspector
+- **WHEN** the user is editing a sketch and imports a raster image for reference tracing
+- **THEN** the editor creates a sketch-owned `referenceImage` operation flow
+- **AND** the editor does not enter the generic `importing` state
+
+#### Scenario: Part-mode import remains reserved for part workspace imports
+- **WHEN** the user activates the generic import button in part mode after this change
+- **THEN** the workflow is limited to non-reference-image part workspace import providers
+- **AND** raster reference-image creation is not offered through that inspector

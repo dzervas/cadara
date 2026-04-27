@@ -29,6 +29,7 @@ import {
   requireAcceptedModelingResult,
   runWorkbenchAction,
 } from '@/app/workbench-action'
+import { runSketchImageImportFlow } from '@/app/sketch-image-import-flow'
 import {
   documentHistoryOrdersEqual,
   getDocumentHistoryOrderRestoreMoves,
@@ -43,7 +44,7 @@ import type {
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
-import { createAppError, errorContext, type AppError } from '@/contracts/errors'
+import { createAppError, err, errorContext, ok, type AppError } from '@/contracts/errors'
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
   getSketchAnnotationDescriptors,
@@ -427,8 +428,14 @@ export function CadWorkbench() {
       return
     }
 
+    const acceptedFileTypes = getAcceptedImportFileTypes()
+    if (acceptedFileTypes.length === 0) {
+      showWorkbenchError('No part importers are currently registered.')
+      return
+    }
+
     const pickerResult = await showOpenImportFilePicker({
-      acceptedFileTypes: getAcceptedImportFileTypes(),
+      acceptedFileTypes,
     })
 
     if (!pickerResult.ok) {
@@ -438,7 +445,13 @@ export function CadWorkbench() {
       return
     }
 
-    const resolvedSource = await resolveLocalFileImportSource(pickerResult.file)
+    const file = pickerResult.files[0]
+    if (!file) {
+      showWorkbenchError('Import file selection failed.')
+      return
+    }
+
+    const resolvedSource = await resolveLocalFileImportSource(file)
     const matchedProviders = matchImportProviders(resolvedSource)
 
     if (matchedProviders.length === 0) {
@@ -465,6 +478,56 @@ export function CadWorkbench() {
       showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
     }
   }, [activeEditSession, activeImportSession, dispatch, modelingService, showWorkbenchError, snapshot])
+
+  const handleSketchImageImport = useCallback(async () => {
+    const currentSession = sketchSessionRef.current
+    const currentSnapshot = snapshotRef.current
+
+    if (!currentSession) {
+      showWorkbenchError('Open a sketch before importing reference images.')
+      return
+    }
+
+    if (!currentSnapshot) {
+      showWorkbenchError('The current document is still loading.')
+      return
+    }
+
+    void runWorkbenchAction({
+      operation: 'Import reference image',
+      reporter: errorReporter,
+      context: [{ key: 'baseRevisionId', value: currentSnapshot.document.revisionId }],
+      action: () => runSketchImageImportFlow({
+        session: currentSession,
+        snapshot: currentSnapshot,
+        modelingService,
+      }),
+      mapSuccess: (result) => {
+        if (result.kind === 'cancelled' || result.kind === 'committed') {
+          return ok(result)
+        }
+
+        return err(result.error ?? createAppError({
+          code: 'app/operation-failed',
+          message: result.message,
+          context: [{ key: 'baseRevisionId', value: currentSnapshot.document.revisionId }],
+        }))
+      },
+      onError: (error) => showWorkbenchError(error.message),
+    }).then((result) => {
+      if (result.isErr() || result.value.kind !== 'committed') {
+        return
+      }
+
+      applyLoadedSnapshot(result.value.snapshot)
+      dispatch(result.value.reopenRequest)
+      showWorkbenchInfo(
+        result.value.payloads.length === 1
+          ? `Imported ${result.value.payloads[0]?.fileName ?? 'reference image'}.`
+          : `Imported ${result.value.payloads.length} reference images.`,
+      )
+    })
+  }, [applyLoadedSnapshot, dispatch, errorReporter, modelingService, showWorkbenchError, showWorkbenchInfo])
 
   const viewportRenderables = useMemo(
     () => {
@@ -937,11 +1000,15 @@ export function CadWorkbench() {
     const unsubscribeImport = actionBus.subscribeToTool('import', () => {
       void handleToolbarImport()
     })
+    const unsubscribeImportImage = actionBus.subscribeToTool('importImage', () => {
+      void handleSketchImageImport()
+    })
 
     return () => {
       unsubscribeUndo()
       unsubscribeRedo()
       unsubscribeImport()
+      unsubscribeImportImage()
     }
   })
 

@@ -1,10 +1,7 @@
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { ResolvedImportSource } from '@/contracts/import/source'
-import { createImageImportProvider, type ImageImportReview, type ImageImportSelections } from '@/domain/import/providers/image-import-provider'
 
-const REGISTERED_IMPORT_PROVIDERS: readonly ImportProvider<unknown, unknown>[] = [
-  createImageImportProvider() as ImportProvider<ImageImportReview, ImageImportSelections>,
-]
+const REGISTERED_IMPORT_PROVIDERS: ImportProvider<unknown, unknown>[] = []
 
 export function getRegisteredImportProviders() {
   return [...REGISTERED_IMPORT_PROVIDERS]
@@ -38,4 +35,12 @@ export function getAcceptedImportFileTypes() {
   }
 
   return [...deduped.values()]
+}
+
+export function registerImportProviderForTest(provider: ImportProvider<unknown, unknown>) {
+  REGISTERED_IMPORT_PROVIDERS.push(provider)
+}
+
+export function resetImportProvidersForTest() {
+  REGISTERED_IMPORT_PROVIDERS.length = 0
 }

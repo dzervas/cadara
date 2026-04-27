@@ -100,4 +100,122 @@ test('src/contracts/sketch/authoring-operations.runtime-schema.spec.ts', () => {
   const normalizedOperation = withUndefinedOptionalGraphs.data.authoringOperations?.[0] as Record<string, unknown> | undefined
   assert(normalizedOperation && !('createdGraph' in normalizedOperation), 'Undefined createdGraph should be omitted from normalized operations.')
   assert(normalizedOperation && !('removedGraph' in normalizedOperation), 'Undefined removedGraph should be omitted from normalized operations.')
+
+  const withReferenceImage = sketchDefinitionSchema.safeParse({
+    ...legacyDefinition,
+    authoringOperations: [{
+      operationId: 'sketch_operation_2_reference-image',
+      label: 'Reference image 2',
+      kind: 'referenceImage',
+      targets: {
+        created: [{ kind: 'operation', operationId: 'sketch_operation_2_reference-image' }],
+      },
+      ownedState: {
+        kind: 'referenceImage',
+        image: {
+          mediaType: 'image/png',
+          pixelWidth: 640,
+          pixelHeight: 480,
+          base64Data: 'cG5n',
+        },
+        placement: {
+          center: [0, 0],
+          width: 200,
+          height: 150,
+          rotationRadians: 0,
+        },
+      },
+    }],
+  })
+  assert(withReferenceImage.success, 'Runtime schema should accept operation-owned reference-image state.')
+  assert(
+    withReferenceImage.data.authoringOperations?.[0]?.targets.created?.[0]?.kind === 'operation',
+    'Reference-image authoring operations should preserve operation member refs.',
+  )
+
+  const withReferenceImageEdit = sketchDefinitionSchema.safeParse({
+    ...legacyDefinition,
+    authoringOperations: [
+      withReferenceImage.data.authoringOperations![0]!,
+      {
+        operationId: 'sketch_operation_3_edit-reference-image',
+        label: 'reference-updated.png',
+        kind: 'edit',
+        targets: {
+          edited: [{ kind: 'operation', operationId: 'sketch_operation_2_reference-image' }],
+        },
+        ownedState: {
+          kind: 'referenceImage',
+          image: {
+            mediaType: 'image/png',
+            fileName: 'reference-updated.png',
+            pixelWidth: 800,
+            pixelHeight: 600,
+            base64Data: 'dXBkYXRlZA==',
+          },
+          placement: {
+            center: [10, 20],
+            width: 240,
+            height: 180,
+            rotationRadians: 0.25,
+          },
+        },
+      },
+    ],
+  })
+  assert(withReferenceImageEdit.success, 'Edit operations targeting sketch operations should accept operation-owned reference-image state.')
+
+  const invalidOwnedState = sketchDefinitionSchema.safeParse({
+    ...legacyDefinition,
+    authoringOperations: [{
+      operationId: 'sketch_operation_3_rectangle',
+      label: 'Rectangle 3',
+      kind: 'rectangle',
+      targets: {},
+      ownedState: {
+        kind: 'referenceImage',
+        image: {
+          mediaType: 'image/png',
+          pixelWidth: 640,
+          pixelHeight: 480,
+          base64Data: 'cG5n',
+        },
+        placement: {
+          center: [0, 0],
+          width: 200,
+          height: 150,
+          rotationRadians: 0,
+        },
+      },
+    }],
+  })
+  assert(!invalidOwnedState.success, 'Non-reference operations should reject operation-owned reference-image state.')
+
+  const invalidEditOwnedState = sketchDefinitionSchema.safeParse({
+    ...legacyDefinition,
+    authoringOperations: [{
+      operationId: 'sketch_operation_4_edit',
+      label: 'Edit without operation target',
+      kind: 'edit',
+      targets: {
+        edited: [{ kind: 'entity', entityId: 'sketch_entity_line' }],
+      },
+      ownedState: {
+        kind: 'referenceImage',
+        image: {
+          mediaType: 'image/png',
+          pixelWidth: 640,
+          pixelHeight: 480,
+          base64Data: 'cG5n',
+        },
+        placement: {
+          center: [0, 0],
+          width: 200,
+          height: 150,
+          rotationRadians: 0,
+        },
+      },
+    }],
+  })
+  assert(!invalidEditOwnedState.success, 'Edit operations without operation targets should reject operation-owned reference-image state.')
 })

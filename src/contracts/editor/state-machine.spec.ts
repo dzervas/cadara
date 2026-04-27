@@ -15,11 +15,13 @@ import {
 import { createEditorRuntimeActor } from './runtime-machine'
 import {
   getDefaultSelectionFilterForMode,
+  planeSelectionFilter,
   primitiveRefEquals,
   type PrimitiveRef,
   type SelectionTargetCatalog,
 } from '@/domain/editor/schema'
 import type { ToolId } from '@/domain/tools/tool-registry'
+import type { ImportProvider } from '@/contracts/import/provider'
 import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
@@ -59,7 +61,7 @@ import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-his
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createModelingService } from '@/domain/modeling/modeling-service'
-import { createImageImportProvider } from '@/domain/import/providers/image-import-provider'
+import { registerImportProviderForTest, resetImportProvidersForTest } from '@/domain/import/provider-registry'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
@@ -474,7 +476,97 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   async function createImageImportSession() {
-    const provider = createImageImportProvider()
+    resetImportProvidersForTest()
+    const provider: ImportProvider<{
+      sourceName: string
+    }, {
+      plane: SketchPlaneDefinition | null
+      planeTarget: PrimitiveRef | null
+      planeKey: 'xy' | 'yz' | 'xz' | null
+    }> = {
+      id: 'test-image-import',
+      label: 'Test Image Import',
+      acceptedFileTypes: [{ extension: 'png', mediaType: 'image/png' }],
+      accepts() {
+        return true
+      },
+      async review(input) {
+        return {
+          providerReview: {
+            sourceName: input.source.name,
+          },
+          proposedActionKinds: ['commitSketch'],
+          diagnostics: [],
+        }
+      },
+      createDefaultSelections() {
+        return {
+          plane: null,
+          planeTarget: null,
+          planeKey: null,
+        }
+      },
+      getReviewFormSchema() {
+        return {
+          sections: [{
+            id: 'image-references',
+            title: 'References',
+            fields: [{
+              id: 'image-plane',
+              kind: 'referencePicker',
+              label: 'Sketch plane',
+              helper: 'Select one construction plane or planar face for the image reference sketch.',
+              value: null,
+              emptyLabel: 'Pick a construction plane or planar face',
+              picker: {
+                mode: 'replace',
+                allowsMultiple: false,
+                selectionFilter: planeSelectionFilter,
+                itemLabel: 'Plane reference',
+              },
+              patch: { patchKey: 'planeSelection' },
+              error: { message: 'Select one sketch plane.' },
+            }],
+          }],
+        }
+      },
+      applySelectionPatch(_review, selections, patch) {
+        if (!Object.prototype.hasOwnProperty.call(patch, 'planeSelection')) {
+          return selections
+        }
+
+        const selection = patch.planeSelection as {
+          target?: PrimitiveRef | null
+          plane?: SketchPlaneDefinition | null
+        } | null
+
+        if (!selection?.target || !selection.plane) {
+          if (selection?.target?.kind === 'construction') {
+            return {
+              plane: createStandardPlaneDefinition('xy'),
+              planeTarget: selection.target,
+              planeKey: 'xy',
+            }
+          }
+
+          return {
+            plane: null,
+            planeTarget: null,
+            planeKey: null,
+          }
+        }
+
+        return {
+          plane: selection.plane,
+          planeTarget: selection.target,
+          planeKey: selection.target.kind === 'construction' ? 'xy' : null,
+        }
+      },
+      async prepare() {
+        return { diagnostics: [] }
+      },
+    }
+    registerImportProviderForTest(provider)
     const source = {
       name: 'reference.png',
       origin: {
@@ -4088,4 +4180,5 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics()
   await testXStateRuntimeBootstrapsAndLoadsSnapshot()
   await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
+  resetImportProvidersForTest()
 })

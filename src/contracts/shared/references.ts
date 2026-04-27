@@ -8,6 +8,7 @@ import type {
   FeatureId,
   LoopId,
   RegionId,
+  SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -131,6 +132,18 @@ export interface SketchDimensionRef {
 }
 
 /**
+ * Durable reference to a sketch authoring operation.
+ */
+export interface SketchOperationRef {
+  /** Stable discriminant for durable sketch-operation references. */
+  kind: 'sketchOperation'
+  /** Owning sketch of the referenced operation. */
+  sketchId: SketchId
+  /** Durable operation identity within `sketchId`. */
+  operationId: SketchAuthoringOperationId
+}
+
+/**
  * Durable reference to an authored feature.
  */
 export interface FeatureRef {
@@ -175,6 +188,7 @@ export type DurableRef =
   | SketchRef
   | SketchEntityRef
   | SketchPointRef
+  | SketchOperationRef
   | SketchConstraintRef
   | SketchDimensionRef
   | FeatureRef

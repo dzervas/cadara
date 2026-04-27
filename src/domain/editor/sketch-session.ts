@@ -18,6 +18,7 @@ import type {
   SketchStyleRecord,
 } from '@/contracts/sketch/schema'
 import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
+import type { ReferenceImageOperationState } from '@/contracts/reference-image/schema'
 import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
 import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import {
@@ -28,6 +29,7 @@ import type {
   SketchConstraintRef,
   SketchDimensionRef,
   SketchEntityRef,
+  SketchOperationRef,
   SketchPointRef,
 } from '@/contracts/shared/references'
 import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
@@ -82,7 +84,16 @@ import {
   createStandardPlaneDefinition,
   deriveStandardPlaneKeyFromConstructionId,
 } from '@/domain/modeling/opencascade-kernel-seed'
-import { workbenchSketchPointColors } from '@/theme/workbench-theme'
+import {
+  collectActiveReferenceImageOperations,
+  createReferenceImageDeleteOperation,
+  createReferenceImageEditOperation,
+  createReferenceImageOperationTarget,
+} from '@/domain/reference-image/operations'
+import {
+  createReferenceImageTextureSourceKey,
+  getReferenceImageCornerPoints,
+} from '@/domain/reference-image/rendering'
 import type {
   SketchToolAnchorDescriptor,
   SketchToolControlValue,
@@ -252,14 +263,6 @@ const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE = 'Could not solve the edited constr
 const LIVE_REGION_DOCUMENT_ID = 'doc_live_sketch' as DocumentId
 const LIVE_REGION_REVISION_ID = 'rev_live_sketch' as RevisionId
 const liveRegionDiagnosticsByRegions = new WeakMap<RegionRecord[], ReturnType<typeof deriveSketchRegionsCore>['diagnostics']>()
-const IMAGE_PIN_MARKER_STYLE: SketchStyleDefinition = {
-  fillMode: 'solid',
-  fillColor: workbenchSketchPointColors.imagePinFill.css,
-  strokeEnabled: true,
-  strokeColor: workbenchSketchPointColors.imagePinStroke.css,
-  strokeWidth: 1.5,
-}
-
 export interface SketchSessionDisplayRenderable {
   id: RenderableId
   label: string
@@ -273,8 +276,10 @@ export interface SketchSessionDisplayRenderable {
   constraintDisplay?: SketchConstraintDisplayTargetState
   diagnosticStyle?: SketchDisplayDiagnosticStyle
   textureFill?: {
-    kind: 'embeddedImage'
-    embeddedBinaryId: string
+    kind: 'inlineImage'
+    sourceKey: string
+    mediaType: string
+    base64Data: string
     uvCoordinates: readonly [
       readonly [number, number],
       readonly [number, number],
@@ -396,6 +401,17 @@ function createSketchPointRef(sketchId: SketchId, pointId: SketchPointId): Sketc
     kind: 'sketchPoint',
     sketchId,
     pointId,
+  }
+}
+
+function createSketchOperationRef(
+  sketchId: SketchId,
+  operationId: SketchAuthoringOperationId,
+): SketchOperationRef {
+  return {
+    kind: 'sketchOperation',
+    sketchId,
+    operationId,
   }
 }
 
@@ -535,7 +551,7 @@ function createAuthoringOperationFromContribution(
   patch: SketchToolCommitContribution,
   input?: {
     sequence?: number
-    kind?: SketchAuthoringOperationKind
+    kind?: Exclude<SketchAuthoringOperationKind, 'referenceImage' | 'edit'>
     label?: string
     suffix?: string
   },
@@ -749,12 +765,17 @@ function getAuthoringOperationHistoryTarget(
   sketchId: SketchId,
   operation: SketchAuthoringOperation,
 ): PrimitiveRef | null {
+  if (operation.kind === 'referenceImage') {
+    return createSketchOperationRef(sketchId, operation.operationId)
+  }
+
   const target = [
     ...(operation.targets.created ?? []),
     ...(operation.targets.edited ?? []),
     ...(operation.targets.removed ?? []),
   ].find((entry) =>
-    entry.kind === 'entity'
+    entry.kind === 'operation'
+    || entry.kind === 'entity'
     || entry.kind === 'point'
     || entry.kind === 'constraint'
     || entry.kind === 'dimension',
@@ -765,6 +786,8 @@ function getAuthoringOperationHistoryTarget(
   }
 
   switch (target.kind) {
+    case 'operation':
+      return createSketchOperationRef(sketchId, target.operationId)
     case 'point':
       return createSketchPointRef(sketchId, target.pointId)
     case 'entity':
@@ -919,8 +942,6 @@ function getEntityPointIds(entity: SketchEntityDefinition) {
       return entity.controlPointIds
     case 'profileText':
       return [entity.anchorPointId]
-    case 'imageReference':
-      return entity.cornerPointIds
   }
 }
 
@@ -1569,25 +1590,6 @@ function mapDefinitionEntityToDraftEntity(
       : []
   }
 
-  if (entity.kind === 'imageReference') {
-    const corners = entity.cornerPointIds.flatMap((pointId) => {
-      const point = pointById.get(pointId)
-      return point ? [point] : []
-    })
-    return corners.length === entity.cornerPointIds.length
-      ? [{
-          id: entity.entityId,
-          kind: 'polyline',
-          points: corners,
-          isClosed: true,
-          entityId: createSketchEntityRef(sketchId, entity.entityId).entityId,
-          status: 'accepted',
-          label: entity.label,
-          isConstruction: true,
-        }]
-      : []
-  }
-
   return []
 }
 
@@ -1649,18 +1651,6 @@ function createPointDefinition(
     target: createSketchPointRef(sketchId, pointId),
     position,
     isConstruction,
-  }
-}
-
-function createImagePinPointDefinition(
-  sketchId: SketchId,
-  pointId: SketchPointId,
-  label: string,
-  position: SketchPoint,
-): SketchPointDefinition {
-  return {
-    ...createPointDefinition(sketchId, pointId, label, position, true),
-    style: IMAGE_PIN_MARKER_STYLE,
   }
 }
 
@@ -1934,6 +1924,79 @@ function applySketchHistoryContribution(
   }
 }
 
+export function appendReferenceImageOperations(
+  session: SketchSessionState,
+  operations: readonly SketchAuthoringOperation[],
+): SketchSessionState {
+  if (operations.length === 0) {
+    return session
+  }
+
+  const history = applySketchHistoryContribution(session, {
+    points: [],
+    entities: [],
+    authoringOperation: operations[0]!,
+  })
+
+  let nextSession = rebuildSessionForDefinition(session, {
+    definition: history.definition,
+    fullDefinition: history.fullDefinition,
+    historyCursor: history.historyCursor,
+    historyOperations: history.historyOperations,
+  })
+
+  for (const operation of operations.slice(1)) {
+    const appended = applySketchHistoryContribution(nextSession, {
+      points: [],
+      entities: [],
+      authoringOperation: operation,
+    })
+    nextSession = rebuildSessionForDefinition(nextSession, {
+      definition: appended.definition,
+      fullDefinition: appended.fullDefinition,
+      historyCursor: appended.historyCursor,
+      historyOperations: appended.historyOperations,
+    })
+  }
+
+  return {
+    ...nextSession,
+    sequence: Math.max(
+      session.sequence,
+      ...operations.map((operation) => getHistorySequence(operation.operationId)),
+    ),
+  }
+}
+
+export function updateReferenceImageOperationStates(input: {
+  session: SketchSessionState
+  updates: ReadonlyArray<{
+    operationId: SketchAuthoringOperationId
+    state: ReferenceImageOperationState
+    label?: string
+  }>
+}): SketchSessionState {
+  if (input.updates.length === 0) {
+    return input.session
+  }
+
+  const activeOperationIds = new Set(
+    collectActiveReferenceImageOperations(input.session.definition).map(({ operation }) => operation.operationId),
+  )
+  const operations = input.updates.flatMap((update, index) =>
+    activeOperationIds.has(update.operationId)
+      ? [createReferenceImageEditOperation({
+        sequence: input.session.sequence + index + 1,
+        operationId: update.operationId,
+        state: update.state,
+        label: update.label,
+      })]
+      : [],
+  )
+
+  return appendReferenceImageOperations(input.session, operations)
+}
+
 export function moveSketchHistoryCursor(
   session: SketchSessionState,
   cursor: SketchHistoryCursor,
@@ -2000,6 +2063,7 @@ export function isEditableSketchGeometrySelection(
   targets: readonly PrimitiveRef[],
 ) {
   return getSelectedSketchGeometryIds(session, targets) !== null
+    || getSelectedReferenceImageOperationIds(session, targets).length > 0
 }
 
 export function getConnectedSketchEntitySelectionTargets(
@@ -2098,6 +2162,24 @@ function getSelectedSketchGeometryIds(
   return { pointIds, entityIds }
 }
 
+function getSelectedReferenceImageOperationIds(
+  session: SketchSessionState,
+  targets: readonly PrimitiveRef[],
+) {
+  const sketchId = getSessionSketchId(session)
+  const activeOperationIds = new Set(
+    collectActiveReferenceImageOperations(session.definition).map(({ operation }) => operation.operationId),
+  )
+
+  return targets.flatMap((target) =>
+    target.kind === 'sketchOperation'
+      && target.sketchId === sketchId
+      && activeOperationIds.has(target.operationId)
+      ? [target.operationId]
+      : [],
+  )
+}
+
 export function constraintReferencesSketchGeometry(
   constraint: ConstraintDefinition,
   deletedPointIds: ReadonlySet<SketchPointId>,
@@ -2118,8 +2200,6 @@ export function constraintReferencesSketchGeometry(
       return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
     case 'pointOnCurve':
       return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.curve.entityId)
-    case 'pointOnImage':
-      return deletedPointIds.has(constraint.pointId) || deletedEntityIds.has(constraint.imageEntityId)
     case 'normal':
       return (
         deletedPointIds.has(constraint.point.pointId) ||
@@ -2183,13 +2263,43 @@ export function deleteSelectedSketchGeometry(
   session: SketchSessionState,
   targets: readonly PrimitiveRef[],
 ): SketchSessionState {
-  const selected = getSelectedSketchGeometryIds(session, targets)
+  const selectedReferenceImageOperationIds = getSelectedReferenceImageOperationIds(session, targets)
+  let nextSession = session
 
-  if (!selected) {
-    return session
+  if (selectedReferenceImageOperationIds.length > 0) {
+    nextSession = appendReferenceImageOperations(nextSession, [
+      createReferenceImageDeleteOperation({
+        sequence: nextSession.sequence + 1,
+        removedOperationIds: selectedReferenceImageOperationIds,
+      }),
+    ])
+    nextSession = {
+      ...nextSession,
+      activeTool: null,
+      status: 'idle',
+      constructionTargetPicking: false,
+      referenceTargetPicking: false,
+      pointerDownPoint: null,
+      livePoint: null,
+      toolPlacedPoints: [],
+      toolSettings: {},
+      toolPresentation: null,
+      constraintAuthoring: null,
+      activeEditTool: null,
+      activeStyleFocus: null,
+      activeSnap: null,
+      drawStartSnap: null,
+      sequence: nextSession.sequence + 1,
+    }
   }
 
-  const beforeDefinition = cloneDefinition(session.definition)
+  const selected = getSelectedSketchGeometryIds(nextSession, targets)
+
+  if (!selected) {
+    return nextSession
+  }
+
+  const beforeDefinition = cloneDefinition(nextSession.definition)
   const deletedEntityIds = new Set(selected.entityIds)
   for (const entity of beforeDefinition.entities) {
     if (getEntityPointIds(entity).some((pointId) => selected.pointIds.has(pointId))) {
@@ -2214,7 +2324,7 @@ export function deleteSelectedSketchGeometry(
   const remainingConstraintIds = new Set(constraints.map((constraint) => constraint.constraintId))
   const remainingDimensionIds = new Set(dimensions.map((dimension) => dimension.dimensionId))
   const deleteOperation = createDeleteAuthoringOperation({
-    sequence: session.sequence + 1,
+    sequence: nextSession.sequence + 1,
     removedGraph: {
       points: beforeDefinition.points.filter((point) => deletedPointIds.has(point.pointId)),
       entities: beforeDefinition.entities.filter((entity) => deletedEntityIds.has(entity.entityId)),
@@ -2239,19 +2349,19 @@ export function deleteSelectedSketchGeometry(
   }
   const operation: SketchHistoryOperation = {
     itemId: deleteOperation.operationId,
-    beforeCursor: session.historyCursor,
+    beforeCursor: nextSession.historyCursor,
     beforeDefinition,
     afterDefinition,
   }
 
   return {
-    ...rebuildSessionForDefinition(session, {
+    ...rebuildSessionForDefinition(nextSession, {
       definition: afterDefinition,
       fullDefinition: afterDefinition,
       historyCursor: { kind: 'item', itemId: operation.itemId },
       historyOperations: [
-        ...session.historyOperations.filter((entry) =>
-          !sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
+        ...nextSession.historyOperations.filter((entry) =>
+          !sketchHistoryCursorsEqual(entry.beforeCursor, nextSession.historyCursor),
         ),
         operation,
       ],
@@ -2270,7 +2380,7 @@ export function deleteSelectedSketchGeometry(
     activeStyleFocus: null,
     activeSnap: null,
     drawStartSnap: null,
-    sequence: session.sequence + 1,
+    sequence: nextSession.sequence + 1,
   }
 }
 
@@ -2536,6 +2646,8 @@ function getTargetKey(target: PrimitiveRef) {
       return target.dimensionId
     case 'sketch':
       return target.sketchId
+    case 'sketchOperation':
+      return target.operationId
     case 'body':
       return target.bodyId
     case 'face':
@@ -4907,8 +5019,6 @@ function getConstraintDedupeKey(constraint: ConstraintDefinition): string {
       return `${constraint.kind}:${constraint.point.pointId}:${constraint.line.entityId}`
     case 'pointOnCurve':
       return `${constraint.kind}:${constraint.point.pointId}:${constraint.curve.entityId}`
-    case 'pointOnImage':
-      return `${constraint.kind}:${constraint.pointId}:${constraint.imageEntityId}:${constraint.u}:${constraint.v}`
     case 'fixPoint':
       return `${constraint.kind}:${constraint.pointId}:${constraint.position.join(':')}`
     case 'angle':
@@ -4936,154 +5046,7 @@ function getConstraintDedupeKey(constraint: ConstraintDefinition): string {
   }
 }
 
-function subtractSketchPoints(left: SketchPoint, right: SketchPoint): SketchPoint {
-  return [left[0] - right[0], left[1] - right[1]]
-}
-
-function addSketchPoints(left: SketchPoint, right: SketchPoint): SketchPoint {
-  return [left[0] + right[0], left[1] + right[1]]
-}
-
-function scaleSketchPoint(point: SketchPoint, factor: number): SketchPoint {
-  return [point[0] * factor, point[1] * factor]
-}
-
-function dotSketchPoints(left: SketchPoint, right: SketchPoint) {
-  return left[0] * right[0] + left[1] * right[1]
-}
-
-function triangleContainsPoint(
-  point: SketchPoint,
-  a: SketchPoint,
-  b: SketchPoint,
-  c: SketchPoint,
-) {
-  const signedArea = (left: SketchPoint, right: SketchPoint, candidate: SketchPoint) =>
-    (left[0] - candidate[0]) * (right[1] - candidate[1]) - (right[0] - candidate[0]) * (left[1] - candidate[1])
-
-  const d1 = signedArea(point, a, b)
-  const d2 = signedArea(point, b, c)
-  const d3 = signedArea(point, c, a)
-  const hasNegative = d1 < -1e-9 || d2 < -1e-9 || d3 < -1e-9
-  const hasPositive = d1 > 1e-9 || d2 > 1e-9 || d3 > 1e-9
-  return !(hasNegative && hasPositive)
-}
-
-function findImagePinPlacement(
-  definition: SketchDefinition,
-  point: SketchPoint,
-): { imageEntityId: SketchEntityId; u: number; v: number } | null {
-  const pointById = new Map(definition.points.map((entry) => [entry.pointId, entry.position] as const))
-  const imageEntities = definition.entities.filter(
-    (entity): entity is Extract<SketchDefinition['entities'][number], { kind: 'imageReference' }> => entity.kind === 'imageReference',
-  )
-
-  for (let index = imageEntities.length - 1; index >= 0; index -= 1) {
-    const imageEntity = imageEntities[index]!
-    const corners = imageEntity.cornerPointIds.flatMap((pointId) => {
-      const position = pointById.get(pointId)
-      return position ? [position] : []
-    })
-    if (corners.length !== imageEntity.cornerPointIds.length) {
-      continue
-    }
-
-    const [topLeft, topRight, bottomRight, bottomLeft] = corners
-    if (
-      !triangleContainsPoint(point, topLeft!, topRight!, bottomRight!)
-      && !triangleContainsPoint(point, topLeft!, bottomRight!, bottomLeft!)
-    ) {
-      continue
-    }
-
-    const topVector = subtractSketchPoints(topRight!, topLeft!)
-    const leftVector = subtractSketchPoints(bottomLeft!, topLeft!)
-    const relative = subtractSketchPoints(point, topLeft!)
-    const topLengthSquared = dotSketchPoints(topVector, topVector)
-    const leftLengthSquared = dotSketchPoints(leftVector, leftVector)
-    if (topLengthSquared <= 1e-9 || leftLengthSquared <= 1e-9) {
-      continue
-    }
-
-    const u = Math.min(Math.max(dotSketchPoints(relative, topVector) / topLengthSquared, 0), 1)
-    const v = Math.min(Math.max(dotSketchPoints(relative, leftVector) / leftLengthSquared, 0), 1)
-    const projected = addSketchPoints(
-      topLeft!,
-      addSketchPoints(scaleSketchPoint(topVector, u), scaleSketchPoint(leftVector, v)),
-    )
-    if (Math.hypot(projected[0] - point[0], projected[1] - point[1]) > 1e-3) {
-      continue
-    }
-
-    return {
-      imageEntityId: imageEntity.entityId,
-      u,
-      v,
-    }
-  }
-
-  return null
-}
-
 export function startSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {
-  if (session.activeTool === 'anchorPoint') {
-    const pinPlacement = findImagePinPlacement(session.definition, point)
-    if (!pinPlacement) {
-      return session
-    }
-
-    const nextSequence = session.sequence + 1
-    const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
-    const pointId = createPointId(nextSequence, 'image_pin')
-    const constraintId = createConstraintId(nextSequence, 'point_on_image')
-    const contribution = {
-      points: [createImagePinPointDefinition(sketchId, pointId, `Image pin ${nextSequence}`, point)],
-      entities: [],
-      constraints: [{
-        constraintId,
-        kind: 'pointOnImage',
-        label: `Image pin ${nextSequence}`,
-        pointId,
-        imageEntityId: pinPlacement.imageEntityId,
-        u: pinPlacement.u,
-        v: pinPlacement.v,
-      } satisfies ConstraintDefinition],
-    }
-    const history = applySketchHistoryContribution(session, {
-      ...contribution,
-      authoringOperation: createAuthoringOperationFromContribution(contribution, {
-        sequence: nextSequence,
-        kind: 'point',
-        label: `Image pin ${nextSequence}`,
-        suffix: 'image-pin',
-      }),
-    })
-
-    return {
-      ...session,
-      definition: history.definition,
-      fullDefinition: history.fullDefinition,
-      historyCursor: history.historyCursor,
-      historyOperations: history.historyOperations,
-      sequence: nextSequence,
-      commitRequest: buildCommitRequest({
-        sketchId: session.sketchId,
-        sketchLabel: session.sketchLabel,
-        plane: session.plane,
-        planeTarget: session.planeTarget,
-        planeKey: session.planeKey,
-        definition: history.definition,
-      }),
-      solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
-      validationMessage: null,
-      activeAnnotationEdit: null,
-      selectedAnnotation: null,
-      activeDrag: null,
-      activeSnap: null,
-      drawStartSnap: null,
-    }
-  }
-
   if (!isDrawingSketchTool(session.activeTool)) {
     return session
   }
@@ -6980,7 +6943,6 @@ function getConstraintGlyphKind(constraint: ConstraintDefinition): SketchAnnotat
       return 'constraintSymmetric'
     case 'pointOnProjectedCurve':
     case 'pointOnCurve':
-    case 'pointOnImage':
       return 'constraintPierce'
     case 'coincidentProjectedPoint':
       return 'constraintCoincident'
@@ -7056,11 +7018,6 @@ function getConstraintAffectedGeometryRefs(
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
         createSketchEntityRef(sketchId, constraint.curve.entityId),
-      ]
-    case 'pointOnImage':
-      return [
-        createSketchPointRef(sketchId, constraint.pointId),
-        createSketchEntityRef(sketchId, constraint.imageEntityId),
       ]
     case 'normal':
       return [
@@ -7198,11 +7155,6 @@ function createConstraintAnnotationAnchor(
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
         getEntityAnchor(definition, constraint.curve.entityId),
-      ].filter((point): point is SketchPoint => point !== null)))
-    case 'pointOnImage':
-      return createOffsetAnnotationAnchor(getAverageSketchPoint([
-        getPointPosition(definition, constraint.pointId),
-        getEntityAnchor(definition, constraint.imageEntityId),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'normal':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
@@ -7906,8 +7858,6 @@ function getEntityAnchor(definition: SketchDefinition, entityId: SketchEntityId)
       return getAveragePointPosition(definition, entity.controlPointIds)
     case 'profileText':
       return getPointPosition(definition, entity.anchorPointId)
-    case 'imageReference':
-      return getAveragePointPosition(definition, entity.cornerPointIds)
   }
 }
 
@@ -7940,8 +7890,6 @@ function getEntityAnchorPointId(
       return entity.controlPointIds[0] ?? null
     case 'profileText':
       return entity.anchorPointId
-    case 'imageReference':
-      return entity.cornerPointIds[0] ?? null
   }
 }
 
@@ -7972,96 +7920,8 @@ function sampleSplinePoints(points: readonly SketchPoint[]): SketchPoint[] {
   })
 }
 
-export function sketchSessionHasImageReference(session: SketchSessionState): boolean {
-  return session.definition.entities.some((entity) => entity.kind === 'imageReference')
-}
-
-function isPointPinnedToImage(definition: SketchDefinition, pointId: SketchPointId) {
-  return definition.constraints.some((constraint) =>
-    constraint.kind === 'pointOnImage' && constraint.pointId === pointId,
-  )
-}
-
-function isImageCornerPoint(definition: SketchDefinition, pointId: SketchPointId) {
-  return definition.entities.some((entity) =>
-    entity.kind === 'imageReference' && entity.cornerPointIds.includes(pointId),
-  )
-}
-
-function getImageReferenceExtentByEntityId(definition: SketchDefinition) {
-  const pointById = new Map(definition.points.map((point) => [point.pointId, point.position] as const))
-  const extentByEntityId = new Map<SketchEntityId, number>()
-
-  for (const entity of definition.entities) {
-    if (entity.kind !== 'imageReference') {
-      continue
-    }
-
-    const corners = entity.cornerPointIds.map((pointId) => pointById.get(pointId)).filter((point): point is SketchPoint => point !== undefined)
-    if (corners.length !== entity.cornerPointIds.length) {
-      continue
-    }
-
-    let minX = Number.POSITIVE_INFINITY
-    let maxX = Number.NEGATIVE_INFINITY
-    let minY = Number.POSITIVE_INFINITY
-    let maxY = Number.NEGATIVE_INFINITY
-
-    for (const [x, y] of corners) {
-      minX = Math.min(minX, x)
-      maxX = Math.max(maxX, x)
-      minY = Math.min(minY, y)
-      maxY = Math.max(maxY, y)
-    }
-
-    extentByEntityId.set(entity.entityId, Math.max(maxX - minX, maxY - minY))
-  }
-
-  return extentByEntityId
-}
-
-function getImageBackedPointMarkerRadius(input: {
-  imagePinned: boolean
-  imageCorner: boolean
-  pointId: SketchPointId
-  definition: SketchDefinition
-  imageExtentByEntityId: ReadonlyMap<SketchEntityId, number>
-}) {
-  const defaultRadius = input.imagePinned ? 0.2 : input.imageCorner ? 0.22 : 0.16
-  if (!input.imagePinned && !input.imageCorner) {
-    return defaultRadius
-  }
-
-  const associatedImageExtent = definitionImageExtentForPoint(input)
-  if (associatedImageExtent === null) {
-    return defaultRadius
-  }
-
-  const scaledRadius = associatedImageExtent * (input.imageCorner ? 0.014 : 0.012)
-  return Math.min(Math.max(scaledRadius, defaultRadius), 5)
-}
-
-function definitionImageExtentForPoint(input: {
-  pointId: SketchPointId
-  definition: SketchDefinition
-  imageExtentByEntityId: ReadonlyMap<SketchEntityId, number>
-}) {
-  const imageConstraint = input.definition.constraints.find(
-    (constraint): constraint is Extract<ConstraintDefinition, { kind: 'pointOnImage' }> =>
-      constraint.kind === 'pointOnImage' && constraint.pointId === input.pointId,
-  )
-  if (imageConstraint) {
-    return input.imageExtentByEntityId.get(imageConstraint.imageEntityId) ?? null
-  }
-
-  const imageEntity = input.definition.entities.find((entity) =>
-    entity.kind === 'imageReference' && entity.cornerPointIds.includes(input.pointId),
-  )
-  if (!imageEntity) {
-    return null
-  }
-
-  return input.imageExtentByEntityId.get(imageEntity.entityId) ?? null
+export function sketchSessionHasReferenceImage(session: SketchSessionState): boolean {
+  return collectActiveReferenceImageOperations(session.definition).length > 0
 }
 
 export function getSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
@@ -8088,18 +7948,8 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       ? [withSketchConstraintDisplay(renderable, constraintDisplaySummary)]
       : []
   })
-  const imageExtentByEntityId = getImageReferenceExtentByEntityId(displayDefinition)
   const pointRenderables = displayDefinition.points.map((point) => {
     const style = pointStyleLookup.get(point.pointId)
-    const imagePinned = isPointPinnedToImage(displayDefinition, point.pointId)
-    const imageCorner = isImageCornerPoint(displayDefinition, point.pointId)
-    const displayRadius = getImageBackedPointMarkerRadius({
-      imagePinned,
-      imageCorner,
-      pointId: point.pointId,
-      definition: displayDefinition,
-      imageExtentByEntityId,
-    })
 
     return withSketchConstraintDisplay({
       id: `renderable_sketch_point_${point.pointId}` as RenderableId,
@@ -8108,37 +7958,16 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       geometry: {
         kind: 'marker' as const,
         position: mapSketchPointToWorld(session.plane, point.position),
-        displayRadius,
+        displayRadius: 0.16,
       },
       linePattern: 'solid' as const,
       role: 'local' as const,
-      paintStyle: style?.paintStyle ?? (
-        imagePinned
-          ? { color: workbenchSketchPointColors.imagePinFill.hex, opacity: 0.55 }
-          : imageCorner
-            ? { color: workbenchSketchPointColors.imageCornerFill.hex, opacity: 0.7 }
-            : undefined
-      ),
-      strokeStyle: style?.strokeStyle ?? (
-        imagePinned
-          ? { color: workbenchSketchPointColors.imagePinStroke.hex, opacity: 0.95, width: 1.5 }
-          : imageCorner
-            ? { color: workbenchSketchPointColors.imageCornerStroke.hex, opacity: 0.9, width: 1.5 }
-            : undefined
-      ),
+      paintStyle: style?.paintStyle,
+      strokeStyle: style?.strokeStyle,
     }, constraintDisplaySummary)
   })
-  const imageReferenceRenderables = displayDefinition.entities.flatMap((entity, index) =>
-    entity.kind === 'imageReference'
-      ? [withSketchConstraintDisplay(
-          createDisplayRenderableForImageReferenceEntity(
-            session,
-            entity,
-            index,
-          ),
-          constraintDisplaySummary,
-        )]
-      : [],
+  const referenceImageRenderables = collectActiveReferenceImageOperations(displayDefinition).map(({ operation, state }, index) =>
+    createDisplayRenderableForReferenceImageOperation(session, operation, state, index),
   )
   const entityRenderables = deriveSketchDisplayEntities(session).map((entity, index) =>
     withSketchConstraintDisplay(
@@ -8154,8 +7983,8 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
 
   return [
     ...regionRenderables,
+    ...referenceImageRenderables,
     ...pointRenderables,
-    ...imageReferenceRenderables,
     ...entityRenderables,
     ...entityRenderables.flatMap(createOverconstraintDiagnosticRenderable),
     ...displayDefinition.references.flatMap((reference, index) => {
@@ -8471,25 +8300,21 @@ function createDisplayRenderableForEntity(
   }
 }
 
-function createDisplayRenderableForImageReferenceEntity(
+function createDisplayRenderableForReferenceImageOperation(
   session: SketchSessionState,
-  entity: Extract<SketchDefinition['entities'][number], { kind: 'imageReference' }>,
+  operation: SketchAuthoringOperation,
+  state: NonNullable<SketchAuthoringOperation['ownedState']>,
   index: number,
 ): SketchSessionDisplayRenderable {
-  const pointById = new Map(session.definition.points.map((point) => [point.pointId, point.position] as const))
-  const corners = entity.cornerPointIds.map((pointId) => {
-    const position = pointById.get(pointId)
-    if (!position) {
-      throw new Error(`Image reference ${entity.entityId} is missing corner point ${pointId}.`)
-    }
-
-    return mapSketchPointToWorld(session.plane, position)
-  })
+  const corners = getReferenceImageCornerPoints(state).map((point) => mapSketchPointToWorld(session.plane, point))
 
   return {
-    id: `renderable_sketch_image_reference_${index}` as RenderableId,
-    label: entity.label,
-    target: createSketchEntityRef(session.sketchId ?? ('sketch_draft' as SketchId), entity.entityId),
+    id: `renderable_sketch_reference_image_${index}` as RenderableId,
+    label: operation.label,
+    target: createReferenceImageOperationTarget(
+      session.sketchId ?? ('sketch_draft' as SketchId),
+      operation.operationId,
+    ),
     geometry: {
       kind: 'mesh',
       vertexPositions: corners,
@@ -8500,8 +8325,13 @@ function createDisplayRenderableForImageReferenceEntity(
     role: 'local',
     semanticClass: 'sketchImage',
     textureFill: {
-      kind: 'embeddedImage',
-      embeddedBinaryId: entity.embeddedBinaryId,
+      kind: 'inlineImage',
+      sourceKey: createReferenceImageTextureSourceKey({
+        operationId: operation.operationId,
+        state,
+      }),
+      mediaType: state.image.mediaType,
+      base64Data: state.image.base64Data,
       uvCoordinates: [
         [0, 1],
         [1, 1],
@@ -9031,8 +8861,6 @@ function describeConstraint(constraint: ConstraintDefinition) {
       return 'Point at projected midpoint'
     case 'pointOnCurve':
       return 'Point on curve'
-    case 'pointOnImage':
-      return 'Point pinned to image'
     case 'coincidentProjectedPoint':
       return 'Coincident projected point'
     case 'pointOnProjectedCurve':

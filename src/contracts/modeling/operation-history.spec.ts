@@ -409,6 +409,62 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     )
   }
 
+  function testCompactHistoryPreservesReferenceImageOperations() {
+    const committedSketchId = 'sketch_committed'
+    const draftDefinition = createDraftSketchDefinition('sketch_draft')
+    const definitionWithReferenceImage: CommitSketchRequest['definition'] = {
+      ...draftDefinition,
+      authoringOperations: [
+        {
+          operationId: 'sketch_operation_1_reference-image',
+          label: 'Reference image 1',
+          kind: 'referenceImage',
+          targets: {
+            created: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+          },
+          ownedState: {
+            kind: 'referenceImage',
+            image: {
+              mediaType: 'image/png',
+              fileName: 'reference.png',
+              pixelWidth: 640,
+              pixelHeight: 480,
+              base64Data: 'cG5n',
+            },
+            placement: {
+              center: [0, 0],
+              width: 200,
+              height: 150,
+              rotationRadians: 0,
+            },
+          },
+        },
+        {
+          operationId: 'sketch_operation_2_delete',
+          label: 'Delete 2',
+          kind: 'delete',
+          targets: {
+            removed: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+          },
+        },
+      ],
+    }
+
+    const compactEntry = createCommitSketchHistoryEntry({
+      ...commitSketchRequest,
+      sketchId: null,
+      definition: definitionWithReferenceImage,
+    }, committedSketchId, { includeAuthoringOperations: false })
+
+    assert(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve reference-image commit entries.')
+    assert(compactEntry.payload.definition.authoringOperations?.length === 2, 'Compact commit history should retain reference-image operations and their deletes.')
+    assert(
+      compactEntry.payload.definition.authoringOperations?.[0]?.kind === 'referenceImage'
+        && compactEntry.payload.definition.authoringOperations?.[1]?.targets.removed?.[0]?.kind === 'operation',
+      'Compact commit history should preserve operation-owned image state and operation-target deletes.',
+    )
+  }
+
   function testAcceptsLegacyDraftCommitSketchTargets() {
     const result = validateOperationHistoryPayload({
       ...createEmptyOperationHistory('doc_workspace'),
@@ -1243,6 +1299,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
   testRejectsInvalidGenericDeleteEntries()
   testNormalizesCommittedCommitSketchTargets()
   testCanCompactCommitSketchAuthoringOperations()
+  testCompactHistoryPreservesReferenceImageOperations()
   testAcceptsLegacyDraftCommitSketchTargets()
   testRejectsUnsupportedVersion()
   testRejectsTransportMetadataLeak()

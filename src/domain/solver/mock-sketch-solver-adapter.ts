@@ -674,8 +674,6 @@ function solvedGeometryForEntity(
           }
         : null
     }
-    case 'imageReference':
-      return null
   }
 }
 

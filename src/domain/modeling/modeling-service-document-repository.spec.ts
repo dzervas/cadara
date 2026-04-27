@@ -717,6 +717,174 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     releaseMutate?.()
   }
 
+  async function testReferenceImageOperationsPersistAcrossRepositoryRestore() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const sourceSketch = snapshot.sketches[0]
+
+    assert(sourceSketch, 'Seed sketch should exist for reference-image persistence coverage.')
+    const committed = await unwrapModelingResult(service.commitSketch({
+      baseRevisionId: snapshot.revisionId,
+      sketchId: 'sketch_reference_image',
+      sketchLabel: 'Reference Image Sketch',
+      plane: sourceSketch.plane,
+      planeTarget: sourceSketch.planeTarget,
+      planeKey: sourceSketch.planeKey,
+      solverCorrelation: {
+        requestId: 'request_reference_image_persist',
+        projectionRequestId: 'request_reference_image_persist:project',
+        validationRequestId: 'request_reference_image_persist:validate',
+        solveRequestId: 'request_reference_image_persist:solve',
+        regionRequestId: 'request_reference_image_persist:regions',
+      },
+      definition: {
+        schemaVersion: SKETCH_SCHEMA_VERSION,
+        referenceIds: [],
+        references: [],
+        pointIds: [],
+        points: [],
+        entityIds: [],
+        entities: [],
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+        authoringOperations: [
+          {
+            operationId: 'sketch_operation_1_reference-image',
+            label: 'reference.png',
+            kind: 'referenceImage',
+            targets: {
+              created: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+            },
+            ownedState: {
+              kind: 'referenceImage',
+              image: {
+                mediaType: 'image/png',
+                fileName: 'reference.png',
+                pixelWidth: 640,
+                pixelHeight: 480,
+                base64Data: 'cG5n',
+              },
+              placement: {
+                center: [0, 0],
+                width: 200,
+                height: 150,
+                rotationRadians: 0,
+              },
+            },
+          },
+          {
+            operationId: 'sketch_operation_2_edit-reference-image',
+            label: 'reference-updated.png',
+            kind: 'edit',
+            targets: {
+              edited: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+            },
+            ownedState: {
+              kind: 'referenceImage',
+              image: {
+                mediaType: 'image/png',
+                fileName: 'reference-updated.png',
+                pixelWidth: 800,
+                pixelHeight: 600,
+                base64Data: 'dXBkYXRlZA==',
+              },
+              placement: {
+                center: [16, -8],
+                width: 240,
+                height: 180,
+                rotationRadians: 0.35,
+              },
+            },
+          },
+        ],
+      },
+    }))
+
+    assert(committed.revisionState.kind === 'accepted', 'Reference-image sketch commits should be accepted.')
+    const persisted = documentRepository.savedDocuments.at(-1)
+    const persistedSketch = persisted?.sketches.find((sketch) => sketch.sketchId === 'sketch_reference_image')
+    const expectedReferenceImageOperations = [
+      {
+        operationId: 'sketch_operation_1_reference-image',
+        label: 'reference.png',
+        kind: 'referenceImage',
+        targets: {
+          created: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+        },
+        ownedState: {
+          kind: 'referenceImage',
+          image: {
+            mediaType: 'image/png',
+            fileName: 'reference.png',
+            pixelWidth: 640,
+            pixelHeight: 480,
+            base64Data: 'cG5n',
+          },
+          placement: {
+            center: [0, 0],
+            width: 200,
+            height: 150,
+            rotationRadians: 0,
+          },
+        },
+      },
+      {
+        operationId: 'sketch_operation_2_edit-reference-image',
+        label: 'reference-updated.png',
+        kind: 'edit',
+        targets: {
+          edited: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+        },
+        ownedState: {
+          kind: 'referenceImage',
+          image: {
+            mediaType: 'image/png',
+            fileName: 'reference-updated.png',
+            pixelWidth: 800,
+            pixelHeight: 600,
+            base64Data: 'dXBkYXRlZA==',
+          },
+          placement: {
+            center: [16, -8],
+            width: 240,
+            height: 180,
+            rotationRadians: 0.35,
+          },
+        },
+      },
+    ]
+
+    assert(persistedSketch, 'Persisted authored documents should include committed reference-image sketches.')
+    assert(persistedSketch.definition.points.length === 0, 'Persisted reference-image sketches should not materialize sketch points.')
+    assert(persistedSketch.definition.entities.length === 0, 'Persisted reference-image sketches should not materialize sketch entities.')
+    assert(
+      JSON.stringify(persistedSketch.definition.authoringOperations) === JSON.stringify(expectedReferenceImageOperations),
+      'Persisted authored documents should keep the full inline reference-image operation payloads, including edit rows.',
+    )
+
+    const restoredRepository = createMemoryDocumentRepository(persisted ? [persisted] : [])
+    const restoredService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository: restoredRepository,
+    })
+    const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
+    const restoredSketch = restoredSnapshot.sketches.find((sketch) => sketch.sketchId === 'sketch_reference_image')
+
+    assert(restoredSketch, 'Repository restore should reopen committed reference-image sketches.')
+    assert(restoredSketch.sketch.definition.points.length === 0, 'Restored reference-image sketches should still avoid local points.')
+    assert(restoredSketch.sketch.definition.entities.length === 0, 'Restored reference-image sketches should still avoid local entities.')
+    assert(
+      JSON.stringify(restoredSketch.sketch.definition.authoringOperations) === JSON.stringify(expectedReferenceImageOperations),
+      'Repository restore should preserve the full inline reference-image operation payloads, including edit rows.',
+    )
+  }
+
   async function testBackgroundRepositoryPersistenceAdvancesFallbackTail() {
     const documentRepository = createMemoryDocumentRepository()
     const mutate = documentRepository.mutate.bind(documentRepository)
@@ -1106,6 +1274,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testRestoredRepositoryRestoreReplaysRepositoryBasedOperationHistoryFallback()
   await testBackgroundRepositoryPersistenceDoesNotBlockAcceptedMutation()
   await testBackgroundSketchCommitCompactsFallbackAuthoringOperations()
+  await testReferenceImageOperationsPersistAcrossRepositoryRestore()
   await testBackgroundRepositoryPersistenceAdvancesFallbackTail()
   await testLocalRepositoryHeadAdvancesDoNotConflictWithCurrentRevisionMutation()
   await testMigrationWriteFailureResetsSeededRepositoryForRetry()

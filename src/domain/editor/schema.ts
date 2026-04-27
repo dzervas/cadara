@@ -56,6 +56,7 @@ export type SelectionSemantic =
   | 'vertex'
   | 'constructionPlane'
   | 'existingSketch'
+  | 'sketchOperation'
   | 'regionProfile'
   | 'sketchEntity'
   | 'sketchPoint'
@@ -124,7 +125,7 @@ export interface CommandPreview {
 
 export const defaultSelectionFilter: SelectionFilter = {
   kind: 'all',
-  allowedKinds: ['body', 'face', 'edge', 'vertex', 'loop', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'feature', 'construction', 'region'],
+  allowedKinds: ['body', 'face', 'edge', 'vertex', 'loop', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'feature', 'construction', 'region'],
   label: 'All selectable geometry',
   requirements: [
     {
@@ -136,7 +137,7 @@ export const defaultSelectionFilter: SelectionFilter = {
           id: 'general-selection',
           label: 'General selection',
           description: 'Select any single durable target.',
-          acceptedKinds: ['body', 'face', 'edge', 'vertex', 'loop', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'feature', 'construction', 'region'],
+          acceptedKinds: ['body', 'face', 'edge', 'vertex', 'loop', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'feature', 'construction', 'region'],
           acceptedSemantics: [
             'body',
             'face',
@@ -144,6 +145,7 @@ export const defaultSelectionFilter: SelectionFilter = {
             'vertex',
             'constructionPlane',
             'existingSketch',
+            'sketchOperation',
             'sketchEntity',
             'sketchPoint',
             'constraintAnnotation',
@@ -158,7 +160,7 @@ export const defaultSelectionFilter: SelectionFilter = {
 
 export const sketchSelectionFilter: SelectionFilter = {
   kind: 'sketchSession',
-  allowedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
+  allowedKinds: ['construction', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
   label: 'Sketch references',
   requirements: [
     {
@@ -170,8 +172,8 @@ export const sketchSelectionFilter: SelectionFilter = {
           id: 'sketch-reference',
           label: 'Sketch reference',
           description: 'Select the sketch plane, sketch, or sketch primitive.',
-          acceptedKinds: ['construction', 'sketch', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
-          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchExternalReference', 'regionProfile'],
+          acceptedKinds: ['construction', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
+          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchExternalReference', 'regionProfile'],
         },
       ],
     },
@@ -861,6 +863,8 @@ export function getPrimitiveRefLabel(target: PrimitiveRef) {
       return `${target.bodyId}.${target.loopId}`
     case 'sketch':
       return target.sketchId
+    case 'sketchOperation':
+      return `${target.sketchId}.${target.operationId}`
     case 'sketchEntity':
       return `${target.sketchId}.${target.entityId}`
     case 'sketchPoint':
@@ -896,6 +900,8 @@ export function getPrimitiveRefKey(target: PrimitiveRef) {
       return `loop:${target.bodyId}:${target.loopId}`
     case 'sketch':
       return `sketch:${target.sketchId}`
+    case 'sketchOperation':
+      return `sketchOperation:${target.sketchId}:${target.operationId}`
     case 'sketchEntity':
       return `sketchEntity:${target.sketchId}:${target.entityId}`
     case 'sketchPoint':
@@ -987,7 +993,8 @@ function getTargetSemantics(
   const targetKey = getPrimitiveRefKey(target)
 
   const allowSessionOwnedTarget =
-    target.kind === 'sketchEntity'
+    target.kind === 'sketchOperation'
+    || target.kind === 'sketchEntity'
     || target.kind === 'sketchPoint'
     || target.kind === 'constraint'
     || target.kind === 'dimension'
@@ -1027,6 +1034,9 @@ function getTargetSemantics(
       if (catalog && catalog.existingSketchKeys.includes(targetKey)) {
         semantics.push('existingSketch')
       }
+      break
+    case 'sketchOperation':
+      semantics.push('sketchOperation')
       break
     case 'region':
       semantics.push('regionProfile')

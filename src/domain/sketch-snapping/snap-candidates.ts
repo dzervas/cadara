@@ -231,7 +231,6 @@ export function collectSketchSnapGeometries(input: {
       case 'conic':
       case 'bezierCurve':
       case 'profileText':
-      case 'imageReference':
         return []
     }
   })

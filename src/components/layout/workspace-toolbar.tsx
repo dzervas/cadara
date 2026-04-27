@@ -18,7 +18,6 @@ import {
   getActiveSketchStyleToolId,
   isSketchSvgRenderingEnabled,
   isSketchConstructionSelected,
-  sketchSessionHasImageReference,
 } from '@/domain/editor/sketch-session'
 import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
@@ -71,6 +70,7 @@ export function WorkspaceToolbar({
     (tool.id === 'undo' && !visibleHistory.canUndo)
     || (tool.id === 'redo' && !visibleHistory.canRedo)
     || (tool.id === 'import' && (activeEditSession !== null || activeImportSession !== null))
+    || (tool.id === 'importImage' && sketchSession === null)
     || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
 
   const renderTool = (tool: RegisteredToolDefinition) => {
@@ -79,10 +79,6 @@ export function WorkspaceToolbar({
     }
 
     if (tool.id === 'finishSketch' && !hasActiveSketchSession) {
-      return null
-    }
-
-    if (tool.id === 'anchorPoint' && (!sketchSession || !sketchSessionHasImageReference(sketchSession))) {
       return null
     }
 

@@ -144,6 +144,58 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     )
   }
 
+  function testSketchBvhKeyDoesNotEmbedInlineImagePayloads() {
+    const renderable = {
+      id: 'renderable_sketch_reference_image_0',
+      label: 'Reference image',
+      geometry: {
+        kind: 'mesh',
+        vertexPositions: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [1, 1, 0],
+          [0, 1, 0],
+        ],
+        vertexNormals: [
+          [0, 0, 1],
+          [0, 0, 1],
+          [0, 0, 1],
+          [0, 0, 1],
+        ],
+        triangleIndices: [[0, 1, 2], [0, 2, 3]],
+      },
+      target: { kind: 'sketchOperation', sketchId: 'sketch_primary', operationId: 'sketch_operation_1_reference-image' },
+      linePattern: 'solid',
+      role: 'local',
+      semanticClass: 'sketchImage',
+      textureFill: {
+        kind: 'inlineImage',
+        sourceKey: 'sketch_operation_1_reference-image:image/png:reference.png:640x480',
+        mediaType: 'image/png',
+        base64Data: 'cG5n',
+        uvCoordinates: [
+          [0, 1],
+          [1, 1],
+          [1, 0],
+          [0, 0],
+        ],
+        opacity: 0.55,
+      },
+    } as const
+    const changedPayloadRenderable = {
+      ...renderable,
+      textureFill: {
+        ...renderable.textureFill,
+        base64Data: 'dXBkYXRlZA==',
+      },
+    } as const
+
+    assert(
+      createViewportBvhSceneKey([], [renderable]) === createViewportBvhSceneKey([], [changedPayloadRenderable]),
+      'Sketch BVH keys should stay independent from inline image payload bytes.',
+    )
+  }
+
   function testProjectionBridgeResolvesKnownTarget() {
     const root = new THREE.Group()
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
@@ -486,6 +538,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
   testDragMovesCoalesceToLatestPoint()
   testDragMoveCancellationDropsPendingFrame()
   testSketchBvhKeyIgnoresPositionalPolylineUpdates()
+  testSketchBvhKeyDoesNotEmbedInlineImagePayloads()
   testProjectionBridgeResolvesKnownTarget()
   testWorldPointProjectionMapsViewportCoordinates()
   testSectionScreenDragOffsetTracksProjectedNormalMotion()

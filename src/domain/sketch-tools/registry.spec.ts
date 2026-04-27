@@ -41,7 +41,6 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(
       JSON.stringify(registeredToolIds) === JSON.stringify([
         'alignedRectangle',
-        'anchorPoint',
         'bezierCurve',
         'centerPointArc',
         'centerPointRectangle',
@@ -126,9 +125,11 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(sketchDrawingSection?.toolIds.includes('ellipse'), 'Sketch toolbar should include an advanced curve family trigger.')
     assert(sketchDrawingSection?.toolIds.includes('inscribedPolygon'), 'Sketch toolbar should include a polygon family trigger.')
     assert(sketchDrawingSection?.toolIds.includes('profileText'), 'Sketch toolbar should include profile text.')
+    assert(!sketchDrawingSection?.toolIds.includes('anchorPoint'), 'Sketch toolbar should no longer expose the legacy image pin tool.')
     assert(
       getToolbarSectionsForMode('sketch').some((section) =>
         section.id === 'sketchOps'
+        && section.toolIds.includes('importImage')
         && section.toolIds.includes('sketchFillet')
         && section.toolIds.includes('sketchChamfer')
         && section.toolIds.includes('sketchExtend')

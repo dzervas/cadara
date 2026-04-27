@@ -43,6 +43,7 @@ type DurableRefKindsAreCanonical = Assert<
     | 'vertex'
     | 'loop'
     | 'sketch'
+    | 'sketchOperation'
     | 'sketchEntity'
     | 'sketchPoint'
     | 'constraint'

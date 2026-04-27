@@ -136,6 +136,29 @@ function normalizeCommitSketchDefinitionForSketchId(
         })),
       }
     : undefined
+  const normalizeAuthoringOperation = (
+    operation: NonNullable<CommitSketchRequest['definition']['authoringOperations']>[number],
+  ) => {
+    const { createdGraph, removedGraph, ...rest } = operation
+    const normalizedCreatedGraph = normalizeOperationGraph(createdGraph)
+    const normalizedRemovedGraph = normalizeOperationGraph(removedGraph)
+
+    return {
+      ...rest,
+      ...(normalizedCreatedGraph ? { createdGraph: normalizedCreatedGraph } : {}),
+      ...(normalizedRemovedGraph ? { removedGraph: normalizedRemovedGraph } : {}),
+    }
+  }
+  const shouldPersistCompactAuthoringOperation = (
+    operation: NonNullable<CommitSketchRequest['definition']['authoringOperations']>[number],
+  ) => operation.kind === 'referenceImage'
+    || (operation.kind === 'edit' && operation.ownedState?.kind === 'referenceImage')
+    || operation.targets.created?.some((target) => target.kind === 'operation') === true
+    || operation.targets.edited?.some((target) => target.kind === 'operation') === true
+    || operation.targets.removed?.some((target) => target.kind === 'operation') === true
+  const compactAuthoringOperations = definition.authoringOperations
+    ?.filter(shouldPersistCompactAuthoringOperation)
+    .map(normalizeAuthoringOperation)
 
   return {
     ...definition,
@@ -154,18 +177,10 @@ function normalizeCommitSketchDefinitionForSketchId(
       },
     })),
     authoringOperations: includeAuthoringOperations
-      ? definition.authoringOperations?.map((operation) => {
-          const { createdGraph, removedGraph, ...rest } = operation
-          const normalizedCreatedGraph = normalizeOperationGraph(createdGraph)
-          const normalizedRemovedGraph = normalizeOperationGraph(removedGraph)
-
-          return {
-            ...rest,
-            ...(normalizedCreatedGraph ? { createdGraph: normalizedCreatedGraph } : {}),
-            ...(normalizedRemovedGraph ? { removedGraph: normalizedRemovedGraph } : {}),
-          }
-        })
-      : undefined,
+      ? definition.authoringOperations?.map(normalizeAuthoringOperation)
+      : compactAuthoringOperations && compactAuthoringOperations.length > 0
+        ? compactAuthoringOperations
+        : undefined,
   }
 }
 

@@ -246,7 +246,6 @@ function getCurveDescriptor(
     case 'conic':
     case 'bezierCurve':
     case 'profileText':
-    case 'imageReference':
       return null
   }
 }
@@ -2028,7 +2027,6 @@ function getPointIdsForSupportedDerivedEntity(entity: SketchEntityDefinition): r
     case 'conic':
     case 'bezierCurve':
     case 'profileText':
-    case 'imageReference':
       return null
   }
 }

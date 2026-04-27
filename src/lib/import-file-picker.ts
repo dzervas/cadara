@@ -20,11 +20,14 @@ export interface ImportFilePickerEnvironment extends LocalFileSystemPickerEnviro
 }
 
 export type ImportFilePickerResult =
-  | { ok: true; file: File }
+  | { ok: true; files: readonly File[] }
   | Extract<LocalFilePickerResult, { ok: false }>
 
 export function buildImportFilePickerConfiguration(
   acceptedFileTypes: readonly AcceptedImportFileType[],
+  options: {
+    multiple?: boolean
+  } = {},
 ): ImportFilePickerConfiguration {
   const normalized = normalizeAcceptedFileTypes(acceptedFileTypes)
   const accept = normalized.reduce<Record<string, string[]>>((result, entry) => {
@@ -46,7 +49,7 @@ export function buildImportFilePickerConfiguration(
 
   return {
     openPickerOptions: {
-      multiple: false,
+      multiple: (options.multiple ?? false) as false,
       excludeAcceptAllOption: false,
       types: [{
         description: 'Supported import files',
@@ -59,21 +62,21 @@ export function buildImportFilePickerConfiguration(
 
 export async function showOpenImportFilePicker(input: {
   acceptedFileTypes: readonly AcceptedImportFileType[]
+  multiple?: boolean
   environment?: ImportFilePickerEnvironment
 }): Promise<ImportFilePickerResult> {
   const environment: ImportFilePickerEnvironment = input.environment ?? (globalThis as unknown as ImportFilePickerEnvironment)
-  const config = buildImportFilePickerConfiguration(input.acceptedFileTypes)
+  const config = buildImportFilePickerConfiguration(input.acceptedFileTypes, { multiple: input.multiple })
   const support = getLocalFileSystemOpenSupport(environment)
 
   if (support.supported) {
     try {
       const handles = await environment.showOpenFilePicker!(config.openPickerOptions)
-      const handle = handles[0]
-      if (!handle) {
+      if (handles.length === 0) {
         return { ok: false, reason: 'cancelled' }
       }
 
-      return { ok: true, file: await handle.getFile() }
+      return { ok: true, files: await Promise.all(handles.map((handle) => handle.getFile())) }
     } catch (error: unknown) {
       return isAbortError(error)
         ? { ok: false, reason: 'cancelled' }
@@ -89,7 +92,7 @@ export async function showOpenImportFilePicker(input: {
     const inputElement = environment.document!.createElement('input')
     inputElement.type = 'file'
     inputElement.accept = config.inputAccept
-    inputElement.multiple = false
+    inputElement.multiple = input.multiple ?? false
     inputElement.style.display = 'none'
 
     const cleanup = () => {
@@ -99,9 +102,9 @@ export async function showOpenImportFilePicker(input: {
     }
 
     const handleChange = () => {
-      const file = inputElement.files?.[0] ?? null
+      const files = inputElement.files ? [...inputElement.files] : []
       cleanup()
-      resolve(file ? { ok: true, file } : { ok: false, reason: 'cancelled' })
+      resolve(files.length > 0 ? { ok: true, files } : { ok: false, reason: 'cancelled' })
     }
 
     const handleCancel = () => {

@@ -15,10 +15,12 @@ import type {
   SketchStyleRecord,
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
+import { referenceImageOperationStateSchema } from '@/contracts/reference-image/runtime-schema'
 import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 import {
   durableRefSchema,
   sketchEntityRefSchema,
+  sketchOperationRefSchema,
   sketchPointRefSchema,
   sketchRefSchema,
 } from '@/contracts/shared/references.runtime-schema'
@@ -232,23 +234,6 @@ const sketchEntityDefinitionSchema = z.discriminatedUnion('kind', [
     verticalAlign: z.union([z.literal('baseline'), z.literal('middle'), z.literal('top'), z.literal('bottom')]),
     style: sketchStyleDefinitionSchema.optional(),
   }),
-  z.object({
-    kind: z.literal('imageReference'),
-    entityId: sketchEntityIdSchema,
-    label: z.string(),
-    target: sketchEntityRefSchema,
-    isConstruction: z.literal(true),
-    cornerPointIds: z.tuple([
-      sketchPointIdSchema,
-      sketchPointIdSchema,
-      sketchPointIdSchema,
-      sketchPointIdSchema,
-    ]),
-    embeddedBinaryId: z.string().trim().min(1, 'Image reference asset ID must not be empty.'),
-    pixelWidth: positiveNumberSchema('Image reference pixel width must be positive.'),
-    pixelHeight: positiveNumberSchema('Image reference pixel height must be positive.'),
-    style: sketchStyleDefinitionSchema.optional(),
-  }),
 ]).transform((value) => value as SketchEntityDefinition)
 
 const localSketchPointConstraintOperandSchema = z.object({
@@ -363,15 +348,6 @@ const constraintDefinitionSchema = z.discriminatedUnion('kind', [
     label: z.string(),
     point: localSketchPointConstraintOperandSchema,
     curve: localSketchEntityConstraintOperandSchema,
-  }),
-  z.object({
-    constraintId: constraintIdSchema,
-    kind: z.literal('pointOnImage'),
-    label: z.string(),
-    pointId: sketchPointIdSchema,
-    imageEntityId: sketchEntityIdSchema,
-    u: z.number().min(0).max(1),
-    v: z.number().min(0).max(1),
   }),
   z.object({
     constraintId: constraintIdSchema,
@@ -651,6 +627,10 @@ const sketchAuthoringOperationMemberRefSchema = z.discriminatedUnion('kind', [
     entityId: sketchEntityIdSchema,
   }),
   z.object({
+    kind: z.literal('operation'),
+    operationId: sketchOperationRefSchema.shape.operationId,
+  }),
+  z.object({
     kind: z.literal('constraint'),
     constraintId: constraintIdSchema,
   }),
@@ -681,6 +661,7 @@ const sketchAuthoringOperationSchema = z.object({
   operationId: sketchAuthoringOperationIdSchema,
   label: z.string(),
   kind: z.union([
+    z.literal('referenceImage'),
     z.literal('point'),
     z.literal('line'),
     z.literal('midpointLine'),
@@ -717,8 +698,23 @@ const sketchAuthoringOperationSchema = z.object({
   }),
   createdGraph: sketchAuthoringOperationGraphSchema.optional(),
   removedGraph: sketchAuthoringOperationGraphSchema.optional(),
-}).transform(({ createdGraph, removedGraph, ...value }) => {
-  const operation: Omit<SketchAuthoringOperation, 'createdGraph' | 'removedGraph'> & Partial<Pick<SketchAuthoringOperation, 'createdGraph' | 'removedGraph'>> = value
+  ownedState: referenceImageOperationStateSchema.optional(),
+}).superRefine((value, context) => {
+  const editsOperationTarget = value.targets.edited?.some((target) => target.kind === 'operation') === true
+  const allowsOwnedState =
+    value.kind === 'referenceImage'
+    || (value.kind === 'edit' && editsOperationTarget)
+
+  if (!allowsOwnedState && value.ownedState !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ownedState'],
+      message: 'Only referenceImage creation rows and edit rows targeting operations may persist operation-owned state.',
+    })
+  }
+}).transform(({ createdGraph, removedGraph, ownedState, ...value }) => {
+  const operation: Omit<SketchAuthoringOperation, 'createdGraph' | 'removedGraph' | 'ownedState'>
+    & Partial<Pick<SketchAuthoringOperation, 'createdGraph' | 'removedGraph' | 'ownedState'>> = value
 
   if (createdGraph) {
     operation.createdGraph = createdGraph
@@ -726,6 +722,10 @@ const sketchAuthoringOperationSchema = z.object({
 
   if (removedGraph) {
     operation.removedGraph = removedGraph
+  }
+
+  if (ownedState) {
+    operation.ownedState = ownedState
   }
 
   return operation as SketchAuthoringOperation

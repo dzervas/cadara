@@ -539,7 +539,6 @@ function projectSketchEntityGeometry(input: {
     case 'conic':
     case 'bezierCurve':
     case 'profileText':
-    case 'imageReference':
       return null
   }
 }

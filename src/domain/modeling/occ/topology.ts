@@ -128,6 +128,8 @@ export function getOccDurableRefKey(target: DurableRef) {
       return `loop:${target.bodyId}:${target.loopId}`
     case 'sketch':
       return `sketch:${target.sketchId}`
+    case 'sketchOperation':
+      return `sketchOperation:${target.sketchId}:${target.operationId}`
     case 'sketchEntity':
       return `sketchEntity:${target.sketchId}:${target.entityId}`
     case 'sketchPoint':
@@ -159,6 +161,8 @@ function getDurableRefLabel(target: DurableRef) {
       return `${target.bodyId}.${target.loopId}`
     case 'sketch':
       return target.sketchId
+    case 'sketchOperation':
+      return `${target.sketchId}.${target.operationId}`
     case 'sketchEntity':
       return `${target.sketchId}.${target.entityId}`
     case 'sketchPoint':
