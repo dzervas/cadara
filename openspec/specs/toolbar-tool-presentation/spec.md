@@ -33,6 +33,18 @@ The system MUST render toolbar tooltips with the tool name as a distinct heading
 - **THEN** the tooltip shows the trigger tool name as the title
 - **AND** the tooltip shows the descriptive copy beneath it using the same layout as standard toolbar buttons
 
+### Requirement: Toolbar SHALL present tools with icons and tooltips
+The toolbar SHALL display tool icons with descriptive tooltips. The import tool group SHALL contain a single generic `import` tool available in part mode.
+
+#### Scenario: Import tool visible in part mode
+- **WHEN** the toolbar renders in part mode
+- **THEN** an import button is visible in the import tool group
+- **AND** the tooltip describes generic file import, not a specific format
+
+#### Scenario: Import tool hidden in sketch mode
+- **WHEN** the toolbar renders in sketch mode
+- **THEN** the import button is not visible
+
 ### Requirement: Toolbar tool foreground SHALL remain visible in sketch mode
 The system SHALL render toolbar tool icons and foreground affordances with sufficient contrast against the dark workbench shell in both part mode and sketch mode.
 
@@ -72,4 +84,3 @@ The toolbar SHALL present SVG/style controls with active and disabled states tha
 #### Scenario: SVG style variants are not toolbar tools
 - **WHEN** the user is editing a sketch
 - **THEN** the sketch toolbar does not show separate fill type, fill solid, fill gradient, stroke options, stroke width, stroke cap, stroke join, stroke miter, or stroke dash tools
-

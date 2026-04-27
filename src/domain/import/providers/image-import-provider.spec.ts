@@ -99,13 +99,16 @@ test('src/domain/import/providers/image-import-provider.spec.ts', async () => {
   assert(prepared.commitSketches?.length === 1, 'Prepare should return one sketch commit request.')
   const commit = prepared.commitSketches?.[0]
   assert(commit?.definition.points.length === 4, 'Prepared sketch should contain four image corner points.')
-  assert(commit?.definition.constraints.length === 0, 'Prepared sketch should leave image corners unconstrained so sketch geometry can drive them.')
+  assert(commit?.definition.constraints.length === 7, 'Prepared sketch should add structural image constraints with one free scale degree of freedom.')
   const entity = commit?.definition.entities[0]
   assert(entity?.kind === 'imageReference', 'Prepared sketch should contain an image reference entity.')
   assert(entity?.cornerPointIds.length === 4, 'Prepared image reference should preserve four corner point IDs.')
   assert(entity?.embeddedBinaryId === 'asset_embedded_image_reference', 'Prepare should persist the embedded binary and reuse its durable asset ID.')
   assert(commit?.sketchLabel === 'reference', 'Prepared sketch label should derive from the source name without the extension.')
   assert(prepared.binding?.kind === 'localFile', 'Prepare should preserve a local-file import binding for refresh.')
+  assert(commit?.definition.entities.filter((candidate) => candidate.kind === 'lineSegment').length === 4, 'Prepared sketch should create four construction edge entities for the image quad.')
+  assert(commit?.definition.entities.filter((candidate) => candidate.kind === 'lineSegment' && candidate.isConstruction).length === 4, 'Image edge entities should all be construction geometry.')
+  assert(commit?.definition.constraints.filter((constraint) => constraint.kind === 'fixPoint').length === 1, 'Prepared sketch should anchor exactly one image corner with a fix-point constraint.')
 
   const corners = commit?.definition.points.map((point) => point.position) ?? []
   assert(

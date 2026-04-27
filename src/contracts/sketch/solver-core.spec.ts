@@ -82,6 +82,29 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     }
   }
 
+  function makeImageReference(
+    entityId: string,
+    label: string,
+    cornerPointIds: readonly [string, string, string, string],
+  ) {
+    return {
+      kind: 'imageReference' as const,
+      entityId: entityId as `sketch_entity_${string}`,
+      label,
+      target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: entityId as `sketch_entity_${string}` } as const,
+      isConstruction: true,
+      cornerPointIds: cornerPointIds as readonly [
+        `sketch_point_${string}`,
+        `sketch_point_${string}`,
+        `sketch_point_${string}`,
+        `sketch_point_${string}`,
+      ],
+      embeddedBinaryId: 'asset_image_reference',
+      pixelWidth: 100,
+      pixelHeight: 100,
+    }
+  }
+
   function cloneValues(values: Float64Array) {
     return new Float64Array(values)
   }
@@ -791,6 +814,310 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     assertGradientMatchesFiniteDifference(definition, 'constraint_perpendicular', 1e-6)
   }
 
+  async function testPointOnImageGradient() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_tl', 'sketch_point_tr', 'sketch_point_br', 'sketch_point_bl', 'sketch_point_pin'],
+      points: [
+        makePoint('sketch_point_tl', 'TL', 0, 1),
+        makePoint('sketch_point_tr', 'TR', 2, 1),
+        makePoint('sketch_point_br', 'BR', 2, -1),
+        makePoint('sketch_point_bl', 'BL', 0, -1),
+        makePoint('sketch_point_pin', 'Pin', 0.8, 0.7),
+      ],
+      entityIds: ['sketch_entity_image'],
+      entities: [
+        makeImageReference('sketch_entity_image', 'Image', [
+          'sketch_point_tl',
+          'sketch_point_tr',
+          'sketch_point_br',
+          'sketch_point_bl',
+        ]),
+      ],
+      constraintIds: ['constraint_point_on_image'],
+      constraints: [{
+        constraintId: 'constraint_point_on_image',
+        kind: 'pointOnImage',
+        label: 'Pin on image',
+        pointId: 'sketch_point_pin',
+        imageEntityId: 'sketch_entity_image',
+        u: 0.25,
+        v: 0.75,
+      }],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    assertGradientMatchesFiniteDifference(definition, 'constraint_point_on_image', 1e-6)
+  }
+
+  async function testPointOnImageSolvesPinnedLocations() {
+    const baseDefinition: Omit<SketchDefinition, 'constraintIds' | 'constraints'> = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_tl', 'sketch_point_tr', 'sketch_point_br', 'sketch_point_bl', 'sketch_point_pin'],
+      points: [
+        makePoint('sketch_point_tl', 'TL', 0, 1),
+        makePoint('sketch_point_tr', 'TR', 1, 1),
+        makePoint('sketch_point_br', 'BR', 1, 0),
+        makePoint('sketch_point_bl', 'BL', 0, 0),
+        makePoint('sketch_point_pin', 'Pin', 0.9, 0.1),
+      ],
+      entityIds: ['sketch_entity_image'],
+      entities: [
+        makeImageReference('sketch_entity_image', 'Image', [
+          'sketch_point_tl',
+          'sketch_point_tr',
+          'sketch_point_br',
+          'sketch_point_bl',
+        ]),
+      ],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const fixedCorners = [
+      {
+        constraintId: 'constraint_fix_tl' as const,
+        kind: 'fixPoint' as const,
+        label: 'Fix TL',
+        pointId: 'sketch_point_tl' as const,
+        position: [0, 1] as const,
+      },
+      {
+        constraintId: 'constraint_fix_tr' as const,
+        kind: 'fixPoint' as const,
+        label: 'Fix TR',
+        pointId: 'sketch_point_tr' as const,
+        position: [1, 1] as const,
+      },
+      {
+        constraintId: 'constraint_fix_br' as const,
+        kind: 'fixPoint' as const,
+        label: 'Fix BR',
+        pointId: 'sketch_point_br' as const,
+        position: [1, 0] as const,
+      },
+      {
+        constraintId: 'constraint_fix_bl' as const,
+        kind: 'fixPoint' as const,
+        label: 'Fix BL',
+        pointId: 'sketch_point_bl' as const,
+        position: [0, 0] as const,
+      },
+    ]
+
+    const centerSolved = solveSketchDefinitionCore({
+      definition: {
+        ...baseDefinition,
+        constraintIds: [
+          ...fixedCorners.map((constraint) => constraint.constraintId),
+          'constraint_pin_center',
+        ],
+        constraints: [
+          ...fixedCorners,
+          {
+            constraintId: 'constraint_pin_center',
+            kind: 'pointOnImage',
+            label: 'Pin center',
+            pointId: 'sketch_point_pin',
+            imageEntityId: 'sketch_entity_image',
+            u: 0.5,
+            v: 0.5,
+          },
+        ],
+      },
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const centerPoint = centerSolved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_pin')
+    assert(centerPoint, 'Point-on-image center solve should produce the pinned point.')
+    assertClose(centerPoint.solvedPosition[0], 0.5, 1e-4, 'Point-on-image should solve center x.')
+    assertClose(centerPoint.solvedPosition[1], 0.5, 1e-4, 'Point-on-image should solve center y.')
+
+    const topLeftSolved = solveSketchDefinitionCore({
+      definition: {
+        ...baseDefinition,
+        constraintIds: [
+          ...fixedCorners.map((constraint) => constraint.constraintId),
+          'constraint_pin_top_left',
+        ],
+        constraints: [
+          ...fixedCorners,
+          {
+            constraintId: 'constraint_pin_top_left',
+            kind: 'pointOnImage',
+            label: 'Pin top left',
+            pointId: 'sketch_point_pin',
+            imageEntityId: 'sketch_entity_image',
+            u: 0,
+            v: 0,
+          },
+        ],
+      },
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const topLeftPoint = topLeftSolved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_pin')
+    assert(topLeftPoint, 'Point-on-image corner solve should produce the pinned point.')
+    assertClose(topLeftPoint.solvedPosition[0], 0, 1e-4, 'Point-on-image should solve top-left x.')
+    assertClose(topLeftPoint.solvedPosition[1], 1, 1e-4, 'Point-on-image should solve top-left y.')
+  }
+
+  async function testPointOnImageDimensionScalesImage() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_tl',
+        'sketch_point_tr',
+        'sketch_point_br',
+        'sketch_point_bl',
+        'sketch_point_pin_a',
+        'sketch_point_pin_b',
+      ],
+      points: [
+        makePoint('sketch_point_tl', 'TL', 0, 1),
+        makePoint('sketch_point_tr', 'TR', 1, 1),
+        makePoint('sketch_point_br', 'BR', 1, 0),
+        makePoint('sketch_point_bl', 'BL', 0, 0),
+        makePoint('sketch_point_pin_a', 'Pin A', 0.25, 0.5),
+        makePoint('sketch_point_pin_b', 'Pin B', 0.75, 0.5),
+      ],
+      entityIds: [
+        'sketch_entity_image',
+        'sketch_entity_top',
+        'sketch_entity_right',
+        'sketch_entity_bottom',
+        'sketch_entity_left',
+        'sketch_entity_pin_line',
+      ],
+      entities: [
+        makeImageReference('sketch_entity_image', 'Image', [
+          'sketch_point_tl',
+          'sketch_point_tr',
+          'sketch_point_br',
+          'sketch_point_bl',
+        ]),
+        makeLine('sketch_entity_top', 'Top', 'sketch_point_tl', 'sketch_point_tr'),
+        makeLine('sketch_entity_right', 'Right', 'sketch_point_tr', 'sketch_point_br'),
+        makeLine('sketch_entity_bottom', 'Bottom', 'sketch_point_br', 'sketch_point_bl'),
+        makeLine('sketch_entity_left', 'Left', 'sketch_point_bl', 'sketch_point_tl'),
+        makeLine('sketch_entity_pin_line', 'Pin line', 'sketch_point_pin_a', 'sketch_point_pin_b'),
+      ],
+      constraintIds: [
+        'constraint_fix_tl',
+        'constraint_horizontal_top',
+        'constraint_parallel_top_bottom',
+        'constraint_parallel_left_right',
+        'constraint_perpendicular_top_left',
+        'constraint_equal_top_bottom',
+        'constraint_equal_left_right',
+        'constraint_pin_a',
+        'constraint_pin_b',
+      ],
+      constraints: [
+        {
+          constraintId: 'constraint_fix_tl',
+          kind: 'fixPoint',
+          label: 'Fix TL',
+          pointId: 'sketch_point_tl',
+          position: [0, 1],
+        },
+        {
+          constraintId: 'constraint_horizontal_top',
+          kind: 'horizontal',
+          label: 'Horizontal top',
+          entityId: 'sketch_entity_top',
+        },
+        {
+          constraintId: 'constraint_parallel_top_bottom',
+          kind: 'parallel',
+          label: 'Top/bottom parallel',
+          entityIds: ['sketch_entity_top', 'sketch_entity_bottom'],
+        },
+        {
+          constraintId: 'constraint_parallel_left_right',
+          kind: 'parallel',
+          label: 'Left/right parallel',
+          entityIds: ['sketch_entity_left', 'sketch_entity_right'],
+        },
+        {
+          constraintId: 'constraint_perpendicular_top_left',
+          kind: 'perpendicular',
+          label: 'Top/left perpendicular',
+          entityIds: ['sketch_entity_top', 'sketch_entity_left'],
+        },
+        {
+          constraintId: 'constraint_equal_top_bottom',
+          kind: 'equalLength',
+          label: 'Top/bottom equal',
+          entityIds: ['sketch_entity_top', 'sketch_entity_bottom'],
+        },
+        {
+          constraintId: 'constraint_equal_left_right',
+          kind: 'equalLength',
+          label: 'Left/right equal',
+          entityIds: ['sketch_entity_left', 'sketch_entity_right'],
+        },
+        {
+          constraintId: 'constraint_pin_a',
+          kind: 'pointOnImage',
+          label: 'Pin A',
+          pointId: 'sketch_point_pin_a',
+          imageEntityId: 'sketch_entity_image',
+          u: 0.25,
+          v: 0.5,
+        },
+        {
+          constraintId: 'constraint_pin_b',
+          kind: 'pointOnImage',
+          label: 'Pin B',
+          pointId: 'sketch_point_pin_b',
+          imageEntityId: 'sketch_entity_image',
+          u: 0.75,
+          v: 0.5,
+        },
+      ],
+      dimensionIds: ['dimension_pin_line'],
+      dimensions: [{
+        dimensionId: 'dimension_pin_line',
+        kind: 'lineLength',
+        label: 'Pin line length',
+        entityId: 'sketch_entity_pin_line',
+        value: 2,
+      }],
+    }
+
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const points = new Map(solved.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
+    const topLeft = points.get('sketch_point_tl')
+    const topRight = points.get('sketch_point_tr')
+    const pinA = points.get('sketch_point_pin_a')
+    const pinB = points.get('sketch_point_pin_b')
+    assert(topLeft && topRight && pinA && pinB, 'Image scaling solve should produce corner and pin points.')
+    assertClose(
+      Math.hypot(pinB[0] - pinA[0], pinB[1] - pinA[1]),
+      2,
+      1e-3,
+      'Dimension between image pins should solve to the requested value.',
+    )
+    assertClose(
+      Math.hypot(topRight[0] - topLeft[0], topRight[1] - topLeft[1]),
+      4,
+      1e-2,
+      'Dimension between two image pins should scale the image corners.',
+    )
+  }
+
   async function testArcStartPointCoincident() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -1347,6 +1674,9 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     await testEqualLength()
     await testParallelLines()
     await testPerpendicularLines()
+    await testPointOnImageGradient()
+    await testPointOnImageSolvesPinnedLocations()
+    await testPointOnImageDimensionScalesImage()
     await testArcStartPointCoincident()
     await testArcEndPointCoincident()
     await testAxisAlignedRectangle()

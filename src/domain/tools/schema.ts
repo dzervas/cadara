@@ -3,6 +3,7 @@ export type ToolbarMode = 'part' | 'sketch'
 export type ToolSource = 'toolbar' | 'dropdown' | 'search' | 'shortcut'
 
 export type ToolIconId =
+  | 'anchorPoint'
   | 'undo'
   | 'redo'
   | 'sketch'

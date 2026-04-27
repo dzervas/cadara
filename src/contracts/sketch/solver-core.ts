@@ -198,6 +198,10 @@ function add(left: SketchPoint2D, right: SketchPoint2D): SketchPoint2D {
   return [left[0] + right[0], left[1] + right[1]]
 }
 
+function scale(point: SketchPoint2D, factor: number): SketchPoint2D {
+  return [point[0] * factor, point[1] * factor]
+}
+
 function length(point: SketchPoint2D) {
   return Math.hypot(point[0], point[1])
 }
@@ -208,6 +212,33 @@ function dot2(left: SketchPoint2D, right: SketchPoint2D) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
+}
+
+function bilinearInterpolatePoint(
+  topLeft: SketchPoint2D,
+  topRight: SketchPoint2D,
+  bottomRight: SketchPoint2D,
+  bottomLeft: SketchPoint2D,
+  u: number,
+  v: number,
+) {
+  const topLeftWeight = (1 - u) * (1 - v)
+  const topRightWeight = u * (1 - v)
+  const bottomRightWeight = u * v
+  const bottomLeftWeight = (1 - u) * v
+
+  return {
+    point: add(
+      add(scale(topLeft, topLeftWeight), scale(topRight, topRightWeight)),
+      add(scale(bottomRight, bottomRightWeight), scale(bottomLeft, bottomLeftWeight)),
+    ),
+    weights: {
+      topLeft: topLeftWeight,
+      topRight: topRightWeight,
+      bottomRight: bottomRightWeight,
+      bottomLeft: bottomLeftWeight,
+    },
+  }
 }
 
 function addPointGradient(
@@ -714,6 +745,9 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       .filter((entity): entity is Extract<SketchEntityDefinition, { kind: 'lineSegment' }> => entity.kind === 'lineSegment')
       .map((entity) => [entity.entityId, entity]),
   )
+  const entityMap = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity] as const),
+  )
   const arcEntityMap = new Map(
     definition.entities
       .filter((entity): entity is Extract<SketchEntityDefinition, { kind: 'arc' }> => entity.kind === 'arc')
@@ -1192,6 +1226,67 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           return pointOnLocalCurveResidual(values, point, curve)
         },
       }))
+      continue
+    }
+
+    if (constraint.kind === 'pointOnImage') {
+      const point = pointRecords.get(constraint.pointId)
+      const imageEntity = entityMap.get(constraint.imageEntityId)
+      if (!point || !imageEntity || imageEntity.kind !== 'imageReference') {
+        continue
+      }
+
+      const topLeft = pointRecords.get(imageEntity.cornerPointIds[0])
+      const topRight = pointRecords.get(imageEntity.cornerPointIds[1])
+      const bottomRight = pointRecords.get(imageEntity.cornerPointIds[2])
+      const bottomLeft = pointRecords.get(imageEntity.cornerPointIds[3])
+      if (!topLeft || !topRight || !bottomRight || !bottomLeft) {
+        continue
+      }
+
+      scalarConstraints.push({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        evaluate(values) {
+          const gradient = zeroVector(parameterCount)
+          const actual = getPoint(values, point)
+          const interpolated = bilinearInterpolatePoint(
+            getPoint(values, topLeft),
+            getPoint(values, topRight),
+            getPoint(values, bottomRight),
+            getPoint(values, bottomLeft),
+            constraint.u,
+            constraint.v,
+          )
+          const delta = subtract(actual, interpolated.point)
+          addPointGradient(gradient, point, delta[0], delta[1])
+          addPointGradient(
+            gradient,
+            topLeft,
+            -interpolated.weights.topLeft * delta[0],
+            -interpolated.weights.topLeft * delta[1],
+          )
+          addPointGradient(
+            gradient,
+            topRight,
+            -interpolated.weights.topRight * delta[0],
+            -interpolated.weights.topRight * delta[1],
+          )
+          addPointGradient(
+            gradient,
+            bottomRight,
+            -interpolated.weights.bottomRight * delta[0],
+            -interpolated.weights.bottomRight * delta[1],
+          )
+          addPointGradient(
+            gradient,
+            bottomLeft,
+            -interpolated.weights.bottomLeft * delta[0],
+            -interpolated.weights.bottomLeft * delta[1],
+          )
+          return { residual: 0.5 * (delta[0] * delta[0] + delta[1] * delta[1]), gradient }
+        },
+      })
       continue
     }
 
@@ -2206,6 +2301,19 @@ function validateDefinition(
         }
         break
       }
+      case 'pointOnImage': {
+        const imageEntity = entityMap.get(constraint.imageEntityId)
+        if (!pointMap.has(constraint.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-point-on-image-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (!imageEntity || imageEntity.kind !== 'imageReference') {
+          diagnostics.push(makeDiagnostic('invalid-point-on-image-target', 'error', `Constraint ${constraint.constraintId} must reference an image reference entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (constraint.u < 0 || constraint.u > 1 || constraint.v < 0 || constraint.v > 1) {
+          diagnostics.push(makeDiagnostic('invalid-point-on-image-coordinates', 'error', `Constraint ${constraint.constraintId} requires normalized coordinates in the range [0, 1].`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
       case 'pointOnProjectedCurve':
         if (!pointMap.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-point-on-projected-curve-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
@@ -3002,6 +3110,12 @@ function buildConstraintStatuses(
       status = point && entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc' || entity.kind === 'spline')
         ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
+    } else if (constraint.kind === 'pointOnImage') {
+      const point = pointRecords.get(constraint.pointId)
+      const imageEntity = definition.entities.find((candidate) => candidate.entityId === constraint.imageEntityId)
+      status = point && imageEntity?.kind === 'imageReference'
+        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
     } else if (constraint.kind === 'coincidentProjectedPoint') {
       const point = pointRecords.get(constraint.point.pointId)
       const projected = findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
@@ -3281,6 +3395,15 @@ function collectTranslationComponent(
           connectPoints(graph, [
             constraint.point.pointId,
             ...(entity ? getEntityPoints(entity) : []),
+          ])
+        }
+        break
+      case 'pointOnImage':
+        {
+          const imageEntity = definition.entities.find((candidate) => candidate.entityId === constraint.imageEntityId)
+          connectPoints(graph, [
+            constraint.pointId,
+            ...(imageEntity?.kind === 'imageReference' ? imageEntity.cornerPointIds : []),
           ])
         }
         break

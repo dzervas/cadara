@@ -366,6 +366,15 @@ const constraintDefinitionSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     constraintId: constraintIdSchema,
+    kind: z.literal('pointOnImage'),
+    label: z.string(),
+    pointId: sketchPointIdSchema,
+    imageEntityId: sketchEntityIdSchema,
+    u: z.number().min(0).max(1),
+    v: z.number().min(0).max(1),
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
     kind: z.literal('parallelProjectedLine'),
     label: z.string(),
     line: localSketchEntityConstraintOperandSchema,

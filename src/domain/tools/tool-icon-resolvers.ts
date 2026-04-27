@@ -106,6 +106,7 @@ function getSketchOperationToolIcon(kind: NonNullable<SketchDefinition['authorin
     case 'point':
     case 'construction':
     case 'reference':
+    case 'anchorPoint':
     case 'inscribedPolygon':
     case 'circumscribedPolygon':
     case 'operation':
@@ -159,6 +160,7 @@ function getSketchConstraintToolIcon(constraint: ConstraintDefinition): ToolIcon
     case 'normal':
     case 'normalProjectedCurve':
       return 'constraintNormal'
+    case 'pointOnImage':
     case 'pointOnCurve':
     case 'pointOnProjectedCurve':
       return 'constraintPierce'

@@ -321,7 +321,7 @@ const toolbarSections = [
     label: 'Draw',
     align: 'center',
     modes: ['sketch'],
-    toolIds: ['point', 'line', 'rectangle', 'circle', 'centerPointArc', 'ellipse', 'inscribedPolygon', 'spline', 'profileText'],
+    toolIds: ['anchorPoint', 'point', 'line', 'rectangle', 'circle', 'centerPointArc', 'ellipse', 'inscribedPolygon', 'spline', 'profileText'],
   },
   {
     id: 'constraints',

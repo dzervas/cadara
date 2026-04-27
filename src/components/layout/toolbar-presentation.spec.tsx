@@ -85,6 +85,7 @@ test('tool icon assets stay centralized outside toolbar, sidebar, and history co
   }
 
   const expectedCurrentToolbarAssets: typeof toolIconAssetFileNames = {
+    anchorPoint: 'sketch-anchor-point.svg',
     undo: 'undo.svg',
     redo: 'redo.svg',
     sketch: 'new-sketch.svg',

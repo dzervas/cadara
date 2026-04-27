@@ -18,6 +18,7 @@ import {
   getActiveSketchStyleToolId,
   isSketchSvgRenderingEnabled,
   isSketchConstructionSelected,
+  sketchSessionHasImageReference,
 } from '@/domain/editor/sketch-session'
 import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
@@ -78,6 +79,10 @@ export function WorkspaceToolbar({
     }
 
     if (tool.id === 'finishSketch' && !hasActiveSketchSession) {
+      return null
+    }
+
+    if (tool.id === 'anchorPoint' && (!sketchSession || !sketchSessionHasImageReference(sketchSession))) {
       return null
     }
 

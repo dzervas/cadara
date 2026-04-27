@@ -20,6 +20,12 @@ import { createStandardPlaneDefinition, deriveStandardPlaneKeyFromConstructionId
 
 const DEFAULT_IMAGE_EXTENT = 200
 const IMAGE_ENTITY_ID = 'sketch_entity_image_reference'
+const IMAGE_EDGE_ENTITY_IDS = [
+  'sketch_entity_image_reference_edge_top',
+  'sketch_entity_image_reference_edge_right',
+  'sketch_entity_image_reference_edge_bottom',
+  'sketch_entity_image_reference_edge_left',
+] as const
 const IMAGE_POINT_IDS = [
   'sketch_point_image_reference_tl',
   'sketch_point_image_reference_tr',
@@ -309,6 +315,10 @@ function createImageReferenceSketchDefinition(input: {
     sketchId: input.sketchId,
     pointId,
   }))
+  const topEdgeId = IMAGE_EDGE_ENTITY_IDS[0]
+  const rightEdgeId = IMAGE_EDGE_ENTITY_IDS[1]
+  const bottomEdgeId = IMAGE_EDGE_ENTITY_IDS[2]
+  const leftEdgeId = IMAGE_EDGE_ENTITY_IDS[3]
 
   return {
     schemaVersion: SKETCH_SCHEMA_VERSION,
@@ -322,24 +332,114 @@ function createImageReferenceSketchDefinition(input: {
       position: corners[index]!,
       isConstruction: true,
     })),
-    entityIds: [IMAGE_ENTITY_ID],
-    entities: [{
-      kind: 'imageReference',
-      entityId: IMAGE_ENTITY_ID,
-      label: 'Image reference',
-      target: {
-        kind: 'sketchEntity',
-        sketchId: input.sketchId,
+    entityIds: [IMAGE_ENTITY_ID, ...IMAGE_EDGE_ENTITY_IDS],
+    entities: [
+      {
+        kind: 'imageReference',
         entityId: IMAGE_ENTITY_ID,
+        label: 'Image reference',
+        target: {
+          kind: 'sketchEntity',
+          sketchId: input.sketchId,
+          entityId: IMAGE_ENTITY_ID,
+        },
+        isConstruction: true,
+        cornerPointIds: [...IMAGE_POINT_IDS],
+        embeddedBinaryId: input.embeddedBinaryId,
+        pixelWidth: input.pixelWidth,
+        pixelHeight: input.pixelHeight,
       },
-      isConstruction: true,
-      cornerPointIds: [...IMAGE_POINT_IDS],
-      embeddedBinaryId: input.embeddedBinaryId,
-      pixelWidth: input.pixelWidth,
-      pixelHeight: input.pixelHeight,
-    }],
-    constraintIds: [],
-    constraints: [],
+      {
+        kind: 'lineSegment',
+        entityId: topEdgeId,
+        label: 'Image top edge',
+        target: { kind: 'sketchEntity', sketchId: input.sketchId, entityId: topEdgeId },
+        isConstruction: true,
+        startPointId: IMAGE_POINT_IDS[0],
+        endPointId: IMAGE_POINT_IDS[1],
+      },
+      {
+        kind: 'lineSegment',
+        entityId: rightEdgeId,
+        label: 'Image right edge',
+        target: { kind: 'sketchEntity', sketchId: input.sketchId, entityId: rightEdgeId },
+        isConstruction: true,
+        startPointId: IMAGE_POINT_IDS[1],
+        endPointId: IMAGE_POINT_IDS[2],
+      },
+      {
+        kind: 'lineSegment',
+        entityId: bottomEdgeId,
+        label: 'Image bottom edge',
+        target: { kind: 'sketchEntity', sketchId: input.sketchId, entityId: bottomEdgeId },
+        isConstruction: true,
+        startPointId: IMAGE_POINT_IDS[2],
+        endPointId: IMAGE_POINT_IDS[3],
+      },
+      {
+        kind: 'lineSegment',
+        entityId: leftEdgeId,
+        label: 'Image left edge',
+        target: { kind: 'sketchEntity', sketchId: input.sketchId, entityId: leftEdgeId },
+        isConstruction: true,
+        startPointId: IMAGE_POINT_IDS[3],
+        endPointId: IMAGE_POINT_IDS[0],
+      },
+    ],
+    constraintIds: [
+      'constraint_image_fix_top_left',
+      'constraint_image_top_horizontal',
+      'constraint_image_top_bottom_parallel',
+      'constraint_image_left_right_parallel',
+      'constraint_image_top_left_perpendicular',
+      'constraint_image_top_bottom_equal',
+      'constraint_image_left_right_equal',
+    ],
+    constraints: [
+      {
+        constraintId: 'constraint_image_fix_top_left',
+        kind: 'fixPoint',
+        label: 'Fix image top-left',
+        pointId: IMAGE_POINT_IDS[0],
+        position: corners[0],
+      },
+      {
+        constraintId: 'constraint_image_top_horizontal',
+        kind: 'horizontal',
+        label: 'Image top edge horizontal',
+        entityId: topEdgeId,
+      },
+      {
+        constraintId: 'constraint_image_top_bottom_parallel',
+        kind: 'parallel',
+        label: 'Image top/bottom parallel',
+        entityIds: [topEdgeId, bottomEdgeId],
+      },
+      {
+        constraintId: 'constraint_image_left_right_parallel',
+        kind: 'parallel',
+        label: 'Image left/right parallel',
+        entityIds: [leftEdgeId, rightEdgeId],
+      },
+      {
+        constraintId: 'constraint_image_top_left_perpendicular',
+        kind: 'perpendicular',
+        label: 'Image top/left perpendicular',
+        entityIds: [topEdgeId, leftEdgeId],
+      },
+      {
+        constraintId: 'constraint_image_top_bottom_equal',
+        kind: 'equalLength',
+        label: 'Image top/bottom equal',
+        entityIds: [topEdgeId, bottomEdgeId],
+      },
+      {
+        constraintId: 'constraint_image_left_right_equal',
+        kind: 'equalLength',
+        label: 'Image left/right equal',
+        entityIds: [leftEdgeId, rightEdgeId],
+      },
+    ],
     dimensionIds: [],
     dimensions: [],
     styleIds: [],

@@ -44,8 +44,16 @@ test('src/contracts/sketch/image-reference-runtime-schema.spec.ts', () => {
       pixelWidth: 640,
       pixelHeight: 480,
     }],
-    constraintIds: [],
-    constraints: [],
+    constraintIds: ['constraint_point_on_image'],
+    constraints: [{
+      constraintId: 'constraint_point_on_image',
+      kind: 'pointOnImage',
+      label: 'Pin center',
+      pointId: 'sketch_point_tl',
+      imageEntityId: 'sketch_entity_image_reference',
+      u: 0.5,
+      v: 0.5,
+    }],
     dimensionIds: [],
     dimensions: [],
     styleIds: [],
@@ -74,4 +82,22 @@ test('src/contracts/sketch/image-reference-runtime-schema.spec.ts', () => {
     }],
   })
   assert(!zeroDimensions.success, 'Runtime schema should reject image references with non-positive pixel dimensions.')
+
+  const outOfRangeUv = sketchDefinitionSchema.safeParse({
+    ...baseDefinition,
+    constraints: [{
+      ...baseDefinition.constraints[0]!,
+      u: 1.2,
+    }],
+  })
+  assert(!outOfRangeUv.success, 'Runtime schema should reject point-on-image constraints outside normalized UV bounds.')
+
+  const missingImageEntity = sketchDefinitionSchema.safeParse({
+    ...baseDefinition,
+    constraints: [{
+      ...baseDefinition.constraints[0]!,
+      imageEntityId: '',
+    }],
+  })
+  assert(!missingImageEntity.success, 'Runtime schema should reject point-on-image constraints with missing image entity IDs.')
 })

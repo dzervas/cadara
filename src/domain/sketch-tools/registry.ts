@@ -1,5 +1,6 @@
 import type { SketchToolDefinition, SketchToolId } from '@/domain/sketch-tools/definition'
 import { createRegistry } from '@/domain/tools/registry-factory'
+import { anchorPointSketchToolDefinition } from '@/domain/sketch-tools/tools/anchor-point'
 import {
   bezierCurveSketchToolDefinition,
   conicSketchToolDefinition,
@@ -24,6 +25,7 @@ import { threePointArcSketchToolDefinition } from '@/domain/sketch-tools/tools/t
 import { threePointCircleSketchToolDefinition } from '@/domain/sketch-tools/tools/three-point-circle'
 
 export const sketchToolDefinitions = [
+  anchorPointSketchToolDefinition,
   pointSketchToolDefinition,
   lineSketchToolDefinition,
   midpointLineSketchToolDefinition,

@@ -56,6 +56,7 @@ export type SketchStrokeJoin = 'miter' | 'round' | 'bevel'
 
 export type SketchDerivedTransformKind = 'mirror' | 'linearPattern' | 'circularPattern' | 'transform'
 export type SketchAuthoringOperationKind =
+  | 'anchorPoint'
   | 'point'
   | 'line'
   | 'midpointLine'
@@ -595,6 +596,20 @@ export type ConstraintDefinition =
       point: LocalSketchPointConstraintOperand
       /** Local editable line, circle, or arc target. */
       curve: LocalSketchEntityConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'pointOnImage'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point pinned to the image quad. */
+      pointId: SketchPointId
+      /** Referenced image entity whose quad defines the pinned location. */
+      imageEntityId: SketchEntityId
+      /** Normalized horizontal coordinate where 0 is left and 1 is right. */
+      u: number
+      /** Normalized vertical coordinate where 0 is top and 1 is bottom. */
+      v: number
     }
   | {
       constraintId: ConstraintId

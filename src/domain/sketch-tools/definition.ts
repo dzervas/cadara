@@ -13,6 +13,7 @@ import type { SketchToolControlValue, SketchToolPresentationSchema } from '@/dom
 import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 
 export type SketchToolId =
+  | 'anchorPoint'
   | 'point'
   | 'line'
   | 'midpointLine'

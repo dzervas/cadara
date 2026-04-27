@@ -8,8 +8,8 @@ The system SHALL allow a user to open a local `.cadara` or JSON authored model d
 
 #### Scenario: Open picker uses cadara JSON options
 - **WHEN** the user selects Open local file
-- **THEN** the browser file picker is configured for `.cadara` files with `application/json` content
-- **AND** the selected file is validated as authored model document JSON before replacing the active document
+- **THEN** the browser file picker is configured for `.cadara` files with JSON content
+- **AND** the selected file is parsed directly as one authored model document JSON object before replacing the active document
 
 #### Scenario: Open valid local document
 - **WHEN** the user selects Open local file and chooses a valid authored model document through the browser file picker
@@ -18,9 +18,15 @@ The system SHALL allow a user to open a local `.cadara` or JSON authored model d
 - **AND** the user receives a visible status message confirming that local file sync is active
 
 #### Scenario: Reject invalid local document
-- **WHEN** the user selects Open local file and chooses a file that is not a valid authored model document
+- **WHEN** the user selects Open local file and chooses a file that is not a valid authored model document JSON object
 - **THEN** the active document is not replaced
 - **AND** no local file sync binding is created for that file
+- **AND** the user receives a visible failure message
+
+#### Scenario: Reject ZIP cadara package
+- **WHEN** the user selects Open local file and chooses a ZIP-backed `.cadara` package
+- **THEN** the active document is not replaced
+- **AND** no package extraction or backwards-compatible asset restore path is used
 - **AND** the user receives a visible failure message
 
 #### Scenario: Local open API unsupported
@@ -29,7 +35,7 @@ The system SHALL allow a user to open a local `.cadara` or JSON authored model d
 - **AND** the workbench reports that local file sync is unavailable in the current browser
 
 ### Requirement: Save local file SHALL bind the active document to a new filesystem location
-The system SHALL allow a user to choose a local file once through the browser File System Access API, write the current authored model document to that file, and bind the active document to that file for subsequent automatic direct writes without additional save-as or download prompts.
+The system SHALL allow a user to choose a local file once through the browser File System Access API, write the current authored model document JSON object to that file, and bind the active document to that file for subsequent automatic direct writes without additional save-as or download prompts.
 
 #### Scenario: Save picker uses cadara JSON options
 - **WHEN** the user selects Save local file
@@ -38,7 +44,7 @@ The system SHALL allow a user to choose a local file once through the browser Fi
 
 #### Scenario: Save current document to a local file
 - **WHEN** the user selects Save local file and chooses a destination through the browser save picker
-- **THEN** the workbench writes the current normalized authored model document directly to that destination through the selected file handle
+- **THEN** the workbench writes the current normalized authored model document as one JSON object directly to that destination through the selected file handle
 - **AND** the selected file handle becomes the direct-write sync target for subsequent accepted changes to the active document
 - **AND** the user receives a visible status message confirming that local file sync is active
 
@@ -62,8 +68,8 @@ The system SHALL run Automerge-to-authored-document normalization and bound file
 
 #### Scenario: Bound file receives normalized changes
 - **WHEN** the active document has a local filesystem sync binding and the worker normalizes an accepted document change
-- **THEN** the worker writes the normalized authored model document JSON directly to the bound file handle through a writable stream
-- **AND** the written payload excludes derived render exports, feature tree rows, object tree rows, diagnostics, preview state, and transient editor state
+- **THEN** the worker writes the normalized authored model document as one JSON object directly to the bound file handle through a writable stream
+- **AND** the written payload excludes ZIP package members, sidecar geometry blobs, derived render exports, feature tree rows, object tree rows, diagnostics, preview state, and transient editor state
 
 #### Scenario: Autosync does not use download export
 - **WHEN** the worker syncs an accepted document change to a bound local file
@@ -133,20 +139,4 @@ The system SHALL keep Import and Export as explicit one-shot file operations tha
 - **WHEN** the user exports the current document through the existing Export action
 - **THEN** the workbench downloads or saves the export payload according to the export contract
 - **AND** the active local filesystem sync binding remains unchanged
-
-### Requirement: Local file sync SHALL write self-contained ZIP packages
-Local file sync SHALL write geometry asset bytes together with the normalized authored document in a ZIP-backed `.cadara` package when a bound document references assets.
-
-#### Scenario: Autosync document with assets
-- **WHEN** autosync writes a bound local document that references geometry assets
-- **THEN** the written `.cadara` package contains the authored document JSON and all referenced asset bytes
-- **AND** the payload does not include browser-local file handles or local sync binding metadata
-
-### Requirement: Local open SHALL restore packaged geometry assets
-Local file open SHALL load geometry assets from the selected self-contained ZIP-backed `.cadara` package into repository asset storage.
-
-#### Scenario: Open saved document in new session
-- **WHEN** the user opens a `.cadara` package containing geometry assets
-- **THEN** the document sync worker restores the authored document and stores all included geometry blobs
-- **AND** modeling restore can rebuild geometry-backed features without asking for the original import files
 

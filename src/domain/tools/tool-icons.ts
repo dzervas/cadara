@@ -5,6 +5,7 @@ type SingleFileAssets = {
 }
 
 export const toolIconAssetFileNames: Record<ToolIconId, string> = {
+  anchorPoint: 'sketch-anchor-point.svg',
   undo: 'undo.svg',
   redo: 'redo.svg',
   sketch: 'new-sketch.svg',

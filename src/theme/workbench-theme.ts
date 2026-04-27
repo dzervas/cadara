@@ -42,6 +42,25 @@ export const workbenchGeometryHighlightColors = {
   },
 } as const
 
+export const workbenchSketchPointColors = {
+  imagePinFill: {
+    css: '#f6c356',
+    hex: 0xf6c356,
+  },
+  imagePinStroke: {
+    css: '#fff4c2',
+    hex: 0xfff4c2,
+  },
+  imageCornerFill: {
+    css: '#7ab8d4',
+    hex: 0x7ab8d4,
+  },
+  imageCornerStroke: {
+    css: '#b8dce8',
+    hex: 0xb8dce8,
+  },
+} as const
+
 export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
   const defaults = defaultCssVariablesResolver(theme)
 

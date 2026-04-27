@@ -2843,6 +2843,27 @@ function normalizeConstraintDefinition(value: unknown): ConstraintDefinition {
     }
   }
 
+  if (value.kind === 'pointOnImage') {
+    if (
+      !isString(value.pointId)
+      || !isString(value.imageEntityId)
+      || typeof value.u !== 'number'
+      || typeof value.v !== 'number'
+    ) {
+      throw new Error('Invalid point-on-image constraint payload.')
+    }
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: 'pointOnImage',
+      label: value.label,
+      pointId: assertSketchPointId(value.pointId),
+      imageEntityId: assertSketchEntityId(value.imageEntityId),
+      u: value.u,
+      v: value.v,
+    }
+  }
+
   if (value.kind === 'parallelProjectedLine' || value.kind === 'perpendicularProjectedLine') {
     if (!isRecord(value.line) || !isRecord(value.projectedLine)) {
       throw new Error('Invalid projected line relationship constraint payload.')

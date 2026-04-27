@@ -16,7 +16,7 @@
 
 ## 3. Geometry Persistence
 
-- [ ] 3.1 Translate STEP/STP source payloads into authored Cadara B-rep JSON before persistence.
+- [x] 3.1 Translate STEP/STP source payloads into authored Cadara B-rep JSON before persistence.
 - [x] 3.2 Preserve selected multi-file STEP solid intent without saving STEP source files.
 - [x] 3.3 Convert any persisted baked mesh output from standalone asset bytes to structured, format-neutral authored JSON data, or reject mesh imports that cannot be represented that way.
 - [x] 3.4 Ensure STL and 3MF source bytes are discarded after transient import review and never appear in saved `.cadara` JSON.
@@ -42,7 +42,7 @@
 - [x] 5.1 Add or update unit coverage for single JSON `.cadara` export/import with translated STEP geometry data.
 - [x] 5.2 Add or update local file sync coverage proving bound writes serialize one JSON object and do not write ZIP packages.
 - [x] 5.3 Add or update mesh import coverage proving no `baked-mesh` blob asset is persisted.
-- [ ] 5.4 Run `bun run test`, `bun run lint`, and `bun run build`.
+- [x] 5.4 Run `bun run test`, `bun run lint`, and `bun run build`.
 - [x] 5.5 Add regression coverage proving prepared STEP import skips pre-persist kernel rebuild validation.
 - [x] 5.6 Add coverage proving large accepted STEP imports clear user-visible progress after persisted faceted presentation is available, even when OCC materialization is slower.
 - [x] 5.7 Add coverage for background STEP materialization diagnostics and bounded completion behavior.

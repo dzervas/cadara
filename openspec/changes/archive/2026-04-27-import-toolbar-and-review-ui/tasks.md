@@ -46,4 +46,4 @@
 - [x] 7.1 Run `bun run build` — confirm zero compile errors.
 - [x] 7.2 Run `bun run lint` — confirm zero lint errors.
 - [x] 7.3 Run `bun run test` — confirm all tests pass.
-- [ ] 7.4 Manual verification: click import button → select an image file → see ImportInspector with plane picker → select a plane → commit → sketch with image reference appears in the feature tree.
+- [x] 7.4 Manual verification: click import button → select an image file → see ImportInspector with plane picker → select a plane → commit → sketch with image reference appears in the feature tree.

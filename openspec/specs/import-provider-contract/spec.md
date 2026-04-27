@@ -41,6 +41,40 @@ The system SHALL determine which provider handles a given source by calling `acc
 - **WHEN** more than one registered provider accepts a given source
 - **THEN** the orchestrator presents all matching providers to the user for selection
 
+### Requirement: Import providers SHALL expose UI hooks for schema-driven review forms
+The `ImportProvider` interface SHALL include `getReviewFormSchema()` and `applySelectionPatch()` methods that enable generic UI rendering without provider-specific form components.
+
+#### Scenario: Provider implements getReviewFormSchema
+- **WHEN** the orchestrator needs to render a review UI for a matched provider
+- **THEN** it calls `provider.getReviewFormSchema(review, selections)` with the current review result and selections
+- **AND** the provider returns a `FeatureEditorFormSchema` describing the fields the user should see
+
+#### Scenario: Provider implements applySelectionPatch
+- **WHEN** the user changes a field value in the import review form
+- **THEN** the orchestrator calls `provider.applySelectionPatch(review, selections, patch)`
+- **AND** the provider returns an updated `TSelections` object reflecting the change
+
+### Requirement: Import providers SHALL expose accepted file extensions for file picker construction
+The `ImportProvider` interface SHALL include an `acceptedFileTypes` property that lists file extensions and optional media types the provider handles. The orchestrator uses this to construct the file picker's accept filter.
+
+#### Scenario: Provider declares accepted extensions
+- **WHEN** the orchestrator builds the file picker accept filter
+- **THEN** it reads `acceptedFileTypes` from each registered provider
+- **AND** combines all extensions into the file picker's accept options
+
+### Requirement: Import providers SHALL expose a default selections factory
+The `ImportProvider` interface SHALL include a `createDefaultSelections(review)` method that returns the initial `TSelections` value used when the review form first appears.
+
+#### Scenario: Default selections for image import
+- **WHEN** the image import provider's review completes
+- **THEN** `createDefaultSelections()` returns selections with no plane selected
+- **AND** the form renders with the plane picker field empty and the commit button disabled
+
+#### Scenario: Default selections for geometry import
+- **WHEN** a geometry import provider's review discovers selectable solids
+- **THEN** `createDefaultSelections()` returns selections with all solids selected by default
+- **AND** the form renders with all items checked
+
 ### Requirement: Import providers SHALL produce a non-mutating review before commit
 The system SHALL require providers to implement a `review()` method that analyzes the source bytes and returns a typed review result describing what will be imported, without mutating any document state.
 
@@ -160,4 +194,3 @@ The system SHALL require that provider review and prepare methods report warning
 - **WHEN** the provider encounters fatal issues during review (e.g. corrupt file, completely unsupported format variant)
 - **THEN** the review result includes diagnostics with `severity: 'error'`
 - **AND** the orchestrator presents the errors to the user and does not allow proceeding to prepare
-

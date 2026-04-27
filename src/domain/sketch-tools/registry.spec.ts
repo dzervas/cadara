@@ -41,6 +41,7 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {
     assert(
       JSON.stringify(registeredToolIds) === JSON.stringify([
         'alignedRectangle',
+        'anchorPoint',
         'bezierCurve',
         'centerPointArc',
         'centerPointRectangle',

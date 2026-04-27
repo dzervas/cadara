@@ -12,7 +12,7 @@ import type {
 } from '@/domain/workspace/viewport-renderables'
 import { workbenchGeometryHighlightColors } from '@/theme/workbench-theme'
 
-export type WorkspaceSemanticClass = RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference'
+export type WorkspaceSemanticClass = RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference' | 'sketchImage'
 
 export interface CollectedBindings {
   pickables: THREE.Object3D[]
@@ -80,6 +80,7 @@ export const SURFACE_COLORS = {
   sketchPoint: 0x8db7d6,
   sketchReference: 0xf0c56c,
   construction: 0xb6d6ff,
+  sketchImage: 0xffffff,
 } as const
 
 export const GEOMETRY_HIGHLIGHT_COLORS = {
@@ -495,6 +496,8 @@ function getRenderableBaseColor(semanticClass: WorkspaceSemanticClass) {
       return SURFACE_COLORS.sketchReference
     case 'construction':
       return SURFACE_COLORS.construction
+    case 'sketchImage':
+      return SURFACE_COLORS.sketchImage
   }
 }
 
@@ -503,6 +506,10 @@ function getHighlightColor(
   isActive: boolean,
   isSelected: boolean,
 ) {
+  if (semanticClass === 'sketchImage') {
+    return getRenderableBaseColor(semanticClass)
+  }
+
   if (isSelected) {
     return GEOMETRY_HIGHLIGHT_COLORS.selected
   }
@@ -550,6 +557,7 @@ function getInteractionSortRank(semanticClass: WorkspaceSemanticClass) {
     case 'planarFace':
       return 3
     case 'construction':
+    case 'sketchImage':
       return 4
   }
 }
@@ -827,6 +835,10 @@ function getRenderableMeshOpacity(
   isActive: boolean,
   isSelected: boolean,
 ) {
+  if (semanticClass === 'sketchImage') {
+    return isSelected ? 0.7 : isActive ? 0.62 : 0.55
+  }
+
   if (semanticClass === 'sketchReference') {
     return isSelected ? 1 : isActive ? 0.92 : 0.82
   }
