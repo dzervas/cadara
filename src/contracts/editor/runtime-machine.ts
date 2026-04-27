@@ -49,6 +49,13 @@ const editorEventTypes = [
   'authoring.reopenRequested',
   'sketch.pointerMoved',
   'sketch.pointerReleased',
+  'sketch.specialModeEntered',
+  'sketch.specialModePanelActionInvoked',
+  'sketch.specialModeClickRequested',
+  'sketch.specialModeDoubleClickRequested',
+  'sketch.specialModeDragStarted',
+  'sketch.specialModeDragMoved',
+  'sketch.specialModeDragEnded',
   'sketch.geometryDragStarted',
   'sketch.geometryDragMoved',
   'sketch.geometryDragEnded',
@@ -88,6 +95,8 @@ const editorEventTypes = [
   'effect.sketchCommitFailed',
   'effect.sketchReferencesProjected',
   'effect.sketchReferenceProjectionFailed',
+  'effect.sketchSpecialModeEffectCompleted',
+  'effect.sketchSpecialModeEffectFailed',
   'effect.documentCursorMoved',
   'effect.documentCursorMoveFailed',
 ] as const satisfies readonly EditorEvent['type'][]
@@ -128,6 +137,12 @@ function effectMatchesState(effect: EditorEffect, state: EditorState) {
       return (
         state.kind === 'editingSketch'
         && state.pendingCommitRequestId === effect.requestId
+        && state.command.commandSessionId === effect.commandSessionId
+      )
+    case 'sketch.specialModeEffect':
+      return (
+        state.kind === 'editingSketch'
+        && state.session.activeSpecialMode?.pendingEffect?.requestId === effect.requestId
         && state.command.commandSessionId === effect.commandSessionId
       )
     case 'document.moveHistoryCursor':

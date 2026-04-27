@@ -68,6 +68,28 @@ import {
   type SketchSessionState,
   type SketchHistoryCursor,
 } from '@/domain/editor/sketch-session'
+import {
+  applySketchSpecialModeEffectResult,
+  cancelSketchSpecialMode,
+  commitSketchSpecialMode,
+  doesSketchSpecialModeAcceptTarget,
+  enterSketchSpecialMode,
+  getSketchSpecialModeSelectionFilter,
+  handleSketchSpecialModeClick,
+  handleSketchSpecialModeDoubleClick,
+  handleSketchSpecialModeDragEnd,
+  handleSketchSpecialModeDragMove,
+  handleSketchSpecialModeDragStart,
+  handleSketchSpecialModeHover,
+  handleSketchSpecialModePanelAction,
+  resolveSketchSpecialModeEffectRequest,
+  sketchSessionHasActiveSpecialMode,
+} from '@/domain/sketch-special-modes/presentation'
+import type {
+  SketchSpecialModeHandleRef,
+  SketchSpecialModeId,
+  SketchSpecialModePanelAction,
+} from '@/domain/sketch-special-modes/schema'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import {
   createSectionViewSession,
@@ -121,6 +143,7 @@ import type {
   FeatureId,
   RequestId,
   RevisionId,
+  SketchAuthoringOperationId,
 } from '@/contracts/shared/ids'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
@@ -418,6 +441,48 @@ export interface SketchPointerReleasedEvent {
   target?: PrimitiveRef | null
 }
 
+export interface SketchSpecialModeEnteredEvent {
+  type: 'sketch.specialModeEntered'
+  modeId: SketchSpecialModeId
+  operationId: SketchAuthoringOperationId
+  payload?: Record<string, unknown>
+}
+
+export interface SketchSpecialModePanelActionInvokedEvent {
+  type: 'sketch.specialModePanelActionInvoked'
+  action: SketchSpecialModePanelAction
+}
+
+export interface SketchSpecialModeClickRequestedEvent {
+  type: 'sketch.specialModeClickRequested'
+  point: readonly [number, number]
+  target?: PrimitiveRef | null
+}
+
+export interface SketchSpecialModeDoubleClickRequestedEvent {
+  type: 'sketch.specialModeDoubleClickRequested'
+  point: readonly [number, number]
+  target?: PrimitiveRef | null
+}
+
+export interface SketchSpecialModeDragStartedEvent {
+  type: 'sketch.specialModeDragStarted'
+  handle: SketchSpecialModeHandleRef
+  point: readonly [number, number]
+}
+
+export interface SketchSpecialModeDragMovedEvent {
+  type: 'sketch.specialModeDragMoved'
+  handle: SketchSpecialModeHandleRef
+  point: readonly [number, number]
+}
+
+export interface SketchSpecialModeDragEndedEvent {
+  type: 'sketch.specialModeDragEnded'
+  handle: SketchSpecialModeHandleRef
+  point: readonly [number, number]
+}
+
 /** Starts direct editing of a selectable sketch geometry handle. */
 export interface SketchGeometryDragStartedEvent {
   type: 'sketch.geometryDragStarted'
@@ -599,6 +664,13 @@ export type EditorEvent =
   | AuthoringReopenRequestedEvent
   | SketchPointerMovedEvent
   | SketchPointerReleasedEvent
+  | SketchSpecialModeEnteredEvent
+  | SketchSpecialModePanelActionInvokedEvent
+  | SketchSpecialModeClickRequestedEvent
+  | SketchSpecialModeDoubleClickRequestedEvent
+  | SketchSpecialModeDragStartedEvent
+  | SketchSpecialModeDragMovedEvent
+  | SketchSpecialModeDragEndedEvent
   | SketchGeometryDragStartedEvent
   | SketchGeometryDragMovedEvent
   | SketchGeometryDragEndedEvent
@@ -797,6 +869,24 @@ export type EditorEvent =
       message: string
     }
   | {
+      type: 'effect.sketchSpecialModeEffectCompleted'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      effectId: string
+      payload: Record<string, unknown>
+    }
+  | {
+      type: 'effect.sketchSpecialModeEffectFailed'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      effectId: string
+      message: string
+    }
+  | {
       type: 'effect.documentCursorMoved'
       /** Effect request being completed by this document history cursor mutation. */
       requestId: RequestId
@@ -923,6 +1013,16 @@ export type EditorEffect =
       session: SketchSessionState
     }
   | {
+      type: 'sketch.specialModeEffect'
+      requestId: RequestId
+      commandSessionId: CommandSessionId
+      documentId: DocumentId
+      baseRevisionId: RevisionId
+      modeId: SketchSpecialModeId
+      effectId: string
+      payload: Record<string, unknown>
+    }
+  | {
       type: 'document.moveHistoryCursor'
       /** Editor-owned correlation ID for this document history cursor mutation. */
       requestId: RequestId
@@ -1027,6 +1127,11 @@ function getEditorEffectContext(effect: EditorEffect): AppErrorContextEntry[] {
     context.push({ key: 'sketchId', value: effect.session.sketchId })
   }
 
+  if (effect.type === 'sketch.specialModeEffect') {
+    context.push({ key: 'modeId', value: effect.modeId })
+    context.push({ key: 'effectId', value: effect.effectId })
+  }
+
   return context
 }
 
@@ -1105,6 +1210,16 @@ export function createEditorEffectFailureEvent(
         baseRevisionId: effect.baseRevisionId,
         message: appError.message,
       }
+    case 'sketch.specialModeEffect':
+      return {
+        type: 'effect.sketchSpecialModeEffectFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        effectId: effect.effectId,
+        message: appError.message,
+      }
     case 'document.moveHistoryCursor':
       return {
         type: 'effect.documentCursorMoveFailed',
@@ -1173,6 +1288,19 @@ export interface EditorEffectRuntime {
   }): Promise<{
     projectedReferences: ProjectedSketchReferenceRecord[]
     diagnostics: ProjectedSketchReferenceRecord['diagnostics']
+  }>
+  /** Runs asynchronous work requested by an active sketch special editor mode. */
+  runSketchSpecialModeEffect?(input: {
+    requestId: RequestId
+    documentId: DocumentId
+    commandSessionId: CommandSessionId
+    baseRevisionId: RevisionId
+    modeId: SketchSpecialModeId
+    effectId: string
+    payload: Record<string, unknown>
+  }): Promise<{
+    effectId: string
+    payload: Record<string, unknown>
   }>
   /** Evaluates a feature preview against a base revision. */
   evaluatePreview(input: {
@@ -2127,6 +2255,64 @@ function emitSketchReferenceProjection(state: SketchEditorState, session: Sketch
   }
 }
 
+function emitSketchSpecialModeEffect(
+  state: SketchEditorState,
+  session: SketchSessionState,
+  requestId: RequestId,
+): EditorTransitionResult {
+  const effect = resolveSketchSpecialModeEffectRequest(session)
+
+  if (
+    !effect
+    || session.activeSpecialMode?.pendingEffect?.requestId !== requestId
+    || state.document.documentId === null
+    || state.document.revisionId === null
+  ) {
+    return {
+      state: {
+        ...state,
+        session,
+        selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+        command: {
+          ...state.command,
+          phase: 'editing',
+        },
+      },
+      effects: [],
+    }
+  }
+
+  return {
+    state: {
+      ...state,
+      session,
+      selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+      nextRequestSequence: state.nextRequestSequence + 1,
+      command: {
+        ...state.command,
+        phase: 'awaitingEffect',
+      },
+      preview: {
+        kind: 'sketch',
+        label: `Running ${effect.effectId}`,
+        target: state.session.planeTarget,
+      },
+    },
+    effects: [
+      {
+        type: 'sketch.specialModeEffect',
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: state.document.revisionId,
+        modeId: session.activeSpecialMode?.modeId ?? 'unknown',
+        effectId: effect.effectId,
+        payload: effect.payload,
+      },
+    ],
+  }
+}
+
 function deriveSketchPointFromWorld(
   _plane: SketchSessionState['plane'],
   point: readonly [number, number],
@@ -2668,6 +2854,13 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
+      if (state.kind === 'editingSketch' && sketchSessionHasActiveSpecialMode(state.session)) {
+        const requestId = nextRequestId(state, 'sketch-special-cancel')
+        const session = cancelSketchSpecialMode(state.session, requestId)
+
+        return emitSketchSpecialModeEffect(state, session, requestId)
+      }
+
       if (state.editSessionCursorContext?.phase === 'active') {
         return emitEditSessionCursorRestore(
           toIdleState(state, state.kind === 'editingSketch' ? 'part' : state.mode),
@@ -2680,6 +2873,14 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
     }
     case 'command.commitRequested':
+      if (state.kind === 'editingSketch' && state.command.commandSessionId === event.commandSessionId) {
+        if (sketchSessionHasActiveSpecialMode(state.session)) {
+          const requestId = nextRequestId(state, 'sketch-special-commit')
+          const session = commitSketchSpecialMode(state.session, requestId)
+          return emitSketchSpecialModeEffect(state, session, requestId)
+        }
+      }
+
       if (state.kind === 'editingFeature' && state.command.commandSessionId === event.commandSessionId) {
         return emitFeatureCommit(state)
       }
@@ -2869,6 +3070,24 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         effects: [],
       }
     case 'viewport.hoverCleared':
+      if (state.kind === 'editingSketch' && sketchSessionHasActiveSpecialMode(state.session)) {
+        const session = handleSketchSpecialModeHover(state.session, null, state.selection, state.selectionCatalog)
+
+        return {
+          state: {
+            ...state,
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
       if (state.kind === 'editingSketch' && state.session.constraintAuthoring) {
         const session = updateSketchConstraintHover(state.session, null)
 
@@ -2928,6 +3147,36 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         effects: [],
       }
     case 'viewport.hovered':
+      if (state.kind === 'editingSketch' && sketchSessionHasActiveSpecialMode(state.session)) {
+        if (!doesSketchSpecialModeAcceptTarget(state.session, event.target, state.selection, state.selectionCatalog)) {
+          return {
+            state,
+            effects: [],
+          }
+        }
+
+        const session = handleSketchSpecialModeHover(
+          state.session,
+          event.target,
+          state.selection,
+          state.selectionCatalog,
+        )
+
+        return {
+          state: {
+            ...state,
+            hoverTarget: event.target,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
       if (
         !selectionFilterAllowsTarget(
           state.selectionFilter,
@@ -3491,6 +3740,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'sketch.connectedSelectionRequested': {
       if (
         state.kind !== 'editingSketch'
+        || sketchSessionHasActiveSpecialMode(state.session)
         || !(
           state.session.activeTool === null
           || (state.session.status === 'idle' && isRegisteredSketchToolId(state.session.activeTool))
@@ -3619,6 +3869,155 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         true,
       )
     }
+    case 'sketch.specialModeEntered': {
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-enter')
+      const session = enterSketchSpecialMode({
+        session: state.session,
+        modeId: event.modeId,
+        operationId: event.operationId,
+        payload: event.payload,
+        requestId,
+      })
+
+      return emitSketchSpecialModeEffect({
+        ...state,
+        selection: [session.activeSpecialMode?.operationTarget ?? state.selection[0]].flatMap((target) => target ? [target] : []),
+        hoverTarget: null,
+        selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+      }, session, requestId)
+    }
+    case 'sketch.specialModePanelActionInvoked': {
+      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-panel')
+      const session = handleSketchSpecialModePanelAction(state.session, event.action, requestId)
+
+      return emitSketchSpecialModeEffect(state, session, requestId)
+    }
+    case 'sketch.specialModeClickRequested': {
+      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-click')
+      const session = handleSketchSpecialModeClick(
+        state.session,
+        deriveSketchPointFromWorld(state.session.plane, event.point),
+        event.target ?? null,
+        state.selection,
+        state.selectionCatalog,
+        requestId,
+      )
+
+      return emitSketchSpecialModeEffect(state, session, requestId)
+    }
+    case 'sketch.specialModeDoubleClickRequested': {
+      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-double-click')
+      const session = handleSketchSpecialModeDoubleClick(
+        state.session,
+        deriveSketchPointFromWorld(state.session.plane, event.point),
+        event.target ?? null,
+        state.selection,
+        state.selectionCatalog,
+        requestId,
+      )
+
+      return emitSketchSpecialModeEffect(state, session, requestId)
+    }
+    case 'sketch.specialModeDragStarted': {
+      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-drag-start')
+      const session = handleSketchSpecialModeDragStart(
+        state.session,
+        event.handle,
+        deriveSketchPointFromWorld(state.session.plane, event.point),
+        requestId,
+      )
+
+      return emitSketchSpecialModeEffect(state, session, requestId)
+    }
+    case 'sketch.specialModeDragMoved': {
+      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-drag-move')
+      const session = handleSketchSpecialModeDragMove(
+        state.session.activeSpecialMode?.activeDragHandle?.handleId === event.handle.handleId
+          ? state.session
+          : {
+              ...state.session,
+              activeSpecialMode: state.session.activeSpecialMode
+                ? {
+                    ...state.session.activeSpecialMode,
+                    activeDragHandle: event.handle,
+                  }
+                : null,
+            },
+        deriveSketchPointFromWorld(state.session.plane, event.point),
+        requestId,
+      )
+
+      return emitSketchSpecialModeEffect(state, session, requestId)
+    }
+    case 'sketch.specialModeDragEnded': {
+      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const requestId = nextRequestId(state, 'sketch-special-drag-end')
+      const session = handleSketchSpecialModeDragEnd(
+        state.session.activeSpecialMode?.activeDragHandle?.handleId === event.handle.handleId
+          ? state.session
+          : {
+              ...state.session,
+              activeSpecialMode: state.session.activeSpecialMode
+                ? {
+                    ...state.session.activeSpecialMode,
+                    activeDragHandle: event.handle,
+                  }
+                : null,
+            },
+        deriveSketchPointFromWorld(state.session.plane, event.point),
+        requestId,
+      )
+
+      return emitSketchSpecialModeEffect(state, session, requestId)
+    }
     case 'sketch.geometryDragStarted':
       if (state.kind !== 'editingSketch') {
         return {
@@ -3668,6 +4067,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           state: {
             ...state,
             session,
+            selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
             command: {
               ...state.command,
               phase: 'editing',
@@ -4766,6 +5166,85 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         },
         effects: [],
       }
+    case 'effect.sketchSpecialModeEffectCompleted':
+      if (
+        state.kind !== 'editingSketch'
+        || state.command.commandSessionId !== event.commandSessionId
+        || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+        || state.session.activeSpecialMode?.pendingEffect?.requestId !== event.requestId
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = applySketchSpecialModeEffectResult({
+          session: state.session,
+          requestId: event.requestId,
+          effectId: event.effectId,
+          payload: event.payload,
+        })
+
+        return {
+          state: {
+            ...state,
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+    case 'effect.sketchSpecialModeEffectFailed':
+      if (
+        state.kind !== 'editingSketch'
+        || state.command.commandSessionId !== event.commandSessionId
+        || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+        || state.session.activeSpecialMode?.pendingEffect?.requestId !== event.requestId
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      const session = {
+        ...state.session,
+        validationMessage: event.message,
+        activeSpecialMode: state.session.activeSpecialMode
+          ? {
+              ...state.session.activeSpecialMode,
+              pendingEffect: null,
+            }
+          : null,
+      }
+
+      return {
+        state: {
+          ...state,
+          session,
+          selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+          preview: {
+            kind: 'sketch',
+            label: event.message,
+            target: state.session.planeTarget,
+          },
+        },
+        effects: [],
+      }
     default:
       return {
         state,
@@ -4964,6 +5443,35 @@ export async function runEditorEffect(
         }
       } catch (error: unknown) {
         return createEditorEffectFailureEvent(effect, error, 'Sketch reference projection failed.')
+      }
+    }
+    case 'sketch.specialModeEffect': {
+      try {
+        if (!runtime.runSketchSpecialModeEffect) {
+          throw new Error('Sketch special mode effect runtime is not available.')
+        }
+
+        const result = await runtime.runSketchSpecialModeEffect({
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          modeId: effect.modeId,
+          effectId: effect.effectId,
+          payload: effect.payload,
+        })
+
+        return {
+          type: 'effect.sketchSpecialModeEffectCompleted',
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          effectId: result.effectId,
+          payload: result.payload,
+        }
+      } catch (error: unknown) {
+        return createEditorEffectFailureEvent(effect, error, 'Sketch special mode effect failed.')
       }
     }
     case 'document.moveHistoryCursor': {
@@ -5193,6 +5701,9 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           reference,
         })),
       })
+    },
+    async runSketchSpecialModeEffect() {
+      throw new Error('No sketch special mode runtime has been registered.')
     },
     async evaluatePreview(input) {
       const definition = buildFeatureDefinition(input.featureSession)

@@ -3,6 +3,7 @@ import { Loader } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
 import { ThreeCadViewport } from '@/components/cad/three-cad-viewport'
+import { SketchSpecialModePanel } from '@/components/cad/sketch-special-mode-panel'
 import { SketchToolPanel } from '@/components/cad/sketch-tool-panel'
 import { FeatureInspector } from '@/components/layout/feature-inspector'
 import { ImportInspector } from '@/components/layout/import-inspector'
@@ -48,9 +49,14 @@ import { createAppError, err, errorContext, ok, type AppError } from '@/contract
 import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
 import {
   getSketchAnnotationDescriptors,
-  getSketchSessionRegionDiagnostics,
   getSketchToolPresentation,
+  getSketchSessionRegionDiagnostics,
 } from '@/domain/editor/sketch-session'
+import {
+  getSketchSpecialModePanel,
+  getSketchSpecialModeViewportPresentation,
+} from '@/domain/sketch-special-modes/presentation'
+import type { SketchSpecialModeHandleRef } from '@/domain/sketch-special-modes/schema'
 import {
   getPrimitiveRefLabel,
   getPrimitiveRefKey,
@@ -542,6 +548,9 @@ export function CadWorkbench() {
     [effectiveHiddenTargetKeys, previewRenderables, sketchSession, snapshot],
   )
   const sketchToolPresentation = sketchSession ? getSketchToolPresentation(sketchSession) : null
+  const sketchSpecialModePanel = sketchSession ? getSketchSpecialModePanel(sketchSession) : null
+  const sketchSpecialModeViewportPresentation =
+    sketchSession ? getSketchSpecialModeViewportPresentation(sketchSession) : null
   const sketchAnnotations = sketchSession ? getSketchAnnotationDescriptors(sketchSession) : []
   const sketchRegionDiagnosticMessage = sketchSession
     ? getSketchSessionRegionDiagnostics(sketchSession).find((diagnostic) => diagnostic.severity !== 'info')?.message ?? null
@@ -1348,6 +1357,41 @@ export function CadWorkbench() {
     dispatch({ type: 'sketch.geometryDragEnded', point })
   }
 
+  const handleSketchSpecialModeClick = (
+    point: readonly [number, number],
+    target?: PrimitiveRef | null,
+  ) => {
+    dispatch({ type: 'sketch.specialModeClickRequested', point, target })
+  }
+
+  const handleSketchSpecialModeDoubleClick = (
+    point: readonly [number, number],
+    target?: PrimitiveRef | null,
+  ) => {
+    dispatch({ type: 'sketch.specialModeDoubleClickRequested', point, target })
+  }
+
+  const handleSketchSpecialModeDragStart = (
+    handle: SketchSpecialModeHandleRef,
+    point: readonly [number, number],
+  ) => {
+    dispatch({ type: 'sketch.specialModeDragStarted', handle, point })
+  }
+
+  const handleSketchSpecialModeDragMove = (
+    handle: SketchSpecialModeHandleRef,
+    point: readonly [number, number],
+  ) => {
+    dispatch({ type: 'sketch.specialModeDragMoved', handle, point })
+  }
+
+  const handleSketchSpecialModeDragEnd = (
+    handle: SketchSpecialModeHandleRef,
+    point: readonly [number, number],
+  ) => {
+    dispatch({ type: 'sketch.specialModeDragEnded', handle, point })
+  }
+
   const handleSectionOffsetChange = (offset: number) => {
     if (!activeCommand) {
       return
@@ -1889,6 +1933,11 @@ export function CadWorkbench() {
               onSketchGeometryDragStart={handleSketchGeometryDragStart}
               onSketchGeometryDragMove={handleSketchGeometryDragMove}
               onSketchGeometryDragEnd={handleSketchGeometryDragEnd}
+              onSpecialModeClick={handleSketchSpecialModeClick}
+              onSpecialModeDoubleClick={handleSketchSpecialModeDoubleClick}
+              onSpecialModeDragStart={handleSketchSpecialModeDragStart}
+              onSpecialModeDragMove={handleSketchSpecialModeDragMove}
+              onSpecialModeDragEnd={handleSketchSpecialModeDragEnd}
               onSectionOffsetChange={handleSectionOffsetChange}
               onSectionFlip={handleSectionFlip}
               onSectionClear={handleSectionClear}
@@ -1896,6 +1945,7 @@ export function CadWorkbench() {
               onLodTierChange={handleViewportLodTierChange}
               selection={visibleSelection}
               sketchToolPresentation={sketchToolPresentation}
+              specialModePresentation={sketchSpecialModeViewportPresentation}
               fitViewRequestId={viewportFitRequestId}
             />
             {initialOccRenderPending ? (
@@ -1910,6 +1960,10 @@ export function CadWorkbench() {
             <SketchToolPanel
               schema={sketchToolPresentation}
               onPatch={(patch) => dispatch({ type: 'sketch.toolPatched', patch })}
+            />
+            <SketchSpecialModePanel
+              schema={sketchSpecialModePanel}
+              onAction={(action) => dispatch({ type: 'sketch.specialModePanelActionInvoked', action })}
             />
             {restoreMessage ? (
               <WorkbenchNotification

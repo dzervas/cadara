@@ -126,6 +126,8 @@ import {
   collectSketchSnapGeometries,
   resolveSketchSnap,
 } from '@/domain/sketch-snapping/snap-candidates'
+import type { ActiveSketchSpecialModeSession } from '@/domain/sketch-special-modes/schema'
+import { getSketchSpecialModeSummaryLabel } from '@/domain/sketch-special-modes/presentation'
 
 export type { SketchDraftEntity, SketchToolId } from '@/domain/sketch-tools/definition'
 export type { SketchConstraintToolId } from '@/domain/sketch-constraints/definition'
@@ -241,6 +243,7 @@ export interface SketchSessionState {
   activeEditTool: SketchEditToolState | null
   activeEditTarget: SketchPointRef | null
   activeStyleFocus: SketchStyleFocus | null
+  activeSpecialMode: ActiveSketchSpecialModeSession | null
   activeDrag: SketchGeometryDragState | null
   activeSnap: SketchSnapCandidate | null
   drawStartSnap: SketchSnapCandidate | null
@@ -1157,6 +1160,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     activeEditTool: null,
     activeEditTarget: null,
     activeStyleFocus: null,
+    activeSpecialMode: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -1207,6 +1211,7 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     activeEditTool: null,
     activeEditTarget: null,
     activeStyleFocus: null,
+    activeSpecialMode: null,
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
@@ -5328,6 +5333,10 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
     return session.toolPresentation?.prompts[0]?.text ?? 'Edit annotation value'
   }
 
+  if (session.activeSpecialMode) {
+    return getSketchSpecialModeSummaryLabel(session) ?? 'Sketch special mode active'
+  }
+
   if (session.constraintAuthoring) {
     const definition = getSketchConstraintDefinition(session.constraintAuthoring.toolId)
     const valueSpec = definition.getValueSpec?.(session.constraintAuthoring.selectedTargets) ?? definition.valueSpec
@@ -5401,6 +5410,10 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
 }
 
 export function getSketchToolPresentation(session: SketchSessionState): SketchToolPresentationSchema | null {
+  if (session.activeSpecialMode) {
+    return null
+  }
+
   if (session.activeAnnotationEdit) {
     return session.toolPresentation
   }
@@ -6833,6 +6846,7 @@ export function deleteSelectedSketchAnnotation(session: SketchSessionState): Ske
     activeAnnotationEdit: null,
     selectedAnnotation: null,
     activeEditTarget: null,
+    activeSpecialMode: null,
     activeDrag: null,
     validationMessage: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),

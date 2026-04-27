@@ -8,6 +8,9 @@ import {
   SketchViewportFeedbackLayer,
 } from '@/components/cad/sketch-viewport-feedback'
 import {
+  SketchSpecialModeViewportFeedback,
+} from '@/components/cad/sketch-special-mode-viewport-feedback'
+import {
   SketchConstraintAnnotations,
 } from '@/components/cad/sketch-constraint-annotations'
 import {
@@ -25,6 +28,10 @@ import {
   getAnnotationProjectionId,
   type SketchViewportFeedbackProjection,
 } from '@/components/cad/sketch-viewport-feedback-model'
+import {
+  collectSketchSpecialModeFeedbackAnchors,
+  type SketchSpecialModeFeedbackProjection,
+} from '@/components/cad/sketch-special-mode-feedback-model'
 import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import {
   requestViewCubeCameraTransition,
@@ -43,6 +50,11 @@ import type {
 } from '@/domain/editor/sketch-session'
 import { createReferenceImageDataUrl } from '@/domain/reference-image/rendering'
 import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type {
+  SketchSpecialModeHandleRef,
+  SketchSpecialModeViewportPresentation,
+} from '@/domain/sketch-special-modes/schema'
+import { doesSketchSpecialModeAcceptTarget } from '@/domain/sketch-special-modes/presentation'
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
@@ -166,6 +178,11 @@ interface ThreeCadViewportProps {
   onSketchGeometryDragStart: (target: PrimitiveRef, point: readonly [number, number]) => void
   onSketchGeometryDragMove: (point: readonly [number, number]) => void
   onSketchGeometryDragEnd: (point: readonly [number, number]) => void
+  onSpecialModeClick: (point: readonly [number, number], target?: PrimitiveRef | null) => void
+  onSpecialModeDoubleClick: (point: readonly [number, number], target?: PrimitiveRef | null) => void
+  onSpecialModeDragStart: (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) => void
+  onSpecialModeDragMove: (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) => void
+  onSpecialModeDragEnd: (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) => void
   onSectionOffsetChange: (offset: number) => void
   onSectionFlip: () => void
   onSectionClear: () => void
@@ -173,6 +190,7 @@ interface ThreeCadViewportProps {
   onLodTierChange: (tierId: OccTessellationTierId) => void
   selection: PrimitiveRef[]
   sketchToolPresentation: SketchToolPresentationSchema | null
+  specialModePresentation: SketchSpecialModeViewportPresentation | null
   fitViewRequestId: number
 }
 
@@ -219,6 +237,11 @@ export function ThreeCadViewport({
   onSketchGeometryDragStart,
   onSketchGeometryDragMove,
   onSketchGeometryDragEnd,
+  onSpecialModeClick,
+  onSpecialModeDoubleClick,
+  onSpecialModeDragStart,
+  onSpecialModeDragMove,
+  onSpecialModeDragEnd,
   onSectionOffsetChange,
   onSectionFlip,
   onSectionClear,
@@ -226,6 +249,7 @@ export function ThreeCadViewport({
   onLodTierChange,
   selection,
   sketchToolPresentation,
+  specialModePresentation,
   fitViewRequestId,
 }: ThreeCadViewportProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -240,6 +264,7 @@ export function ThreeCadViewport({
   const [projectionMode, setProjectionMode] = useState<ViewportProjectionMode>(DEFAULT_VIEWPORT_PROJECTION_MODE)
   const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const [sketchAnnotationProjections, setSketchAnnotationProjections] = useState<SketchViewportFeedbackProjection[]>([])
+  const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] = useState<SketchSpecialModeFeedbackProjection[]>([])
   const raycasterRef = useRef(new THREE.Raycaster())
   const pointerRef = useRef(new THREE.Vector2())
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
@@ -282,6 +307,11 @@ export function ThreeCadViewport({
   const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart)
   const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove)
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
+  const specialModeClickRef = useRef(onSpecialModeClick)
+  const specialModeDoubleClickRef = useRef(onSpecialModeDoubleClick)
+  const specialModeDragStartRef = useRef(onSpecialModeDragStart)
+  const specialModeDragMoveRef = useRef(onSpecialModeDragMove)
+  const specialModeDragEndRef = useRef(onSpecialModeDragEnd)
   const sectionOffsetChangeRef = useRef(onSectionOffsetChange)
   const sectionFlipRef = useRef(onSectionFlip)
   const sectionClearRef = useRef(onSectionClear)
@@ -425,6 +455,11 @@ export function ThreeCadViewport({
     sketchGeometryDragStartRef.current = onSketchGeometryDragStart
     sketchGeometryDragMoveRef.current = onSketchGeometryDragMove
     sketchGeometryDragEndRef.current = onSketchGeometryDragEnd
+    specialModeClickRef.current = onSpecialModeClick
+    specialModeDoubleClickRef.current = onSpecialModeDoubleClick
+    specialModeDragStartRef.current = onSpecialModeDragStart
+    specialModeDragMoveRef.current = onSpecialModeDragMove
+    specialModeDragEndRef.current = onSpecialModeDragEnd
     sectionOffsetChangeRef.current = onSectionOffsetChange
     sectionFlipRef.current = onSectionFlip
     sectionClearRef.current = onSectionClear
@@ -443,6 +478,11 @@ export function ThreeCadViewport({
     onHover,
     onSelect,
     onConnectedSketchSelect,
+    onSpecialModeClick,
+    onSpecialModeDoubleClick,
+    onSpecialModeDragEnd,
+    onSpecialModeDragMove,
+    onSpecialModeDragStart,
     onSketchGeometryDragEnd,
     onSketchGeometryDragMove,
     onSketchGeometryDragStart,
@@ -517,11 +557,13 @@ export function ThreeCadViewport({
     if (!camera || !canvasElement || !plane) {
       setSketchFeedbackProjections([])
       setSketchAnnotationProjections([])
+      setSpecialModeFeedbackProjections([])
       return
     }
 
     const rect = canvasElement.getBoundingClientRect()
     const anchors = collectSketchViewportFeedbackAnchors(sketchToolPresentation)
+    const specialModeAnchors = collectSketchSpecialModeFeedbackAnchors(specialModePresentation)
     const projections = anchors.flatMap((anchor) => {
       const screenPoint = projectSketchFeedbackAnchor({
         anchor: anchor.anchor,
@@ -540,6 +582,24 @@ export function ThreeCadViewport({
     })
 
     setSketchFeedbackProjections(projections)
+    setSpecialModeFeedbackProjections(
+      specialModeAnchors.flatMap((anchor) => {
+        const screenPoint = projectSketchFeedbackAnchor({
+          anchor: anchor.anchor,
+          plane,
+          viewport: {
+            width: rect.width,
+            height: rect.height,
+          },
+          projectWorldPoint: (point: WorkspaceVec3) => {
+            const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
+            return { x: projected.x, y: projected.y, z: projected.z }
+          },
+        })
+
+        return screenPoint ? [{ id: anchor.id, x: screenPoint.x, y: screenPoint.y }] : []
+      }),
+    )
     setSketchAnnotationProjections(
       sketchAnnotations.flatMap((annotation) => {
         const screenPoint = projectSketchFeedbackAnchor({
@@ -564,7 +624,7 @@ export function ThreeCadViewport({
           : []
       }),
     )
-  }, [sketchAnnotations, sketchSession?.plane, sketchToolPresentation])
+  }, [sketchAnnotations, sketchSession?.plane, sketchToolPresentation, specialModePresentation])
   const updateSketchFeedbackProjectionsRef = useRef(updateSketchFeedbackProjections)
 
   useEffect(() => {
@@ -814,6 +874,26 @@ export function ThreeCadViewport({
       return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
     }
 
+    const acceptsViewportTarget = (target: PrimitiveRef) => {
+      const activeSpecialModeSession = sketchSessionRef.current
+
+      if (activeSpecialModeSession?.activeSpecialMode) {
+        return doesSketchSpecialModeAcceptTarget(
+          activeSpecialModeSession,
+          target,
+          selectionRef.current,
+          selectionCatalogRef.current,
+        )
+      }
+
+      return selectionFilterAllowsTarget(
+        selectionFilterRef.current,
+        selectionRef.current,
+        target,
+        selectionCatalogRef.current,
+      )
+    }
+
     const getPickTargetFromClientPoint = (
       clientX: number,
       clientY: number,
@@ -833,12 +913,6 @@ export function ThreeCadViewport({
       ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = false
 
       const intersections = raycasterRef.current.intersectObjects(bindings.pickables, true)
-      const acceptsTarget = (target: PrimitiveRef) => selectionFilterAllowsTarget(
-        selectionFilterRef.current,
-        selectionRef.current,
-        target,
-        selectionCatalogRef.current,
-      )
       const candidates = [
         ...collectRaycastPickCandidates(intersections),
         ...collectProjectedSketchDisplayPointCandidates({
@@ -847,7 +921,7 @@ export function ThreeCadViewport({
           camera,
           viewportRect,
           sketchDisplayRenderables: sketchDisplayRenderablesRef.current,
-          acceptsTarget,
+          acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
         }),
         ...collectProjectedVertexCandidates({
@@ -856,12 +930,12 @@ export function ThreeCadViewport({
           camera,
           viewportRect,
           renderables: renderablesRef.current,
-          acceptsTarget,
+          acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
         }),
       ]
 
-      return resolveAllCandidates(candidates, acceptsTarget, pickTuning.resolutionOptions)
+      return resolveAllCandidates(candidates, acceptsViewportTarget, pickTuning.resolutionOptions)
     }
 
     const getViewportCameraPosition = (): Vec3 | null => {
@@ -1076,12 +1150,7 @@ export function ThreeCadViewport({
 
       if (
         target
-        && selectionFilterAllowsTarget(
-          selectionFilterRef.current,
-          selectionRef.current,
-          target.target,
-          selectionCatalogRef.current,
-        )
+        && acceptsViewportTarget(target.target)
       ) {
         lastPickedTargetRef.current = target.target
         if (hoverTargetRef.current === null || !primitiveRefEquals(hoverTargetRef.current, target.target)) {
@@ -1095,6 +1164,10 @@ export function ThreeCadViewport({
       const activeSketchSession = sketchSessionRef.current
 
       if (!activeSketchSession) {
+        return
+      }
+
+      if (activeSketchSession.activeSpecialMode) {
         return
       }
 
@@ -1142,6 +1215,7 @@ export function ThreeCadViewport({
 
       if (
         !activeSketchSession
+        || activeSketchSession.activeSpecialMode
         || !shouldViewportStartSketchGeometryDrag(activeSketchSession.activeTool, activeSketchSession.status)
       ) {
         return
@@ -1239,6 +1313,10 @@ export function ThreeCadViewport({
         return
       }
 
+      if (activeSketchSession.activeSpecialMode) {
+        return
+      }
+
       const viewportRect = canvasElement.getBoundingClientRect()
       const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
@@ -1281,6 +1359,16 @@ export function ThreeCadViewport({
       }
 
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+
+      if (sketchSessionRef.current?.activeSpecialMode) {
+        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+
+        if (point) {
+          specialModeClickRef.current(point, resolvedTarget?.target ?? null)
+        }
+
+        return
+      }
 
       if (shouldViewportClickEventRequestConnectedSketchSelection({
         activeSketchTool: sketchSessionRef.current?.activeTool,
@@ -1334,6 +1422,16 @@ export function ThreeCadViewport({
 
       const viewportRect = canvasElement.getBoundingClientRect()
       const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+
+      if (sketchSessionRef.current?.activeSpecialMode) {
+        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+
+        if (point) {
+          specialModeDoubleClickRef.current(point, resolvedTarget?.target ?? null)
+        }
+
+        return
+      }
 
       if (!shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: sketchSessionRef.current?.activeTool,
@@ -1602,6 +1700,28 @@ export function ThreeCadViewport({
               dimensionId: handle.dimensionId,
               point,
             })
+          }
+        }}
+      />
+      <SketchSpecialModeViewportFeedback
+        presentation={specialModePresentation}
+        projections={specialModeFeedbackProjections}
+        onHandleDragStart={(handle, clientX, clientY) => {
+          const point = projectSketchClientPointRef.current(clientX, clientY)
+          if (point) {
+            specialModeDragStartRef.current(handle, point)
+          }
+        }}
+        onHandleDragMove={(handle, clientX, clientY) => {
+          const point = projectSketchClientPointRef.current(clientX, clientY)
+          if (point) {
+            specialModeDragMoveRef.current(handle, point)
+          }
+        }}
+        onHandleDragEnd={(handle, clientX, clientY) => {
+          const point = projectSketchClientPointRef.current(clientX, clientY)
+          if (point) {
+            specialModeDragEndRef.current(handle, point)
           }
         }}
       />
