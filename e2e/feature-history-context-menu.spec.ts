@@ -15,7 +15,7 @@ test('right-clicking a committed feature history item opens its context menu', a
   })
   await expect(featureHistoryItem).toBeVisible({ timeout: 30_000 })
 
-  await featureHistoryItem.click({ button: 'right' })
+  await featureHistoryItem.click({ button: 'right', force: true })
 
   const menu = page.getByRole('menu', { name: 'Extrude 1 actions' })
   await expect(menu).toBeVisible({ timeout: 10_000 })

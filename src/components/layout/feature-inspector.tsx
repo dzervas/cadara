@@ -183,10 +183,16 @@ function getSectionSelectedCount(fields: readonly FeatureEditorFormField[]) {
   return fields.reduce((count, field) => count + (field.advancedParticipant?.selectedCount ?? 0), 0)
 }
 
-function isProfileReferenceCollection(
+function isReferenceCollectionField(
   field: FeatureEditorFormField,
 ): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
-  return field.kind === 'referenceCollection' && field.advancedParticipant?.role === 'profile'
+  return field.kind === 'referenceCollection'
+}
+
+function isProfileReferenceCollectionField(
+  field: FeatureEditorFormField,
+): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
+  return isReferenceCollectionField(field) && field.advancedParticipant?.role === 'profile'
 }
 
 function getReferenceSectionTitle(section: FeatureEditorFormSection) {
@@ -216,7 +222,7 @@ function getVisualFormSections(sections: readonly FeatureEditorFormSection[]): V
 
     if (section.id === 'references') {
       const selectedCount = getSectionSelectedCount(section.fields)
-      const isProfileSection = section.fields.some(isProfileReferenceCollection)
+      const isProfileSection = section.fields.some(isProfileReferenceCollectionField)
       return [{
         id: section.id,
         title: getReferenceSectionTitle(section),
@@ -747,7 +753,9 @@ function ReferenceCollectionCard(props: {
           field.onChange(next)
         }
 
-        if (isProfileReferenceCollection(props.field)) {
+        const isProfileCollection = props.field.advancedParticipant?.role === 'profile'
+
+        if (isProfileCollection) {
           return (
             <div>
               {hasSelection ? (
@@ -1121,7 +1129,7 @@ export function FeatureInspector({
 
       <div className="flex-1 overflow-y-auto pb-1">
         {visualSections.map((section) => {
-          const profileReferenceField = section.fields.find(isProfileReferenceCollection)
+          const profileReferenceField = section.fields.find(isProfileReferenceCollectionField)
           const hasProfileSelection = (profileReferenceField?.value.length ?? 0) > 0
 
           return (

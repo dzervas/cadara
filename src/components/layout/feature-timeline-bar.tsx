@@ -285,6 +285,7 @@ function HistoryTimelineSurface({
 
   useEffect(() => {
     updateHandlePosition(activeCursorIndex)
+    const scroller = scrollerRef.current
 
     const handleResize = () => {
       updateHandlePosition(activeCursorIndex)
@@ -294,10 +295,10 @@ function HistoryTimelineSurface({
     }
 
     window.addEventListener('resize', handleResize)
-    scrollerRef.current?.addEventListener('scroll', handleScroll)
+    scroller?.addEventListener('scroll', handleScroll)
     return () => {
       window.removeEventListener('resize', handleResize)
-      scrollerRef.current?.removeEventListener('scroll', handleScroll)
+      scroller?.removeEventListener('scroll', handleScroll)
     }
   }, [activeCursorIndex, updateHandlePosition])
 
@@ -312,7 +313,7 @@ function HistoryTimelineSurface({
     }
   }, [cursorDisabled, resolveNearestCursorIndex])
 
-  const handleWindowPointerUp = useCallback((event: PointerEvent) => {
+  function handleWindowPointerUp(event: PointerEvent) {
     if (dragPointerIdRef.current !== event.pointerId) {
       return
     }
@@ -334,7 +335,7 @@ function HistoryTimelineSurface({
 
       return null
     })
-  }, [cursorDisabled, cursorIndex, onCursorRequested, handleWindowPointerMove])
+  }
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (cursorDisabled) {

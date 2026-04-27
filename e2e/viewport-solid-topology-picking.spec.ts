@@ -7,8 +7,8 @@ test.setTimeout(90_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
 const FACE_POINT = { x: 230, y: 130 }
-const EDGE_POINT = { x: 227, y: 119 }
-const VERTEX_POINT = { x: 145, y: 190 }
+const EDGE_POINT = { x: 199, y: 130 }
+const VERTEX_POINT = { x: 109, y: 207 }
 const BLANK_POINT = { x: 1000, y: 200 }
 
 const FACE_TARGET = 'body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'

@@ -33,7 +33,9 @@ test('feature inspector omits debugger-only contract and revision readouts', asy
   await workbench.activateFeature('extrude')
   await workbench.selectReference(FEATURE_FIXTURE.profile)
 
-  const inspector = page.locator('aside').filter({ hasText: 'Feature Session' })
+  const inspector = page.locator('main').getByRole('complementary').filter({
+    has: page.getByRole('button', { name: 'Commit' }),
+  })
   await expect(inspector).toBeVisible()
   await expect(inspector).not.toContainText('Contract:')
   await expect(inspector).not.toContainText('Revision state:')

@@ -234,8 +234,27 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async selectOperation(operation: string) {
-    await this.page.getByRole('combobox', { name: 'Operation' }).click()
-    await this.page.getByRole('option', { name: operation, exact: true }).click()
+    const operationLabels: Record<string, string> = {
+      newBody: 'New body',
+      join: 'Join',
+      cut: 'Cut',
+      intersect: 'Intersect',
+      create: 'Create',
+      add: 'Add',
+      subtract: 'Subtract',
+    }
+    const optionLabel = operationLabels[operation] ?? operation
+    const operationField = this.page.getByRole('combobox', { name: 'Operation' })
+    const currentValue = (await operationField.textContent())?.trim().toLowerCase() ?? ''
+
+    if (currentValue === optionLabel.toLowerCase()) {
+      return
+    }
+
+    await operationField.click()
+    await this.page.getByRole('option', {
+      name: new RegExp(`^${escapeRegExp(optionLabel)}$`, 'i'),
+    }).click()
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {
@@ -301,6 +320,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   private async projectTargetToScreen(targetId: string) {
     return this.page.evaluate((id) => window.__cadProjectToScreen?.(id) ?? null, targetId)
   }
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export class FeatureChainHarness {
