@@ -18,6 +18,7 @@ import type {
   FaceRef,
   RegionRef,
   SketchEntityRef,
+  SketchOperationRef,
   SketchPointRef,
   SketchRef,
   VertexRef,
@@ -930,6 +931,19 @@ export type SketchReferenceDefinition =
       source: SketchEntityRef | SketchPointRef | SketchRef
       /** Declared projection mode into sketch-space coordinates. */
       projectionMode: 'useExistingCoplanarGeometry'
+    }
+  | {
+      /** Durable authored reference identity within the containing sketch definition. */
+      referenceId: ReferenceId
+      kind: 'referenceImageAnchor'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Owning reference-image operation exporting this fixed anchor. */
+      source: SketchOperationRef
+      /** Stable calibration anchor identity within the owning operation. */
+      anchorId: string
+      /** Declared projection mode into sketch-space coordinates. */
+      projectionMode: 'referenceImageAnchor'
     }
 
 /**

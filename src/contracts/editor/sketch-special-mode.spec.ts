@@ -17,7 +17,10 @@ import {
   createSketchSpecialModeHandleRef,
   createSketchSpecialModeTargetRef,
 } from '@/domain/sketch-special-modes/presentation'
-import { replaceRegisteredSketchSpecialModeDefinitionsForTest } from '@/domain/sketch-special-modes/registry'
+import {
+  replaceRegisteredSketchSpecialModeDefinitionsForTest,
+  sketchSpecialModeDefinitions,
+} from '@/domain/sketch-special-modes/registry'
 import type { SketchSpecialModeDefinition } from '@/domain/sketch-special-modes/schema'
 
 test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
@@ -33,6 +36,10 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
   }> = {
     id: 'fixture.special-mode',
     label: 'Fixture mode',
+    resolveOpenRequest: ({ target }) =>
+      target?.kind === 'sketchOperation'
+        ? { operationId: target.operationId, payload: { openedFrom: 'double-click' } }
+        : null,
     selection: {
       label: 'Fixture selection',
       description: 'Select the fixture operation only.',
@@ -178,12 +185,13 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
     }
 
     const entered = transitionEditorState(baseState, {
-      type: 'sketch.specialModeEntered',
-      modeId: fixtureMode.id,
-      operationId: operationTarget.operationId,
+      type: 'sketch.specialModeDoubleClickRequested',
+      point: [4, 6],
+      target: operationTarget,
     })
     assert(entered.state.kind === 'editingSketch', 'Special mode entry should preserve sketch editing.')
     assert(entered.effects[0]?.type === 'sketch.specialModeEffect', 'Entry should emit the mode effect contract.')
@@ -348,6 +356,6 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       'Stale async mode results should be ignored after mode cancellation.',
     )
   } finally {
-    replaceRegisteredSketchSpecialModeDefinitionsForTest([])
+    replaceRegisteredSketchSpecialModeDefinitionsForTest(sketchSpecialModeDefinitions)
   }
 })

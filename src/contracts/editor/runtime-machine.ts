@@ -95,6 +95,8 @@ const editorEventTypes = [
   'effect.sketchCommitFailed',
   'effect.sketchReferencesProjected',
   'effect.sketchReferenceProjectionFailed',
+  'effect.sketchReferenceImageImportCompleted',
+  'effect.sketchReferenceImageImportFailed',
   'effect.sketchSpecialModeEffectCompleted',
   'effect.sketchSpecialModeEffectFailed',
   'effect.documentCursorMoved',
@@ -137,6 +139,12 @@ function effectMatchesState(effect: EditorEffect, state: EditorState) {
       return (
         state.kind === 'editingSketch'
         && state.pendingCommitRequestId === effect.requestId
+        && state.command.commandSessionId === effect.commandSessionId
+      )
+    case 'sketch.importReferenceImages':
+      return (
+        state.kind === 'editingSketch'
+        && state.pendingImportRequestId === effect.requestId
         && state.command.commandSessionId === effect.commandSessionId
       )
     case 'sketch.specialModeEffect':

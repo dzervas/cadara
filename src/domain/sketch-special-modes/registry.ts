@@ -3,6 +3,7 @@ import type {
   SketchSpecialModeDefinition,
   SketchSpecialModeId,
 } from '@/domain/sketch-special-modes/schema'
+import { referenceImageCalibrationModeDefinition } from '@/domain/reference-image-calibration/mode/definition'
 
 export function createSketchSpecialModeRegistry(
   definitions: readonly SketchSpecialModeDefinition[],
@@ -14,7 +15,9 @@ export function createSketchSpecialModeRegistry(
   )
 }
 
-export const sketchSpecialModeDefinitions = [] as const satisfies readonly SketchSpecialModeDefinition[]
+export const sketchSpecialModeDefinitions = [
+  referenceImageCalibrationModeDefinition,
+] as const satisfies readonly SketchSpecialModeDefinition[]
 
 let sketchSpecialModeRegistry = createSketchSpecialModeRegistry(sketchSpecialModeDefinitions)
 

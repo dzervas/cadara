@@ -91,6 +91,10 @@ import {
   createReferenceImageOperationTarget,
 } from '@/domain/reference-image/operations'
 import {
+  buildReferenceImageAnchorProjectedReferences,
+  mergeReferenceImageAnchorReferences,
+} from '@/domain/reference-image-calibration/export/references'
+import {
   createReferenceImageTextureSourceKey,
   getReferenceImageCornerPoints,
 } from '@/domain/reference-image/rendering'
@@ -127,7 +131,10 @@ import {
   resolveSketchSnap,
 } from '@/domain/sketch-snapping/snap-candidates'
 import type { ActiveSketchSpecialModeSession } from '@/domain/sketch-special-modes/schema'
-import { getSketchSpecialModeSummaryLabel } from '@/domain/sketch-special-modes/presentation'
+import {
+  getSketchSpecialModeOperationOwnedStateOverride,
+  getSketchSpecialModeSummaryLabel,
+} from '@/domain/sketch-special-modes/presentation'
 
 export type { SketchDraftEntity, SketchToolId } from '@/domain/sketch-tools/definition'
 export type { SketchConstraintToolId } from '@/domain/sketch-constraints/definition'
@@ -459,6 +466,30 @@ function createEmptyDefinition(): SketchDefinition {
   }
 }
 
+function normalizeReferenceImageDerivedDefinition(
+  definition: SketchDefinition,
+  sketchId: SketchId,
+): SketchDefinition {
+  return mergeReferenceImageAnchorReferences(definition, sketchId)
+}
+
+function getReferenceImageOperationOverrides(
+  session: SketchSessionState,
+) {
+  const override = getSketchSpecialModeOperationOwnedStateOverride(session)
+  const state = override?.state as { kind?: unknown } | undefined
+  if (!override || state?.kind !== 'referenceImage') {
+    return undefined
+  }
+
+  return new Map([
+    [override.operationId, {
+      state: override.state as ReferenceImageOperationState,
+      label: override.label,
+    }],
+  ])
+}
+
 function cloneDefinition(definition: SketchDefinition): SketchDefinition {
   return {
     ...definition,
@@ -479,6 +510,40 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
     derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
     authoringOperations: definition.authoringOperations ? [...definition.authoringOperations] : undefined,
   }
+}
+
+function mergeDerivedProjectedReferences(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  overrides?: ReturnType<typeof getReferenceImageOperationOverrides>,
+): ProjectedSketchReferenceRecord[] {
+  const derivedReferences = buildReferenceImageAnchorProjectedReferences(definition, overrides)
+  const derivedReferenceIds = new Set(derivedReferences.map((reference) => reference.referenceId))
+  return [
+    ...projectedReferences.filter((reference) => !derivedReferenceIds.has(reference.referenceId)),
+    ...derivedReferences,
+  ]
+}
+
+function getSketchSessionDisplayDefinition(session: SketchSessionState) {
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const evaluatedDefinition = evaluateSketchDerivations(session.definition).definition
+  return mergeReferenceImageAnchorReferences(
+    evaluatedDefinition,
+    sketchId,
+    getReferenceImageOperationOverrides(session),
+  )
+}
+
+function getSketchSessionDisplayProjectedReferences(
+  session: SketchSessionState,
+  definition: SketchDefinition,
+) {
+  return mergeDerivedProjectedReferences(
+    definition,
+    session.projectedReferences,
+    getReferenceImageOperationOverrides(session),
+  )
 }
 
 function deriveSolvedRegionsForSession(
@@ -1128,13 +1193,21 @@ function getNextDefinitionSequence(definition: SketchDefinition) {
 }
 
 export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): SketchSessionState {
-  const fullDefinition = cloneDefinition(sketch.sketch.definition)
+  const sketchId = sketch.sketchId
+  const fullDefinition = normalizeReferenceImageDerivedDefinition(
+    cloneDefinition(sketch.sketch.definition),
+    sketchId,
+  )
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
-  const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
+  const definition = normalizeReferenceImageDerivedDefinition(
+    filterSketchDefinitionThroughCursor(fullDefinition, historyCursor),
+    sketchId,
+  )
   const planeKey = sketch.planeKey ?? sketch.plane.key ?? null
+  const projectedReferences = buildReferenceImageAnchorProjectedReferences(definition)
 
   return {
-    sketchId: sketch.sketchId,
+    sketchId,
     sketchLabel: sketch.label,
     plane: sketch.plane,
     planeTarget: sketch.planeTarget,
@@ -1166,10 +1239,10 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     drawStartSnap: null,
     sequence: getNextDefinitionSequence(sketch.sketch.definition),
     solvedRegions: [...sketch.sketch.regions],
-    projectedReferences: [],
+    projectedReferences,
     projectionDiagnostics: [],
     commitRequest: buildCommitRequest({
-      sketchId: sketch.sketchId,
+      sketchId,
       sketchLabel: sketch.label,
       plane: sketch.plane,
       planeTarget: sketch.planeTarget,
@@ -2044,14 +2117,17 @@ function rebuildSessionForDefinition(
     historyOperations: SketchHistoryOperation[]
   },
 ): SketchSessionState {
-  const definition = cloneDefinition(input.definition)
-  const fullDefinition = cloneDefinition(input.fullDefinition)
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const definition = normalizeReferenceImageDerivedDefinition(cloneDefinition(input.definition), sketchId)
+  const fullDefinition = normalizeReferenceImageDerivedDefinition(cloneDefinition(input.fullDefinition), sketchId)
+  const projectedReferences = mergeDerivedProjectedReferences(definition, session.projectedReferences)
   return {
     ...session,
     historyCursor: input.historyCursor,
     definition,
     fullDefinition,
     historyOperations: [...input.historyOperations],
+    projectedReferences,
     toolStagedEntities: [],
     activeAnnotationEdit: null,
     selectedAnnotation: null,
@@ -2620,7 +2696,11 @@ function activateSketchConstraintTool(
 }
 
 function rebuildSessionCommitRequest(session: SketchSessionState, definition: SketchDefinition) {
-  const evaluatedDefinition = evaluateSketchDerivations(definition).definition
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const evaluatedDefinition = normalizeReferenceImageDerivedDefinition(
+    evaluateSketchDerivations(definition).definition,
+    sketchId,
+  )
   return buildCommitRequest({
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,
@@ -7944,10 +8024,11 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   const localStyleLookup = svgRenderingEnabled ? createSketchEntityStyleLookup(session) : new Map<SketchEntityId, SketchEntityDisplayStyle>()
   const pointStyleLookup = svgRenderingEnabled ? createSketchPointStyleLookup(session) : new Map<SketchPointId, SketchEntityDisplayStyle>()
   const regionStyleLookup = svgRenderingEnabled ? createSketchRegionStyleLookup(session) : new Map<RegionRecord['regionId'], SketchEntityDisplayStyle>()
-  const displayDefinition = evaluateSketchDerivations(session.definition).definition
+  const displayDefinition = getSketchSessionDisplayDefinition(session)
+  const displayProjectedReferences = getSketchSessionDisplayProjectedReferences(session, displayDefinition)
   const solved = solveSketchDefinitionCore({
     definition: displayDefinition,
-    projectedReferences: session.projectedReferences,
+    projectedReferences: displayProjectedReferences,
     tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
     partialSolvePolicy: 'bestEffort',
   })
@@ -7980,7 +8061,10 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       strokeStyle: style?.strokeStyle,
     }, constraintDisplaySummary)
   })
-  const referenceImageRenderables = collectActiveReferenceImageOperations(displayDefinition).map(({ operation, state }, index) =>
+  const referenceImageRenderables = collectActiveReferenceImageOperations(
+    displayDefinition,
+    getReferenceImageOperationOverrides(session),
+  ).map(({ operation, state }, index) =>
     createDisplayRenderableForReferenceImageOperation(session, operation, state, index),
   )
   const entityRenderables = deriveSketchDisplayEntities(session).map((entity, index) =>
@@ -8002,19 +8086,49 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
     ...entityRenderables,
     ...entityRenderables.flatMap(createOverconstraintDiagnosticRenderable),
     ...displayDefinition.references.flatMap((reference, index) => {
-      const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
+      if (reference.kind === 'referenceImageAnchor') {
+        return []
+      }
+
+      const projectedReference = displayProjectedReferences.find((entry) => entry.referenceId === reference.referenceId)
       if (projectedReference && projectedReference.status === 'projected' && projectedReference.geometry.length > 0) {
         return []
       }
 
       return [createDisplayRenderableForReferenceRecord(session, reference.referenceId, index)]
     }),
-    ...session.projectedReferences.flatMap((reference) =>
+    ...displayProjectedReferences
+      .filter((reference) => shouldRenderProjectedReference(session, displayDefinition, reference.referenceId))
+      .flatMap((reference) =>
       reference.geometry.map((geometry, index) =>
         createDisplayRenderableForProjectedGeometry(session, reference.referenceId, geometry, index),
       ),
-    ),
+      ),
   ]
+}
+
+function shouldRenderProjectedReference(
+  session: SketchSessionState,
+  definition: SketchDefinition,
+  referenceId: ReferenceId,
+) {
+  const reference = definition.references.find((entry) => entry.referenceId === referenceId)
+  if (!reference || reference.kind !== 'referenceImageAnchor') {
+    return true
+  }
+
+  const overrides = getReferenceImageOperationOverrides(session)
+  if (overrides?.has(reference.source.operationId)) {
+    return true
+  }
+
+  const operation = collectActiveReferenceImageOperations(
+    definition,
+    overrides,
+  ).find(({ operation }) =>
+    operation.operationId === reference.source.operationId
+  )
+  return operation?.state.calibration?.showExportedAnchorsInSketch ?? false
 }
 
 function withSketchConstraintDisplay(
@@ -8829,7 +8943,8 @@ export function updateSketchReferenceProjection(
   projectedReferences: ProjectedSketchReferenceRecord[],
   diagnostics: ProjectedSketchReferenceRecord['diagnostics'],
 ): SketchSessionState {
-  const referenceDiagnostics = projectedReferences.flatMap((reference) => [
+  const mergedProjectedReferences = mergeDerivedProjectedReferences(session.definition, projectedReferences)
+  const referenceDiagnostics = mergedProjectedReferences.flatMap((reference) => [
     ...reference.diagnostics,
     ...(reference.status === 'projected'
       ? []
@@ -8845,7 +8960,7 @@ export function updateSketchReferenceProjection(
 
   return withLiveSolvedRegions({
     ...session,
-    projectedReferences,
+    projectedReferences: mergedProjectedReferences,
     projectionDiagnostics,
     validationMessage,
   })

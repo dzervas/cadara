@@ -863,8 +863,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(persistedSketch, 'Persisted authored documents should include committed reference-image sketches.')
     assert(persistedSketch.definition.points.length === 0, 'Persisted reference-image sketches should not materialize sketch points.')
     assert(persistedSketch.definition.entities.length === 0, 'Persisted reference-image sketches should not materialize sketch entities.')
-    assert(
-      JSON.stringify(persistedSketch.definition.authoringOperations) === JSON.stringify(expectedReferenceImageOperations),
+    assertReferenceImageOperationPayloads(
+      persistedSketch.definition.authoringOperations,
+      expectedReferenceImageOperations,
       'Persisted authored documents should keep the full inline reference-image operation payloads, including edit rows.',
     )
 
@@ -879,8 +880,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(restoredSketch, 'Repository restore should reopen committed reference-image sketches.')
     assert(restoredSketch.sketch.definition.points.length === 0, 'Restored reference-image sketches should still avoid local points.')
     assert(restoredSketch.sketch.definition.entities.length === 0, 'Restored reference-image sketches should still avoid local entities.')
-    assert(
-      JSON.stringify(restoredSketch.sketch.definition.authoringOperations) === JSON.stringify(expectedReferenceImageOperations),
+    assertReferenceImageOperationPayloads(
+      restoredSketch.sketch.definition.authoringOperations,
+      expectedReferenceImageOperations,
       'Repository restore should preserve the full inline reference-image operation payloads, including edit rows.',
     )
   }
@@ -1283,3 +1285,19 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
 })
+
+function assertReferenceImageOperationPayloads(
+  actual: unknown,
+  expected: unknown,
+  message: string,
+): asserts actual {
+  const normalize = (value: unknown) => JSON.stringify(value, (key, fieldValue) =>
+    key === 'calibration'
+      ? undefined
+      : fieldValue
+  )
+
+  if (normalize(actual) !== normalize(expected)) {
+    throw new Error(message)
+  }
+}

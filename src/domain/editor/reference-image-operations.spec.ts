@@ -8,6 +8,7 @@ import {
   updateReferenceImageOperationStates,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
+import { REFERENCE_IMAGE_CALIBRATION_MODE_ID, type ReferenceImageCalibrationModeState } from '@/domain/reference-image-calibration/mode/shared'
 import { createReferenceImageEditOperation, createReferenceImageOperation } from '@/domain/reference-image/operations'
 
 test('src/domain/editor/reference-image-operations.spec.ts', () => {
@@ -140,5 +141,161 @@ test('src/domain/editor/reference-image-operations.spec.ts', () => {
   assert(
     remainingRenderables[0]?.label === 'reference-b.jpg',
     'Reference-image deletes should target individual operations rather than clearing the whole sketch image set.',
+  )
+})
+
+test('src/domain/editor/reference-image-operations.spec.ts renders exported anchor references from draft calibration state', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const plane = createStandardPlaneDefinition('xy')
+  const operationId = 'sketch_operation_1_reference-image'
+  const committed = updateReferenceImageOperationStates({
+    session: appendReferenceImageOperations(createNewSketchSession(plane), [
+      createReferenceImageOperation({
+        sequence: 1,
+        sketchId: 'sketch_draft',
+        payload: {
+          mediaType: 'image/png',
+          fileName: 'reference.png',
+          pixelWidth: 400,
+          pixelHeight: 200,
+          base64Data: 'cG5n',
+        },
+      }),
+    ]),
+    updates: [{
+      operationId,
+      state: {
+        kind: 'referenceImage',
+        image: {
+          mediaType: 'image/png',
+          fileName: 'reference.png',
+          pixelWidth: 400,
+          pixelHeight: 200,
+          base64Data: 'cG5n',
+        },
+        placement: {
+          center: [0, 0],
+          width: 200,
+          height: 100,
+          rotationRadians: 0,
+        },
+        calibration: {
+          scaleMode: 'lockedAspect',
+          showExportedAnchorsInSketch: false,
+          anchors: [{
+            anchorId: 'anchor-1',
+            label: 'A1',
+            uv: [0.5, 0.5],
+            worldPosition: [0, 0],
+          }],
+          constraints: [],
+          solveResult: {
+            placement: {
+              center: [0, 0],
+              width: 200,
+              height: 100,
+              rotationRadians: 0,
+            },
+            anchors: [{
+              anchorId: 'anchor-1',
+              worldPosition: [0, 0],
+            }],
+            diagnostics: [],
+          },
+        },
+      },
+    }],
+  })
+
+  const draftState: ReferenceImageCalibrationModeState = {
+    operationId,
+    draftState: {
+      kind: 'referenceImage',
+      image: {
+        mediaType: 'image/png',
+        fileName: 'reference-updated.png',
+        pixelWidth: 400,
+        pixelHeight: 200,
+        base64Data: 'dXBkYXRlZA==',
+      },
+      placement: {
+        center: [15, 5],
+        width: 200,
+        height: 100,
+        rotationRadians: 0,
+      },
+      calibration: {
+        scaleMode: 'lockedAspect',
+        showExportedAnchorsInSketch: false,
+        anchors: [{
+          anchorId: 'anchor-1',
+          label: 'A1',
+          uv: [0.5, 0.5],
+          worldPosition: [25, 10],
+        }],
+        constraints: [],
+        solveResult: {
+          placement: {
+            center: [15, 5],
+            width: 200,
+            height: 100,
+            rotationRadians: 0,
+          },
+          anchors: [{
+            anchorId: 'anchor-1',
+            worldPosition: [25, 10],
+          }],
+          diagnostics: [],
+        },
+      },
+    },
+    selectedAnchorId: 'anchor-1',
+    selectedConstraintId: null,
+    pendingAnchorPlacement: false,
+    pendingConstraintAnchorIds: null,
+  }
+
+  const renderables = getSketchSessionDisplayRenderables({
+    ...committed,
+    activeSpecialMode: {
+      modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+      operationTarget: {
+        kind: 'sketchOperation',
+        sketchId: 'sketch_draft',
+        operationId,
+      },
+      state: draftState,
+      generation: 1,
+      hoverTarget: null,
+      selectedTarget: null,
+      activeDragHandle: null,
+      pendingEffect: null,
+      pendingExit: false,
+    },
+  })
+
+  const draftImage = renderables.find((entry) =>
+    entry.target?.kind === 'sketchOperation' && entry.target.operationId === operationId
+  )
+  const exportedAnchor = renderables.find((entry) =>
+    entry.target?.kind === 'projectedReferenceGeometry'
+      && entry.target.referenceId.includes(operationId)
+      && entry.geometry.kind === 'marker'
+  )
+
+  assert(
+    draftImage?.textureFill?.base64Data === 'dXBkYXRlZA==',
+    'Active calibration sessions should render the draft reference-image payload.',
+  )
+  assert(
+    exportedAnchor?.geometry.kind === 'marker'
+      && Math.abs(exportedAnchor.geometry.position[0] - 25) < 0.01
+      && Math.abs(exportedAnchor.geometry.position[1] - 10) < 0.01,
+    'Derived exported anchor references should render from the draft calibration solve while calibration is active.',
   )
 })

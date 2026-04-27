@@ -1,6 +1,10 @@
 import type { ReferenceImageOperationState, ReferenceImagePayload } from '@/contracts/reference-image/schema'
 import type { SketchAuthoringOperation, SketchDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
 import type { SketchAuthoringOperationId, SketchId } from '@/contracts/shared/ids'
+import {
+  createDefaultReferenceImageCalibrationState,
+  solveReferenceImageOperationState,
+} from '@/domain/reference-image-calibration/state'
 
 const DEFAULT_REFERENCE_IMAGE_EXTENT = 200
 
@@ -22,6 +26,11 @@ export interface ActiveReferenceImageOperation {
   state: ReferenceImageOperationState
 }
 
+export interface ReferenceImageOperationStateOverride {
+  state: ReferenceImageOperationState
+  label?: string
+}
+
 export function createReferenceImageOperation(
   input: CreateReferenceImageOperationInput,
 ): SketchAuthoringOperation {
@@ -39,6 +48,7 @@ export function createReferenceImageOperation(
       kind: 'referenceImage',
       image: input.payload,
       placement,
+      calibration: createDefaultReferenceImageCalibrationState(input.payload, placement),
     },
   }
 }
@@ -53,7 +63,7 @@ export function createReferenceImageEditOperation(
     targets: {
       edited: [{ kind: 'operation', operationId: input.operationId }],
     },
-    ownedState: input.state,
+    ownedState: solveReferenceImageOperationState(input.state),
   }
 }
 
@@ -74,15 +84,26 @@ export function createReferenceImagePlacement(
 
 export function collectActiveReferenceImageOperations(
   definition: Pick<SketchDefinition, 'authoringOperations'>,
+  overrides?: ReadonlyMap<SketchAuthoringOperationId, ReferenceImageOperationStateOverride>,
 ): ActiveReferenceImageOperation[] {
   const operations = definition.authoringOperations ?? []
   const activeOperations = new Map<SketchAuthoringOperationId, ActiveReferenceImageOperation>()
 
   for (const operation of operations) {
     if (operation.kind === 'referenceImage' && operation.ownedState.kind === 'referenceImage') {
+      const override = overrides?.get(operation.operationId)
       activeOperations.set(operation.operationId, {
-        operation,
-        state: operation.ownedState,
+        operation: override?.label
+          ? {
+              ...operation,
+              label: override.label,
+            }
+          : operation,
+        state: solveReferenceImageOperationState(override?.state ?? {
+          ...operation.ownedState,
+          calibration: operation.ownedState.calibration
+            ?? createDefaultReferenceImageCalibrationState(operation.ownedState.image, operation.ownedState.placement),
+        }),
       })
       continue
     }
@@ -98,14 +119,23 @@ export function collectActiveReferenceImageOperations(
           continue
         }
 
+        const override = overrides?.get(target.operationId)
         activeOperations.set(target.operationId, {
           operation: {
             ...current.operation,
             kind: 'referenceImage',
-            label: operation.label,
-            ownedState: operation.ownedState,
+            label: override?.label ?? operation.label,
+            ownedState: solveReferenceImageOperationState(override?.state ?? {
+              ...operation.ownedState,
+              calibration: operation.ownedState.calibration
+                ?? createDefaultReferenceImageCalibrationState(operation.ownedState.image, operation.ownedState.placement),
+            }),
           },
-          state: operation.ownedState,
+          state: solveReferenceImageOperationState(override?.state ?? {
+            ...operation.ownedState,
+            calibration: operation.ownedState.calibration
+              ?? createDefaultReferenceImageCalibrationState(operation.ownedState.image, operation.ownedState.placement),
+          }),
         })
       }
       continue

@@ -4,6 +4,7 @@ import type { SketchSessionState } from '@/domain/editor/sketch-session'
 import { sketchSelectionFilter, type PrimitiveRef, type SelectionFilter, type SelectionTargetCatalog } from '@/domain/editor/schema'
 import {
   getSketchSpecialModeDefinition,
+  getRegisteredSketchSpecialModeDefinitions,
   isRegisteredSketchSpecialModeId,
 } from '@/domain/sketch-special-modes/registry'
 import type {
@@ -12,6 +13,8 @@ import type {
   SketchSpecialModeEffectRequest,
   SketchSpecialModeHandleRef,
   SketchSpecialModeId,
+  SketchSpecialModeOpenContext,
+  SketchSpecialModeOperationOwnedStateOverride,
   SketchSpecialModePanelAction,
   SketchSpecialModePanelSchema,
   SketchSpecialModeTargetRef,
@@ -84,16 +87,18 @@ function applyTransition(
     return session
   }
 
+  const baseSession = transition.session ?? session
+
   if (transition.exit && !transition.effect) {
     return {
-      ...session,
+      ...baseSession,
       activeSpecialMode: null,
     }
   }
 
-  const activeMode = session.activeSpecialMode
+  const activeMode = baseSession.activeSpecialMode
   if (!activeMode) {
-    return session
+    return baseSession
   }
 
   const nextGeneration = activeMode.generation + (transition.state !== undefined || transition.effect ? 1 : 0)
@@ -119,7 +124,7 @@ function applyTransition(
   }
 
   return {
-    ...session,
+    ...baseSession,
     activeSpecialMode: nextMode,
     validationMessage: null,
   }
@@ -195,6 +200,29 @@ export function enterSketchSpecialMode(input: {
       pendingExit: false,
     },
   }
+}
+
+export function resolveSketchSpecialModeOpenRequest(
+  input: SketchSpecialModeOpenContext,
+): {
+  modeId: SketchSpecialModeId
+  operationId: SketchAuthoringOperationId
+  payload?: Record<string, unknown>
+} | null {
+  for (const definition of getRegisteredSketchSpecialModeDefinitions()) {
+    const request = definition.resolveOpenRequest?.(input)
+    if (!request) {
+      continue
+    }
+
+    return {
+      modeId: definition.id,
+      operationId: request.operationId,
+      payload: request.payload,
+    }
+  }
+
+  return null
 }
 
 function resolveSketchSpecialModeSelectionInput(
@@ -537,6 +565,21 @@ export function handleSketchSpecialModePanelAction(
 
 export function resolveSketchSpecialModeEffectRequest(session: SketchSessionState): SketchSpecialModeEffectRequest | null {
   return session.activeSpecialMode?.pendingEffect?.effect ?? null
+}
+
+export function getSketchSpecialModeOperationOwnedStateOverride(
+  session: SketchSessionState,
+): SketchSpecialModeOperationOwnedStateOverride | null {
+  const resolved = resolveDefinition(session)
+
+  if (!resolved) {
+    return null
+  }
+
+  return resolved.definition.getOperationOwnedStateOverride?.({
+    sketchSession: session,
+    activeMode: resolved.activeMode,
+  }) ?? null
 }
 
 export function applySketchSpecialModeEffectResult(input: {

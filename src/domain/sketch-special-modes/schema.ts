@@ -244,7 +244,27 @@ export interface SketchSpecialModeEffectContext<TState = unknown>
   payload: Record<string, unknown>
 }
 
+export interface SketchSpecialModeOpenContext {
+  sketchSession: SketchSessionState
+  point: SketchPoint
+  target: PrimitiveRef | null
+  selection: readonly PrimitiveRef[]
+  selectionCatalog: SelectionTargetCatalog | null
+}
+
+export interface SketchSpecialModeOpenRequest {
+  operationId: SketchAuthoringOperationId
+  payload?: Record<string, unknown>
+}
+
+export interface SketchSpecialModeOperationOwnedStateOverride {
+  operationId: SketchAuthoringOperationId
+  state: unknown
+  label?: string
+}
+
 export interface SketchSpecialModeTransition<TState = unknown> {
+  session?: SketchSessionState
   state?: TState
   hoverTarget?: SketchSpecialModeTargetRef | null
   selectedTarget?: SketchSpecialModeTargetRef | null
@@ -256,6 +276,7 @@ export interface SketchSpecialModeTransition<TState = unknown> {
 export interface SketchSpecialModeDefinition<TState = unknown> {
   id: SketchSpecialModeId
   label: string
+  resolveOpenRequest?(input: SketchSpecialModeOpenContext): SketchSpecialModeOpenRequest | null
   enter(input: {
     sketchSession: SketchSessionState
     operationTarget: SketchOperationRef
@@ -277,4 +298,7 @@ export interface SketchSpecialModeDefinition<TState = unknown> {
   commit?(input: SketchSpecialModeLifecycleContext<TState>): SketchSpecialModeTransition<TState>
   cancel?(input: SketchSpecialModeLifecycleContext<TState>): SketchSpecialModeTransition<TState>
   handleEffectResult?(input: SketchSpecialModeEffectContext<TState>): SketchSpecialModeTransition<TState>
+  getOperationOwnedStateOverride?(
+    input: SketchSpecialModeLifecycleContext<TState>,
+  ): SketchSpecialModeOperationOwnedStateOverride | null
 }

@@ -1433,6 +1433,16 @@ export function ThreeCadViewport({
         return
       }
 
+      if (resolvedTarget?.target?.kind === 'sketchOperation') {
+        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+
+        if (point) {
+          specialModeDoubleClickRef.current(point, resolvedTarget.target)
+        }
+
+        return
+      }
+
       if (!shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: sketchSessionRef.current?.activeTool,
         sketchStatus: sketchSessionRef.current?.status,

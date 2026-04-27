@@ -7,6 +7,7 @@ import {
   initialEditorState,
   replayEditorEvents,
   replayEditorEventsWithRuntime,
+  runEditorEffect,
   type SketchEditorState,
   transitionEditorState,
   type EditorEvent,
@@ -2015,6 +2016,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       session: sketchSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
     }
 
     const sketchCleared = transitionEditorState(sketchState, { type: 'selection.cleared' })
@@ -3119,6 +3121,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
     }
 
     const reused = transitionEditorState(baseState, {
@@ -3258,6 +3261,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       session: styledSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
     }
 
     for (const toolId of passiveSketchToolIds) {
@@ -3442,6 +3446,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
     }
 
     const selectedFirst = transitionEditorState(state, {
@@ -3625,6 +3630,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         session,
         pendingCommitRequestId: null,
         pendingProjectionRequestId: null,
+        pendingImportRequestId: null,
       },
     }
   }
@@ -3678,6 +3684,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
     }, {
       type: 'sketch.connectedSelectionRequested',
       target: localTarget,
@@ -4142,6 +4149,97 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testReferencePickerCancellationAndSessionCleanup()
   await testImportSessionAutoArmsSinglePlanePicker()
   await testImportPlaneSelectionCompletesSinglePlanePicker()
+  async function testSketchImageImportUsesEditorRuntime() {
+    const snapshot = (await new MockKernelAdapter().getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: 'doc_workspace',
+    })).snapshot
+    const session = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    const sketchState: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: snapshot.documentId,
+        revisionId: snapshot.revisionId,
+      },
+      snapshot,
+      selection: [session.planeTarget],
+      hoverTarget: null,
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: buildSelectionTargetCatalog(snapshot),
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-import-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      session,
+      pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+      pendingImportRequestId: null,
+    }
+
+    const reopenedSession = {
+      ...session,
+      sketchId: 'sketch_imported' as SketchId,
+      sketchLabel: 'Imported Sketch',
+    }
+    const runtime: EditorEffectRuntime = {
+      async getCurrentDocumentSnapshot() {
+        return snapshot
+      },
+      async commitSketch() {
+        return null
+      },
+      async projectSketchReferences() {
+        return { projectedReferences: [], diagnostics: [] }
+      },
+      async importSketchReferenceImages() {
+        return {
+          status: 'committed' as const,
+          revisionId: snapshot.revisionId,
+          snapshot,
+          selectionCatalog: buildSelectionTargetCatalog(snapshot),
+          session: reopenedSession,
+          importedCount: 1,
+        }
+      },
+      async evaluatePreview() {
+        throw new Error('Feature preview is not used by this test.')
+      },
+      async commitFeature() {
+        throw new Error('Feature commit is not used by this test.')
+      },
+    }
+
+    const importing = transitionEditorState(sketchState, {
+      type: 'tool.activated',
+      toolId: 'importImage',
+    })
+
+    assert(
+      importing.effects[0]?.type === 'sketch.importReferenceImages',
+      'Import Image should emit a sketch-owned editor effect.',
+    )
+    assert(importing.state.kind === 'editingSketch', 'Import Image should preserve sketch editing state while the picker runs.')
+
+    const completedEvent = await runEditorEffect(importing.effects[0]!, runtime)
+    const completed = transitionEditorState(importing.state, completedEvent)
+
+    assert(completed.state.kind === 'editingSketch', 'Successful import should keep the reopened sketch session active.')
+    assert(completed.state.selection[0]?.kind === 'sketch', 'Successful import should select the reopened sketch target.')
+    assert(
+      completed.state.selection[0]?.kind === 'sketch' && completed.state.selection[0].sketchId === 'sketch_imported',
+      'Successful import should reopen the imported sketch through the editor runtime rather than the workbench shell.',
+    )
+    assert(completed.state.pendingImportRequestId === null, 'Import completion should clear the pending import request.')
+  }
+
   testSelectionClearEventClearsSelectionAndPreservesActiveState()
   testSketchToolClearStaysInSketchEditing()
   testRemainingSketchToolsActivateWithoutDroppingSketchSession()
@@ -4169,6 +4267,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testRuntimeLoopReopensStoredSketchPlane()
   await testRuntimeLoopReopensCommittedFeatureFromExplicitIntent()
   await testRuntimeLoopReopensSketchFromExplicitIntent()
+  await testSketchImageImportUsesEditorRuntime()
   await testFeatureEditEntryRollsBackBeforeHydrationFromTail()
   await testSketchEditEntryRollsBackBeforeOpenFromTail()
   await testFeatureEditCancelRestoresTailCursor()

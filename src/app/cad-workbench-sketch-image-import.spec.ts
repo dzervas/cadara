@@ -134,7 +134,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
     'Sketch image import should commit a reference-image authoring operation in the sketch payload.',
   )
   assert(
-    JSON.stringify(importedOperation) === JSON.stringify({
+    JSON.stringify({
       operationId: importedOperation?.operationId,
       label: 'reference.png',
       kind: 'referenceImage',
@@ -153,6 +153,16 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
           height: 150,
           rotationRadians: 0,
         },
+      },
+    }) === JSON.stringify({
+      operationId: importedOperation?.operationId,
+      label: importedOperation?.label,
+      kind: importedOperation?.kind,
+      targets: importedOperation?.targets,
+      ownedState: importedOperation?.ownedState && {
+        kind: importedOperation.ownedState.kind,
+        image: importedOperation.ownedState.image,
+        placement: importedOperation.ownedState.placement,
       },
     }),
     'Sketch image import should commit the full inline reference-image payload and centered placement state.',

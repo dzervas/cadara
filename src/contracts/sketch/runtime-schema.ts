@@ -87,6 +87,14 @@ const sketchReferenceDefinitionSchema = z.discriminatedUnion('kind', [
     source: z.union([sketchEntityRefSchema, sketchPointRefSchema, sketchRefSchema]),
     projectionMode: z.literal('useExistingCoplanarGeometry'),
   }),
+  z.object({
+    referenceId: referenceIdSchema,
+    kind: z.literal('referenceImageAnchor'),
+    label: z.string(),
+    source: sketchOperationRefSchema,
+    anchorId: z.string().trim().min(1, 'Reference-image anchor references must persist an anchor id.'),
+    projectionMode: z.literal('referenceImageAnchor'),
+  }),
 ]).transform((value) => value as SketchReferenceDefinition)
 
 const sketchStyleDefinitionSchema = z.object({

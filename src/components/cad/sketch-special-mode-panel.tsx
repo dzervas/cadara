@@ -90,18 +90,6 @@ function SpecialModePanelField({
   field: SketchSpecialModePanelField
   onAction: (action: SketchSpecialModePanelAction) => void
 }) {
-  const surfaceClassName = `mt-1 w-full rounded-md border border-[var(--cad-border)] bg-[var(--workbench-shell-overlay-strong)] px-2 py-1.5 text-[12px] text-[var(--workbench-shell-text)] outline-none ${field.disabled ? 'opacity-60' : ''}`
-
-  const applyPatch = (value: string | number | boolean | null) => {
-    onAction({
-      kind: 'patch',
-      patch: {
-        ...field.action.patch,
-        value,
-      },
-    })
-  }
-
   return (
     <label className="block">
       <div className="flex items-center justify-between gap-2">
@@ -112,22 +100,36 @@ function SpecialModePanelField({
       </div>
       {field.kind === 'text' ? (
         <input
-          className={surfaceClassName}
+          className={`mt-1 w-full rounded-md border border-[var(--cad-border)] bg-[var(--workbench-shell-overlay-strong)] px-2 py-1.5 text-[12px] text-[var(--workbench-shell-text)] outline-none ${field.disabled ? 'opacity-60' : ''}`}
           disabled={field.disabled}
           placeholder={field.placeholder}
           type="text"
           value={field.value}
-          onChange={(event) => applyPatch(event.currentTarget.value)}
+          onChange={(event) => {
+            onAction({
+              kind: 'patch',
+              patch: {
+                ...field.action.patch,
+                value: event.currentTarget.value,
+              },
+            })
+          }}
         />
       ) : field.kind === 'numeric' ? (
         <input
-          className={surfaceClassName}
+          className={`mt-1 w-full rounded-md border border-[var(--cad-border)] bg-[var(--workbench-shell-overlay-strong)] px-2 py-1.5 text-[12px] text-[var(--workbench-shell-text)] outline-none ${field.disabled ? 'opacity-60' : ''}`}
           disabled={field.disabled}
           type="number"
           value={field.value ?? ''}
           onChange={(event) => {
             const parsed = Number(event.currentTarget.value)
-            applyPatch(Number.isNaN(parsed) ? null : parsed)
+            onAction({
+              kind: 'patch',
+              patch: {
+                ...field.action.patch,
+                value: Number.isNaN(parsed) ? null : parsed,
+              },
+            })
           }}
         />
       ) : field.kind === 'toggle' ? (
@@ -136,14 +138,30 @@ function SpecialModePanelField({
           checked={field.value}
           disabled={field.disabled}
           type="checkbox"
-          onChange={(event) => applyPatch(event.currentTarget.checked)}
+          onChange={(event) => {
+            onAction({
+              kind: 'patch',
+              patch: {
+                ...field.action.patch,
+                value: event.currentTarget.checked,
+              },
+            })
+          }}
         />
       ) : field.kind === 'option' ? (
         <select
-          className={surfaceClassName}
+          className={`mt-1 w-full rounded-md border border-[var(--cad-border)] bg-[var(--workbench-shell-overlay-strong)] px-2 py-1.5 text-[12px] text-[var(--workbench-shell-text)] outline-none ${field.disabled ? 'opacity-60' : ''}`}
           disabled={field.disabled}
           value={field.value ?? ''}
-          onChange={(event: ChangeEvent<HTMLSelectElement>) => applyPatch(event.currentTarget.value || null)}
+          onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+            onAction({
+              kind: 'patch',
+              patch: {
+                ...field.action.patch,
+                value: event.currentTarget.value || null,
+              },
+            })
+          }}
         >
           {field.options.map((option) => (
             <option key={option.value} value={option.value}>

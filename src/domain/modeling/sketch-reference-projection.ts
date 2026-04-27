@@ -675,6 +675,13 @@ function projectReference(
     case 'sketch':
       return projectWholeSketch(snapshot, reference, request.plane, request.tolerances)
   }
+
+  return failedReference(
+    reference.referenceId,
+    'unsupportedSource',
+    'unsupported-reference-source',
+    `Reference ${reference.referenceId} does not contain a supported source.`,
+  )
 }
 
 export function projectSketchExternalReferencesFromSnapshot(

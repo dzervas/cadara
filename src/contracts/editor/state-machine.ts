@@ -83,6 +83,7 @@ import {
   handleSketchSpecialModeHover,
   handleSketchSpecialModePanelAction,
   resolveSketchSpecialModeEffectRequest,
+  resolveSketchSpecialModeOpenRequest,
   sketchSessionHasActiveSpecialMode,
 } from '@/domain/sketch-special-modes/presentation'
 import type {
@@ -144,6 +145,7 @@ import type {
   RequestId,
   RevisionId,
   SketchAuthoringOperationId,
+  SketchId,
 } from '@/contracts/shared/ids'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
@@ -267,6 +269,8 @@ export interface SketchEditorState extends EditorStateBase {
   pendingCommitRequestId: RequestId | null
   /** Explicit correlation ID for an in-flight sketch reference projection request. */
   pendingProjectionRequestId: RequestId | null
+  /** Explicit correlation ID for an in-flight sketch reference-image import request. */
+  pendingImportRequestId: RequestId | null
 }
 
 /**
@@ -869,6 +873,27 @@ export type EditorEvent =
       message: string
     }
   | {
+      type: 'effect.sketchReferenceImageImportCompleted'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      status: 'cancelled' | 'committed'
+      revisionId: RevisionId
+      snapshot?: DocumentSnapshot
+      selectionCatalog?: SelectionTargetCatalog
+      session?: SketchSessionState
+      importedCount?: number
+    }
+  | {
+      type: 'effect.sketchReferenceImageImportFailed'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      message: string
+    }
+  | {
       type: 'effect.sketchSpecialModeEffectCompleted'
       requestId: RequestId
       documentId: DocumentId
@@ -1013,6 +1038,14 @@ export type EditorEffect =
       session: SketchSessionState
     }
   | {
+      type: 'sketch.importReferenceImages'
+      requestId: RequestId
+      commandSessionId: CommandSessionId
+      documentId: DocumentId
+      baseRevisionId: RevisionId
+      session: SketchSessionState
+    }
+  | {
       type: 'sketch.specialModeEffect'
       requestId: RequestId
       commandSessionId: CommandSessionId
@@ -1020,6 +1053,7 @@ export type EditorEffect =
       baseRevisionId: RevisionId
       modeId: SketchSpecialModeId
       effectId: string
+      kind: string
       payload: Record<string, unknown>
     }
   | {
@@ -1123,13 +1157,18 @@ function getEditorEffectContext(effect: EditorEffect): AppErrorContextEntry[] {
     }
   }
 
-  if (effect.type === 'sketch.commit' || effect.type === 'sketch.projectReferences') {
+  if (
+    effect.type === 'sketch.commit'
+    || effect.type === 'sketch.projectReferences'
+    || effect.type === 'sketch.importReferenceImages'
+  ) {
     context.push({ key: 'sketchId', value: effect.session.sketchId })
   }
 
   if (effect.type === 'sketch.specialModeEffect') {
     context.push({ key: 'modeId', value: effect.modeId })
     context.push({ key: 'effectId', value: effect.effectId })
+    context.push({ key: 'effectKind', value: effect.kind })
   }
 
   return context
@@ -1204,6 +1243,15 @@ export function createEditorEffectFailureEvent(
     case 'sketch.projectReferences':
       return {
         type: 'effect.sketchReferenceProjectionFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+    case 'sketch.importReferenceImages':
+      return {
+        type: 'effect.sketchReferenceImageImportFailed',
         requestId: effect.requestId,
         documentId: effect.documentId,
         commandSessionId: effect.commandSessionId,
@@ -1289,6 +1337,21 @@ export interface EditorEffectRuntime {
     projectedReferences: ProjectedSketchReferenceRecord[]
     diagnostics: ProjectedSketchReferenceRecord['diagnostics']
   }>
+  /** Imports one or more reference images into the active sketch workflow. */
+  importSketchReferenceImages?(input: {
+    requestId: RequestId
+    documentId: DocumentId
+    commandSessionId: CommandSessionId
+    baseRevisionId: RevisionId
+    session: SketchSessionState
+  }): Promise<{
+    status: 'cancelled' | 'committed'
+    revisionId: RevisionId
+    snapshot?: DocumentSnapshot
+    selectionCatalog?: SelectionTargetCatalog
+    session?: SketchSessionState
+    importedCount?: number
+  }>
   /** Runs asynchronous work requested by an active sketch special editor mode. */
   runSketchSpecialModeEffect?(input: {
     requestId: RequestId
@@ -1297,6 +1360,7 @@ export interface EditorEffectRuntime {
     baseRevisionId: RevisionId
     modeId: SketchSpecialModeId
     effectId: string
+    kind: string
     payload: Record<string, unknown>
   }): Promise<{
     effectId: string
@@ -2255,6 +2319,42 @@ function emitSketchReferenceProjection(state: SketchEditorState, session: Sketch
   }
 }
 
+function emitSketchReferenceImageImport(state: SketchEditorState): EditorTransitionResult {
+  if (state.document.documentId === null || state.document.revisionId === null) {
+    return {
+      state,
+      effects: [],
+    }
+  }
+
+  const requestId = nextRequestId(state, 'sketch-reference-image-import')
+
+  return {
+    state: {
+      ...state,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      pendingImportRequestId: requestId,
+      command: {
+        ...state.command,
+        phase: 'awaitingEffect',
+      },
+      preview: {
+        kind: 'sketch',
+        label: 'Import reference images',
+        target: state.session.planeTarget,
+      },
+    },
+    effects: [{
+      type: 'sketch.importReferenceImages',
+      requestId,
+      commandSessionId: state.command.commandSessionId,
+      documentId: state.document.documentId,
+      baseRevisionId: state.document.revisionId,
+      session: state.session,
+    }],
+  }
+}
+
 function emitSketchSpecialModeEffect(
   state: SketchEditorState,
   session: SketchSessionState,
@@ -2307,6 +2407,7 @@ function emitSketchSpecialModeEffect(
         baseRevisionId: state.document.revisionId,
         modeId: session.activeSpecialMode?.modeId ?? 'unknown',
         effectId: effect.effectId,
+        kind: effect.kind,
         payload: effect.payload,
       },
     ],
@@ -2463,6 +2564,15 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           state,
           effects: [],
         }
+      }
+
+      if (event.toolId === 'importImage') {
+        return state.kind === 'editingSketch'
+          ? emitSketchReferenceImageImport(state)
+          : {
+              state,
+              effects: [],
+            }
       }
 
       if (event.toolId === 'finishSketch' && state.kind === 'editingSketch') {
@@ -3927,11 +4037,45 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       return emitSketchSpecialModeEffect(state, session, requestId)
     }
     case 'sketch.specialModeDoubleClickRequested': {
-      if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
+      if (state.kind !== 'editingSketch') {
         return {
           state,
           effects: [],
         }
+      }
+
+      if (!sketchSessionHasActiveSpecialMode(state.session)) {
+        const point = deriveSketchPointFromWorld(state.session.plane, event.point)
+        const request = resolveSketchSpecialModeOpenRequest({
+          sketchSession: state.session,
+          point,
+          target: event.target ?? null,
+          selection: state.selection,
+          selectionCatalog: state.selectionCatalog,
+        })
+
+        if (!request) {
+          return {
+            state,
+            effects: [],
+          }
+        }
+
+        const requestId = nextRequestId(state, 'sketch-special-enter')
+        const session = enterSketchSpecialMode({
+          session: state.session,
+          modeId: request.modeId,
+          operationId: request.operationId,
+          payload: request.payload,
+          requestId,
+        })
+
+        return emitSketchSpecialModeEffect({
+          ...state,
+          selection: [session.activeSpecialMode?.operationTarget ?? state.selection[0]].flatMap((target) => target ? [target] : []),
+          hoverTarget: null,
+          selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+        }, session, requestId)
       }
 
       const requestId = nextRequestId(state, 'sketch-special-double-click')
@@ -4710,6 +4854,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           session: event.session,
           pendingCommitRequestId: null,
           pendingProjectionRequestId: null,
+          pendingImportRequestId: null,
         }
 
         return emitSketchReferenceProjection(nextState, event.session)
@@ -5166,6 +5311,94 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         },
         effects: [],
       }
+    case 'effect.sketchReferenceImageImportCompleted':
+      if (
+        state.kind !== 'editingSketch'
+        || state.pendingImportRequestId !== event.requestId
+        || state.command.commandSessionId !== event.commandSessionId
+        || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      if (event.status === 'cancelled' || !event.snapshot || !event.selectionCatalog || !event.session) {
+        return {
+          state: {
+            ...state,
+            pendingImportRequestId: null,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(state.session),
+              target: state.session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
+
+      return emitSketchReferenceProjection(
+        {
+          ...state,
+          document: {
+            documentId: event.snapshot.documentId,
+            revisionId: event.revisionId,
+          },
+          snapshot: event.snapshot,
+          selectionCatalog: event.selectionCatalog,
+          selection: [{ kind: 'sketch', sketchId: event.session.sketchId ?? ('sketch_draft' as SketchId) }],
+          hoverTarget: null,
+          selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+          previewRenderables: null,
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+          session: event.session,
+          pendingProjectionRequestId: null,
+          pendingImportRequestId: null,
+        },
+        event.session,
+      )
+    case 'effect.sketchReferenceImageImportFailed':
+      if (
+        state.kind !== 'editingSketch'
+        || state.pendingImportRequestId !== event.requestId
+        || state.command.commandSessionId !== event.commandSessionId
+        || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+      ) {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      return {
+        state: {
+          ...state,
+          pendingImportRequestId: null,
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+          preview: {
+            kind: 'sketch',
+            label: event.message,
+            target: state.session.planeTarget,
+          },
+          session: {
+            ...state.session,
+            validationMessage: event.message,
+          },
+        },
+        effects: [],
+      }
     case 'effect.sketchSpecialModeEffectCompleted':
       if (
         state.kind !== 'editingSketch'
@@ -5204,7 +5437,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           effects: [],
         }
       }
-    case 'effect.sketchSpecialModeEffectFailed':
+    case 'effect.sketchSpecialModeEffectFailed': {
       if (
         state.kind !== 'editingSketch'
         || state.command.commandSessionId !== event.commandSessionId
@@ -5245,6 +5478,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         },
         effects: [],
       }
+    }
     default:
       return {
         state,
@@ -5445,6 +5679,37 @@ export async function runEditorEffect(
         return createEditorEffectFailureEvent(effect, error, 'Sketch reference projection failed.')
       }
     }
+    case 'sketch.importReferenceImages': {
+      try {
+        if (!runtime.importSketchReferenceImages) {
+          throw new Error('Sketch reference-image import runtime is not available.')
+        }
+
+        const result = await runtime.importSketchReferenceImages({
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          session: effect.session,
+        })
+
+        return {
+          type: 'effect.sketchReferenceImageImportCompleted',
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          status: result.status,
+          revisionId: result.revisionId,
+          snapshot: result.snapshot,
+          selectionCatalog: result.selectionCatalog,
+          session: result.session,
+          importedCount: result.importedCount,
+        }
+      } catch (error: unknown) {
+        return createEditorEffectFailureEvent(effect, error, 'Sketch reference-image import failed.')
+      }
+    }
     case 'sketch.specialModeEffect': {
       try {
         if (!runtime.runSketchSpecialModeEffect) {
@@ -5458,6 +5723,7 @@ export async function runEditorEffect(
           baseRevisionId: effect.baseRevisionId,
           modeId: effect.modeId,
           effectId: effect.effectId,
+          kind: effect.kind,
           payload: effect.payload,
         })
 
@@ -5688,6 +5954,15 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     },
     async projectSketchReferences(input) {
       const sketchId = input.session.sketchId ?? ('sketch_draft' as NonNullable<SketchSessionState['sketchId']>)
+      const externalReferences = input.session.definition.references
+        .filter((reference) => reference.kind !== 'referenceImageAnchor')
+
+      if (externalReferences.length === 0) {
+        return {
+          projectedReferences: [],
+          diagnostics: [],
+        }
+      }
 
       return modelingService.projectSketchExternalReferences({
         solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -5696,7 +5971,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         sketchId,
         plane: input.session.plane.frame,
         tolerances: EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
-        references: input.session.definition.references.map((reference) => ({
+        references: externalReferences.map((reference) => ({
           referenceId: reference.referenceId,
           reference,
         })),

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsWithChildren } from 'react'
 
 import {
-  createModelingServiceEditorEffectRuntime,
   getEditorViewState,
   initialEditorState,
   type EditorEvent,
 } from '@/contracts/editor/state-machine'
+import { createAppEditorEffectRuntime } from '@/app/editor-effect-runtime'
 import {
   clearActiveDocumentTelemetryContext,
   createActiveDocumentTelemetryContext,
@@ -27,7 +27,7 @@ interface EditorProviderProps extends PropsWithChildren {
 export function EditorProvider({ modelingService, children }: EditorProviderProps) {
   const errorReporter = useErrorReporter()
   const runtime = useMemo(
-    () => createModelingServiceEditorEffectRuntime(modelingService),
+    () => createAppEditorEffectRuntime(modelingService),
     [modelingService],
   )
   const actorRef = useRef<EditorRuntimeActor | null>(null)
