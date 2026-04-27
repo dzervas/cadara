@@ -933,12 +933,12 @@ export type SketchReferenceDefinition =
       projectionMode: 'useExistingCoplanarGeometry'
     }
   | {
-      /** Durable authored reference identity within the containing sketch definition. */
+      /** Runtime-only reference identity synthesized for display/solving within the active sketch session. */
       referenceId: ReferenceId
       kind: 'referenceImageAnchor'
-      /** Human-readable label owned by the producer of the sketch definition. */
+      /** Human-readable label synthesized from the owning reference-image operation and anchor. */
       label: string
-      /** Owning reference-image operation exporting this fixed anchor. */
+      /** Owning reference-image operation exporting this fixed anchor. Runtime-only; never persisted. */
       source: SketchOperationRef
       /** Stable calibration anchor identity within the owning operation. */
       anchorId: string

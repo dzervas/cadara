@@ -466,13 +466,6 @@ function createEmptyDefinition(): SketchDefinition {
   }
 }
 
-function normalizeReferenceImageDerivedDefinition(
-  definition: SketchDefinition,
-  sketchId: SketchId,
-): SketchDefinition {
-  return mergeReferenceImageAnchorReferences(definition, sketchId)
-}
-
 function getReferenceImageOperationOverrides(
   session: SketchSessionState,
 ) {
@@ -1194,15 +1187,9 @@ function getNextDefinitionSequence(definition: SketchDefinition) {
 
 export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): SketchSessionState {
   const sketchId = sketch.sketchId
-  const fullDefinition = normalizeReferenceImageDerivedDefinition(
-    cloneDefinition(sketch.sketch.definition),
-    sketchId,
-  )
+  const fullDefinition = cloneDefinition(sketch.sketch.definition)
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
-  const definition = normalizeReferenceImageDerivedDefinition(
-    filterSketchDefinitionThroughCursor(fullDefinition, historyCursor),
-    sketchId,
-  )
+  const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
   const planeKey = sketch.planeKey ?? sketch.plane.key ?? null
   const projectedReferences = buildReferenceImageAnchorProjectedReferences(definition)
 
@@ -2117,9 +2104,8 @@ function rebuildSessionForDefinition(
     historyOperations: SketchHistoryOperation[]
   },
 ): SketchSessionState {
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
-  const definition = normalizeReferenceImageDerivedDefinition(cloneDefinition(input.definition), sketchId)
-  const fullDefinition = normalizeReferenceImageDerivedDefinition(cloneDefinition(input.fullDefinition), sketchId)
+  const definition = cloneDefinition(input.definition)
+  const fullDefinition = cloneDefinition(input.fullDefinition)
   const projectedReferences = mergeDerivedProjectedReferences(definition, session.projectedReferences)
   return {
     ...session,
@@ -2696,11 +2682,7 @@ function activateSketchConstraintTool(
 }
 
 function rebuildSessionCommitRequest(session: SketchSessionState, definition: SketchDefinition) {
-  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
-  const evaluatedDefinition = normalizeReferenceImageDerivedDefinition(
-    evaluateSketchDerivations(definition).definition,
-    sketchId,
-  )
+  const evaluatedDefinition = evaluateSketchDerivations(definition).definition
   return buildCommitRequest({
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,

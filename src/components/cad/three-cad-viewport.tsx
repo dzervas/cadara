@@ -2993,8 +2993,8 @@ function SketchDisplayMeshNode({
           opacity: renderable.textureFill.opacity,
           side: THREE.DoubleSide,
           polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1,
         })
       : new THREE.MeshBasicMaterial(materialConfig)
     nextMaterial.depthWrite = false
@@ -3003,10 +3003,6 @@ function SketchDisplayMeshNode({
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
-  if (renderable.textureFill && !texture) {
-    return null
-  }
-
   return (
     <mesh
       ref={(value) => {
@@ -3022,7 +3018,7 @@ function SketchDisplayMeshNode({
       }}
       geometry={geometry}
       material={material}
-      renderOrder={renderable.textureFill ? -1 : 0}
+      renderOrder={renderable.textureFill ? 1 : 0}
     />
   )
 }
@@ -3055,7 +3051,13 @@ function useImageTexture(url: string | null) {
         })
       },
       undefined,
-      () => undefined,
+      (error) => {
+        if (cancelled) {
+          return
+        }
+
+        console.error('Failed to load reference-image texture.', error)
+      },
     )
 
     return () => {

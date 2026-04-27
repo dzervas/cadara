@@ -132,6 +132,7 @@ import type {
   ModelingDiagnostic,
   SnapshotMutationBasis,
 } from '@/contracts/modeling/schema'
+import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
 import type { ImportReviewEnvelope } from '@/contracts/import/review'
 import type { ResolvedImportSource } from '@/contracts/import/source'
 import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
@@ -445,6 +446,12 @@ export interface SketchPointerReleasedEvent {
   target?: PrimitiveRef | null
 }
 
+export interface SketchReferenceImagePayloadsPickedEvent {
+  type: 'sketch.referenceImagePayloadsPicked'
+  payloads: readonly ReferenceImagePayload[] | null
+  message?: string
+}
+
 export interface SketchSpecialModeEnteredEvent {
   type: 'sketch.specialModeEntered'
   modeId: SketchSpecialModeId
@@ -668,6 +675,7 @@ export type EditorEvent =
   | AuthoringReopenRequestedEvent
   | SketchPointerMovedEvent
   | SketchPointerReleasedEvent
+  | SketchReferenceImagePayloadsPickedEvent
   | SketchSpecialModeEnteredEvent
   | SketchSpecialModePanelActionInvokedEvent
   | SketchSpecialModeClickRequestedEvent
@@ -1043,7 +1051,9 @@ export type EditorEffect =
       commandSessionId: CommandSessionId
       documentId: DocumentId
       baseRevisionId: RevisionId
+      mutationBasis: SnapshotMutationBasis
       session: SketchSessionState
+      payloads: readonly ReferenceImagePayload[]
     }
   | {
       type: 'sketch.specialModeEffect'
@@ -1343,7 +1353,9 @@ export interface EditorEffectRuntime {
     documentId: DocumentId
     commandSessionId: CommandSessionId
     baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
     session: SketchSessionState
+    payloads: readonly ReferenceImagePayload[]
   }): Promise<{
     status: 'cancelled' | 'committed'
     revisionId: RevisionId
@@ -2319,8 +2331,18 @@ function emitSketchReferenceProjection(state: SketchEditorState, session: Sketch
   }
 }
 
-function emitSketchReferenceImageImport(state: SketchEditorState): EditorTransitionResult {
-  if (state.document.documentId === null || state.document.revisionId === null) {
+function emitSketchReferenceImageImportWithPayloads(
+  state: SketchEditorState,
+  payloads: readonly ReferenceImagePayload[],
+): EditorTransitionResult {
+  const mutationBasis = getSnapshotMutationBasis(state)
+
+  if (
+    state.document.documentId === null
+    || state.document.revisionId === null
+    || mutationBasis === null
+    || payloads.length === 0
+  ) {
     return {
       state,
       effects: [],
@@ -2350,7 +2372,9 @@ function emitSketchReferenceImageImport(state: SketchEditorState): EditorTransit
       commandSessionId: state.command.commandSessionId,
       documentId: state.document.documentId,
       baseRevisionId: state.document.revisionId,
+      mutationBasis,
       session: state.session,
+      payloads: [...payloads],
     }],
   }
 }
@@ -2568,7 +2592,37 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (event.toolId === 'importImage') {
         return state.kind === 'editingSketch'
-          ? emitSketchReferenceImageImport(state)
+          ? {
+            state: {
+              ...state,
+              command: {
+                ...state.command,
+                phase: 'editing',
+              },
+              preview: {
+                kind: 'sketch',
+                label: 'Select reference images',
+                target: state.session.planeTarget,
+              },
+            },
+            effects: [],
+          }
+          : state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')
+            ? {
+              state: {
+                ...state,
+                command: {
+                  ...state.command,
+                  phase: 'collecting',
+                },
+                preview: {
+                  kind: 'sketch',
+                  label: 'Select reference images',
+                  target: state.selection[0] ?? null,
+                },
+              },
+              effects: [],
+            }
           : {
               state,
               effects: [],
@@ -3456,7 +3510,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
-      if (state.kind === 'selectionCommand' && state.command.toolId === 'sketch') {
+      if (state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')) {
         return emitSketchOpen(
           {
             ...state,
@@ -3980,6 +4034,58 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       )
     }
     case 'sketch.specialModeEntered': {
+      if (state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')) {
+        const session = state.snapshot
+          ? openSketchSessionFromSelection(state.selection.slice(), state.snapshot)
+          : null
+
+        if (!session) {
+          return {
+            state: withPreview(state, {
+              kind: 'sketch',
+              label: 'Reference-image import requires an active sketch plane.',
+              target: state.selection[0] ?? null,
+            }),
+            effects: [],
+          }
+        }
+
+        const nextState: SketchEditorState = {
+          kind: 'editingSketch',
+          mode: 'sketch',
+          document: state.document,
+          snapshot: state.snapshot,
+          previewRenderables: null,
+          selection:
+            session.sketchId === null
+              ? [session.planeTarget]
+              : [{ kind: 'sketch', sketchId: session.sketchId }],
+          hoverTarget: null,
+          selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+          selectionCatalog: state.selectionCatalog,
+          preview: {
+            kind: 'sketch',
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          },
+          nextCommandSequence: state.nextCommandSequence,
+          nextRequestSequence: state.nextRequestSequence,
+          pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+          pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+          editSessionCursorContext: state.editSessionCursorContext,
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+          session,
+          pendingCommitRequestId: null,
+          pendingProjectionRequestId: null,
+          pendingImportRequestId: null,
+        }
+
+        return transitionEditorState(nextState, event)
+      }
+
       if (state.kind !== 'editingSketch') {
         return {
           state,
@@ -4254,8 +4360,107 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
             },
           },
           effects: [],
+      }
+    }
+    case 'sketch.referenceImagePayloadsPicked':
+      if (state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')) {
+        const session = state.snapshot
+          ? openSketchSessionFromSelection(state.selection.slice(), state.snapshot)
+          : null
+
+        if (!session) {
+          return {
+            state,
+            effects: [],
+          }
+        }
+
+        const nextState: SketchEditorState = {
+          kind: 'editingSketch',
+          mode: 'sketch',
+          document: state.document,
+          snapshot: state.snapshot,
+          previewRenderables: null,
+          selection:
+            session.sketchId === null
+              ? [session.planeTarget]
+              : [{ kind: 'sketch', sketchId: session.sketchId }],
+          hoverTarget: null,
+          selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+          selectionCatalog: state.selectionCatalog,
+          preview: {
+            kind: 'sketch',
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          },
+          nextCommandSequence: state.nextCommandSequence,
+          nextRequestSequence: state.nextRequestSequence,
+          pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+          pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+          editSessionCursorContext: state.editSessionCursorContext,
+          command: {
+            ...state.command,
+            phase: 'editing',
+          },
+          session,
+          pendingCommitRequestId: null,
+          pendingProjectionRequestId: null,
+          pendingImportRequestId: null,
+        }
+
+        return !event.payloads || event.payloads.length === 0
+          ? {
+            state: {
+              ...nextState,
+              preview: {
+                kind: 'sketch',
+                label: event.message ?? getSketchSessionPreviewLabel(session),
+                target: session.planeTarget,
+              },
+              session: event.message
+                ? {
+                  ...session,
+                  validationMessage: event.message,
+                }
+                : session,
+            },
+            effects: [],
+          }
+          : emitSketchReferenceImageImportWithPayloads(nextState, event.payloads)
+      }
+
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
         }
       }
+
+      if (!event.payloads || event.payloads.length === 0) {
+        return {
+          state: {
+            ...state,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+            preview: {
+              kind: 'sketch',
+              label: event.message ?? getSketchSessionPreviewLabel(state.session),
+              target: state.session.planeTarget,
+            },
+            session: event.message
+              ? {
+                ...state.session,
+                validationMessage: event.message,
+              }
+              : state.session,
+          },
+          effects: [],
+        }
+      }
+
+      return emitSketchReferenceImageImportWithPayloads(state, event.payloads)
     case 'sketch.pointerMoved':
       if (state.kind !== 'editingSketch') {
         return {
@@ -5690,7 +5895,9 @@ export async function runEditorEffect(
           documentId: effect.documentId,
           commandSessionId: effect.commandSessionId,
           baseRevisionId: effect.baseRevisionId,
+          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
           session: effect.session,
+          payloads: effect.payloads,
         })
 
         return {
@@ -5955,7 +6162,6 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     async projectSketchReferences(input) {
       const sketchId = input.session.sketchId ?? ('sketch_draft' as NonNullable<SketchSessionState['sketchId']>)
       const externalReferences = input.session.definition.references
-        .filter((reference) => reference.kind !== 'referenceImageAnchor')
 
       if (externalReferences.length === 0) {
         return {

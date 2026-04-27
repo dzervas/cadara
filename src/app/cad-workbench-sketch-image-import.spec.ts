@@ -2,10 +2,16 @@ import { test } from 'bun:test'
 
 import { runSketchImageImportFlow } from '@/app/sketch-image-import-flow'
 import { ResultAsync, createAppError } from '@/contracts/errors'
+import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
-import { createSketchSessionFromSnapshot } from '@/domain/editor/sketch-session'
+import type { RevisionId } from '@/contracts/shared/ids'
+import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import { createNewSketchSessionFromSupport, createSketchSessionFromSnapshot } from '@/domain/editor/sketch-session'
 import { createModelingService, type ModelingCommitSketchInput, type ModelingService } from '@/domain/modeling/modeling-service'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
+import { OCC_KERNEL_DOCUMENT_ID } from '@/domain/modeling/opencascade-kernel-seed'
+import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
 
 test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -38,7 +44,8 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
   }> = []
   let capturedCommitInput: ModelingCommitSketchInput | null = null
 
-  const wrappedModelingService: Pick<ModelingService, 'commitSketch' | 'getCurrentDocumentSnapshot'> = {
+  const wrappedModelingService: Pick<ModelingService, 'commitSketch' | 'getCurrentDocumentSnapshot' | 'sketchSolver'> = {
+    sketchSolver: null,
     commitSketch(input) {
       callOrder.push('commitSketch')
       capturedCommitInput = input
@@ -184,5 +191,247 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
         ),
     ),
     'Sketch image import should refresh to a snapshot that preserves the committed inline reference-image payload.',
+  )
+})
+
+test('src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft sketch through the real modeling service', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: 'doc_workspace',
+    sketchSolver: new SketchConstraintSolverAdapter({
+      documentId: 'doc_workspace',
+      revisionId: null,
+    }),
+  })
+  const snapshot = await service.getCurrentDocumentSnapshot()
+  const session = createNewSketchSessionFromSupport({
+    kind: 'construction',
+    constructionId: 'construction_plane-xy',
+  })
+
+  const result = await runSketchImageImportFlow({
+    requestId: 'request_sketch-reference-image-import-test' as const,
+    baseRevisionId: snapshot.document.revisionId,
+    session,
+    snapshot,
+    modelingService: service,
+    payloads: [{
+      mediaType: 'image/png',
+      fileName: 'reference.png',
+      pixelWidth: 640,
+      pixelHeight: 480,
+      base64Data: 'cG5n',
+    }],
+  })
+
+  assert(result.kind === 'committed', 'Importing into a new draft sketch should commit successfully through the modeling service.')
+  assert(
+    result.snapshot.sketches.some((sketch) =>
+      sketch.sketchId === result.sketchId
+        && sketch.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
+    ),
+    'A committed draft-sketch import should persist the reference-image operation into the reopened sketch snapshot.',
+  )
+})
+
+test('src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft sketches through OpenCascade', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const createSolver = (revisionId: RevisionId | null) => new SketchConstraintSolverAdapter({
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+    revisionId,
+  })
+  const createAdapter = () => new OpenCascadeKernelAdapter({
+    solverAdapter: createSolver(null),
+    solverAdapterFactory: createSolver,
+  })
+  const service = createModelingService(createAdapter(), {
+    currentDocumentId: OCC_KERNEL_DOCUMENT_ID,
+    sketchSolver: createSolver(null),
+  })
+  const snapshot = await service.getCurrentDocumentSnapshot()
+  const session = createNewSketchSessionFromSupport({
+    kind: 'construction',
+    constructionId: 'construction_plane-xy',
+  })
+
+  const result = await runSketchImageImportFlow({
+    requestId: 'request_sketch-reference-image-import-occ-test' as const,
+    baseRevisionId: snapshot.document.revisionId,
+    session,
+    snapshot,
+    modelingService: service,
+    payloads: [{
+      mediaType: 'image/png',
+      fileName: 'reference.png',
+      pixelWidth: 640,
+      pixelHeight: 480,
+      base64Data: 'cG5n',
+    }],
+  })
+
+  assert(result.kind === 'committed', 'OpenCascade should accept reference-image-only sketch commits.')
+  const committedSketch = result.snapshot.sketches.find((sketch) => sketch.sketchId === result.sketchId)
+  assert(committedSketch, 'Committed reference-image sketch should exist in the refreshed OpenCascade snapshot.')
+  assert(
+    committedSketch.sketch.solvedSnapshot.status.solveState === 'notEvaluated',
+    'Reference-image-only sketches should persist without requiring solved sketch geometry.',
+  )
+  assert(
+    committedSketch.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
+    'OpenCascade snapshot should preserve the reference-image authoring operation.',
+  )
+
+  const restoredAdapter = createAdapter()
+  await restoredAdapter.restoreAuthoredModelDocument(createAuthoredModelDocumentFromSnapshot(result.snapshot))
+  const restoredSnapshot = await restoredAdapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+  })
+  const restoredSketch = restoredSnapshot.snapshot.document.sketches.find((sketch) => sketch.sketchId === result.sketchId)
+  assert(
+    restoredSketch?.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
+    'OpenCascade authored-document restore should preserve reference-image-only sketches.',
+  )
+})
+
+test('src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision basis and retries one conflict', async () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const seedService = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: 'doc_workspace',
+  })
+  const seedSnapshot = await seedService.getCurrentDocumentSnapshot()
+  const sourceSketch = seedSnapshot.sketches[0]
+  assert(sourceSketch, 'Seed sketch should exist for stale-basis import coverage.')
+
+  const session = createSketchSessionFromSnapshot(sourceSketch)
+  const importedPayload: ReferenceImagePayload = {
+    mediaType: 'image/png',
+    fileName: 'reference.png',
+    pixelWidth: 640,
+    pixelHeight: 480,
+    base64Data: 'cG5n',
+  }
+  const staleInputRevision = 'rev_0001' as const
+  const commitBaseRevisionIds: string[] = []
+  let snapshotReads = 0
+
+  const currentSnapshot = {
+    ...seedSnapshot,
+    revisionId: 'rev_0002' as const,
+    provenance: {
+      repositoryHeads: ['head_2'] as const,
+    },
+    document: {
+      ...seedSnapshot.document,
+      revisionId: 'rev_0002' as const,
+    },
+  }
+  const retrySnapshot = {
+    ...currentSnapshot,
+    revisionId: 'rev_0003' as const,
+    provenance: {
+      repositoryHeads: ['head_3'] as const,
+    },
+    document: {
+      ...currentSnapshot.document,
+      revisionId: 'rev_0003' as const,
+    },
+  }
+
+  const wrappedModelingService: Pick<ModelingService, 'commitSketch' | 'getCurrentDocumentSnapshot' | 'sketchSolver'> = {
+    sketchSolver: null,
+    commitSketch(input) {
+      commitBaseRevisionIds.push(input.baseRevisionId)
+
+      if (commitBaseRevisionIds.length === 1) {
+        return ResultAsync.fromPromise(Promise.resolve({
+          revisionId: 'rev_0003' as const,
+          sketchId: input.sketchId ?? sourceSketch.sketchId,
+          revisionState: {
+            kind: 'conflict' as const,
+            expectedRevisionId: input.baseRevisionId,
+            actualRevisionId: 'rev_0003' as const,
+          },
+          rebuildResult: {
+            kind: 'skipped' as const,
+            reasonCode: 'revisionConflict' as const,
+            invalidatedTargets: [],
+            diagnostics: [{
+              code: 'repository-head-conflict',
+              severity: 'error' as const,
+              message: 'Request revision rev_0002 does not match current revision rev_0003.',
+              target: null,
+              detail: {
+                kind: 'revisionConflict' as const,
+                expectedRevisionId: 'rev_0002' as const,
+                actualRevisionId: 'rev_0003' as const,
+              },
+            }],
+          },
+          changedTargets: [],
+          diagnostics: [{
+            code: 'repository-head-conflict',
+            severity: 'error' as const,
+            message: 'Request revision rev_0002 does not match current revision rev_0003.',
+            target: null,
+            detail: {
+              kind: 'revisionConflict' as const,
+              expectedRevisionId: 'rev_0002' as const,
+              actualRevisionId: 'rev_0003' as const,
+            },
+          }],
+        }), (error) => createAppError({
+          code: 'test/commit-sketch',
+          message: String(error),
+        }))
+      }
+
+      return ResultAsync.fromPromise(Promise.resolve({
+        revisionId: 'rev_0003' as const,
+        sketchId: input.sketchId ?? sourceSketch.sketchId,
+        revisionState: { kind: 'accepted' as const },
+        rebuildResult: 'reused' as const,
+        changedTargets: [],
+        diagnostics: [],
+      }), (error) => createAppError({
+        code: 'test/commit-sketch',
+        message: String(error),
+      }))
+    },
+    getCurrentDocumentSnapshot() {
+      snapshotReads += 1
+      return Promise.resolve(snapshotReads === 1 ? retrySnapshot : retrySnapshot)
+    },
+  }
+
+  const result = await runSketchImageImportFlow({
+    requestId: 'request_sketch-reference-image-import-stale' as const,
+    baseRevisionId: staleInputRevision,
+    baseRepositoryHeads: ['head_1'] as const,
+    session,
+    snapshot: currentSnapshot,
+    modelingService: wrappedModelingService,
+    payloads: [importedPayload],
+  })
+
+  assert(result.kind === 'committed', 'A stale import basis should refresh and retry to complete the import.')
+  assert(
+    JSON.stringify(commitBaseRevisionIds) === JSON.stringify(['rev_0002', 'rev_0003']),
+    'Sketch image import should commit against the current snapshot revision first, then retry once with the refreshed revision after a conflict.',
   )
 })

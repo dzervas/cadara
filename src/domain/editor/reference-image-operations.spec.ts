@@ -10,6 +10,7 @@ import {
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID, type ReferenceImageCalibrationModeState } from '@/domain/reference-image-calibration/mode/shared'
 import { createReferenceImageEditOperation, createReferenceImageOperation } from '@/domain/reference-image/operations'
+import { solveReferenceImageOperationState } from '@/domain/reference-image-calibration/state'
 
 test('src/domain/editor/reference-image-operations.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -98,6 +99,17 @@ test('src/domain/editor/reference-image-operations.spec.ts', () => {
     }],
   })
   assert(updated.definition.authoringOperations?.at(-1)?.kind === 'edit', 'Reference-image state updates should append edit authoring operations.')
+  const persistedCalibration = updated.definition.authoringOperations?.at(-1)?.ownedState?.kind === 'referenceImage'
+    ? updated.definition.authoringOperations.at(-1)?.ownedState.calibration
+    : null
+  assert(
+    !updated.commitRequest?.definition.references.some((reference) => reference.kind === 'referenceImageAnchor'),
+    'Committed sketch definitions must not persist derived reference-image anchor references.',
+  )
+  assert(
+    persistedCalibration !== null && !('solveResult' in persistedCalibration),
+    'Persisted reference-image operation state must not serialize runtime-only calibration solve output.',
+  )
   const updatedRenderables = getSketchSessionDisplayRenderables(updated).filter((entry) => entry.target?.kind === 'sketchOperation')
   assert(updatedRenderables[0]?.label === 'reference-a-updated.png', 'Reference-image updates should replay the latest operation label.')
   assert(
@@ -187,26 +199,21 @@ test('src/domain/editor/reference-image-operations.spec.ts renders exported anch
         calibration: {
           scaleMode: 'lockedAspect',
           showExportedAnchorsInSketch: false,
-          anchors: [{
-            anchorId: 'anchor-1',
-            label: 'A1',
-            uv: [0.5, 0.5],
-            worldPosition: [0, 0],
-          }],
-          constraints: [],
-          solveResult: {
-            placement: {
-              center: [0, 0],
-              width: 200,
-              height: 100,
-              rotationRadians: 0,
-            },
-            anchors: [{
+          anchors: [
+            {
               anchorId: 'anchor-1',
+              label: 'A1',
+              uv: [0.25, 0.5],
               worldPosition: [0, 0],
-            }],
-            diagnostics: [],
-          },
+            },
+            {
+              anchorId: 'anchor-2',
+              label: 'A2',
+              uv: [0.75, 0.5],
+              worldPosition: [100, 0],
+            },
+          ],
+          constraints: [],
         },
       },
     }],
@@ -214,7 +221,7 @@ test('src/domain/editor/reference-image-operations.spec.ts renders exported anch
 
   const draftState: ReferenceImageCalibrationModeState = {
     operationId,
-    draftState: {
+    draftState: solveReferenceImageOperationState({
       kind: 'referenceImage',
       image: {
         mediaType: 'image/png',
@@ -232,28 +239,23 @@ test('src/domain/editor/reference-image-operations.spec.ts renders exported anch
       calibration: {
         scaleMode: 'lockedAspect',
         showExportedAnchorsInSketch: false,
-        anchors: [{
-          anchorId: 'anchor-1',
-          label: 'A1',
-          uv: [0.5, 0.5],
-          worldPosition: [25, 10],
-        }],
-        constraints: [],
-        solveResult: {
-          placement: {
-            center: [15, 5],
-            width: 200,
-            height: 100,
-            rotationRadians: 0,
-          },
-          anchors: [{
+        anchors: [
+          {
             anchorId: 'anchor-1',
-            worldPosition: [25, 10],
-          }],
-          diagnostics: [],
-        },
+            label: 'A1',
+            uv: [0.25, 0.5],
+            worldPosition: [15, 5],
+          },
+          {
+            anchorId: 'anchor-2',
+            label: 'A2',
+            uv: [0.75, 0.5],
+            worldPosition: [115, 5],
+          },
+        ],
+        constraints: [],
       },
-    },
+    }),
     selectedAnchorId: 'anchor-1',
     selectedConstraintId: null,
     pendingAnchorPlacement: false,
@@ -294,8 +296,8 @@ test('src/domain/editor/reference-image-operations.spec.ts renders exported anch
   )
   assert(
     exportedAnchor?.geometry.kind === 'marker'
-      && Math.abs(exportedAnchor.geometry.position[0] - 25) < 0.01
-      && Math.abs(exportedAnchor.geometry.position[1] - 10) < 0.01,
+      && Math.abs(exportedAnchor.geometry.position[0] - 15) < 0.01
+      && Math.abs(exportedAnchor.geometry.position[1] - 5) < 0.01,
     'Derived exported anchor references should render from the draft calibration solve while calibration is active.',
   )
 })

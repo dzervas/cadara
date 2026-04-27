@@ -4223,13 +4223,30 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
 
     assert(
-      importing.effects[0]?.type === 'sketch.importReferenceImages',
-      'Import Image should emit a sketch-owned editor effect.',
+      importing.effects.length === 0
+        && importing.state.preview?.label === 'Select reference images',
+      'Import Image should wait for direct user-gesture file selection before emitting the sketch import effect.',
     )
-    assert(importing.state.kind === 'editingSketch', 'Import Image should preserve sketch editing state while the picker runs.')
+    assert(importing.state.kind === 'editingSketch', 'Import Image should preserve sketch editing state while awaiting file selection.')
 
-    const completedEvent = await runEditorEffect(importing.effects[0]!, runtime)
-    const completed = transitionEditorState(importing.state, completedEvent)
+    const selected = transitionEditorState(importing.state, {
+      type: 'sketch.referenceImagePayloadsPicked',
+      payloads: [{
+        mediaType: 'image/png',
+        fileName: 'reference.png',
+        pixelWidth: 640,
+        pixelHeight: 480,
+        base64Data: 'cG5n',
+      }],
+    })
+
+    assert(
+      selected.effects[0]?.type === 'sketch.importReferenceImages',
+      'Selected reference-image payloads should emit a sketch-owned import effect.',
+    )
+
+    const completedEvent = await runEditorEffect(selected.effects[0]!, runtime)
+    const completed = transitionEditorState(selected.state, completedEvent)
 
     assert(completed.state.kind === 'editingSketch', 'Successful import should keep the reopened sketch session active.')
     assert(completed.state.selection[0]?.kind === 'sketch', 'Successful import should select the reopened sketch target.')
@@ -4238,6 +4255,107 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       'Successful import should reopen the imported sketch through the editor runtime rather than the workbench shell.',
     )
     assert(completed.state.pendingImportRequestId === null, 'Import completion should clear the pending import request.')
+  }
+
+  function testSketchImageImportCanStartFromSketchSelectionCommand() {
+    const commandState = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: 'doc_workspace' as const,
+          revisionId: 'rev_1' as const,
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: 'tool.activated',
+        toolId: 'sketch',
+      },
+    )
+
+    assert(commandState.state.kind === 'selectionCommand', 'Sketch activation should arm the sketch selection command.')
+
+    const selected = transitionEditorState(commandState.state, {
+      type: 'viewport.selectionRequested',
+      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+    })
+
+    assert(selected.state.kind === 'selectionCommand', 'Selecting the sketch plane should keep the sketch command active until the draft opens.')
+
+    const importing = transitionEditorState(selected.state, {
+      type: 'tool.activated',
+      toolId: 'importImage',
+    })
+
+    assert(
+      importing.state.kind === 'selectionCommand'
+        && importing.state.preview?.label === 'Select reference images',
+      'Import Image should arm file selection from the sketch-entry command state.',
+    )
+
+    const payloadSelected = transitionEditorState(importing.state, {
+      type: 'sketch.referenceImagePayloadsPicked',
+      payloads: [{
+        mediaType: 'image/png',
+        fileName: 'reference.png',
+        pixelWidth: 640,
+        pixelHeight: 480,
+        base64Data: 'cG5n',
+      }],
+    })
+
+    assert(payloadSelected.state.kind === 'editingSketch', 'Picking reference-image payloads should open a draft sketch session.')
+    assert(
+      payloadSelected.effects[0]?.type === 'sketch.importReferenceImages',
+      'Picking reference-image payloads from sketch entry should emit the sketch import effect.',
+    )
+  }
+
+  function testSketchImagePayloadSelectionAcceptsImportImageOwnedSelectionCommand() {
+    const importingState = {
+      ...initialEditorState,
+      kind: 'selectionCommand' as const,
+      mode: 'part' as const,
+      document: {
+        documentId: 'doc_workspace' as const,
+        revisionId: 'rev_1' as const,
+      },
+      snapshot: createSnapshot(),
+      selection: [{ kind: 'construction', constructionId: 'construction_plane-xy' } as PrimitiveRef],
+      selectionCatalog: createSelectionCatalog(),
+      preview: {
+        kind: 'sketch' as const,
+        label: 'Select reference images',
+        target: { kind: 'construction', constructionId: 'construction_plane-xy' } as PrimitiveRef,
+      },
+      command: {
+        commandSessionId: 'command_import-image-1',
+        toolId: 'importImage' as const,
+        phase: 'collecting' as const,
+      },
+      pendingRequestId: null,
+    }
+
+    const payloadSelected = transitionEditorState(importingState, {
+      type: 'sketch.referenceImagePayloadsPicked',
+      payloads: [{
+        mediaType: 'image/png',
+        fileName: 'reference.png',
+        pixelWidth: 640,
+        pixelHeight: 480,
+        base64Data: 'cG5n',
+      }],
+    })
+
+    assert(
+      payloadSelected.state.kind === 'editingSketch',
+      'Import-image-owned sketch selection commands should open a draft sketch session when payloads are picked.',
+    )
+    assert(
+      payloadSelected.effects[0]?.type === 'sketch.importReferenceImages',
+      'Import-image-owned sketch selection commands should emit the sketch import effect.',
+    )
   }
 
   testSelectionClearEventClearsSelectionAndPreservesActiveState()
@@ -4268,6 +4386,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testRuntimeLoopReopensCommittedFeatureFromExplicitIntent()
   await testRuntimeLoopReopensSketchFromExplicitIntent()
   await testSketchImageImportUsesEditorRuntime()
+  testSketchImageImportCanStartFromSketchSelectionCommand()
+  testSketchImagePayloadSelectionAcceptsImportImageOwnedSelectionCommand()
   await testFeatureEditEntryRollsBackBeforeHydrationFromTail()
   await testSketchEditEntryRollsBackBeforeOpenFromTail()
   await testFeatureEditCancelRestoresTailCursor()

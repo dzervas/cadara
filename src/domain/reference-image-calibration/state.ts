@@ -4,35 +4,26 @@ import type {
   ReferenceImageCalibrationState,
   ReferenceImageOperationState,
   ReferenceImagePayload,
-  ReferenceImagePlacement,
+  SolvedReferenceImageCalibrationState,
+  SolvedReferenceImageOperationState,
 } from '@/contracts/reference-image/schema'
 import type { SketchPoint2D } from '@/contracts/sketch/schema'
 
 import { solveReferenceImageCalibration } from '@/domain/reference-image-calibration/solver/solve-reference-image-calibration'
 
-export function createDefaultReferenceImageCalibrationState(
-  image: Pick<ReferenceImagePayload, 'pixelWidth' | 'pixelHeight'>,
-  placement: ReferenceImagePlacement,
-): ReferenceImageCalibrationState {
+export function createDefaultReferenceImageCalibrationState(): ReferenceImageCalibrationState {
   return {
     scaleMode: 'lockedAspect',
     showExportedAnchorsInSketch: false,
     anchors: [],
     constraints: [],
-    solveResult: solveReferenceImageCalibration({
-      image,
-      initialPlacement: placement,
-      scaleMode: 'lockedAspect',
-      anchors: [],
-      constraints: [],
-    }),
   }
 }
 
 export function solveReferenceImageOperationState(
   state: ReferenceImageOperationState,
-): ReferenceImageOperationState {
-  const calibration = state.calibration ?? createDefaultReferenceImageCalibrationState(state.image, state.placement)
+): SolvedReferenceImageOperationState {
+  const calibration = state.calibration ?? createDefaultReferenceImageCalibrationState()
   const solveResult = solveReferenceImageCalibration({
     image: state.image,
     initialPlacement: state.placement,
@@ -82,11 +73,35 @@ export function createReferenceImageCalibrationConstraint(input: {
   }
 }
 
+export function stripReferenceImageRuntimeState(
+  state: ReferenceImageOperationState,
+): ReferenceImageOperationState {
+  const calibration = state.calibration
+
+  return {
+    ...state,
+    calibration: calibration
+      ? {
+          scaleMode: calibration.scaleMode,
+          showExportedAnchorsInSketch: calibration.showExportedAnchorsInSketch,
+          anchors: [...calibration.anchors],
+          constraints: [...calibration.constraints],
+        }
+      : undefined,
+  }
+}
+
+export function canExportSolvedReferenceImageAnchors(
+  calibration: SolvedReferenceImageCalibrationState,
+) {
+  return calibration.solveResult.diagnostics.length === 0
+}
+
 export function replaceReferenceImagePayloadPreservingCalibration(input: {
   state: ReferenceImageOperationState
   image: ReferenceImagePayload
-}): ReferenceImageOperationState {
-  const calibration = input.state.calibration ?? createDefaultReferenceImageCalibrationState(input.state.image, input.state.placement)
+}): SolvedReferenceImageOperationState {
+  const calibration = input.state.calibration ?? createDefaultReferenceImageCalibrationState()
   return solveReferenceImageOperationState({
     ...input.state,
     image: input.image,

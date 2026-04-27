@@ -4,8 +4,6 @@ export const supportedReferenceImageFileTypes = [
   { extension: 'jpeg', mediaType: 'image/jpeg' },
   { extension: 'webp', mediaType: 'image/webp' },
   { extension: 'bmp', mediaType: 'image/bmp' },
-  { extension: 'tif', mediaType: 'image/tiff' },
-  { extension: 'tiff', mediaType: 'image/tiff' },
 ] as const
 
 export function inferReferenceImageMediaType(name: string) {

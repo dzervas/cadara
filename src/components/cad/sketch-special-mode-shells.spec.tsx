@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
@@ -16,58 +17,60 @@ test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {
   }
 
   const panelMarkup = renderToStaticMarkup(
-    <SketchSpecialModePanel
-      schema={{
-        title: 'Fixture mode',
-        subtitle: 'Generic mode shell',
-        prompts: [{ id: 'prompt', text: 'Adjust the committed operation.' }],
-        sections: [{
-          id: 'geometry',
-          title: 'Geometry',
-          description: 'Generic section copy.',
-          fields: [
-            {
-              id: 'distance',
-              kind: 'numeric',
-              label: 'Distance',
-              value: 12,
-              action: {
-                kind: 'patch',
-                patch: { field: 'distance' },
+    <MantineProvider>
+      <SketchSpecialModePanel
+        schema={{
+          title: 'Fixture mode',
+          subtitle: 'Generic mode shell',
+          prompts: [{ id: 'prompt', text: 'Adjust the committed operation.' }],
+          sections: [{
+            id: 'geometry',
+            title: 'Geometry',
+            description: 'Generic section copy.',
+            fields: [
+              {
+                id: 'distance',
+                kind: 'numeric',
+                label: 'Distance',
+                value: 12,
+                action: {
+                  kind: 'patch',
+                  patch: { field: 'distance' },
+                },
               },
-            },
-            {
-              id: 'status',
-              kind: 'readout',
-              label: 'State',
-              value: 'Ready',
-            },
-          ],
-          diagnostics: [{
-            id: 'warning',
-            message: 'Review the selected target.',
-            severity: 'warning',
+              {
+                id: 'status',
+                kind: 'readout',
+                label: 'State',
+                value: 'Ready',
+              },
+            ],
+            diagnostics: [{
+              id: 'warning',
+              message: 'Review the selected target.',
+              severity: 'warning',
+            }],
+            buttons: [{
+              id: 'focus',
+              label: 'Focus',
+              action: {
+                kind: 'invoke',
+                actionId: 'focus',
+              },
+            }],
           }],
-          buttons: [{
-            id: 'focus',
-            label: 'Focus',
+          footerButtons: [{
+            id: 'cancel',
+            label: 'Cancel',
             action: {
-              kind: 'invoke',
-              actionId: 'focus',
+              kind: 'command',
+              command: 'cancel',
             },
           }],
-        }],
-        footerButtons: [{
-          id: 'cancel',
-          label: 'Cancel',
-          action: {
-            kind: 'command',
-            command: 'cancel',
-          },
-        }],
-      }}
-      onAction={() => undefined}
-    />,
+        }}
+        onAction={() => undefined}
+      />
+    </MantineProvider>,
   )
 
   assert(panelMarkup.includes('Fixture mode'), 'The generic special-mode panel should render the mode title.')

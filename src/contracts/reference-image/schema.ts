@@ -55,7 +55,10 @@ export interface ReferenceImageCalibrationState {
   showExportedAnchorsInSketch: boolean
   anchors: readonly ReferenceImageCalibrationAnchor[]
   constraints: readonly ReferenceImageCalibrationConstraint[]
-  solveResult: ReferenceImageCalibrationSolveResult | null
+}
+
+export interface SolvedReferenceImageCalibrationState extends ReferenceImageCalibrationState {
+  solveResult: ReferenceImageCalibrationSolveResult
 }
 
 export interface ReferenceImageOperationState {
@@ -63,4 +66,9 @@ export interface ReferenceImageOperationState {
   image: ReferenceImagePayload
   placement: ReferenceImagePlacement
   calibration?: ReferenceImageCalibrationState
+}
+
+export interface SolvedReferenceImageOperationState
+  extends Omit<ReferenceImageOperationState, 'calibration'> {
+  calibration: SolvedReferenceImageCalibrationState
 }

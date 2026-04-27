@@ -592,6 +592,24 @@ function buildSketchChangedTargets(sketch: SketchSnapshotRecord) {
   ]
 }
 
+function hasReferenceImageOperationState(definition: SketchDefinition) {
+  return (definition.authoringOperations ?? []).some((operation) =>
+    operation.kind === 'referenceImage'
+    || operation.ownedState?.kind === 'referenceImage',
+  )
+}
+
+function canPersistSketchSolveState(definition: SketchDefinition, solvedSnapshot: SketchRecord['solvedSnapshot']) {
+  if (solvedSnapshot.status.solveState === 'solved') {
+    return true
+  }
+
+  return solvedSnapshot.status.solveState === 'notEvaluated'
+    && definition.points.length === 0
+    && definition.entities.length === 0
+    && hasReferenceImageOperationState(definition)
+}
+
 function createRestoreSolverCorrelation(sketchId: SketchId, revisionId: RevisionId) {
   const requestId = `request_restore_${sketchId}_${revisionId}` as RequestId
 
@@ -1420,7 +1438,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       projectedReferences: projection.projectedReferences,
     })
 
-    if (!validation.isValid || solved.status.solveState !== 'solved') {
+    if (!validation.isValid || !canPersistSketchSolveState(definition, solved.solvedSnapshot)) {
       throw new Error(`Authored sketch ${sketchId} could not be restored from persisted authored inputs.`)
     }
 
@@ -2213,7 +2231,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       ...regions.diagnostics.map((diagnostic) => mapSketchSolverDiagnostic(sketchId, diagnostic)),
     ]
 
-    if (!validation.isValid || solved.status.solveState !== 'solved') {
+    if (!validation.isValid || !canPersistSketchSolveState(normalizedDefinition, solved.solvedSnapshot)) {
       const rejected = this.buildRejectedResult(
         request.baseRevisionId,
         solverDiagnostics,

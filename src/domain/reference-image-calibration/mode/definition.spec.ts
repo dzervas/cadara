@@ -176,7 +176,7 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts authors dis
   assert(state.kind === 'editingSketch', 'Anchor authoring fixture should remain in sketch editing.')
   const modeStateBeforeConstraint = getModeState(state)
   const anchors = modeStateBeforeConstraint.draftState.calibration.anchors
-  const solvedAnchorPoints = modeStateBeforeConstraint.draftState.calibration.solveResult?.anchors
+  const solvedAnchorPoints = modeStateBeforeConstraint.draftState.calibration.solveResult.anchors
   assert(anchors.length === 3, 'Fixture should create three calibration anchors.')
   assert(solvedAnchorPoints?.length === 3, 'Fixture should solve all authored calibration anchors.')
 

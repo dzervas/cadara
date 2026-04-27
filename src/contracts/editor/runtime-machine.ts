@@ -49,6 +49,7 @@ const editorEventTypes = [
   'authoring.reopenRequested',
   'sketch.pointerMoved',
   'sketch.pointerReleased',
+  'sketch.referenceImagePayloadsPicked',
   'sketch.specialModeEntered',
   'sketch.specialModePanelActionInvoked',
   'sketch.specialModeClickRequested',

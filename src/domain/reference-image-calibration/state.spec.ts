@@ -62,7 +62,7 @@ test('src/domain/reference-image-calibration/state.spec.ts', () => {
     'Replacing the inline image payload should preserve anchor UV coordinates.',
   )
   assert(
-    replaced.image.fileName === 'replacement.jpg' && replaced.calibration?.solveResult?.anchors.length === 2,
+    replaced.image.fileName === 'replacement.jpg' && replaced.calibration.solveResult.anchors.length === 2,
     'Replacing the image should keep calibration anchors available to the dedicated solver.',
   )
 })

@@ -62,6 +62,7 @@ export function WorkspaceToolbar({
     [searchQuery],
   )
   const hasActiveSketchSession = sketchSession !== null
+  const canImportReferenceImage = sketchSession !== null || activeCommand?.toolId === 'sketch'
 
   const activeSketchStyleToolId = sketchSession ? getActiveSketchStyleToolId(sketchSession) : null
   const svgRenderingEnabled = sketchSession ? isSketchSvgRenderingEnabled(sketchSession) : false
@@ -70,7 +71,7 @@ export function WorkspaceToolbar({
     (tool.id === 'undo' && !visibleHistory.canUndo)
     || (tool.id === 'redo' && !visibleHistory.canRedo)
     || (tool.id === 'import' && (activeEditSession !== null || activeImportSession !== null))
-    || (tool.id === 'importImage' && sketchSession === null)
+    || (tool.id === 'importImage' && !canImportReferenceImage)
     || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
 
   const renderTool = (tool: RegisteredToolDefinition) => {

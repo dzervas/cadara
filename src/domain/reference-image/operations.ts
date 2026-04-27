@@ -1,9 +1,14 @@
-import type { ReferenceImageOperationState, ReferenceImagePayload } from '@/contracts/reference-image/schema'
+import type {
+  ReferenceImageOperationState,
+  ReferenceImagePayload,
+  SolvedReferenceImageOperationState,
+} from '@/contracts/reference-image/schema'
 import type { SketchAuthoringOperation, SketchDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
 import type { SketchAuthoringOperationId, SketchId } from '@/contracts/shared/ids'
 import {
   createDefaultReferenceImageCalibrationState,
   solveReferenceImageOperationState,
+  stripReferenceImageRuntimeState,
 } from '@/domain/reference-image-calibration/state'
 
 const DEFAULT_REFERENCE_IMAGE_EXTENT = 200
@@ -23,7 +28,7 @@ export interface EditReferenceImageOperationInput {
 
 export interface ActiveReferenceImageOperation {
   operation: SketchAuthoringOperation
-  state: ReferenceImageOperationState
+  state: SolvedReferenceImageOperationState
 }
 
 export interface ReferenceImageOperationStateOverride {
@@ -48,7 +53,7 @@ export function createReferenceImageOperation(
       kind: 'referenceImage',
       image: input.payload,
       placement,
-      calibration: createDefaultReferenceImageCalibrationState(input.payload, placement),
+      calibration: createDefaultReferenceImageCalibrationState(),
     },
   }
 }
@@ -56,6 +61,7 @@ export function createReferenceImageOperation(
 export function createReferenceImageEditOperation(
   input: EditReferenceImageOperationInput,
 ): SketchAuthoringOperation {
+  const solvedState = solveReferenceImageOperationState(input.state)
   return {
     operationId: `sketch_operation_${input.sequence}_edit-reference-image` as SketchAuthoringOperationId,
     label: input.label ?? input.state.image.fileName?.trim() ?? `Edit reference image ${input.sequence}`,
@@ -63,7 +69,7 @@ export function createReferenceImageEditOperation(
     targets: {
       edited: [{ kind: 'operation', operationId: input.operationId }],
     },
-    ownedState: solveReferenceImageOperationState(input.state),
+    ownedState: stripReferenceImageRuntimeState(solvedState),
   }
 }
 
@@ -100,9 +106,9 @@ export function collectActiveReferenceImageOperations(
             }
           : operation,
         state: solveReferenceImageOperationState(override?.state ?? {
-          ...operation.ownedState,
-          calibration: operation.ownedState.calibration
-            ?? createDefaultReferenceImageCalibrationState(operation.ownedState.image, operation.ownedState.placement),
+            ...operation.ownedState,
+            calibration: operation.ownedState.calibration
+            ?? createDefaultReferenceImageCalibrationState(),
         }),
       })
       continue
@@ -128,13 +134,13 @@ export function collectActiveReferenceImageOperations(
             ownedState: solveReferenceImageOperationState(override?.state ?? {
               ...operation.ownedState,
               calibration: operation.ownedState.calibration
-                ?? createDefaultReferenceImageCalibrationState(operation.ownedState.image, operation.ownedState.placement),
+                ?? createDefaultReferenceImageCalibrationState(),
             }),
           },
           state: solveReferenceImageOperationState(override?.state ?? {
             ...operation.ownedState,
             calibration: operation.ownedState.calibration
-              ?? createDefaultReferenceImageCalibrationState(operation.ownedState.image, operation.ownedState.placement),
+              ?? createDefaultReferenceImageCalibrationState(),
           }),
         })
       }

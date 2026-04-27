@@ -60,9 +60,13 @@ export function createAppEditorEffectRuntime(
     async importSketchReferenceImages(input) {
       const snapshot = await modelingService.getCurrentDocumentSnapshot()
       const result = await runSketchImageImportFlow({
+        requestId: input.requestId,
+        baseRevisionId: input.baseRevisionId,
+        baseRepositoryHeads: input.baseRepositoryHeads,
         session: input.session,
         snapshot,
         modelingService,
+        payloads: input.payloads,
       })
 
       if (result.kind === 'cancelled') {

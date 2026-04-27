@@ -1,7 +1,7 @@
 import type {
   ReferenceImageCalibrationAnchor,
-  ReferenceImageCalibrationState,
-  ReferenceImageOperationState,
+  SolvedReferenceImageCalibrationState,
+  SolvedReferenceImageOperationState,
 } from '@/contracts/reference-image/schema'
 import type { SketchPoint2D } from '@/contracts/sketch/schema'
 import type { SketchAuthoringOperationId } from '@/contracts/shared/ids'
@@ -185,8 +185,8 @@ export const referenceImageCalibrationModeDefinition = {
 } satisfies SketchSpecialModeDefinition<ReferenceImageCalibrationModeState>
 
 function getCalibrationState(
-  draftState: ReferenceImageOperationState,
-): ReferenceImageCalibrationState {
+  draftState: SolvedReferenceImageOperationState,
+): SolvedReferenceImageCalibrationState {
   const calibration = draftState.calibration
   if (!calibration) {
     throw new Error('Reference-image calibration state must be solved before entering calibration mode.')
@@ -199,7 +199,7 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
   const calibration = getCalibrationState(state.draftState)
   const selectedAnchor = getSelectedAnchor(state)
   const selectedConstraint = getSelectedConstraint(state)
-  const diagnostics = calibration.solveResult?.diagnostics ?? []
+  const diagnostics = calibration.solveResult.diagnostics
   const solveFields: SketchSpecialModePanelField[] = [
     {
       id: 'scale-mode',
@@ -361,7 +361,7 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
 function buildViewport(state: ReferenceImageCalibrationModeState): SketchSpecialModeViewportPresentation {
   const calibration = getCalibrationState(state.draftState)
   const solvedByAnchorId = new Map(
-    (calibration.solveResult?.anchors ?? []).map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
+    calibration.solveResult.anchors.map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
   )
   const overlays: SketchSpecialModeViewportOverlay[] = [
     ...calibration.constraints.flatMap((constraint) => {
@@ -396,7 +396,7 @@ function buildViewport(state: ReferenceImageCalibrationModeState): SketchSpecial
 
   return {
     prompts: [buildPrompt(state, 'viewport')],
-    diagnostics: (calibration.solveResult?.diagnostics ?? []).map((diagnostic, index) => ({
+    diagnostics: calibration.solveResult.diagnostics.map((diagnostic, index) => ({
       id: `${diagnostic.code}:${index}`,
       message: diagnostic.message,
       severity: diagnostic.severity,
@@ -714,10 +714,10 @@ function getSelectedConstraint(state: ReferenceImageCalibrationModeState) {
 }
 
 function getSolvedAnchorPosition(
-  draftState: ReferenceImageOperationState,
+  draftState: SolvedReferenceImageOperationState,
   anchorId: string,
 ) {
-  return getCalibrationState(draftState).solveResult?.anchors.find((anchor) => anchor.anchorId === anchorId)?.worldPosition ?? null
+  return getCalibrationState(draftState).solveResult.anchors.find((anchor) => anchor.anchorId === anchorId)?.worldPosition ?? null
 }
 
 function buildPrompt(
@@ -827,7 +827,7 @@ function findNearestAnchor(
   state: ReferenceImageCalibrationModeState,
   point: SketchPoint2D,
 ) {
-  const solvedAnchors = getCalibrationState(state.draftState).solveResult?.anchors ?? []
+  const solvedAnchors = getCalibrationState(state.draftState).solveResult.anchors
   return solvedAnchors
     .map((anchor) => ({
       anchorId: anchor.anchorId,
@@ -859,7 +859,7 @@ function findNearestConstraint(
 
 function worldPointToUv(
   point: SketchPoint2D,
-  placement: ReferenceImageOperationState['placement'],
+  placement: SolvedReferenceImageOperationState['placement'],
 ): SketchPoint2D | null {
   const dx = point[0] - placement.center[0]
   const dy = point[1] - placement.center[1]
@@ -909,7 +909,7 @@ function distanceBetween(first: SketchPoint2D, second: SketchPoint2D) {
   return Math.hypot(first[0] - second[0], first[1] - second[1])
 }
 
-function isReferenceImagePayload(value: unknown): value is ReferenceImageOperationState['image'] {
+function isReferenceImagePayload(value: unknown): value is SolvedReferenceImageOperationState['image'] {
   return typeof value === 'object'
     && value !== null
     && typeof (value as { mediaType?: unknown }).mediaType === 'string'

@@ -6,6 +6,9 @@ import { useEditorState } from '@/hooks/use-editor-state'
 import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
+import { supportedReferenceImageFileTypes } from '@/domain/reference-image/raster'
+import { showOpenImportFilePicker } from '@/lib/import-file-picker'
+import { readReferenceImagePayload } from '@/app/sketch-image-import-flow'
 
 const useRequiredToolActionContext = createRequiredContextHook(
   ToolActionContext,
@@ -23,9 +26,12 @@ export function useToolActions() {
     machineState,
     dispatch,
   } = useEditorState()
+  const canImportReferenceImage =
+    machineState.kind === 'editingSketch'
+    || (machineState.kind === 'selectionCommand' && machineState.command.toolId === 'sketch')
 
   return {
-    triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
+    async triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
       if (toolId === 'undo') {
         if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.undoRequested' })
@@ -44,6 +50,48 @@ export function useToolActions() {
 
       if (toolId === 'import') {
         actionBus.triggerTool(toolId, machineState.mode, metadata)
+        return
+      }
+
+      if (toolId === 'importImage') {
+        if (!canImportReferenceImage) {
+          actionBus.triggerTool(toolId, machineState.mode, metadata)
+          return
+        }
+
+        dispatch({
+          type: 'tool.activated',
+          toolId,
+        })
+        actionBus.triggerTool(toolId, machineState.mode, metadata)
+
+        const pickerResult = await showOpenImportFilePicker({
+          acceptedFileTypes: supportedReferenceImageFileTypes,
+          multiple: true,
+        })
+
+        if (!pickerResult.ok) {
+          dispatch({
+            type: 'sketch.referenceImagePayloadsPicked',
+            payloads: null,
+            message: pickerResult.reason === 'failed' ? 'Reference-image selection failed.' : undefined,
+          })
+          return
+        }
+
+        try {
+          const payloads = await Promise.all(pickerResult.files.map((file) => readReferenceImagePayload(file)))
+          dispatch({
+            type: 'sketch.referenceImagePayloadsPicked',
+            payloads,
+          })
+        } catch (error: unknown) {
+          dispatch({
+            type: 'sketch.referenceImagePayloadsPicked',
+            payloads: null,
+            message: error instanceof Error ? error.message : 'Reference-image import failed.',
+          })
+        }
         return
       }
 

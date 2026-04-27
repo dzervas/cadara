@@ -1,6 +1,7 @@
 import type {
   ReferenceImageCalibrationAnchor,
   ReferenceImageOperationState,
+  SolvedReferenceImageCalibrationState,
 } from '@/contracts/reference-image/schema'
 import type { SketchDefinition, SketchReferenceDefinition } from '@/contracts/sketch/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
@@ -8,7 +9,10 @@ import type { ProjectedGeometryId, ReferenceId, SketchAuthoringOperationId, Sket
 
 import { collectActiveReferenceImageOperations } from '@/domain/reference-image/operations'
 import type { ReferenceImageOperationStateOverride } from '@/domain/reference-image/operations'
-import { solveReferenceImageOperationState } from '@/domain/reference-image-calibration/state'
+import {
+  canExportSolvedReferenceImageAnchors,
+  solveReferenceImageOperationState,
+} from '@/domain/reference-image-calibration/state'
 
 function getCalibrationState(state: ReferenceImageOperationState) {
   const calibration = solveReferenceImageOperationState(state).calibration
@@ -90,14 +94,15 @@ function buildProjectedAnchorRecordsForOperation(
   state: ReferenceImageOperationState,
 ): ProjectedSketchReferenceRecord[] {
   const calibration = getCalibrationState(state)
+  const canExport = canExportSolvedReferenceImageAnchors(calibration)
   const solvedByAnchorId = new Map(
-    (calibration.solveResult?.anchors ?? []).map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
+    calibration.solveResult.anchors.map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
   )
 
   return calibration.anchors.map((anchor) => {
     const referenceId = createReferenceImageAnchorReferenceId(operationId, anchor.anchorId)
     const solvedPosition = solvedByAnchorId.get(anchor.anchorId)
-    return solvedPosition
+    return solvedPosition && canExport
       ? {
           referenceId,
           status: 'projected' as const,
@@ -108,16 +113,38 @@ function buildProjectedAnchorRecordsForOperation(
           }],
           diagnostics: [],
         }
-      : {
-          referenceId,
-          status: 'missingSource' as const,
-          geometry: [],
-          diagnostics: [{
-            code: 'reference-image-anchor-unsolved',
-            severity: 'warning' as const,
-            message: `${anchor.label} is not solved yet.`,
-            target: null,
-          }],
-        }
+      : buildUnexportedAnchorRecord(referenceId, anchor, calibration)
   })
+}
+
+function buildUnexportedAnchorRecord(
+  referenceId: ReferenceId,
+  anchor: ReferenceImageCalibrationAnchor,
+  calibration: SolvedReferenceImageCalibrationState,
+): ProjectedSketchReferenceRecord {
+  if (calibration.solveResult.diagnostics.length > 0) {
+    return {
+      referenceId,
+      status: 'ambiguous' as const,
+      geometry: [],
+      diagnostics: calibration.solveResult.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        severity: diagnostic.severity,
+        message: diagnostic.message,
+        target: null,
+      })),
+    }
+  }
+
+  return {
+    referenceId,
+    status: 'missingSource' as const,
+    geometry: [],
+    diagnostics: [{
+      code: 'reference-image-anchor-unsolved',
+      severity: 'warning' as const,
+      message: `${anchor.label} is not solved yet.`,
+      target: null,
+    }],
+  }
 }

@@ -3,10 +3,7 @@ import { z } from 'zod'
 import type {
   ReferenceImageCalibrationAnchor,
   ReferenceImageCalibrationConstraint,
-  ReferenceImageCalibrationDiagnostic,
   ReferenceImageCalibrationScaleMode,
-  ReferenceImageCalibrationSolveResult,
-  ReferenceImageCalibrationSolvedAnchor,
   ReferenceImageCalibrationState,
   ReferenceImageOperationState,
 } from '@/contracts/reference-image/schema'
@@ -51,29 +48,11 @@ export const referenceImageCalibrationConstraintSchema = z.object({
   distance: positiveNumberSchema('Reference-image calibration distances must be positive.'),
 }).transform((value) => value as ReferenceImageCalibrationConstraint)
 
-export const referenceImageCalibrationDiagnosticSchema = z.object({
-  code: z.string().trim().min(1, 'Reference-image calibration diagnostics must provide a code.'),
-  severity: z.union([z.literal('info'), z.literal('warning'), z.literal('error')]),
-  message: z.string().trim().min(1, 'Reference-image calibration diagnostics must provide a message.'),
-}).transform((value) => value as ReferenceImageCalibrationDiagnostic)
-
-export const referenceImageCalibrationSolvedAnchorSchema = z.object({
-  anchorId: z.string().trim().min(1, 'Reference-image solved anchors must provide an anchor id.'),
-  worldPosition: point2dSchema,
-}).transform((value) => value as ReferenceImageCalibrationSolvedAnchor)
-
-export const referenceImageCalibrationSolveResultSchema = z.object({
-  placement: referenceImagePlacementSchema,
-  anchors: z.array(referenceImageCalibrationSolvedAnchorSchema),
-  diagnostics: z.array(referenceImageCalibrationDiagnosticSchema),
-}).transform((value) => value as ReferenceImageCalibrationSolveResult)
-
 export const referenceImageCalibrationStateSchema = z.object({
   scaleMode: referenceImageCalibrationScaleModeSchema,
   showExportedAnchorsInSketch: z.boolean(),
   anchors: z.array(referenceImageCalibrationAnchorSchema),
   constraints: z.array(referenceImageCalibrationConstraintSchema),
-  solveResult: referenceImageCalibrationSolveResultSchema.nullable(),
 }).transform((value) => value as ReferenceImageCalibrationState)
 
 export const referenceImageOperationStateSchema = z.object({
@@ -85,6 +64,5 @@ export const referenceImageOperationStateSchema = z.object({
     showExportedAnchorsInSketch: false,
     anchors: [],
     constraints: [],
-    solveResult: null,
   }),
 }).transform((value) => value as ReferenceImageOperationState)
