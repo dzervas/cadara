@@ -40,9 +40,3 @@
 - Runtime contract validation uses `zod`; prefer shared schemas for transport and persistence boundaries, and keep domain invariants in plain TypeScript when schemas do not make the code smaller or clearer.
 - Stateful editor/runtime orchestration uses `xstate`; keep machine logic in domain/contracts modules and avoid leaking state-machine concerns into presentational components.
 - Non-E2E tests use `bun:test`; add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
-
-## Verification
-
-- After any code change, always run `bun run test`.
-- After any code change, always run `bun run lint`.
-- After any code change, always run `bun run build`.
