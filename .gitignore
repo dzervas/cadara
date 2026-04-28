@@ -36,3 +36,4 @@ tmp-*
 *.step
 *.3mf
 *.cadara
+.fallow/

@@ -111,15 +111,16 @@ function estimateInitialPlacement(
   const vSpan = Math.max(Math.max(...vValues) - Math.min(...vValues), EPSILON)
   const width = Math.max((Math.max(...xTargets) - Math.min(...xTargets)) / uSpan, EPSILON)
   const height = Math.max((Math.max(...yTargets) - Math.min(...yTargets)) / vSpan, EPSILON)
-  const center = [
-    xTargets.reduce((sum, value) => sum + value, 0) / xTargets.length,
-    yTargets.reduce((sum, value) => sum + value, 0) / yTargets.length,
-  ] as SketchPoint2D
 
   if (input.scaleMode === 'lockedAspect') {
     const lockedHeight = Math.max(height, width / Math.max(aspectRatio, EPSILON))
     return {
-      center,
+      center: estimatePlacementCenter(targets, {
+        center: input.initialPlacement.center,
+        width: lockedHeight * aspectRatio,
+        height: lockedHeight,
+        rotationRadians: input.initialPlacement.rotationRadians,
+      }),
       width: lockedHeight * aspectRatio,
       height: lockedHeight,
       rotationRadians: input.initialPlacement.rotationRadians,
@@ -127,11 +128,39 @@ function estimateInitialPlacement(
   }
 
   return {
-    center,
+    center: estimatePlacementCenter(targets, {
+      center: input.initialPlacement.center,
+      width,
+      height,
+      rotationRadians: input.initialPlacement.rotationRadians,
+    }),
     width,
     height,
     rotationRadians: input.initialPlacement.rotationRadians,
   }
+}
+
+function estimatePlacementCenter(
+  targets: ReferenceImageCalibrationSolverInput['anchors'],
+  placement: ReferenceImagePlacement,
+): SketchPoint2D {
+  const cos = Math.cos(placement.rotationRadians)
+  const sin = Math.sin(placement.rotationRadians)
+  const estimatedCenters = targets.map((anchor) => {
+    const localX = (anchor.uv[0] - 0.5) * placement.width
+    const localY = (0.5 - anchor.uv[1]) * placement.height
+    const rotatedX = localX * cos - localY * sin
+    const rotatedY = localX * sin + localY * cos
+    return [
+      (anchor.worldPosition?.[0] ?? 0) - rotatedX,
+      (anchor.worldPosition?.[1] ?? 0) - rotatedY,
+    ] as SketchPoint2D
+  })
+
+  return [
+    estimatedCenters.reduce((sum, center) => sum + center[0], 0) / estimatedCenters.length,
+    estimatedCenters.reduce((sum, center) => sum + center[1], 0) / estimatedCenters.length,
+  ]
 }
 
 function evaluateLoss(

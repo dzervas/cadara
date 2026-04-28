@@ -271,13 +271,11 @@ function HistoryTimelineSurface({
     const nextLeft = positions[index + 1]
     if (nextLeft === undefined) {
       handle.style.opacity = '0'
-      handle.style.left = '0px'
       track.style.setProperty('--timeline-cursor-left', '0px')
       track.style.setProperty('--timeline-cursor-opacity', '0')
       return
     }
 
-    handle.style.left = `${nextLeft}px`
     handle.style.opacity = '1'
     track.style.setProperty('--timeline-cursor-left', `${nextLeft}px`)
     track.style.setProperty('--timeline-cursor-opacity', '1')
@@ -300,7 +298,7 @@ function HistoryTimelineSurface({
       window.removeEventListener('resize', handleResize)
       scroller?.removeEventListener('scroll', handleScroll)
     }
-  }, [activeCursorIndex, updateHandlePosition])
+  }, [activeCursorIndex, updateHandlePosition, items.length])
 
   const handleWindowPointerMove = useCallback((event: PointerEvent) => {
     if (cursorDisabled || dragPointerIdRef.current !== event.pointerId) {
@@ -501,7 +499,7 @@ function HistoryTimelineSurface({
                 <button
                   ref={handleRef}
                   type="button"
-                  className={`absolute top-1/2 z-10 h-[18px] w-[18px] rounded-full border-2 transition ${
+                  className={`absolute top-1/2 z-10 h-[18px] w-[18px] rounded-full border-2 transition left-[max(9px,var(--timeline-cursor-left,0px))] ${
                     dragCursorIndex === null && !cursorDisabled ? 'hover:[--timeline-thumb-scale:1.08]' : ''
                   }`}
                   aria-label={getCursorAriaLabel(activeCursorIndex)}
@@ -517,7 +515,6 @@ function HistoryTimelineSurface({
                     boxShadow: dragCursorIndex !== null
                       ? 'var(--workbench-shell-scrubber-glow)'
                       : 'var(--workbench-shell-scrubber-ring)',
-                    left: 0,
                     opacity: 0,
                     touchAction: 'none',
                     cursor: cursorDisabled ? 'default' : (dragCursorIndex !== null ? 'grabbing' : 'grab'),

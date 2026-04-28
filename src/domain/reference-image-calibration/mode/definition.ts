@@ -200,6 +200,14 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
   const selectedAnchor = getSelectedAnchor(state)
   const selectedConstraint = getSelectedConstraint(state)
   const diagnostics = calibration.solveResult.diagnostics
+  const anchorOptions = calibration.anchors.map((anchor) => ({
+    value: anchor.anchorId,
+    label: anchor.label,
+  }))
+  const constraintOptions = calibration.constraints.map((constraint) => ({
+    value: constraint.constraintId,
+    label: constraint.label,
+  }))
   const solveFields: SketchSpecialModePanelField[] = [
     {
       id: 'scale-mode',
@@ -226,8 +234,19 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
       value: String(calibration.anchors.length),
     },
   ]
-  const anchorFields: SketchSpecialModePanelField[] = selectedAnchor
-    ? [
+  const anchorFields: SketchSpecialModePanelField[] = [
+    {
+      id: 'anchor-selection',
+      kind: 'option',
+      label: 'Selected anchor',
+      value: state.selectedAnchorId,
+      options: anchorOptions,
+      helper: calibration.anchors.length > 0 ? `${calibration.anchors.length} authored anchors available.` : 'No anchors yet.',
+      disabled: calibration.anchors.length === 0,
+      action: { kind: 'patch', patch: { field: 'selectedAnchorId' } },
+    },
+    ...(selectedAnchor
+      ? [
         {
           id: 'anchor-label',
           kind: 'text',
@@ -250,14 +269,21 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
           action: { kind: 'patch', patch: { field: 'anchorY' } },
         },
       ]
-    : [{
-        id: 'anchor-selection',
-        kind: 'readout',
-        label: 'Selected anchor',
-        value: 'None',
-      }]
-  const constraintFields: SketchSpecialModePanelField[] = selectedConstraint
-    ? [{
+      : []),
+  ]
+  const constraintFields: SketchSpecialModePanelField[] = [
+    {
+      id: 'constraint-selection',
+      kind: 'option',
+      label: 'Selected constraint',
+      value: state.selectedConstraintId,
+      options: constraintOptions,
+      helper: calibration.constraints.length > 0 ? `${calibration.constraints.length} distance constraints available.` : 'No distance constraints yet.',
+      disabled: calibration.constraints.length === 0,
+      action: { kind: 'patch', patch: { field: 'selectedConstraintId' } },
+    },
+    ...(selectedConstraint
+      ? [{
         id: 'constraint-distance',
         kind: 'numeric',
         label: 'Selected distance',
@@ -265,12 +291,8 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
         unit: 'mm',
         action: { kind: 'patch', patch: { field: 'constraintDistance' } },
       }]
-    : [{
-        id: 'constraint-selection',
-        kind: 'readout',
-        label: 'Selected constraint',
-        value: 'None',
-      }]
+      : []),
+  ]
   const anchorButtons: SketchSpecialModePanelButton[] = [
     {
       id: 'add-anchor',
@@ -554,6 +576,31 @@ function patchDraftState(
           showExportedAnchorsInSketch: value,
         },
       },
+    }
+  }
+
+  if (field === 'selectedAnchorId') {
+    return {
+      ...state,
+      selectedAnchorId: typeof value === 'string' && calibration.anchors.some((anchor) => anchor.anchorId === value)
+        ? value
+        : null,
+      selectedConstraintId: null,
+      pendingAnchorPlacement: false,
+      pendingConstraintAnchorIds: null,
+    }
+  }
+
+  if (field === 'selectedConstraintId') {
+    return {
+      ...state,
+      selectedConstraintId: typeof value === 'string'
+        && calibration.constraints.some((constraint) => constraint.constraintId === value)
+        ? value
+        : null,
+      selectedAnchorId: null,
+      pendingAnchorPlacement: false,
+      pendingConstraintAnchorIds: null,
     }
   }
 
