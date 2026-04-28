@@ -13,6 +13,7 @@ import {
 } from '@/domain/reference-image-calibration/export/references'
 import {
   createReferenceImageCalibrationAnchor,
+  createReferenceImageCalibrationConstraint,
   solveReferenceImageOperationState,
 } from '@/domain/reference-image-calibration/state'
 
@@ -174,4 +175,83 @@ test('src/domain/reference-image-calibration/export/references.spec.ts does not 
 
   assert(projectedReferences[0]?.status === 'ambiguous', 'Underconstrained calibration anchors must not export as fixed projected geometry.')
   assert(projectedReferences[0]?.geometry.length === 0, 'Weak calibration exports should not expose point geometry to the main sketch.')
+})
+
+test('src/domain/reference-image-calibration/export/references.spec.ts blocks export when anchor targets are not fit after solving', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const operation = createReferenceImageOperation({
+    sequence: 1,
+    sketchId: 'sketch_primary',
+    payload: {
+      mediaType: 'image/png',
+      fileName: 'reference.png',
+      pixelWidth: 400,
+      pixelHeight: 200,
+      base64Data: 'cG5n',
+    },
+  })
+
+  const projectedReferences = buildReferenceImageAnchorProjectedReferences({
+    schemaVersion: 'sketch-definition/v1alpha1',
+    referenceIds: [],
+    references: [],
+    pointIds: [],
+    points: [],
+    entityIds: [],
+    entities: [],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    svgRenderingEnabled: true,
+    derivedRelationships: [],
+    authoringOperations: [{
+      ...operation,
+      ownedState: solveReferenceImageOperationState({
+        ...operation.ownedState,
+        calibration: {
+          ...operation.ownedState.calibration!,
+          anchors: [
+            createReferenceImageCalibrationAnchor({
+              anchorId: 'anchor_a',
+              anchorIndex: 0,
+              uv: [0.25, 0.5],
+              worldPosition: [-50, 0],
+            }),
+            createReferenceImageCalibrationAnchor({
+              anchorId: 'anchor_b',
+              anchorIndex: 1,
+              uv: [0.75, 0.5],
+              worldPosition: [50, 0],
+            }),
+          ],
+          constraints: [
+            createReferenceImageCalibrationConstraint({
+              constraintId: 'constraint_conflict',
+              constraintIndex: 0,
+              firstAnchorId: 'anchor_a',
+              secondAnchorId: 'anchor_b',
+              distance: 10,
+            }),
+          ],
+        },
+      }),
+    }],
+  } satisfies SketchDefinition)
+
+  assert(
+    projectedReferences.every((reference) => reference.status === 'ambiguous'),
+    'Calibration with unsatisfied anchor targets must not export fixed projected geometry.',
+  )
+  assert(
+    projectedReferences.every((reference) =>
+      reference.diagnostics.some((diagnostic) => diagnostic.code === 'unsatisfied-anchor-target'),
+    ),
+    'Blocked exports should surface the anchor-fit diagnostics that made the calibration unsafe.',
+  )
 })

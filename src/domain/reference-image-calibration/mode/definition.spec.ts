@@ -351,3 +351,97 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts keeps left-
     'Adding a distance constraint should preserve both solved anchor positions.',
   )
 })
+
+test('src/domain/reference-image-calibration/mode/definition.spec.ts seeds new distance constraints from authored anchor targets', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const operationTarget = getOperationTarget(createEditingSketchState())
+  let state = transitionEditorState(createEditingSketchState(), {
+    type: 'sketch.specialModeEntered',
+    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+    operationId: operationTarget.operationId,
+  }).state
+
+  for (const point of [[-40, 0], [0, 0], [40, 0]] as const) {
+    state = transitionEditorState(state, {
+      type: 'sketch.specialModePanelActionInvoked',
+      action: {
+        kind: 'invoke',
+        actionId: 'add-anchor',
+      },
+    }).state
+
+    state = transitionEditorState(state, {
+      type: 'sketch.specialModeClickRequested',
+      point,
+      target: operationTarget,
+    }).state
+  }
+
+  let modeState = getModeState(state)
+  const anchors = modeState.draftState.calibration.anchors
+  const corruptedSolveAnchors = modeState.draftState.calibration.solveResult.anchors.map((anchor) => ({
+    ...anchor,
+    worldPosition: anchor.anchorId === anchors[0]!.anchorId
+      ? ([-10, 0] as const)
+      : anchor.anchorId === anchors[1]!.anchorId
+        ? ([10, 0] as const)
+        : anchor.worldPosition,
+  }))
+  state = {
+    ...state,
+    session: {
+      ...state.session,
+      activeSpecialMode: {
+        ...state.session.activeSpecialMode!,
+        state: {
+          ...modeState,
+          draftState: {
+            ...modeState.draftState,
+            calibration: {
+              ...modeState.draftState.calibration,
+              solveResult: {
+                ...modeState.draftState.calibration.solveResult,
+                anchors: corruptedSolveAnchors,
+              },
+            },
+          },
+        },
+      },
+    },
+  }
+
+  modeState = getModeState(state)
+  const solvedByAnchorId = new Map(
+    modeState.draftState.calibration.solveResult.anchors.map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
+  )
+
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: {
+      kind: 'invoke',
+      actionId: 'add-distance-constraint',
+    },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModeClickRequested',
+    point: solvedByAnchorId.get(anchors[0]!.anchorId)!,
+    target: operationTarget,
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModeClickRequested',
+    point: solvedByAnchorId.get(anchors[1]!.anchorId)!,
+    target: operationTarget,
+  }).state
+
+  const newConstraint = getModeState(state).draftState.calibration.constraints[0]
+  assert(newConstraint, 'Selecting the second anchor pair should create a new distance constraint.')
+  assert(
+    Math.abs(newConstraint.distance - 40) < 1e-6,
+    'New distance constraints should use authored anchor targets instead of drifted solved positions.',
+  )
+})

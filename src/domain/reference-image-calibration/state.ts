@@ -34,7 +34,12 @@ export function solveReferenceImageOperationState(
 
   return {
     ...state,
-    placement: solveResult.placement,
+    placement: canExportSolvedReferenceImageAnchors({
+      ...calibration,
+      solveResult,
+    })
+      ? solveResult.placement
+      : state.placement,
     calibration: {
       ...calibration,
       solveResult,

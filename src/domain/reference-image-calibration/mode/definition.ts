@@ -245,12 +245,12 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
       disabled: calibration.anchors.length === 0,
       action: { kind: 'patch', patch: { field: 'selectedAnchorId' } },
     },
-    ...(selectedAnchor
-      ? [
-        {
-          id: 'anchor-label',
-          kind: 'text',
-          label: 'Selected anchor',
+	    ...(selectedAnchor
+	      ? ([
+	        {
+	          id: 'anchor-label',
+	          kind: 'text',
+	          label: 'Selected anchor',
           value: selectedAnchor.label,
           action: { kind: 'patch', patch: { field: 'anchorLabel' } },
         },
@@ -265,12 +265,12 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
           id: 'anchor-y',
           kind: 'numeric',
           label: 'Target Y',
-          value: selectedAnchor.worldPosition?.[1] ?? null,
-          action: { kind: 'patch', patch: { field: 'anchorY' } },
-        },
-      ]
-      : []),
-  ]
+	          value: selectedAnchor.worldPosition?.[1] ?? null,
+	          action: { kind: 'patch', patch: { field: 'anchorY' } },
+	        },
+	      ] satisfies SketchSpecialModePanelField[])
+	      : []),
+	  ]
   const constraintFields: SketchSpecialModePanelField[] = [
     {
       id: 'constraint-selection',
@@ -282,17 +282,17 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
       disabled: calibration.constraints.length === 0,
       action: { kind: 'patch', patch: { field: 'selectedConstraintId' } },
     },
-    ...(selectedConstraint
-      ? [{
-        id: 'constraint-distance',
-        kind: 'numeric',
-        label: 'Selected distance',
-        value: selectedConstraint.distance,
-        unit: 'mm',
-        action: { kind: 'patch', patch: { field: 'constraintDistance' } },
-      }]
-      : []),
-  ]
+	    ...(selectedConstraint
+	      ? ([{
+	        id: 'constraint-distance',
+	        kind: 'numeric',
+	        label: 'Selected distance',
+	        value: selectedConstraint.distance,
+	        unit: 'mm',
+	        action: { kind: 'patch', patch: { field: 'constraintDistance' } },
+	      }] satisfies SketchSpecialModePanelField[])
+	      : []),
+	  ]
   const anchorButtons: SketchSpecialModePanelButton[] = [
     {
       id: 'add-anchor',
@@ -674,8 +674,8 @@ function addDistanceConstraint(state: ReferenceImageCalibrationModeState) {
     return state
   }
 
-  const firstPosition = getSolvedAnchorPosition(state.draftState, first.anchorId)
-  const secondPosition = getSolvedAnchorPosition(state.draftState, second.anchorId)
+  const firstPosition = first.worldPosition ?? getSolvedAnchorPosition(state.draftState, first.anchorId)
+  const secondPosition = second.worldPosition ?? getSolvedAnchorPosition(state.draftState, second.anchorId)
   if (!firstPosition || !secondPosition) {
     return state
   }
