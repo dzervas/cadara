@@ -3,11 +3,12 @@ import { test } from 'bun:test'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 import {
   createReferenceImageCalibrationAnchor,
+  createReferenceImageCalibrationConstraint,
   replaceReferenceImagePayloadPreservingCalibration,
   solveReferenceImageOperationState,
 } from '@/domain/reference-image-calibration/state'
 
-test('src/domain/reference-image-calibration/state.spec.ts', () => {
+test('src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs and point bindings when replacing the image payload', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -26,6 +27,11 @@ test('src/domain/reference-image-calibration/state.spec.ts', () => {
     },
   })
 
+  const pointPositionsById = new Map([
+    ['sketch_point_anchor_a', [-20, -10] as const],
+    ['sketch_point_anchor_b', [20, 10] as const],
+  ])
+
   const calibrated = solveReferenceImageOperationState({
     ...operation.ownedState,
     calibration: {
@@ -35,17 +41,17 @@ test('src/domain/reference-image-calibration/state.spec.ts', () => {
           anchorId: 'anchor_a',
           anchorIndex: 0,
           uv: [0.2, 0.8],
-          worldPosition: [-20, -10],
+          pointId: 'sketch_point_anchor_a',
         }),
         createReferenceImageCalibrationAnchor({
           anchorId: 'anchor_b',
           anchorIndex: 1,
           uv: [0.8, 0.2],
-          worldPosition: [20, 10],
+          pointId: 'sketch_point_anchor_b',
         }),
       ],
     },
-  })
+  }, { pointPositionsById })
   const replaced = replaceReferenceImagePayloadPreservingCalibration({
     state: calibrated,
     image: {
@@ -55,6 +61,7 @@ test('src/domain/reference-image-calibration/state.spec.ts', () => {
       pixelHeight: 800,
       base64Data: 'cmVwbGFjZW1lbnQ=',
     },
+    pointPositionsById,
   })
 
   assert(
@@ -62,12 +69,12 @@ test('src/domain/reference-image-calibration/state.spec.ts', () => {
     'Replacing the inline image payload should preserve anchor UV coordinates.',
   )
   assert(
-    replaced.image.fileName === 'replacement.jpg' && replaced.calibration.solveResult.anchors.length === 2,
-    'Replacing the image should keep calibration anchors available to the dedicated solver.',
+    JSON.stringify(replaced.calibration?.anchors.map((anchor) => anchor.pointId)) === JSON.stringify(['sketch_point_anchor_a', 'sketch_point_anchor_b']),
+    'Replacing the inline image payload should preserve the local point bindings.',
   )
 })
 
-test('src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when calibration is ambiguous', () => {
+test('src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when bound anchors are insufficient or legacy constraints are dropped', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -97,21 +104,32 @@ test('src/domain/reference-image-calibration/state.spec.ts preserves the last st
           anchorId: 'anchor_a',
           anchorIndex: 0,
           uv: [0.25, 0.5],
-          worldPosition: [-50, 0],
+          pointId: 'sketch_point_anchor_a',
         }),
-        createReferenceImageCalibrationAnchor({
-          anchorId: 'anchor_b',
-          anchorIndex: 1,
-          uv: [0.75, 0.5],
-          worldPosition: [50, 0],
+      ],
+      legacyConstraints: [
+        createReferenceImageCalibrationConstraint({
+          constraintId: 'legacy_constraint',
+          constraintIndex: 0,
+          firstAnchorId: 'anchor_a',
+          secondAnchorId: 'anchor_b',
+          distance: 10,
         }),
       ],
     },
+  }, {
+    pointPositionsById: new Map([
+      ['sketch_point_anchor_a', [-50, 0] as const],
+    ]),
   })
 
   assert(
     solved.calibration.solveResult.diagnostics.some((diagnostic) => diagnostic.code === 'underconstrained-calibration'),
-    'Fixture should produce an honestly underconstrained independent calibration.',
+    'A single bound anchor should leave the independent fit underconstrained.',
+  )
+  assert(
+    solved.calibration.solveResult.diagnostics.some((diagnostic) => diagnostic.code === 'legacy-calibration-constraints-dropped'),
+    'Dropped legacy calibration-only constraints should surface as diagnostics.',
   )
   assert(
     JSON.stringify(solved.placement) === JSON.stringify(initialPlacement),

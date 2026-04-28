@@ -29,6 +29,7 @@ export function solveReferenceImageCalibration(
       placement: input.initialPlacement,
       anchors: input.anchors.map((anchor) => ({
         anchorId: anchor.anchorId,
+        pointId: anchor.pointId,
         worldPosition: mapAnchorToWorld(anchor.uv, input.initialPlacement),
       })),
       diagnostics,
@@ -50,6 +51,7 @@ export function solveReferenceImageCalibration(
   )
   const solvedAnchors: ReferenceImageCalibrationSolvedAnchor[] = input.anchors.map((anchor) => ({
     anchorId: anchor.anchorId,
+    pointId: anchor.pointId,
     worldPosition: mapAnchorToWorld(anchor.uv, placement),
   }))
 

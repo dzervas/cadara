@@ -89,11 +89,14 @@ import {
   createReferenceImageDeleteOperation,
   createReferenceImageEditOperation,
   createReferenceImageOperationTarget,
+  materializeLegacyReferenceImageAnchorBindings,
+  type ReferenceImageOperationStateOverride,
 } from '@/domain/reference-image/operations'
 import {
   buildReferenceImageAnchorProjectedReferences,
   mergeReferenceImageAnchorReferences,
 } from '@/domain/reference-image-calibration/export/references'
+import { solveReferenceImageOperationState } from '@/domain/reference-image-calibration/state'
 import {
   createReferenceImageTextureSourceKey,
   getReferenceImageCornerPoints,
@@ -272,6 +275,9 @@ const CONSTRAINED_DRAG_BLOCKED_MESSAGE = 'Geometry is constrained and cannot mov
 const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE = 'Could not solve the edited constraint value.'
 const LIVE_REGION_DOCUMENT_ID = 'doc_live_sketch' as DocumentId
 const LIVE_REGION_REVISION_ID = 'rev_live_sketch' as RevisionId
+const REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS = 0.28
+const REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS = 0.4
+const REFERENCE_IMAGE_ANCHOR_MARKER_COLOR = 0xf6c453
 const liveRegionDiagnosticsByRegions = new WeakMap<RegionRecord[], ReturnType<typeof deriveSketchRegionsCore>['diagnostics']>()
 export interface SketchSessionDisplayRenderable {
   id: RenderableId
@@ -281,6 +287,7 @@ export interface SketchSessionDisplayRenderable {
   linePattern: 'solid' | 'dashed'
   role: 'local' | 'reference'
   semanticClass?: RenderableEntityRecord['binding']['semanticClass'] | 'sketchReference' | 'sketchImage'
+  markerLayer?: 'default' | 'overlay'
   paintStyle?: SketchDisplayPaintStyle
   strokeStyle?: SketchDisplayStrokeStyle
   constraintDisplay?: SketchConstraintDisplayTargetState
@@ -481,6 +488,44 @@ function getReferenceImageOperationOverrides(
       label: override.label,
     }],
   ])
+}
+
+function collectVisibleReferenceImageAnchorPointIds(
+  definition: Pick<SketchDefinition, 'authoringOperations'>,
+  overrides?: ReadonlyMap<SketchAuthoringOperationId, ReferenceImageOperationStateOverride>,
+) {
+  const pointIds = new Set<SketchPointId>()
+
+  for (const { state } of collectActiveReferenceImageOperations(definition, overrides)) {
+    if (!state.calibration?.showExportedAnchorsInSketch) {
+      continue
+    }
+
+    for (const anchor of state.calibration.anchors) {
+      pointIds.add(anchor.pointId as SketchPointId)
+    }
+  }
+
+  return pointIds
+}
+
+function collectVisibleReferenceImageAnchorLabels(
+  definition: Pick<SketchDefinition, 'authoringOperations'>,
+  overrides?: ReadonlyMap<SketchAuthoringOperationId, ReferenceImageOperationStateOverride>,
+) {
+  const labels = new Map<SketchPointId, string>()
+
+  for (const { state } of collectActiveReferenceImageOperations(definition, overrides)) {
+    if (!state.calibration?.showExportedAnchorsInSketch) {
+      continue
+    }
+
+    for (const anchor of state.calibration.anchors) {
+      labels.set(anchor.pointId as SketchPointId, anchor.label)
+    }
+  }
+
+  return labels
 }
 
 function cloneDefinition(definition: SketchDefinition): SketchDefinition {
@@ -1187,7 +1232,7 @@ function getNextDefinitionSequence(definition: SketchDefinition) {
 
 export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): SketchSessionState {
   const sketchId = sketch.sketchId
-  const fullDefinition = cloneDefinition(sketch.sketch.definition)
+  const fullDefinition = materializeLegacyReferenceImageAnchorBindings(cloneDefinition(sketch.sketch.definition))
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
   const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
   const planeKey = sketch.planeKey ?? sketch.plane.key ?? null
@@ -1998,8 +2043,17 @@ export function appendReferenceImageOperations(
   }
 
   const history = applySketchHistoryContribution(session, {
-    points: [],
-    entities: [],
+    points: [...(operations[0]!.createdGraph?.points ?? [])],
+    entities: [...(operations[0]!.createdGraph?.entities ?? [])],
+    ...(operations[0]!.createdGraph?.constraints
+      ? { constraints: [...operations[0]!.createdGraph.constraints] }
+      : {}),
+    ...(operations[0]!.createdGraph?.dimensions
+      ? { dimensions: [...operations[0]!.createdGraph.dimensions] }
+      : {}),
+    ...(operations[0]!.createdGraph?.derivedRelationships
+      ? { derivedRelationships: [...operations[0]!.createdGraph.derivedRelationships] }
+      : {}),
     authoringOperation: operations[0]!,
   })
 
@@ -2012,8 +2066,17 @@ export function appendReferenceImageOperations(
 
   for (const operation of operations.slice(1)) {
     const appended = applySketchHistoryContribution(nextSession, {
-      points: [],
-      entities: [],
+      points: [...(operation.createdGraph?.points ?? [])],
+      entities: [...(operation.createdGraph?.entities ?? [])],
+      ...(operation.createdGraph?.constraints
+        ? { constraints: [...operation.createdGraph.constraints] }
+        : {}),
+      ...(operation.createdGraph?.dimensions
+        ? { dimensions: [...operation.createdGraph.dimensions] }
+        : {}),
+      ...(operation.createdGraph?.derivedRelationships
+        ? { derivedRelationships: [...operation.createdGraph.derivedRelationships] }
+        : {}),
       authoringOperation: operation,
     })
     nextSession = rebuildSessionForDefinition(nextSession, {
@@ -2039,6 +2102,8 @@ export function updateReferenceImageOperationStates(input: {
     operationId: SketchAuthoringOperationId
     state: ReferenceImageOperationState
     label?: string
+    createdPoints?: readonly SketchPointDefinition[]
+    createdEntities?: readonly SketchEntityDefinition[]
   }>
 }): SketchSessionState {
   if (input.updates.length === 0) {
@@ -2055,6 +2120,8 @@ export function updateReferenceImageOperationStates(input: {
         operationId: update.operationId,
         state: update.state,
         label: update.label,
+        createdPoints: update.createdPoints,
+        createdEntities: update.createdEntities,
       })]
       : [],
   )
@@ -2376,7 +2443,7 @@ export function deleteSelectedSketchGeometry(
 
   const remainingEntities = beforeDefinition.entities.filter((entity) => !deletedEntityIds.has(entity.entityId))
   const remainingEntityPointIds = new Set(remainingEntities.flatMap((entity) => getEntityPointIds(entity)))
-  const deletedPointIds = new Set(
+  const deletedPointIds = new Set<SketchPointId>(
     beforeDefinition.pointIds.filter((pointId) =>
       selected.pointIds.has(pointId) || !remainingEntityPointIds.has(pointId),
     ),
@@ -2421,8 +2488,7 @@ export function deleteSelectedSketchGeometry(
     afterDefinition,
   }
 
-  return {
-    ...rebuildSessionForDefinition(nextSession, {
+  let rebuiltSession = rebuildSessionForDefinition(nextSession, {
       definition: afterDefinition,
       fullDefinition: afterDefinition,
       historyCursor: { kind: 'item', itemId: operation.itemId },
@@ -2432,7 +2498,42 @@ export function deleteSelectedSketchGeometry(
         ),
         operation,
       ],
-    }),
+    })
+
+  const referenceImageBindingUpdates = collectActiveReferenceImageOperations(rebuiltSession.definition)
+    .map(({ operation: activeOperation, state }) => {
+      const calibration = state.calibration
+      if (!calibration) {
+        return null
+      }
+
+      const anchors = calibration.anchors.filter((anchor) => !deletedPointIds.has(anchor.pointId as SketchPointId))
+      return anchors.length === calibration.anchors.length
+        ? null
+        : {
+            operationId: activeOperation.operationId,
+            label: activeOperation.label,
+            state: {
+              ...state,
+              calibration: {
+                scaleMode: calibration.scaleMode,
+                showExportedAnchorsInSketch: calibration.showExportedAnchorsInSketch,
+                anchors,
+              },
+            },
+          }
+    })
+    .filter((update): update is NonNullable<typeof update> => update !== null)
+
+  if (referenceImageBindingUpdates.length > 0) {
+    rebuiltSession = updateReferenceImageOperationStates({
+      session: rebuiltSession,
+      updates: referenceImageBindingUpdates,
+    })
+  }
+
+  return {
+    ...rebuiltSession,
     activeTool: null,
     status: 'idle',
     constructionTargetPicking: false,
@@ -2447,7 +2548,7 @@ export function deleteSelectedSketchGeometry(
     activeStyleFocus: null,
     activeSnap: null,
     drawStartSnap: null,
-    sequence: nextSession.sequence + 1,
+    sequence: rebuiltSession.sequence,
   }
 }
 
@@ -8008,6 +8109,15 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   const regionStyleLookup = svgRenderingEnabled ? createSketchRegionStyleLookup(session) : new Map<RegionRecord['regionId'], SketchEntityDisplayStyle>()
   const displayDefinition = getSketchSessionDisplayDefinition(session)
   const displayProjectedReferences = getSketchSessionDisplayProjectedReferences(session, displayDefinition)
+  const referenceImageOperationOverrides = getReferenceImageOperationOverrides(session)
+  const visibleReferenceImageAnchorPointIds = collectVisibleReferenceImageAnchorPointIds(
+    displayDefinition,
+    referenceImageOperationOverrides,
+  )
+  const visibleReferenceImageAnchorLabels = collectVisibleReferenceImageAnchorLabels(
+    displayDefinition,
+    referenceImageOperationOverrides,
+  )
   const solved = solveSketchDefinitionCore({
     definition: displayDefinition,
     projectedReferences: displayProjectedReferences,
@@ -8019,6 +8129,9 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
     definition: displayDefinition,
     solvedSnapshot: solved.solvedSnapshot,
   })
+  const solvedPointPositionsById = new Map(
+    solved.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition] as const),
+  )
   const regionRenderables = session.solvedRegions.flatMap((region, index) => {
     const renderable = createDisplayRenderableForRegion(session, displayDefinition, region, index, regionStyleLookup.get(region.regionId))
     return renderable
@@ -8027,6 +8140,13 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   })
   const pointRenderables = displayDefinition.points.map((point) => {
     const style = pointStyleLookup.get(point.pointId)
+    const isVisibleReferenceImageAnchor = visibleReferenceImageAnchorPointIds.has(point.pointId)
+    const referenceImageAnchorStyle = isVisibleReferenceImageAnchor
+      ? {
+          paintStyle: { color: REFERENCE_IMAGE_ANCHOR_MARKER_COLOR, opacity: 1 } satisfies SketchDisplayPaintStyle,
+          strokeStyle: { color: REFERENCE_IMAGE_ANCHOR_MARKER_COLOR, opacity: 1 } satisfies SketchDisplayStrokeStyle,
+        }
+      : null
 
     return withSketchConstraintDisplay({
       id: `renderable_sketch_point_${point.pointId}` as RenderableId,
@@ -8035,19 +8155,47 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       geometry: {
         kind: 'marker' as const,
         position: mapSketchPointToWorld(session.plane, point.position),
-        displayRadius: 0.16,
+        displayRadius: isVisibleReferenceImageAnchor ? REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS : 0.16,
       },
       linePattern: 'solid' as const,
       role: 'local' as const,
-      paintStyle: style?.paintStyle,
-      strokeStyle: style?.strokeStyle,
+      paintStyle: style?.paintStyle ?? referenceImageAnchorStyle?.paintStyle,
+      strokeStyle: style?.strokeStyle ?? referenceImageAnchorStyle?.strokeStyle,
     }, constraintDisplaySummary)
+  })
+  const referenceImageAnchorOverlayRenderables = displayDefinition.points.flatMap((point) => {
+    if (!visibleReferenceImageAnchorPointIds.has(point.pointId)) {
+      return []
+    }
+
+    return [withSketchConstraintDisplay({
+      id: `renderable_reference_image_anchor_overlay_${point.pointId}` as RenderableId,
+      label: visibleReferenceImageAnchorLabels.get(point.pointId) ?? point.label,
+      target: createSketchPointRef(sketchId, point.pointId),
+      geometry: {
+        kind: 'marker' as const,
+        position: mapSketchPointToWorld(session.plane, point.position),
+        displayRadius: REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS,
+      },
+      linePattern: 'solid' as const,
+      role: 'local' as const,
+      markerLayer: 'overlay' as const,
+      paintStyle: { color: REFERENCE_IMAGE_ANCHOR_MARKER_COLOR, opacity: 1 },
+      strokeStyle: { color: REFERENCE_IMAGE_ANCHOR_MARKER_COLOR, opacity: 1 },
+    }, constraintDisplaySummary)]
   })
   const referenceImageRenderables = collectActiveReferenceImageOperations(
     displayDefinition,
-    getReferenceImageOperationOverrides(session),
+    referenceImageOperationOverrides,
   ).map(({ operation, state }, index) =>
-    createDisplayRenderableForReferenceImageOperation(session, operation, state, index),
+    createDisplayRenderableForReferenceImageOperation(
+      session,
+      operation,
+      hasSolvedReferenceImageCalibration(state)
+        ? state
+        : solveReferenceImageOperationState(state, { pointPositionsById: solvedPointPositionsById }),
+      index,
+    ),
   )
   const entityRenderables = deriveSketchDisplayEntities(session).map((entity, index) =>
     withSketchConstraintDisplay(
@@ -8065,6 +8213,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
     ...regionRenderables,
     ...referenceImageRenderables,
     ...pointRenderables,
+    ...referenceImageAnchorOverlayRenderables,
     ...entityRenderables,
     ...entityRenderables.flatMap(createOverconstraintDiagnosticRenderable),
     ...displayDefinition.references.flatMap((reference, index) => {
@@ -8094,23 +8243,10 @@ function shouldRenderProjectedReference(
   definition: SketchDefinition,
   referenceId: ReferenceId,
 ) {
-  const reference = definition.references.find((entry) => entry.referenceId === referenceId)
-  if (!reference || reference.kind !== 'referenceImageAnchor') {
-    return true
-  }
-
-  const overrides = getReferenceImageOperationOverrides(session)
-  if (overrides?.has(reference.source.operationId)) {
-    return true
-  }
-
-  const operation = collectActiveReferenceImageOperations(
-    definition,
-    overrides,
-  ).find(({ operation }) =>
-    operation.operationId === reference.source.operationId
-  )
-  return operation?.state.calibration?.showExportedAnchorsInSketch ?? false
+  void session
+  void definition
+  void referenceId
+  return true
 }
 
 function withSketchConstraintDisplay(
@@ -8451,6 +8587,14 @@ function createDisplayRenderableForReferenceImageOperation(
       opacity: 0.55,
     },
   }
+}
+
+function hasSolvedReferenceImageCalibration(
+  state: ReferenceImageOperationState,
+): state is ReturnType<typeof solveReferenceImageOperationState> {
+  return typeof state.calibration === 'object'
+    && state.calibration !== null
+    && 'solveResult' in state.calibration
 }
 
 interface SketchEntityDisplayStyle {

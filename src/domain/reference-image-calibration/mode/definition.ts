@@ -1,10 +1,11 @@
 import type {
   ReferenceImageCalibrationAnchor,
+  ReferenceImageOperationState,
   SolvedReferenceImageCalibrationState,
   SolvedReferenceImageOperationState,
 } from '@/contracts/reference-image/schema'
-import type { SketchPoint2D } from '@/contracts/sketch/schema'
-import type { SketchAuthoringOperationId } from '@/contracts/shared/ids'
+import type { SketchEntityDefinition, SketchPointDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
+import type { SketchAuthoringOperationId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 
 import {
@@ -25,7 +26,6 @@ import {
 } from '@/domain/reference-image/operations'
 import {
   createReferenceImageCalibrationAnchor,
-  createReferenceImageCalibrationConstraint,
   replaceReferenceImagePayloadPreservingCalibration,
   solveReferenceImageOperationState,
 } from '@/domain/reference-image-calibration/state'
@@ -36,7 +36,6 @@ import {
 import { updateReferenceImageOperationStates } from '@/domain/editor/sketch-session'
 
 const ANCHOR_HIT_TOLERANCE = 10
-const CONSTRAINT_HIT_TOLERANCE = 8
 
 export const referenceImageCalibrationModeDefinition = {
   id: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
@@ -66,36 +65,29 @@ export const referenceImageCalibrationModeDefinition = {
       throw new Error(`Reference-image operation ${operationTarget.operationId} is not available for calibration.`)
     }
 
+    const draftPoints = collectDraftPoints(
+      sketchSession.sketchId ?? 'sketch_draft',
+      sketchSession.definition.points,
+      activeOperation.state,
+    )
+
     return {
       state: {
+        sketchId: sketchSession.sketchId ?? 'sketch_draft',
         operationId: operationTarget.operationId,
-        draftState: solveReferenceImageOperationState(activeOperation.state),
+        draftState: solveReferenceImageOperationState(activeOperation.state, {
+          pointPositionsById: createPointPositionMap(draftPoints),
+        }),
+        draftPoints,
         selectedAnchorId: null,
-        selectedConstraintId: null,
         pendingAnchorPlacement: false,
-        pendingConstraintAnchorIds: null,
       } satisfies ReferenceImageCalibrationModeState,
     }
   },
   buildPanel: ({ activeMode }) => buildPanel(activeMode.state as ReferenceImageCalibrationModeState),
   buildViewport: ({ activeMode }) => buildViewport(activeMode.state as ReferenceImageCalibrationModeState),
-  handleClick: ({ activeMode, point, target }) =>
-    handleClick(activeMode.state as ReferenceImageCalibrationModeState, point, target),
-  handleDragStart: ({ activeMode, handle, point }) => handleDragMove(
-    activeMode.state as ReferenceImageCalibrationModeState,
-    handle.handleId,
-    point,
-  ),
-  handleDragMove: ({ activeMode, handle, point }) => handleDragMove(
-    activeMode.state as ReferenceImageCalibrationModeState,
-    handle.handleId,
-    point,
-  ),
-  handleDragEnd: ({ activeMode, handle, point }) => handleDragMove(
-    activeMode.state as ReferenceImageCalibrationModeState,
-    handle.handleId,
-    point,
-  ),
+  handleClick: ({ sketchSession, activeMode, point, target }) =>
+    handleClick(sketchSession.definition.points, activeMode.state as ReferenceImageCalibrationModeState, point, target),
   handlePanelAction: ({ activeMode, action }) => {
     const state = activeMode.state as ReferenceImageCalibrationModeState
     if (action.kind === 'patch') {
@@ -111,22 +103,21 @@ export const referenceImageCalibrationModeDefinition = {
             state: {
               ...state,
               pendingAnchorPlacement: true,
-              pendingConstraintAnchorIds: null,
               selectedAnchorId: null,
-              selectedConstraintId: null,
             },
+          }
+        case 'rebind-anchor':
+          return {
+            state: state.selectedAnchorId
+              ? {
+                  ...state,
+                  pendingAnchorPlacement: true,
+                }
+              : state,
           }
         case 'remove-anchor':
           return {
             state: removeSelectedAnchor(state),
-          }
-        case 'add-distance-constraint':
-          return {
-            state: startDistanceConstraintSelection(state),
-          }
-        case 'remove-distance-constraint':
-          return {
-            state: removeSelectedConstraint(state),
           }
         case 'replace-image':
           return {
@@ -153,6 +144,7 @@ export const referenceImageCalibrationModeDefinition = {
         draftState: replaceReferenceImagePayloadPreservingCalibration({
           state: state.draftState,
           image: payload.image,
+          pointPositionsById: createPointPositionMap(state.draftPoints),
         }),
       },
       effect: null,
@@ -160,12 +152,21 @@ export const referenceImageCalibrationModeDefinition = {
   },
   commit: ({ sketchSession, activeMode }) => {
     const state = activeMode.state as ReferenceImageCalibrationModeState
+    const existingPointIds = new Set(sketchSession.definition.pointIds)
+    const existingEntityIds = new Set(sketchSession.definition.entityIds)
+    const createdPoints = state.draftPoints.filter((point) => !existingPointIds.has(point.pointId))
+    const createdEntities = createdPoints.flatMap((point) => {
+      const entity = createDraftPointEntity(state.sketchId, state.operationId, point)
+      return existingEntityIds.has(entity.entityId) ? [] : [entity]
+    })
     const nextSession = updateReferenceImageOperationStates({
       session: sketchSession,
       updates: [{
         operationId: state.operationId,
         state: state.draftState,
         label: state.draftState.image.fileName,
+        createdPoints,
+        createdEntities,
       }],
     })
 
@@ -198,15 +199,10 @@ function getCalibrationState(
 function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialModePanelSchema {
   const calibration = getCalibrationState(state.draftState)
   const selectedAnchor = getSelectedAnchor(state)
-  const selectedConstraint = getSelectedConstraint(state)
   const diagnostics = calibration.solveResult.diagnostics
   const anchorOptions = calibration.anchors.map((anchor) => ({
     value: anchor.anchorId,
     label: anchor.label,
-  }))
-  const constraintOptions = calibration.constraints.map((constraint) => ({
-    value: constraint.constraintId,
-    label: constraint.label,
   }))
   const solveFields: SketchSpecialModePanelField[] = [
     {
@@ -223,14 +219,14 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
     {
       id: 'anchor-visibility',
       kind: 'toggle',
-      label: 'Show exported anchors in sketch',
+      label: 'Show bound anchors in sketch',
       value: calibration.showExportedAnchorsInSketch,
       action: { kind: 'patch', patch: { field: 'showExportedAnchorsInSketch' } },
     },
     {
       id: 'anchor-count',
       kind: 'readout',
-      label: 'Anchors',
+      label: 'Bound anchors',
       value: String(calibration.anchors.length),
     },
   ]
@@ -241,58 +237,28 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
       label: 'Selected anchor',
       value: state.selectedAnchorId,
       options: anchorOptions,
-      helper: calibration.anchors.length > 0 ? `${calibration.anchors.length} authored anchors available.` : 'No anchors yet.',
+      helper: calibration.anchors.length > 0 ? `${calibration.anchors.length} bound anchors available.` : 'No anchors yet.',
       disabled: calibration.anchors.length === 0,
       action: { kind: 'patch', patch: { field: 'selectedAnchorId' } },
     },
-	    ...(selectedAnchor
-	      ? ([
-	        {
-	          id: 'anchor-label',
-	          kind: 'text',
-	          label: 'Selected anchor',
-          value: selectedAnchor.label,
-          action: { kind: 'patch', patch: { field: 'anchorLabel' } },
-        },
-        {
-          id: 'anchor-x',
-          kind: 'numeric',
-          label: 'Target X',
-          value: selectedAnchor.worldPosition?.[0] ?? null,
-          action: { kind: 'patch', patch: { field: 'anchorX' } },
-        },
-        {
-          id: 'anchor-y',
-          kind: 'numeric',
-          label: 'Target Y',
-	          value: selectedAnchor.worldPosition?.[1] ?? null,
-	          action: { kind: 'patch', patch: { field: 'anchorY' } },
-	        },
-	      ] satisfies SketchSpecialModePanelField[])
-	      : []),
-	  ]
-  const constraintFields: SketchSpecialModePanelField[] = [
-    {
-      id: 'constraint-selection',
-      kind: 'option',
-      label: 'Selected constraint',
-      value: state.selectedConstraintId,
-      options: constraintOptions,
-      helper: calibration.constraints.length > 0 ? `${calibration.constraints.length} distance constraints available.` : 'No distance constraints yet.',
-      disabled: calibration.constraints.length === 0,
-      action: { kind: 'patch', patch: { field: 'selectedConstraintId' } },
-    },
-	    ...(selectedConstraint
-	      ? ([{
-	        id: 'constraint-distance',
-	        kind: 'numeric',
-	        label: 'Selected distance',
-	        value: selectedConstraint.distance,
-	        unit: 'mm',
-	        action: { kind: 'patch', patch: { field: 'constraintDistance' } },
-	      }] satisfies SketchSpecialModePanelField[])
-	      : []),
-	  ]
+    ...(selectedAnchor
+      ? ([
+          {
+            id: 'anchor-label',
+            kind: 'text',
+            label: 'Label',
+            value: selectedAnchor.label,
+            action: { kind: 'patch', patch: { field: 'anchorLabel' } },
+          },
+          {
+            id: 'anchor-point-id',
+            kind: 'readout',
+            label: 'Point binding',
+            value: selectedAnchor.pointId,
+          },
+        ] satisfies SketchSpecialModePanelField[])
+      : []),
+  ]
   const anchorButtons: SketchSpecialModePanelButton[] = [
     {
       id: 'add-anchor',
@@ -301,46 +267,35 @@ function buildPanel(state: ReferenceImageCalibrationModeState): SketchSpecialMod
       action: { kind: 'invoke', actionId: 'add-anchor' },
     },
     {
+      id: 'rebind-anchor',
+      label: state.pendingAnchorPlacement && state.selectedAnchorId ? 'Picking Binding' : 'Rebind Anchor',
+      disabled: state.selectedAnchorId === null,
+      action: { kind: 'invoke', actionId: 'rebind-anchor' },
+    },
+    {
       id: 'remove-anchor',
       label: 'Remove Anchor',
       disabled: selectedAnchor === null,
       action: { kind: 'invoke', actionId: 'remove-anchor' },
     },
   ]
-  const constraintButtons: SketchSpecialModePanelButton[] = [
-    {
-      id: 'add-distance-constraint',
-      label: state.pendingConstraintAnchorIds === null ? 'Add Distance' : 'Picking Pair',
-      disabled: calibration.anchors.length < 2,
-      action: { kind: 'invoke', actionId: 'add-distance-constraint' },
-    },
-    {
-      id: 'remove-distance-constraint',
-      label: 'Remove Distance',
-      disabled: selectedConstraint === null,
-      action: { kind: 'invoke', actionId: 'remove-distance-constraint' },
-    },
-  ]
   const sections: SketchSpecialModePanelSection[] = [
     {
       id: 'solve',
-      title: 'Solve',
-      description: 'Choose how the dedicated calibration solver is allowed to scale the image.',
+      title: 'Placement',
+      description: 'Reference-image placement is recovered from solved sketch point bindings after ordinary sketch solving.',
       fields: solveFields,
     },
     {
       id: 'anchors',
       title: 'Anchors',
-      description: 'Anchors stay operation-local and export only as fixed reference points after solving.',
+      description: state.pendingAnchorPlacement
+        ? state.selectedAnchorId
+          ? 'Click an existing sketch point to rebind, or click the image to create a new construction point binding.'
+          : 'Click the image to place a new bound construction point.'
+        : 'Anchors bind the image to ordinary sketch points.',
       fields: anchorFields,
       buttons: anchorButtons,
-    },
-    {
-      id: 'constraints',
-      title: 'Constraints',
-      description: 'Distance constraints act only inside the dedicated reference-image solver.',
-      fields: constraintFields,
-      buttons: constraintButtons,
     },
     {
       id: 'image',
@@ -385,36 +340,20 @@ function buildViewport(state: ReferenceImageCalibrationModeState): SketchSpecial
   const solvedByAnchorId = new Map(
     calibration.solveResult.anchors.map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
   )
-  const overlays: SketchSpecialModeViewportOverlay[] = [
-    ...calibration.constraints.flatMap((constraint) => {
-      const first = solvedByAnchorId.get(constraint.firstAnchorId)
-      const second = solvedByAnchorId.get(constraint.secondAnchorId)
-      return first && second
-        ? [{
-            id: `constraint:${constraint.constraintId}`,
-            kind: 'segment' as const,
-            start: first,
-            end: second,
-            tone: state.selectedConstraintId === constraint.constraintId ? 'success' as const : 'neutral' as const,
-            dashed: true,
-          }]
-        : []
-    }),
-    ...calibration.anchors.flatMap((anchor) => {
-      const solved = solvedByAnchorId.get(anchor.anchorId)
-      return solved
-        ? [{
-            id: `anchor:${anchor.anchorId}`,
-            kind: 'handle' as const,
-            label: anchor.label,
-            anchor: { kind: 'sketchPoint' as const, point: solved },
-            handle: createSketchSpecialModeHandleRef(state.operationId, anchor.anchorId),
-            tone: getAnchorHandleTone(state, anchor.anchorId),
-            draggable: true,
-          }]
-        : []
-    }),
-  ]
+  const overlays: SketchSpecialModeViewportOverlay[] = calibration.anchors.flatMap((anchor) => {
+    const solved = solvedByAnchorId.get(anchor.anchorId)
+    return solved
+      ? [{
+          id: `anchor:${anchor.anchorId}`,
+          kind: 'handle' as const,
+          label: anchor.label,
+          anchor: { kind: 'sketchPoint' as const, point: solved },
+          handle: createSketchSpecialModeHandleRef(state.operationId, anchor.anchorId),
+          tone: state.selectedAnchorId === anchor.anchorId ? 'success' as const : 'neutral' as const,
+          draggable: false,
+        }]
+      : []
+  })
 
   return {
     prompts: [buildPrompt(state, 'viewport')],
@@ -428,38 +367,18 @@ function buildViewport(state: ReferenceImageCalibrationModeState): SketchSpecial
 }
 
 function handleClick(
+  definitionPoints: readonly SketchPointDefinition[],
   state: ReferenceImageCalibrationModeState,
   point: SketchPoint2D,
   target: PrimitiveRef | null,
 ) {
   const selectedAnchor = findNearestAnchor(state, point)
   if (selectedAnchor) {
-    const nextState = selectAnchor(state, selectedAnchor.anchorId)
-    return {
-      state: nextState.pendingConstraintAnchorIds === null
-        ? nextState
-        : completePendingDistanceConstraintSelection(nextState, selectedAnchor.anchorId),
-    }
-  }
-
-  if (state.pendingConstraintAnchorIds !== null) {
     return {
       state: {
         ...state,
-        selectedConstraintId: null,
-      },
-    }
-  }
-
-  const selectedConstraint = findNearestConstraint(state, point)
-  if (selectedConstraint) {
-    return {
-      state: {
-        ...state,
-        selectedConstraintId: selectedConstraint.constraintId,
-        selectedAnchorId: null,
+        selectedAnchorId: selectedAnchor.anchorId,
         pendingAnchorPlacement: false,
-        pendingConstraintAnchorIds: null,
       },
     }
   }
@@ -469,76 +388,92 @@ function handleClick(
       state: {
         ...state,
         selectedAnchorId: null,
-        selectedConstraintId: null,
-        pendingConstraintAnchorIds: null,
       },
     }
   }
 
-  if (target?.kind !== 'sketchOperation' || target.operationId !== state.operationId) {
-    return { state }
+  if (state.selectedAnchorId && target?.kind === 'sketchPoint') {
+    const boundPoint = definitionPoints.find((candidate) => candidate.pointId === target.pointId)
+    return boundPoint
+      ? {
+          state: solveModeState({
+            ...state,
+            draftPoints: upsertDraftPoint(state.draftPoints, boundPoint),
+            draftState: {
+              ...state.draftState,
+              calibration: {
+                ...getCalibrationState(state.draftState),
+                anchors: getCalibrationState(state.draftState).anchors.map((anchor) =>
+                  anchor.anchorId === state.selectedAnchorId
+                    ? { ...anchor, pointId: target.pointId }
+                    : anchor,
+                ),
+              },
+            },
+            pendingAnchorPlacement: false,
+          }),
+        }
+      : { state }
   }
 
   const uv = worldPointToUv(point, state.draftState.placement)
-  if (!uv) {
+  if (!uv || target?.kind !== 'sketchOperation' || target.operationId !== state.operationId) {
     return { state }
   }
 
-  const nextAnchor = createReferenceImageCalibrationAnchor({
-    anchorId: createAnchorId(state.operationId, getCalibrationState(state.draftState).anchors.length),
-    anchorIndex: getCalibrationState(state.draftState).anchors.length,
-    uv,
-    worldPosition: point,
-  })
-
   const calibration = getCalibrationState(state.draftState)
-  const draftState = solveReferenceImageOperationState({
-    ...state.draftState,
-    calibration: {
-      ...calibration,
-      anchors: [...calibration.anchors, nextAnchor],
-    },
-  })
-
-  return {
-    state: {
-      ...state,
-        draftState,
-        selectedAnchorId: nextAnchor.anchorId,
-        selectedConstraintId: null,
-        pendingAnchorPlacement: false,
-        pendingConstraintAnchorIds: null,
-      },
-    }
-}
-
-function handleDragMove(
-  state: ReferenceImageCalibrationModeState,
-  handleId: string,
-  point: SketchPoint2D,
-) {
-  const anchorId = handleId.replace('sketch_special_handle_', '')
-  const calibration = getCalibrationState(state.draftState)
-  const nextAnchors = calibration.anchors.map((anchor) =>
-    anchor.anchorId === anchorId
-      ? { ...anchor, worldPosition: point }
-      : anchor,
+  const pointId = createAnchorPointId(
+    state.operationId,
+    state.selectedAnchorId ?? createAnchorId(state.operationId, calibration.anchors.length),
   )
+  const nextPoint = createDraftPoint(state.sketchId, pointId, getAnchorLabel(calibration.anchors.length), point)
+
+  if (state.selectedAnchorId) {
+    return {
+      state: solveModeState({
+        ...state,
+        draftPoints: upsertDraftPoint(removeUnusedDraftPoint(state), nextPoint),
+        draftState: {
+          ...state.draftState,
+          calibration: {
+            ...calibration,
+            anchors: calibration.anchors.map((anchor) =>
+              anchor.anchorId === state.selectedAnchorId
+                ? {
+                    ...anchor,
+                    uv,
+                    pointId,
+                  }
+                : anchor,
+            ),
+          },
+        },
+        pendingAnchorPlacement: false,
+      }),
+    }
+  }
+
+  const nextAnchor = createReferenceImageCalibrationAnchor({
+    anchorId: createAnchorId(state.operationId, calibration.anchors.length),
+    anchorIndex: calibration.anchors.length,
+    uv,
+    pointId,
+  })
 
   return {
-    state: {
+    state: solveModeState({
       ...state,
-      selectedAnchorId: anchorId,
-      selectedConstraintId: null,
-      pendingConstraintAnchorIds: null,
-      draftState: solveReferenceImageOperationState({
+      draftPoints: [...state.draftPoints, nextPoint],
+      draftState: {
         ...state.draftState,
         calibration: {
           ...calibration,
-          anchors: nextAnchors,
+          anchors: [...calibration.anchors, nextAnchor],
         },
-      }),
-    },
+      },
+      selectedAnchorId: nextAnchor.anchorId,
+      pendingAnchorPlacement: false,
+    }),
   }
 }
 
@@ -554,16 +489,16 @@ function patchDraftState(
   const calibration = getCalibrationState(state.draftState)
 
   if (field === 'scaleMode' && (value === 'lockedAspect' || value === 'independent')) {
-    return {
+    return solveModeState({
       ...state,
-      draftState: solveReferenceImageOperationState({
+      draftState: {
         ...state.draftState,
         calibration: {
           ...calibration,
           scaleMode: value,
         },
-      }),
-    }
+      },
+    })
   }
 
   if (field === 'showExportedAnchorsInSketch' && typeof value === 'boolean') {
@@ -585,122 +520,28 @@ function patchDraftState(
       selectedAnchorId: typeof value === 'string' && calibration.anchors.some((anchor) => anchor.anchorId === value)
         ? value
         : null,
-      selectedConstraintId: null,
       pendingAnchorPlacement: false,
-      pendingConstraintAnchorIds: null,
-    }
-  }
-
-  if (field === 'selectedConstraintId') {
-    return {
-      ...state,
-      selectedConstraintId: typeof value === 'string'
-        && calibration.constraints.some((constraint) => constraint.constraintId === value)
-        ? value
-        : null,
-      selectedAnchorId: null,
-      pendingAnchorPlacement: false,
-      pendingConstraintAnchorIds: null,
     }
   }
 
   if (field === 'anchorLabel' && typeof value === 'string' && state.selectedAnchorId) {
-    return patchSelectedAnchor(state, (anchor) => ({ ...anchor, label: value.trim() || anchor.label }))
-  }
-
-  if ((field === 'anchorX' || field === 'anchorY') && typeof value === 'number' && state.selectedAnchorId) {
-    return patchSelectedAnchor(state, (anchor) => {
-      const current = anchor.worldPosition ?? [0, 0]
-      return {
-        ...anchor,
-        worldPosition: field === 'anchorX'
-          ? [value, current[1]]
-          : [current[0], value],
-      }
-    })
-  }
-
-  if (field === 'constraintDistance' && typeof value === 'number' && state.selectedConstraintId) {
-    const nextConstraints = calibration.constraints.map((constraint) =>
-      constraint.constraintId === state.selectedConstraintId
-        ? { ...constraint, distance: Math.max(value, 1e-6) }
-        : constraint,
-    )
-    return {
+    return solveModeState({
       ...state,
-      draftState: solveReferenceImageOperationState({
+      draftState: {
         ...state.draftState,
         calibration: {
           ...calibration,
-          constraints: nextConstraints,
+          anchors: calibration.anchors.map((anchor) =>
+            anchor.anchorId === state.selectedAnchorId
+              ? { ...anchor, label: value.trim() || anchor.label }
+              : anchor,
+          ),
         },
-      }),
-    }
+      },
+    })
   }
 
   return state
-}
-
-function patchSelectedAnchor(
-  state: ReferenceImageCalibrationModeState,
-  update: (anchor: ReferenceImageCalibrationAnchor) => ReferenceImageCalibrationAnchor,
-) {
-  const calibration = getCalibrationState(state.draftState)
-  const nextAnchors = calibration.anchors.map((anchor) =>
-    anchor.anchorId === state.selectedAnchorId ? update(anchor) : anchor,
-  )
-  return {
-    ...state,
-    draftState: solveReferenceImageOperationState({
-      ...state.draftState,
-      calibration: {
-        ...calibration,
-        anchors: nextAnchors,
-      },
-    }),
-  }
-}
-
-function addDistanceConstraint(state: ReferenceImageCalibrationModeState) {
-  const [firstAnchorId, secondAnchorId] = state.pendingConstraintAnchorIds ?? []
-  if (!firstAnchorId || !secondAnchorId) {
-    return state
-  }
-
-  const calibration = getCalibrationState(state.draftState)
-  const first = calibration.anchors.find((anchor) => anchor.anchorId === firstAnchorId)
-  const second = calibration.anchors.find((anchor) => anchor.anchorId === secondAnchorId)
-  if (!first || !second) {
-    return state
-  }
-
-  const firstPosition = first.worldPosition ?? getSolvedAnchorPosition(state.draftState, first.anchorId)
-  const secondPosition = second.worldPosition ?? getSolvedAnchorPosition(state.draftState, second.anchorId)
-  if (!firstPosition || !secondPosition) {
-    return state
-  }
-
-  const constraint = createReferenceImageCalibrationConstraint({
-    constraintId: createConstraintId(state.operationId, calibration.constraints.length),
-    constraintIndex: calibration.constraints.length,
-    firstAnchorId: first.anchorId,
-    secondAnchorId: second.anchorId,
-    distance: distanceBetween(firstPosition, secondPosition),
-  })
-
-  return {
-    ...state,
-    selectedConstraintId: constraint.constraintId,
-    selectedAnchorId: null,
-    pendingConstraintAnchorIds: null,
-    draftState: solveReferenceImageOperationState({
-      ...state.draftState,
-      calibration: {
-        ...calibration,
-        constraints: [...calibration.constraints, constraint],
-      },
-    }),
-  }
 }
 
 function removeSelectedAnchor(state: ReferenceImageCalibrationModeState) {
@@ -709,258 +550,235 @@ function removeSelectedAnchor(state: ReferenceImageCalibrationModeState) {
   }
 
   const calibration = getCalibrationState(state.draftState)
+  const anchorToRemove = calibration.anchors.find((anchor) => anchor.anchorId === state.selectedAnchorId)
+  if (!anchorToRemove) {
+    return state
+  }
+
   const nextAnchors = calibration.anchors.filter((anchor) => anchor.anchorId !== state.selectedAnchorId)
-  const nextConstraints = calibration.constraints.filter((constraint) =>
-    constraint.firstAnchorId !== state.selectedAnchorId && constraint.secondAnchorId !== state.selectedAnchorId
+  const nextDraftPoints = state.draftPoints.filter((point) =>
+    point.pointId !== anchorToRemove.pointId
+      || nextAnchors.some((anchor) => anchor.pointId === point.pointId),
   )
 
-  return {
+  return solveModeState({
     ...state,
-    selectedAnchorId: null,
-    selectedConstraintId: null,
-    pendingConstraintAnchorIds: null,
-    draftState: solveReferenceImageOperationState({
+    draftPoints: nextDraftPoints,
+    draftState: {
       ...state.draftState,
       calibration: {
         ...calibration,
         anchors: nextAnchors,
-        constraints: nextConstraints,
       },
-    }),
-  }
-}
-
-function removeSelectedConstraint(state: ReferenceImageCalibrationModeState) {
-  if (!state.selectedConstraintId) {
-    return state
-  }
-
-  const calibration = getCalibrationState(state.draftState)
-  return {
-    ...state,
-    selectedConstraintId: null,
-    pendingConstraintAnchorIds: null,
-    draftState: solveReferenceImageOperationState({
-      ...state.draftState,
-      calibration: {
-        ...calibration,
-        constraints: calibration.constraints.filter((constraint) =>
-          constraint.constraintId !== state.selectedConstraintId
-        ),
-      },
-    }),
-  }
+    },
+    selectedAnchorId: null,
+    pendingAnchorPlacement: false,
+  })
 }
 
 function getSelectedAnchor(state: ReferenceImageCalibrationModeState) {
   return getCalibrationState(state.draftState).anchors.find((anchor) => anchor.anchorId === state.selectedAnchorId) ?? null
 }
 
-function getSelectedConstraint(state: ReferenceImageCalibrationModeState) {
-  return getCalibrationState(state.draftState).constraints.find((constraint) => constraint.constraintId === state.selectedConstraintId) ?? null
-}
-
-function getSolvedAnchorPosition(
-  draftState: SolvedReferenceImageOperationState,
-  anchorId: string,
-) {
-  return getCalibrationState(draftState).solveResult.anchors.find((anchor) => anchor.anchorId === anchorId)?.worldPosition ?? null
-}
-
-function buildPrompt(
+function solveModeState(
   state: ReferenceImageCalibrationModeState,
-  scope: 'panel' | 'viewport',
-) {
-  if (state.pendingAnchorPlacement) {
-    return {
-      id: `${scope}-place-anchor`,
-      text: scope === 'panel'
-        ? 'Click the image to place a calibration anchor.'
-        : 'Place a calibration anchor on the image.',
-    }
-  }
-
-  if (state.pendingConstraintAnchorIds?.length === 0) {
-    return {
-      id: `${scope}-pick-first-anchor`,
-      text: 'Click the first anchor for the new distance constraint.',
-      tone: 'warning' as const,
-    }
-  }
-
-  if (state.pendingConstraintAnchorIds?.length === 1) {
-    return {
-      id: `${scope}-pick-second-anchor`,
-      text: 'Click a second anchor to define the distance constraint.',
-      tone: 'warning' as const,
-    }
-  }
-
-  return {
-    id: `${scope}-drag-anchor`,
-    text: 'Drag anchors to align the image to sketch-space references.',
-  }
-}
-
-function getAnchorHandleTone(
-  state: ReferenceImageCalibrationModeState,
-  anchorId: string,
-) {
-  if (state.pendingConstraintAnchorIds?.includes(anchorId)) {
-    return 'warning' as const
-  }
-
-  return state.selectedAnchorId === anchorId ? 'success' as const : 'neutral' as const
-}
-
-function selectAnchor(state: ReferenceImageCalibrationModeState, anchorId: string) {
+): ReferenceImageCalibrationModeState {
   return {
     ...state,
-    selectedAnchorId: anchorId,
-    selectedConstraintId: null,
-    pendingAnchorPlacement: false,
+    draftState: solveReferenceImageOperationState(state.draftState, {
+      pointPositionsById: createPointPositionMap(state.draftPoints),
+    }),
   }
 }
 
-function startDistanceConstraintSelection(state: ReferenceImageCalibrationModeState) {
-  if (getCalibrationState(state.draftState).anchors.length < 2) {
-    return state
-  }
-
-  return {
-    ...state,
-    pendingAnchorPlacement: false,
-    pendingConstraintAnchorIds: [],
-    selectedAnchorId: null,
-    selectedConstraintId: null,
-  }
-}
-
-function completePendingDistanceConstraintSelection(
-  state: ReferenceImageCalibrationModeState,
-  anchorId: string,
+function collectDraftPoints(
+  sketchId: SketchId,
+  definitionPoints: readonly SketchPointDefinition[],
+  state: Pick<ReferenceImageOperationState, 'calibration'>,
 ) {
-  const pendingAnchorIds = state.pendingConstraintAnchorIds
-  if (pendingAnchorIds === null) {
-    return state
-  }
+  const calibration = state.calibration ?? { anchors: [] }
+  const pointLookup = new Map(definitionPoints.map((point) => [point.pointId, point] as const))
 
-  if (pendingAnchorIds.length === 0) {
-    return {
-      ...state,
-      pendingConstraintAnchorIds: [anchorId],
-      selectedAnchorId: anchorId,
-      selectedConstraintId: null,
+  return calibration.anchors.flatMap((anchor, index) => {
+    const point = pointLookup.get(anchor.pointId as SketchPointId)
+    if (point) {
+      return [point]
     }
-  }
 
-  if (pendingAnchorIds[0] === anchorId) {
-    return {
-      ...state,
-      selectedAnchorId: anchorId,
-      selectedConstraintId: null,
+    if (anchor.legacyWorldPosition) {
+      return [createDraftPoint(sketchId, anchor.pointId as SketchPointId, anchor.label || getAnchorLabel(index), anchor.legacyWorldPosition)]
     }
-  }
 
-  return addDistanceConstraint({
-    ...state,
-    pendingConstraintAnchorIds: [pendingAnchorIds[0], anchorId],
-    selectedAnchorId: anchorId,
-    selectedConstraintId: null,
+    return []
   })
+}
+
+function createPointPositionMap(points: readonly SketchPointDefinition[]) {
+  return new Map(points.map((point) => [point.pointId, point.position] as const))
+}
+
+function upsertDraftPoint(
+  draftPoints: readonly SketchPointDefinition[],
+  point: SketchPointDefinition,
+) {
+  const nextPoints = draftPoints.filter((candidate) => candidate.pointId !== point.pointId)
+  nextPoints.push(point)
+  return nextPoints
+}
+
+function removeUnusedDraftPoint(state: ReferenceImageCalibrationModeState) {
+  const selectedAnchor = getSelectedAnchor(state)
+  if (!selectedAnchor) {
+    return state.draftPoints
+  }
+
+  const remainingAnchors = getCalibrationState(state.draftState).anchors.filter((anchor) =>
+    anchor.anchorId !== selectedAnchor.anchorId && anchor.pointId === selectedAnchor.pointId
+  )
+  return remainingAnchors.length > 0
+    ? state.draftPoints
+    : state.draftPoints.filter((point) => point.pointId !== selectedAnchor.pointId)
+}
+
+function createDraftPoint(
+  sketchId: SketchId,
+  pointId: SketchPointId,
+  label: string,
+  position: SketchPoint2D,
+): SketchPointDefinition {
+  return {
+    pointId,
+    label,
+    target: {
+      kind: 'sketchPoint',
+      sketchId,
+      pointId,
+    },
+    position,
+    isConstruction: true,
+  }
+}
+
+function createDraftPointEntity(
+  sketchId: SketchId,
+  operationId: SketchAuthoringOperationId,
+  point: SketchPointDefinition,
+): SketchEntityDefinition {
+  const entityId = (
+    `sketch_entity_${operationId.replace(/[^a-zA-Z0-9]+/g, '_')}_${point.pointId.replace(/[^a-zA-Z0-9]+/g, '_')}_point`
+  ) as SketchEntityId
+  return {
+    kind: 'point',
+    entityId,
+    label: point.label,
+    target: {
+      kind: 'sketchEntity',
+      sketchId,
+      entityId,
+    },
+    isConstruction: true,
+    pointId: point.pointId,
+  }
 }
 
 function findNearestAnchor(
   state: ReferenceImageCalibrationModeState,
   point: SketchPoint2D,
 ) {
-  const solvedAnchors = getCalibrationState(state.draftState).solveResult.anchors
-  return solvedAnchors
-    .map((anchor) => ({
-      anchorId: anchor.anchorId,
-      distance: distanceBetween(anchor.worldPosition, point),
-    }))
-    .filter((candidate) => candidate.distance <= ANCHOR_HIT_TOLERANCE)
-    .sort((left, right) => left.distance - right.distance)[0] ?? null
+  const solvedByAnchorId = new Map(
+    getCalibrationState(state.draftState).solveResult.anchors.map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
+  )
+
+  let nearest: ReferenceImageCalibrationAnchor | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+
+  for (const anchor of getCalibrationState(state.draftState).anchors) {
+    const solved = solvedByAnchorId.get(anchor.anchorId)
+    if (!solved) {
+      continue
+    }
+
+    const delta = distanceBetween(solved, point)
+    if (delta <= ANCHOR_HIT_TOLERANCE && delta < bestDistance) {
+      nearest = anchor
+      bestDistance = delta
+    }
+  }
+
+  return nearest
 }
 
-function findNearestConstraint(
+function buildPrompt(
   state: ReferenceImageCalibrationModeState,
-  point: SketchPoint2D,
+  surface: 'panel' | 'viewport',
 ) {
-  return getCalibrationState(state.draftState).constraints
-    .map((constraint) => {
-      const first = getSolvedAnchorPosition(state.draftState, constraint.firstAnchorId)
-      const second = getSolvedAnchorPosition(state.draftState, constraint.secondAnchorId)
-      return first && second
-        ? {
-            constraintId: constraint.constraintId,
-            distance: pointToSegmentDistance(point, first, second),
-          }
-        : null
-    })
-    .flatMap((constraint) => constraint ? [constraint] : [])
-    .filter((candidate) => candidate.distance <= CONSTRAINT_HIT_TOLERANCE)
-    .sort((left, right) => left.distance - right.distance)[0] ?? null
-}
-
-function worldPointToUv(
-  point: SketchPoint2D,
-  placement: SolvedReferenceImageOperationState['placement'],
-): SketchPoint2D | null {
-  const dx = point[0] - placement.center[0]
-  const dy = point[1] - placement.center[1]
-  const cos = Math.cos(-placement.rotationRadians)
-  const sin = Math.sin(-placement.rotationRadians)
-  const localX = dx * cos - dy * sin
-  const localY = dx * sin + dy * cos
-  if (placement.width <= 0 || placement.height <= 0) {
-    return null
+  if (state.pendingAnchorPlacement) {
+    return {
+      id: `reference-image-calibration-${surface}-prompt`,
+      text: state.selectedAnchorId
+        ? 'Select a sketch point to rebind, or click the image to create a new bound construction point.'
+        : 'Click the image to place a bound construction point.',
+    }
   }
 
-  const uv: SketchPoint2D = [
-    localX / placement.width + 0.5,
-    0.5 - localY / placement.height,
-  ]
-  return uv[0] >= 0 && uv[0] <= 1 && uv[1] >= 0 && uv[1] <= 1 ? uv : null
-}
-
-function createAnchorId(operationId: SketchAuthoringOperationId, index: number) {
-  return `${operationId}:anchor:${index + 1}`
-}
-
-function createConstraintId(operationId: SketchAuthoringOperationId, index: number) {
-  return `${operationId}:distance:${index + 1}`
-}
-
-function pointToSegmentDistance(
-  point: SketchPoint2D,
-  start: SketchPoint2D,
-  end: SketchPoint2D,
-) {
-  const dx = end[0] - start[0]
-  const dy = end[1] - start[1]
-  const lengthSquared = dx * dx + dy * dy
-  if (lengthSquared <= 1e-9) {
-    return distanceBetween(point, start)
+  return {
+    id: `reference-image-calibration-${surface}-prompt`,
+    text: 'Manage image anchor bindings, then return to normal sketch tools for constraints and dimensions.',
   }
-
-  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared))
-  return distanceBetween(point, [
-    start[0] + dx * t,
-    start[1] + dy * t,
-  ])
 }
 
-function distanceBetween(first: SketchPoint2D, second: SketchPoint2D) {
-  return Math.hypot(first[0] - second[0], first[1] - second[1])
-}
-
-function isReferenceImagePayload(value: unknown): value is SolvedReferenceImageOperationState['image'] {
+function isReferenceImagePayload(
+  value: unknown,
+): value is SolvedReferenceImageOperationState['image'] {
   return typeof value === 'object'
     && value !== null
     && typeof (value as { mediaType?: unknown }).mediaType === 'string'
     && typeof (value as { pixelWidth?: unknown }).pixelWidth === 'number'
     && typeof (value as { pixelHeight?: unknown }).pixelHeight === 'number'
     && typeof (value as { base64Data?: unknown }).base64Data === 'string'
+}
+
+function worldPointToUv(
+  point: SketchPoint2D,
+  placement: SolvedReferenceImageOperationState['placement'],
+) {
+  const dx = point[0] - placement.center[0]
+  const dy = point[1] - placement.center[1]
+  const cos = Math.cos(-placement.rotationRadians)
+  const sin = Math.sin(-placement.rotationRadians)
+  const localX = dx * cos - dy * sin
+  const localY = dx * sin + dy * cos
+
+  if (placement.width <= 0 || placement.height <= 0) {
+    return null
+  }
+
+  const u = localX / placement.width + 0.5
+  const v = 0.5 - localY / placement.height
+
+  return u >= 0 && u <= 1 && v >= 0 && v <= 1
+    ? [u, v] as SketchPoint2D
+    : null
+}
+
+function distanceBetween(first: SketchPoint2D, second: SketchPoint2D) {
+  return Math.hypot(first[0] - second[0], first[1] - second[1])
+}
+
+function createAnchorId(
+  operationId: SketchAuthoringOperationId,
+  index: number,
+) {
+  return `${operationId}_anchor_${index + 1}`
+}
+
+function createAnchorPointId(
+  operationId: SketchAuthoringOperationId,
+  anchorKey: string,
+) {
+  return `sketch_point_${operationId.replace(/[^a-zA-Z0-9]+/g, '_')}_${anchorKey.replace(/[^a-zA-Z0-9]+/g, '_')}` as SketchPointId
+}
+
+function getAnchorLabel(index: number) {
+  return `Anchor ${index + 1}`
 }

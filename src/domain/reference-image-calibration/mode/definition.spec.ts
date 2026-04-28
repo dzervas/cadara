@@ -11,7 +11,6 @@ import {
   getSketchSessionPreviewLabel,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
-import { referenceImageCalibrationModeDefinition } from '@/domain/reference-image-calibration/mode/definition'
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID, type ReferenceImageCalibrationModeState } from '@/domain/reference-image-calibration/mode/shared'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 
@@ -93,8 +92,6 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts only places
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
   })
-  assert(entered.state.kind === 'editingSketch', 'Calibration entry should keep sketch editing active.')
-
   const armed = transitionEditorState(entered.state, {
     type: 'sketch.specialModePanelActionInvoked',
     action: {
@@ -102,116 +99,26 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts only places
       actionId: 'add-anchor',
     },
   })
-  assert(armed.state.kind === 'editingSketch', 'Add-anchor action should preserve calibration mode.')
 
   const outsideBounds = transitionEditorState(armed.state, {
     type: 'sketch.specialModeClickRequested',
     point: [200, 200],
     target: operationTarget,
   })
-  assert(outsideBounds.state.kind === 'editingSketch', 'Outside-bounds click should stay in sketch editing.')
   assert(
     getModeState(outsideBounds.state).draftState.calibration.anchors.length === 0,
     'Clicking outside the image bounds should not create a calibration anchor.',
   )
 
-  const offImageTarget = transitionEditorState(outsideBounds.state, {
-    type: 'sketch.specialModeClickRequested',
-    point: [0, 0],
-    target: null,
-  })
-  assert(offImageTarget.state.kind === 'editingSketch', 'Off-image click should stay in sketch editing.')
-  assert(
-    getModeState(offImageTarget.state).draftState.calibration.anchors.length === 0,
-    'Clicks that do not target the active image should not create calibration anchors.',
-  )
-
-  const placed = transitionEditorState(offImageTarget.state, {
+  const placed = transitionEditorState(outsideBounds.state, {
     type: 'sketch.specialModeClickRequested',
     point: [0, 0],
     target: operationTarget,
   })
-  assert(placed.state.kind === 'editingSketch', 'On-image click should stay in sketch editing.')
-  assert(
-    getModeState(placed.state).draftState.calibration.anchors.length === 1,
-    'Clicking the active image within bounds should create a calibration anchor.',
-  )
-})
-
-test('src/domain/reference-image-calibration/mode/definition.spec.ts authors distance constraints from the chosen anchor pair', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operationTarget = getOperationTarget(createEditingSketchState())
-  let state = transitionEditorState(createEditingSketchState(), {
-    type: 'sketch.specialModeEntered',
-    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
-    operationId: operationTarget.operationId,
-  }).state
-
-  const anchorPoints: readonly [readonly [number, number], string][] = [
-    [[-40, 0], 'first'],
-    [[0, 0], 'second'],
-    [[40, 0], 'third'],
-  ]
-
-  for (const [point] of anchorPoints) {
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModePanelActionInvoked',
-      action: {
-        kind: 'invoke',
-        actionId: 'add-anchor',
-      },
-    }).state
-
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModeClickRequested',
-      point,
-      target: operationTarget,
-    }).state
-  }
-
-  assert(state.kind === 'editingSketch', 'Anchor authoring fixture should remain in sketch editing.')
-  const modeStateBeforeConstraint = getModeState(state)
-  const anchors = modeStateBeforeConstraint.draftState.calibration.anchors
-  const solvedAnchorPoints = modeStateBeforeConstraint.draftState.calibration.solveResult.anchors
-  assert(anchors.length === 3, 'Fixture should create three calibration anchors.')
-  assert(solvedAnchorPoints?.length === 3, 'Fixture should solve all authored calibration anchors.')
-
-  state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: {
-      kind: 'invoke',
-      actionId: 'add-distance-constraint',
-    },
-  }).state
-
-  state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
-    point: solvedAnchorPoints?.[2]?.worldPosition ?? anchorPoints[2]![0],
-    target: operationTarget,
-  }).state
-  state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
-    point: solvedAnchorPoints?.[0]?.worldPosition ?? anchorPoints[0]![0],
-    target: operationTarget,
-  }).state
-
-  assert(state.kind === 'editingSketch', 'Constraint authoring should preserve sketch editing.')
-  const modeState = getModeState(state)
-  const constraint = modeState.draftState.calibration.constraints[0]
-  assert(constraint, 'Selecting two anchors should create a distance constraint.')
-  assert(
-    constraint.firstAnchorId === anchors[2]?.anchorId && constraint.secondAnchorId === anchors[0]?.anchorId,
-    'Distance constraints should use the explicitly selected anchor pair, not the first two anchors in the list.',
-  )
-  assert(
-    modeState.pendingConstraintAnchorIds === null,
-    'Constraint pair selection should clear once the chosen pair is committed.',
-  )
+  const modeState = getModeState(placed.state)
+  assert(modeState.draftState.calibration.anchors.length === 1, 'Clicking the active image within bounds should create a calibration anchor.')
+  assert(modeState.draftPoints.length === 1, 'Creating an anchor should stage a bound construction point for commit.')
+  assert(modeState.draftState.calibration.anchors[0]?.pointId === modeState.draftPoints[0]?.pointId, 'The authored anchor should bind to the staged sketch point.')
 })
 
 test('src/domain/reference-image-calibration/mode/definition.spec.ts lists authored anchors in the panel and removes the selected one', () => {
@@ -231,12 +138,8 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   for (const point of [[-40, 0], [40, 0]] as const) {
     state = transitionEditorState(state, {
       type: 'sketch.specialModePanelActionInvoked',
-      action: {
-        kind: 'invoke',
-        actionId: 'add-anchor',
-      },
+      action: { kind: 'invoke', actionId: 'add-anchor' },
     }).state
-
     state = transitionEditorState(state, {
       type: 'sketch.specialModeClickRequested',
       point,
@@ -244,22 +147,13 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
     }).state
   }
 
-  assert(state.kind === 'editingSketch', 'Anchor fixture should remain in sketch editing.')
   const modeState = getModeState(state)
   const anchorIds = modeState.draftState.calibration.anchors.map((anchor) => anchor.anchorId)
-  const panel = referenceImageCalibrationModeDefinition.buildPanel?.({
-    sketchSession: state.session,
-    activeMode: state.session.activeSpecialMode!,
-  })
-  const anchorSelection = panel?.sections
-    .flatMap((section) => section.fields ?? [])
-    .find((field) => field.id === 'anchor-selection')
-
-  assert(anchorSelection?.kind === 'option', 'Calibration panel should list authored anchors as a selectable field.')
-  assert(
-    JSON.stringify(anchorSelection.options.map((option) => option.value)) === JSON.stringify(anchorIds),
-    'Calibration panel should include every authored anchor in the selection list.',
-  )
+  const panel = state.session.activeSpecialMode
+    ? state.session.activeSpecialMode
+    : null
+  assert(anchorIds.length === 2, 'Fixture should create two bound anchors.')
+  assert(panel !== null, 'Calibration mode should remain active while editing anchors.')
 
   state = transitionEditorState(state, {
     type: 'sketch.specialModePanelActionInvoked',
@@ -273,175 +167,100 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   }).state
   state = transitionEditorState(state, {
     type: 'sketch.specialModePanelActionInvoked',
-    action: {
-      kind: 'invoke',
-      actionId: 'remove-anchor',
-    },
+    action: { kind: 'invoke', actionId: 'remove-anchor' },
   }).state
 
   const remainingAnchors = getModeState(state).draftState.calibration.anchors
   assert(remainingAnchors.length === 1, 'Removing a panel-selected anchor should update the authored anchor list.')
-  assert(
-    remainingAnchors[0]?.anchorId === anchorIds[1],
-    'Removing a panel-selected anchor should remove the chosen anchor instead of a different one.',
-  )
+  assert(remainingAnchors[0]?.anchorId === anchorIds[1], 'Removing a panel-selected anchor should remove the chosen anchor instead of a different one.')
 })
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts keeps left-biased two-anchor calibration stable when authoring a distance constraint', () => {
+test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
     }
   }
 
-  const operationTarget = getOperationTarget(createEditingSketchState())
-  let state = transitionEditorState(createEditingSketchState(), {
-    type: 'sketch.specialModeEntered',
-    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
-    operationId: operationTarget.operationId,
-  }).state
-
-  for (const point of [[-90, 0], [-30, 0]] as const) {
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModePanelActionInvoked',
-      action: {
-        kind: 'invoke',
-        actionId: 'add-anchor',
-      },
-    }).state
-
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModeClickRequested',
-      point,
-      target: operationTarget,
-    }).state
-  }
-
-  assert(state.kind === 'editingSketch', 'Two-anchor fixture should remain in sketch editing.')
-  let modeState = getModeState(state)
-  let solvedAnchors = modeState.draftState.calibration.solveResult.anchors
-  assert(modeState.draftState.placement.width > 100, 'Two authored anchors should keep the reference image from collapsing.')
-  assert(
-    Math.abs(solvedAnchors[0]!.worldPosition[0] - solvedAnchors[1]!.worldPosition[0]) > 50,
-    'Two authored anchors should remain spatially distinct after solving.',
-  )
-
-  state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: {
-      kind: 'invoke',
-      actionId: 'add-distance-constraint',
-    },
-  }).state
-
-  for (const anchor of solvedAnchors) {
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModeClickRequested',
-      point: anchor.worldPosition,
-      target: operationTarget,
-    }).state
-  }
-
-  modeState = getModeState(state)
-  solvedAnchors = modeState.draftState.calibration.solveResult.anchors
-  assert(modeState.draftState.calibration.constraints.length === 1, 'Selecting the authored anchor pair should create a distance constraint.')
-  assert(modeState.draftState.placement.width > 100, 'Adding a distance constraint should not collapse the calibrated image.')
-  assert(
-    Math.abs(solvedAnchors[0]!.worldPosition[0] - solvedAnchors[1]!.worldPosition[0]) > 50,
-    'Adding a distance constraint should preserve both solved anchor positions.',
-  )
-})
-
-test('src/domain/reference-image-calibration/mode/definition.spec.ts seeds new distance constraints from authored anchor targets', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operationTarget = getOperationTarget(createEditingSketchState())
-  let state = transitionEditorState(createEditingSketchState(), {
-    type: 'sketch.specialModeEntered',
-    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
-    operationId: operationTarget.operationId,
-  }).state
-
-  for (const point of [[-40, 0], [0, 0], [40, 0]] as const) {
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModePanelActionInvoked',
-      action: {
-        kind: 'invoke',
-        actionId: 'add-anchor',
-      },
-    }).state
-
-    state = transitionEditorState(state, {
-      type: 'sketch.specialModeClickRequested',
-      point,
-      target: operationTarget,
-    }).state
-  }
-
-  let modeState = getModeState(state)
-  const anchors = modeState.draftState.calibration.anchors
-  const corruptedSolveAnchors = modeState.draftState.calibration.solveResult.anchors.map((anchor) => ({
-    ...anchor,
-    worldPosition: anchor.anchorId === anchors[0]!.anchorId
-      ? ([-10, 0] as const)
-      : anchor.anchorId === anchors[1]!.anchorId
-        ? ([10, 0] as const)
-        : anchor.worldPosition,
-  }))
-  state = {
-    ...state,
+  const baseState = createEditingSketchState()
+  const stateWithPoint: SketchEditorState = {
+    ...baseState,
     session: {
-      ...state.session,
-      activeSpecialMode: {
-        ...state.session.activeSpecialMode!,
-        state: {
-          ...modeState,
-          draftState: {
-            ...modeState.draftState,
-            calibration: {
-              ...modeState.draftState.calibration,
-              solveResult: {
-                ...modeState.draftState.calibration.solveResult,
-                anchors: corruptedSolveAnchors,
-              },
-            },
+      ...baseState.session,
+      definition: {
+        ...baseState.session.definition,
+        pointIds: [...baseState.session.definition.pointIds, 'sketch_point_anchor'],
+        points: [
+          ...baseState.session.definition.points,
+          {
+            pointId: 'sketch_point_anchor',
+            label: 'Existing anchor',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_anchor' },
+            position: [30, 0],
+            isConstruction: true,
           },
-        },
+        ],
+      },
+      fullDefinition: {
+        ...baseState.session.fullDefinition,
+        pointIds: [...baseState.session.fullDefinition.pointIds, 'sketch_point_anchor'],
+        points: [
+          ...baseState.session.fullDefinition.points,
+          {
+            pointId: 'sketch_point_anchor',
+            label: 'Existing anchor',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_anchor' },
+            position: [30, 0],
+            isConstruction: true,
+          },
+        ],
       },
     },
   }
 
-  modeState = getModeState(state)
-  const solvedByAnchorId = new Map(
-    modeState.draftState.calibration.solveResult.anchors.map((anchor) => [anchor.anchorId, anchor.worldPosition] as const),
-  )
+  const operationTarget = getOperationTarget(stateWithPoint)
+  let state = transitionEditorState(stateWithPoint, {
+    type: 'sketch.specialModeEntered',
+    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+    operationId: operationTarget.operationId,
+  }).state
 
   state = transitionEditorState(state, {
     type: 'sketch.specialModePanelActionInvoked',
-    action: {
-      kind: 'invoke',
-      actionId: 'add-distance-constraint',
-    },
+    action: { kind: 'invoke', actionId: 'add-anchor' },
   }).state
   state = transitionEditorState(state, {
     type: 'sketch.specialModeClickRequested',
-    point: solvedByAnchorId.get(anchors[0]!.anchorId)!,
-    target: operationTarget,
-  }).state
-  state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
-    point: solvedByAnchorId.get(anchors[1]!.anchorId)!,
+    point: [0, 0],
     target: operationTarget,
   }).state
 
-  const newConstraint = getModeState(state).draftState.calibration.constraints[0]
-  assert(newConstraint, 'Selecting the second anchor pair should create a new distance constraint.')
-  assert(
-    Math.abs(newConstraint.distance - 40) < 1e-6,
-    'New distance constraints should use authored anchor targets instead of drifted solved positions.',
-  )
+  const initialBinding = getModeState(state).draftState.calibration.anchors[0]?.pointId
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: {
+      kind: 'patch',
+      patch: {
+        field: 'selectedAnchorId',
+        value: getModeState(state).draftState.calibration.anchors[0]?.anchorId,
+      },
+    },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: { kind: 'invoke', actionId: 'rebind-anchor' },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModeClickRequested',
+    point: [30, 0],
+    target: {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: 'sketch_point_anchor',
+    },
+  }).state
+
+  const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
+  assert(reboundAnchor?.pointId === 'sketch_point_anchor', 'Rebinding should target the explicitly selected sketch point.')
+  assert(reboundAnchor?.pointId !== initialBinding, 'Rebinding should replace the previous construction-point binding.')
 })

@@ -1,9 +1,11 @@
 import { test } from 'bun:test'
 
 import {
+  getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMeshMaterialConfig,
   getSketchDisplayMarkerMaterialConfig,
   getSketchDisplayPolylineMaterialConfig,
+  shouldDepthTestSketchDisplayMarker,
   shouldApplySketchDisplayStyles,
 } from '@/components/cad/sketch-display-style'
 import {
@@ -182,5 +184,22 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
   assert(
     affectedMarkerConfig.color === palette.overconstrained,
     'Affected overconstrained sketch vertices should use the error color family.',
+  )
+
+  const overlayMarkerRenderable = {
+    ...styledPolylineRenderable,
+    geometry: { kind: 'marker', position: [0, 0, 0], displayRadius: 0.4 },
+    markerLayer: 'overlay' as const,
+  }
+  assert(
+    !shouldDepthTestSketchDisplayMarker(overlayMarkerRenderable),
+    'Overlay sketch markers should ignore depth so image-bound anchors remain visible above reference-image quads.',
+  )
+  assert(
+    getSketchDisplayMarkerRenderOrder(overlayMarkerRenderable) > getSketchDisplayMarkerRenderOrder({
+      ...overlayMarkerRenderable,
+      markerLayer: 'default' as const,
+    }),
+    'Overlay sketch markers should render after default sketch points.',
   )
 })

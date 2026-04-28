@@ -33,6 +33,14 @@ export interface SketchDisplayMarkerMaterialConfig {
   opacity: number
 }
 
+export function shouldDepthTestSketchDisplayMarker(renderable: SketchSessionDisplayRenderable) {
+  return renderable.markerLayer !== 'overlay'
+}
+
+export function getSketchDisplayMarkerRenderOrder(renderable: SketchSessionDisplayRenderable) {
+  return renderable.markerLayer === 'overlay' ? 5 : 4
+}
+
 export function shouldApplySketchDisplayStyles(mode: ToolbarMode, hasSketchSession: boolean) {
   return mode === 'sketch' && hasSketchSession
 }

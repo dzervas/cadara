@@ -5,7 +5,7 @@ Defines how sketches persist ordered authoring operations alongside the live fla
 
 ## Requirements
 ### Requirement: Sketch definitions SHALL persist authoring operations
-The sketch authored contract SHALL persist an ordered collection of sketch authoring operations alongside the flat sketch graph. Each operation SHALL identify the accepted user intent, carry a durable operation id and display label, and reference the graph members it created, removed, replaced, or edited. Explicitly approved operation kinds MAY also persist operation-owned state that is not represented as ordinary local sketch graph records.
+The sketch authored contract SHALL persist an ordered collection of sketch authoring operations alongside the flat sketch graph. Each operation SHALL identify the accepted user intent, carry a durable operation id and display label, and reference the graph members it created, removed, replaced, or edited. Explicitly approved operation kinds MAY also persist operation-owned state that is not represented as ordinary local sketch graph records, but that operation-owned state SHALL reference flat-graph members explicitly when the feature depends on local sketch geometry.
 
 #### Scenario: Constructor operation is persisted
 - **WHEN** the user completes a rectangle constructor in an active sketch
@@ -18,12 +18,12 @@ The sketch authored contract SHALL persist an ordered collection of sketch autho
 - **AND** operation rows retain their durable operation ids and display labels
 
 #### Scenario: Reference-image operation persists operation-owned state
-- **WHEN** the user creates a committed `referenceImage` operation
+- **WHEN** the user creates or edits a committed `referenceImage` operation
 - **THEN** the sketch definition persists that operation in the authoring operation list
-- **AND** the operation may own image-specific persisted state without translating that state into local sketch points, entities, or constraints
+- **AND** the operation may own image-specific persisted state, including anchor-binding metadata that references durable local sketch point ids, without translating the image payload itself into local sketch entities
 
 ### Requirement: Authoring operations SHALL be metadata over a flat sketch graph
-Sketch authoring operations SHALL remain distinct from the flat local sketch graph. The current flat sketch graph SHALL remain the source of truth for local solver input, region extraction, and local sketch geometry editing. Explicitly approved special operations MAY own isolated operation-local state for rendering or dedicated editing workflows without materializing that state as local sketch geometry.
+Sketch authoring operations SHALL remain distinct from the flat local sketch graph. The current flat sketch graph SHALL remain the source of truth for local solver input, region extraction, and local sketch geometry editing. Explicitly approved special operations MAY own isolated operation-local state for rendering or dedicated editing workflows without materializing that state as local sketch geometry, but any local geometry that drives those operations SHALL still live in the flat graph and participate in the normal sketch solver.
 
 #### Scenario: Solver ignores operation-owned image payload
 - **WHEN** a sketch contains a committed `referenceImage` operation with operation-owned image data
@@ -34,9 +34,9 @@ Sketch authoring operations SHALL remain distinct from the flat local sketch gra
 - **THEN** the system does not synthesize a rectangle operation by inspecting the flat graph
 
 #### Scenario: Reference-image operation is not rebuilt from local graph records
-- **WHEN** a sketch contains a committed `referenceImage` operation
+- **WHEN** a sketch contains a committed `referenceImage` operation with bound calibration anchor point ids
 - **THEN** the system reads that image operation from its own persisted operation state
-- **AND** it does not infer the image operation by reconstructing hidden local sketch geometry
+- **AND** it does not infer the image payload or anchor metadata by reconstructing hidden image-owned geometry
 
 ### Requirement: Deleted sketch graph members SHALL be absent from current document state
 When a sketch operation deletes geometry, constraints, or dimensions, the deleted members SHALL be removed from the current flat sketch graph and SHALL NOT participate in solver input, rendering, picking, selection, commit payloads, or active document state. Prior authoring operations MAY retain historical references to the deleted member ids.

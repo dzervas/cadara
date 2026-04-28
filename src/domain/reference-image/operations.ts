@@ -1,13 +1,17 @@
 import type {
   ReferenceImageOperationState,
   ReferenceImagePayload,
-  SolvedReferenceImageOperationState,
 } from '@/contracts/reference-image/schema'
-import type { SketchAuthoringOperation, SketchDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
+import type {
+  SketchAuthoringOperation,
+  SketchDefinition,
+  SketchEntityDefinition,
+  SketchPoint2D,
+  SketchPointDefinition,
+} from '@/contracts/sketch/schema'
 import type { SketchAuthoringOperationId, SketchId } from '@/contracts/shared/ids'
 import {
   createDefaultReferenceImageCalibrationState,
-  solveReferenceImageOperationState,
   stripReferenceImageRuntimeState,
 } from '@/domain/reference-image-calibration/state'
 
@@ -24,11 +28,13 @@ export interface EditReferenceImageOperationInput {
   operationId: SketchAuthoringOperationId
   state: ReferenceImageOperationState
   label?: string
+  createdPoints?: readonly SketchPointDefinition[]
+  createdEntities?: readonly SketchEntityDefinition[]
 }
 
 export interface ActiveReferenceImageOperation {
   operation: SketchAuthoringOperation
-  state: SolvedReferenceImageOperationState
+  state: ReferenceImageOperationState
 }
 
 export interface ReferenceImageOperationStateOverride {
@@ -61,15 +67,33 @@ export function createReferenceImageOperation(
 export function createReferenceImageEditOperation(
   input: EditReferenceImageOperationInput,
 ): SketchAuthoringOperation {
-  const solvedState = solveReferenceImageOperationState(input.state)
+  const createdPointTargets = (input.createdPoints ?? []).map((point) => ({
+    kind: 'point' as const,
+    pointId: point.pointId,
+  }))
+  const createdEntityTargets = (input.createdEntities ?? []).map((entity) => ({
+    kind: 'entity' as const,
+    entityId: entity.entityId,
+  }))
   return {
     operationId: `sketch_operation_${input.sequence}_edit-reference-image` as SketchAuthoringOperationId,
     label: input.label ?? input.state.image.fileName?.trim() ?? `Edit reference image ${input.sequence}`,
     kind: 'edit',
     targets: {
+      ...((createdPointTargets.length > 0 || createdEntityTargets.length > 0)
+        ? { created: [...createdPointTargets, ...createdEntityTargets] }
+        : {}),
       edited: [{ kind: 'operation', operationId: input.operationId }],
     },
-    ownedState: stripReferenceImageRuntimeState(solvedState),
+    ...((input.createdPoints && input.createdPoints.length > 0) || (input.createdEntities && input.createdEntities.length > 0)
+      ? {
+          createdGraph: {
+            points: input.createdPoints,
+            entities: input.createdEntities,
+          },
+        }
+      : {}),
+    ownedState: stripReferenceImageRuntimeState(input.state),
   }
 }
 
@@ -105,11 +129,11 @@ export function collectActiveReferenceImageOperations(
               label: override.label,
             }
           : operation,
-        state: solveReferenceImageOperationState(override?.state ?? {
+        state: override?.state ?? {
             ...operation.ownedState,
             calibration: operation.ownedState.calibration
             ?? createDefaultReferenceImageCalibrationState(),
-        }),
+        },
       })
       continue
     }
@@ -131,17 +155,17 @@ export function collectActiveReferenceImageOperations(
             ...current.operation,
             kind: 'referenceImage',
             label: override?.label ?? operation.label,
-            ownedState: solveReferenceImageOperationState(override?.state ?? {
+            ownedState: override?.state ?? {
               ...operation.ownedState,
               calibration: operation.ownedState.calibration
                 ?? createDefaultReferenceImageCalibrationState(),
-            }),
+            },
           },
-          state: solveReferenceImageOperationState(override?.state ?? {
+          state: override?.state ?? {
             ...operation.ownedState,
             calibration: operation.ownedState.calibration
               ?? createDefaultReferenceImageCalibrationState(),
-          }),
+          },
         })
       }
       continue
@@ -187,4 +211,144 @@ export function createReferenceImageOperationTarget(
     sketchId,
     operationId,
   }
+}
+
+export function materializeLegacyReferenceImageAnchorBindings(
+  definition: SketchDefinition,
+): SketchDefinition {
+  if (!definition.authoringOperations || definition.authoringOperations.length === 0) {
+    return definition
+  }
+
+  const sketchId = getDefinitionSketchId(definition)
+  const existingPointIds = new Set(definition.pointIds)
+  const existingEntityIds = new Set(definition.entityIds)
+  const points = [...definition.points]
+  const entities = [...definition.entities]
+  let changed = false
+
+  const authoringOperations = definition.authoringOperations.map((operation) => {
+    const state = operation.ownedState
+    if (!state || state.kind !== 'referenceImage' || !state.calibration) {
+      return operation
+    }
+
+    const addedPoints: SketchPointDefinition[] = []
+    const addedEntities: SketchEntityDefinition[] = []
+    const nextAnchors = state.calibration.anchors.map((anchor, anchorIndex) => {
+      if (anchor.legacyWorldPosition === undefined) {
+        return anchor
+      }
+
+      changed = true
+      const pointId = createLegacyAnchorPointId(operation.operationId, anchor.anchorId, anchorIndex)
+      if (!existingPointIds.has(pointId)) {
+        existingPointIds.add(pointId)
+        addedPoints.push({
+          pointId,
+          label: anchor.label,
+          target: { kind: 'sketchPoint', sketchId, pointId },
+          position: anchor.legacyWorldPosition ?? state.placement.center,
+          isConstruction: true,
+        })
+      }
+
+      const entityId = createAnchorPointEntityId(operation.operationId, pointId)
+      if (!existingEntityIds.has(entityId)) {
+        existingEntityIds.add(entityId)
+        addedEntities.push({
+          kind: 'point',
+          entityId,
+          label: anchor.label,
+          target: { kind: 'sketchEntity', sketchId, entityId },
+          isConstruction: true,
+          pointId,
+        })
+      }
+
+      return {
+        anchorId: anchor.anchorId,
+        label: anchor.label,
+        uv: anchor.uv,
+        pointId,
+      }
+    })
+
+    if (addedPoints.length === 0 && addedEntities.length === 0 && !state.calibration.legacyConstraints) {
+      return operation
+    }
+
+    changed = true
+    points.push(...addedPoints)
+    entities.push(...addedEntities)
+
+    return {
+      ...operation,
+      targets: {
+        ...operation.targets,
+        ...(addedPoints.length > 0
+          ? {
+              created: [
+                ...(operation.targets.created ?? []),
+                ...addedPoints.map((point) => ({ kind: 'point' as const, pointId: point.pointId })),
+                ...addedEntities.map((entity) => ({ kind: 'entity' as const, entityId: entity.entityId })),
+              ],
+            }
+          : {}),
+      },
+      ...(addedPoints.length > 0 || addedEntities.length > 0 || operation.createdGraph
+        ? {
+            createdGraph: {
+              ...operation.createdGraph,
+              points: [...(operation.createdGraph?.points ?? []), ...addedPoints],
+              entities: [...(operation.createdGraph?.entities ?? []), ...addedEntities],
+            },
+          }
+        : {}),
+      ownedState: stripReferenceImageRuntimeState({
+        ...state,
+        calibration: {
+          scaleMode: state.calibration.scaleMode,
+          showExportedAnchorsInSketch: state.calibration.showExportedAnchorsInSketch,
+          anchors: nextAnchors,
+        },
+      }),
+    }
+  })
+
+  return changed
+    ? {
+        ...definition,
+        pointIds: points.map((point) => point.pointId),
+        points,
+        entityIds: entities.map((entity) => entity.entityId),
+        entities,
+        authoringOperations,
+      }
+    : definition
+}
+
+function getDefinitionSketchId(definition: SketchDefinition) {
+  return definition.entities[0]?.target.sketchId
+    ?? definition.points[0]?.target.sketchId
+    ?? ('sketch_draft' as SketchId)
+}
+
+function createLegacyAnchorPointId(
+  operationId: SketchAuthoringOperationId,
+  anchorId: string,
+  anchorIndex: number,
+) {
+  const safeOperationId = operationId.replace(/[^a-zA-Z0-9]+/g, '_')
+  const safeAnchorId = anchorId.replace(/[^a-zA-Z0-9]+/g, '_')
+  return `sketch_point_${safeOperationId}_${safeAnchorId || anchorIndex}` as const
+}
+
+function createAnchorPointEntityId(
+  operationId: SketchAuthoringOperationId,
+  pointId: string,
+) {
+  const safeOperationId = operationId.replace(/[^a-zA-Z0-9]+/g, '_')
+  const safePointId = pointId.replace(/[^a-zA-Z0-9]+/g, '_')
+  return `sketch_entity_${safeOperationId}_${safePointId}_point` as const
 }

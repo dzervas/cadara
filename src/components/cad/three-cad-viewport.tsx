@@ -14,9 +14,11 @@ import {
   SketchConstraintAnnotations,
 } from '@/components/cad/sketch-constraint-annotations'
 import {
+  getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMarkerMaterialConfig,
   getSketchDisplayMeshMaterialConfig,
   getSketchDisplayPolylineMaterialConfig,
+  shouldDepthTestSketchDisplayMarker,
   shouldApplySketchDisplayStyles,
 } from '@/components/cad/sketch-display-style'
 import {
@@ -3187,9 +3189,9 @@ function SketchDisplayMarkerNode({
   )
   const material = useMemo(() => new THREE.MeshBasicMaterial({
     ...materialConfig,
-    depthTest: true,
+    depthTest: shouldDepthTestSketchDisplayMarker(renderable),
     depthWrite: false,
-  }), [materialConfig])
+  }), [materialConfig, renderable])
   const pickProxy = useMemo(() => {
     const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius)
     proxy.userData.highlightExcluded = true
@@ -3228,7 +3230,7 @@ function SketchDisplayMarkerNode({
         material={material}
         position={geometryData.position}
         scale={getVisibleMarkerRadius(geometryData.displayRadius)}
-        renderOrder={4}
+        renderOrder={getSketchDisplayMarkerRenderOrder(renderable)}
       />
       <primitive object={pickProxy} />
     </group>
