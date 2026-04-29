@@ -33,7 +33,7 @@ import {
   configureWorkspaceScaffoldWireObject,
 } from '@/components/cad/three-cad-viewport-helpers'
 
-export const VIEWPORT_PROJECTION_OPTIONS: Array<{ mode: ViewportProjectionMode, label: string }> = [
+const VIEWPORT_PROJECTION_OPTIONS: Array<{ mode: ViewportProjectionMode, label: string }> = [
   { mode: 'orthographic', label: 'Orthographic' },
   { mode: 'perspective', label: 'Perspective' },
 ]
@@ -241,7 +241,7 @@ export function ViewportProjectionSelector({
   )
 }
 
-export function getProjectionModeLabel(mode: ViewportProjectionMode) {
+function getProjectionModeLabel(mode: ViewportProjectionMode) {
   return VIEWPORT_PROJECTION_OPTIONS.find((option) => option.mode === mode)?.label ?? 'Orthographic'
 }
 

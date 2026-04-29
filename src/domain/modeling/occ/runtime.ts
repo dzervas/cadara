@@ -32,7 +32,8 @@ export type OpenCascadeInitializer = (
 export type OpenCascadeEntrySpecifier = 'opencascade.js' | 'opencascade.js/dist/node.js'
 
 interface OpenCascadeFactoryModule {
-  default: OpenCascadeInitializer
+  default?: OpenCascadeInitializer
+  initOpenCascade?: OpenCascadeInitializer
 }
 
 interface OpenCascadeFactoryLoadOptions {
@@ -113,12 +114,58 @@ export function createOpenCascadeInitializerFromMainJS(
 }
 
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  return import('opencascade.js')
+  return import('./opencascade-cdn-entry')
+}
+
+async function readNodeOpenCascadeWasmBinary(path: string) {
+  const bunRuntime = globalThis as typeof globalThis & {
+    Bun?: { file(path: string): { arrayBuffer(): Promise<ArrayBuffer> } }
+  }
+
+  if (bunRuntime.Bun) {
+    return new Uint8Array(await bunRuntime.Bun.file(path).arrayBuffer())
+  }
+
+  const { readFile } = await import('node:fs/promises')
+  return new Uint8Array(await readFile(path))
 }
 
 async function loadNodeOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  const nodeEntrySpecifier = 'opencascade.js/dist/' + 'node.js'
-  return import(/* @vite-ignore */ nodeEntrySpecifier) as Promise<OpenCascadeFactoryModule>
+  try {
+    const nodeEntrySpecifier = 'opencascade.js/dist/' + 'node.js'
+    return await import(/* @vite-ignore */ nodeEntrySpecifier) as Promise<OpenCascadeFactoryModule>
+  } catch {
+    const legacyMainSpecifier = 'opencascade.js/dist/' + 'opencascade.wasm.js'
+    const legacyWasmSpecifier = 'opencascade.js/dist/' + 'opencascade.wasm.wasm'
+    const [{ default: nodeMainJS }, { default: wasmPath }] = await Promise.all([
+      import(/* @vite-ignore */ legacyMainSpecifier),
+      import(/* @vite-ignore */ legacyWasmSpecifier),
+    ])
+    const defaultInitializer = createOpenCascadeInitializerFromMainJS(
+      nodeMainJS as OpenCascadeMainJS,
+      () => wasmPath,
+    )
+
+    return {
+      default: async (settings = {}) => defaultInitializer({
+        ...settings,
+        module: {
+          ...settings.module,
+          wasmBinary: settings.module?.wasmBinary ?? await readNodeOpenCascadeWasmBinary(wasmPath),
+        },
+      }),
+    }
+  }
+}
+
+function resolveOpenCascadeInitializer(module: OpenCascadeFactoryModule): OpenCascadeInitializer {
+  const initializer = module.default ?? module.initOpenCascade
+
+  if (typeof initializer !== 'function') {
+    throw new Error('OpenCascade module did not expose an initializer function.')
+  }
+
+  return initializer
 }
 
 export async function loadDefaultOpenCascadeFactory(
@@ -130,7 +177,7 @@ export async function loadDefaultOpenCascadeFactory(
     : (options.loadBrowserModule ?? loadBrowserOpenCascadeModule)
   const module = await loadModule()
 
-  return module.default
+  return resolveOpenCascadeInitializer(module)
 }
 
 export function createOpenCascadeInstanceLoader(

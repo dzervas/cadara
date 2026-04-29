@@ -19,7 +19,7 @@ import {
 } from '@/domain/workspace/render-picking'
 import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
 
-export function getDocumentRenderableMaterialOptions(
+function getDocumentRenderableMaterialOptions(
   entry: ViewportRenderableRecord,
   palette: SketchRenderingPalette,
   diagnostic = false,

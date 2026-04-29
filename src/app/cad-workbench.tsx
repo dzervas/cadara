@@ -162,17 +162,6 @@ function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
     || status.kind === 'persistent-binding-unavailable'
 }
 
-function sameBooleanRecord(left: Record<string, boolean>, right: Record<string, boolean>) {
-  const leftKeys = Object.keys(left)
-  const rightKeys = Object.keys(right)
-
-  if (leftKeys.length !== rightKeys.length) {
-    return false
-  }
-
-  return leftKeys.every((key) => left[key] === right[key])
-}
-
 function promptForImportProvider(
   providers: readonly ImportProvider<unknown, unknown>[],
 ) {
@@ -220,8 +209,8 @@ export function CadWorkbench() {
   const snapshot = machineState.snapshot
   const initialOccRenderPending = isInitialOccRenderPending(machineState)
   const previewRenderables = machineState.previewRenderables
-  const [explicitHiddenTargetKeys, setExplicitHiddenTargetKeys] = useState<Record<string, boolean>>({})
-  const [explicitlyShownAutoHiddenTargetKeys, setExplicitlyShownAutoHiddenTargetKeys] = useState<Record<string, boolean>>({})
+  const [rawExplicitHiddenTargetKeys, setRawExplicitHiddenTargetKeys] = useState<Record<string, boolean>>({})
+  const [rawExplicitlyShownAutoHiddenTargetKeys, setRawExplicitlyShownAutoHiddenTargetKeys] = useState<Record<string, boolean>>({})
   const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
   const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null)
@@ -309,7 +298,19 @@ export function CadWorkbench() {
     () => new Set((snapshot?.presentation.objects ?? []).map((item) => getPrimitiveRefKey(item.target))),
     [snapshot],
   )
+  const explicitHiddenTargetKeys = useMemo(
+    () => reconcileVisibilityIntentKeys(rawExplicitHiddenTargetKeys, visibleObjectTargetKeys),
+    [rawExplicitHiddenTargetKeys, visibleObjectTargetKeys],
+  )
   const autoHiddenSketchTargetKeys = useMemo(() => getAutoHiddenSketchTargetKeys(snapshot), [snapshot])
+  const allowedAutoHiddenTargetKeys = useMemo(
+    () => new Set(Object.keys(autoHiddenSketchTargetKeys)),
+    [autoHiddenSketchTargetKeys],
+  )
+  const explicitlyShownAutoHiddenTargetKeys = useMemo(
+    () => reconcileVisibilityIntentKeys(rawExplicitlyShownAutoHiddenTargetKeys, allowedAutoHiddenTargetKeys),
+    [allowedAutoHiddenTargetKeys, rawExplicitlyShownAutoHiddenTargetKeys],
+  )
 
   const effectiveHiddenTargetKeys = useMemo(
     () => getWorkbenchVisibilityState({
@@ -319,22 +320,6 @@ export function CadWorkbench() {
     }).effectiveHiddenTargetKeys,
     [explicitHiddenTargetKeys, explicitlyShownAutoHiddenTargetKeys, snapshot],
   )
-
-  useEffect(() => {
-    setExplicitHiddenTargetKeys((current) => {
-      const reconciled = reconcileVisibilityIntentKeys(current, visibleObjectTargetKeys)
-      return sameBooleanRecord(current, reconciled) ? current : reconciled
-    })
-  }, [visibleObjectTargetKeys])
-
-  useEffect(() => {
-    const allowedAutoHiddenTargetKeys = new Set(Object.keys(autoHiddenSketchTargetKeys))
-
-    setExplicitlyShownAutoHiddenTargetKeys((current) => {
-      const reconciled = reconcileVisibilityIntentKeys(current, allowedAutoHiddenTargetKeys)
-      return sameBooleanRecord(current, reconciled) ? current : reconciled
-    })
-  }, [autoHiddenSketchTargetKeys])
 
   const visibleSelection = useMemo(
     () => selection.filter((target) => !isTargetHidden(target, effectiveHiddenTargetKeys)),
@@ -651,8 +636,8 @@ export function CadWorkbench() {
       explicitlyShownAutoHiddenTargetKeys: nextVisibility.explicitlyShownAutoHiddenTargetKeys,
     }).effectiveHiddenTargetKeys
 
-    setExplicitHiddenTargetKeys(nextVisibility.explicitHiddenTargetKeys)
-    setExplicitlyShownAutoHiddenTargetKeys(nextVisibility.explicitlyShownAutoHiddenTargetKeys)
+    setRawExplicitHiddenTargetKeys(nextVisibility.explicitHiddenTargetKeys)
+    setRawExplicitlyShownAutoHiddenTargetKeys(nextVisibility.explicitlyShownAutoHiddenTargetKeys)
 
     if (
       nextEffectiveHiddenTargetKeys[getPrimitiveRefKey(target)] === true
@@ -1572,8 +1557,8 @@ export function CadWorkbench() {
   }
 
   const refreshAfterDocumentFileAction = (message: string, options: { fitView?: boolean } = {}) => {
-    setExplicitHiddenTargetKeys({})
-    setExplicitlyShownAutoHiddenTargetKeys({})
+    setRawExplicitHiddenTargetKeys({})
+    setRawExplicitlyShownAutoHiddenTargetKeys({})
     setObjectLabelOverrides({})
     setUndoStack([])
     setRedoStack([])

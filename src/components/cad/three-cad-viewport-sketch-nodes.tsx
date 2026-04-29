@@ -127,7 +127,7 @@ export function SketchDisplayMeshNode({
   )
 }
 
-export function useImageTexture(url: string | null) {
+function useImageTexture(url: string | null) {
   const [texture, setTexture] = useState<{ url: string, texture: THREE.Texture } | null>(null)
 
   useEffect(() => {
@@ -173,7 +173,7 @@ export function useImageTexture(url: string | null) {
   return texture?.url === url ? texture.texture : null
 }
 
-export function updatePolylineGeometryBuffer(
+function updatePolylineGeometryBuffer(
   geometry: THREE.BufferGeometry,
   geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
 ) {
