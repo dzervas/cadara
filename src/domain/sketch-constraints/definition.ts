@@ -65,6 +65,9 @@ export interface SketchConstraintTargetRecord {
     reference: NonNullable<Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>>
     geometry: ProjectedSketchReferenceRecord['geometry'][number]
   }
+  datum?: {
+    reference: NonNullable<Extract<PrimitiveRef, { kind: 'sketchDatumReference' }>>
+  }
   line?: {
     start: SketchPoint2D
     end: SketchPoint2D
@@ -128,6 +131,18 @@ export function resolvePointTarget(
   target: PrimitiveRef,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchConstraintTargetRecord | null {
+  if (target.kind === 'sketchDatumReference') {
+    return target.datumId === 'origin' && target.geometryKind === 'point'
+      ? {
+          target,
+          label: 'Sketch origin',
+          kind: 'point',
+          anchor: [0, 0],
+          datum: { reference: target },
+        }
+      : null
+  }
+
   if (target.kind === 'projectedReferenceGeometry') {
     const projected = resolveProjectedGeometryTarget(target, projectedReferences)
 
@@ -162,6 +177,10 @@ export function resolveLineTarget(
   target: PrimitiveRef,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchConstraintTargetRecord | null {
+  if (target.kind === 'sketchDatumReference') {
+    return resolveSketchDatumLineTarget(definition, target)
+  }
+
   if (target.kind === 'projectedReferenceGeometry') {
     const projected = resolveProjectedGeometryTarget(target, projectedReferences)
 
@@ -291,6 +310,34 @@ function midpointForLine(definition: SketchDefinition, entity: Extract<SketchEnt
   const start = findPoint(definition, entity.startPointId)?.position ?? [0, 0]
   const end = findPoint(definition, entity.endPointId)?.position ?? [0, 0]
   return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
+}
+
+function resolveSketchDatumLineTarget(
+  definition: SketchDefinition,
+  target: Extract<PrimitiveRef, { kind: 'sketchDatumReference' }>,
+): SketchConstraintTargetRecord | null {
+  if (target.geometryKind !== 'lineSegment' || (target.datumId !== 'xAxis' && target.datumId !== 'yAxis')) {
+    return null
+  }
+
+  const extent = getSketchDatumGuideExtent(definition)
+  const start: SketchPoint2D = target.datumId === 'xAxis' ? [-extent, 0] : [0, -extent]
+  const end: SketchPoint2D = target.datumId === 'xAxis' ? [extent, 0] : [0, extent]
+
+  return {
+    target,
+    label: target.datumId === 'xAxis' ? 'Sketch X axis' : 'Sketch Y axis',
+    kind: 'line',
+    anchor: [0, 0],
+    datum: { reference: target },
+    line: { start, end },
+  }
+}
+
+function getSketchDatumGuideExtent(definition: SketchDefinition) {
+  const coordinates = definition.points.flatMap((point) => [Math.abs(point.position[0]), Math.abs(point.position[1])])
+  const maxCoordinate = coordinates.length > 0 ? Math.max(...coordinates) : 0
+  return Math.max(10, maxCoordinate * 2 || 10)
 }
 
 function resolveProjectedGeometryTarget(

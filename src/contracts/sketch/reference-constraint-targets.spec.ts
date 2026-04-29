@@ -395,4 +395,76 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     tangentStatus?.status === 'unsatisfied',
     'Tangent-to-projected-arc should reject tangency points outside the finite arc sweep.',
   )
+
+  const datumCoincident = solveSketchDefinitionCore({
+    definition: makeBaseDefinition({
+      constraintId: 'constraint_coincident_datum_origin',
+      kind: 'coincidentProjectedPoint',
+      label: 'Coincident datum origin',
+      point: { kind: 'localPoint', pointId: 'sketch_point_a' },
+      projectedPoint: { kind: 'sketchDatum', datum: 'origin' },
+    }),
+    projectedReferences: [],
+    tolerances,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const datumCoincidentPoint = datumCoincident.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_a')
+  assert(
+    datumCoincidentPoint && Math.hypot(datumCoincidentPoint.solvedPosition[0], datumCoincidentPoint.solvedPosition[1]) < 1e-4,
+    'Coincident-to-origin should solve the local point onto the sketch origin datum.',
+  )
+
+  const datumParallel = solveSketchDefinitionCore({
+    definition: makeBaseDefinition({
+      constraintId: 'constraint_parallel_datum_axis',
+      kind: 'parallelProjectedLine',
+      label: 'Parallel datum axis',
+      line: { kind: 'localEntity', entityId: 'sketch_entity_line' },
+      projectedLine: { kind: 'sketchDatum', datum: 'xAxis' },
+    }),
+    projectedReferences: [],
+    tolerances,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const datumParallelLine = datumParallel.solvedSnapshot.solvedEntities.find((entity) => entity.entityId === 'sketch_entity_line')
+  assert(
+    datumParallelLine?.kind === 'lineSegment' && Math.abs(datumParallelLine.endPosition[1] - datumParallelLine.startPosition[1]) < 1e-3,
+    'Parallel-to-axis should solve the local line onto the sketch-local axis direction.',
+  )
+
+  const datumPointDistanceDefinition: SketchDefinition = {
+    ...makeBaseDefinition({
+      constraintId: 'constraint_seed',
+      kind: 'coincident',
+      label: 'Seed coincident',
+      pointIds: ['sketch_point_a', 'sketch_point_a'],
+    }),
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: ['dimension_point_datum_distance'],
+    dimensions: [{
+      dimensionId: 'dimension_point_datum_distance',
+      kind: 'pointDatumDistance',
+      label: 'Point to origin',
+      axis: 'aligned',
+      point: { kind: 'localPoint', pointId: 'sketch_point_b' },
+      datum: { kind: 'sketchDatum', datum: 'origin' },
+      value: Math.hypot(4, 5),
+    }],
+  }
+  const datumPointDistance = solveSketchDefinitionCore({
+    definition: datumPointDistanceDefinition,
+    projectedReferences: [],
+    tolerances,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const datumPointDistanceStatus = datumPointDistance.solvedSnapshot.dimensionStatuses.find(
+    (status) => status.dimensionId === 'dimension_point_datum_distance',
+  )
+  assert(
+    datumPointDistanceStatus?.status === 'driving'
+      && datumPointDistanceStatus.solvedValue !== null
+      && Math.abs(datumPointDistanceStatus.solvedValue - Math.hypot(4, 5)) < 1e-4,
+    'Point-to-origin datum dimensions should evaluate against the sketch origin without projected helper geometry.',
+  )
 })

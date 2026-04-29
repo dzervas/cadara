@@ -40,12 +40,19 @@ export interface ProjectedReferenceGeometryRef {
   geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc' | 'spline'
 }
 
+export interface SketchDatumReferenceRef {
+  kind: 'sketchDatumReference'
+  sketchId: import('@/contracts/shared/ids').SketchId
+  datumId: 'origin' | 'xAxis' | 'yAxis'
+  geometryKind: 'point' | 'lineSegment'
+}
+
 export interface SketchExternalReferenceRef {
   kind: 'sketchExternalReference'
   referenceId: ReferenceId
 }
 
-export type PrimitiveRef = DurableRef | ProjectedReferenceGeometryRef | SketchExternalReferenceRef
+export type PrimitiveRef = DurableRef | ProjectedReferenceGeometryRef | SketchDatumReferenceRef | SketchExternalReferenceRef
 
 export type SelectionTarget = PrimitiveRef
 
@@ -63,6 +70,7 @@ export type SelectionSemantic =
   | 'constraintAnnotation'
   | 'dimensionAnnotation'
   | 'projectedReferenceGeometry'
+  | 'sketchDatumReference'
   | 'sketchExternalReference'
   | 'planarFace'
   | 'planarReference'
@@ -160,7 +168,7 @@ export const defaultSelectionFilter: SelectionFilter = {
 
 export const sketchSelectionFilter: SelectionFilter = {
   kind: 'sketchSession',
-  allowedKinds: ['construction', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
+  allowedKinds: ['construction', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchDatumReference', 'sketchExternalReference', 'region'],
   label: 'Sketch references',
   requirements: [
     {
@@ -172,8 +180,8 @@ export const sketchSelectionFilter: SelectionFilter = {
           id: 'sketch-reference',
           label: 'Sketch reference',
           description: 'Select the sketch plane, sketch, or sketch primitive.',
-          acceptedKinds: ['construction', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchExternalReference', 'region'],
-          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchExternalReference', 'regionProfile'],
+          acceptedKinds: ['construction', 'sketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraint', 'dimension', 'projectedReferenceGeometry', 'sketchDatumReference', 'sketchExternalReference', 'region'],
+          acceptedSemantics: ['constructionPlane', 'existingSketch', 'sketchOperation', 'sketchEntity', 'sketchPoint', 'constraintAnnotation', 'dimensionAnnotation', 'projectedReferenceGeometry', 'sketchDatumReference', 'sketchExternalReference', 'regionProfile'],
         },
       ],
     },
@@ -881,6 +889,8 @@ export function getPrimitiveRefLabel(target: PrimitiveRef) {
       return `${target.sketchId}.${target.regionId}`
     case 'projectedReferenceGeometry':
       return `${target.referenceId}.${target.geometryId}`
+    case 'sketchDatumReference':
+      return `${target.sketchId}.${target.datumId}`
     case 'sketchExternalReference':
       return target.referenceId
   }
@@ -918,6 +928,8 @@ export function getPrimitiveRefKey(target: PrimitiveRef) {
       return `region:${target.sketchId}:${target.regionId}`
     case 'projectedReferenceGeometry':
       return `projectedReferenceGeometry:${target.referenceId}:${target.geometryId}`
+    case 'sketchDatumReference':
+      return `sketchDatumReference:${target.sketchId}:${target.datumId}`
     case 'sketchExternalReference':
       return `sketchExternalReference:${target.referenceId}`
   }
@@ -928,7 +940,9 @@ export function primitiveRefEquals(left: PrimitiveRef, right: PrimitiveRef) {
 }
 
 export function isDurablePrimitiveRef(target: PrimitiveRef): target is DurableRef {
-  return target.kind !== 'projectedReferenceGeometry' && target.kind !== 'sketchExternalReference'
+  return target.kind !== 'projectedReferenceGeometry'
+    && target.kind !== 'sketchDatumReference'
+    && target.kind !== 'sketchExternalReference'
 }
 
 export function getDefaultSelectionFilterForMode(mode: ToolbarMode): SelectionFilter {
@@ -999,6 +1013,7 @@ function getTargetSemantics(
     || target.kind === 'constraint'
     || target.kind === 'dimension'
     || target.kind === 'projectedReferenceGeometry'
+    || target.kind === 'sketchDatumReference'
     || target.kind === 'sketchExternalReference'
 
   if (
@@ -1043,6 +1058,9 @@ function getTargetSemantics(
       break
     case 'projectedReferenceGeometry':
       semantics.push('projectedReferenceGeometry')
+      break
+    case 'sketchDatumReference':
+      semantics.push('sketchDatumReference')
       break
     case 'sketchExternalReference':
       semantics.push('sketchExternalReference')

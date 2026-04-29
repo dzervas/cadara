@@ -2454,6 +2454,8 @@ export function dimensionReferencesSketchGeometry(
     case 'horizontalDistance':
     case 'verticalDistance':
       return dimension.pointIds.some((pointId) => deletedPointIds.has(pointId))
+    case 'pointDatumDistance':
+      return deletedPointIds.has(dimension.point.pointId)
     case 'circleRadius':
     case 'diameter':
       return deletedEntityIds.has(dimension.entityId)
@@ -2948,6 +2950,8 @@ function getTargetKey(target: PrimitiveRef) {
       return `${target.sketchId}:${target.regionId}`
     case 'projectedReferenceGeometry':
       return `${target.referenceId}:${target.geometryId}`
+    case 'sketchDatumReference':
+      return `${target.sketchId}:${target.datumId}`
     case 'sketchExternalReference':
       return target.referenceId
   }
@@ -5368,6 +5372,11 @@ function dedupeConstraints(constraints: ConstraintDefinition[]) {
 }
 
 function getConstraintDedupeKey(constraint: ConstraintDefinition): string {
+  const readOnlyOperandKey = (operand: { kind: string; reference?: { referenceId: ReferenceId; geometryId: string }; datum?: 'origin' | 'xAxis' | 'yAxis' }) =>
+    operand.kind === 'projectedGeometry'
+      ? `${operand.reference!.referenceId}:${operand.reference!.geometryId}`
+      : `datum:${operand.datum}`
+
   switch (constraint.kind) {
     case 'coincident':
       return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}`
@@ -5389,14 +5398,14 @@ function getConstraintDedupeKey(constraint: ConstraintDefinition): string {
     case 'angle':
       return `${constraint.kind}:${constraint.pointIds.join(':')}:${constraint.valueRadians}`
     case 'coincidentProjectedPoint':
-      return `${constraint.kind}:${constraint.point.pointId}:${constraint.projectedPoint.reference.referenceId}:${constraint.projectedPoint.reference.geometryId}`
+      return `${constraint.kind}:${constraint.point.pointId}:${readOnlyOperandKey(constraint.projectedPoint)}`
     case 'pointOnProjectedCurve':
-      return `${constraint.kind}:${constraint.point.pointId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}`
+      return `${constraint.kind}:${constraint.point.pointId}:${readOnlyOperandKey(constraint.projectedCurve)}`
     case 'midpointProjectedLine':
-      return `${constraint.kind}:${constraint.point.pointId}:${constraint.projectedLine.reference.referenceId}:${constraint.projectedLine.reference.geometryId}`
+      return `${constraint.kind}:${constraint.point.pointId}:${readOnlyOperandKey(constraint.projectedLine)}`
     case 'parallelProjectedLine':
     case 'perpendicularProjectedLine':
-      return `${constraint.kind}:${constraint.line.entityId}:${constraint.projectedLine.reference.referenceId}:${constraint.projectedLine.reference.geometryId}`
+      return `${constraint.kind}:${constraint.line.entityId}:${readOnlyOperandKey(constraint.projectedLine)}`
     case 'tangentProjectedCurve':
     case 'concentricProjectedCurve':
       return `${constraint.kind}:${constraint.curve.entityId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}`
@@ -5407,7 +5416,7 @@ function getConstraintDedupeKey(constraint: ConstraintDefinition): string {
     case 'symmetric':
       return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}:${constraint.axis.entityId}`
     case 'symmetricProjectedLine':
-      return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}:${constraint.projectedLine.reference.referenceId}:${constraint.projectedLine.reference.geometryId}`
+      return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}:${readOnlyOperandKey(constraint.projectedLine)}`
   }
 }
 
@@ -5799,7 +5808,7 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
 
   if (!isDrawingSketchTool(session.activeTool)) {
     if (!session.activeEditTarget) {
-      const overlays = buildCommittedDimensionOverlays(session.definition)
+      const overlays = buildCommittedDimensionOverlays(session, session.definition)
       return overlays.length > 0 ? { prompts: [], overlays } : null
     }
 
@@ -6059,6 +6068,7 @@ export function patchSketchDimensionAnnotationPlacement(
   const dimensionId = patch.dimensionId as DimensionId
   const target = createSketchDimensionRef(getSessionSketchId(session), dimensionId)
   const nextFullDefinition = updateDimensionAnnotationPlacementInDefinition(
+    session,
     session.fullDefinition,
     target,
     point,
@@ -6731,6 +6741,7 @@ function updateAnnotationValueInDefinition(
 
     switch (dimension.kind) {
       case 'distance':
+      case 'pointDatumDistance':
       case 'horizontalDistance':
       case 'verticalDistance':
       case 'circleRadius':
@@ -6788,6 +6799,7 @@ function updateAnnotationValueInDefinition(
 }
 
 function updateDimensionAnnotationPlacementInDefinition(
+  session: SketchSessionState,
   definition: SketchDefinition,
   target: SketchDimensionRef,
   point: SketchPoint,
@@ -6797,7 +6809,7 @@ function updateDimensionAnnotationPlacementInDefinition(
       return dimension
     }
 
-    const placement = inferCommittedDimensionAnnotationPlacement(definition, dimension, point)
+    const placement = inferCommittedDimensionAnnotationPlacement(session, definition, dimension, point)
     if (!placement) {
       return dimension
     }
@@ -6839,6 +6851,7 @@ function updateDimensionAnnotationPlacementInDefinition(
 }
 
 function inferCommittedDimensionAnnotationPlacement(
+  session: SketchSessionState,
   definition: SketchDefinition,
   dimension: DimensionDefinition,
   point: SketchPoint,
@@ -6860,6 +6873,11 @@ function inferCommittedDimensionAnnotationPlacement(
           : 'vertical'
       return getPointPairAnnotationPlacementFromPoint(first, second, axis, point)
     }
+    case 'pointDatumDistance': {
+      const first = getReferencePointGeometry(definition, session, dimension.point)
+      const second = getReferencePointGeometry(definition, session, dimension.datum)
+      return first && second ? getPointPairAnnotationPlacementFromPoint(first, second, dimension.axis, point) : null
+    }
     case 'circleRadius':
     case 'diameter': {
       const circle = getCircleLikeGeometry(definition, dimension.entityId)
@@ -6878,24 +6896,16 @@ function inferCommittedDimensionAnnotationPlacement(
       return line ? getLineAnnotationPlacementFromPoint(line, point) : null
     }
     case 'lineDistance': {
-      const line = dimension.lines[0].kind === 'localEntity'
-        ? getLineSegmentGeometry(definition, dimension.lines[0].entityId)
-        : null
+      const line = getReferenceLineGeometry(definition, session, dimension.lines[0])
       return line ? getLineAnnotationPlacementFromPoint(line, point) : null
     }
     case 'linePointDistance': {
-      const line = dimension.line.kind === 'localEntity'
-        ? getLineSegmentGeometry(definition, dimension.line.entityId)
-        : null
+      const line = getReferenceLineGeometry(definition, session, dimension.line)
       return line ? getLineAnnotationPlacementFromPoint(line, point) : null
     }
     case 'lineAngle': {
-      const first = dimension.lines[0].kind === 'localEntity'
-        ? getLineSegmentGeometry(definition, dimension.lines[0].entityId)
-        : null
-      const second = dimension.lines[1].kind === 'localEntity'
-        ? getLineSegmentGeometry(definition, dimension.lines[1].entityId)
-        : null
+      const first = getReferenceLineGeometry(definition, session, dimension.lines[0])
+      const second = getReferenceLineGeometry(definition, session, dimension.lines[1])
       if (!first || !second) {
         return null
       }
@@ -7256,7 +7266,7 @@ export function getSketchAnnotationDescriptors(
       id: dimension.dimensionId,
       target: createSketchDimensionRef(sketchId, dimension.dimensionId),
       glyphKind: getDimensionGlyphKind(dimension),
-      anchor: createDimensionAnnotationAnchor(session.definition, dimension),
+      anchor: createDimensionAnnotationAnchor(session, session.definition, dimension),
       affectedGeometryRefs: getDimensionAffectedGeometryRefs(sketchId, dimension),
       constraintDisplay: getSketchConstraintDisplayForTarget(
         createSketchDimensionRef(sketchId, dimension.dimensionId),
@@ -7338,6 +7348,7 @@ function getConstraintGlyphKind(constraint: ConstraintDefinition): SketchAnnotat
 function getDimensionGlyphKind(dimension: DimensionDefinition): SketchAnnotationGlyphKind {
   switch (dimension.kind) {
     case 'distance':
+    case 'pointDatumDistance':
       if (dimension.axis === 'horizontal') {
         return 'dimensionHorizontal'
       }
@@ -7393,7 +7404,7 @@ function getConstraintAffectedGeometryRefs(
     case 'midpointProjectedLine':
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
-        createProjectedPrimitiveRef(constraint.projectedLine.reference),
+        createReferencePrimitiveRef(constraint.projectedLine, sketchId)!,
       ]
     case 'pointOnCurve':
       return [
@@ -7410,7 +7421,7 @@ function getConstraintAffectedGeometryRefs(
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
         createSketchEntityRef(sketchId, constraint.line.entityId),
-        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+        createReferencePrimitiveRef(constraint.projectedCurve, sketchId)!,
       ]
     case 'symmetric':
       return [
@@ -7420,33 +7431,33 @@ function getConstraintAffectedGeometryRefs(
     case 'symmetricProjectedLine':
       return [
         ...constraint.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId)),
-        createProjectedPrimitiveRef(constraint.projectedLine.reference),
+        createReferencePrimitiveRef(constraint.projectedLine, sketchId)!,
       ]
     case 'coincidentProjectedPoint':
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
-        createProjectedPrimitiveRef(constraint.projectedPoint.reference),
+        createReferencePrimitiveRef(constraint.projectedPoint, sketchId)!,
       ]
     case 'pointOnProjectedCurve':
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
-        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+        createReferencePrimitiveRef(constraint.projectedCurve, sketchId)!,
       ]
     case 'parallelProjectedLine':
     case 'perpendicularProjectedLine':
       return [
         createSketchEntityRef(sketchId, constraint.line.entityId),
-        createProjectedPrimitiveRef(constraint.projectedLine.reference),
+        createReferencePrimitiveRef(constraint.projectedLine, sketchId)!,
       ]
     case 'tangentProjectedCurve':
       return [
         createSketchEntityRef(sketchId, constraint.curve.entityId),
-        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+        createReferencePrimitiveRef(constraint.projectedCurve, sketchId)!,
       ]
     case 'concentricProjectedCurve':
       return [
         createSketchEntityRef(sketchId, constraint.curve.entityId),
-        createProjectedPrimitiveRef(constraint.projectedCurve.reference),
+        createReferencePrimitiveRef(constraint.projectedCurve, sketchId)!,
       ]
   }
 }
@@ -7461,6 +7472,7 @@ function getDimensionAffectedGeometryRefs(
       pointId?: SketchPointId
       entityId?: SketchEntityId
       reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }
+      datum?: 'origin' | 'xAxis' | 'yAxis'
     },
   ): PrimitiveRef | null => {
     if (operand.kind === 'localPoint' && operand.pointId) {
@@ -7475,6 +7487,15 @@ function getDimensionAffectedGeometryRefs(
       return createProjectedPrimitiveRef(operand.reference)
     }
 
+    if (operand.kind === 'sketchDatum' && operand.datum) {
+      return {
+        kind: 'sketchDatumReference',
+        sketchId,
+        datumId: operand.datum,
+        geometryKind: operand.datum === 'origin' ? 'point' : 'lineSegment',
+      }
+    }
+
     return null
   }
 
@@ -7483,6 +7504,11 @@ function getDimensionAffectedGeometryRefs(
     case 'horizontalDistance':
     case 'verticalDistance':
       return dimension.pointIds.map((pointId) => createSketchPointRef(sketchId, pointId))
+    case 'pointDatumDistance':
+      return [
+        createSketchPointRef(sketchId, dimension.point.pointId),
+        createReferencePrimitiveRef(dimension.datum, sketchId)!,
+      ]
     case 'circleRadius':
     case 'diameter':
       return [createSketchEntityRef(sketchId, dimension.entityId)]
@@ -7530,7 +7556,7 @@ function createConstraintAnnotationAnchor(
     case 'midpointProjectedLine':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
-        getProjectedGeometryAnchor(session, constraint.projectedLine.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedLine),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'pointOnCurve':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
@@ -7547,7 +7573,7 @@ function createConstraintAnnotationAnchor(
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
         getEntityAnchor(definition, constraint.line.entityId),
-        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedCurve),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'symmetric':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
@@ -7557,38 +7583,39 @@ function createConstraintAnnotationAnchor(
     case 'symmetricProjectedLine':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getAveragePointPosition(definition, constraint.pointIds),
-        getProjectedGeometryAnchor(session, constraint.projectedLine.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedLine),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'coincidentProjectedPoint':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
-        getProjectedGeometryAnchor(session, constraint.projectedPoint.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedPoint),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'pointOnProjectedCurve':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
-        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedCurve),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'parallelProjectedLine':
     case 'perpendicularProjectedLine':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getEntityAnchor(definition, constraint.line.entityId),
-        getProjectedGeometryAnchor(session, constraint.projectedLine.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedLine),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'tangentProjectedCurve':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getEntityAnchor(definition, constraint.curve.entityId),
-        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedCurve),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'concentricProjectedCurve':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getEntityAnchor(definition, constraint.curve.entityId),
-        getProjectedGeometryAnchor(session, constraint.projectedCurve.reference),
+        getReferenceGeometryAnchor(session, constraint.projectedCurve),
       ].filter((point): point is SketchPoint => point !== null)))
   }
 }
 
 function createDimensionAnnotationAnchor(
+  session: SketchSessionState,
   definition: SketchDefinition,
   dimension: DimensionDefinition,
 ): SketchToolAnchorDescriptor {
@@ -7604,6 +7631,16 @@ function createDimensionAnnotationAnchor(
 
       const axis = dimension.kind === 'distance' ? dimension.axis : dimension.kind === 'horizontalDistance' ? 'horizontal' : 'vertical'
       const line = createPlacedPointDimensionLine(first, second, axis, dimension.annotationPlacement)
+      return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
+    }
+    case 'pointDatumDistance': {
+      const first = getReferencePointGeometry(definition, session, dimension.point)
+      const second = getReferencePointGeometry(definition, session, dimension.datum)
+      if (!first || !second) {
+        return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
+      }
+
+      const line = createPlacedPointDimensionLine(first, second, dimension.axis, dimension.annotationPlacement)
       return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
     }
     case 'circleRadius':
@@ -7630,8 +7667,8 @@ function createDimensionAnnotationAnchor(
       return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
     }
     case 'lineDistance': {
-      const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
-      const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+      const first = getReferenceLineGeometry(definition, session, dimension.lines[0])
+      const second = getReferenceLineGeometry(definition, session, dimension.lines[1])
       if (!first || !second) {
         return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
       }
@@ -7640,8 +7677,8 @@ function createDimensionAnnotationAnchor(
       return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
     }
     case 'linePointDistance': {
-      const lineGeometry = dimension.line.kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.line.entityId) : null
-      const point = dimension.point.kind === 'localPoint' ? getPointPosition(definition, dimension.point.pointId) : null
+      const lineGeometry = getReferenceLineGeometry(definition, session, dimension.line)
+      const point = getReferencePointGeometry(definition, session, dimension.point)
       if (!lineGeometry || !point) {
         return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
       }
@@ -7650,8 +7687,8 @@ function createDimensionAnnotationAnchor(
       return { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } }
     }
     case 'lineAngle': {
-      const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
-      const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+      const first = getReferenceLineGeometry(definition, session, dimension.lines[0])
+      const second = getReferenceLineGeometry(definition, session, dimension.lines[1])
       if (!first || !second) {
         return createOffsetAnnotationAnchor(null, { x: 0, y: -28 })
       }
@@ -7678,7 +7715,10 @@ function createDimensionAnnotationAnchor(
   }
 }
 
-function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly SketchToolOverlayDescriptor[] {
+function buildCommittedDimensionOverlays(
+  session: SketchSessionState,
+  definition: SketchDefinition,
+): readonly SketchToolOverlayDescriptor[] {
   return definition.dimensions.flatMap((dimension): SketchToolOverlayDescriptor[] => {
     switch (dimension.kind) {
       case 'distance':
@@ -7697,6 +7737,30 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
           kind: 'dimensionLine',
           label: dimension.label,
           referenceKind: axis,
+          start: line.start,
+          end: line.end,
+          value: dimension.value,
+          unit: 'mm',
+          labelAnchor: { kind: 'sketchPoint', point: getSketchMidpoint(line.start, line.end), offset: { x: 0, y: -18 } },
+          extensionLines: [
+            { id: `${dimension.dimensionId}-extension-a`, label: 'Extension', start: first, end: line.start },
+            { id: `${dimension.dimensionId}-extension-b`, label: 'Extension', start: second, end: line.end },
+          ],
+        }]
+      }
+      case 'pointDatumDistance': {
+        const first = getReferencePointGeometry(definition, session, dimension.point)
+        const second = getReferencePointGeometry(definition, session, dimension.datum)
+        if (!first || !second) {
+          return []
+        }
+
+        const line = createPlacedPointDimensionLine(first, second, dimension.axis, dimension.annotationPlacement)
+        return [{
+          id: `${dimension.dimensionId}-overlay`,
+          kind: 'dimensionLine',
+          label: dimension.label,
+          referenceKind: dimension.axis,
           start: line.start,
           end: line.end,
           value: dimension.value,
@@ -7759,8 +7823,8 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
         }]
       }
       case 'lineDistance': {
-        const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
-        const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+        const first = getReferenceLineGeometry(definition, session, dimension.lines[0])
+        const second = getReferenceLineGeometry(definition, session, dimension.lines[1])
         if (!first || !second) {
           return []
         }
@@ -7779,8 +7843,8 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
         }]
       }
       case 'linePointDistance': {
-        const lineGeometry = dimension.line.kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.line.entityId) : null
-        const point = dimension.point.kind === 'localPoint' ? getPointPosition(definition, dimension.point.pointId) : null
+        const lineGeometry = getReferenceLineGeometry(definition, session, dimension.line)
+        const point = getReferencePointGeometry(definition, session, dimension.point)
         if (!lineGeometry || !point) {
           return []
         }
@@ -7799,8 +7863,8 @@ function buildCommittedDimensionOverlays(definition: SketchDefinition): readonly
         }]
       }
       case 'lineAngle': {
-        const first = dimension.lines[0].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[0].entityId) : null
-        const second = dimension.lines[1].kind === 'localEntity' ? getLineSegmentGeometry(definition, dimension.lines[1].entityId) : null
+        const first = getReferenceLineGeometry(definition, session, dimension.lines[0])
+        const second = getReferenceLineGeometry(definition, session, dimension.lines[1])
         if (!first || !second) {
           return []
         }
@@ -8151,6 +8215,49 @@ function createProjectedPrimitiveRef(
   }
 }
 
+function createDatumPrimitiveRef(datum: 'origin' | 'xAxis' | 'yAxis'): PrimitiveRef {
+  return {
+    kind: 'sketchDatumReference',
+    sketchId: 'sketch_draft' as SketchId,
+    datumId: datum,
+    geometryKind: datum === 'origin' ? 'point' : 'lineSegment',
+  }
+}
+
+function createReferencePrimitiveRef(
+  operand: {
+    kind: string
+    reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }
+    datum?: 'origin' | 'xAxis' | 'yAxis'
+  },
+  sketchId: SketchId,
+): PrimitiveRef | null {
+  if (operand.kind === 'projectedGeometry' && operand.reference) {
+    return createProjectedPrimitiveRef(operand.reference)
+  }
+
+  if (operand.kind === 'sketchDatum' && operand.datum) {
+    return {
+      kind: 'sketchDatumReference',
+      sketchId,
+      datumId: operand.datum,
+      geometryKind: operand.datum === 'origin' ? 'point' : 'lineSegment',
+    }
+  }
+
+  return null
+}
+
+function getDatumAnchor(datum: 'origin' | 'xAxis' | 'yAxis'): SketchPoint {
+  switch (datum) {
+    case 'origin':
+      return [0, 0]
+    case 'xAxis':
+    case 'yAxis':
+      return [0, 0]
+  }
+}
+
 function getProjectedGeometryAnchor(
   session: SketchSessionState,
   reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
@@ -8181,6 +8288,74 @@ function getProjectedGeometryAnchor(
     case 'spline':
       return geometry.fitPoints[0] ?? null
   }
+}
+
+function getReferenceGeometryAnchor(
+  session: SketchSessionState,
+  operand: {
+    kind: string
+    reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }
+    datum?: 'origin' | 'xAxis' | 'yAxis'
+  },
+): SketchPoint | null {
+  if (operand.kind === 'projectedGeometry' && operand.reference) {
+    return getProjectedGeometryAnchor(session, operand.reference)
+  }
+
+  if (operand.kind === 'sketchDatum' && operand.datum) {
+    return getDatumAnchor(operand.datum)
+  }
+
+  return null
+}
+
+function getReferenceLineGeometry(
+  definition: SketchDefinition,
+  session: SketchSessionState,
+  operand: {
+    kind: string
+    entityId?: SketchEntityId
+    reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }
+    datum?: 'origin' | 'xAxis' | 'yAxis'
+  },
+): { start: SketchPoint; end: SketchPoint } | null {
+  if (operand.kind === 'localEntity' && operand.entityId) {
+    return getLineSegmentGeometry(definition, operand.entityId)
+  }
+
+  if (operand.kind === 'projectedGeometry' && operand.reference) {
+    const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === operand.reference.referenceId)
+    const geometry = projectedReference?.geometry.find((entry) => entry.geometryId === operand.reference?.geometryId)
+    return geometry?.kind === 'lineSegment'
+      ? { start: geometry.startPosition, end: geometry.endPosition }
+      : null
+  }
+
+  if (operand.kind === 'sketchDatum' && operand.datum && operand.datum !== 'origin') {
+    const extent = getSketchDatumGuideExtent(definition, session.projectedReferences)
+    return operand.datum === 'xAxis'
+      ? { start: [-extent, 0], end: [extent, 0] }
+      : { start: [0, -extent], end: [0, extent] }
+  }
+
+  return null
+}
+
+function getReferencePointGeometry(
+  definition: SketchDefinition,
+  session: SketchSessionState,
+  operand: {
+    kind: string
+    pointId?: SketchPointId
+    reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }
+    datum?: 'origin' | 'xAxis' | 'yAxis'
+  },
+): SketchPoint | null {
+  if (operand.kind === 'localPoint' && operand.pointId) {
+    return getPointPosition(definition, operand.pointId)
+  }
+
+  return getReferenceGeometryAnchor(session, operand)
 }
 
 function getPointPosition(definition: SketchDefinition, pointId: SketchPointId): SketchPoint | null {
@@ -8313,6 +8488,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   const regionStyleLookup = svgRenderingEnabled ? createSketchRegionStyleLookup(session) : new Map<RegionRecord['regionId'], SketchEntityDisplayStyle>()
   const displayDefinition = getSketchSessionDisplayDefinition(session)
   const displayProjectedReferences = getSketchSessionDisplayProjectedReferences(session, displayDefinition)
+  const datumGuideExtent = getSketchDatumGuideExtent(displayDefinition, displayProjectedReferences)
   const referenceImageOperationOverrides = getReferenceImageOperationOverrides(session)
   const visibleReferenceImageAnchorPointIds = collectVisibleReferenceImageAnchorPointIds(
     displayDefinition,
@@ -8416,6 +8592,9 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
   return [
     ...regionRenderables,
     ...referenceImageRenderables,
+    createDisplayRenderableForSketchDatum(session, sketchId, 'origin', datumGuideExtent),
+    createDisplayRenderableForSketchDatum(session, sketchId, 'xAxis', datumGuideExtent),
+    createDisplayRenderableForSketchDatum(session, sketchId, 'yAxis', datumGuideExtent),
     ...pointRenderables,
     ...referenceImageAnchorOverlayRenderables,
     ...entityRenderables,
@@ -9114,6 +9293,99 @@ function createReferenceRecordTarget(referenceId: ReferenceId): PrimitiveRef {
   }
 }
 
+function createSketchDatumReferenceTarget(
+  sketchId: SketchId,
+  datumId: 'origin' | 'xAxis' | 'yAxis',
+  geometryKind: 'point' | 'lineSegment',
+): PrimitiveRef {
+  return {
+    kind: 'sketchDatumReference',
+    sketchId,
+    datumId,
+    geometryKind,
+  }
+}
+
+function getSketchDatumGuideExtent(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+) {
+  const localCoordinates = definition.points.flatMap((point) => [Math.abs(point.position[0]), Math.abs(point.position[1])])
+  const projectedCoordinates = projectedReferences.flatMap((reference) => reference.geometry.flatMap((geometry) => {
+    switch (geometry.kind) {
+      case 'point':
+        return [Math.abs(geometry.position[0]), Math.abs(geometry.position[1])]
+      case 'lineSegment':
+        return [
+          Math.abs(geometry.startPosition[0]),
+          Math.abs(geometry.startPosition[1]),
+          Math.abs(geometry.endPosition[0]),
+          Math.abs(geometry.endPosition[1]),
+        ]
+      case 'circle':
+        return [
+          Math.abs(geometry.centerPosition[0]) + geometry.radius,
+          Math.abs(geometry.centerPosition[1]) + geometry.radius,
+        ]
+      case 'arc': {
+        const radius = Math.hypot(
+          geometry.startPosition[0] - geometry.centerPosition[0],
+          geometry.startPosition[1] - geometry.centerPosition[1],
+        )
+        return [
+          Math.abs(geometry.centerPosition[0]) + radius,
+          Math.abs(geometry.centerPosition[1]) + radius,
+        ]
+      }
+      case 'spline':
+        return geometry.fitPoints.flatMap((point) => [Math.abs(point[0]), Math.abs(point[1])])
+    }
+  }))
+  const maxCoordinate = Math.max(0, ...localCoordinates, ...projectedCoordinates)
+  return Math.max(10, maxCoordinate * 1.35 || 10)
+}
+
+function createDisplayRenderableForSketchDatum(
+  session: SketchSessionState,
+  sketchId: SketchId,
+  datumId: 'origin' | 'xAxis' | 'yAxis',
+  extent: number,
+): SketchSessionDisplayRenderable {
+  if (datumId === 'origin') {
+    return {
+      id: `renderable_sketch_datum_origin_${sketchId}` as RenderableId,
+      label: 'Sketch origin',
+      target: createSketchDatumReferenceTarget(sketchId, 'origin', 'point'),
+      geometry: {
+        kind: 'marker',
+        position: mapSketchPointToWorld(session.plane, [0, 0]),
+        displayRadius: 0.18,
+      },
+      linePattern: 'solid',
+      role: 'reference',
+    }
+  }
+
+  const start: SketchPoint = datumId === 'xAxis' ? [-extent, 0] : [0, -extent]
+  const end: SketchPoint = datumId === 'xAxis' ? [extent, 0] : [0, extent]
+
+  return {
+    id: `renderable_sketch_datum_${datumId}_${sketchId}` as RenderableId,
+    label: datumId === 'xAxis' ? 'Sketch X axis' : 'Sketch Y axis',
+    target: createSketchDatumReferenceTarget(sketchId, datumId, 'lineSegment'),
+    geometry: {
+      kind: 'polyline',
+      points: [
+        mapSketchPointToWorld(session.plane, start),
+        mapSketchPointToWorld(session.plane, end),
+      ],
+      isClosed: false,
+    },
+    linePattern: 'dashed',
+    role: 'reference',
+  }
+}
+
 function createDisplayRenderableForReferenceRecord(
   session: SketchSessionState,
   referenceId: ReferenceId,
@@ -9350,6 +9622,7 @@ function describeConstraint(constraint: ConstraintDefinition) {
 function describeDimension(dimension: DimensionDefinition) {
   switch (dimension.kind) {
     case 'distance':
+    case 'pointDatumDistance':
       return `${dimension.value.toFixed(2)} mm distance`
     case 'horizontalDistance':
     case 'verticalDistance':
@@ -9375,6 +9648,7 @@ function describeDimension(dimension: DimensionDefinition) {
 function formatDimensionVisibleLabel(dimension: DimensionDefinition) {
   switch (dimension.kind) {
     case 'distance':
+    case 'pointDatumDistance':
     case 'horizontalDistance':
     case 'verticalDistance':
     case 'circleRadius':

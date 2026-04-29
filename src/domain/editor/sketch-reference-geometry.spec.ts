@@ -348,6 +348,26 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
     material.dispose()
   }
 
+  function testSketchDatumRenderablesStayReadOnlyAndSelectable() {
+    const session = createSession()
+    const renderables = getSketchSessionDisplayRenderables(session)
+    const origin = renderables.find((entry) => entry.target?.kind === 'sketchDatumReference' && entry.target.datumId === 'origin')
+    const xAxis = renderables.find((entry) => entry.target?.kind === 'sketchDatumReference' && entry.target.datumId === 'xAxis')
+    const yAxis = renderables.find((entry) => entry.target?.kind === 'sketchDatumReference' && entry.target.datumId === 'yAxis')
+
+    assert(origin && xAxis && yAxis, 'Active sketch sessions should expose origin, X-axis, and Y-axis datum renderables.')
+    assert(origin.role === 'reference' && xAxis.role === 'reference' && yAxis.role === 'reference', 'Sketch datum renderables should use read-only reference styling.')
+
+    const dragged = beginSketchGeometryDrag(session, origin.target!, [0, 0])
+    assert(dragged.activeDrag === null, 'Sketch datum origin should not start direct sketch dragging.')
+
+    const toggled = toggleSketchConstructionTarget(beginSketchTool(session, 'construction'), xAxis.target!)
+    assert(
+      toggled.definition.entities.length === session.definition.entities.length,
+      'Sketch datum axes should not toggle into authored construction geometry.',
+    )
+  }
+
   testReferenceAuthoringPersistsInCommitRequest()
   testFaceBackedReopenPreservesNullPlaneKeyInCommitRequest()
   testDuplicateReferencesAreRejected()
@@ -356,4 +376,5 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
   testProjectionRenderablesAreReadOnlyReferenceTargets()
   testFailedProjectionReferencesProduceDeletableMarkers()
   testReferenceHighlightRefreshKeepsReferenceColor()
+  testSketchDatumRenderablesStayReadOnlyAndSelectable()
 })

@@ -763,6 +763,111 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     )
   }
 
+  function testSketchDatumAuthoringCommitsTypedOperands() {
+    let coincidentSession = createSessionWithTwoLines()
+    const [pointId] = coincidentSession.definition.pointIds
+    coincidentSession = beginSketchTool(coincidentSession, 'constraintCoincident')
+    coincidentSession = selectSketchConstraintTarget(coincidentSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointId!,
+    })
+    coincidentSession = selectSketchConstraintTarget(coincidentSession, {
+      kind: 'sketchDatumReference',
+      sketchId: 'sketch_draft',
+      datumId: 'origin',
+      geometryKind: 'point',
+    })
+
+    const coincident = coincidentSession.definition.constraints[0]
+    assert(
+      coincident?.kind === 'coincidentProjectedPoint'
+        && coincident.projectedPoint.kind === 'sketchDatum'
+        && coincident.projectedPoint.datum === 'origin',
+      'Coincident authoring should store the sketch origin as a durable datum operand.',
+    )
+
+    let parallelSession = createSessionWithTwoLines()
+    const [lineId] = parallelSession.definition.entityIds
+    parallelSession = beginSketchTool(parallelSession, 'constraintParallel')
+    parallelSession = selectSketchConstraintTarget(parallelSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId!,
+    })
+    parallelSession = selectSketchConstraintTarget(parallelSession, {
+      kind: 'sketchDatumReference',
+      sketchId: 'sketch_draft',
+      datumId: 'xAxis',
+      geometryKind: 'lineSegment',
+    })
+
+    const parallel = parallelSession.definition.constraints[0]
+    assert(
+      parallel?.kind === 'parallelProjectedLine'
+        && parallel.projectedLine.kind === 'sketchDatum'
+        && parallel.projectedLine.datum === 'xAxis',
+      'Parallel authoring should store the sketch X axis as a durable datum operand.',
+    )
+  }
+
+  function testSketchDatumDimensionAuthoringCommitsTypedOperands() {
+    let pointSession = createSessionWithTwoLines()
+    const [pointId] = pointSession.definition.pointIds
+    pointSession = beginSketchTool(pointSession, 'dimensionDistance')
+    pointSession = selectSketchConstraintTarget(pointSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointId!,
+    })
+    pointSession = selectSketchConstraintTarget(pointSession, {
+      kind: 'sketchDatumReference',
+      sketchId: 'sketch_draft',
+      datumId: 'origin',
+      geometryKind: 'point',
+    })
+    pointSession = patchSketchConstraintValue(pointSession, { value: 3 })
+    pointSession = patchSketchConstraintValue(pointSession, { intent: 'commitConstraintValue' })
+
+    const pointDatum = pointSession.definition.dimensions.find((dimension) => dimension.kind === 'pointDatumDistance')
+    assert(
+      pointDatum?.kind === 'pointDatumDistance'
+        && pointDatum.point.pointId === pointId
+        && pointDatum.datum.datum === 'origin',
+      'Point-to-origin distance authoring should commit a durable datum-point dimension.',
+    )
+
+    let lineSession = createNewSketchSessionFromSupport({
+      kind: 'construction',
+      constructionId: 'construction_plane-xy',
+    })
+    lineSession = beginSketchTool(lineSession, 'line')
+    lineSession = startSketchDraw(lineSession, [0, 2])
+    lineSession = acceptSketchDraw(lineSession, [10, 2])
+    const [lineId] = lineSession.definition.entityIds
+    lineSession = beginSketchTool(lineSession, 'dimensionDistance')
+    lineSession = selectSketchConstraintTarget(lineSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId!,
+    })
+    lineSession = selectSketchConstraintTarget(lineSession, {
+      kind: 'sketchDatumReference',
+      sketchId: 'sketch_draft',
+      datumId: 'xAxis',
+      geometryKind: 'lineSegment',
+    })
+    lineSession = patchSketchConstraintValue(lineSession, { value: 2 })
+    lineSession = patchSketchConstraintValue(lineSession, { intent: 'commitConstraintValue' })
+
+    const lineDatum = lineSession.definition.dimensions.find((dimension) => dimension.kind === 'lineDistance')
+    assert(
+      lineDatum?.kind === 'lineDistance'
+        && lineDatum.lines.some((line) => line.kind === 'sketchDatum' && line.datum === 'xAxis'),
+      'Line-to-axis distance authoring should commit a durable datum-axis operand.',
+    )
+  }
+
   function testPointOnProjectedCurveAuthoringCommitsTypedOperand() {
     const cases = [
       {
@@ -1565,6 +1670,8 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   testProjectedCoincidentAuthoringCommitsTypedOperand()
   testProjectedCoincidentAuthoringCanConstrainCircleCenter()
   testProjectedParallelAuthoringCommitsTypedOperand()
+  testSketchDatumAuthoringCommitsTypedOperands()
+  testSketchDatumDimensionAuthoringCommitsTypedOperands()
   testPointOnProjectedCurveAuthoringCommitsTypedOperand()
   testReferenceTargetedConstraintAuthoringCommitsTypedOperands()
   testDimensionalConstraintShowsFloatingInputAndSupportsDeletion()

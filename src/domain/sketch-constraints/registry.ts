@@ -4,6 +4,7 @@ import type {
   DimensionAnnotationPlacement,
   DimensionLineAnnotationPlacement,
   ProjectedSketchGeometryRef,
+  SketchDatumConstraintOperand,
   SketchCurveConstraintOperand,
   SketchPointConstraintOperand,
 } from '@/contracts/sketch/schema'
@@ -66,6 +67,13 @@ function projectedOperand(projected: NonNullable<SketchConstraintTargetRecord['p
   }
 }
 
+function datumOperand(datum: NonNullable<SketchConstraintTargetRecord['datum']>): SketchDatumConstraintOperand {
+  return {
+    kind: 'sketchDatum',
+    datum: datum.reference.datumId,
+  }
+}
+
 function localPointOperand(target: SketchConstraintTargetRecord) {
   return target.point
     ? {
@@ -116,7 +124,7 @@ function createCompositeResolver(resolvers: readonly ConstraintTargetResolver[])
 }
 
 const resolveCoincidentTarget: ConstraintTargetResolver = (definition, target, projectedReferences) =>
-  target.kind === 'projectedReferenceGeometry'
+  target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchDatumReference'
     ? createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])(
         definition,
         target,
@@ -128,10 +136,10 @@ const resolvePointOrLineTarget = createCompositeResolver([resolvePointTarget, re
 const resolvePierceTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])
 const resolveNormalTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget])
 const resolveLocalLineTarget: ConstraintTargetResolver = (definition, target) =>
-  target.kind === 'projectedReferenceGeometry' ? null : resolveLineTarget(definition, target)
+  target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchDatumReference' ? null : resolveLineTarget(definition, target)
 
 const resolveFixTarget: ConstraintTargetResolver = (definition, target) =>
-  target.kind === 'projectedReferenceGeometry'
+  target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchDatumReference'
     ? null
     : createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])(definition, target)
 
@@ -145,6 +153,18 @@ function selectedLocalLine(targets: readonly SketchConstraintTargetRecord[]) {
 
 function selectedLocalCircleLike(targets: readonly SketchConstraintTargetRecord[]) {
   return targets.find((target) => target.entity?.kind === 'circle' || target.entity?.kind === 'arc') ?? null
+}
+
+function selectedDatumPoint(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) => target.datum?.reference.datumId === 'origin') ?? null
+}
+
+function selectedReferenceLineTarget(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) =>
+    target.projected?.geometry.kind === 'lineSegment'
+    || target.datum?.reference.datumId === 'xAxis'
+    || target.datum?.reference.datumId === 'yAxis',
+  ) ?? null
 }
 
 function selectedProjectedLine(targets: readonly SketchConstraintTargetRecord[]) {
@@ -482,6 +502,10 @@ function lineDimensionOperand(target: SketchConstraintTargetRecord): SketchCurve
     return projectedOperand(target.projected)
   }
 
+  if (target.datum && target.datum.reference.geometryKind === 'lineSegment') {
+    return datumOperand(target.datum)
+  }
+
   return null
 }
 
@@ -495,6 +519,10 @@ function pointDimensionOperand(target: SketchConstraintTargetRecord): SketchPoin
 
   if (target.projected?.geometry.kind === 'point') {
     return projectedOperand(target.projected)
+  }
+
+  if (target.datum?.reference.datumId === 'origin') {
+    return datumOperand(target.datum)
   }
 
   return null
@@ -555,7 +583,10 @@ function getDimensionDistanceIntent(
     return { kind: 'linePointDistance', valueSpec: { label: 'Distance', unit: 'mm', min: 0.01, defaultValue: 10 } }
   }
 
-  if (first.point && second.point) {
+  if (
+    (first.point || first.datum?.reference.datumId === 'origin')
+    && (second.point || second.datum?.reference.datumId === 'origin')
+  ) {
     return { kind: 'pointDistance', valueSpec: { label: 'Distance', unit: 'mm', min: 0.01, defaultValue: 10 } }
   }
 
@@ -1185,46 +1216,59 @@ const sketchConstraintDefinitions = [
         : localCoincidentPointOperand(right)
           ? right
           : null
-      const projected = left.projected
-        ? left.projected
-        : right.projected
-          ? right.projected
+      const referenceTarget = left.projected || left.datum
+        ? left
+        : right.projected || right.datum
+          ? right
           : null
       const point = local ? localCoincidentPointOperand(local) : null
 
-      if (!point || !projected) {
+      if (!point || !referenceTarget) {
         return {}
       }
 
       if (
-        projected.geometry.kind === 'lineSegment'
-        || projected.geometry.kind === 'circle'
-        || projected.geometry.kind === 'arc'
-        || projected.geometry.kind === 'spline'
+        referenceTarget.datum?.reference.geometryKind === 'lineSegment'
+        || referenceTarget.projected?.geometry.kind === 'lineSegment'
+        || referenceTarget.projected?.geometry.kind === 'circle'
+        || referenceTarget.projected?.geometry.kind === 'arc'
+        || referenceTarget.projected?.geometry.kind === 'spline'
       ) {
+        const projectedCurve = referenceTarget.projected
+          ? projectedOperand(referenceTarget.projected)
+          : referenceTarget.datum
+            ? datumOperand(referenceTarget.datum)
+            : null
+
         return {
-          constraints: [
-            {
-              constraintId: input.createConstraintId('point-on-projected-curve'),
-              kind: 'pointOnProjectedCurve',
-              label: `Coincident ${input.sequence}`,
-              point,
-              projectedCurve: projectedOperand(projected),
-            },
-          ],
+          constraints: projectedCurve
+            ? [{
+                constraintId: input.createConstraintId('point-on-projected-curve'),
+                kind: 'pointOnProjectedCurve',
+                label: `Coincident ${input.sequence}`,
+                point,
+                projectedCurve,
+              }]
+            : [],
         }
       }
 
+      const projectedPoint = referenceTarget.projected
+        ? projectedOperand(referenceTarget.projected)
+        : referenceTarget.datum
+          ? datumOperand(referenceTarget.datum)
+          : null
+
       return {
-        constraints: [
-          {
-            constraintId: input.createConstraintId('coincident-projected-point'),
-            kind: 'coincidentProjectedPoint',
-            label: `Coincident ${input.sequence}`,
-            point,
-            projectedPoint: projectedOperand(projected),
-          },
-        ],
+        constraints: projectedPoint
+          ? [{
+              constraintId: input.createConstraintId('coincident-projected-point'),
+              kind: 'coincidentProjectedPoint',
+              label: `Coincident ${input.sequence}`,
+              point,
+              projectedPoint,
+            }]
+          : [],
       }
     },
   },
@@ -1255,11 +1299,7 @@ const sketchConstraintDefinitions = [
       }
 
       const local = first.entity ? first : second.entity ? second : null
-      const projected = first.projected?.geometry.kind === 'lineSegment'
-        ? first.projected
-        : second.projected?.geometry.kind === 'lineSegment'
-          ? second.projected
-          : null
+      const referenceLineTarget = selectedReferenceLineTarget(input.selectedTargets)
 
       return createLocalOrProjectedConstraint({
         localBuilder: () => first.entity && second.entity
@@ -1273,13 +1313,13 @@ const sketchConstraintDefinitions = [
         projectedBuilder: () => {
           const line = local ? localEntityOperand(local) : null
 
-          return line && projected
+          return line && referenceLineTarget
             ? {
-            constraintId: input.createConstraintId('parallel-projected-line'),
-            kind: 'parallelProjectedLine',
-            label: `Parallel ${input.sequence}`,
-            line,
-            projectedLine: projectedOperand(projected),
+                constraintId: input.createConstraintId('parallel-projected-line'),
+                kind: 'parallelProjectedLine',
+                label: `Parallel ${input.sequence}`,
+                line,
+                projectedLine: lineDimensionOperand(referenceLineTarget)!,
               }
             : null
         },
@@ -1313,11 +1353,7 @@ const sketchConstraintDefinitions = [
       }
 
       const local = first.entity ? first : second.entity ? second : null
-      const projected = first.projected?.geometry.kind === 'lineSegment'
-        ? first.projected
-        : second.projected?.geometry.kind === 'lineSegment'
-          ? second.projected
-          : null
+      const referenceLineTarget = selectedReferenceLineTarget(input.selectedTargets)
 
       return createLocalOrProjectedConstraint({
         localBuilder: () => first.entity && second.entity
@@ -1331,13 +1367,13 @@ const sketchConstraintDefinitions = [
         projectedBuilder: () => {
           const line = local ? localEntityOperand(local) : null
 
-          return line && projected
+          return line && referenceLineTarget
             ? {
-            constraintId: input.createConstraintId('perpendicular-projected-line'),
-            kind: 'perpendicularProjectedLine',
-            label: `Perpendicular ${input.sequence}`,
-            line,
-            projectedLine: projectedOperand(projected),
+                constraintId: input.createConstraintId('perpendicular-projected-line'),
+                kind: 'perpendicularProjectedLine',
+                label: `Perpendicular ${input.sequence}`,
+                line,
+                projectedLine: lineDimensionOperand(referenceLineTarget)!,
               }
             : null
         },
@@ -1587,7 +1623,7 @@ const sketchConstraintDefinitions = [
     createCommitContribution(input) {
       const point = selectedLocalPoint(input.selectedTargets)
       const localLine = selectedLocalLine(input.selectedTargets)
-      const projectedLine = selectedProjectedLine(input.selectedTargets)
+      const referenceLineTarget = selectedReferenceLineTarget(input.selectedTargets)
       const pointOperand = point ? localPointOperand(point) : null
 
       if (!pointOperand) {
@@ -1608,13 +1644,13 @@ const sketchConstraintDefinitions = [
               }
             : null
         },
-        projectedBuilder: () => projectedLine
+        projectedBuilder: () => referenceLineTarget
           ? {
               constraintId: input.createConstraintId('midpoint-projected-line'),
               kind: 'midpointProjectedLine',
               label: `Midpoint ${input.sequence}`,
               point: pointOperand,
-              projectedLine: projectedOperand(projectedLine),
+              projectedLine: lineDimensionOperand(referenceLineTarget)!,
             }
           : null,
       })
@@ -1706,6 +1742,7 @@ const sketchConstraintDefinitions = [
       const point = selectedLocalPoint(input.selectedTargets)
       const localCurve = selectedLocalCurve(input.selectedTargets)
       const projectedCurve = selectedProjectedCurve(input.selectedTargets)
+      const datumAxis = selectedReferenceLineTarget(input.selectedTargets)?.datum
       const pointOperand = point ? localPointOperand(point) : null
 
       if (!pointOperand) {
@@ -1726,13 +1763,13 @@ const sketchConstraintDefinitions = [
               }
             : null
         },
-        projectedBuilder: () => projectedCurve
+        projectedBuilder: () => projectedCurve || datumAxis
           ? {
               constraintId: input.createConstraintId('point-on-projected-curve'),
               kind: 'pointOnProjectedCurve',
               label: `Pierce ${input.sequence}`,
               point: pointOperand,
-              projectedCurve: projectedOperand(projectedCurve),
+              projectedCurve: projectedCurve ? projectedOperand(projectedCurve) : datumOperand(datumAxis!),
             }
           : null,
       })
@@ -1761,7 +1798,7 @@ const sketchConstraintDefinitions = [
     createCommitContribution(input) {
       const points = input.selectedTargets.filter((target) => target.point)
       const localLine = selectedLocalLine(input.selectedTargets)
-      const projectedLine = selectedProjectedLine(input.selectedTargets)
+      const referenceLineTarget = selectedReferenceLineTarget(input.selectedTargets)
 
       const [firstPoint, secondPoint] = points
 
@@ -1785,13 +1822,13 @@ const sketchConstraintDefinitions = [
               }
             : null
         },
-        projectedBuilder: () => projectedLine
+        projectedBuilder: () => referenceLineTarget
           ? {
               constraintId: input.createConstraintId('symmetric-projected-line'),
               kind: 'symmetricProjectedLine',
               label: `Symmetric ${input.sequence}`,
               pointIds,
-              projectedLine: projectedOperand(projectedLine),
+              projectedLine: lineDimensionOperand(referenceLineTarget)!,
             }
           : null,
       })
@@ -2008,7 +2045,7 @@ const sketchConstraintDefinitions = [
         }
       }
 
-      if (!first.point || !second.point) {
+      if (!firstPoint || !secondPoint) {
         return {}
       }
 
@@ -2019,15 +2056,42 @@ const sketchConstraintDefinitions = [
             second: second.anchor,
             pointer: input.pointer,
           })
+      const localPointTarget = first.point ? first : second.point ? second : null
+      const datumPointTarget = first.datum?.reference.datumId === 'origin'
+        ? first
+        : second.datum?.reference.datumId === 'origin'
+          ? second
+          : null
+
+      if (!localPointTarget || !datumPointTarget) {
+        return first.point && second.point
+          ? {
+              dimensions: [
+                {
+                  dimensionId: input.createDimensionId('distance'),
+                  kind: 'distance',
+                  label: `Distance ${input.sequence}`,
+                  axis,
+                  pointIds: [first.point.pointId, second.point.pointId],
+                  value: input.value,
+                  annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                    ? input.annotationPlacement
+                    : undefined,
+                },
+              ],
+            }
+          : {}
+      }
 
       return {
         dimensions: [
           {
             dimensionId: input.createDimensionId('distance'),
-            kind: 'distance',
+            kind: 'pointDatumDistance',
             label: `Distance ${input.sequence}`,
             axis,
-            pointIds: [first.point.pointId, second.point.pointId],
+            point: { kind: 'localPoint', pointId: localPointTarget.point!.pointId },
+            datum: { kind: 'sketchDatum', datum: datumPointTarget.datum!.reference.datumId },
             value: input.value,
             annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
               ? input.annotationPlacement
@@ -2069,7 +2133,38 @@ const sketchConstraintDefinitions = [
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
 
-      if (!first?.point || !second?.point || input.value === null) {
+      const firstPoint = first ? pointDimensionOperand(first) : null
+      const secondPoint = second ? pointDimensionOperand(second) : null
+
+      if (!firstPoint || !secondPoint || input.value === null) {
+        return {}
+      }
+
+      if (first.point && second.point) {
+        return {
+          dimensions: [
+            {
+              dimensionId: input.createDimensionId('horizontal-distance'),
+              kind: 'horizontalDistance',
+              label: `Horizontal distance ${input.sequence}`,
+              pointIds: [first.point.pointId, second.point.pointId],
+              value: input.value,
+              annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                ? input.annotationPlacement
+                : undefined,
+            },
+          ],
+        }
+      }
+
+      const localPointTarget = first.point ? first : second.point ? second : null
+      const datumPointTarget = first.datum?.reference.datumId === 'origin'
+        ? first
+        : second.datum?.reference.datumId === 'origin'
+          ? second
+          : null
+
+      if (!localPointTarget || !datumPointTarget) {
         return {}
       }
 
@@ -2077,9 +2172,11 @@ const sketchConstraintDefinitions = [
         dimensions: [
           {
             dimensionId: input.createDimensionId('horizontal-distance'),
-            kind: 'horizontalDistance',
+            kind: 'pointDatumDistance',
             label: `Horizontal distance ${input.sequence}`,
-            pointIds: [first.point.pointId, second.point.pointId],
+            axis: 'horizontal',
+            point: { kind: 'localPoint', pointId: localPointTarget.point!.pointId },
+            datum: { kind: 'sketchDatum', datum: datumPointTarget.datum!.reference.datumId },
             value: input.value,
             annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
               ? input.annotationPlacement
@@ -2121,7 +2218,38 @@ const sketchConstraintDefinitions = [
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets
 
-      if (!first?.point || !second?.point || input.value === null) {
+      const firstPoint = first ? pointDimensionOperand(first) : null
+      const secondPoint = second ? pointDimensionOperand(second) : null
+
+      if (!firstPoint || !secondPoint || input.value === null) {
+        return {}
+      }
+
+      if (first.point && second.point) {
+        return {
+          dimensions: [
+            {
+              dimensionId: input.createDimensionId('vertical-distance'),
+              kind: 'verticalDistance',
+              label: `Vertical distance ${input.sequence}`,
+              pointIds: [first.point.pointId, second.point.pointId],
+              value: input.value,
+              annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
+                ? input.annotationPlacement
+                : undefined,
+            },
+          ],
+        }
+      }
+
+      const localPointTarget = first.point ? first : second.point ? second : null
+      const datumPointTarget = first.datum?.reference.datumId === 'origin'
+        ? first
+        : second.datum?.reference.datumId === 'origin'
+          ? second
+          : null
+
+      if (!localPointTarget || !datumPointTarget) {
         return {}
       }
 
@@ -2129,9 +2257,11 @@ const sketchConstraintDefinitions = [
         dimensions: [
           {
             dimensionId: input.createDimensionId('vertical-distance'),
-            kind: 'verticalDistance',
+            kind: 'pointDatumDistance',
             label: `Vertical distance ${input.sequence}`,
-            pointIds: [first.point.pointId, second.point.pointId],
+            axis: 'vertical',
+            point: { kind: 'localPoint', pointId: localPointTarget.point!.pointId },
+            datum: { kind: 'sketchDatum', datum: datumPointTarget.datum!.reference.datumId },
             value: input.value,
             annotationPlacement: input.annotationPlacement?.kind === 'dimensionLine'
               ? input.annotationPlacement

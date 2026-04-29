@@ -443,6 +443,13 @@ export type LocalSketchEntityConstraintOperand = {
   entityId: SketchEntityId
 }
 
+export type SketchDatumOperandKind = 'origin' | 'xAxis' | 'yAxis'
+
+export type SketchDatumConstraintOperand = {
+  kind: 'sketchDatum'
+  datum: SketchDatumOperandKind
+}
+
 export type ProjectedSketchGeometryConstraintOperand = {
   kind: 'projectedGeometry'
   reference: ProjectedSketchGeometryRef & {
@@ -452,10 +459,20 @@ export type ProjectedSketchGeometryConstraintOperand = {
 
 export type SketchPointConstraintOperand =
   | LocalSketchPointConstraintOperand
+  | SketchDatumConstraintOperand
   | ProjectedSketchGeometryConstraintOperand
 
 export type SketchCurveConstraintOperand =
   | LocalSketchEntityConstraintOperand
+  | SketchDatumConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand
+
+export type ReadOnlySketchPointConstraintOperand =
+  | SketchDatumConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand
+
+export type ReadOnlySketchCurveConstraintOperand =
+  | SketchDatumConstraintOperand
   | ProjectedSketchGeometryConstraintOperand
 
 export type DimensionLineAnnotationPlacement = {
@@ -556,8 +573,8 @@ export type ConstraintDefinition =
       label: string
       /** Local editable point participating in the coincident relationship. */
       point: LocalSketchPointConstraintOperand
-      /** Read-only projected point target. */
-      projectedPoint: ProjectedSketchGeometryConstraintOperand
+      /** Read-only projected or datum point target. */
+      projectedPoint: ReadOnlySketchPointConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -566,8 +583,8 @@ export type ConstraintDefinition =
       label: string
       /** Local editable point constrained onto the projected curve. */
       point: LocalSketchPointConstraintOperand
-      /** Read-only projected line, circle, or arc target. */
-      projectedCurve: ProjectedSketchGeometryConstraintOperand
+      /** Read-only projected curve or sketch datum axis target. */
+      projectedCurve: ReadOnlySketchCurveConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -586,8 +603,8 @@ export type ConstraintDefinition =
       label: string
       /** Local editable point constrained to the projected midpoint. */
       point: LocalSketchPointConstraintOperand
-      /** Read-only projected line whose derived midpoint is targeted. */
-      projectedLine: ProjectedSketchGeometryConstraintOperand
+      /** Read-only projected line or sketch datum axis whose midpoint is targeted. */
+      projectedLine: ReadOnlySketchCurveConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -606,8 +623,8 @@ export type ConstraintDefinition =
       label: string
       /** Local editable line entity. */
       line: LocalSketchEntityConstraintOperand
-      /** Read-only projected line target. */
-      projectedLine: ProjectedSketchGeometryConstraintOperand
+      /** Read-only projected line or sketch datum axis target. */
+      projectedLine: ReadOnlySketchCurveConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -616,8 +633,8 @@ export type ConstraintDefinition =
       label: string
       /** Local editable line entity. */
       line: LocalSketchEntityConstraintOperand
-      /** Read-only projected line target. */
-      projectedLine: ProjectedSketchGeometryConstraintOperand
+      /** Read-only projected line or sketch datum axis target. */
+      projectedLine: ReadOnlySketchCurveConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -700,8 +717,8 @@ export type ConstraintDefinition =
       label: string
       /** Two local editable points mirrored about the projected axis. */
       pointIds: readonly [SketchPointId, SketchPointId]
-      /** Read-only projected line used as the symmetry axis. */
-      projectedLine: ProjectedSketchGeometryConstraintOperand
+      /** Read-only projected line or sketch datum axis used as the symmetry axis. */
+      projectedLine: ReadOnlySketchCurveConstraintOperand
     }
   | {
       constraintId: ConstraintId
@@ -770,6 +787,22 @@ export type DimensionDefinition =
       axis: 'aligned' | 'horizontal' | 'vertical'
       /** Two referenced points whose solved separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId]
+      /** Requested dimension value in sketch-plane units. */
+      value: number
+      /** Optional persisted sketch-plane annotation placement. */
+      annotationPlacement?: DimensionLineAnnotationPlacement
+    }
+  | {
+      dimensionId: DimensionId
+      kind: 'pointDatumDistance'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Axis interpretation for `value` within the sketch-plane frame. */
+      axis: 'aligned' | 'horizontal' | 'vertical'
+      /** Local editable point referenced by the dimension. */
+      point: LocalSketchPointConstraintOperand
+      /** Sketch origin datum referenced by the dimension. */
+      datum: SketchDatumConstraintOperand
       /** Requested dimension value in sketch-plane units. */
       value: number
       /** Optional persisted sketch-plane annotation placement. */

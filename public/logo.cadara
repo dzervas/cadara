@@ -19,7 +19,7 @@
       "sketchId": "sketch_primary"
     }
   ],
-  "revisionId": "rev_0016",
+  "revisionId": "rev_0017",
   "schemaVersion": "authored-model-document/v1alpha1",
   "settings": {
     "angularToleranceRadians": 0.0001,
@@ -535,11 +535,563 @@
                 }
               ]
             }
+          },
+          {
+            "createdGraph": {
+              "constraints": [],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [
+                {
+                  "endPointId": "sketch_point_12_line-end",
+                  "entityId": "sketch_entity_12_line",
+                  "isConstruction": false,
+                  "kind": "lineSegment",
+                  "label": "Line 12",
+                  "startPointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
+                  "target": {
+                    "entityId": "sketch_entity_12_line",
+                    "kind": "sketchEntity",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ],
+              "points": [
+                {
+                  "isConstruction": false,
+                  "label": "Line 12 end",
+                  "pointId": "sketch_point_12_line-end",
+                  "position": [
+                    44.922262950675666,
+                    28.43855296487332
+                  ],
+                  "target": {
+                    "kind": "sketchPoint",
+                    "pointId": "sketch_point_12_line-end",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ]
+            },
+            "kind": "line",
+            "label": "Line 12",
+            "operationId": "sketch_operation_12_line",
+            "targets": {
+              "created": [
+                {
+                  "kind": "point",
+                  "pointId": "sketch_point_12_line-end"
+                },
+                {
+                  "entityId": "sketch_entity_12_line",
+                  "kind": "entity"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [
+                {
+                  "endPointId": "sketch_point_13_line-end",
+                  "entityId": "sketch_entity_13_line",
+                  "isConstruction": false,
+                  "kind": "lineSegment",
+                  "label": "Line 13",
+                  "startPointId": "sketch_point_12_line-end",
+                  "target": {
+                    "entityId": "sketch_entity_13_line",
+                    "kind": "sketchEntity",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ],
+              "points": [
+                {
+                  "isConstruction": false,
+                  "label": "Line 13 end",
+                  "pointId": "sketch_point_13_line-end",
+                  "position": [
+                    61.262091236548585,
+                    21.515369113143706
+                  ],
+                  "target": {
+                    "kind": "sketchPoint",
+                    "pointId": "sketch_point_13_line-end",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ]
+            },
+            "kind": "line",
+            "label": "Line 13",
+            "operationId": "sketch_operation_13_line",
+            "targets": {
+              "created": [
+                {
+                  "kind": "point",
+                  "pointId": "sketch_point_13_line-end"
+                },
+                {
+                  "entityId": "sketch_entity_13_line",
+                  "kind": "entity"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_15_equal",
+                  "entityIds": [
+                    "sketch_entity_12_line",
+                    "sketch_entity_6_line"
+                  ],
+                  "kind": "equalLength",
+                  "label": "Equal 15"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Equal 15",
+            "operationId": "sketch_operation_15_constraintEqual",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_15_equal",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_16_parallel",
+                  "entityIds": [
+                    "sketch_entity_12_line",
+                    "sketch_entity_6_line"
+                  ],
+                  "kind": "parallel",
+                  "label": "Parallel 16"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Parallel 16",
+            "operationId": "sketch_operation_16_constraintParallel",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_16_parallel",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_17_parallel",
+                  "entityIds": [
+                    "sketch_entity_13_line",
+                    "sketch_entity_8_line"
+                  ],
+                  "kind": "parallel",
+                  "label": "Parallel 17"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Parallel 17",
+            "operationId": "sketch_operation_17_constraintParallel",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_17_parallel",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_18_equal",
+                  "entityIds": [
+                    "sketch_entity_12_line",
+                    "sketch_entity_13_line"
+                  ],
+                  "kind": "equalLength",
+                  "label": "Equal 18"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Equal 18",
+            "operationId": "sketch_operation_18_constraintEqual",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_18_equal",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [
+                {
+                  "endPointId": "sketch_point_19_line-end",
+                  "entityId": "sketch_entity_19_line",
+                  "isConstruction": false,
+                  "kind": "lineSegment",
+                  "label": "Line 19",
+                  "startPointId": "sketch_point_13_line-end",
+                  "target": {
+                    "entityId": "sketch_entity_19_line",
+                    "kind": "sketchEntity",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ],
+              "points": [
+                {
+                  "isConstruction": false,
+                  "label": "Line 19 end",
+                  "pointId": "sketch_point_19_line-end",
+                  "position": [
+                    62.9062934647947,
+                    3.5735337642602065
+                  ],
+                  "target": {
+                    "kind": "sketchPoint",
+                    "pointId": "sketch_point_19_line-end",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ]
+            },
+            "kind": "line",
+            "label": "Line 19",
+            "operationId": "sketch_operation_19_line",
+            "targets": {
+              "created": [
+                {
+                  "kind": "point",
+                  "pointId": "sketch_point_19_line-end"
+                },
+                {
+                  "entityId": "sketch_entity_19_line",
+                  "kind": "entity"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_20_coincident",
+                  "kind": "coincident",
+                  "label": "Coincident 20",
+                  "pointIds": [
+                    "sketch_point_19_line-end",
+                    "sketch_point_8_line-end"
+                  ]
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Coincident 20",
+            "operationId": "sketch_operation_20_constraintCoincident",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_20_coincident",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [
+                {
+                  "endPointId": "sketch_point_21_line-end",
+                  "entityId": "sketch_entity_21_line",
+                  "isConstruction": false,
+                  "kind": "lineSegment",
+                  "label": "Line 21",
+                  "startPointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
+                  "target": {
+                    "entityId": "sketch_entity_21_line",
+                    "kind": "sketchEntity",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ],
+              "points": [
+                {
+                  "isConstruction": false,
+                  "label": "Line 21 end",
+                  "pointId": "sketch_point_21_line-end",
+                  "position": [
+                    45.852261040258405,
+                    -2.6701424524855586
+                  ],
+                  "target": {
+                    "kind": "sketchPoint",
+                    "pointId": "sketch_point_21_line-end",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ]
+            },
+            "kind": "line",
+            "label": "Line 21",
+            "operationId": "sketch_operation_21_line",
+            "targets": {
+              "created": [
+                {
+                  "kind": "point",
+                  "pointId": "sketch_point_21_line-end"
+                },
+                {
+                  "entityId": "sketch_entity_21_line",
+                  "kind": "entity"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [
+                {
+                  "endPointId": "sketch_point_19_line-end",
+                  "entityId": "sketch_entity_22_line",
+                  "isConstruction": false,
+                  "kind": "lineSegment",
+                  "label": "Line 22",
+                  "startPointId": "sketch_point_21_line-end",
+                  "target": {
+                    "entityId": "sketch_entity_22_line",
+                    "kind": "sketchEntity",
+                    "sketchId": "sketch_primary"
+                  }
+                }
+              ],
+              "points": []
+            },
+            "kind": "line",
+            "label": "Line 22",
+            "operationId": "sketch_operation_22_line",
+            "targets": {
+              "created": [
+                {
+                  "entityId": "sketch_entity_22_line",
+                  "kind": "entity"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_23_equal",
+                  "entityIds": [
+                    "sketch_entity_22_line",
+                    "sketch_entity_6_line"
+                  ],
+                  "kind": "equalLength",
+                  "label": "Equal 23"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Equal 23",
+            "operationId": "sketch_operation_23_constraintEqual",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_23_equal",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_24_equal",
+                  "entityIds": [
+                    "sketch_entity_21_line",
+                    "sketch_entity_8_line"
+                  ],
+                  "kind": "equalLength",
+                  "label": "Equal 24"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Equal 24",
+            "operationId": "sketch_operation_24_constraintEqual",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_24_equal",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_25_equal",
+                  "entityIds": [
+                    "sketch_entity_19_line",
+                    "sketch_entity_3_line"
+                  ],
+                  "kind": "equalLength",
+                  "label": "Equal 25"
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Equal 25",
+            "operationId": "sketch_operation_25_constraintEqual",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_25_equal",
+                  "kind": "constraint"
+                }
+              ]
+            }
+          },
+          {
+            "createdGraph": {
+              "constraints": [],
+              "derivedRelationships": [],
+              "dimensions": [
+                {
+                  "annotationPlacement": {
+                    "kind": "dimensionLine",
+                    "offset": -12.269457212550849
+                  },
+                  "dimensionId": "dimension_26_line-length",
+                  "entityId": "sketch_entity_6_line",
+                  "kind": "lineLength",
+                  "label": "Line length 26",
+                  "value": 17
+                }
+              ],
+              "entities": [],
+              "points": []
+            },
+            "kind": "dimension",
+            "label": "Distance 26",
+            "operationId": "sketch_operation_26_dimensionDistance",
+            "targets": {
+              "created": [
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                }
+              ],
+              "edited": [
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                },
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                },
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                },
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                },
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                },
+                {
+                  "dimensionId": "dimension_26_line-length",
+                  "kind": "dimension"
+                }
+              ]
+            }
           }
         ],
         "constraintIds": [
           "constraint_4_vertical",
-          "constraint_11_equal"
+          "constraint_11_equal",
+          "constraint_15_equal",
+          "constraint_16_parallel",
+          "constraint_17_parallel",
+          "constraint_18_equal",
+          "constraint_20_coincident",
+          "constraint_23_equal",
+          "constraint_24_equal",
+          "constraint_25_equal"
         ],
         "constraints": [
           {
@@ -556,13 +1108,86 @@
             ],
             "kind": "equalLength",
             "label": "Equal 11"
+          },
+          {
+            "constraintId": "constraint_15_equal",
+            "entityIds": [
+              "sketch_entity_12_line",
+              "sketch_entity_6_line"
+            ],
+            "kind": "equalLength",
+            "label": "Equal 15"
+          },
+          {
+            "constraintId": "constraint_16_parallel",
+            "entityIds": [
+              "sketch_entity_12_line",
+              "sketch_entity_6_line"
+            ],
+            "kind": "parallel",
+            "label": "Parallel 16"
+          },
+          {
+            "constraintId": "constraint_17_parallel",
+            "entityIds": [
+              "sketch_entity_13_line",
+              "sketch_entity_8_line"
+            ],
+            "kind": "parallel",
+            "label": "Parallel 17"
+          },
+          {
+            "constraintId": "constraint_18_equal",
+            "entityIds": [
+              "sketch_entity_12_line",
+              "sketch_entity_13_line"
+            ],
+            "kind": "equalLength",
+            "label": "Equal 18"
+          },
+          {
+            "constraintId": "constraint_20_coincident",
+            "kind": "coincident",
+            "label": "Coincident 20",
+            "pointIds": [
+              "sketch_point_19_line-end",
+              "sketch_point_8_line-end"
+            ]
+          },
+          {
+            "constraintId": "constraint_23_equal",
+            "entityIds": [
+              "sketch_entity_22_line",
+              "sketch_entity_6_line"
+            ],
+            "kind": "equalLength",
+            "label": "Equal 23"
+          },
+          {
+            "constraintId": "constraint_24_equal",
+            "entityIds": [
+              "sketch_entity_21_line",
+              "sketch_entity_8_line"
+            ],
+            "kind": "equalLength",
+            "label": "Equal 24"
+          },
+          {
+            "constraintId": "constraint_25_equal",
+            "entityIds": [
+              "sketch_entity_19_line",
+              "sketch_entity_3_line"
+            ],
+            "kind": "equalLength",
+            "label": "Equal 25"
           }
         ],
         "derivedRelationships": [],
         "dimensionIds": [
           "dimension_5_line-length",
           "dimension_7_line-angle",
-          "dimension_10_line-angle"
+          "dimension_10_line-angle",
+          "dimension_26_line-length"
         ],
         "dimensions": [
           {
@@ -617,6 +1242,17 @@
               }
             ],
             "valueRadians": 2.5307274153917776
+          },
+          {
+            "annotationPlacement": {
+              "kind": "dimensionLine",
+              "offset": -12.269457212550849
+            },
+            "dimensionId": "dimension_26_line-length",
+            "entityId": "sketch_entity_6_line",
+            "kind": "lineLength",
+            "label": "Line length 26",
+            "value": 17
           }
         ],
         "entities": [
@@ -682,6 +1318,71 @@
               "kind": "sketchEntity",
               "sketchId": "sketch_primary"
             }
+          },
+          {
+            "endPointId": "sketch_point_12_line-end",
+            "entityId": "sketch_entity_12_line",
+            "isConstruction": false,
+            "kind": "lineSegment",
+            "label": "Line 12",
+            "startPointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
+            "target": {
+              "entityId": "sketch_entity_12_line",
+              "kind": "sketchEntity",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "endPointId": "sketch_point_13_line-end",
+            "entityId": "sketch_entity_13_line",
+            "isConstruction": false,
+            "kind": "lineSegment",
+            "label": "Line 13",
+            "startPointId": "sketch_point_12_line-end",
+            "target": {
+              "entityId": "sketch_entity_13_line",
+              "kind": "sketchEntity",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "endPointId": "sketch_point_19_line-end",
+            "entityId": "sketch_entity_19_line",
+            "isConstruction": false,
+            "kind": "lineSegment",
+            "label": "Line 19",
+            "startPointId": "sketch_point_13_line-end",
+            "target": {
+              "entityId": "sketch_entity_19_line",
+              "kind": "sketchEntity",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "endPointId": "sketch_point_21_line-end",
+            "entityId": "sketch_entity_21_line",
+            "isConstruction": false,
+            "kind": "lineSegment",
+            "label": "Line 21",
+            "startPointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
+            "target": {
+              "entityId": "sketch_entity_21_line",
+              "kind": "sketchEntity",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "endPointId": "sketch_point_19_line-end",
+            "entityId": "sketch_entity_22_line",
+            "isConstruction": false,
+            "kind": "lineSegment",
+            "label": "Line 22",
+            "startPointId": "sketch_point_21_line-end",
+            "target": {
+              "entityId": "sketch_entity_22_line",
+              "kind": "sketchEntity",
+              "sketchId": "sketch_primary"
+            }
           }
         ],
         "entityIds": [
@@ -689,13 +1390,22 @@
           "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2_point",
           "sketch_entity_3_line",
           "sketch_entity_6_line",
-          "sketch_entity_8_line"
+          "sketch_entity_8_line",
+          "sketch_entity_12_line",
+          "sketch_entity_13_line",
+          "sketch_entity_19_line",
+          "sketch_entity_21_line",
+          "sketch_entity_22_line"
         ],
         "pointIds": [
           "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
           "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
           "sketch_point_6_line-end",
-          "sketch_point_8_line-end"
+          "sketch_point_8_line-end",
+          "sketch_point_12_line-end",
+          "sketch_point_13_line-end",
+          "sketch_point_19_line-end",
+          "sketch_point_21_line-end"
         ],
         "points": [
           {
@@ -703,8 +1413,8 @@
             "label": "Anchor 1",
             "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
             "position": [
-              28.749933032675997,
-              2.6893102369246384
+              29.110404607012146,
+              1.2961566959965458
             ],
             "target": {
               "kind": "sketchPoint",
@@ -717,8 +1427,8 @@
             "label": "Anchor 2",
             "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
             "position": [
-              28.749933033094987,
-              22.68931023663623
+              29.110404607076696,
+              21.296156697438256
             ],
             "target": {
               "kind": "sketchPoint",
@@ -731,8 +1441,8 @@
             "label": "Line 6 end",
             "pointId": "sketch_point_6_line-end",
             "position": [
-              44.956011341684565,
-              7.0317158104959985
+              45.53114365977362,
+              5.6960804368925855
             ],
             "target": {
               "kind": "sketchPoint",
@@ -745,12 +1455,68 @@
             "label": "Line 8 end",
             "pointId": "sketch_point_8_line-end",
             "position": [
-              60.72195503100573,
-              1.2933815670307114
+              61.50591820712896,
+              -0.11826201065457728
             ],
             "target": {
               "kind": "sketchPoint",
               "pointId": "sketch_point_8_line-end",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "isConstruction": false,
+            "label": "Line 12 end",
+            "pointId": "sketch_point_12_line-end",
+            "position": [
+              45.53114365781939,
+              25.69608044881377
+            ],
+            "target": {
+              "kind": "sketchPoint",
+              "pointId": "sketch_point_12_line-end",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "isConstruction": false,
+            "label": "Line 13 end",
+            "pointId": "sketch_point_13_line-end",
+            "position": [
+              61.505918203348486,
+              19.881737991355145
+            ],
+            "target": {
+              "kind": "sketchPoint",
+              "pointId": "sketch_point_13_line-end",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "isConstruction": false,
+            "label": "Line 19 end",
+            "pointId": "sketch_point_19_line-end",
+            "position": [
+              61.5059182072414,
+              -0.11826201028785953
+            ],
+            "target": {
+              "kind": "sketchPoint",
+              "pointId": "sketch_point_19_line-end",
+              "sketchId": "sketch_primary"
+            }
+          },
+          {
+            "isConstruction": false,
+            "label": "Line 21 end",
+            "pointId": "sketch_point_21_line-end",
+            "position": [
+              45.08517915454362,
+              -4.518185748524435
+            ],
+            "target": {
+              "kind": "sketchPoint",
+              "pointId": "sketch_point_21_line-end",
               "sketchId": "sketch_primary"
             }
           }

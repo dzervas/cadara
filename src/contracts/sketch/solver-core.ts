@@ -251,6 +251,21 @@ function findProjectedGeometry(
   ) ?? null
 }
 
+function resolveSketchDatumPoint(datum: 'origin' | 'xAxis' | 'yAxis'): SketchPoint2D | null {
+  return datum === 'origin' ? [0, 0] : null
+}
+
+function resolveSketchDatumLine(datum: 'origin' | 'xAxis' | 'yAxis'): { start: SketchPoint2D; end: SketchPoint2D } | null {
+  switch (datum) {
+    case 'xAxis':
+      return { start: [-1, 0], end: [1, 0] }
+    case 'yAxis':
+      return { start: [0, -1], end: [0, 1] }
+    case 'origin':
+      return null
+  }
+}
+
 function projectedCircleLikeGeometry(
   geometry: ProjectedSketchReferenceGeometry,
 ): { center: SketchPoint2D; radius: number } | null {
@@ -463,6 +478,10 @@ function resolveLineDimensionOperand(
   pointRecords: Map<SketchPointId, SolverPointRecord>,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ): { start: SketchPoint2D; end: SketchPoint2D } | null {
+  if (operand.kind === 'sketchDatum') {
+    return resolveSketchDatumLine(operand.datum)
+  }
+
   if (operand.kind === 'projectedGeometry') {
     const projected = findProjectedGeometry(projectedReferences, operand.reference)
     return projected?.kind === 'lineSegment'
@@ -485,6 +504,10 @@ function resolvePointDimensionOperand(
   pointRecords: Map<SketchPointId, SolverPointRecord>,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ): SketchPoint2D | null {
+  if (operand.kind === 'sketchDatum') {
+    return resolveSketchDatumPoint(operand.datum)
+  }
+
   if (operand.kind === 'projectedGeometry') {
     const projected = findProjectedGeometry(projectedReferences, operand.reference)
     return projected?.kind === 'point' ? projected.position : null
@@ -1128,12 +1151,17 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
 
     if (constraint.kind === 'coincidentProjectedPoint') {
       const point = pointRecords.get(constraint.point.pointId)
-      const projected = findProjectedGeometry(
-        options.projectedReferences ?? [],
-        constraint.projectedPoint.reference,
-      )
+      const targetPoint = constraint.projectedPoint.kind === 'projectedGeometry'
+        ? (() => {
+            const projected = findProjectedGeometry(
+              options.projectedReferences ?? [],
+              constraint.projectedPoint.reference,
+            )
+            return projected?.kind === 'point' ? projected.position : null
+          })()
+        : resolveSketchDatumPoint(constraint.projectedPoint.datum)
 
-      if (!point || !projected || projected.kind !== 'point') {
+      if (!point || !targetPoint) {
         continue
       }
 
@@ -1142,7 +1170,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         targetKind: 'constraint',
         parameterCount,
         evaluateResidual(values) {
-          return length(subtract(getPoint(values, point), projected.position))
+          return length(subtract(getPoint(values, point), targetPoint))
         },
       }))
       continue
@@ -1150,12 +1178,17 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
 
     if (constraint.kind === 'pointOnProjectedCurve') {
       const point = pointRecords.get(constraint.point.pointId)
-      const projected = findProjectedGeometry(
-        options.projectedReferences ?? [],
-        constraint.projectedCurve.reference,
-      )
+      const projected = constraint.projectedCurve.kind === 'projectedGeometry'
+        ? findProjectedGeometry(
+            options.projectedReferences ?? [],
+            constraint.projectedCurve.reference,
+          )
+        : null
+      const datumLine = constraint.projectedCurve.kind === 'sketchDatum'
+        ? resolveSketchDatumLine(constraint.projectedCurve.datum)
+        : null
 
-      if (!point || !projected) {
+      if (!point || (!projected && !datumLine)) {
         continue
       }
 
@@ -1164,7 +1197,9 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         targetKind: 'constraint',
         parameterCount,
         evaluateResidual(values) {
-          return pointOnProjectedCurveResidual(getPoint(values, point), projected)
+          return projected
+            ? pointOnProjectedCurveResidual(getPoint(values, point), projected)
+            : Math.abs(pointLineSignedDistance(getPoint(values, point), datumLine!.start, datumLine!.end))
         },
       }))
       continue
@@ -1194,16 +1229,23 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
 
     if (constraint.kind === 'midpointProjectedLine') {
       const point = pointRecords.get(constraint.point.pointId)
-      const projected = findProjectedGeometry(
-        options.projectedReferences ?? [],
-        constraint.projectedLine.reference,
-      )
+      const projectedLine = constraint.projectedLine.kind === 'projectedGeometry'
+        ? (() => {
+            const projected = findProjectedGeometry(
+              options.projectedReferences ?? [],
+              constraint.projectedLine.reference,
+            )
+            return projected?.kind === 'lineSegment'
+              ? { start: projected.startPosition, end: projected.endPosition }
+              : null
+          })()
+        : resolveSketchDatumLine(constraint.projectedLine.datum)
 
-      if (!point || !projected || projected.kind !== 'lineSegment') {
+      if (!point || !projectedLine) {
         continue
       }
 
-      const target = midpoint(projected.startPosition, projected.endPosition)
+      const target = midpoint(projectedLine.start, projectedLine.end)
       scalarConstraints.push(createNumericalScalarConstraint({
         id: constraint.constraintId,
         targetKind: 'constraint',
@@ -1239,17 +1281,24 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       || constraint.kind === 'perpendicularProjectedLine'
     ) {
       const line = lineEntityMap.get(constraint.line.entityId)
-      const projected = findProjectedGeometry(
-        options.projectedReferences ?? [],
-        constraint.projectedLine.reference,
-      )
-      if (!line || !projected || projected.kind !== 'lineSegment') {
+      const projectedLine = constraint.projectedLine.kind === 'projectedGeometry'
+        ? (() => {
+            const projected = findProjectedGeometry(
+              options.projectedReferences ?? [],
+              constraint.projectedLine.reference,
+            )
+            return projected?.kind === 'lineSegment'
+              ? { start: projected.startPosition, end: projected.endPosition }
+              : null
+          })()
+        : resolveSketchDatumLine(constraint.projectedLine.datum)
+      if (!line || !projectedLine) {
         continue
       }
 
       const start = pointRecords.get(line.startPointId)
       const end = pointRecords.get(line.endPointId)
-      const projectedUnit = unitVector(projected.startPosition, projected.endPosition)
+      const projectedUnit = unitVector(projectedLine.start, projectedLine.end)
       if (!start || !end || !projectedUnit) {
         continue
       }
@@ -1631,11 +1680,18 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
     if (constraint.kind === 'symmetricProjectedLine') {
       const first = pointRecords.get(constraint.pointIds[0])
       const second = pointRecords.get(constraint.pointIds[1])
-      const projected = findProjectedGeometry(
-        options.projectedReferences ?? [],
-        constraint.projectedLine.reference,
-      )
-      if (!first || !second || projected?.kind !== 'lineSegment') {
+      const projectedLine = constraint.projectedLine.kind === 'projectedGeometry'
+        ? (() => {
+            const projected = findProjectedGeometry(
+              options.projectedReferences ?? [],
+              constraint.projectedLine.reference,
+            )
+            return projected?.kind === 'lineSegment'
+              ? { start: projected.startPosition, end: projected.endPosition }
+              : null
+          })()
+        : resolveSketchDatumLine(constraint.projectedLine.datum)
+      if (!first || !second || !projectedLine) {
         continue
       }
 
@@ -1647,8 +1703,8 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           return symmetricResidual(
             getPoint(values, first),
             getPoint(values, second),
-            projected.startPosition,
-            projected.endPosition,
+            projectedLine.start,
+            projectedLine.end,
           )
         },
       }))
@@ -1764,6 +1820,33 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         evaluateResidual(values) {
           const circleLike = getLocalCircleLike(values, entity)
           return circleLike ? circleLike.radius * 2 - dimension.value : dimension.value
+        },
+      }))
+      continue
+    }
+
+    if (dimension.kind === 'pointDatumDistance') {
+      const point = pointRecords.get(dimension.point.pointId)
+      const datumPoint = resolveSketchDatumPoint(dimension.datum.datum)
+      if (!point || !datumPoint) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: dimension.dimensionId,
+        targetKind: 'dimension',
+        parameterCount,
+        evaluateResidual(values) {
+          const localPoint = getPoint(values, point)
+          if (dimension.axis === 'horizontal') {
+            return Math.abs(localPoint[0] - datumPoint[0]) - dimension.value
+          }
+
+          if (dimension.axis === 'vertical') {
+            return Math.abs(localPoint[1] - datumPoint[1]) - dimension.value
+          }
+
+          return length(subtract(localPoint, datumPoint)) - dimension.value
         },
       }))
       continue
@@ -1946,6 +2029,21 @@ function validateDefinition(
   const projectedTargetExists = (
     reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
   ) => findProjectedGeometry(projectedReferences, reference) !== null
+  const validateDatumConstraintTarget = (
+    constraintId: ConstraintId,
+    datum: 'origin' | 'xAxis' | 'yAxis',
+    expectedKinds: readonly ('origin' | 'axis')[],
+  ) => {
+    const actualKind = datum === 'origin' ? 'origin' : 'axis'
+    if (!expectedKinds.includes(actualKind)) {
+      diagnostics.push(makeDiagnostic(
+        'invalid-datum-constraint-target-kind',
+        'error',
+        `Constraint ${constraintId} targets datum ${datum}, which is not valid for this relationship.`,
+        { kind: 'constraint', constraintId },
+      ))
+    }
+  }
   const validateProjectedTarget = (
     constraintId: ConstraintId,
     reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
@@ -1977,6 +2075,21 @@ function validateDefinition(
         'error',
         `Constraint ${constraintId} targets projected geometry ${reference.referenceId}.${reference.geometryId}, but no valid projected geometry was provided.`,
         { kind: 'constraint', constraintId },
+      ))
+    }
+  }
+  const validateDatumDimensionTarget = (
+    dimensionId: DimensionId,
+    datum: 'origin' | 'xAxis' | 'yAxis',
+    expectedKinds: readonly ('origin' | 'axis')[],
+  ) => {
+    const actualKind = datum === 'origin' ? 'origin' : 'axis'
+    if (!expectedKinds.includes(actualKind)) {
+      diagnostics.push(makeDiagnostic(
+        'invalid-datum-dimension-target-kind',
+        'error',
+        `Dimension ${dimensionId} targets datum ${datum}, which is not valid for this dimension.`,
+        { kind: 'dimension', dimensionId },
       ))
     }
   }
@@ -2205,7 +2318,11 @@ function validateDefinition(
         if (!pointMap.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-coincident-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        validateProjectedTarget(constraint.constraintId, constraint.projectedPoint.reference, ['projectedPoint'])
+        if (constraint.projectedPoint.kind === 'projectedGeometry') {
+          validateProjectedTarget(constraint.constraintId, constraint.projectedPoint.reference, ['projectedPoint'])
+        } else {
+          validateDatumConstraintTarget(constraint.constraintId, constraint.projectedPoint.datum, ['origin'])
+        }
         break
       case 'midpoint': {
         const entity = entityMap.get(constraint.line.entityId)
@@ -2218,7 +2335,11 @@ function validateDefinition(
         if (!pointMap.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-projected-midpoint-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        if (constraint.projectedLine.kind === 'projectedGeometry') {
+          validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        } else {
+          validateDatumConstraintTarget(constraint.constraintId, constraint.projectedLine.datum, ['axis'])
+        }
         break
       case 'pointOnCurve': {
         const entity = entityMap.get(constraint.curve.entityId)
@@ -2235,12 +2356,16 @@ function validateDefinition(
         if (!pointMap.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-point-on-projected-curve-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
-          'projectedLineSegment',
-          'projectedCircle',
-          'projectedArc',
-          'projectedSpline',
-        ])
+        if (constraint.projectedCurve.kind === 'projectedGeometry') {
+          validateProjectedTarget(constraint.constraintId, constraint.projectedCurve.reference, [
+            'projectedLineSegment',
+            'projectedCircle',
+            'projectedArc',
+            'projectedSpline',
+          ])
+        } else {
+          validateDatumConstraintTarget(constraint.constraintId, constraint.projectedCurve.datum, ['axis'])
+        }
         break
       case 'parallelProjectedLine':
       case 'perpendicularProjectedLine': {
@@ -2248,7 +2373,11 @@ function validateDefinition(
         if (!entity || entity.kind !== 'lineSegment') {
           diagnostics.push(makeDiagnostic('missing-projected-line-local-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported line entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        if (constraint.projectedLine.kind === 'projectedGeometry') {
+          validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        } else {
+          validateDatumConstraintTarget(constraint.constraintId, constraint.projectedLine.datum, ['axis'])
+        }
         break
       }
       case 'tangentProjectedCurve': {
@@ -2342,7 +2471,11 @@ function validateDefinition(
         if (!constraint.pointIds.every((pointId) => pointMap.has(pointId))) {
           diagnostics.push(makeDiagnostic('missing-projected-symmetric-point', 'error', `Constraint ${constraint.constraintId} references missing symmetric points.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        if (constraint.projectedLine.kind === 'projectedGeometry') {
+          validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        } else {
+          validateDatumConstraintTarget(constraint.constraintId, constraint.projectedLine.datum, ['axis'])
+        }
         break
     }
   }
@@ -2366,6 +2499,12 @@ function validateDefinition(
         if (!dimension.pointIds.every((pointId) => pointMap.has(pointId))) {
           diagnostics.push(makeDiagnostic('missing-dimension-point', 'error', `Dimension ${dimension.dimensionId} references a missing point.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
         }
+        break
+      case 'pointDatumDistance':
+        if (!pointMap.has(dimension.point.pointId)) {
+          diagnostics.push(makeDiagnostic('missing-dimension-point', 'error', `Dimension ${dimension.dimensionId} references a missing point.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
+        }
+        validateDatumDimensionTarget(dimension.dimensionId, dimension.datum.datum, ['origin'])
         break
       case 'circleRadius':
         if (!entityMap.has(dimension.entityId)) {
@@ -2394,6 +2533,8 @@ function validateDefinition(
             if (!entity || entity.kind !== 'lineSegment') {
               diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
             }
+          } else if (line.kind === 'sketchDatum') {
+            validateDatumDimensionTarget(dimension.dimensionId, line.datum, ['axis'])
           } else {
             validateProjectedDimensionTarget(dimension.dimensionId, line.reference, ['projectedLineSegment'])
           }
@@ -2405,6 +2546,8 @@ function validateDefinition(
           if (!entity || entity.kind !== 'lineSegment') {
             diagnostics.push(makeDiagnostic('missing-dimension-entity', 'error', `Dimension ${dimension.dimensionId} references a missing line.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
           }
+        } else if (dimension.line.kind === 'sketchDatum') {
+          validateDatumDimensionTarget(dimension.dimensionId, dimension.line.datum, ['axis'])
         } else {
           validateProjectedDimensionTarget(dimension.dimensionId, dimension.line.reference, ['projectedLineSegment'])
         }
@@ -2412,6 +2555,8 @@ function validateDefinition(
           if (!pointMap.has(dimension.point.pointId)) {
             diagnostics.push(makeDiagnostic('missing-dimension-point', 'error', `Dimension ${dimension.dimensionId} references a missing point.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
           }
+        } else if (dimension.point.kind === 'sketchDatum') {
+          validateDatumDimensionTarget(dimension.dimensionId, dimension.point.datum, ['origin'])
         } else {
           validateProjectedDimensionTarget(dimension.dimensionId, dimension.point.reference, ['projectedPoint'])
         }
@@ -3167,6 +3312,19 @@ function buildDimensionStatuses(
       const start = entity ? pointRecords.get(entity.startPointId) : null
       const end = entity ? pointRecords.get(entity.endPointId) : null
       solvedValue = start && end ? length(subtract(getPoint(values, end), getPoint(values, start))) : null
+    } else if (dimension.kind === 'pointDatumDistance') {
+      const point = pointRecords.get(dimension.point.pointId)
+      const datumPoint = resolveSketchDatumPoint(dimension.datum.datum)
+      if (point && datumPoint) {
+        const localPoint = getPoint(values, point)
+        solvedValue = dimension.axis === 'horizontal'
+          ? Math.abs(localPoint[0] - datumPoint[0])
+          : dimension.axis === 'vertical'
+            ? Math.abs(localPoint[1] - datumPoint[1])
+            : length(subtract(localPoint, datumPoint))
+      } else {
+        solvedValue = null
+      }
     } else if (dimension.kind === 'lineDistance') {
       const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, projectedReferences)
       const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, projectedReferences)

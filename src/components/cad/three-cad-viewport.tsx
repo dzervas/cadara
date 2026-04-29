@@ -3333,7 +3333,13 @@ function collectProjectedSketchDisplayPointCandidates({
   return sketchDisplayRenderables.flatMap((renderable) => {
     const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
 
-    if (!geometryData || !renderable.target || renderable.target.kind !== 'sketchPoint' || !acceptsTarget(renderable.target)) {
+    if (
+      !geometryData
+      || !renderable.target
+      || (renderable.target.kind !== 'sketchPoint'
+        && !(renderable.target.kind === 'sketchDatumReference' && renderable.target.geometryKind === 'point'))
+      || !acceptsTarget(renderable.target)
+    ) {
       return []
     }
 
