@@ -1,0 +1,283 @@
+import type {
+  DocumentExportRequest,
+  DocumentExportResult,
+  DocumentExportSuccessResult,
+} from '@/contracts/modeling/export'
+import type {
+  BodyId,
+  DocumentId,
+  DocumentVariableId,
+  FeatureId,
+  PrimitiveRef,
+  RevisionId,
+  SketchId,
+} from '@/domain/editor/schema'
+import type {
+  CommitSketchRequest,
+  AddDocumentVariableRequest,
+  CreateFeatureRequest,
+  DeleteDocumentTargetRequest,
+  DeleteFeatureRequest,
+  DocumentFeatureCursor,
+  DocumentSnapshot,
+  EvaluatePreviewRequest,
+  EvaluatePreviewResponse,
+  ModelingDiagnostic,
+  MutationRevisionState,
+  PreviewFreshness,
+  RebuildResult,
+  RenameBodyRequest,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
+  ReorderFeatureRequest,
+  ResolvedReferenceRecord,
+  SetFeatureCursorRequest,
+  SnapshotMutationBasis,
+  UpdateFeatureRequest,
+  UpdateDocumentVariableRequest,
+} from '@/contracts/modeling/schema'
+import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
+import type { RenderExport } from '@/contracts/render/schema'
+import type {
+  SolveSketchRequest,
+  ValidateSketchRequest,
+  DeriveSketchRegionsRequest,
+  ProjectSketchExternalReferencesRequest,
+  ResolveSketchReferenceRequest,
+} from '@/contracts/solver/schema'
+import type { SketchSolverAdapter as SketchSolverBoundary } from '@/contracts/solver/adapter'
+import type { RequestId } from '@/contracts/shared/ids'
+import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+import type { LocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
+import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
+import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
+import type { DocumentRepositoryMetadata } from '@/domain/modeling/document-repository'
+import type { OperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
+import type { DocumentRepository } from '@/domain/modeling/document-repository'
+import type { AppResultAsync } from '@/contracts/errors'
+
+export interface ModelingService {
+  readonly currentDocumentId: DocumentId
+  readonly sketchSolver: SketchSolverService | null
+  subscribeToDocumentChanges(listener: (event: ModelingServiceDocumentChangeEvent) => void): () => void
+  getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
+  resetOperationHistory(): void
+  setViewportLodTier(tierId: OccTessellationTierId): boolean
+  getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
+  createNewDocument(): Promise<ModelingDocumentFileMutationResult>
+  importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
+  exportCurrentDocument(): Promise<DocumentExportSuccessResult>
+  bindLocalFile(input: {
+    handle: LocalFileSystemFileHandle
+    metadata: LocalFileBindingMetadata
+  }): Promise<ModelingDocumentFileMutationResult>
+  restoreLocalFileBinding(): Promise<LocalFileBindingMetadata | null>
+  getLocalFileSyncStatus(): Promise<DocumentSyncWriteStatus | null>
+  subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void): () => void
+  commitSketch(input: ModelingCommitSketchInput): AppResultAsync<ModelingCommitSketchResult>
+  projectSketchExternalReferences(
+    input: ModelingProjectSketchExternalReferencesInput,
+  ): Promise<import('@/contracts/solver/schema').ProjectSketchExternalReferencesResponse>
+  addDocumentVariable(input: ModelingAddDocumentVariableInput): AppResultAsync<ModelingDocumentVariableMutationResult>
+  updateDocumentVariable(input: ModelingUpdateDocumentVariableInput): AppResultAsync<ModelingDocumentVariableMutationResult>
+  createFeature(input: ModelingCreateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
+  updateFeature(input: ModelingUpdateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
+  deleteFeature(input: ModelingDeleteFeatureInput): AppResultAsync<ModelingDeleteFeatureResult>
+  deleteTarget(input: ModelingDeleteTargetInput): AppResultAsync<ModelingDeleteTargetResult>
+  renameBody(input: ModelingRenameBodyInput): AppResultAsync<ModelingRenameBodyResult>
+  reorderFeature(input: ModelingReorderFeatureInput): AppResultAsync<ModelingReorderFeatureResult>
+  reorderDocumentHistory(input: ModelingReorderDocumentHistoryInput): AppResultAsync<ModelingReorderDocumentHistoryResult>
+  setFeatureCursor(input: ModelingSetFeatureCursorInput): AppResultAsync<ModelingSetFeatureCursorResult>
+  evaluatePreview(input: ModelingEvaluatePreviewInput): Promise<ModelingPreviewResult>
+  exportDocument(input: ModelingExportDocumentInput): Promise<ModelingExportDocumentResult>
+  resolveReference(target: PrimitiveRef): Promise<ModelingResolvedReferenceResult>
+}
+
+export interface ModelingServiceOptions {
+  currentDocumentId: DocumentSnapshot['documentId']
+  sketchSolver?: SketchSolverBoundary
+  operationHistoryStore?: OperationHistoryStore | null
+  documentRepository?: DocumentRepository | null
+  documentRepositoryPersistence?: 'blocking' | 'background'
+}
+
+export interface ModelingServiceDocumentChangeEvent {
+  documentId: DocumentId
+  metadata: DocumentRepositoryMetadata
+}
+
+export interface ModelingHistoryRestoreDiagnostic {
+  reasonCode: string
+  message: string
+  entryIndex: number | null
+}
+
+export type ModelingHistoryRestoreState =
+  | { kind: 'pending'; entriesReplayed: number; diagnostics: [] }
+  | { kind: 'empty'; entriesReplayed: 0; diagnostics: [] }
+  | { kind: 'restored'; entriesReplayed: number; diagnostics: [] }
+  | { kind: 'failed'; entriesReplayed: number; diagnostics: ModelingHistoryRestoreDiagnostic[] }
+
+/**
+ * Explicit sketch-solver service facade exposed to editor/runtime code.
+ * This keeps Phase 3 solver behavior separate from the broader kernel service.
+ */
+export interface SketchSolverService {
+  solveSketch(input: Omit<SolveSketchRequest, 'contractVersion'>): ReturnType<SketchSolverBoundary['solveSketch']>
+  validateSketch(input: Omit<ValidateSketchRequest, 'contractVersion'>): ReturnType<SketchSolverBoundary['validateSketch']>
+  deriveSketchRegions(
+    input: Omit<DeriveSketchRegionsRequest, 'contractVersion'>,
+  ): ReturnType<SketchSolverBoundary['deriveSketchRegions']>
+  projectExternalReferences(
+    input: Omit<ProjectSketchExternalReferencesRequest, 'contractVersion'>,
+  ): ReturnType<SketchSolverBoundary['projectExternalReferences']>
+  resolveSketchReference(
+    input: Omit<ResolveSketchReferenceRequest, 'contractVersion'>,
+  ): ReturnType<SketchSolverBoundary['resolveSketchReference']>
+  createCommitCorrelation(requestId: RequestId): ModelingCommitSketchCorrelation
+}
+
+export interface ModelingFeatureMutationResult {
+  revisionId: DocumentSnapshot['revisionId']
+  featureId: FeatureId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingDeleteFeatureResult {
+  revisionId: DocumentSnapshot['revisionId']
+  deletedFeatureId: FeatureId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingDeleteTargetResult {
+  revisionId: DocumentSnapshot['revisionId']
+  deletedTarget: PrimitiveRef
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingRenameBodyResult {
+  revisionId: DocumentSnapshot['revisionId']
+  bodyId: BodyId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingReorderFeatureResult {
+  revisionId: DocumentSnapshot['revisionId']
+  featureId: FeatureId
+  beforeFeatureId: FeatureId | null
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingReorderDocumentHistoryResult {
+  revisionId: DocumentSnapshot['revisionId']
+  item: ReorderDocumentHistoryResponse['item']
+  beforeItem: ReorderDocumentHistoryResponse['beforeItem']
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingSetFeatureCursorResult {
+  revisionId: DocumentSnapshot['revisionId']
+  cursor: DocumentFeatureCursor
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingCommitSketchResult {
+  revisionId: DocumentSnapshot['revisionId']
+  sketchId: SketchId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingDocumentVariableMutationResult {
+  revisionId: DocumentSnapshot['revisionId']
+  variableId: DocumentVariableId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+type ModelingMutationBasisInput = Pick<SnapshotMutationBasis, 'baseRepositoryHeads'>
+
+export type ModelingCreateFeatureInput = Omit<CreateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingAddDocumentVariableInput = Omit<AddDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingDeleteTargetInput = Omit<DeleteDocumentTargetRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingRenameBodyInput = Omit<RenameBodyRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingReorderFeatureInput = Omit<ReorderFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingReorderDocumentHistoryInput =
+  Omit<ReorderDocumentHistoryRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingSetFeatureCursorInput =
+  Omit<SetFeatureCursorRequest, 'contractVersion' | 'documentId'> & {
+    persistHistory?: boolean
+  } & Partial<ModelingMutationBasisInput>
+export type ModelingExportDocumentInput = Omit<DocumentExportRequest, 'contractVersion' | 'documentId'>
+export type ModelingExportDocumentResult = DocumentExportResult
+
+export interface ModelingImportDocumentInput {
+  document: unknown
+  assets?: readonly GeometryAssetBlobInput[]
+}
+
+export type ModelingDocumentFileMutationResult =
+  | { ok: true; revisionId: RevisionId; diagnostics: ModelingDiagnostic[] }
+  | { ok: false; diagnostics: ModelingDiagnostic[] }
+
+export interface ModelingCommitSketchCorrelation {
+  requestId: RequestId
+  projectionRequestId: RequestId
+  validationRequestId: RequestId
+  solveRequestId: RequestId
+  regionRequestId: RequestId
+}
+
+export interface ModelingCommitSketchInput extends Omit<CommitSketchRequest, 'contractVersion' | 'documentId'>, Partial<ModelingMutationBasisInput> {
+  solverCorrelation: ModelingCommitSketchCorrelation | null
+}
+export type ModelingEvaluatePreviewInput = Omit<
+  EvaluatePreviewRequest,
+  'contractVersion' | 'documentId'
+>
+export type ModelingProjectSketchExternalReferencesInput = Omit<
+  ProjectSketchExternalReferencesRequest,
+  'contractVersion' | 'documentId'
+>
+
+export interface ModelingPreviewResult {
+  revisionId: DocumentSnapshot['revisionId']
+  previewId: EvaluatePreviewResponse['previewId']
+  renderables: RenderExport['records']
+  freshness: PreviewFreshness
+  stale: boolean
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingResolvedReferenceResult {
+  resolution: ResolvedReferenceRecord
+  diagnostics: ModelingDiagnostic[]
+}
