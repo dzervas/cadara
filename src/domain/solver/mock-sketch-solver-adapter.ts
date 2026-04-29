@@ -386,7 +386,13 @@ function validateDefinition(
         if (!points.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-coincident-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        if (!referenceIds.has(constraint.projectedPoint.reference.referenceId) || !findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)) {
+        if (
+          constraint.projectedPoint.kind === 'projectedGeometry'
+          && (
+            !referenceIds.has(constraint.projectedPoint.reference.referenceId)
+            || !findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+          )
+        ) {
           diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
@@ -394,18 +400,32 @@ function validateDefinition(
         if (!points.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-point-on-projected-curve-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        if (!referenceIds.has(constraint.projectedCurve.reference.referenceId) || !findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)) {
+        if (
+          constraint.projectedCurve.kind === 'projectedGeometry'
+          && (
+            !referenceIds.has(constraint.projectedCurve.reference.referenceId)
+            || !findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
+          )
+        ) {
           diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
       case 'parallelProjectedLine':
       case 'perpendicularProjectedLine': {
         const entity = entities.get(constraint.line.entityId)
-        const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+        const projected = constraint.projectedLine.kind === 'projectedGeometry'
+          ? findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+          : null
         if (!entity || entity.kind !== 'lineSegment') {
           diagnostics.push(makeDiagnostic('missing-projected-line-local-entity', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported line entity.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
-        if (!referenceIds.has(constraint.projectedLine.reference.referenceId) || projected?.kind !== 'lineSegment') {
+        if (
+          constraint.projectedLine.kind === 'projectedGeometry'
+          && (
+            !referenceIds.has(constraint.projectedLine.reference.referenceId)
+            || projected?.kind !== 'lineSegment'
+          )
+        ) {
           diagnostics.push(makeDiagnostic('missing-projected-constraint-target', 'error', `Constraint ${constraint.constraintId} targets missing projected line geometry.`, { kind: 'constraint', constraintId: constraint.constraintId }))
         }
         break
@@ -725,12 +745,22 @@ function solveDefinition(
       }
       case 'coincidentProjectedPoint': {
         const point = points.get(constraint.point.pointId)
-        const projected = findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+        const projected = constraint.projectedPoint.kind === 'projectedGeometry'
+          ? findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+          : null
+        const datumPoint = constraint.projectedPoint.kind === 'sketchDatum' && constraint.projectedPoint.datum === 'origin'
+          ? ([0, 0] as const)
+          : null
         return {
           constraintId: constraint.constraintId,
-          status: point && projected?.kind === 'point'
-            ? samePoint(point.position, projected.position, 1e-9) ? 'satisfied' : 'unsatisfied'
-            : 'conflicting',
+          status: point && (
+            (projected?.kind === 'point' && samePoint(point.position, projected.position, 1e-9))
+            || (datumPoint !== null && samePoint(point.position, datumPoint, 1e-9))
+          )
+            ? 'satisfied'
+            : point && (projected?.kind === 'point' || datumPoint !== null)
+              ? 'unsatisfied'
+              : 'conflicting',
         } as const
       }
       case 'pointOnProjectedCurve':

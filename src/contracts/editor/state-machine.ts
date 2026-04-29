@@ -1884,7 +1884,12 @@ function createPreviewFailedDiagnostics(
 }
 
 function getDurableDiagnosticTarget(target: PrimitiveRef | null): DurableRef | null {
-  if (!target || target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchExternalReference') {
+  if (
+    !target
+    || target.kind === 'projectedReferenceGeometry'
+    || target.kind === 'sketchDatumReference'
+    || target.kind === 'sketchExternalReference'
+  ) {
     return null
   }
 

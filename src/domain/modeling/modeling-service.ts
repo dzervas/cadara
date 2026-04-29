@@ -156,6 +156,9 @@ import type {
   ConstraintDefinition,
   DimensionStatusRecord,
   DimensionDefinition,
+  ProjectedSketchGeometryConstraintOperand,
+  ReadOnlySketchCurveConstraintOperand,
+  ReadOnlySketchPointConstraintOperand,
   RegionRecord,
   SketchPoint2D,
   SketchReferenceDefinition,
@@ -695,7 +698,11 @@ function assertPrimitiveRef(value: unknown): PrimitiveRef {
 function assertDurableRef(value: unknown): DurableRef {
   const target = assertPrimitiveRef(value)
 
-  if (target.kind === 'projectedReferenceGeometry' || target.kind === 'sketchExternalReference') {
+  if (
+    target.kind === 'projectedReferenceGeometry'
+    || target.kind === 'sketchDatumReference'
+    || target.kind === 'sketchExternalReference'
+  ) {
     throw new Error('Invalid durable reference payload.')
   }
 
@@ -2987,7 +2994,7 @@ function normalizeLocalEntityConstraintOperand(
 
 function normalizeProjectedGeometryConstraintOperand(
   value: Record<string, unknown>,
-): Extract<ConstraintDefinition, { kind: 'coincidentProjectedPoint' }>['projectedPoint'] {
+): ProjectedSketchGeometryConstraintOperand {
   if (!isRecord(value.reference) || value.kind !== 'projectedGeometry') {
     throw new Error('Invalid projected geometry constraint operand payload.')
   }
@@ -3018,6 +3025,48 @@ function normalizeProjectedGeometryConstraintOperand(
   }
 }
 
+function normalizeReadOnlySketchPointConstraintOperand(
+  value: unknown,
+): ReadOnlySketchPointConstraintOperand {
+  if (!isRecord(value)) {
+    throw new Error('Invalid sketch point operand payload.')
+  }
+
+  if (value.kind === 'sketchDatum') {
+    if (value.datum !== 'origin' && value.datum !== 'xAxis' && value.datum !== 'yAxis') {
+      throw new Error('Invalid sketch datum constraint operand payload.')
+    }
+
+    return {
+      kind: 'sketchDatum',
+      datum: value.datum,
+    }
+  }
+
+  return normalizeProjectedGeometryConstraintOperand(value)
+}
+
+function normalizeReadOnlySketchCurveConstraintOperand(
+  value: unknown,
+): ReadOnlySketchCurveConstraintOperand {
+  if (!isRecord(value)) {
+    throw new Error('Invalid sketch curve operand payload.')
+  }
+
+  if (value.kind === 'sketchDatum') {
+    if (value.datum !== 'origin' && value.datum !== 'xAxis' && value.datum !== 'yAxis') {
+      throw new Error('Invalid sketch datum constraint operand payload.')
+    }
+
+    return {
+      kind: 'sketchDatum',
+      datum: value.datum,
+    }
+  }
+
+  return normalizeProjectedGeometryConstraintOperand(value)
+}
+
 function normalizeSketchCurveConstraintOperand(
   value: unknown,
 ): Extract<DimensionDefinition, { kind: 'lineDistance' }>['lines'][number] {
@@ -3027,7 +3076,7 @@ function normalizeSketchCurveConstraintOperand(
 
   return value.kind === 'localEntity'
     ? normalizeLocalEntityConstraintOperand(value)
-    : normalizeProjectedGeometryConstraintOperand(value)
+    : normalizeReadOnlySketchCurveConstraintOperand(value)
 }
 
 function normalizeSketchPointConstraintOperand(
@@ -3039,7 +3088,7 @@ function normalizeSketchPointConstraintOperand(
 
   return value.kind === 'localPoint'
     ? normalizeLocalPointConstraintOperand(value)
-    : normalizeProjectedGeometryConstraintOperand(value)
+    : normalizeReadOnlySketchPointConstraintOperand(value)
 }
 
 function normalizeDimensionLineAnnotationPlacement(

@@ -4,6 +4,7 @@ import type {
   DimensionAnnotationPlacement,
   DimensionLineAnnotationPlacement,
   ProjectedSketchGeometryRef,
+  ReadOnlySketchCurveConstraintOperand,
   SketchDatumConstraintOperand,
   SketchCurveConstraintOperand,
   SketchPointConstraintOperand,
@@ -155,20 +156,12 @@ function selectedLocalCircleLike(targets: readonly SketchConstraintTargetRecord[
   return targets.find((target) => target.entity?.kind === 'circle' || target.entity?.kind === 'arc') ?? null
 }
 
-function selectedDatumPoint(targets: readonly SketchConstraintTargetRecord[]) {
-  return targets.find((target) => target.datum?.reference.datumId === 'origin') ?? null
-}
-
 function selectedReferenceLineTarget(targets: readonly SketchConstraintTargetRecord[]) {
   return targets.find((target) =>
     target.projected?.geometry.kind === 'lineSegment'
     || target.datum?.reference.datumId === 'xAxis'
     || target.datum?.reference.datumId === 'yAxis',
   ) ?? null
-}
-
-function selectedProjectedLine(targets: readonly SketchConstraintTargetRecord[]) {
-  return targets.find((target) => target.projected?.geometry.kind === 'lineSegment')?.projected ?? null
 }
 
 function selectedProjectedCircleLike(targets: readonly SketchConstraintTargetRecord[]) {
@@ -498,6 +491,18 @@ function lineDimensionOperand(target: SketchConstraintTargetRecord): SketchCurve
     }
   }
 
+  if (target.projected?.geometry.kind === 'lineSegment') {
+    return projectedOperand(target.projected)
+  }
+
+  if (target.datum && target.datum.reference.geometryKind === 'lineSegment') {
+    return datumOperand(target.datum)
+  }
+
+  return null
+}
+
+function readOnlyLineOperand(target: SketchConstraintTargetRecord): ReadOnlySketchCurveConstraintOperand | null {
   if (target.projected?.geometry.kind === 'lineSegment') {
     return projectedOperand(target.projected)
   }
@@ -1319,7 +1324,7 @@ const sketchConstraintDefinitions = [
                 kind: 'parallelProjectedLine',
                 label: `Parallel ${input.sequence}`,
                 line,
-                projectedLine: lineDimensionOperand(referenceLineTarget)!,
+                projectedLine: readOnlyLineOperand(referenceLineTarget)!,
               }
             : null
         },
@@ -1373,7 +1378,7 @@ const sketchConstraintDefinitions = [
                 kind: 'perpendicularProjectedLine',
                 label: `Perpendicular ${input.sequence}`,
                 line,
-                projectedLine: lineDimensionOperand(referenceLineTarget)!,
+                projectedLine: readOnlyLineOperand(referenceLineTarget)!,
               }
             : null
         },
@@ -1650,7 +1655,7 @@ const sketchConstraintDefinitions = [
               kind: 'midpointProjectedLine',
               label: `Midpoint ${input.sequence}`,
               point: pointOperand,
-              projectedLine: lineDimensionOperand(referenceLineTarget)!,
+              projectedLine: readOnlyLineOperand(referenceLineTarget)!,
             }
           : null,
       })
@@ -1828,7 +1833,7 @@ const sketchConstraintDefinitions = [
               kind: 'symmetricProjectedLine',
               label: `Symmetric ${input.sequence}`,
               pointIds,
-              projectedLine: lineDimensionOperand(referenceLineTarget)!,
+              projectedLine: readOnlyLineOperand(referenceLineTarget)!,
             }
           : null,
       })

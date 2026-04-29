@@ -2,6 +2,7 @@ import type {
   ConstraintDefinition,
   DimensionAnnotationPlacement,
   DimensionDefinition,
+  ProjectedSketchGeometryConstraintOperand,
   ProjectedSketchGeometryRef,
   RegionLoopRecord,
   RegionRecord,
@@ -4836,7 +4837,7 @@ function projectedKindForSource(source: Extract<SketchSnapSourceRef, { kind: 'pr
 
 function projectedOperandFromSource(
   source: Extract<SketchSnapSourceRef, { kind: 'projectedGeometry' }>,
-): Extract<ConstraintDefinition, { kind: 'pointOnProjectedCurve' }>['projectedCurve'] {
+): ProjectedSketchGeometryConstraintOperand {
   return {
     kind: 'projectedGeometry',
     reference: {
@@ -6765,6 +6766,10 @@ function updateAnnotationValueInDefinition(
       case 'arcStartPointCoincident':
       case 'arcEndPointCoincident':
         return dimension
+      default: {
+        const exhaustive: never = dimension
+        return exhaustive
+      }
     }
   })
   const edited = dimensions.some((dimension, index) => dimension !== definition.dimensions[index])
@@ -6816,6 +6821,7 @@ function updateDimensionAnnotationPlacementInDefinition(
 
     switch (dimension.kind) {
       case 'distance':
+      case 'pointDatumDistance':
       case 'horizontalDistance':
       case 'verticalDistance':
       case 'circleRadius':
@@ -6927,6 +6933,10 @@ function inferCommittedDimensionAnnotationPlacement(
     case 'arcStartPointCoincident':
     case 'arcEndPointCoincident':
       return null
+    default: {
+      const exhaustive: never = dimension
+      return exhaustive
+    }
   }
 }
 
@@ -7005,6 +7015,7 @@ function getEditableAnnotationValue(
 
   switch (dimension.kind) {
     case 'distance':
+    case 'pointDatumDistance':
       return {
         label: dimension.axis === 'horizontal'
           ? 'Horizontal distance'
@@ -8215,15 +8226,6 @@ function createProjectedPrimitiveRef(
   }
 }
 
-function createDatumPrimitiveRef(datum: 'origin' | 'xAxis' | 'yAxis'): PrimitiveRef {
-  return {
-    kind: 'sketchDatumReference',
-    sketchId: 'sketch_draft' as SketchId,
-    datumId: datum,
-    geometryKind: datum === 'origin' ? 'point' : 'lineSegment',
-  }
-}
-
 function createReferencePrimitiveRef(
   operand: {
     kind: string
@@ -8324,8 +8326,9 @@ function getReferenceLineGeometry(
   }
 
   if (operand.kind === 'projectedGeometry' && operand.reference) {
-    const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === operand.reference.referenceId)
-    const geometry = projectedReference?.geometry.find((entry) => entry.geometryId === operand.reference?.geometryId)
+    const reference = operand.reference
+    const projectedReference = session.projectedReferences.find((entry) => entry.referenceId === reference.referenceId)
+    const geometry = projectedReference?.geometry.find((entry) => entry.geometryId === reference.geometryId)
     return geometry?.kind === 'lineSegment'
       ? { start: geometry.startPosition, end: geometry.endPosition }
       : null

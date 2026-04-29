@@ -9,6 +9,7 @@ services:
     volumes:
       - .:/app
       - .codex/container:/root/.codex
+      - $HOME/.config/git/ignore:/root/.config/git/ignore:ro
 
   frontend:
     build: .

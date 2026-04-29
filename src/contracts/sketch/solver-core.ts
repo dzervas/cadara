@@ -3158,8 +3158,13 @@ function buildConstraintStatuses(
       status = point && line ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied' : 'conflicting'
     } else if (constraint.kind === 'midpointProjectedLine') {
       const point = pointRecords.get(constraint.point.pointId)
-      const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
-      status = point && projected?.kind === 'lineSegment'
+      const projected = constraint.projectedLine.kind === 'projectedGeometry'
+        ? findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+        : null
+      status = point && (
+        projected?.kind === 'lineSegment'
+        || constraint.projectedLine.kind === 'sketchDatum'
+      )
         ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'pointOnCurve') {
@@ -3170,20 +3175,35 @@ function buildConstraintStatuses(
         : 'conflicting'
     } else if (constraint.kind === 'coincidentProjectedPoint') {
       const point = pointRecords.get(constraint.point.pointId)
-      const projected = findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
-      status = point && projected?.kind === 'point'
+      const projected = constraint.projectedPoint.kind === 'projectedGeometry'
+        ? findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+        : null
+      status = point && (
+        projected?.kind === 'point'
+        || constraint.projectedPoint.kind === 'sketchDatum'
+      )
         ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'pointOnProjectedCurve') {
       const point = pointRecords.get(constraint.point.pointId)
-      const projected = findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
-      status = point && projected !== null
+      const projected = constraint.projectedCurve.kind === 'projectedGeometry'
+        ? findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
+        : null
+      status = point && (
+        projected !== null
+        || constraint.projectedCurve.kind === 'sketchDatum'
+      )
         ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'parallelProjectedLine' || constraint.kind === 'perpendicularProjectedLine') {
       const line = lineEntityMap.get(constraint.line.entityId)
-      const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
-      status = line && projected?.kind === 'lineSegment'
+      const projected = constraint.projectedLine.kind === 'projectedGeometry'
+        ? findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+        : null
+      status = line && (
+        projected?.kind === 'lineSegment'
+        || constraint.projectedLine.kind === 'sketchDatum'
+      )
         ? residual <= tolerance.angleRadians * tolerance.angleRadians ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'tangentProjectedCurve') {
@@ -3242,8 +3262,13 @@ function buildConstraintStatuses(
     } else if (constraint.kind === 'symmetricProjectedLine') {
       const first = pointRecords.get(constraint.pointIds[0])
       const second = pointRecords.get(constraint.pointIds[1])
-      const projected = findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
-      status = first && second && projected?.kind === 'lineSegment'
+      const projected = constraint.projectedLine.kind === 'projectedGeometry'
+        ? findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+        : null
+      status = first && second && (
+        projected?.kind === 'lineSegment'
+        || constraint.projectedLine.kind === 'sketchDatum'
+      )
         ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (residual > tolerance.coincidence * tolerance.coincidence) {
