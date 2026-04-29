@@ -25,6 +25,8 @@ export const toolIconAssetFileNames: Record<ToolIconId, string> = {
   constraintPerpendicular: 'sketch-perpendicular.svg',
   constraintTangent: 'sketch-tangent.svg',
   constraintEqual: 'sketch-equal.svg',
+  constraintHorizontal: 'sketch-horizontal.svg',
+  constraintVertical: 'sketch-vertical.svg',
   constraintConcentric: 'sketch-concentric.svg',
   constraintMidpoint: 'sketch-midpoint.svg',
   constraintNormal: 'sketch-normal.svg',

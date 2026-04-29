@@ -4784,6 +4784,81 @@ function getPatchPointIdsAtPosition(
     .map((candidate) => candidate.pointId)
 }
 
+function resolveReusableLocalSnapPointId(input: {
+  previousDefinition: SketchDefinition
+  candidate: SketchSnapCandidate | null
+}): SketchPointId | null {
+  const { candidate, previousDefinition } = input
+  if (!candidate || candidate.kind !== 'endpoint') {
+    return null
+  }
+
+  for (const source of candidate.sources) {
+    if (source.kind === 'localPoint') {
+      return source.pointId
+    }
+
+    if (source.kind === 'localEntity') {
+      const pointId = getEntityEndpointAtPoint(previousDefinition, source.entityId, candidate.point)
+      if (pointId) {
+        return pointId
+      }
+    }
+  }
+
+  return null
+}
+
+function normalizeLinePatchEndpointReuse(input: {
+  previousDefinition: SketchDefinition
+  patch: SketchToolCommitContribution
+  startSnap: SketchSnapCandidate | null
+  endSnap: SketchSnapCandidate | null
+}): SketchToolCommitContribution {
+  const lineEntity = input.patch.entities.find((entity) => entity.kind === 'lineSegment')
+  if (!lineEntity) {
+    return input.patch
+  }
+
+  const replacements = new Map<SketchPointId, SketchPointId>()
+  const startPointId = resolveReusableLocalSnapPointId({
+    previousDefinition: input.previousDefinition,
+    candidate: input.startSnap,
+  })
+  const endPointId = resolveReusableLocalSnapPointId({
+    previousDefinition: input.previousDefinition,
+    candidate: input.endSnap,
+  })
+
+  if (startPointId && startPointId !== lineEntity.startPointId) {
+    replacements.set(lineEntity.startPointId, startPointId)
+  }
+
+  if (endPointId && endPointId !== lineEntity.endPointId) {
+    replacements.set(lineEntity.endPointId, endPointId)
+  }
+
+  if (replacements.size === 0) {
+    return input.patch
+  }
+
+  return {
+    ...input.patch,
+    points: input.patch.points.filter((point) => !replacements.has(point.pointId)),
+    entities: input.patch.entities.map((entity) => {
+      if (entity.kind !== 'lineSegment') {
+        return entity
+      }
+
+      return {
+        ...entity,
+        startPointId: replacements.get(entity.startPointId) ?? entity.startPointId,
+        endPointId: replacements.get(entity.endPointId) ?? entity.endPointId,
+      }
+    }),
+  }
+}
+
 function getPatchLineEntityId(patch: SketchToolCommitContribution): SketchEntityId | null {
   return patch.entities.find((entity) => entity.kind === 'lineSegment')?.entityId ?? null
 }
@@ -5109,7 +5184,15 @@ function appendInferredSnapConstraints(input: {
   sequence: number
   createConstraintId: (suffix: string) => ConstraintId
 }): SketchToolCommitContribution {
-  const constraints = [...(input.patch.constraints ?? [])]
+  const patch = input.activeTool === 'line'
+    ? normalizeLinePatchEndpointReuse({
+        previousDefinition: input.previousDefinition,
+        patch: input.patch,
+        startSnap: input.startSnap,
+        endSnap: input.endSnap,
+      })
+    : input.patch
+  const constraints = [...(patch.constraints ?? [])]
 
   for (const [snapRole, snap] of [
     ['start', input.startSnap],
@@ -5119,10 +5202,10 @@ function appendInferredSnapConstraints(input: {
       continue
     }
 
-    for (const pointId of getPatchPointIdsAtPosition(input.patch, snap.point)) {
+    for (const pointId of getPatchPointIdsAtPosition(patch, snap.point)) {
       constraints.push(...inferPointSnapConstraints({
         previousDefinition: input.previousDefinition,
-        patch: input.patch,
+        patch,
         candidate: snap,
         snapRole,
         pointId,
@@ -5133,9 +5216,9 @@ function appendInferredSnapConstraints(input: {
   }
 
   if (input.activeTool === 'line') {
-    const endPointId = input.patch.entities.find((entity) => entity.kind === 'lineSegment')?.endPointId ?? null
+    const endPointId = patch.entities.find((entity) => entity.kind === 'lineSegment')?.endPointId ?? null
     constraints.push(...inferLineSnapConstraints({
-      patch: input.patch,
+      patch,
       candidate: input.endSnap,
       endPointId,
       sequence: input.sequence,
@@ -5145,10 +5228,10 @@ function appendInferredSnapConstraints(input: {
 
   const uniqueConstraints = dedupeConstraints(constraints)
 
-  return uniqueConstraints.length === (input.patch.constraints ?? []).length
-    ? input.patch
+  return uniqueConstraints.length === (patch.constraints ?? []).length
+    ? patch
     : {
-        ...input.patch,
+        ...patch,
         constraints: uniqueConstraints,
       }
 }
@@ -5674,7 +5757,13 @@ export function selectSketchConstraintTarget(
   const resolved = resolveSketchConstraintTarget(authoring.toolId, session.definition, target, session.projectedReferences)
 
   if (!resolved) {
-    return session
+    const validationMessage = `${definition.metadata.name} needs the supported target combination.`
+
+    return {
+      ...session,
+      validationMessage,
+      toolPresentation: buildConstraintToolPresentation(authoring, validationMessage),
+    }
   }
 
   if (authoring.selectedTargets.some((entry) => getTargetKey(entry.target) === getTargetKey(resolved.target))) {
@@ -5692,6 +5781,7 @@ export function selectSketchConstraintTarget(
   const nextSession: SketchSessionState = {
     ...session,
     status: readyForValue ? 'awaitingValue' : 'collectingTargets',
+    validationMessage: null,
     toolPresentation: buildConstraintToolPresentation({
       ...authoring,
       selectedTargets: nextTargets,

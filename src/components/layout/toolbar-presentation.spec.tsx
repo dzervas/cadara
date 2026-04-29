@@ -105,6 +105,8 @@ test('tool icon assets stay centralized outside toolbar, sidebar, and history co
     constraintPerpendicular: 'sketch-perpendicular.svg',
     constraintTangent: 'sketch-tangent.svg',
     constraintEqual: 'sketch-equal.svg',
+    constraintHorizontal: 'sketch-horizontal.svg',
+    constraintVertical: 'sketch-vertical.svg',
     constraintConcentric: 'sketch-concentric.svg',
     constraintMidpoint: 'sketch-midpoint.svg',
     constraintNormal: 'sketch-normal.svg',

@@ -175,6 +175,64 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   assert(remainingAnchors[0]?.anchorId === anchorIds[1], 'Removing a panel-selected anchor should remove the chosen anchor instead of a different one.')
 })
 
+test('src/domain/reference-image-calibration/mode/definition.spec.ts allocates a fresh anchor id after removing an earlier anchor', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const operationTarget = getOperationTarget(createEditingSketchState())
+  let state = transitionEditorState(createEditingSketchState(), {
+    type: 'sketch.specialModeEntered',
+    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+    operationId: operationTarget.operationId,
+  }).state
+
+  for (const point of [[-40, 0], [40, 0]] as const) {
+    state = transitionEditorState(state, {
+      type: 'sketch.specialModePanelActionInvoked',
+      action: { kind: 'invoke', actionId: 'add-anchor' },
+    }).state
+    state = transitionEditorState(state, {
+      type: 'sketch.specialModeClickRequested',
+      point,
+      target: operationTarget,
+    }).state
+  }
+
+  const originalAnchorIds = getModeState(state).draftState.calibration.anchors.map((anchor) => anchor.anchorId)
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: {
+      kind: 'patch',
+      patch: {
+        field: 'selectedAnchorId',
+        value: originalAnchorIds[0]!,
+      },
+    },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: { kind: 'invoke', actionId: 'remove-anchor' },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: { kind: 'invoke', actionId: 'add-anchor' },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModeClickRequested',
+    point: [0, 20],
+    target: operationTarget,
+  }).state
+
+  const nextAnchorIds = getModeState(state).draftState.calibration.anchors.map((anchor) => anchor.anchorId)
+  assert(nextAnchorIds.length === 2, 'The replacement fixture should still contain two anchors after remove-and-add.')
+  assert(new Set(nextAnchorIds).size === nextAnchorIds.length, 'Remove-and-add should not reuse an anchor id that is still present.')
+  assert(nextAnchorIds.includes(originalAnchorIds[1]!), 'Remove-and-add should preserve the untouched anchor id.')
+  assert(!nextAnchorIds.includes(originalAnchorIds[0]!), 'Remove-and-add should not resurrect the removed anchor id when a newer anchor already exists.')
+})
+
 test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -263,4 +321,91 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
   assert(reboundAnchor?.pointId === 'sketch_point_anchor', 'Rebinding should target the explicitly selected sketch point.')
   assert(reboundAnchor?.pointId !== initialBinding, 'Rebinding should replace the previous construction-point binding.')
+})
+
+test('src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode prioritizes the clicked sketch point over anchor hit-testing', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const baseState = createEditingSketchState()
+  const stateWithOverlappingPoint: SketchEditorState = {
+    ...baseState,
+    session: {
+      ...baseState.session,
+      definition: {
+        ...baseState.session.definition,
+        pointIds: [...baseState.session.definition.pointIds, 'sketch_point_overlap'],
+        points: [
+          ...baseState.session.definition.points,
+          {
+            pointId: 'sketch_point_overlap',
+            label: 'Overlap point',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_overlap' },
+            position: [0, 0],
+            isConstruction: true,
+          },
+        ],
+      },
+      fullDefinition: {
+        ...baseState.session.fullDefinition,
+        pointIds: [...baseState.session.fullDefinition.pointIds, 'sketch_point_overlap'],
+        points: [
+          ...baseState.session.fullDefinition.points,
+          {
+            pointId: 'sketch_point_overlap',
+            label: 'Overlap point',
+            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_overlap' },
+            position: [0, 0],
+            isConstruction: true,
+          },
+        ],
+      },
+    },
+  }
+
+  const operationTarget = getOperationTarget(stateWithOverlappingPoint)
+  let state = transitionEditorState(stateWithOverlappingPoint, {
+    type: 'sketch.specialModeEntered',
+    modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+    operationId: operationTarget.operationId,
+  }).state
+
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: { kind: 'invoke', actionId: 'add-anchor' },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModeClickRequested',
+    point: [0, 0],
+    target: operationTarget,
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: {
+      kind: 'patch',
+      patch: {
+        field: 'selectedAnchorId',
+        value: getModeState(state).draftState.calibration.anchors[0]?.anchorId,
+      },
+    },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModePanelActionInvoked',
+    action: { kind: 'invoke', actionId: 'rebind-anchor' },
+  }).state
+  state = transitionEditorState(state, {
+    type: 'sketch.specialModeClickRequested',
+    point: [0, 0],
+    target: {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: 'sketch_point_overlap',
+    },
+  }).state
+
+  const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
+  assert(reboundAnchor?.pointId === 'sketch_point_overlap', 'Rebind mode should honor the clicked sketch point even when it overlaps the anchor handle.')
 })

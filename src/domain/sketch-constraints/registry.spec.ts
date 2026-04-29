@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 import {
   beginSketchAnnotationEdit,
   beginSketchTool,
+  createNewSketchSession,
   createNewSketchSessionFromSupport,
   deleteSelectedSketchAnnotation,
   getSketchAnnotationDescriptors,
@@ -16,12 +17,14 @@ import {
   updateSketchReferenceProjection,
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
+import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { toolIconAssetFileNames } from '@/domain/tools/tool-icons'
 import {
   getRegisteredSketchConstraintDefinitions,
   selectPointToPointDimensionReference,
 } from '@/domain/sketch-constraints/registry'
 import { getToolById, getToolbarSectionsForMode } from '@/domain/tools/tool-registry'
+import { mapSketchPointToWorkspaceWorld } from '@/domain/workspace/sketch-plane-mapping'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 
 test('src/domain/sketch-constraints/registry.spec.ts', async () => {
@@ -119,6 +122,8 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
     )
 
     const newConstraintTools = {
+      constraintHorizontal: 'sketch-horizontal.svg',
+      constraintVertical: 'sketch-vertical.svg',
       constraintConcentric: 'sketch-concentric.svg',
       constraintMidpoint: 'sketch-midpoint.svg',
       constraintNormal: 'sketch-normal.svg',
@@ -142,6 +147,166 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
       assert(!partToolIds.includes(tool.id), `${toolId} should not be exposed in part mode.`)
       assert(registeredConstraintIds.has(tool.id), `${toolId} should have sketch constraint behavior registered.`)
     }
+  }
+
+  function testHorizontalAndVerticalAuthoringCommitDurableConstraints() {
+    let horizontalSession = createSessionWithTwoLines()
+    const [horizontalLineId] = horizontalSession.definition.entityIds
+    assert(horizontalLineId, 'Expected a local line for horizontal authoring.')
+
+    horizontalSession = beginSketchTool(horizontalSession, 'constraintHorizontal')
+    horizontalSession = selectSketchConstraintTarget(horizontalSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: horizontalLineId,
+    })
+
+    const horizontalConstraint = horizontalSession.definition.constraints.at(-1)
+    assert(horizontalConstraint?.kind === 'horizontal', 'Horizontal should commit a durable horizontal constraint.')
+    assert(horizontalConstraint.entityId === horizontalLineId, 'Horizontal should target the selected line entity.')
+    assert(horizontalSession.definition.dimensions.length === 0, 'Horizontal should not append a dimension record.')
+    assert(
+      getSketchAnnotationDescriptors(horizontalSession).some((entry) => entry.glyphKind === 'constraintHorizontal'),
+      'Horizontal constraints should expose the horizontal glyph in committed annotations.',
+    )
+
+    let verticalSession = createSessionWithTwoLines()
+    const [, verticalLineId] = verticalSession.definition.entityIds
+    assert(verticalLineId, 'Expected a second local line for vertical authoring.')
+
+    verticalSession = beginSketchTool(verticalSession, 'constraintVertical')
+    verticalSession = selectSketchConstraintTarget(verticalSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: verticalLineId,
+    })
+
+    const verticalConstraint = verticalSession.definition.constraints.at(-1)
+    assert(verticalConstraint?.kind === 'vertical', 'Vertical should commit a durable vertical constraint.')
+    assert(verticalConstraint.entityId === verticalLineId, 'Vertical should target the selected line entity.')
+    assert(verticalSession.definition.dimensions.length === 0, 'Vertical should not append a dimension record.')
+    assert(
+      getSketchAnnotationDescriptors(verticalSession).some((entry) => entry.glyphKind === 'constraintVertical'),
+      'Vertical constraints should expose the vertical glyph in committed annotations.',
+    )
+  }
+
+  function testHorizontalAndVerticalRejectUnsupportedTargets() {
+    let session = createSessionWithLineAndCircle()
+    const circle = session.definition.entities.find((entity) => entity.kind === 'circle')
+    assert(circle?.kind === 'circle', 'Expected a circle target for unsupported constraint picks.')
+    const initialConstraintCount = session.definition.constraints.length
+    const initialDimensionCount = session.definition.dimensions.length
+
+    session = beginSketchTool(session, 'constraintHorizontal')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: circle.entityId,
+    })
+
+    assert(
+      session.definition.constraints.length === initialConstraintCount,
+      'Unsupported horizontal targets should not commit partial constraints.',
+    )
+    assert(
+      session.definition.dimensions.length === initialDimensionCount,
+      'Unsupported horizontal targets should not append dimensions.',
+    )
+    assert(session.constraintAuthoring?.selectedTargets.length === 0, 'Unsupported horizontal targets should not stay selected.')
+    assert(
+      getSketchToolPresentation(session)?.validation?.[0]?.message === 'Horizontal needs the supported target combination.',
+      'Unsupported horizontal targets should surface validation feedback.',
+    )
+
+    session = beginSketchTool(session, 'constraintVertical')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: circle.entityId,
+    })
+
+    assert(
+      session.definition.constraints.length === initialConstraintCount,
+      'Unsupported vertical targets should not commit partial constraints.',
+    )
+    assert(
+      session.definition.dimensions.length === initialDimensionCount,
+      'Unsupported vertical targets should not append dimensions.',
+    )
+    assert(session.constraintAuthoring?.selectedTargets.length === 0, 'Unsupported vertical targets should not stay selected.')
+    assert(
+      getSketchToolPresentation(session)?.validation?.[0]?.message === 'Vertical needs the supported target combination.',
+      'Unsupported vertical targets should surface validation feedback.',
+    )
+  }
+
+  function testHorizontalAndVerticalUseSketchPlaneAxes() {
+    let horizontalSession = createNewSketchSession(createStandardPlaneDefinition('yz'))
+    horizontalSession = beginSketchTool(horizontalSession, 'line')
+    horizontalSession = startSketchDraw(horizontalSession, [2, 1])
+    horizontalSession = acceptSketchDraw(horizontalSession, [5, 4])
+
+    const [horizontalLineId] = horizontalSession.definition.entityIds
+    assert(horizontalLineId, 'Expected a local line on the YZ plane.')
+
+    horizontalSession = beginSketchTool(horizontalSession, 'constraintHorizontal')
+    horizontalSession = selectSketchConstraintTarget(horizontalSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: horizontalLineId,
+    })
+
+    const horizontalLine = horizontalSession.definition.entities.find((entity) => entity.entityId === horizontalLineId)
+    assert(horizontalLine?.kind === 'lineSegment', 'Expected the authored horizontal line to remain available.')
+    const horizontalStart = horizontalSession.definition.points.find((point) => point.pointId === horizontalLine.startPointId)
+    const horizontalEnd = horizontalSession.definition.points.find((point) => point.pointId === horizontalLine.endPointId)
+    assert(horizontalStart && horizontalEnd, 'Expected solved horizontal line endpoints.')
+
+    const horizontalStartWorld = mapSketchPointToWorkspaceWorld(horizontalSession.plane, horizontalStart.position)
+    const horizontalEndWorld = mapSketchPointToWorkspaceWorld(horizontalSession.plane, horizontalEnd.position)
+    assert(
+      Math.abs(horizontalEnd.position[1] - horizontalStart.position[1]) < 1e-6,
+      'Horizontal should solve in local sketch coordinates.',
+    )
+    assert(
+      Math.abs(horizontalEndWorld[2] - horizontalStartWorld[2]) < 1e-6 && Math.abs(horizontalEndWorld[1] - horizontalStartWorld[1]) > 1e-3,
+      'Horizontal on the YZ plane should align to world Y, not reinterpret against world X.',
+    )
+
+    let verticalSession = createNewSketchSession(createStandardPlaneDefinition('xz'))
+    verticalSession = beginSketchTool(verticalSession, 'line')
+    verticalSession = startSketchDraw(verticalSession, [1, 2])
+    verticalSession = acceptSketchDraw(verticalSession, [4, 5])
+
+    const [verticalLineId] = verticalSession.definition.entityIds
+    assert(verticalLineId, 'Expected a local line on the XZ plane.')
+
+    verticalSession = beginSketchTool(verticalSession, 'constraintVertical')
+    verticalSession = selectSketchConstraintTarget(verticalSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: verticalLineId,
+    })
+
+    const verticalLine = verticalSession.definition.entities.find((entity) => entity.entityId === verticalLineId)
+    assert(verticalLine?.kind === 'lineSegment', 'Expected the authored vertical line to remain available.')
+    const verticalStart = verticalSession.definition.points.find((point) => point.pointId === verticalLine.startPointId)
+    const verticalEnd = verticalSession.definition.points.find((point) => point.pointId === verticalLine.endPointId)
+    assert(verticalStart && verticalEnd, 'Expected solved vertical line endpoints.')
+
+    const verticalStartWorld = mapSketchPointToWorkspaceWorld(verticalSession.plane, verticalStart.position)
+    const verticalEndWorld = mapSketchPointToWorkspaceWorld(verticalSession.plane, verticalEnd.position)
+    assert(
+      Math.abs(verticalEnd.position[0] - verticalStart.position[0]) < 1e-6,
+      'Vertical should solve in local sketch coordinates.',
+    )
+    assert(
+      Math.abs(verticalEndWorld[0] - verticalStartWorld[0]) < 1e-6
+        && Math.abs(verticalEndWorld[2] - verticalStartWorld[2]) > 1e-3
+        && Math.abs(verticalEndWorld[1] - verticalStartWorld[1]) < 1e-6,
+      'Vertical on the XZ plane should align to world Z, not reinterpret against world Y.',
+    )
   }
 
   function testConcentricAuthoringCommitsLocalAndProjectedConstraints() {
@@ -1387,6 +1552,9 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {
   }
 
   testToolbarDefinitionsExposeConstraintFamilies()
+  testHorizontalAndVerticalAuthoringCommitDurableConstraints()
+  testHorizontalAndVerticalRejectUnsupportedTargets()
+  testHorizontalAndVerticalUseSketchPlaneAxes()
   testConcentricAuthoringCommitsLocalAndProjectedConstraints()
   testMidpointAuthoringCommitsLocalAndProjectedConstraints()
   testPierceAuthoringCommitsLocalAndProjectedConstraints()

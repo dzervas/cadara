@@ -23,6 +23,8 @@ export type ToolIconId =
   | 'constraintPerpendicular'
   | 'constraintTangent'
   | 'constraintEqual'
+  | 'constraintHorizontal'
+  | 'constraintVertical'
   | 'constraintConcentric'
   | 'constraintMidpoint'
   | 'constraintNormal'

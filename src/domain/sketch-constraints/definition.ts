@@ -21,6 +21,8 @@ export type SketchConstraintToolId =
   | 'constraintPerpendicular'
   | 'constraintTangent'
   | 'constraintEqual'
+  | 'constraintHorizontal'
+  | 'constraintVertical'
   | 'constraintConcentric'
   | 'constraintMidpoint'
   | 'constraintNormal'

@@ -103,6 +103,33 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {
     assert(session.activeSnap === null, 'Accepted draw commits should clear transient snap state.')
   }
 
+  function testEndpointSnapReusesExistingLocalPointIds() {
+    let session = createSketchLineSession()
+    const baseLine = session.definition.entities.find((entity) => entity.kind === 'lineSegment')
+    assert(baseLine?.kind === 'lineSegment', 'Expected a committed baseline line.')
+
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [2.04, 0.02])
+    assert(session.activeSnap?.kind === 'endpoint', 'Starting near an existing endpoint should activate endpoint snap.')
+    session = updateSketchPointer(session, [3, 1])
+    session = acceptSketchDraw(session, [3, 1])
+
+    const committed = session.definition.entities.at(-1)
+    assert(committed?.kind === 'lineSegment', 'Snapped endpoint commit should author a line entity.')
+    assert(
+      committed.startPointId === baseLine.endPointId,
+      'Snapped line start should reuse the existing endpoint point id instead of creating a duplicate point.',
+    )
+    assert(session.definition.points.length === 3, 'Endpoint snap should only add the one unsnapped endpoint point.')
+    assert(
+      !session.definition.constraints.some((constraint) =>
+        constraint.kind === 'coincident'
+        && constraint.pointIds.includes(baseLine.endPointId)
+      ),
+      'Reused local endpoints should not need an extra inferred coincident constraint.',
+    )
+  }
+
   function testProjectedSnapPreviewWithoutCopyingReferenceGeometry() {
     const projectedReferences: ProjectedSketchReferenceRecord[] = [
       {
@@ -396,6 +423,7 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {
   }
 
   testLocalSnapPreviewAndCommit()
+  testEndpointSnapReusesExistingLocalPointIds()
   testProjectedSnapPreviewWithoutCopyingReferenceGeometry()
   testProjectedSnapCommitsReferenceConstraintWithoutCopyingGeometry()
   testBothEndpointsSnappedToSameLineUseUniqueConstraintIds()

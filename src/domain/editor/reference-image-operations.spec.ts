@@ -2,11 +2,14 @@ import { test } from 'bun:test'
 
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
 import {
+  acceptSketchDraw,
   appendReferenceImageOperations,
+  beginSketchTool,
   createSketchSessionFromSnapshot,
   createNewSketchSession,
   deleteSelectedSketchGeometry,
   getSketchSessionDisplayRenderables,
+  startSketchDraw,
   updateReferenceImageOperationStates,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
@@ -756,6 +759,41 @@ test('src/domain/editor/reference-image-operations.spec.ts lets bound anchor poi
   assert(
     Math.abs(anchorPoint.solvedPosition[1] - freePoint.solvedPosition[1]) < 1e-6,
     'Bound anchor points should remain valid local targets for ordinary sketch constraints.',
+  )
+})
+
+test('src/domain/editor/reference-image-operations.spec.ts reuses bound anchor point ids when drawing snapped lines', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  let session = createSketchSessionFromSnapshot(loadCapturedReferenceImageSketchFixture())
+  const anchorPointIds = session.definition.authoringOperations?.[1]?.ownedState?.kind === 'referenceImage'
+    ? session.definition.authoringOperations[1].ownedState.calibration?.anchors.map((anchor) => anchor.pointId) ?? []
+    : []
+
+  assert(anchorPointIds.length === 2, 'Expected captured fixture to expose two bound anchor points.')
+
+  session = beginSketchTool(session, 'line')
+  session = startSketchDraw(session, [66.08, 23.76])
+  assert(session.activeSnap?.kind === 'endpoint', 'Bound anchor points should participate in ordinary endpoint snapping.')
+  session = acceptSketchDraw(session, [66.76, -22.65])
+
+  const committed = session.definition.entities.at(-1)
+  assert(committed?.kind === 'lineSegment', 'Expected snapped anchor draw to commit a line segment.')
+  assert(
+    committed.startPointId === anchorPointIds[0] && committed.endPointId === anchorPointIds[1],
+    'Snapped anchor lines should reuse the existing anchor point ids at both endpoints.',
+  )
+  assert(
+    session.definition.points.length === 2,
+    'Connecting two existing anchors should not author duplicate endpoint points.',
+  )
+  assert(
+    !session.definition.constraints.some((constraint) => constraint.kind === 'coincident'),
+    'Reused anchor endpoints should not need inferred coincident constraints.',
   )
 })
 

@@ -372,6 +372,103 @@ function handleClick(
   point: SketchPoint2D,
   target: PrimitiveRef | null,
 ) {
+  if (state.pendingAnchorPlacement) {
+    if (state.selectedAnchorId && target?.kind === 'sketchPoint') {
+      const boundPoint = definitionPoints.find((candidate) => candidate.pointId === target.pointId)
+      return boundPoint
+        ? {
+            state: solveModeState({
+              ...state,
+              draftPoints: upsertDraftPoint(state.draftPoints, boundPoint),
+              draftState: {
+                ...state.draftState,
+                calibration: {
+                  ...getCalibrationState(state.draftState),
+                  anchors: getCalibrationState(state.draftState).anchors.map((anchor) =>
+                    anchor.anchorId === state.selectedAnchorId
+                      ? { ...anchor, pointId: target.pointId }
+                      : anchor,
+                  ),
+                },
+              },
+              pendingAnchorPlacement: false,
+            }),
+          }
+        : { state }
+    }
+
+    const uv = worldPointToUv(point, state.draftState.placement)
+    if (!uv || target?.kind !== 'sketchOperation' || target.operationId !== state.operationId) {
+      return { state }
+    }
+
+    const calibration = getCalibrationState(state.draftState)
+
+    if (state.selectedAnchorId) {
+      const pointId = createAnchorPointId(state.operationId, state.selectedAnchorId)
+      const nextPoint = createDraftPoint(
+        state.sketchId,
+        pointId,
+        getAnchorLabel(getAnchorOrdinalFromId(state.selectedAnchorId) - 1),
+        point,
+      )
+
+      return {
+        state: solveModeState({
+          ...state,
+          draftPoints: upsertDraftPoint(removeUnusedDraftPoint(state), nextPoint),
+          draftState: {
+            ...state.draftState,
+            calibration: {
+              ...calibration,
+              anchors: calibration.anchors.map((anchor) =>
+                anchor.anchorId === state.selectedAnchorId
+                  ? {
+                      ...anchor,
+                      uv,
+                      pointId,
+                    }
+                  : anchor,
+              ),
+            },
+          },
+          pendingAnchorPlacement: false,
+        }),
+      }
+    }
+
+    const nextAnchorOrdinal = getNextAnchorOrdinal(state.operationId, calibration.anchors)
+    const nextAnchorId = createAnchorId(state.operationId, nextAnchorOrdinal)
+    const nextPoint = createDraftPoint(
+      state.sketchId,
+      createAnchorPointId(state.operationId, nextAnchorId),
+      getAnchorLabel(nextAnchorOrdinal - 1),
+      point,
+    )
+    const nextAnchor = createReferenceImageCalibrationAnchor({
+      anchorId: nextAnchorId,
+      anchorIndex: nextAnchorOrdinal - 1,
+      uv,
+      pointId: nextPoint.pointId,
+    })
+
+    return {
+      state: solveModeState({
+        ...state,
+        draftPoints: [...state.draftPoints, nextPoint],
+        draftState: {
+          ...state.draftState,
+          calibration: {
+            ...calibration,
+            anchors: [...calibration.anchors, nextAnchor],
+          },
+        },
+        selectedAnchorId: nextAnchor.anchorId,
+        pendingAnchorPlacement: false,
+      }),
+    }
+  }
+
   const selectedAnchor = findNearestAnchor(state, point)
   if (selectedAnchor) {
     return {
@@ -383,97 +480,11 @@ function handleClick(
     }
   }
 
-  if (!state.pendingAnchorPlacement) {
-    return {
-      state: {
-        ...state,
-        selectedAnchorId: null,
-      },
-    }
-  }
-
-  if (state.selectedAnchorId && target?.kind === 'sketchPoint') {
-    const boundPoint = definitionPoints.find((candidate) => candidate.pointId === target.pointId)
-    return boundPoint
-      ? {
-          state: solveModeState({
-            ...state,
-            draftPoints: upsertDraftPoint(state.draftPoints, boundPoint),
-            draftState: {
-              ...state.draftState,
-              calibration: {
-                ...getCalibrationState(state.draftState),
-                anchors: getCalibrationState(state.draftState).anchors.map((anchor) =>
-                  anchor.anchorId === state.selectedAnchorId
-                    ? { ...anchor, pointId: target.pointId }
-                    : anchor,
-                ),
-              },
-            },
-            pendingAnchorPlacement: false,
-          }),
-        }
-      : { state }
-  }
-
-  const uv = worldPointToUv(point, state.draftState.placement)
-  if (!uv || target?.kind !== 'sketchOperation' || target.operationId !== state.operationId) {
-    return { state }
-  }
-
-  const calibration = getCalibrationState(state.draftState)
-  const pointId = createAnchorPointId(
-    state.operationId,
-    state.selectedAnchorId ?? createAnchorId(state.operationId, calibration.anchors.length),
-  )
-  const nextPoint = createDraftPoint(state.sketchId, pointId, getAnchorLabel(calibration.anchors.length), point)
-
-  if (state.selectedAnchorId) {
-    return {
-      state: solveModeState({
-        ...state,
-        draftPoints: upsertDraftPoint(removeUnusedDraftPoint(state), nextPoint),
-        draftState: {
-          ...state.draftState,
-          calibration: {
-            ...calibration,
-            anchors: calibration.anchors.map((anchor) =>
-              anchor.anchorId === state.selectedAnchorId
-                ? {
-                    ...anchor,
-                    uv,
-                    pointId,
-                  }
-                : anchor,
-            ),
-          },
-        },
-        pendingAnchorPlacement: false,
-      }),
-    }
-  }
-
-  const nextAnchor = createReferenceImageCalibrationAnchor({
-    anchorId: createAnchorId(state.operationId, calibration.anchors.length),
-    anchorIndex: calibration.anchors.length,
-    uv,
-    pointId,
-  })
-
   return {
-    state: solveModeState({
+    state: {
       ...state,
-      draftPoints: [...state.draftPoints, nextPoint],
-      draftState: {
-        ...state.draftState,
-        calibration: {
-          ...calibration,
-          anchors: [...calibration.anchors, nextAnchor],
-        },
-      },
-      selectedAnchorId: nextAnchor.anchorId,
-      pendingAnchorPlacement: false,
-    }),
+      selectedAnchorId: null,
+    },
   }
 }
 
@@ -767,9 +778,9 @@ function distanceBetween(first: SketchPoint2D, second: SketchPoint2D) {
 
 function createAnchorId(
   operationId: SketchAuthoringOperationId,
-  index: number,
+  ordinal: number,
 ) {
-  return `${operationId}_anchor_${index + 1}`
+  return `${operationId}_anchor_${ordinal}`
 }
 
 function createAnchorPointId(
@@ -777,6 +788,32 @@ function createAnchorPointId(
   anchorKey: string,
 ) {
   return `sketch_point_${operationId.replace(/[^a-zA-Z0-9]+/g, '_')}_${anchorKey.replace(/[^a-zA-Z0-9]+/g, '_')}` as SketchPointId
+}
+
+function getNextAnchorOrdinal(
+  operationId: SketchAuthoringOperationId,
+  anchors: readonly ReferenceImageCalibrationAnchor[],
+) {
+  return anchors.reduce((maxOrdinal, anchor) => {
+    const ordinal = getAnchorOrdinalFromId(anchor.anchorId, operationId)
+    return ordinal > maxOrdinal ? ordinal : maxOrdinal
+  }, 0) + 1
+}
+
+function getAnchorOrdinalFromId(
+  anchorId: string,
+  operationId?: SketchAuthoringOperationId,
+) {
+  const pattern = operationId
+    ? new RegExp(`^${escapeRegExp(operationId)}_anchor_(\\d+)$`)
+    : /_anchor_(\d+)$/
+  const match = pattern.exec(anchorId)
+  const ordinal = match ? Number.parseInt(match[1] ?? '', 10) : Number.NaN
+  return Number.isFinite(ordinal) && ordinal > 0 ? ordinal : 1
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function getAnchorLabel(index: number) {

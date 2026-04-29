@@ -127,6 +127,8 @@ const resolveCoincidentTarget: ConstraintTargetResolver = (definition, target, p
 const resolvePointOrLineTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget])
 const resolvePierceTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])
 const resolveNormalTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget])
+const resolveLocalLineTarget: ConstraintTargetResolver = (definition, target) =>
+  target.kind === 'projectedReferenceGeometry' ? null : resolveLineTarget(definition, target)
 
 const resolveFixTarget: ConstraintTargetResolver = (definition, target) =>
   target.kind === 'projectedReferenceGeometry'
@@ -1445,6 +1447,68 @@ const sketchConstraintDefinitions = [
           },
         ],
       }
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintHorizontal',
+      name: 'Horizontal',
+      tooltip: 'Constrain a line parallel to the sketch horizontal axis.',
+      icon: 'constraintHorizontal',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [{ id: 'horizontal-line', label: 'Select line', acceptedKinds: ['line'] }],
+    resolveTarget(definition, target) {
+      return resolveLocalLineTarget(definition, target)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'horizontal-preview', 'Horizontal preview', 'Select a local line')
+    },
+    createCommitContribution(input) {
+      const line = selectedLocalLine(input.selectedTargets)
+
+      return line?.entity
+        ? {
+            constraints: [{
+              constraintId: input.createConstraintId('horizontal'),
+              kind: 'horizontal',
+              label: `Horizontal ${input.sequence}`,
+              entityId: line.entity.entityId,
+            }],
+          }
+        : {}
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintVertical',
+      name: 'Vertical',
+      tooltip: 'Constrain a line parallel to the sketch vertical axis.',
+      icon: 'constraintVertical',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [{ id: 'vertical-line', label: 'Select line', acceptedKinds: ['line'] }],
+    resolveTarget(definition, target) {
+      return resolveLocalLineTarget(definition, target)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'vertical-preview', 'Vertical preview', 'Select a local line')
+    },
+    createCommitContribution(input) {
+      const line = selectedLocalLine(input.selectedTargets)
+
+      return line?.entity
+        ? {
+            constraints: [{
+              constraintId: input.createConstraintId('vertical'),
+              kind: 'vertical',
+              label: `Vertical ${input.sequence}`,
+              entityId: line.entity.entityId,
+            }],
+          }
+        : {}
     },
   },
   {

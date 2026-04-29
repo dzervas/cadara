@@ -342,6 +342,8 @@ const toolbarSections = [
       'constraintPerpendicular',
       'constraintTangent',
       'constraintEqual',
+      'constraintHorizontal',
+      'constraintVertical',
       'constraintConcentric',
       'constraintMidpoint',
       'constraintNormal',

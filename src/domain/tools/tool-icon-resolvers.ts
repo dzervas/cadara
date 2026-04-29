@@ -151,6 +151,10 @@ function getSketchConstraintToolIcon(constraint: ConstraintDefinition): ToolIcon
       return 'constraintTangent'
     case 'equalLength':
       return 'constraintEqual'
+    case 'horizontal':
+      return 'constraintHorizontal'
+    case 'vertical':
+      return 'constraintVertical'
     case 'concentric':
     case 'concentricProjectedCurve':
       return 'constraintConcentric'
@@ -169,8 +173,6 @@ function getSketchConstraintToolIcon(constraint: ConstraintDefinition): ToolIcon
     case 'fixPoint':
       return 'constraintFix'
     case 'angle':
-    case 'horizontal':
-    case 'vertical':
       return null
   }
 }
