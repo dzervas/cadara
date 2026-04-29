@@ -1,11 +1,12 @@
 import type { GeometryAssetResolver, ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
   DocumentExportDiagnostic,
-  DocumentExportFormat,
   DocumentExportRequest,
   DocumentExportResult,
   DocumentExportSuccessResult,
 } from '@/contracts/modeling/export'
+import { orchestrateGeometryExport } from '@/domain/export/export-orchestrator'
+import { registerBuiltinExportProviders } from '@/domain/export/register-builtin-providers'
 import type {
   BodyId,
   ConstructionId,
@@ -101,6 +102,7 @@ import {
   encodeGeometryAssetData,
 } from '@/contracts/modeling/geometry-assets'
 import {
+  cadaraExportOptionsSchema,
   documentExportRequestSchema,
   documentExportResultSchema,
 } from '@/contracts/modeling/export.runtime-schema'
@@ -4348,33 +4350,7 @@ function createExportDiagnostic(
   }
 }
 
-function getDocumentExportExtension(format: DocumentExportFormat) {
-  switch (format) {
-    case 'stl':
-      return 'stl'
-    case 'step':
-      return 'step'
-    case '3mf':
-      return '3mf'
-    case 'cadara':
-      return 'cadara'
-  }
-}
-
-function getDocumentExportMimeType(format: DocumentExportFormat) {
-  switch (format) {
-    case 'stl':
-      return 'model/stl'
-    case 'step':
-      return 'model/step'
-    case '3mf':
-      return 'model/3mf'
-    case 'cadara':
-      return 'application/vnd.cadara+json'
-  }
-}
-
-function createExportFilename(targetLabel: string, format: DocumentExportFormat) {
+function createExportFilename(targetLabel: string, extension: string) {
   const slug = targetLabel
     .trim()
     .toLowerCase()
@@ -4382,7 +4358,7 @@ function createExportFilename(targetLabel: string, format: DocumentExportFormat)
     .replace(/^-+|-+$/g, '')
     || 'document'
 
-  return `${slug}.${getDocumentExportExtension(format)}`
+  return `${slug}.${extension}`
 }
 
 function stringifyCadaraDocument(document: KernelDocumentSnapshot, pretty: boolean) {
@@ -4768,6 +4744,7 @@ export function createModelingService(
   adapter: ModelingKernelAdapter,
   options: ModelingServiceOptions,
 ): ModelingService {
+  registerBuiltinExportProviders()
   const currentDocumentId = normalizeCurrentDocumentId(options.currentDocumentId)
   const sketchSolver = options.sketchSolver ? createSketchSolverService(options.sketchSolver) : null
   const operationHistoryStore = options.operationHistoryStore ?? null
@@ -5751,8 +5728,8 @@ export function createModelingService(
         ok: true,
         format: 'cadara',
         filename: 'document.cadara',
-        extension: getDocumentExportExtension('cadara'),
-        mimeType: getDocumentExportMimeType('cadara'),
+        extension: 'cadara',
+        mimeType: 'application/vnd.cadara+json',
         payload: createLocalAuthoredDocumentPayload(document),
         diagnostics: [],
       }
@@ -6013,7 +5990,21 @@ export function createModelingService(
       const request = normalizeExportDocumentInput(input, currentDocumentId)
 
       if (request.format !== 'cadara') {
-        return mapExportDocumentResponse(await adapter.exportDocument(request))
+        const capabilitiesOrDiagnostic = await adapter.getExportCapabilities(request.baseRevisionId)
+
+        if ('code' in capabilitiesOrDiagnostic) {
+          const failure: DocumentExportResult = {
+            ok: false,
+            format: request.format,
+            diagnostics: [capabilitiesOrDiagnostic],
+          }
+          return mapExportDocumentResponse(failure)
+        }
+
+        return mapExportDocumentResponse(orchestrateGeometryExport(
+          { format: request.format, options: request.options, target: request.target, targetLabel: request.targetLabel },
+          capabilitiesOrDiagnostic,
+        ))
       }
 
       const snapshot = await validateSnapshotResponse(
@@ -6035,13 +6026,15 @@ export function createModelingService(
         }
       }
 
+      const cadaraOptions = cadaraExportOptionsSchema.parse(request.options)
+
       return mapExportDocumentResponse({
         ok: true,
         format: request.format,
         filename: createExportFilename(request.targetLabel, request.format),
-        extension: getDocumentExportExtension(request.format),
-        mimeType: getDocumentExportMimeType(request.format),
-        payload: stringifyCadaraDocument(snapshot.document, request.options.pretty),
+        extension: 'cadara',
+        mimeType: 'application/vnd.cadara+json',
+        payload: stringifyCadaraDocument(snapshot.document, cadaraOptions.pretty),
         diagnostics: [],
       })
     },

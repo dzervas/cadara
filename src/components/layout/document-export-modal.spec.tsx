@@ -6,10 +6,13 @@ import {
   DocumentExportModal,
 } from '@/components/layout/document-export-modal'
 import { buildDocumentExportModalInput } from '@/components/layout/document-export-modal-input'
-import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
 import { createTestErrorReporter } from '@/contracts/errors'
 import type { ObjectExportModalState } from '@/app/object-export-state'
 import { workbenchTheme } from '@/theme/workbench-theme'
+import { registerBuiltinExportProviders } from '@/domain/export/register-builtin-providers'
+import { stepExportProvider } from '@/domain/export/providers/step-export-provider'
+
+registerBuiltinExportProviders()
 
 test('src/components/layout/document-export-modal.spec.tsx', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -84,12 +87,12 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
   assert(cadaraMarkup.includes('cadara JSON'), 'cadara export should show JSON options.')
   assert(!cadaraMarkup.includes('Mesh accuracy'), 'cadara export should omit mesh accuracy controls.')
 
-  const input = buildDocumentExportModalInput(
-    target,
-    'step',
-    getDefaultDocumentExportOptions('step'),
-  )
+  const stepDefaults = stepExportProvider.getDefaultOptions()
+  const input = buildDocumentExportModalInput(target, 'step', stepDefaults)
 
   assert(input.format === 'step', 'Modal submission should preserve the selected format.')
-  assert(!('meshAccuracy' in input.options), 'Modal submission should not include incompatible mesh options for STEP.')
+  assert(
+    !(typeof input.options === 'object' && input.options !== null && 'meshAccuracy' in input.options),
+    'Modal submission should not include incompatible mesh options for STEP.',
+  )
 })

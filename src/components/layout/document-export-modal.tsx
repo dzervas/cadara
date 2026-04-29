@@ -13,34 +13,29 @@ import {
 } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
-import type {
-  DocumentExportFormat,
-  DocumentExportSuccessResult,
-} from '@/contracts/modeling/export'
+import type { DocumentExportSuccessResult } from '@/contracts/modeling/export'
 import {
   appErrorFromModelingResult,
   err,
   ok,
   type ErrorReporter,
 } from '@/contracts/errors'
-import {
-  getDefaultCadaraExportOptions,
-  getDefaultStlExportOptions,
-  getDefaultStepExportOptions,
-  getDefaultThreeMfExportOptions,
-} from '@/contracts/modeling/export.runtime-schema'
+import { getDefaultCadaraExportOptions } from '@/contracts/modeling/export.runtime-schema'
+import type { CadaraExportOptions } from '@/contracts/modeling/export'
 import type {
   ModelingExportDocumentInput,
   ModelingExportDocumentResult,
 } from '@/domain/modeling/modeling-service'
 import type { ObjectExportModalState } from '@/app/object-export-state'
 import { runWorkbenchAction } from '@/app/workbench-action'
-import { buildDocumentExportModalInput } from '@/components/layout/document-export-modal-input'
+import type { ExportProvider } from '@/contracts/export/provider'
+import type { FeatureEditorFormField, FeatureEditorFormSection } from '@/domain/feature-authoring/form-schema'
+import { getRegisteredExportProviders } from '@/domain/export/provider-registry'
 
 interface DocumentExportModalProps {
   exportDocument: (input: ModelingExportDocumentInput) => Promise<ModelingExportDocumentResult>
   errorReporter: ErrorReporter
-  initialFormat?: DocumentExportFormat
+  initialFormat?: string
   onClose: () => void
   onDownload: (result: DocumentExportSuccessResult) => void
   opened: boolean
@@ -88,7 +83,7 @@ export function DocumentExportModal({
 interface DocumentExportModalContentProps {
   exportDocument: DocumentExportModalProps['exportDocument']
   errorReporter: DocumentExportModalProps['errorReporter']
-  initialFormat: DocumentExportFormat
+  initialFormat: string
   onClose: DocumentExportModalProps['onClose']
   onDownload: DocumentExportModalProps['onDownload']
   target: ObjectExportModalState
@@ -96,6 +91,99 @@ interface DocumentExportModalContentProps {
 
 function formatExportFailure(result: ModelingExportDocumentResult) {
   return result.diagnostics[0]?.message ?? 'Export failed.'
+}
+
+function buildExportInput(
+  target: ObjectExportModalState,
+  format: string,
+  providerOptions: Record<string, unknown>,
+  cadaraOptions: CadaraExportOptions,
+): ModelingExportDocumentInput {
+  return {
+    baseRevisionId: target.baseRevisionId,
+    target: target.target,
+    targetLabel: target.label,
+    format,
+    options: format === 'cadara' ? cadaraOptions : (providerOptions[format] ?? {}),
+  }
+}
+
+function renderFormField(
+  field: FeatureEditorFormField,
+  onPatch: (patch: Record<string, unknown>) => void,
+): React.ReactNode {
+  if (field.hidden) {
+    return null
+  }
+
+  if (field.kind === 'numeric') {
+    return (
+      <NumberInput
+        key={field.id}
+        label={field.label}
+        min={0.001}
+        step={field.step}
+        value={typeof field.value === 'number' ? field.value : undefined}
+        onChange={(value) => onPatch({ [field.patch.patchKey]: toNumber(value, typeof field.value === 'number' ? field.value : 0) })}
+      />
+    )
+  }
+
+  if (field.kind === 'enum') {
+    return (
+      <Select
+        key={field.id}
+        label={field.label}
+        data={field.options.map((opt) => ({ label: opt.label, value: opt.value }))}
+        value={field.value}
+        onChange={(value) => { if (value !== null) { onPatch({ [field.patch.patchKey]: value }) } }}
+      />
+    )
+  }
+
+  if (field.kind === 'custom' && field.rendererId === 'checkbox') {
+    const payload = field.payload as { checked: boolean; patchKey: string }
+    return (
+      <Checkbox
+        key={field.id}
+        label={field.label}
+        checked={payload.checked}
+        onChange={(event) => onPatch({ [payload.patchKey]: event.currentTarget.checked })}
+      />
+    )
+  }
+
+  return null
+}
+
+function renderFormSection(
+  section: FeatureEditorFormSection,
+  onPatch: (patch: Record<string, unknown>) => void,
+): React.ReactNode {
+  return (
+    <Stack key={section.id} gap="xs">
+      <Text size="sm" fw={600}>{section.title}</Text>
+      {section.fields.map((field) => renderFormField(field, onPatch))}
+    </Stack>
+  )
+}
+
+function ProviderOptionsForm({
+  provider,
+  options,
+  onPatch,
+}: {
+  provider: ExportProvider<unknown>
+  options: unknown
+  onPatch: (patch: Record<string, unknown>) => void
+}) {
+  const schema = provider.getOptionFormSchema(options)
+
+  return (
+    <>
+      {schema.sections.map((section) => renderFormSection(section, onPatch))}
+    </>
+  )
 }
 
 function DocumentExportModalContent({
@@ -106,27 +194,38 @@ function DocumentExportModalContent({
   onDownload,
   target,
 }: DocumentExportModalContentProps) {
-  const [format, setFormat] = useState<DocumentExportFormat>(initialFormat)
-  const [stlOptions, setStlOptions] = useState(getDefaultStlExportOptions)
-  const [stepOptions, setStepOptions] = useState(getDefaultStepExportOptions)
-  const [threeMfOptions, setThreeMfOptions] = useState(getDefaultThreeMfExportOptions)
+  const providers = getRegisteredExportProviders()
+  const [format, setFormat] = useState(initialFormat)
+  const [providerOptions, setProviderOptions] = useState<Record<string, unknown>>(() => {
+    const map: Record<string, unknown> = {}
+    for (const provider of providers) {
+      map[provider.formatId] = provider.getDefaultOptions()
+    }
+    return map
+  })
   const [cadaraOptions, setCadaraOptions] = useState(getDefaultCadaraExportOptions)
   const [pending, setPending] = useState(false)
   const [failureMessage, setFailureMessage] = useState<string | null>(null)
+
+  const activeProvider = providers.find((p) => p.formatId === format)
+
+  const handlePatch = (patch: Record<string, unknown>) => {
+    if (!activeProvider) {
+      return
+    }
+
+    const currentOptions = providerOptions[format]
+    const updated = activeProvider.applyOptionPatch(currentOptions, patch)
+
+    setProviderOptions((current) => ({ ...current, [format]: updated }))
+  }
 
   const handleSubmit = () => {
     if (pending) {
       return
     }
 
-    const input =
-      format === 'stl'
-        ? buildDocumentExportModalInput(target, format, stlOptions)
-        : format === 'step'
-          ? buildDocumentExportModalInput(target, format, stepOptions)
-          : format === '3mf'
-            ? buildDocumentExportModalInput(target, format, threeMfOptions)
-            : buildDocumentExportModalInput(target, format, cadaraOptions)
+    const input = buildExportInput(target, format, providerOptions, cadaraOptions)
 
     setPending(true)
     setFailureMessage(null)
@@ -173,155 +272,58 @@ function DocumentExportModalContent({
       .finally(() => setPending(false))
   }
 
+  const formatData = [
+    ...providers.map((p) => ({ label: p.label, value: p.formatId })),
+    { label: 'cadara', value: 'cadara' },
+  ]
+
   return (
     <Stack gap="md">
       <SegmentedControl
         aria-label="Export file type"
-        data={[
-          { label: 'STL', value: 'stl' },
-          { label: 'STEP', value: 'step' },
-          { label: '3MF', value: '3mf' },
-          { label: 'cadara', value: 'cadara' },
-        ]}
+        data={formatData}
         styles={{
           root: { isolation: 'isolate' },
           indicator: { zIndex: 0 },
           label: { position: 'relative', zIndex: 1 },
         }}
         value={format}
-        onChange={(value) => setFormat(value as DocumentExportFormat)}
+        onChange={setFormat}
       />
 
-      {format === 'stl' ? (
-        <Stack gap="xs" data-export-option="mesh-accuracy">
-          <Text size="sm" fw={600}>Mesh accuracy</Text>
-            <NumberInput
-              label="Chord tolerance"
-              min={0.001}
-              step={0.005}
-              value={stlOptions.meshAccuracy.chordTolerance}
-              onChange={(value) => setStlOptions((current) => ({
-                ...current,
-                meshAccuracy: {
-                  ...current.meshAccuracy,
-                  chordTolerance: toNumber(value, current.meshAccuracy.chordTolerance),
-                },
-              }))}
-            />
-            <NumberInput
-              label="Angle tolerance"
-              min={0.001}
-              step={0.01}
-              value={stlOptions.meshAccuracy.angleToleranceRadians}
-              onChange={(value) => setStlOptions((current) => ({
-                ...current,
-                meshAccuracy: {
-                  ...current.meshAccuracy,
-                  angleToleranceRadians: toNumber(value, current.meshAccuracy.angleToleranceRadians),
-                },
-              }))}
-            />
-            <Select
-              label="Encoding"
-              data={[
-                { label: 'Binary', value: 'binary' },
-                { label: 'ASCII', value: 'ascii' },
-              ]}
-              value={stlOptions.encoding}
-              onChange={(value) => setStlOptions((current) => ({
-                ...current,
-                encoding: value === 'ascii' ? 'ascii' : 'binary',
-              }))}
-            />
-          </Stack>
-        ) : null}
+      {activeProvider ? (
+        <ProviderOptionsForm
+          provider={activeProvider}
+          options={providerOptions[format]}
+          onPatch={handlePatch}
+        />
+      ) : null}
 
-        {format === '3mf' ? (
-          <Stack gap="xs" data-export-option="mesh-accuracy">
-            <Text size="sm" fw={600}>Mesh accuracy</Text>
-            <NumberInput
-              label="Chord tolerance"
-              min={0.001}
-              step={0.005}
-              value={threeMfOptions.meshAccuracy.chordTolerance}
-              onChange={(value) => setThreeMfOptions((current) => ({
-                ...current,
-                meshAccuracy: {
-                  ...current.meshAccuracy,
-                  chordTolerance: toNumber(value, current.meshAccuracy.chordTolerance),
-                },
-              }))}
-            />
-            <NumberInput
-              label="Angle tolerance"
-              min={0.001}
-              step={0.01}
-              value={threeMfOptions.meshAccuracy.angleToleranceRadians}
-              onChange={(value) => setThreeMfOptions((current) => ({
-                ...current,
-                meshAccuracy: {
-                  ...current.meshAccuracy,
-                  angleToleranceRadians: toNumber(value, current.meshAccuracy.angleToleranceRadians),
-                },
-              }))}
-            />
-            <Select label="Unit" data={[{ label: 'Millimeter', value: 'millimeter' }]} value={threeMfOptions.unit} />
-            <Checkbox
-              label="Include metadata"
-              checked={threeMfOptions.includeMetadata}
-              onChange={(event) => setThreeMfOptions((current) => ({
-                ...current,
-                includeMetadata: event.currentTarget.checked,
-              }))}
-            />
-          </Stack>
-        ) : null}
+      {format === 'cadara' ? (
+        <Stack gap="xs" data-export-option="cadara-json">
+          <Text size="sm" fw={600}>cadara JSON</Text>
+          <Checkbox
+            label="Readable formatting"
+            checked={cadaraOptions.pretty}
+            onChange={(event) => setCadaraOptions({ pretty: event.currentTarget.checked })}
+          />
+        </Stack>
+      ) : null}
 
-        {format === 'step' ? (
-          <Stack gap="xs" data-export-option="step">
-            <Text size="sm" fw={600}>STEP options</Text>
-            <Select
-              label="Schema"
-              data={[
-                { label: 'AP242', value: 'AP242' },
-                { label: 'AP214', value: 'AP214' },
-                { label: 'AP203', value: 'AP203' },
-              ]}
-              value={stepOptions.schema}
-              onChange={(value) => setStepOptions((current) => ({
-                ...current,
-                schema: value === 'AP203' || value === 'AP214' ? value : 'AP242',
-              }))}
-            />
-            <Select label="Unit" data={[{ label: 'Millimeter', value: 'millimeter' }]} value={stepOptions.unit} />
-          </Stack>
-        ) : null}
+      {failureMessage ? (
+        <Alert color="red" variant="light" title="Export failed">
+          {failureMessage}
+        </Alert>
+      ) : null}
 
-        {format === 'cadara' ? (
-          <Stack gap="xs" data-export-option="cadara-json">
-            <Text size="sm" fw={600}>cadara JSON</Text>
-            <Checkbox
-              label="Readable formatting"
-              checked={cadaraOptions.pretty}
-              onChange={(event) => setCadaraOptions({ pretty: event.currentTarget.checked })}
-            />
-          </Stack>
-        ) : null}
-
-        {failureMessage ? (
-          <Alert color="red" variant="light" title="Export failed">
-            {failureMessage}
-          </Alert>
-        ) : null}
-
-        <Group justify="flex-end" gap="xs">
-          <Button variant="subtle" leftSection={<WorkbenchIcon name="close" size={14} />} onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
-          <Button leftSection={<WorkbenchIcon name="download" size={14} />} onClick={handleSubmit} loading={pending} disabled={!target}>
-            Export
-          </Button>
-        </Group>
+      <Group justify="flex-end" gap="xs">
+        <Button variant="subtle" leftSection={<WorkbenchIcon name="close" size={14} />} onClick={onClose} disabled={pending}>
+          Cancel
+        </Button>
+        <Button leftSection={<WorkbenchIcon name="download" size={14} />} onClick={handleSubmit} loading={pending} disabled={!target}>
+          Export
+        </Button>
+      </Group>
     </Stack>
   )
 }

@@ -1,11 +1,13 @@
 import { test } from 'bun:test'
 
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import { getDefaultDocumentExportOptions } from '@/contracts/modeling/export.runtime-schema'
+import { getDefaultCadaraExportOptions } from '@/contracts/modeling/export.runtime-schema'
 import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createModelingService } from '@/domain/modeling/modeling-service'
+import { stepExportProvider } from '@/domain/export/providers/step-export-provider'
+import { stlExportProvider } from '@/domain/export/providers/stl-export-provider'
 
 test('src/domain/modeling/modeling-export.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -25,7 +27,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       target: { kind: 'body', bodyId: 'body_part-1' },
       targetLabel: 'Part 1',
       format: 'cadara',
-      options: getDefaultDocumentExportOptions('cadara'),
+      options: getDefaultCadaraExportOptions(),
     })
 
     assert(result.ok, 'cadara export should succeed for the current document revision.')
@@ -50,7 +52,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       target: { kind: 'body', bodyId: 'body_part-1' },
       targetLabel: 'Part 1',
       format: 'step',
-      options: getDefaultDocumentExportOptions('step'),
+      options: stepExportProvider.getDefaultOptions(),
     })
 
     assert(result.ok, 'Mock STEP export should succeed for a body target.')
@@ -72,7 +74,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       target: { kind: 'sketch', sketchId: 'sketch_primary' },
       targetLabel: 'Sketch 1',
       format: 'stl',
-      options: getDefaultDocumentExportOptions('stl'),
+      options: stlExportProvider.getDefaultOptions(),
     })
 
     assert(!result.ok, 'Geometry export should reject non-body targets.')

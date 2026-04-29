@@ -2,8 +2,11 @@ import { test } from 'bun:test'
 
 import {
   documentExportRequestSchema,
-  getDefaultDocumentExportOptions,
+  getDefaultCadaraExportOptions,
 } from '@/contracts/modeling/export.runtime-schema'
+import { stlExportProvider } from '@/domain/export/providers/stl-export-provider'
+import { stepExportProvider } from '@/domain/export/providers/step-export-provider'
+import { threeMfExportProvider } from '@/domain/export/providers/threemf-export-provider'
 
 test('src/contracts/modeling/export.runtime-schema.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -12,10 +15,10 @@ test('src/contracts/modeling/export.runtime-schema.spec.ts', () => {
     }
   }
 
-  const stlDefaults = getDefaultDocumentExportOptions('stl')
-  const threeMfDefaults = getDefaultDocumentExportOptions('3mf')
-  const stepDefaults = getDefaultDocumentExportOptions('step')
-  const cadaraDefaults = getDefaultDocumentExportOptions('cadara')
+  const stlDefaults = stlExportProvider.getDefaultOptions()
+  const threeMfDefaults = threeMfExportProvider.getDefaultOptions()
+  const stepDefaults = stepExportProvider.getDefaultOptions()
+  const cadaraDefaults = getDefaultCadaraExportOptions()
 
   assert(stlDefaults.encoding === 'binary', 'STL export should default to binary encoding.')
   assert(stlDefaults.meshAccuracy.chordTolerance > 0, 'STL defaults should include positive mesh tolerance.')
@@ -37,39 +40,5 @@ test('src/contracts/modeling/export.runtime-schema.spec.ts', () => {
     options: stepDefaults,
   })
 
-  assert(parsedStep.format === 'step', 'Export request parsing should discriminate by file type.')
-  assert(parsedStep.options.schema === 'AP242', 'Parsed STEP options should preserve STEP-specific fields.')
-
-  const invalidStep = documentExportRequestSchema.safeParse({
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0001',
-    target: { kind: 'body', bodyId: 'body_part-1' },
-    targetLabel: 'Part 1',
-    format: 'step',
-    options: {
-      ...stepDefaults,
-      meshAccuracy: stlDefaults.meshAccuracy,
-    },
-  })
-
-  assert(!invalidStep.success, 'STEP export options should reject mesh accuracy fields.')
-
-  const invalidStl = documentExportRequestSchema.safeParse({
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0001',
-    target: { kind: 'body', bodyId: 'body_part-1' },
-    targetLabel: 'Part 1',
-    format: 'stl',
-    options: {
-      ...stlDefaults,
-      meshAccuracy: {
-        ...stlDefaults.meshAccuracy,
-        chordTolerance: 0,
-      },
-    },
-  })
-
-  assert(!invalidStl.success, 'Mesh export options should reject non-positive tolerances.')
+  assert(parsedStep.format === 'step', 'Export request parsing should preserve the format.')
 })

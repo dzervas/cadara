@@ -1,9 +1,6 @@
 import type { GeometryAssetResolver, ModelingKernelAdapter } from '@/contracts/modeling/adapter'
-import type {
-  DocumentExportDiagnostic,
-  DocumentExportRequest,
-  DocumentExportResult,
-} from '@/contracts/modeling/export'
+import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
 import type {
@@ -113,7 +110,7 @@ import {
   resolveOccReference,
 } from '@/domain/modeling/occ/topology'
 import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
-import { exportOccGeometryDocument } from '@/domain/modeling/occ/geometry-export'
+import { createOccExportCapabilities } from '@/domain/export/occ-export-capabilities'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -3270,26 +3267,19 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
   }
 
-  async exportDocument(request: DocumentExportRequest): Promise<DocumentExportResult> {
-    assertSupportedModelingRequest(request, this.documentId)
+  async getExportCapabilities(baseRevisionId: RevisionId): Promise<ExportCapabilities | DocumentExportDiagnostic> {
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
-    if (request.baseRevisionId !== currentRevisionId) {
-      return {
-        ok: false,
-        format: request.format,
-        diagnostics: [
-          createOccExportDiagnostic(
-            'occ-export-revision-conflict',
-            `Export request revision ${request.baseRevisionId} does not match current revision ${currentRevisionId}.`,
-            request.target,
-          ),
-        ],
-      }
+    if (baseRevisionId !== currentRevisionId) {
+      return createOccExportDiagnostic(
+        'occ-export-revision-conflict',
+        `Export request revision ${baseRevisionId} does not match current revision ${currentRevisionId}.`,
+        null,
+      )
     }
 
-    return exportOccGeometryDocument(runtimeState.authoringState, request)
+    return createOccExportCapabilities(runtimeState.authoringState)
   }
 
   async resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse> {
