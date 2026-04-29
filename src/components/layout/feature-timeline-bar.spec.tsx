@@ -553,4 +553,14 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
     sketchHistoryMarkup.includes('data-transition-state="leaving-down"'),
     'Document history should expose a reduced-motion-friendly leaving state while sketch history is active.',
   )
+
+  const source = await Bun.file(new URL('./feature-timeline-bar.tsx', import.meta.url)).text()
+  assert(
+    source.includes("dispatch({ type: 'sketch.historyOperationDeleteRequested', operationId: item.operation.operationId })"),
+    'Sketch history Delete should dispatch the explicit history-row delete event.',
+  )
+  assert(
+    !source.includes("dispatch({ type: 'sketch.annotationDeleteRequested' })"),
+    'Sketch history Delete should no longer reuse the generic live-selection delete event.',
+  )
 })

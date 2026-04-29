@@ -36,4 +36,5 @@ tmp-*
 *.step
 *.3mf
 *.cadara
+!public/**/*.cadara
 .fallow/

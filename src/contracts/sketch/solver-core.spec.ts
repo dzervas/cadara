@@ -514,6 +514,73 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     assertGradientMatchesFiniteDifference(vertical, 'dimension_axis_vertical', 1e-6)
   }
 
+  async function testObtuseLineAngleDimension() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 0, 10),
+        makePoint('sketch_point_c', 'C', 7, 14),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_bc'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_bc', 'BC', 'sketch_point_b', 'sketch_point_c'),
+      ],
+      constraintIds: ['constraint_fix_a', 'constraint_fix_b'],
+      constraints: [
+        {
+          constraintId: 'constraint_fix_a',
+          kind: 'fixPoint',
+          label: 'Fix A',
+          pointId: 'sketch_point_a',
+          position: [0, 0],
+        },
+        {
+          constraintId: 'constraint_fix_b',
+          kind: 'fixPoint',
+          label: 'Fix B',
+          pointId: 'sketch_point_b',
+          position: [0, 10],
+        },
+      ],
+      dimensionIds: ['dimension_bc_length', 'dimension_obtuse_angle'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_bc_length',
+          kind: 'lineLength',
+          label: 'BC length',
+          entityId: 'sketch_entity_bc',
+          value: 10,
+        },
+        {
+          dimensionId: 'dimension_obtuse_angle',
+          kind: 'lineAngle',
+          label: 'Obtuse angle',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_ab' },
+            { kind: 'localEntity', entityId: 'sketch_entity_bc' },
+          ],
+          valueRadians: (120 * Math.PI) / 180,
+        },
+      ],
+    }
+
+    const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'failOnConflict' })
+    const pointC = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_c')
+    const angleStatus = solved.solvedSnapshot.dimensionStatuses.find((status) => status.dimensionId === 'dimension_obtuse_angle')
+
+    assert(solved.status.solveState === 'solved', 'Obtuse line-angle dimensions should remain solvable.')
+    assert(solved.status.constraintState !== 'overConstrained', 'Obtuse line-angle dimensions should not be classified as over-constrained.')
+    assert(pointC, 'Expected solved endpoint for the obtuse-angle fixture.')
+    assertClose(pointC.solvedPosition[0], 8.660254037844387, 1e-4, 'Obtuse line-angle solve should place the free endpoint on the expected branch.')
+    assertClose(pointC.solvedPosition[1], 15, 1e-4, 'Obtuse line-angle solve should preserve the requested line length.')
+    assertClose(angleStatus?.solvedValue ?? 0, (120 * Math.PI) / 180, 1e-4, 'Obtuse line-angle dimensions should report their solved angle in radians.')
+  }
+
   async function testHorizontalLine() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -1340,6 +1407,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     await testVerticalDistance()
     await testExpandedDimensionStatuses()
     await testAxisQualifiedDistance()
+    await testObtuseLineAngleDimension()
     await testHorizontalLine()
     await testVerticalLine()
     await testAngleBetweenPoints()

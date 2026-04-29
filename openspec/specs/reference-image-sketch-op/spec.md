@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines sketch-owned raster reference images as committed operation-owned state instead of solver-owned sketch geometry.
-
 ## Requirements
 ### Requirement: Sketches SHALL persist committed reference-image operations
 The system SHALL allow an active sketch to contain one or more committed `referenceImage` operations. Each committed operation SHALL persist its own durable operation identity, image media type, optional file name, pixel width, pixel height, inline base64 image payload, placement state, and calibration anchor-binding metadata inside the sketch document. Persisted calibration anchor-binding metadata SHALL include a durable anchor identity, image-relative `u/v` coordinates, and the durable local sketch point id bound to that anchor, but SHALL NOT persist a separate calibration-only constraint list.
@@ -64,10 +63,12 @@ The sketch viewport SHALL render committed `referenceImage` operations as image 
 - **AND** selecting the rendered image resolves the owning `referenceImage` operation identity rather than a synthetic local sketch point or entity target
 
 ### Requirement: Reference-image operations SHALL support independent history and deletion
-Each committed `referenceImage` operation SHALL participate in sketch history as its own operation row. Deleting one reference image SHALL remove only that image operation and its renderables without affecting other committed reference images in the sketch.
+Each committed `referenceImage` operation SHALL participate in sketch history as its own operation row. Deleting one reference image from sketch-local history SHALL remove that image operation row and its operation-owned follow-up state without affecting other committed reference images in the sketch.
 
 #### Scenario: Delete one of multiple reference images
-- **WHEN** a sketch contains multiple committed `referenceImage` operations and the user deletes one of them
-- **THEN** the sketch appends a deletion history step for the targeted image operation
+- **WHEN** a sketch contains multiple committed `referenceImage` operations and the user deletes one of their sketch-history rows
+- **THEN** the targeted reference-image operation row is removed from the sketch definition's authoring operation list
+- **AND** the editor does not append a new deletion history step for that action
 - **AND** only the targeted image disappears from the sketch
 - **AND** the remaining committed reference-image operations are preserved
+

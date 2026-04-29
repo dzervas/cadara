@@ -887,12 +887,11 @@ export function SketchHistoryTimelineBar({
         disabled: item.target === null,
         danger: true,
         onSelect: () => {
-          if (!item.target) {
+          if (item.kind !== 'operation' || !item.target) {
             return
           }
 
-          dispatch({ type: 'viewport.selectionRequested', target: item.target })
-          dispatch({ type: 'sketch.annotationDeleteRequested' })
+          dispatch({ type: 'sketch.historyOperationDeleteRequested', operationId: item.operation.operationId })
         },
       },
     ]

@@ -405,15 +405,55 @@ function lineAngleRadians(
   secondStart: SketchPoint2D,
   secondEnd: SketchPoint2D,
 ) {
-  const firstUnit = unitVector(firstStart, firstEnd)
-  const secondUnit = unitVector(secondStart, secondEnd)
+  const firstDelta = subtract(firstEnd, firstStart)
+  const secondDelta = subtract(secondEnd, secondStart)
+  const denominator = firstDelta[0] * secondDelta[1] - firstDelta[1] * secondDelta[0]
+  const center: SketchPoint2D | null = Math.abs(denominator) <= DEGENERATE_NORM_EPSILON
+    ? null
+    : (() => {
+        const delta = subtract(secondStart, firstStart)
+        const t = (delta[0] * secondDelta[1] - delta[1] * secondDelta[0]) / denominator
+        return [
+          firstStart[0] + firstDelta[0] * t,
+          firstStart[1] + firstDelta[1] * t,
+        ]
+      })()
+  const firstUnit = lineAngleDirectionFromCenter(firstStart, firstEnd, center)
+  const secondUnit = lineAngleDirectionFromCenter(secondStart, secondEnd, center)
 
   if (!firstUnit || !secondUnit) {
     return null
   }
 
   const dot = Math.max(-1, Math.min(1, firstUnit[0] * secondUnit[0] + firstUnit[1] * secondUnit[1]))
-  return Math.acos(Math.abs(dot))
+  return Math.acos(dot)
+}
+
+function lineAngleDirectionFromCenter(
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+  center: SketchPoint2D | null,
+): SketchPoint2D | null {
+  const lineUnit = unitVector(start, end)
+  if (!lineUnit) {
+    return null
+  }
+
+  if (!center) {
+    return lineUnit
+  }
+
+  const midpoint: SketchPoint2D = [
+    (start[0] + end[0]) * 0.5,
+    (start[1] + end[1]) * 0.5,
+  ]
+  const towardMidpoint = unitVector(center, midpoint)
+  if (!towardMidpoint) {
+    return lineUnit
+  }
+
+  const dot = towardMidpoint[0] * lineUnit[0] + towardMidpoint[1] * lineUnit[1]
+  return dot >= 0 ? lineUnit : [-lineUnit[0], -lineUnit[1]]
 }
 
 function resolveLineDimensionOperand(

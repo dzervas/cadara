@@ -8,6 +8,7 @@ import {
   createSketchSessionFromSnapshot,
   createNewSketchSession,
   deleteSelectedSketchGeometry,
+  deleteSketchHistoryOperation,
   getSketchSessionDisplayRenderables,
   startSketchDraw,
   updateReferenceImageOperationStates,
@@ -818,4 +819,77 @@ test('src/domain/editor/reference-image-operations.spec.ts keeps captured debug-
     overlayAnchors.every((renderable) => renderable.geometry.kind === 'marker' && renderable.geometry.displayRadius >= 0.4),
     'Captured bound anchors should render enlarged overlay markers in normal sketch mode.',
   )
+})
+
+test('src/domain/editor/reference-image-operations.spec.ts deletes one reference-image history row without appending a new delete operation or disturbing other images', () => {
+  function assert(condition: unknown, message: string): asserts condition {
+    if (!condition) {
+      throw new Error(message)
+    }
+  }
+
+  const session = updateReferenceImageOperationStates({
+    session: appendReferenceImageOperations(createNewSketchSession(createStandardPlaneDefinition('xy')), [
+      createReferenceImageOperation({
+        sequence: 1,
+        sketchId: 'sketch_draft',
+        payload: {
+          mediaType: 'image/png',
+          fileName: 'reference-a.png',
+          pixelWidth: 400,
+          pixelHeight: 200,
+          base64Data: 'aW1hZ2UtYQ==',
+        },
+      }),
+      createReferenceImageOperation({
+        sequence: 2,
+        sketchId: 'sketch_draft',
+        payload: {
+          mediaType: 'image/png',
+          fileName: 'reference-b.png',
+          pixelWidth: 200,
+          pixelHeight: 400,
+          base64Data: 'aW1hZ2UtYg==',
+        },
+      }),
+    ]),
+    updates: [{
+      operationId: 'sketch_operation_1_reference-image',
+      label: 'reference-a-edited.png',
+      state: {
+        kind: 'referenceImage',
+        image: {
+          mediaType: 'image/png',
+          fileName: 'reference-a-edited.png',
+          pixelWidth: 500,
+          pixelHeight: 250,
+          base64Data: 'ZWRpdGVkLWE=',
+        },
+        placement: {
+          center: [12, 6],
+          width: 220,
+          height: 110,
+          rotationRadians: 0.2,
+        },
+      },
+    }],
+  })
+
+  const deleted = deleteSketchHistoryOperation(session, 'sketch_operation_1_reference-image')
+  const renderables = getSketchSessionDisplayRenderables(deleted)
+    .filter((entry) => entry.target?.kind === 'sketchOperation')
+
+  assert(
+    deleted.fullDefinition.authoringOperations?.every((operation) =>
+      operation.operationId !== 'sketch_operation_1_reference-image'
+      && operation.operationId !== 'sketch_operation_3_edit-reference-image',
+    ),
+    'Deleting a reference-image history row should prune direct operation-owned follow-up rows for that image.',
+  )
+  assert(
+    deleted.fullDefinition.authoringOperations?.every((operation) => operation.kind !== 'delete'),
+    'Deleting a reference-image history row should not append a new delete operation.',
+  )
+  assert(renderables.length === 1, 'Deleting one reference-image history row should preserve other committed reference images.')
+  assert(renderables[0]?.label === 'reference-b.png', 'Deleting one reference-image history row should leave the untargeted image intact.')
 })

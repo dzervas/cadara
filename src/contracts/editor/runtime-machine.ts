@@ -70,6 +70,7 @@ const editorEventTypes = [
   'history.undoRequested',
   'history.redoRequested',
   'document.snapshotLoaded',
+  'sketch.historyOperationDeleteRequested',
   'sketch.annotationDeleteRequested',
   'sketch.annotationEditRequested',
   'form.featurePatched',

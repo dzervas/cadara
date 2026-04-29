@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines how sketches persist ordered authoring operations alongside the live flat sketch graph, including limited operation-owned state for approved special cases.
-
 ## Requirements
 ### Requirement: Sketch definitions SHALL persist authoring operations
 The sketch authored contract SHALL persist an ordered collection of sketch authoring operations alongside the flat sketch graph. Each operation SHALL identify the accepted user intent, carry a durable operation id and display label, and reference the graph members it created, removed, replaced, or edited. Explicitly approved operation kinds MAY also persist operation-owned state that is not represented as ordinary local sketch graph records, but that operation-owned state SHALL reference flat-graph members explicitly when the feature depends on local sketch geometry.
@@ -53,10 +52,10 @@ When a sketch operation deletes geometry, constraints, or dimensions, the delete
 - **AND** the durable operation history still contains the first rectangle operation, the delete operation, and the second rectangle operation
 
 ### Requirement: Deletions SHALL append authoring operations
-Ordinary deletion of sketch geometry, constraints, dimensions, or annotations SHALL append a new sketch authoring operation instead of mutating or removing the original operation that created the deleted members.
+Deletion of live sketch geometry, constraints, dimensions, or annotations through the normal sketch selection delete path SHALL append a new sketch authoring operation instead of mutating or removing the original operation that created the deleted members.
 
 #### Scenario: Delete one edge from a rectangle
-- **WHEN** the user deletes one edge created by a rectangle operation
+- **WHEN** the user deletes one edge created by a rectangle operation from the active sketch selection
 - **THEN** the sketch definition removes that edge and dependent live constraints or dimensions from the current flat graph
 - **AND** the authoring operation list appends a delete operation after the rectangle operation
 - **AND** the original rectangle operation remains available as historical metadata
@@ -82,3 +81,19 @@ Constraints inferred from accepted snap or constructor intent SHALL be recorded 
 - **WHEN** the user manually adds a coincident constraint to existing sketch geometry
 - **THEN** the sketch definition appends a separate constraint authoring operation
 - **AND** that operation references the created constraint or dimension records
+
+### Requirement: Explicit operation deletion SHALL remove the targeted authoring operation
+When the user explicitly deletes an authored row from sketch-local history, the system SHALL remove the targeted authoring operation from the sketch definition and rebuild the visible sketch state from the remaining authored operations instead of appending a new delete operation.
+
+#### Scenario: Delete a rectangle operation row from sketch history
+- **WHEN** the user selects Delete from the sketch-local history context menu for a rectangle authoring operation
+- **THEN** the targeted rectangle operation is removed from the sketch definition's authoring operation list
+- **AND** no new delete operation is appended for that history action
+- **AND** the rebuilt sketch state reflects only the surviving authoring operations
+
+#### Scenario: Delete a delete-operation row from sketch history
+- **WHEN** the user selects Delete from the sketch-local history context menu for an existing delete authoring operation
+- **THEN** the targeted delete operation is removed from the sketch definition's authoring operation list
+- **AND** no replacement delete operation is appended
+- **AND** any sketch members that only that removed delete operation had taken out of the rebuilt graph become visible again after replay
+

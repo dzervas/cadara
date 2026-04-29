@@ -33,6 +33,7 @@ import {
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
   deleteSelectedSketchGeometry,
+  deleteSketchHistoryOperation,
   deleteSketchReferenceTarget,
   finishSketchGeometryDrag,
   focusSketchStyleTool,
@@ -553,6 +554,13 @@ export interface HistoryRedoRequestedEvent {
   type: 'history.redoRequested'
 }
 
+/** Deletes a targeted sketch-local authoring-operation row from history. */
+export interface SketchHistoryOperationDeleteRequestedEvent {
+  type: 'sketch.historyOperationDeleteRequested'
+  /** Durable sketch-local operation identity targeted by the history-row menu. */
+  operationId: SketchAuthoringOperationId
+}
+
 /** Deletes the currently selected committed sketch annotation, if any. */
 export interface SketchAnnotationDeleteRequestedEvent {
   type: 'sketch.annotationDeleteRequested'
@@ -692,6 +700,7 @@ export type EditorEvent =
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent
+  | SketchHistoryOperationDeleteRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
   | SketchAnnotationEditRequestedEvent
   | FormFeaturePatchedEvent
@@ -931,6 +940,8 @@ export type EditorEvent =
       revisionId: RevisionId
       /** Whether the cursor mutation was accepted against `baseRevisionId`. */
       accepted: boolean
+      /** Fresh snapshot after the accepted cursor move, when the runtime can provide it immediately. */
+      snapshot?: DocumentSnapshot
       /** Machine-readable diagnostics returned by the mutation. */
       diagnostics: ModelingDiagnostic[]
       /** Actual revision encountered when `accepted` is false due to conflict. */
@@ -2023,6 +2034,14 @@ function createEditSessionCursorContext(
   }
 }
 
+function canReopenSketchDirectlyFromCurrentCursor(
+  snapshot: DocumentSnapshot | null,
+  target: Extract<PrimitiveRef, { kind: 'sketch' }>,
+) {
+  return snapshot?.document.cursor.kind === 'sketch'
+    && snapshot.document.cursor.sketchId === target.sketchId
+}
+
 function emitFeaturePreview(state: FeatureEditorState): EditorTransitionResult {
   if (state.document.revisionId === null) {
     return {
@@ -2514,6 +2533,102 @@ function updateStateDocumentSnapshot(state: EditorState, snapshot: DocumentSnaps
     selectionCatalog: buildSelectionTargetCatalog(snapshot),
     pendingSnapshotRequestId: null,
   }
+}
+
+function continueAfterSnapshotRefresh(updatedState: EditorState): EditorTransitionResult {
+  const cursorContext = updatedState.editSessionCursorContext
+
+  if (cursorContext?.phase === 'opening' && updatedState.kind === 'selectionCommand') {
+    const activeState: SelectionCommandEditorState = {
+      ...updatedState,
+      editSessionCursorContext: {
+        ...cursorContext,
+        phase: 'active',
+      },
+    }
+
+    if (cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketch') {
+      const session = activeState.snapshot
+        ? openSketchSessionFromSelection([{ kind: 'sketch', sketchId: cursorContext.target.sketchId }], activeState.snapshot)
+        : null
+
+      return session
+        ? enterSketchEditing(activeState, session)
+        : emitSketchOpen(
+            {
+              ...activeState,
+              selection: [{ kind: 'sketch', sketchId: cursorContext.target.sketchId }],
+              hoverTarget: null,
+            },
+            [{ kind: 'sketch', sketchId: cursorContext.target.sketchId }],
+          )
+    }
+
+    if (cursorContext.target.kind === 'feature' && isFeatureTool(activeState.command.toolId)) {
+      return emitFeatureHydration(
+        {
+          ...activeState,
+          selection: [{ kind: 'feature', featureId: cursorContext.target.featureId }],
+          hoverTarget: null,
+        },
+        cursorContext.target.featureId,
+      )
+    }
+  }
+
+  if (cursorContext?.phase === 'restorePending') {
+    return emitEditSessionCursorRestore(updatedState)
+  }
+
+  return {
+    state: cursorContext?.phase === 'restoring'
+      ? {
+          ...updatedState,
+          editSessionCursorContext: null,
+        }
+      : updatedState,
+    effects: [],
+  }
+}
+
+function enterSketchEditing(
+  state: SelectionCommandEditorState,
+  session: SketchSessionState,
+): EditorTransitionResult {
+  const nextState: SketchEditorState = {
+    kind: 'editingSketch',
+    mode: 'sketch',
+    document: state.document,
+    snapshot: state.snapshot,
+    previewRenderables: null,
+    selection:
+      session.sketchId === null
+        ? [session.planeTarget]
+        : [{ kind: 'sketch', sketchId: session.sketchId }],
+    hoverTarget: null,
+    selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+    selectionCatalog: state.selectionCatalog,
+    preview: {
+      kind: 'sketch',
+      label: getSketchSessionPreviewLabel(session),
+      target: session.planeTarget,
+    },
+    nextCommandSequence: state.nextCommandSequence,
+    nextRequestSequence: state.nextRequestSequence,
+    pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    editSessionCursorContext: state.editSessionCursorContext,
+    command: {
+      ...state.command,
+      phase: 'editing',
+    },
+    session,
+    pendingCommitRequestId: null,
+    pendingProjectionRequestId: null,
+    pendingImportRequestId: null,
+  }
+
+  return emitSketchReferenceProjection(nextState, session)
 }
 
 function eventMatchesDocument(
@@ -3953,6 +4068,22 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           sketchStartSelectionFilter,
           createSelectionPreview(state, sketchStartSelectionFilter),
         )
+
+        if (canReopenSketchDirectlyFromCurrentCursor(state.snapshot, event.target)) {
+          const session = openSketchSessionFromSelection([event.target], state.snapshot)
+
+          if (session) {
+            return enterSketchEditing(
+              {
+                ...nextState,
+                selection: [event.target],
+                hoverTarget: event.target,
+              },
+              session,
+            )
+          }
+        }
+
         const cursorContext = createEditSessionCursorContext(state.snapshot, {
           kind: 'sketch',
           sketchId: event.target.sketchId,
@@ -4697,6 +4828,32 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
 
       return emitDocumentCursorMove(state, event.cursor, false)
+    case 'sketch.historyOperationDeleteRequested':
+      if (state.kind !== 'editingSketch') {
+        return {
+          state,
+          effects: [],
+        }
+      }
+
+      {
+        const session = deleteSketchHistoryOperation(state.session, event.operationId)
+
+        return {
+          state: {
+            ...state,
+            selection: [],
+            hoverTarget: null,
+            session,
+            preview: {
+              kind: 'sketch',
+              label: getSketchSessionPreviewLabel(session),
+              target: session.planeTarget,
+            },
+          },
+          effects: [],
+        }
+      }
     case 'sketch.annotationDeleteRequested':
       if (state.kind !== 'editingSketch') {
         return {
@@ -4885,26 +5042,29 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
           : { state: nextState, effects: [] }
       }
 
-      return emitSnapshotFetch(
-        {
-          ...state,
-          document: {
-            ...state.document,
-            revisionId: event.revisionId,
-          },
-          pendingHistoryCursorRequestId: null,
-          editSessionCursorContext: state.editSessionCursorContext
-            ? {
-                ...state.editSessionCursorContext,
-                phase: state.editSessionCursorContext.phase === 'rollingBack'
-                  ? 'opening'
-                  : state.editSessionCursorContext.phase,
-              }
-            : null,
-          preview: null,
+      const nextState = {
+        ...state,
+        document: {
+          ...state.document,
+          revisionId: event.revisionId,
         },
-        null,
-      )
+        pendingHistoryCursorRequestId: null,
+        editSessionCursorContext: state.editSessionCursorContext
+          ? {
+              ...state.editSessionCursorContext,
+              phase: state.editSessionCursorContext.phase === 'rollingBack'
+                ? 'opening'
+                : state.editSessionCursorContext.phase,
+            }
+          : null,
+        preview: null,
+      } satisfies EditorState
+
+      if (!event.snapshot) {
+        return emitSnapshotFetch(nextState, null)
+      }
+
+      return continueAfterSnapshotRefresh(updateStateDocumentSnapshot(nextState, event.snapshot))
     }
     case 'effect.documentCursorMoveFailed':
       if (
@@ -4939,56 +5099,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
-      {
-        const updatedState = updateStateDocument(state, event.payload)
-        const cursorContext = updatedState.editSessionCursorContext
-
-        if (cursorContext?.phase === 'opening' && updatedState.kind === 'selectionCommand') {
-          const activeState: SelectionCommandEditorState = {
-            ...updatedState,
-            editSessionCursorContext: {
-              ...cursorContext,
-              phase: 'active',
-            },
-          }
-
-          if (cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketch') {
-            return emitSketchOpen(
-              {
-                ...activeState,
-                selection: [{ kind: 'sketch', sketchId: cursorContext.target.sketchId }],
-                hoverTarget: null,
-              },
-              [{ kind: 'sketch', sketchId: cursorContext.target.sketchId }],
-            )
-          }
-
-          if (cursorContext.target.kind === 'feature' && isFeatureTool(activeState.command.toolId)) {
-            return emitFeatureHydration(
-              {
-                ...activeState,
-                selection: [{ kind: 'feature', featureId: cursorContext.target.featureId }],
-                hoverTarget: null,
-              },
-              cursorContext.target.featureId,
-            )
-          }
-        }
-
-        if (cursorContext?.phase === 'restorePending') {
-          return emitEditSessionCursorRestore(updatedState)
-        }
-
-        return {
-          state: cursorContext?.phase === 'restoring'
-            ? {
-                ...updatedState,
-                editSessionCursorContext: null,
-              }
-            : updatedState,
-          effects: [],
-        }
-      }
+      return continueAfterSnapshotRefresh(updateStateDocument(state, event.payload))
     case 'effect.snapshotFailed':
       if (
         state.pendingSnapshotRequestId !== event.requestId ||
@@ -5028,42 +5139,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
         }
       }
 
-      {
-        const nextState: SketchEditorState = {
-          kind: 'editingSketch',
-          mode: 'sketch',
-          document: state.document,
-          snapshot: state.snapshot,
-          previewRenderables: null,
-          selection:
-            event.session.sketchId === null
-              ? [event.session.planeTarget]
-              : [{ kind: 'sketch', sketchId: event.session.sketchId }],
-          hoverTarget: null,
-          selectionFilter: getDefaultSelectionFilterForMode('sketch'),
-          selectionCatalog: state.selectionCatalog,
-          preview: {
-            kind: 'sketch',
-            label: getSketchSessionPreviewLabel(event.session),
-            target: event.session.planeTarget,
-          },
-          nextCommandSequence: state.nextCommandSequence,
-          nextRequestSequence: state.nextRequestSequence,
-          pendingSnapshotRequestId: state.pendingSnapshotRequestId,
-          pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
-          editSessionCursorContext: state.editSessionCursorContext,
-          command: {
-            ...state.command,
-            phase: 'editing',
-          },
-          session: event.session,
-          pendingCommitRequestId: null,
-          pendingProjectionRequestId: null,
-          pendingImportRequestId: null,
-        }
-
-        return emitSketchReferenceProjection(nextState, event.session)
-      }
+      return enterSketchEditing(state, event.session)
     case 'effect.sketchSessionOpenFailed':
       if (
         state.kind !== 'selectionCommand' ||
@@ -5960,6 +6036,10 @@ export async function runEditorEffect(
           transient: effect.transient,
         })
 
+        const snapshot = result.accepted
+          ? await runtime.getCurrentDocumentSnapshot()
+          : undefined
+
         return {
           type: 'effect.documentCursorMoved',
           requestId: effect.requestId,
@@ -5967,6 +6047,7 @@ export async function runEditorEffect(
           baseRevisionId: effect.baseRevisionId,
           revisionId: result.revisionId,
           accepted: result.accepted,
+          snapshot,
           diagnostics: result.diagnostics,
           actualRevisionId: result.actualRevisionId,
           errorContext: result.errorContext,

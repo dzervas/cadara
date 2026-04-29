@@ -2314,6 +2314,83 @@ function getSelectedReferenceImageOperationIds(
   )
 }
 
+function getOperationOwnedStateTargetIds(operation: SketchAuthoringOperation) {
+  return [
+    ...(operation.targets.edited ?? []),
+    ...(operation.targets.removed ?? []),
+  ].flatMap((target) => target.kind === 'operation' ? [target.operationId] : [])
+}
+
+function pruneDirectOperationDependents(
+  operations: readonly SketchAuthoringOperation[],
+  removedOperationIds: ReadonlySet<SketchAuthoringOperationId>,
+) {
+  const pendingRemovedIds = new Set(removedOperationIds)
+  let remainingOperations = [...operations]
+  let pruned = true
+
+  while (pruned) {
+    pruned = false
+    remainingOperations = remainingOperations.filter((operation) => {
+      const operationTargetIds = getOperationOwnedStateTargetIds(operation)
+      if (
+        operationTargetIds.length === 0
+        || !operationTargetIds.every((targetOperationId) => pendingRemovedIds.has(targetOperationId))
+      ) {
+        return true
+      }
+
+      pendingRemovedIds.add(operation.operationId)
+      pruned = true
+      return false
+    })
+  }
+
+  return remainingOperations
+}
+
+function repairSketchHistoryCursorAfterOperationRemoval(
+  previousItems: readonly SketchHistoryItem[],
+  previousCursor: SketchHistoryCursor,
+  remainingOperationIds: ReadonlySet<SketchAuthoringOperationId>,
+): SketchHistoryCursor {
+  if (previousCursor.kind === 'empty') {
+    return previousCursor
+  }
+
+  if (remainingOperationIds.has(previousCursor.itemId as SketchAuthoringOperationId)) {
+    return previousCursor
+  }
+
+  const previousCursorIndex = previousItems.findIndex((item) => item.id === previousCursor.itemId)
+  for (let index = previousCursorIndex - 1; index >= 0; index -= 1) {
+    const item = previousItems[index]
+    if (item && remainingOperationIds.has(item.id as SketchAuthoringOperationId)) {
+      return { kind: 'item', itemId: item.id }
+    }
+  }
+
+  return { kind: 'empty' }
+}
+
+function createEmptyAuthoringReplayDefinition(definition: SketchDefinition): SketchDefinition {
+  return {
+    ...cloneDefinition(definition),
+    pointIds: [],
+    points: [],
+    entityIds: [],
+    entities: [],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    styleIds: [],
+    styles: [],
+    derivedRelationships: [],
+    authoringOperations: [],
+  }
+}
+
 export function constraintReferencesSketchGeometry(
   constraint: ConstraintDefinition,
   deletedPointIds: ReadonlySet<SketchPointId>,
@@ -2550,6 +2627,43 @@ export function deleteSelectedSketchGeometry(
     drawStartSnap: null,
     sequence: rebuiltSession.sequence,
   }
+}
+
+export function deleteSketchHistoryOperation(
+  session: SketchSessionState,
+  operationId: SketchAuthoringOperationId,
+): SketchSessionState {
+  const operations = session.fullDefinition.authoringOperations ?? []
+  if (!operations.some((operation) => operation.operationId === operationId)) {
+    return session
+  }
+
+  const previousItems = getSketchHistoryItems(session.fullDefinition)
+  const survivingOperations = pruneDirectOperationDependents(
+    operations.filter((operation) => operation.operationId !== operationId),
+    new Set([operationId]),
+  )
+  const survivingOperationIds = new Set(survivingOperations.map((operation) => operation.operationId))
+  const replayDefinition = {
+    ...cloneDefinition(session.fullDefinition),
+    authoringOperations: survivingOperations,
+  }
+  const fullDefinition = survivingOperations.length > 0
+    ? filterSketchDefinitionThroughCursor(replayDefinition, createTailSketchHistoryCursor(replayDefinition))
+    : createEmptyAuthoringReplayDefinition(session.fullDefinition)
+  const historyCursor = repairSketchHistoryCursorAfterOperationRemoval(
+    previousItems,
+    session.historyCursor,
+    survivingOperationIds,
+  )
+  const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
+
+  return rebuildSessionForDefinition(session, {
+    definition,
+    fullDefinition,
+    historyCursor,
+    historyOperations: [],
+  })
 }
 
 function buildConstraintSelectionGuide(

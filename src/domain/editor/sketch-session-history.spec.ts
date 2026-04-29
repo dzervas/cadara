@@ -4,6 +4,8 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
+  deleteSelectedSketchGeometry,
+  deleteSketchHistoryOperation,
   getSketchHistoryCursorForIndex,
   getSketchHistoryCursorIndex,
   getSketchHistoryItems,
@@ -74,4 +76,47 @@ test('src/domain/editor/sketch-session-history.spec.ts', () => {
     getSketchHistoryCursorIndex(insertedItems, inserted.historyCursor) === insertedItems.length - 1,
     'Sketch cursor should advance to the newly inserted item.',
   )
+
+  const cursorRepair = deleteSketchHistoryOperation(session, fullItems[1]!.id)
+  assert(cursorRepair.fullDefinition.authoringOperations?.length === 1, 'Deleting a history row should remove the targeted authored operation.')
+  assert(
+    cursorRepair.historyCursor.kind === 'item' && cursorRepair.historyCursor.itemId === fullItems[0]!.id,
+    'Deleting the current history row should repair the cursor to the nearest surviving predecessor.',
+  )
+  assert(
+    cursorRepair.fullDefinition.authoringOperations?.every((operation) => operation.kind !== 'delete'),
+    'Deleting an authored row from history should not append a replacement delete operation.',
+  )
+
+  const singleRowWithLine = addLine(
+    createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+    [0, 0],
+    [2, 0],
+  )
+  const singleRowId = singleRowWithLine.fullDefinition.authoringOperations?.[0]?.operationId
+  assert(singleRowId, 'Single-row history delete fixture should create one authored operation.')
+  const emptied = deleteSketchHistoryOperation(singleRowWithLine, singleRowId)
+  assert(emptied.historyCursor.kind === 'empty', 'Deleting the last history row should repair the cursor to the empty position.')
+  assert(emptied.definition.entityIds.length === 0, 'Deleting the final history row should clear the rebuilt sketch graph.')
+
+  const deleteFixture = addLine(
+    createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+    [0, 0],
+    [3, 0],
+  )
+  const deletedEntityId = deleteFixture.definition.entityIds[0]
+  assert(deletedEntityId, 'Delete-row fixture should expose one authored entity.')
+  const withDeleteRow = deleteSelectedSketchGeometry(deleteFixture, [{
+    kind: 'sketchEntity',
+    sketchId: 'sketch_draft',
+    entityId: deletedEntityId,
+  }])
+  const deleteRowId = withDeleteRow.fullDefinition.authoringOperations?.at(-1)?.operationId
+  assert(deleteRowId, 'Live deletion should append a durable delete row before it can be removed from history.')
+  const restored = deleteSketchHistoryOperation(withDeleteRow, deleteRowId)
+  assert(
+    restored.fullDefinition.authoringOperations?.every((operation) => operation.kind !== 'delete'),
+    'Deleting an existing delete row from history should remove that row instead of appending another delete row.',
+  )
+  assert(restored.definition.entityIds.includes(deletedEntityId), 'Deleting a delete row from history should restore the geometry it had removed.')
 })

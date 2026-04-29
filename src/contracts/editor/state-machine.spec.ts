@@ -46,6 +46,7 @@ import {
 } from '@/contracts/shared/versioning'
 import {
   acceptSketchDraw,
+  appendReferenceImageOperations,
   beginSketchTool,
   createNewSketchSession,
   createSketchSessionFromSnapshot,
@@ -67,6 +68,7 @@ import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createAppError, ResultAsync, type AppError } from '@/contracts/errors'
+import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 
 test('src/contracts/editor/state-machine.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -694,6 +696,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   function createCursorAwareRuntime(initialSnapshot: DocumentSnapshot) {
     let snapshot = structuredClone(initialSnapshot)
     let nextRevisionSequence = 1
+    let snapshotReadCount = 0
     const cursorMoves: {
       baseRevisionId: RevisionId
       cursor: DocumentSnapshot['document']['cursor']
@@ -707,7 +710,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const sketchCommitCalls: RevisionId[] = []
 
     const runtime: EditorEffectRuntime = {
-      getCurrentDocumentSnapshot: async () => snapshot,
+      getCurrentDocumentSnapshot: async () => {
+        snapshotReadCount += 1
+        return snapshot
+      },
       commitSketch: async (input) => {
         sketchCommitCalls.push(input.baseRevisionId)
         const revisionId = `rev_sketch_commit_${nextRevisionSequence++}` as RevisionId
@@ -771,6 +777,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       previewCalls,
       featureCommitCalls,
       sketchCommitCalls,
+      getSnapshotReadCount: () => snapshotReadCount,
       getSnapshot: () => snapshot,
     }
   }
@@ -2516,7 +2523,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
   async function testSketchEditEntryRollsBackBeforeOpenFromTail() {
     const snapshot = await createSketchExtrudeSketchRevolveSnapshot()
-    const { runtime, cursorMoves } = createCursorAwareRuntime(snapshot)
+    const { runtime, cursorMoves, getSnapshotReadCount } = createCursorAwareRuntime(snapshot)
 
     const result = await replayEditorEventsWithRuntime(
       [
@@ -2545,6 +2552,32 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       result.state.session.historyCursor.kind !== 'empty',
       'Reopened sketch editing should preserve sketch-local history while the document is rolled back.',
     )
+    assert(
+      getSnapshotReadCount() === 2,
+      'Sketch reopen should reuse the rollback snapshot directly instead of forcing an extra document refresh cycle.',
+    )
+  }
+
+  async function testTailSketchReopenSkipsRollbackAndOpensImmediately() {
+    const snapshot = createReopenableYzSketchSnapshot()
+    const { runtime, cursorMoves, getSnapshotReadCount } = createCursorAwareRuntime(snapshot)
+
+    const result = await replayEditorEventsWithRuntime(
+      [
+        { type: 'session.started' },
+        {
+          type: 'authoring.reopenRequested',
+          target: { kind: 'sketch', sketchId: 'sketch_yz' },
+          toolId: 'sketch',
+        },
+      ],
+      runtime,
+    )
+
+    assert(result.state.kind === 'editingSketch', 'Tail sketch reopen should enter sketch editing immediately.')
+    assert(result.state.session.sketchId === 'sketch_yz', 'Tail sketch reopen should preserve the committed sketch id.')
+    assert(cursorMoves.length === 0, 'Tail sketch reopen should not roll the document cursor when the sketch is already current.')
+    assert(getSnapshotReadCount() === 1, 'Tail sketch reopen should reuse the loaded snapshot instead of re-fetching it.')
   }
 
   async function testFeatureEditCancelRestoresTailCursor() {
@@ -2634,7 +2667,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
-  async function testFinishSketchRestoresNonTailCursor() {
+  async function testFinishSketchAtCurrentSketchCursorSkipsRestore() {
     const tailSnapshot = await createSketchExtrudeSketchRevolveSnapshot()
     const entryCursor = { kind: 'sketch' as const, sketchId: 'sketch_second' as SketchId }
     const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.revisionId)
@@ -2656,22 +2689,15 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'idle', 'Finish sketch should return to idle after restore.')
-    assert(cursorMoves.length === 2, 'Finish sketch should restore the captured entry cursor.')
+    assert(result.state.kind === 'idle', 'Finish sketch should return to idle after commit.')
+    assert(cursorMoves.length === 0, 'Finish sketch should not restore the document cursor when the reopened sketch is already current.')
     const sketchCommitIndex = result.effects.findIndex((effect) => effect.type === 'sketch.commit')
-    const restoreFetchIndex = result.effects.findIndex(
+    const refreshIndex = result.effects.findIndex(
       (effect, index) => index > sketchCommitIndex && effect.type === 'document.fetchSnapshot',
     )
-    const restoreCursorIndex = result.effects.findIndex(
-      (effect, index) => index > restoreFetchIndex && effect.type === 'document.moveHistoryCursor',
-    )
     assert(
-      sketchCommitIndex >= 0 && restoreFetchIndex > sketchCommitIndex && restoreCursorIndex > restoreFetchIndex,
-      'Finish sketch should refresh the committed snapshot before restoring the entry cursor.',
-    )
-    assert(
-      cursorMoves[1]?.cursor.kind === 'sketch' && cursorMoves[1].cursor.sketchId === 'sketch_second',
-      'Finish sketch should restore the captured non-tail cursor instead of the history tail.',
+      sketchCommitIndex >= 0 && refreshIndex > sketchCommitIndex,
+      'Finish sketch should refresh the committed snapshot after commit.',
     )
   }
 
@@ -3790,6 +3816,81 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     )
   }
 
+  function testSketchHistoryDeleteStaysDistinctFromLiveSelectionDelete() {
+    const baseSession = appendReferenceImageOperations(createNewSketchSession(createStandardPlaneDefinition('xy')), [
+      createReferenceImageOperation({
+        sequence: 1,
+        sketchId: 'sketch_draft',
+        payload: {
+          mediaType: 'image/png',
+          fileName: 'reference.png',
+          pixelWidth: 400,
+          pixelHeight: 200,
+          base64Data: 'cG5n',
+        },
+      }),
+    ])
+    const operationId = baseSession.fullDefinition.authoringOperations?.[0]?.operationId
+    assert(operationId, 'History-delete fixture should create a committed reference-image operation.')
+
+    const baseState: SketchEditorState = {
+      ...initialEditorState,
+      kind: 'editingSketch',
+      mode: 'sketch',
+      document: {
+        documentId: 'doc_workspace',
+        revisionId: 'rev_1',
+      },
+      snapshot: createSnapshot(),
+      selection: [{
+        kind: 'sketchOperation',
+        sketchId: 'sketch_draft',
+        operationId,
+      }],
+      hoverTarget: {
+        kind: 'sketchOperation',
+        sketchId: 'sketch_draft',
+        operationId,
+      },
+      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionCatalog: null,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(baseSession),
+        target: baseSession.planeTarget,
+      },
+      command: {
+        commandSessionId: 'command_sketch-history-delete-1',
+        toolId: 'sketch',
+        phase: 'editing',
+      },
+      session: baseSession,
+      pendingCommitRequestId: null,
+    }
+
+    const deletedFromHistory = transitionEditorState(baseState, {
+      type: 'sketch.historyOperationDeleteRequested',
+      operationId,
+    })
+    assert(deletedFromHistory.state.kind === 'editingSketch', 'History-row deletion should keep the sketch editor active.')
+    assert(
+      deletedFromHistory.state.session.fullDefinition.authoringOperations?.length === 0,
+      'History-row deletion should remove the targeted authored operation instead of appending a delete row.',
+    )
+    assert(deletedFromHistory.state.selection.length === 0, 'History-row deletion should clear live selection state after the rewrite.')
+
+    const liveDelete = transitionEditorState(baseState, { type: 'sketch.annotationDeleteRequested' })
+    assert(liveDelete.state.kind === 'editingSketch', 'Live selection deletion should keep the sketch editor active.')
+    assert(
+      liveDelete.state.session.fullDefinition.authoringOperations?.length === 2,
+      'Live selection deletion of a reference image should append a durable delete operation.',
+    )
+    assert(
+      liveDelete.state.session.fullDefinition.authoringOperations?.at(-1)?.kind === 'delete',
+      'Live selection deletion should preserve the existing append-delete semantics for viewport-selected reference images.',
+    )
+  }
+
   function testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm() {
     let session = createNewSketchSession(createStandardPlaneDefinition('xy'))
     session = beginSketchTool(session, 'line')
@@ -4371,6 +4472,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape()
   testConnectedSketchSelectionEventRejectsUnsupportedTargets()
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation()
+  testSketchHistoryDeleteStaysDistinctFromLiveSelectionDelete()
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm()
   testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest()
   testRejectedSketchCommitShowsValidationMessage()
@@ -4390,10 +4492,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   testSketchImagePayloadSelectionAcceptsImportImageOwnedSelectionCommand()
   await testFeatureEditEntryRollsBackBeforeHydrationFromTail()
   await testSketchEditEntryRollsBackBeforeOpenFromTail()
+  await testTailSketchReopenSkipsRollbackAndOpensImmediately()
   await testFeatureEditCancelRestoresTailCursor()
   await testFeatureEditCommitRestoresNonTailCursor()
   await testSketchAbortRestoresTailCursor()
-  await testFinishSketchRestoresNonTailCursor()
+  await testFinishSketchAtCurrentSketchCursorSkipsRestore()
   await testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore()
   await testDocumentCursorRequestUsesSnapshotBasisAndRefreshesOnConflict()
   testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics()
