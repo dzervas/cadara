@@ -5,9 +5,10 @@ import { createRequiredContextHook } from '@/hooks/create-required-context-hook'
 import type { ToolId } from '@/domain/tools/tool-registry'
 import type { ToolTriggerMetadata } from '@/domain/tools/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
-import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
-import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
-import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
+import {
+  getToolCommandBehavior,
+  resolveToolActivationMode,
+} from '@/domain/tools/activation-policy'
 import { supportedReferenceImageFileTypes } from '@/domain/reference-image/raster'
 import { readReferenceImagePayload } from '@/domain/reference-image/import-flow'
 import { WorkbenchCommandContext } from '@/hooks/workbench-command-context'
@@ -36,37 +37,40 @@ export function useToolActions() {
 
   return {
     async triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
-      if (toolId === 'undo') {
+      const activationMode = resolveToolActivationMode(toolId, machineState.mode)
+      const commandBehavior = getToolCommandBehavior(toolId)
+
+      if (commandBehavior === 'undo') {
         if (commandHandlers) {
           commandHandlers.requestUndo()
         } else if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.undoRequested' })
         }
-        actionBus.triggerTool(toolId, machineState.mode, metadata)
+        actionBus.triggerTool(toolId, activationMode, metadata)
         return
       }
 
-      if (toolId === 'redo') {
+      if (commandBehavior === 'redo') {
         if (commandHandlers) {
           commandHandlers.requestRedo()
         } else if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.redoRequested' })
         }
-        actionBus.triggerTool(toolId, machineState.mode, metadata)
+        actionBus.triggerTool(toolId, activationMode, metadata)
         return
       }
 
-      if (toolId === 'import') {
+      if (commandBehavior === 'partImport') {
         if (commandHandlers) {
           void commandHandlers.requestPartImport()
         }
-        actionBus.triggerTool(toolId, machineState.mode, metadata)
+        actionBus.triggerTool(toolId, activationMode, metadata)
         return
       }
 
-      if (toolId === 'importImage') {
+      if (commandBehavior === 'sketchReferenceImageImport') {
         if (!canImportReferenceImage) {
-          actionBus.triggerTool(toolId, machineState.mode, metadata)
+          actionBus.triggerTool(toolId, activationMode, metadata)
           return
         }
 
@@ -74,7 +78,7 @@ export function useToolActions() {
           type: 'tool.activated',
           toolId,
         })
-        actionBus.triggerTool(toolId, machineState.mode, metadata)
+        actionBus.triggerTool(toolId, activationMode, metadata)
 
         const pickerResult = await showOpenImportFilePicker({
           acceptedFileTypes: supportedReferenceImageFileTypes,
@@ -106,26 +110,12 @@ export function useToolActions() {
         return
       }
 
-      const nextMode =
-        toolId === 'sketch'
-          ? 'part'
-          : isRegisteredSketchToolId(toolId)
-            || isRegisteredSketchConstraintToolId(toolId)
-            || isRegisteredSketchEditToolId(toolId)
-            || toolId === 'dimension'
-            || toolId === 'construction'
-            || toolId === 'projectReference'
-            || toolId === 'svgRendering'
-            || toolId === 'finishSketch'
-            ? 'sketch'
-            : machineState.mode
-
       dispatch({
         type: 'tool.activated',
         toolId,
       })
 
-      actionBus.triggerTool(toolId, nextMode, metadata)
+      actionBus.triggerTool(toolId, activationMode, metadata)
     },
   }
 }

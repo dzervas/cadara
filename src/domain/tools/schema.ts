@@ -2,6 +2,14 @@ export type ToolbarMode = 'part' | 'sketch'
 
 export type ToolSource = 'toolbar' | 'dropdown' | 'search' | 'shortcut'
 
+export type ToolActivationMode = ToolbarMode | 'preserve'
+
+export type ToolCommandBehavior =
+  | 'undo'
+  | 'redo'
+  | 'partImport'
+  | 'sketchReferenceImageImport'
+
 export type ToolIconId =
   | 'undo'
   | 'redo'
@@ -92,6 +100,8 @@ export interface ToolDefinition<
   tooltip: string
   icon: TIcon
   modes: readonly ToolbarMode[]
+  activationMode?: ToolActivationMode
+  commandBehavior?: ToolCommandBehavior
   dropdown?: ToolDropdownDefinition<TToolId>
 }
 

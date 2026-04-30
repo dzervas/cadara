@@ -1,4 +1,9 @@
-import type { ToolDefinition, ToolDropdownDefinition } from '@/domain/tools/schema'
+import type {
+  ToolActivationMode,
+  ToolCommandBehavior,
+  ToolDefinition,
+  ToolDropdownDefinition,
+} from '@/domain/tools/schema'
 
 export interface ToolDefinitionMetadata<
   TToolId extends string = string,
@@ -10,6 +15,8 @@ export interface ToolDefinitionMetadata<
   tooltip: string
   icon: ToolDefinition<TToolId, TGroupId>['icon']
   modes: ToolDefinition<TToolId, TGroupId>['modes']
+  activationMode?: ToolActivationMode
+  commandBehavior?: ToolCommandBehavior
   dropdown?: ToolDropdownDefinition<TToolId>
 }
 
@@ -24,7 +31,8 @@ export function toToolDefinition<
     tooltip: metadata.tooltip,
     icon: metadata.icon,
     modes: metadata.modes,
+    ...(metadata.activationMode ? { activationMode: metadata.activationMode } : {}),
+    ...(metadata.commandBehavior ? { commandBehavior: metadata.commandBehavior } : {}),
     ...(metadata.dropdown ? { dropdown: metadata.dropdown } : {}),
   }
 }
-

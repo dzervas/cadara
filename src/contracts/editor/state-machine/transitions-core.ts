@@ -1,6 +1,7 @@
 import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
+import { getToolCommandBehavior } from '@/domain/tools/activation-policy'
 import {
   adoptCompatibleSketchEditToolTargets,
   beginSketchTool,
@@ -409,19 +410,21 @@ function handleFeatureToolActivation(
 }
 
 function handleToolActivated(state: EditorState, event: ToolActivatedEvent): EditorTransitionResult {
-  if (event.toolId === 'undo') {
+  const commandBehavior = getToolCommandBehavior(event.toolId)
+
+  if (commandBehavior === 'undo') {
     return transitionEditorState(state, { type: 'history.undoRequested' })
   }
 
-  if (event.toolId === 'redo') {
+  if (commandBehavior === 'redo') {
     return transitionEditorState(state, { type: 'history.redoRequested' })
   }
 
-  if (event.toolId === 'import') {
+  if (commandBehavior === 'partImport') {
     return { state, effects: [] }
   }
 
-  if (event.toolId === 'importImage') {
+  if (commandBehavior === 'sketchReferenceImageImport') {
     return handleImportImageToolActivation(state)
   }
 

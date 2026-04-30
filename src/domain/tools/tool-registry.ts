@@ -114,6 +114,8 @@ export const toolDefinitions = [
     tooltip: 'Undo the last operation.',
     icon: 'undo',
     modes: ['part', 'sketch'],
+    activationMode: 'preserve',
+    commandBehavior: 'undo',
   },
   {
     id: 'redo',
@@ -122,6 +124,8 @@ export const toolDefinitions = [
     tooltip: 'Redo the last undone operation.',
     icon: 'redo',
     modes: ['part', 'sketch'],
+    activationMode: 'preserve',
+    commandBehavior: 'redo',
   },
   {
     id: 'sketch',
@@ -178,6 +182,7 @@ export const toolDefinitions = [
     tooltip: 'Import one or more reference images into the active sketch.',
     icon: 'import',
     modes: ['sketch'],
+    commandBehavior: 'sketchReferenceImageImport',
   },
   {
     id: 'svgRendering',
@@ -211,6 +216,7 @@ export const toolDefinitions = [
     tooltip: 'Import an image, mesh, or other supported external file.',
     icon: 'import',
     modes: ['part'],
+    commandBehavior: 'partImport',
   },
   {
     id: 'linearPattern',

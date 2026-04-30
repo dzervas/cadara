@@ -19,7 +19,6 @@ import { isInitialOccRenderPending } from '@/app/workbench/initial-occ-render-st
 import { composeViewportRenderables, isTargetHidden } from '@/app/workbench/shell/viewport-renderables'
 import {
   createObjectExportModalState,
-  type ObjectExportModalState,
 } from '@/domain/export/object-export-state'
 import {
   dispatchCadTestSelection,
@@ -33,6 +32,7 @@ import {
   saveWorkbenchLocalFile,
 } from '@/app/workbench/document/workbench-document-actions'
 import { useWorkbenchHistory } from '@/app/workbench/controllers/use-workbench-history'
+import { useWorkbenchDocumentPresentation } from '@/app/workbench/controllers/use-workbench-document-presentation'
 import { useWorkbenchLocalFileSync } from '@/app/workbench/controllers/use-workbench-local-file-sync'
 import { useWorkbenchNotifications } from '@/app/workbench/controllers/use-workbench-notifications'
 import { useWorkbenchPartImport } from '@/app/workbench/controllers/use-workbench-part-import'
@@ -142,18 +142,27 @@ export function CadWorkbench() {
   const snapshot = machineState.snapshot
   const initialOccRenderPending = isInitialOccRenderPending(machineState)
   const previewRenderables = machineState.previewRenderables
-  const [rawExplicitHiddenTargetKeys, setRawExplicitHiddenTargetKeys] = useState<Record<string, boolean>>({})
-  const [rawExplicitlyShownAutoHiddenTargetKeys, setRawExplicitlyShownAutoHiddenTargetKeys] = useState<Record<string, boolean>>({})
-  const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
-  const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
-  const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
-  const [viewportFitRequestId, setViewportFitRequestId] = useState(0)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH)
   const shellFrameRef = useRef<HTMLDivElement | null>(null)
   const snapshotRef = useRef(snapshot)
   const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true })
   // TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
   const cloudSaveEnabled = false
+  const {
+    invalidVariableValueMessages,
+    objectExportModal,
+    objectLabelOverrides,
+    rawExplicitHiddenTargetKeys,
+    rawExplicitlyShownAutoHiddenTargetKeys,
+    requestViewportFit,
+    resetForDocumentReplacement,
+    setInvalidVariableValueMessages,
+    setObjectExportModal,
+    setObjectLabelOverrides,
+    setRawExplicitHiddenTargetKeys,
+    setRawExplicitlyShownAutoHiddenTargetKeys,
+    viewportFitRequestId,
+  } = useWorkbenchDocumentPresentation()
   const {
     reportDocumentFileActionFailure,
     restoreMessage,
@@ -865,14 +874,12 @@ export function CadWorkbench() {
     message: string,
     options: { fitView?: boolean } = {},
   ): Promise<void> => {
-    setRawExplicitHiddenTargetKeys({})
-    setRawExplicitlyShownAutoHiddenTargetKeys({})
-    setObjectLabelOverrides({})
+    resetForDocumentReplacement()
     resetHistoryState()
     try {
       await documentOwner.replaceActiveDocumentBasis()
       if (options.fitView) {
-        setViewportFitRequestId((current) => current + 1)
+        requestViewportFit()
       }
       showWorkbenchInfo(message)
     } catch (error: unknown) {

@@ -45,6 +45,7 @@ test('src/app/workbench-architecture-boundary.spec.ts tool activation routing', 
   const toolButtonSource = readFileSync(join(ROOT, 'src/components/layout/tool-button.tsx'), 'utf8')
   const dropdownSource = readFileSync(join(ROOT, 'src/components/layout/tool-dropdown-button.tsx'), 'utf8')
   const workbenchSource = readFileSync(join(ROOT, 'src/app/workbench/cad-workbench.tsx'), 'utf8')
+  const toolActionsSource = readFileSync(join(ROOT, 'src/hooks/use-tool-actions.ts'), 'utf8')
 
   assert(
     contextSource.includes('activateTool:'),
@@ -69,6 +70,14 @@ test('src/app/workbench-architecture-boundary.spec.ts tool activation routing', 
     workbenchSource.includes('activateTool: triggerTool'),
     'CadWorkbench should inject the shared tool activation entrypoint from its application composition layer.',
   )
+  assert(
+    toolActionsSource.includes('getToolCommandBehavior')
+      && toolActionsSource.includes('resolveToolActivationMode')
+      && !toolActionsSource.includes('isRegisteredSketchToolId')
+      && !toolActionsSource.includes('isRegisteredSketchConstraintToolId')
+      && !toolActionsSource.includes('isRegisteredSketchEditToolId'),
+    'Tool activation policy should flow through shared tool metadata helpers instead of duplicating sketch tool classification in the hook layer.',
+  )
 })
 
 test('src/app/workbench-architecture-boundary.spec.ts workbench document ownership routing', () => {
@@ -83,6 +92,7 @@ test('src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
   const importSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-part-import.ts'), 'utf8')
   const fileActionsSource = readFileSync(join(ROOT, 'src/app/workbench/document/workbench-document-actions.ts'), 'utf8')
   const ownerHookSource = readFileSync(join(ROOT, 'src/hooks/use-workbench-document-owner.ts'), 'utf8')
+  const presentationHookSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-document-presentation.ts'), 'utf8')
 
   assert(
     ownerHookSource.includes("dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })")
@@ -115,6 +125,11 @@ test('src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
     fileActionsSource.includes('replaceAfterDocumentFileAction')
       && !fileActionsSource.includes('refreshAfterDocumentFileAction'),
     'Whole-document file flows should use the explicit replacement handoff instead of the ordinary refresh callback.',
+  )
+  assert(
+    presentationHookSource.includes('resetForDocumentReplacement')
+      && presentationHookSource.includes('setInvalidVariableValueMessages({})'),
+    'Document-scoped shell presentation state should expose one reset path for whole-document replacement flows.',
   )
 })
 
