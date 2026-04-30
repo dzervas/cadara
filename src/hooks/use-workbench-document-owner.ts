@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 
-import type { ImportSessionState } from '@/contracts/editor/state-machine'
+import type { ImportSessionState } from '@/domain/editor/state-machine'
 import type {
   DocumentHistoryOrderEntry,
   DocumentSnapshot,

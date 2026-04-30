@@ -4,7 +4,7 @@ import {
   initialEditorState,
   transitionEditorState,
   type SketchEditorState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import {
   appendReferenceImageOperations,
   createNewSketchSession,

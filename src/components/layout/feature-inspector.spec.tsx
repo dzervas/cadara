@@ -3,7 +3,7 @@ import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeatureExpressionEditorControl, FeatureInspector } from '@/components/layout/feature-inspector'
-import { initialEditorState, type EditorViewState } from '@/contracts/editor/state-machine'
+import { initialEditorState, type EditorViewState } from '@/domain/editor/state-machine'
 import { createExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import {

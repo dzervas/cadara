@@ -1,4 +1,4 @@
-import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
+import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
 import type { DocumentHistoryOrderEntry } from '@/contracts/modeling/schema'
 import {
   getDocumentHistoryOrderEntryKey,

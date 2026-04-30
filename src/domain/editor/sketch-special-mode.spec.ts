@@ -6,7 +6,7 @@ import {
   transitionEditorState,
   type EditorEffectRuntime,
   type EditorState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import {

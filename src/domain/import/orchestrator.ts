@@ -6,6 +6,7 @@ import type { ImportReviewEnvelope } from '@/contracts/import/review'
 import type { ResolvedImportSource } from '@/contracts/import/source'
 import type { ModelingDiagnostic, DocumentSnapshot } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
 import { registerEmbeddedBinaryAsset } from '@/domain/modeling/embedded-binary-asset-registry'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
@@ -80,7 +81,7 @@ export function toImportModelingDiagnostics(
 }
 
 export async function createImportSession(input: {
-  provider: ImportProvider<unknown, unknown>
+  provider: ImportProvider<unknown, unknown, FeatureEditorFormSchema>
   source: ResolvedImportSource
   capabilities: ImportCapabilities
 }) {
@@ -166,7 +167,7 @@ export async function applyImportPreparedActions(input: {
 }
 
 export async function prepareImportActions<TReview, TSelections>(input: {
-  provider: ImportProvider<TReview, TSelections>
+  provider: ImportProvider<TReview, TSelections, FeatureEditorFormSchema>
   source: ResolvedImportSource
   review: ImportReviewEnvelope<TReview>
   selections: TSelections

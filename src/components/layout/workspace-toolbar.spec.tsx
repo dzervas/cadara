@@ -7,7 +7,7 @@ import {
   getEditorViewState,
   initialEditorState,
   type EditorViewState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import {
   acceptSketchDraw,
   beginSketchTool,

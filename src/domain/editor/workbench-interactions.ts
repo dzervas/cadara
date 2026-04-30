@@ -2,7 +2,7 @@ import type {
   AuthoringReopenRequestedEvent,
   EditorEvent,
   EditorViewState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef, SelectionFilter } from '@/domain/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'

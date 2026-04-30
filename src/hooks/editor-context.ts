@@ -6,7 +6,7 @@ import type {
   EditorEvent,
   EditorState,
   EditorViewState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 
 export interface EditorContextValue {
   machineState: EditorState

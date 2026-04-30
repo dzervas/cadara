@@ -1,7 +1,7 @@
 import {
   createModelingServiceEditorEffectRuntime,
   type EditorEffectRuntime,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'

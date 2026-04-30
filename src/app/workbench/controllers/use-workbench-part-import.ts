@@ -1,8 +1,9 @@
 import { useCallback } from 'react'
 
-import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-machine'
+import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { ImportProvider } from '@/contracts/import/provider'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 import {
   createImportCapabilities,
   createImportSession,
@@ -14,7 +15,7 @@ import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-regis
 import { showOpenImportFilePicker } from '@/lib/import-file-picker'
 
 function promptForImportProvider(
-  providers: readonly ImportProvider<unknown, unknown>[],
+  providers: readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[],
 ) {
   if (typeof window === 'undefined') {
     return providers[0] ?? null

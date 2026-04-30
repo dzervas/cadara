@@ -26,7 +26,7 @@ function exportStep(
   return { ok: true, payload: result.payload, diagnostics: [] }
 }
 
-export const stepExportProvider: ExportProvider<StepExportOptions> = {
+export const stepExportProvider: ExportProvider<StepExportOptions, FeatureEditorFormSchema> = {
   id: 'step',
   label: 'STEP',
   formatId: 'step',

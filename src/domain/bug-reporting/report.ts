@@ -3,7 +3,7 @@ import { strToU8, zipSync } from 'fflate'
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { validateOperationHistoryPayload, type ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
-import type { EditorViewState } from '@/contracts/editor/state-machine'
+import type { EditorViewState } from '@/domain/editor/state-machine'
 import { MODELING_OPERATION_HISTORY_STORAGE_KEY, type StorageLike } from '@/domain/modeling/modeling-history-persistence'
 
 export const CADARA_GITHUB_BUG_REPORT_URL = 'https://github.com/dzervas/cadara/issues/new'

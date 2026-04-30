@@ -13,7 +13,7 @@ import {
   type EditorEvent,
   type EditorState,
   type EditorViewState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import {
   createConsoleErrorReporter,
   normalizeUnknownError,

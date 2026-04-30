@@ -2,13 +2,12 @@ import type { ImportPreparedActions } from '@/contracts/import/actions'
 import type { ImportCapabilities } from '@/contracts/import/capabilities'
 import type { ImportReviewEnvelope } from '@/contracts/import/review'
 import type { ResolvedImportSource } from '@/contracts/import/source'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 
 /**
  * Providers are stateless data transformers; the review result is passed back
  * into prepare by the orchestrator.
  */
-export interface ImportProvider<TReview, TSelections = unknown> {
+export interface ImportProvider<TReview, TSelections = unknown, TFormSchema = unknown> {
   id: string
   label: string
   acceptedFileTypes: readonly {
@@ -24,7 +23,7 @@ export interface ImportProvider<TReview, TSelections = unknown> {
   getReviewFormSchema(
     review: ImportReviewEnvelope<TReview>,
     selections: TSelections,
-  ): FeatureEditorFormSchema
+  ): TFormSchema
   applySelectionPatch(
     review: ImportReviewEnvelope<TReview>,
     selections: TSelections,

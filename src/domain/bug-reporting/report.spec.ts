@@ -5,7 +5,7 @@ import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/au
 import { createGeometryAssetDiagnostic } from '@/contracts/modeling/geometry-assets'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
-import { initialEditorState, getEditorViewState } from '@/contracts/editor/state-machine'
+import { initialEditorState, getEditorViewState } from '@/domain/editor/state-machine'
 import {
   BUG_REPORT_FIELD_IDS,
   CADARA_GITHUB_BUG_REPORT_TEMPLATE,

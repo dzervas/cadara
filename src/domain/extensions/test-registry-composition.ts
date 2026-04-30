@@ -1,5 +1,6 @@
 import type { ExportProvider } from '@/contracts/export/provider'
 import type { ImportProvider } from '@/contracts/import/provider'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 import type { SketchSpecialModeDefinition } from '@/domain/sketch-special-modes/schema'
 import { createBuiltinExportProviderRegistry, builtinExportProviders } from '@/domain/export/builtin-provider-composition'
 import { createExportProviderRegistry } from '@/domain/export/provider-registry'
@@ -8,13 +9,13 @@ import { createSketchSpecialModeRegistry, builtinSketchSpecialModeDefinitions } 
 import type { RuntimeExtensionRegistryComposition } from '@/domain/extensions/runtime-registry-composition'
 
 export function createScopedExportProviderRegistryForTest(
-  providers: readonly ExportProvider<unknown>[] = builtinExportProviders,
+  providers: readonly ExportProvider<unknown, FeatureEditorFormSchema>[] = builtinExportProviders,
 ) {
   return createExportProviderRegistry(providers)
 }
 
 export function createScopedImportProviderRegistryForTest(
-  providers: readonly ImportProvider<unknown, unknown>[] = [],
+  providers: readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[] = [],
 ) {
   return createImportProviderRegistry(providers)
 }
@@ -26,8 +27,8 @@ export function createScopedSketchSpecialModeRegistryForTest(
 }
 
 export function createScopedRuntimeExtensionRegistryCompositionForTest(input: {
-  exportProviders?: readonly ExportProvider<unknown>[]
-  importProviders?: readonly ImportProvider<unknown, unknown>[]
+  exportProviders?: readonly ExportProvider<unknown, FeatureEditorFormSchema>[]
+  importProviders?: readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[]
   sketchSpecialModes?: readonly SketchSpecialModeDefinition[]
 } = {}): RuntimeExtensionRegistryComposition {
   return {

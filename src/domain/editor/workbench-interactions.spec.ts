@@ -1,5 +1,5 @@
 import { test } from 'bun:test'
-import { getEditorViewState, initialEditorState } from '@/contracts/editor/state-machine'
+import { getEditorViewState, initialEditorState } from '@/domain/editor/state-machine'
 import { createNewSketchSession } from '@/domain/editor/sketch-session'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'

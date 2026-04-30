@@ -21,7 +21,7 @@ import {
 } from '@/domain/editor/sketch-session'
 import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
-import type { EditorHistoryAvailability } from '@/contracts/editor/state-machine'
+import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
 
 const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 

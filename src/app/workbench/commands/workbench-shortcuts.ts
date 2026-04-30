@@ -1,4 +1,4 @@
-import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-machine'
+import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
 import { isEditableSketchGeometrySelection } from '@/domain/editor/sketch-session'
 import { getEscapeEvent } from '@/domain/editor/workbench-interactions'
 import { getToolCommandId, type ShortcutScope } from '@/domain/shortcuts/commands'

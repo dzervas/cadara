@@ -177,7 +177,9 @@ function ProviderOptionsForm({
   options: unknown
   onPatch: (patch: Record<string, unknown>) => void
 }) {
-  const schema = provider.getOptionFormSchema(options)
+  const schema = provider.getOptionFormSchema(options) as {
+    sections: readonly FeatureEditorFormSection[]
+  }
 
   return (
     <>

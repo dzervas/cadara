@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 
-import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-machine'
+import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
 import type { PrimitiveRef } from '@/domain/editor/schema'
 import { createWorkbenchShortcutCommandHandlers, getWorkbenchShortcutActiveScopes } from '@/app/workbench/commands/workbench-shortcuts'
 import { createShortcutCommandRegistry, getShortcutCommandDefinitions } from '@/domain/shortcuts/commands'

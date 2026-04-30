@@ -1,15 +1,16 @@
 import type { ExportProvider } from '@/contracts/export/provider'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 
 export interface ExportProviderRegistry {
-  getAll(): readonly ExportProvider<unknown>[]
-  getByFormat(formatId: string): ExportProvider<unknown> | undefined
+  getAll(): readonly ExportProvider<unknown, FeatureEditorFormSchema>[]
+  getByFormat(formatId: string): ExportProvider<unknown, FeatureEditorFormSchema> | undefined
 }
 
 export function createExportProviderRegistry(
-  providers: readonly ExportProvider<unknown>[],
+  providers: readonly ExportProvider<unknown, FeatureEditorFormSchema>[],
 ): ExportProviderRegistry {
-  const dedupedProviders: ExportProvider<unknown>[] = []
-  const providersByFormat = new Map<string, ExportProvider<unknown>>()
+  const dedupedProviders: ExportProvider<unknown, FeatureEditorFormSchema>[] = []
+  const providersByFormat = new Map<string, ExportProvider<unknown, FeatureEditorFormSchema>>()
   const seenProviderIds = new Set<string>()
 
   for (const provider of providers) {

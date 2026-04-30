@@ -1,6 +1,6 @@
 import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
-import type { EditorEvent } from '@/contracts/editor/state-machine'
+import type { EditorEvent } from '@/domain/editor/state-machine'
 import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,

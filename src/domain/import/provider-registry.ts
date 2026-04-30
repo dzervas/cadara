@@ -1,18 +1,19 @@
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { ResolvedImportSource } from '@/contracts/import/source'
+import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 
 export interface ImportProviderRegistry {
-  getAll(): readonly ImportProvider<unknown, unknown>[]
-  getById(providerId: string): ImportProvider<unknown, unknown> | null
-  matchProviders(source: ResolvedImportSource): readonly ImportProvider<unknown, unknown>[]
+  getAll(): readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[]
+  getById(providerId: string): ImportProvider<unknown, unknown, FeatureEditorFormSchema> | null
+  matchProviders(source: ResolvedImportSource): readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[]
   getAcceptedFileTypes(): readonly { extension: string; mediaType?: string }[]
 }
 
 export function createImportProviderRegistry(
-  providers: readonly ImportProvider<unknown, unknown>[],
+  providers: readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[],
 ): ImportProviderRegistry {
-  const dedupedProviders: ImportProvider<unknown, unknown>[] = []
-  const providersById = new Map<string, ImportProvider<unknown, unknown>>()
+  const dedupedProviders: ImportProvider<unknown, unknown, FeatureEditorFormSchema>[] = []
+  const providersById = new Map<string, ImportProvider<unknown, unknown, FeatureEditorFormSchema>>()
 
   for (const provider of providers) {
     if (providersById.has(provider.id)) {
@@ -42,7 +43,7 @@ export function createImportProviderRegistry(
 }
 
 function collectAcceptedImportFileTypes(
-  providers: readonly ImportProvider<unknown, unknown>[],
+  providers: readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[],
 ) {
   const deduped = new Map<string, { extension: string; mediaType?: string }>()
 

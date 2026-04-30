@@ -2,8 +2,8 @@ import type { AuthoredSketchRecord } from '@/contracts/modeling/authored-documen
 import type { DimensionDefinition, SketchDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
 import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
-import type { ConstraintId, DimensionId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
-import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
+import type { ConstraintId, ConstructionId, DimensionId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
+import type { SketchPlaneDefinition, SketchPlaneKey } from '@/contracts/shared/sketch-plane'
 
 export interface SketchSolverBenchmarkFixture {
   name: string
@@ -148,12 +148,62 @@ function makeDefinition(parts: MutableSketchDefinitionParts): SketchDefinition {
   }
 }
 
+function createBenchmarkPlaneDefinition(planeKey: SketchPlaneKey): SketchPlaneDefinition {
+  const constructionIds: Record<SketchPlaneKey, ConstructionId> = {
+    xy: 'construction_plane-xy' as ConstructionId,
+    yz: 'construction_plane-yz' as ConstructionId,
+    xz: 'construction_plane-xz' as ConstructionId,
+  }
+
+  switch (planeKey) {
+    case 'xy':
+      return {
+        support: { kind: 'construction', constructionId: constructionIds.xy },
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+        key: planeKey,
+      }
+    case 'yz':
+      return {
+        support: { kind: 'construction', constructionId: constructionIds.yz },
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [0, 1, 0],
+          yAxis: [0, 0, 1],
+          normal: [1, 0, 0],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+        key: planeKey,
+      }
+    case 'xz':
+      return {
+        support: { kind: 'construction', constructionId: constructionIds.xz },
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 0, 1],
+          normal: [0, -1, 0],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+        key: planeKey,
+      }
+  }
+}
+
 function makeAuthoredSketchRecord(
   sketchId: SketchId,
   label: string,
   definition: SketchDefinition,
 ): AuthoredSketchRecord {
-  const plane = createStandardPlaneDefinition('xy')
+  const plane = createBenchmarkPlaneDefinition('xy')
   return {
     sketchId,
     label,

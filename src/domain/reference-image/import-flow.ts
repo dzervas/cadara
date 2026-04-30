@@ -1,5 +1,5 @@
 import type { AppError } from '@/contracts/errors'
-import type { EditorEvent } from '@/contracts/editor/state-machine'
+import type { EditorEvent } from '@/domain/editor/state-machine'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { RequestId, RevisionId, SketchId } from '@/contracts/shared/ids'

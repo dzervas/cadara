@@ -13,7 +13,7 @@ import {
 import {
   getEditorViewState,
   initialEditorState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import { getPrimitiveRefKey } from '@/domain/editor/schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createSketchSessionFromSnapshot } from '@/domain/editor/sketch-session'

@@ -150,7 +150,7 @@ function exportThreeMf(
   return { ok: true, payload: writeThreeMfPackage(triangles, targetLabel, options.includeMetadata), diagnostics: [] }
 }
 
-export const threeMfExportProvider: ExportProvider<ThreeMfExportOptions> = {
+export const threeMfExportProvider: ExportProvider<ThreeMfExportOptions, FeatureEditorFormSchema> = {
   id: '3mf',
   label: '3MF',
   formatId: '3mf',

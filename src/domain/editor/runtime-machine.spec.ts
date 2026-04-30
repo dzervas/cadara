@@ -1,11 +1,11 @@
 import { test } from 'bun:test'
 
-import type { EditorEffectRuntime, EditorState } from '@/contracts/editor/state-machine'
+import type { EditorEffectRuntime, EditorState } from '@/domain/editor/state-machine'
 import {
   createEditorRuntimeActor,
   getEditorRuntimeState,
   type EditorRuntimeActor,
-} from '@/contracts/editor/runtime-machine'
+} from '@/domain/editor/runtime-machine'
 import { createTestErrorReporter } from '@/contracts/errors'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 

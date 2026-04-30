@@ -98,7 +98,7 @@ function exportStl(
   return { ok: true, payload, diagnostics: [] }
 }
 
-export const stlExportProvider: ExportProvider<StlExportOptions> = {
+export const stlExportProvider: ExportProvider<StlExportOptions, FeatureEditorFormSchema> = {
   id: 'stl',
   label: 'STL',
   formatId: 'stl',

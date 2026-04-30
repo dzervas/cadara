@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
-import type { EditorEvent, EditorHistoryAvailability } from '@/contracts/editor/state-machine'
+import type { EditorEvent, EditorHistoryAvailability } from '@/domain/editor/state-machine'
 import { ok, type AppError, type ErrorReporter } from '@/contracts/errors'
 import type {
   DocumentHistoryOrderEntry,

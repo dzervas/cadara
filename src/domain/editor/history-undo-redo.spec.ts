@@ -6,7 +6,7 @@ import {
   transitionEditorState,
   type EditorState,
   type SketchEditorState,
-} from '@/contracts/editor/state-machine'
+} from '@/domain/editor/state-machine'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-history'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'

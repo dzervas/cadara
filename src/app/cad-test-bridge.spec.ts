@@ -7,7 +7,7 @@ import {
 } from '@/app/workbench/cad-test-bridge'
 import { defaultSelectionFilter } from '@/domain/editor/schema'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
-import type { EditorEvent } from '@/contracts/editor/state-machine'
+import type { EditorEvent } from '@/domain/editor/state-machine'
 import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 
 test('src/app/cad-test-bridge.spec.ts', () => {
