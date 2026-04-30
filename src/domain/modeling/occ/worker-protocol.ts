@@ -1,9 +1,45 @@
 import { z } from 'zod'
 
+import type {
+  AddDocumentVariableRequest,
+  AddDocumentVariableResponse,
+  CommitSketchRequest,
+  CommitSketchResponse,
+  CreateFeatureRequest,
+  CreateFeatureResponse,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
+  DeleteFeatureRequest,
+  DeleteFeatureResponse,
+  EvaluatePreviewRequest,
+  EvaluatePreviewResponse,
+  GetDocumentSnapshotRequest,
+  GetDocumentSnapshotResponse,
+  ModelingDiagnostic,
+  RenameBodyRequest,
+  RenameBodyResponse,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
+  ReorderFeatureRequest,
+  ReorderFeatureResponse,
+  ResolveReferenceRequest,
+  ResolveReferenceResponse,
+  SetFeatureCursorRequest,
+  SetFeatureCursorResponse,
+  UpdateDocumentVariableRequest,
+  UpdateDocumentVariableResponse,
+  UpdateFeatureRequest,
+  UpdateFeatureResponse,
+} from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
-import type { RequestId } from '@/contracts/shared/ids'
+import type { RequestId, RevisionId } from '@/contracts/shared/ids'
+import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
+import type {
+  ProjectSketchExternalReferencesRequest,
+  ProjectSketchExternalReferencesResponse,
+} from '@/contracts/solver/schema'
 import type { PackedWorkspaceSnapshot } from '@/domain/modeling/occ/mesh-transport'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 
@@ -16,24 +52,126 @@ export const occWorkerAssetConfigSchema = z.object({
 
 export type OccWorkerAssetConfig = z.infer<typeof occWorkerAssetConfigSchema>
 
-export type OccWorkerRequest =
+interface AuthoredDocumentWorkerOperationBase {
+  document: AuthoredModelDocument
+  diagnostics?: readonly ModelingDiagnostic[]
+  assets?: readonly GeometryAssetBlobInput[]
+}
+
+export type OccWorkerOperation =
   | {
-      kind: 'preload'
-      requestId: RequestId
+      kind: 'warmup'
       assets?: OccWorkerAssetConfig
     }
+  | ({
+      kind: 'restoreAuthoredModelDocument'
+    } & AuthoredDocumentWorkerOperationBase)
+  | ({
+      kind: 'validateAuthoredModelDocument'
+    } & AuthoredDocumentWorkerOperationBase)
   | {
-      kind: 'rebuildDocument'
-      requestId: RequestId
-      document: AuthoredModelDocument
-      assets?: readonly GeometryAssetBlobInput[]
+      kind: 'exportAuthoredModelDocument'
+      documentId: AuthoredModelDocument['documentId']
     }
   | {
-      kind: 'buildWorkspaceSnapshot'
-      requestId: RequestId
-      document: AuthoredModelDocument
+      kind: 'getDocumentSnapshot'
+      request: GetDocumentSnapshotRequest
       lodTierId?: OccTessellationTierId
-      assets?: readonly GeometryAssetBlobInput[]
+    }
+  | {
+      kind: 'projectSketchExternalReferences'
+      request: ProjectSketchExternalReferencesRequest
+    }
+  | {
+      kind: 'commitSketch'
+      request: CommitSketchRequest
+    }
+  | {
+      kind: 'createFeature'
+      request: CreateFeatureRequest
+    }
+  | {
+      kind: 'updateFeature'
+      request: UpdateFeatureRequest
+    }
+  | {
+      kind: 'deleteFeature'
+      request: DeleteFeatureRequest
+    }
+  | {
+      kind: 'deleteTarget'
+      request: DeleteDocumentTargetRequest
+    }
+  | {
+      kind: 'renameBody'
+      request: RenameBodyRequest
+    }
+  | {
+      kind: 'reorderFeature'
+      request: ReorderFeatureRequest
+    }
+  | {
+      kind: 'reorderDocumentHistory'
+      request: ReorderDocumentHistoryRequest
+    }
+  | {
+      kind: 'setFeatureCursor'
+      request: SetFeatureCursorRequest
+    }
+  | {
+      kind: 'addDocumentVariable'
+      request: AddDocumentVariableRequest
+    }
+  | {
+      kind: 'updateDocumentVariable'
+      request: UpdateDocumentVariableRequest
+    }
+  | {
+      kind: 'evaluatePreview'
+      request: EvaluatePreviewRequest
+    }
+  | {
+      kind: 'resolveReference'
+      request: ResolveReferenceRequest
+    }
+  | {
+      kind: 'getExportCapabilities'
+      baseRevisionId: RevisionId
+    }
+
+export type OccWorkerOperationResult =
+  | void
+  | AuthoredModelDocument
+  | GetDocumentSnapshotResponse
+  | ProjectSketchExternalReferencesResponse
+  | CommitSketchResponse
+  | CreateFeatureResponse
+  | UpdateFeatureResponse
+  | DeleteFeatureResponse
+  | DeleteDocumentTargetResponse
+  | RenameBodyResponse
+  | ReorderFeatureResponse
+  | ReorderDocumentHistoryResponse
+  | SetFeatureCursorResponse
+  | AddDocumentVariableResponse
+  | UpdateDocumentVariableResponse
+  | EvaluatePreviewResponse
+  | ResolveReferenceResponse
+  | ExportCapabilities
+  | DocumentExportDiagnostic
+
+export type OccWorkerResponsePayload =
+  | OccWorkerOperationResult
+  | {
+      contractVersion: GetDocumentSnapshotResponse['contractVersion']
+      snapshot: GetDocumentSnapshotResponse['snapshot'] | PackedWorkspaceSnapshot
+    }
+
+export type OccWorkerRequest =
+  | {
+      kind: 'invoke'
+      requestId: RequestId
+      operation: OccWorkerOperation
     }
   | {
       kind: 'cancel'
@@ -43,17 +181,10 @@ export type OccWorkerRequest =
 
 export type OccWorkerResponse =
   | {
-      kind: 'preloaded'
+      kind: 'invoked'
       requestId: RequestId
-    }
-  | {
-      kind: 'documentRebuilt'
-      requestId: RequestId
-    }
-  | {
-      kind: 'workspaceSnapshotBuilt'
-      requestId: RequestId
-      snapshot: WorkspaceSnapshot | PackedWorkspaceSnapshot
+      operation: OccWorkerOperation['kind']
+      payload?: OccWorkerResponsePayload
     }
   | OccWorkerFailureMessage
 
@@ -68,22 +199,11 @@ export interface OccWorkerFailureMessage {
 
 export const occWorkerRequestEnvelopeSchema = z.discriminatedUnion('kind', [
   z.object({
-    kind: z.literal('preload'),
+    kind: z.literal('invoke'),
     requestId: requestIdSchema,
-    assets: occWorkerAssetConfigSchema.optional(),
-  }),
-  z.object({
-    kind: z.literal('rebuildDocument'),
-    requestId: requestIdSchema,
-    document: z.unknown(),
-    assets: z.array(z.unknown()).optional(),
-  }),
-  z.object({
-    kind: z.literal('buildWorkspaceSnapshot'),
-    requestId: requestIdSchema,
-    document: z.unknown(),
-    lodTierId: z.enum(['startup', 'normal', 'fine']).optional(),
-    assets: z.array(z.unknown()).optional(),
+    operation: z.object({
+      kind: z.string().min(1),
+    }).passthrough(),
   }),
   z.object({
     kind: z.literal('cancel'),

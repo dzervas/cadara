@@ -9,26 +9,32 @@ test('src/App.preload.spec.ts', () => {
     }
   }
 
-  const source = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
+  const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
+  const bootstrapSource = readFileSync(join(process.cwd(), 'src/bootstrap.tsx'), 'utf8')
+  const runtimeSource = readFileSync(
+    join(process.cwd(), 'src/domain/modeling/occ/browser-kernel-runtime.ts'),
+    'utf8',
+  )
 
   assert(
-    source.includes('createOccPreloadController') && source.includes('kernelAdapter.preloadRuntime()'),
-    'App mount should start OCC eager preload through the current runtime owner.',
+    bootstrapSource.includes('startBrowserOccWarmup()'),
+    'Browser bootstrap should start OCC eager warmup before React mount.',
   )
   assert(
-    source.includes('errorReporter.report') && /source:\s*['"]occ-preload['"]/.test(source),
-    'OCC preload failures should use the existing reported error path.',
+    runtimeSource.includes('createOccPreloadController')
+      && runtimeSource.includes('getBrowserOccKernelAdapter().preloadRuntime()'),
+    'Bootstrap warmup should preload the shared browser OCC runtime owner.',
   )
   assert(
-    source.includes('initialSnapshotRequiresRuntime: typeof window') && source.includes('<OccPreloadEffect'),
-    'Browser app snapshots should wait for the first OCC-backed render while the preload effect is mounted.',
+    appSource.includes('errorReporter.report') && /source:\s*['"]occ-preload['"]/.test(appSource),
+    'OCC warmup failures should use the existing reported error path.',
   )
   assert(
-    source.includes('createBrowserOccWorkerClient') && source.includes('workerSnapshotClient: occWorkerClient'),
-    'Browser app snapshots should route OCC initialization and snapshot builds through the worker client.',
+    appSource.includes('OccWarmupErrorEffect') && !appSource.includes('OccPreloadEffect'),
+    'App should observe bootstrap warmup failures without owning the startup trigger.',
   )
   assert(
-    source.includes('occWorkerDisposeTimerRef') && source.includes('setTimeout') && source.includes('clearTimeout'),
-    'OCC worker disposal should be deferred so React StrictMode cleanup does not dispose the active worker client.',
+    runtimeSource.includes('workerSnapshotClient: browserOccWorkerClient'),
+    'Browser app snapshots and mutations should route through the shared worker-backed OCC client.',
   )
 })

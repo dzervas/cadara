@@ -452,6 +452,18 @@ export function CadWorkbench() {
   }, [snapshot])
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !snapshot) {
+      return
+    }
+
+    window.__cadOccPerf = {
+      warmupStatus: 'idle',
+      ...window.__cadOccPerf,
+      firstSnapshotReadyAt: window.__cadOccPerf?.firstSnapshotReadyAt ?? performance.now(),
+    }
+  }, [snapshot])
+
+  useEffect(() => {
     undoStackRef.current = undoStack
   }, [undoStack])
 
@@ -462,6 +474,50 @@ export function CadWorkbench() {
   useEffect(() => {
     sketchSessionRef.current = sketchSession
   }, [sketchSession])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !shouldEnableOccPerfBridge()) {
+      return
+    }
+
+    window.__cadMeasureOccMutation = async () => {
+      const currentSnapshot = snapshotRef.current
+      if (!currentSnapshot) {
+        return null
+      }
+
+      const startedAt = performance.now()
+      const result = await modelingService.addDocumentVariable({
+        baseRevisionId: currentSnapshot.document.revisionId,
+        name: `__cad_occ_perf_${Date.now()}`,
+        valueText: '1',
+      })
+      const elapsedMs = performance.now() - startedAt
+
+      window.__cadOccPerf = {
+        warmupStatus: 'idle',
+        ...window.__cadOccPerf,
+        lastMutationLatencyMs: elapsedMs,
+      }
+
+      return result.match(
+        (value) => ({
+          elapsedMs,
+          revisionId: value.revisionId,
+          accepted: value.revisionState.kind === 'accepted',
+        }),
+        () => ({
+          elapsedMs,
+          revisionId: currentSnapshot.document.revisionId,
+          accepted: false,
+        }),
+      )
+    }
+
+    return () => {
+      delete window.__cadMeasureOccMutation
+    }
+  }, [modelingService])
 
   useEffect(() => {
     let disposed = false
@@ -1648,26 +1704,29 @@ export function CadWorkbench() {
     }
   }
 
-  const refreshAfterDocumentFileAction = (message: string, options: { fitView?: boolean } = {}) => {
+  const refreshAfterDocumentFileAction = async (
+    message: string,
+    options: { fitView?: boolean } = {},
+  ): Promise<void> => {
     setRawExplicitHiddenTargetKeys({})
     setRawExplicitlyShownAutoHiddenTargetKeys({})
     setObjectLabelOverrides({})
     setUndoStack([])
     setRedoStack([])
     if (options.fitView) {
-      return modelingService.getCurrentDocumentSnapshot().then((nextSnapshot) => {
+      try {
+        const nextSnapshot = await modelingService.getCurrentDocumentSnapshot()
         applyLoadedSnapshot(nextSnapshot)
         setViewportFitRequestId((current) => current + 1)
         showWorkbenchInfo(message)
-      }).catch((error: unknown) => {
+      } catch (error: unknown) {
         reportDocumentFileActionFailure('workbench.file.refresh', 'Document refresh failed.', error)
-      })
+      }
       return
     }
 
     dispatch({ type: 'document.refreshRequested' })
     showWorkbenchInfo(message)
-    return Promise.resolve()
   }
 
   const reportDocumentFileActionFailure = useCallback((source: string, message: string, error: unknown) => {
@@ -2057,4 +2116,12 @@ export function CadWorkbench() {
     </div>
     </ShortcutProvider>
   )
+}
+
+function shouldEnableOccPerfBridge() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return import.meta.env.DEV || new URLSearchParams(window.location.search).has('cadPerfMode')
 }

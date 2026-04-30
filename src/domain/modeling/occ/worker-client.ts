@@ -1,14 +1,51 @@
+import type {
+  AddDocumentVariableRequest,
+  AddDocumentVariableResponse,
+  CommitSketchRequest,
+  CommitSketchResponse,
+  CreateFeatureRequest,
+  CreateFeatureResponse,
+  DeleteDocumentTargetRequest,
+  DeleteDocumentTargetResponse,
+  DeleteFeatureRequest,
+  DeleteFeatureResponse,
+  EvaluatePreviewRequest,
+  EvaluatePreviewResponse,
+  GetDocumentSnapshotRequest,
+  GetDocumentSnapshotResponse,
+  ModelingDiagnostic,
+  RenameBodyRequest,
+  RenameBodyResponse,
+  ReorderDocumentHistoryRequest,
+  ReorderDocumentHistoryResponse,
+  ReorderFeatureRequest,
+  ReorderFeatureResponse,
+  ResolveReferenceRequest,
+  ResolveReferenceResponse,
+  SetFeatureCursorRequest,
+  SetFeatureCursorResponse,
+  UpdateDocumentVariableRequest,
+  UpdateDocumentVariableResponse,
+  UpdateFeatureRequest,
+  UpdateFeatureResponse,
+} from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
-import type { RequestId } from '@/contracts/shared/ids'
+import type { RequestId, RevisionId } from '@/contracts/shared/ids'
+import type {
+  ProjectSketchExternalReferencesRequest,
+  ProjectSketchExternalReferencesResponse,
+} from '@/contracts/solver/schema'
+import { unpackWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
+import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type {
   OccWorkerAssetConfig,
+  OccWorkerOperation,
   OccWorkerRequest,
   OccWorkerResponse,
 } from '@/domain/modeling/occ/worker-protocol'
-import { unpackWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
-import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
 
 export interface OccWorkerLike {
   postMessage(message: OccWorkerRequest, transfer?: Transferable[]): void
@@ -17,25 +54,51 @@ export interface OccWorkerLike {
   terminate?(): void
 }
 
-type PendingRequest =
-  {
-    kind: 'preload' | 'rebuildDocument' | 'buildWorkspaceSnapshot'
-    resolve: (value?: WorkspaceSnapshot) => void
-    reject: (error: Error) => void
-  }
+type PendingRequest = {
+  operation: OccWorkerOperation['kind']
+  resolve: (value?: unknown) => void
+  reject: (error: Error) => void
+}
 
 export interface OccWorkerClientOptions {
   worker: OccWorkerLike
 }
 
 export interface OccWorkerSnapshotClient {
+  warmup(assets?: OccWorkerAssetConfig): Promise<void>
   preload(assets?: OccWorkerAssetConfig): Promise<void>
-  rebuildDocument(document: AuthoredModelDocument, assets?: readonly GeometryAssetBlobInput[]): Promise<void>
-  buildWorkspaceSnapshot(
+  restoreAuthoredModelDocument(
     document: AuthoredModelDocument,
-    lodTierId?: OccTessellationTierId,
+    diagnostics?: readonly ModelingDiagnostic[],
     assets?: readonly GeometryAssetBlobInput[],
-  ): Promise<WorkspaceSnapshot>
+  ): Promise<void>
+  validateAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics?: readonly ModelingDiagnostic[],
+    assets?: readonly GeometryAssetBlobInput[],
+  ): Promise<void>
+  exportAuthoredModelDocument(documentId: AuthoredModelDocument['documentId']): Promise<AuthoredModelDocument>
+  getDocumentSnapshot(
+    request: GetDocumentSnapshotRequest,
+    lodTierId?: OccTessellationTierId,
+  ): Promise<GetDocumentSnapshotResponse>
+  projectSketchExternalReferences(
+    request: ProjectSketchExternalReferencesRequest,
+  ): Promise<ProjectSketchExternalReferencesResponse>
+  commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>
+  createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>
+  updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>
+  deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>
+  deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse>
+  renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>
+  reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse>
+  reorderDocumentHistory(request: ReorderDocumentHistoryRequest): Promise<ReorderDocumentHistoryResponse>
+  setFeatureCursor(request: SetFeatureCursorRequest): Promise<SetFeatureCursorResponse>
+  addDocumentVariable(request: AddDocumentVariableRequest): Promise<AddDocumentVariableResponse>
+  updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse>
+  evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse>
+  resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse>
+  getExportCapabilities(baseRevisionId: RevisionId): Promise<ExportCapabilities | DocumentExportDiagnostic>
   dispose?(): void
 }
 
@@ -49,37 +112,121 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     this.worker.addEventListener('message', this.handleMessage)
   }
 
+  warmup(assets?: OccWorkerAssetConfig) {
+    return this.invokeVoid({ kind: 'warmup', assets })
+  }
+
   preload(assets?: OccWorkerAssetConfig) {
-    const requestId = this.createRequestId('occ_preload')
-
-    return this.sendRequest<void>({ kind: 'preload', requestId, assets }, {
-      kind: 'preload',
-      resolve: () => undefined,
-      reject: () => undefined,
-    })
+    return this.warmup(assets)
   }
 
-  rebuildDocument(document: AuthoredModelDocument, assets: readonly GeometryAssetBlobInput[] = []) {
-    const requestId = this.createRequestId('occ_rebuild')
-
-    return this.sendRequest<void>({ kind: 'rebuildDocument', requestId, document, assets }, {
-      kind: 'rebuildDocument',
-      resolve: () => undefined,
-      reject: () => undefined,
-    })
-  }
-
-  buildWorkspaceSnapshot(
+  restoreAuthoredModelDocument(
     document: AuthoredModelDocument,
-    lodTierId?: OccTessellationTierId,
+    diagnostics: readonly ModelingDiagnostic[] = [],
     assets: readonly GeometryAssetBlobInput[] = [],
   ) {
-    const requestId = this.createRequestId('occ_snapshot')
+    return this.invokeVoid({
+      kind: 'restoreAuthoredModelDocument',
+      document,
+      diagnostics,
+      assets,
+    })
+  }
 
-    return this.sendRequest<WorkspaceSnapshot>({ kind: 'buildWorkspaceSnapshot', requestId, document, lodTierId, assets }, {
-      kind: 'buildWorkspaceSnapshot',
-      resolve: () => undefined,
-      reject: () => undefined,
+  validateAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assets: readonly GeometryAssetBlobInput[] = [],
+  ) {
+    return this.invokeVoid({
+      kind: 'validateAuthoredModelDocument',
+      document,
+      diagnostics,
+      assets,
+    })
+  }
+
+  exportAuthoredModelDocument(documentId: AuthoredModelDocument['documentId']) {
+    return this.invoke<AuthoredModelDocument>({
+      kind: 'exportAuthoredModelDocument',
+      documentId,
+    })
+  }
+
+  getDocumentSnapshot(
+    request: GetDocumentSnapshotRequest,
+    lodTierId?: OccTessellationTierId,
+  ) {
+    return this.invoke<GetDocumentSnapshotResponse>({
+      kind: 'getDocumentSnapshot',
+      request,
+      lodTierId,
+    })
+  }
+
+  projectSketchExternalReferences(request: ProjectSketchExternalReferencesRequest) {
+    return this.invoke<ProjectSketchExternalReferencesResponse>({
+      kind: 'projectSketchExternalReferences',
+      request,
+    })
+  }
+
+  commitSketch(request: CommitSketchRequest) {
+    return this.invoke<CommitSketchResponse>({ kind: 'commitSketch', request })
+  }
+
+  createFeature(request: CreateFeatureRequest) {
+    return this.invoke<CreateFeatureResponse>({ kind: 'createFeature', request })
+  }
+
+  updateFeature(request: UpdateFeatureRequest) {
+    return this.invoke<UpdateFeatureResponse>({ kind: 'updateFeature', request })
+  }
+
+  deleteFeature(request: DeleteFeatureRequest) {
+    return this.invoke<DeleteFeatureResponse>({ kind: 'deleteFeature', request })
+  }
+
+  deleteTarget(request: DeleteDocumentTargetRequest) {
+    return this.invoke<DeleteDocumentTargetResponse>({ kind: 'deleteTarget', request })
+  }
+
+  renameBody(request: RenameBodyRequest) {
+    return this.invoke<RenameBodyResponse>({ kind: 'renameBody', request })
+  }
+
+  reorderFeature(request: ReorderFeatureRequest) {
+    return this.invoke<ReorderFeatureResponse>({ kind: 'reorderFeature', request })
+  }
+
+  reorderDocumentHistory(request: ReorderDocumentHistoryRequest) {
+    return this.invoke<ReorderDocumentHistoryResponse>({ kind: 'reorderDocumentHistory', request })
+  }
+
+  setFeatureCursor(request: SetFeatureCursorRequest) {
+    return this.invoke<SetFeatureCursorResponse>({ kind: 'setFeatureCursor', request })
+  }
+
+  addDocumentVariable(request: AddDocumentVariableRequest) {
+    return this.invoke<AddDocumentVariableResponse>({ kind: 'addDocumentVariable', request })
+  }
+
+  updateDocumentVariable(request: UpdateDocumentVariableRequest) {
+    return this.invoke<UpdateDocumentVariableResponse>({ kind: 'updateDocumentVariable', request })
+  }
+
+  evaluatePreview(request: EvaluatePreviewRequest) {
+    return this.invoke<EvaluatePreviewResponse>({ kind: 'evaluatePreview', request })
+  }
+
+  resolveReference(request: ResolveReferenceRequest) {
+    return this.invoke<ResolveReferenceResponse>({ kind: 'resolveReference', request })
+  }
+
+  getExportCapabilities(baseRevisionId: RevisionId) {
+    return this.invoke<ExportCapabilities | DocumentExportDiagnostic>({
+      kind: 'getExportCapabilities',
+      baseRevisionId,
     })
   }
 
@@ -91,18 +238,34 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     this.worker.terminate?.()
   }
 
-  private sendRequest<T>(
-    request: OccWorkerRequest,
-      pending: PendingRequest,
-  ): Promise<T> {
+  private invokeVoid(operation: OccWorkerOperation) {
+    return this.invoke<void>(operation)
+  }
+
+  private invoke<T>(operation: OccWorkerOperation): Promise<T> {
+    const requestId = this.createRequestId(operation.kind)
+
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(request.requestId, {
-        ...pending,
-        resolve: (value) => resolve(value as T),
+      this.pending.set(requestId, {
+        operation: operation.kind,
+        resolve: (value) => resolve(this.normalizePayload(operation.kind, value) as T),
         reject,
       })
-      this.worker.postMessage(request)
+      this.worker.postMessage({ kind: 'invoke', requestId, operation })
     })
+  }
+
+  private normalizePayload(operation: OccWorkerOperation['kind'], payload: unknown) {
+    if (operation === 'getDocumentSnapshot' && payload) {
+      return {
+        ...(payload as GetDocumentSnapshotResponse),
+        snapshot: unpackWorkspaceSnapshotRenderMeshes(
+          (payload as GetDocumentSnapshotResponse).snapshot,
+        ),
+      } satisfies GetDocumentSnapshotResponse
+    }
+
+    return payload
   }
 
   private readonly handleMessage = (event: MessageEvent<OccWorkerResponse>) => {
@@ -120,25 +283,12 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
       return
     }
 
-    if (pending.kind === 'buildWorkspaceSnapshot') {
-      if (message.kind !== 'workspaceSnapshotBuilt') {
-        pending.reject(new Error(`Unexpected OCC worker response ${message.kind}.`))
-        return
-      }
-
-      pending.resolve(unpackWorkspaceSnapshotRenderMeshes(message.snapshot))
+    if (message.kind !== 'invoked' || message.operation !== pending.operation) {
+      pending.reject(new Error(`Unexpected OCC worker response ${message.kind}.`))
       return
     }
 
-    if (
-      (pending.kind === 'preload' && message.kind === 'preloaded')
-      || (pending.kind === 'rebuildDocument' && message.kind === 'documentRebuilt')
-    ) {
-      pending.resolve()
-      return
-    }
-
-    pending.reject(new Error(`Unexpected OCC worker response ${message.kind}.`))
+    pending.resolve(message.payload)
   }
 
   private rejectPending(requestId: RequestId, error: Error) {
@@ -153,6 +303,6 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   private createRequestId(prefix: string) {
     this.requestSequence += 1
-    return `${prefix}_${this.requestSequence}` as RequestId
+    return `occ_${prefix}_${this.requestSequence}` as RequestId
   }
 }

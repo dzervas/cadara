@@ -9,9 +9,14 @@ import { MODELING_OPERATION_HISTORY_STORAGE_KEY } from '../src/domain/modeling/m
 
 const PREVIEW_HOST = '127.0.0.1'
 const PREVIEW_PORT = 4173
-const PREVIEW_URL = `http://${PREVIEW_HOST}:${PREVIEW_PORT}`
+const PREVIEW_URL_BASE = `http://${PREVIEW_HOST}:${PREVIEW_PORT}/`
+const DOCUMENT_REPOSITORY_URL_STORAGE_KEY = 'cad.documentRepository.automergeUrls.v1'
 const SERVER_TIMEOUT_MS = 120_000
 const LOAD_TIMEOUT_MS = 120_000
+
+function buildPreviewUrl(runId: string) {
+  return `${PREVIEW_URL_BASE}?cadPerfMode=1&cadDisableRepository=1&cadRepositoryDbName=${encodeURIComponent(`load-time-${runId}`)}`
+}
 
 function startPreviewServer() {
   const server = spawn(
@@ -73,28 +78,39 @@ async function stopServer(server: ChildProcessWithoutNullStreams) {
 }
 
 async function waitForRestoredGeometry(page: Page) {
-  console.log('Waiting for workbench shell...')
-  await page.getByText('Machine:').waitFor({ state: 'visible', timeout: LOAD_TIMEOUT_MS })
-  console.log('Waiting for successful history restore...')
+  console.log('Waiting for first OCC-backed snapshot...')
   const restoreState = await page.waitForFunction(
     () => {
       const text = document.body?.innerText ?? ''
+      const occPerf = (window as Window & {
+        __cadOccPerf?: {
+          firstSnapshotReadyAt?: number | null
+          warmupStatus?: 'idle' | 'pending' | 'fulfilled' | 'rejected'
+          warmupError?: string | null
+        }
+      }).__cadOccPerf
 
       if (text.includes('History restore failed')) {
         return 'restoreFailed'
       }
 
-      return /Revision:\s+(?!loading)\S+/.test(text) ? 'ready' : null
+      if (occPerf?.warmupStatus === 'rejected') {
+        return `warmupFailed:${occPerf.warmupError ?? 'unknown'}`
+      }
+
+      return occPerf?.firstSnapshotReadyAt != null ? 'ready' : null
     },
     undefined,
     { timeout: LOAD_TIMEOUT_MS },
   )
 
-  if ((await restoreState.jsonValue()) !== 'ready') {
+  const state = await restoreState.jsonValue()
+
+  if (state !== 'ready') {
     const bodyText = (await page.locator('body').textContent()) ?? ''
-    console.error('Preview build failed persisted-history restore. Body text snapshot:')
+    console.error('Preview build failed OCC readiness probe. Body text snapshot:')
     console.error(bodyText.slice(0, 4000))
-    throw new Error('Preview build reported "History restore failed" before geometry became ready.')
+    throw new Error(`Preview build did not reach OCC-ready state: ${String(state)}`)
   }
 
   await page.evaluate(
@@ -103,7 +119,7 @@ async function waitForRestoredGeometry(page: Page) {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       }),
   )
-  console.log('Restored geometry signal reached.')
+  console.log('First OCC-backed snapshot signal reached.')
 }
 
 async function main() {
@@ -111,12 +127,14 @@ async function main() {
     throw new Error('Preview build is missing. Run `bun run build` once a valid build baseline is available.')
   }
 
+  const runId = `${Date.now()}`
+  const previewUrl = buildPreviewUrl(runId)
   const payload = createTwoExtrudeBodiesOperationHistory()
   const serializedPayload = JSON.stringify(payload)
   const server = startPreviewServer()
 
   try {
-    await waitForServer(PREVIEW_URL, SERVER_TIMEOUT_MS)
+    await waitForServer(previewUrl, SERVER_TIMEOUT_MS)
 
     const browser = await chromium.launch({ headless: true })
 
@@ -132,8 +150,9 @@ async function main() {
       })
 
       await page.addInitScript(
-        ({ storageKey, serialized }) => {
+        ({ storageKey, repositoryUrlStorageKey, serialized }) => {
           localStorage.setItem(storageKey, serialized)
+          localStorage.removeItem(repositoryUrlStorageKey)
           ;(
             window as Window & {
               __cadLoadTime?: { startedAt: number }
@@ -141,18 +160,21 @@ async function main() {
           ).__cadLoadTime = { startedAt: performance.now() }
         },
         {
+          repositoryUrlStorageKey: DOCUMENT_REPOSITORY_URL_STORAGE_KEY,
           storageKey: MODELING_OPERATION_HISTORY_STORAGE_KEY,
           serialized: serializedPayload,
         },
       )
 
       const navigationStartedAt = performance.now()
-      await page.goto(PREVIEW_URL, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS })
+      await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS })
       const domContentLoadedMs = performance.now() - navigationStartedAt
 
       await waitForRestoredGeometry(page)
 
       const totalWallClockMs = performance.now() - navigationStartedAt
+      const occPerf = await page.evaluate(() => window.__cadOccPerf ?? null)
+      const mutationPerf = await page.evaluate(async () => window.__cadMeasureOccMutation?.() ?? null)
       const browserElapsedMs = await page.evaluate(() => {
         const state = (
           window as Window & {
@@ -162,20 +184,34 @@ async function main() {
 
         return state ? performance.now() - state.startedAt : null
       })
-      const bodyText = (await page.locator('body').textContent()) ?? ''
-      const revisionMatch = bodyText.match(/Revision:\s*(\S+)/)
+      const bodyText = (await page.locator('body').innerText()) ?? ''
 
       console.log(
         JSON.stringify(
           {
-            url: PREVIEW_URL,
+            url: previewUrl,
             fixture: 'two-extrude-bodies',
             historyEntryCount: payload.entries.length,
-            revisionId: revisionMatch?.[1] ?? null,
+            revisionId: null,
             domContentLoadedMs: Number(domContentLoadedMs.toFixed(1)),
             restoredGeometryMs: Number(totalWallClockMs.toFixed(1)),
             browserElapsedMs: browserElapsedMs === null ? null : Number(browserElapsedMs.toFixed(1)),
-            readinessSignal: 'debugger shell + non-loading revision + 2 animation frames',
+            occWarmupMs:
+              occPerf?.warmupStartedAt != null && occPerf?.warmupSettledAt != null
+                ? Number((occPerf.warmupSettledAt - occPerf.warmupStartedAt).toFixed(1))
+                : null,
+            occWarmupStatus: occPerf?.warmupStatus ?? null,
+            firstSnapshotReadyMs:
+              occPerf?.firstSnapshotReadyAt != null
+                ? Number(occPerf.firstSnapshotReadyAt.toFixed(1))
+                : null,
+            postStartupMutationLatencyMs:
+              mutationPerf?.elapsedMs != null
+                ? Number(mutationPerf.elapsedMs.toFixed(1))
+                : null,
+            postStartupMutationAccepted: mutationPerf?.accepted ?? null,
+            bodyTextSample: bodyText.slice(0, 500),
+            readinessSignal: 'window.__cadOccPerf.firstSnapshotReadyAt + 2 animation frames',
           },
           null,
           2,

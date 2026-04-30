@@ -31,6 +31,7 @@ import {
   sketchReferenceSelectionFilter,
   sketchStartSelectionFilter,
 } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/domain/editor/schema'
 import { getImportProviderById } from '@/domain/import/provider-registry'
 import { resolveMeasureSelectionCandidate } from '@/domain/measure/measurement'
 import { createFeatureEditorReferenceSelectionPatch } from '@/domain/feature-authoring/form-events'

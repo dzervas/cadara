@@ -70,6 +70,17 @@ function getConfiguredOpenCascadeWasmUrl() {
     : DEFAULT_OPENCASCADE_WASM_CDN_URL
 }
 
+function getExplicitOpenCascadeWasmUrl() {
+  const viteEnv = (import.meta as ImportMeta & {
+    env?: { VITE_OPENCASCADE_WASM_URL?: string }
+  }).env
+  const configuredUrl = viteEnv?.VITE_OPENCASCADE_WASM_URL?.trim()
+
+  return configuredUrl && configuredUrl.length > 0
+    ? configuredUrl
+    : undefined
+}
+
 export function createOpenCascadeInitializerFromMainJS(
   defaultMainJS: OpenCascadeMainJS,
   getDefaultMainWasm = getConfiguredOpenCascadeWasmUrl,
@@ -114,7 +125,11 @@ export function createOpenCascadeInitializerFromMainJS(
 }
 
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  return import('./opencascade-cdn-entry')
+  if (getExplicitOpenCascadeWasmUrl()) {
+    return import('./opencascade-cdn-entry')
+  }
+
+  return import('opencascade.js')
 }
 
 async function readNodeOpenCascadeWasmBinary(path: string) {

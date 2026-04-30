@@ -346,7 +346,7 @@ function handleSketchToolActivation(state: EditorState): EditorTransitionResult 
 
 function handleFeatureToolActivation(
   state: EditorState,
-  toolId: ToolActivatedEvent['toolId'],
+  toolId: Parameters<typeof getSelectionFilterForFeatureType>[0],
 ): EditorTransitionResult {
   const selectionFilter = getSelectionFilterForFeatureType(toolId)
   const activationSelection =

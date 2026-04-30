@@ -1306,7 +1306,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   preloadRuntime(): Promise<void> {
     if (this.workerSnapshotClient) {
-      return this.workerSnapshotClient.preload()
+      return this.workerSnapshotClient.warmup()
     }
 
     return this.getRuntimeState().then(() => undefined)
@@ -1468,17 +1468,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): Promise<void> {
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
     const assets = createGeometryAssetBlobInputs(document, assetBlobs)
-    this.workerRestoredDocument = null
 
     if (this.workerSnapshotClient) {
+      this.workerRestoredDocument = null
       this.runtimeState = null
       this.initializationPromise = null
-      this.workerRestoredDocument = {
-        document: structuredClone(document),
-        assets,
-      }
+      await this.workerSnapshotClient.restoreAuthoredModelDocument(document, diagnostics, assets)
       return
     }
+
+    this.workerRestoredDocument = null
 
     await this.restoreAuthoredModelDocumentOnMainThread(
       document,
@@ -1495,14 +1494,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     if (this.workerSnapshotClient) {
       const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver)
       const assets = createGeometryAssetBlobInputs(document, assetBlobs)
-      await this.workerSnapshotClient.rebuildDocument(document, assets)
+      await this.workerSnapshotClient.validateAuthoredModelDocument(document, diagnostics, assets)
 
       this.runtimeState = null
       this.initializationPromise = null
-      this.workerRestoredDocument = {
-        document: structuredClone(document),
-        assets,
-      }
+      this.workerRestoredDocument = null
       return
     }
 
@@ -1632,6 +1628,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   async exportAuthoredModelDocument(documentId: AuthoredModelDocument['documentId']) {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.exportAuthoredModelDocument(documentId)
+    }
+
     if (this.workerRestoredDocument) {
       if (this.workerRestoredDocument.document.documentId !== documentId) {
         throw new Error(`OCC authored export requested document ${documentId}, but active document is ${this.workerRestoredDocument.document.documentId}.`)
@@ -1657,16 +1657,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     })
 
     return buildOccWorkspaceSnapshot(authoringState)
-  }
-
-  private buildInitialAuthoredDocumentWithoutRuntime() {
-    const authoringState = createOccAuthoringState({} as OpenCascadeInstance, {
-      documentId: this.documentId,
-      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
-      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
-
-    return createAuthoredModelDocumentFromAuthoringState(authoringState)
   }
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
@@ -2068,25 +2058,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId)
 
-    if (this.workerSnapshotClient && this.workerRestoredDocument) {
-      return {
-        contractVersion: CONTRACT_VERSION,
-        snapshot: await this.workerSnapshotClient.buildWorkspaceSnapshot(
-          this.workerRestoredDocument.document,
-          this.snapshotLodTierId,
-          this.workerRestoredDocument.assets,
-        ),
-      }
-    }
-
-    if (this.workerSnapshotClient && !this.runtimeState && !this.initializationPromise) {
-      return {
-        contractVersion: CONTRACT_VERSION,
-        snapshot: await this.workerSnapshotClient.buildWorkspaceSnapshot(
-          this.buildInitialAuthoredDocumentWithoutRuntime(),
-          this.snapshotLodTierId,
-        ),
-      }
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.getDocumentSnapshot(request, this.snapshotLodTierId)
     }
 
     if (!this.initialSnapshotRequiresRuntime && !this.runtimeState && !this.initializationPromise) {
@@ -2100,18 +2073,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     return {
       contractVersion: CONTRACT_VERSION,
-      snapshot: this.workerSnapshotClient
-        ? await (() => {
-            const document = createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState)
-            return this.workerSnapshotClient!.buildWorkspaceSnapshot(
-              document,
-              this.snapshotLodTierId,
-              createGeometryAssetBlobInputs(document, runtimeState.authoringState.assetBlobs),
-            )
-          })()
-        : buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
-            lodTierId: this.snapshotLodTierId,
-          }),
+      snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
+        lodTierId: this.snapshotLodTierId,
+      }),
     }
   }
 
@@ -2119,6 +2083,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     request: ProjectSketchExternalReferencesRequest,
   ): Promise<ProjectSketchExternalReferencesResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.projectSketchExternalReferences(request)
+    }
 
     if (!this.runtimeState && !this.initializationPromise) {
       return projectSketchExternalReferencesFromSnapshot(this.buildInitialSnapshotWithoutRuntime(), request)
@@ -2133,6 +2101,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.commitSketch(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
     const sketchId = request.sketchId ?? allocateSketchId(runtimeState.authoringState)
@@ -2297,6 +2270,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.createFeature(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
     const featureId = allocateFeatureId(runtimeState.authoringState, request.definition.kind)
@@ -2379,6 +2357,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.updateFeature(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -2474,6 +2457,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.deleteFeature(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -2546,6 +2534,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.deleteTarget(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -2687,6 +2680,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.renameBody(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -2743,6 +2741,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.reorderFeature(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -2838,6 +2841,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async reorderDocumentHistory(request: ReorderDocumentHistoryRequest): Promise<ReorderDocumentHistoryResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.reorderDocumentHistory(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -2957,6 +2965,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async setFeatureCursor(request: SetFeatureCursorRequest): Promise<SetFeatureCursorResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.setFeatureCursor(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -3024,6 +3037,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async addDocumentVariable(request: AddDocumentVariableRequest): Promise<AddDocumentVariableResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.addDocumentVariable(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
     const variableId = request.variableId ?? allocateDocumentVariableId(runtimeState.authoringState)
@@ -3085,6 +3103,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.updateDocumentVariable(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -3164,6 +3187,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.evaluatePreview(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
     const previewFeatureId = `feature_preview_${request.previewId}` as FeatureId
@@ -3268,6 +3296,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   async getExportCapabilities(baseRevisionId: RevisionId): Promise<ExportCapabilities | DocumentExportDiagnostic> {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.getExportCapabilities(baseRevisionId)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const currentRevisionId = this.getCurrentRevisionId(runtimeState)
 
@@ -3284,6 +3316,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse> {
     assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.resolveReference(request)
+    }
+
     const runtimeState = await this.getRuntimeState()
     const resolved = resolveOccReference({
       documentId: this.documentId,

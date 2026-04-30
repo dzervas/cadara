@@ -13,6 +13,13 @@ import type {
   SketchDefinition,
 } from '@/contracts/sketch/schema'
 import type {
+  SketchConstraintRef,
+  SketchDimensionRef,
+  SketchEntityRef,
+  SketchOperationRef,
+  SketchPointRef,
+} from '@/contracts/shared/references'
+import type {
   PrimitiveRef,
 } from '@/domain/editor/schema'
 import type {
@@ -55,23 +62,38 @@ function getDefinitionSketchId(definition: SketchDefinition) {
     ?? ('sketch_draft' as SketchId)
 }
 
-function createSketchConstraintRef(sketchId: SketchId, constraintId: SketchDefinition['constraintIds'][number]): PrimitiveRef {
+function createSketchConstraintRef(
+  sketchId: SketchId,
+  constraintId: SketchDefinition['constraintIds'][number],
+): SketchConstraintRef {
   return { kind: 'constraint', sketchId, constraintId }
 }
 
-function createSketchDimensionRef(sketchId: SketchId, dimensionId: SketchDefinition['dimensionIds'][number]): PrimitiveRef {
+function createSketchDimensionRef(
+  sketchId: SketchId,
+  dimensionId: SketchDefinition['dimensionIds'][number],
+): SketchDimensionRef {
   return { kind: 'dimension', sketchId, dimensionId }
 }
 
-function createSketchEntityRef(sketchId: SketchId, entityId: SketchDefinition['entityIds'][number]): PrimitiveRef {
+function createSketchEntityRef(
+  sketchId: SketchId,
+  entityId: SketchDefinition['entityIds'][number],
+): SketchEntityRef {
   return { kind: 'sketchEntity', sketchId, entityId }
 }
 
-function createSketchOperationRef(sketchId: SketchId, operationId: SketchAuthoringOperation['operationId']): PrimitiveRef {
+function createSketchOperationRef(
+  sketchId: SketchId,
+  operationId: SketchAuthoringOperation['operationId'],
+): SketchOperationRef {
   return { kind: 'sketchOperation', sketchId, operationId }
 }
 
-function createSketchPointRef(sketchId: SketchId, pointId: SketchDefinition['pointIds'][number]): PrimitiveRef {
+function createSketchPointRef(
+  sketchId: SketchId,
+  pointId: SketchDefinition['pointIds'][number],
+): SketchPointRef {
   return { kind: 'sketchPoint', sketchId, pointId }
 }
 

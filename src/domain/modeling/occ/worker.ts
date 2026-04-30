@@ -1,7 +1,7 @@
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
+import { packWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
 import {
   loadDefaultOpenCascadeFactory,
   type OpenCascadeInstance,
@@ -10,10 +10,10 @@ import {
   normalizeOccWorkerFailure,
   occWorkerRequestEnvelopeSchema,
   type OccWorkerAssetConfig,
+  type OccWorkerOperation,
   type OccWorkerRequest,
   type OccWorkerResponse,
 } from '@/domain/modeling/occ/worker-protocol'
-import { packWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -28,6 +28,12 @@ let requestQueue: Promise<void> = Promise.resolve()
 interface OccWorkerGlobalScope {
   postMessage(message: OccWorkerResponse, transfer?: Transferable[]): void
   addEventListener(type: 'message', listener: (event: MessageEvent<OccWorkerRequest>) => void): void
+}
+
+interface PackedSnapshotOperationResult {
+  contractVersion: 'modeling-contract/v1alpha1'
+  snapshot: ReturnType<typeof packWorkspaceSnapshotRenderMeshes>['snapshot']
+  transferList: Transferable[]
 }
 
 const workerScope = self as unknown as OccWorkerGlobalScope
@@ -71,38 +77,103 @@ function getWorkerAdapter() {
   return adapter
 }
 
+async function handleWorkerOperation(operation: OccWorkerOperation) {
+  const workerAdapter = getWorkerAdapter()
+
+  switch (operation.kind) {
+    case 'warmup':
+      await getWorkerOpenCascadeInstance(operation.assets)
+      await workerAdapter.preloadRuntime()
+      return undefined
+    case 'restoreAuthoredModelDocument':
+      await workerAdapter.restoreAuthoredModelDocument?.(
+        operation.document,
+        operation.diagnostics ?? [],
+        createWorkerAssetResolver(operation.assets),
+      )
+      return undefined
+    case 'validateAuthoredModelDocument':
+      await workerAdapter.validateAuthoredModelDocument?.(
+        operation.document,
+        operation.diagnostics ?? [],
+        createWorkerAssetResolver(operation.assets),
+      )
+      return undefined
+    case 'exportAuthoredModelDocument':
+      return workerAdapter.exportAuthoredModelDocument?.(operation.documentId)
+    case 'getDocumentSnapshot': {
+      workerAdapter.setSnapshotLodTier(operation.lodTierId ?? 'startup')
+      const response = await workerAdapter.getDocumentSnapshot(operation.request)
+      const packed = packWorkspaceSnapshotRenderMeshes(response.snapshot)
+      return {
+        contractVersion: response.contractVersion,
+        snapshot: packed.snapshot,
+        transferList: packed.transferList,
+      } satisfies PackedSnapshotOperationResult
+    }
+    case 'projectSketchExternalReferences':
+      return workerAdapter.projectSketchExternalReferences(operation.request)
+    case 'commitSketch':
+      return workerAdapter.commitSketch(operation.request)
+    case 'createFeature':
+      return workerAdapter.createFeature(operation.request)
+    case 'updateFeature':
+      return workerAdapter.updateFeature(operation.request)
+    case 'deleteFeature':
+      return workerAdapter.deleteFeature(operation.request)
+    case 'deleteTarget':
+      return workerAdapter.deleteTarget(operation.request)
+    case 'renameBody':
+      return workerAdapter.renameBody(operation.request)
+    case 'reorderFeature':
+      return workerAdapter.reorderFeature(operation.request)
+    case 'reorderDocumentHistory':
+      return workerAdapter.reorderDocumentHistory(operation.request)
+    case 'setFeatureCursor':
+      return workerAdapter.setFeatureCursor(operation.request)
+    case 'addDocumentVariable':
+      return workerAdapter.addDocumentVariable(operation.request)
+    case 'updateDocumentVariable':
+      return workerAdapter.updateDocumentVariable(operation.request)
+    case 'evaluatePreview':
+      return workerAdapter.evaluatePreview(operation.request)
+    case 'resolveReference':
+      return workerAdapter.resolveReference(operation.request)
+    case 'getExportCapabilities':
+      return workerAdapter.getExportCapabilities(operation.baseRevisionId)
+  }
+}
+
 async function handleOccWorkerRequest(request: OccWorkerRequest) {
   switch (request.kind) {
-    case 'preload':
-      await getWorkerOpenCascadeInstance(request.assets)
-      postOccWorkerMessage({ kind: 'preloaded', requestId: request.requestId })
-      return
-    case 'rebuildDocument':
-      await getWorkerAdapter().restoreAuthoredModelDocument?.(
-        request.document,
-        [],
-        createWorkerAssetResolver(request.assets),
-      )
-      postOccWorkerMessage({ kind: 'documentRebuilt', requestId: request.requestId })
-      return
-    case 'buildWorkspaceSnapshot': {
-      const workerAdapter = getWorkerAdapter()
-      await workerAdapter.restoreAuthoredModelDocument?.(
-        request.document,
-        [],
-        createWorkerAssetResolver(request.assets),
-      )
-      workerAdapter.setSnapshotLodTier(request.lodTierId ?? 'startup')
-      const response = await workerAdapter.getDocumentSnapshot({
-        contractVersion: CONTRACT_VERSION,
-        documentId: request.document.documentId,
-      })
-      const packed = packWorkspaceSnapshotRenderMeshes(response.snapshot)
+    case 'invoke': {
+      const result = await handleWorkerOperation(request.operation)
+      if (
+        request.operation.kind === 'getDocumentSnapshot'
+        && result
+        && typeof result === 'object'
+        && 'snapshot' in result
+        && 'transferList' in result
+      ) {
+        const snapshotResult = result as PackedSnapshotOperationResult
+        postOccWorkerMessage({
+          kind: 'invoked',
+          requestId: request.requestId,
+          operation: request.operation.kind,
+          payload: {
+            contractVersion: snapshotResult.contractVersion,
+            snapshot: snapshotResult.snapshot,
+          },
+        }, snapshotResult.transferList)
+        return
+      }
+
       postOccWorkerMessage({
-        kind: 'workspaceSnapshotBuilt',
+        kind: 'invoked',
         requestId: request.requestId,
-        snapshot: packed.snapshot,
-      }, packed.transferList)
+        operation: request.operation.kind,
+        payload: result,
+      })
       return
     }
     case 'cancel':
@@ -137,7 +208,7 @@ function enqueueOccWorkerRequest(request: OccWorkerRequest) {
       postOccWorkerMessage(normalizeOccWorkerFailure(
         request.requestId,
         error,
-        request.kind === 'preload'
+        request.kind === 'invoke' && request.operation.kind === 'warmup'
           ? 'occ-worker-initialization-failed'
           : 'occ-worker-request-failed',
       ))
