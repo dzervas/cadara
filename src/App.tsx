@@ -18,6 +18,7 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 import { EditorProvider } from "@/hooks/editor-provider";
 import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
+import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
 import { ToolActionProvider } from "@/hooks/tool-action-provider";
 import { createToolActionBus } from "@/domain/tools/tool-action-bus";
 import { ReportedErrorBoundary } from "@/components/layout/reported-error-boundary";
@@ -25,9 +26,14 @@ import { BuildMetadataLabel } from "@/components/layout/build-metadata-label";
 import { SentryAdBlockNotification } from "@/components/layout/sentry-ad-block-notification";
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
+import { createBuiltinRuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 
 function App() {
 	const actionBus = useMemo(() => createToolActionBus(), []);
+	const runtimeExtensionRegistries = useMemo(
+		() => createBuiltinRuntimeExtensionRegistryComposition(),
+		[],
+	);
 	const editorSketchSolver = useMemo(
 		() =>
 			new SketchConstraintSolverAdapter({
@@ -67,6 +73,7 @@ function App() {
 			createModelingService(kernelAdapter, {
 				currentDocumentId: OCC_KERNEL_DOCUMENT_ID,
 				sketchSolver: editorSketchSolver,
+				exportProviders: runtimeExtensionRegistries.exportProviders,
 				operationHistoryStore:
 					typeof window === "undefined"
 						? null
@@ -80,7 +87,7 @@ function App() {
 								urlStore: createLocalStorageDocumentRepositoryUrlStore(window.localStorage),
 							}),
 			}),
-		[kernelAdapter, editorSketchSolver, documentSyncWorkerClient],
+		[kernelAdapter, editorSketchSolver, documentSyncWorkerClient, runtimeExtensionRegistries],
 	);
 
 	return (
@@ -88,13 +95,21 @@ function App() {
 			<ReportedErrorBoundary>
 				<OccWarmupErrorEffect />
 				<OccAssetCacheEffect />
-				<ModelingServiceProvider modelingService={modelingService}>
-					<EditorProvider modelingService={modelingService}>
-						<ToolActionProvider actionBus={actionBus}>
-							<CadWorkbench />
-						</ToolActionProvider>
-					</EditorProvider>
-				</ModelingServiceProvider>
+				<RuntimeExtensionRegistryProvider registries={runtimeExtensionRegistries}>
+					<ModelingServiceProvider modelingService={modelingService}>
+						<EditorProvider
+							modelingService={modelingService}
+							editorDependencies={{
+								importProviders: runtimeExtensionRegistries.importProviders,
+								sketchSpecialModes: runtimeExtensionRegistries.sketchSpecialModes,
+							}}
+						>
+							<ToolActionProvider actionBus={actionBus}>
+								<CadWorkbench />
+							</ToolActionProvider>
+						</EditorProvider>
+					</ModelingServiceProvider>
+				</RuntimeExtensionRegistryProvider>
 			</ReportedErrorBoundary>
 			<SentryAdBlockNotification />
 			<BuildMetadataLabel />

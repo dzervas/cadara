@@ -9,10 +9,9 @@ import { buildDocumentExportModalInput } from '@/components/layout/document-expo
 import { createTestErrorReporter } from '@/contracts/errors'
 import type { ObjectExportModalState } from '@/domain/export/object-export-state'
 import { workbenchTheme } from '@/theme/workbench-theme'
-import { registerBuiltinExportProviders } from '@/domain/export/register-builtin-providers'
+import { RuntimeExtensionRegistryProvider } from '@/hooks/runtime-extension-registry-provider'
+import { createScopedRuntimeExtensionRegistryCompositionForTest } from '@/domain/extensions/test-registry-composition'
 import { stepExportProvider } from '@/domain/export/providers/step-export-provider'
-
-registerBuiltinExportProviders()
 
 test('src/components/layout/document-export-modal.spec.tsx', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -27,18 +26,21 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
     baseRevisionId: 'rev_0001',
   }
   const errorReporter = createTestErrorReporter()
+  const registries = createScopedRuntimeExtensionRegistryCompositionForTest()
 
   const stlMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <DocumentExportModal
-        opened
-        target={target}
-        withinPortal={false}
-        errorReporter={errorReporter}
-        exportDocument={async () => ({ ok: false, format: 'stl', diagnostics: [] })}
-        onClose={() => undefined}
-        onDownload={() => undefined}
-      />
+      <RuntimeExtensionRegistryProvider registries={registries}>
+        <DocumentExportModal
+          opened
+          target={target}
+          withinPortal={false}
+          errorReporter={errorReporter}
+          exportDocument={async () => ({ ok: false, format: 'stl', diagnostics: [] })}
+          onClose={() => undefined}
+          onDownload={() => undefined}
+        />
+      </RuntimeExtensionRegistryProvider>
     </MantineProvider>,
   )
 
@@ -53,16 +55,18 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
 
   const stepMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <DocumentExportModal
-        opened
-        initialFormat="step"
-        target={target}
-        withinPortal={false}
-        errorReporter={errorReporter}
-        exportDocument={async () => ({ ok: false, format: 'step', diagnostics: [] })}
-        onClose={() => undefined}
-        onDownload={() => undefined}
-      />
+      <RuntimeExtensionRegistryProvider registries={registries}>
+        <DocumentExportModal
+          opened
+          initialFormat="step"
+          target={target}
+          withinPortal={false}
+          errorReporter={errorReporter}
+          exportDocument={async () => ({ ok: false, format: 'step', diagnostics: [] })}
+          onClose={() => undefined}
+          onDownload={() => undefined}
+        />
+      </RuntimeExtensionRegistryProvider>
     </MantineProvider>,
   )
 
@@ -71,16 +75,18 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {
 
   const cadaraMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <DocumentExportModal
-        opened
-        initialFormat="cadara"
-        target={target}
-        withinPortal={false}
-        errorReporter={errorReporter}
-        exportDocument={async () => ({ ok: false, format: 'cadara', diagnostics: [] })}
-        onClose={() => undefined}
-        onDownload={() => undefined}
-      />
+      <RuntimeExtensionRegistryProvider registries={registries}>
+        <DocumentExportModal
+          opened
+          initialFormat="cadara"
+          target={target}
+          withinPortal={false}
+          errorReporter={errorReporter}
+          exportDocument={async () => ({ ok: false, format: 'cadara', diagnostics: [] })}
+          onClose={() => undefined}
+          onDownload={() => undefined}
+        />
+      </RuntimeExtensionRegistryProvider>
     </MantineProvider>,
   )
 

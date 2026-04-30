@@ -38,6 +38,10 @@ import type {
   EditorState,
 } from './types'
 import {
+  defaultEditorExtensionDependencies,
+  type EditorExtensionDependencies,
+} from './dependencies'
+import {
   adoptSelectionForFilter,
   createCommandState,
   createEditSessionCursorContext,
@@ -55,6 +59,7 @@ import {
   isFeatureTool,
   isPassiveSketchTool,
   nextRequestId,
+  replaceStateDocumentSnapshot,
   toIdleState,
   updateStateDocumentSnapshot,
   withActivationSelection,
@@ -505,7 +510,11 @@ function moveSketchHistory(
  * Pure editor transition function for Phase 1.
  * The reducer never performs async work directly and emits only typed effect requests.
  */
-export function transitionEditorState(state: EditorState, event: EditorEvent): EditorTransitionResult {
+export function transitionEditorState(
+  state: EditorState,
+  event: EditorEvent,
+  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
+): EditorTransitionResult {
   switch (event.type) {
     case 'session.started':
       return emitSnapshotFetch(state, null)
@@ -544,9 +553,9 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
       if (state.kind === 'editingSketch' && sketchSessionHasActiveSpecialMode(state.session)) {
         const requestId = nextRequestId(state, 'sketch-special-cancel')
-        const session = cancelSketchSpecialMode(state.session, requestId)
+        const session = cancelSketchSpecialMode(state.session, dependencies.sketchSpecialModes, requestId)
 
-        return emitSketchSpecialModeEffect(state, session, requestId)
+        return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
       }
 
       if (state.editSessionCursorContext?.phase === 'active') {
@@ -564,8 +573,8 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       if (state.kind === 'editingSketch' && state.command.commandSessionId === event.commandSessionId) {
         if (sketchSessionHasActiveSpecialMode(state.session)) {
           const requestId = nextRequestId(state, 'sketch-special-commit')
-          const session = commitSketchSpecialMode(state.session, requestId)
-          return emitSketchSpecialModeEffect(state, session, requestId)
+          const session = commitSketchSpecialMode(state.session, dependencies.sketchSpecialModes, requestId)
+          return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
         }
       }
 
@@ -579,6 +588,11 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'document.snapshotLoaded':
       return {
         state: updateStateDocumentSnapshot(state, event.snapshot),
+        effects: [],
+      }
+    case 'document.replaced':
+      return {
+        state: replaceStateDocumentSnapshot(state, event.snapshot),
         effects: [],
       }
     case 'document.historyCursorRequested':
@@ -597,11 +611,11 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
     // Import events
     case 'import.fileSelected':
-      return handleImportFileSelected(state, event)
+      return handleImportFileSelected(state, event, dependencies)
     case 'import.providerSelected':
       return handleImportProviderSelected(state)
     case 'import.selectionPatched':
-      return handleImportSelectionPatched(state, event)
+      return handleImportSelectionPatched(state, event, dependencies)
     case 'import.commitRequested':
       return handleImportCommitRequested(state)
     case 'import.cancelled':
@@ -609,7 +623,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'import.committed':
       return handleImportCommitted(state)
     case 'import.failed':
-      return handleImportFailed(state, event)
+      return handleImportFailed(state, event, dependencies)
 
     // Section events
     case 'section.offsetUpdated':
@@ -621,13 +635,13 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
 
     // Viewport/selection events
     case 'viewport.hoverCleared':
-      return handleViewportHoverCleared(state)
+      return handleViewportHoverCleared(state, dependencies)
     case 'viewport.hovered':
-      return handleViewportHovered(state, event)
+      return handleViewportHovered(state, event, dependencies)
     case 'selection.cleared':
-      return handleSelectionCleared(state)
+      return handleSelectionCleared(state, dependencies)
     case 'viewport.selectionRequested':
-      return handleViewportSelectionRequested(state, event)
+      return handleViewportSelectionRequested(state, event, dependencies)
     case 'authoring.reopenRequested':
       return handleAuthoringReopenRequested(state, event)
 
@@ -635,23 +649,28 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'sketch.connectedSelectionRequested':
       return handleSketchConnectedSelectionRequested(state, event)
     case 'sketch.specialModeEntered':
-      return handleSketchSpecialModeEntered(state, event, transitionEditorState)
+      return handleSketchSpecialModeEntered(
+        state,
+        event,
+        (nextState, nextEvent) => transitionEditorState(nextState, nextEvent, dependencies),
+        dependencies,
+      )
     case 'sketch.specialModePanelActionInvoked':
-      return handleSketchSpecialModePanelActionInvoked(state, event)
+      return handleSketchSpecialModePanelActionInvoked(state, event, dependencies)
     case 'sketch.specialModeClickRequested':
-      return handleSketchSpecialModeClickRequested(state, event)
+      return handleSketchSpecialModeClickRequested(state, event, dependencies)
     case 'sketch.specialModeDoubleClickRequested':
-      return handleSketchSpecialModeDoubleClickRequested(state, event)
+      return handleSketchSpecialModeDoubleClickRequested(state, event, dependencies)
     case 'sketch.specialModeDragStarted':
-      return handleSketchSpecialModeDragStarted(state, event)
+      return handleSketchSpecialModeDragStarted(state, event, dependencies)
     case 'sketch.specialModeDragMoved':
-      return handleSketchSpecialModeDragMoved(state, event)
+      return handleSketchSpecialModeDragMoved(state, event, dependencies)
     case 'sketch.specialModeDragEnded':
-      return handleSketchSpecialModeDragEnded(state, event)
+      return handleSketchSpecialModeDragEnded(state, event, dependencies)
     case 'sketch.geometryDragStarted':
       return handleSketchGeometryDragStarted(state, event)
     case 'sketch.geometryDragMoved':
-      return handleSketchGeometryDragMoved(state, event)
+      return handleSketchGeometryDragMoved(state, event, dependencies)
     case 'sketch.geometryDragEnded':
       return handleSketchGeometryDragEnded(state, event)
     case 'sketch.referenceImagePayloadsPicked':
@@ -679,7 +698,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'form.referencePickerActivated':
       return handleFormReferencePickerActivated(state, event)
     case 'form.referencePickerCancelled':
-      return handleFormReferencePickerCancelled(state)
+      return handleFormReferencePickerCancelled(state, dependencies)
 
     // Effect response events
     case 'effect.documentCursorMoved':
@@ -719,9 +738,9 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
     case 'effect.sketchReferenceImageImportFailed':
       return handleEffectSketchReferenceImageImportFailed(state, event)
     case 'effect.sketchSpecialModeEffectCompleted':
-      return handleEffectSketchSpecialModeEffectCompleted(state, event)
+      return handleEffectSketchSpecialModeEffectCompleted(state, event, dependencies)
     case 'effect.sketchSpecialModeEffectFailed':
-      return handleEffectSketchSpecialModeEffectFailed(state, event)
+      return handleEffectSketchSpecialModeEffectFailed(state, event, dependencies)
 
     default:
       return { state, effects: [] }

@@ -37,9 +37,6 @@ import {
   resolveSketchSnap,
 } from '@/domain/sketch-snapping/snap-candidates'
 import {
-  getSketchSpecialModeSummaryLabel,
-} from '@/domain/sketch-special-modes/presentation'
-import {
   buildSketchStyleControls,
   buildSketchStylePresentation,
 } from '@/domain/sketch-styles/definition'
@@ -1929,7 +1926,7 @@ export function getSketchSessionPreviewLabel(session: SketchSessionState): strin
   }
 
   if (session.activeSpecialMode) {
-    return getSketchSpecialModeSummaryLabel(session) ?? 'Sketch special mode active'
+    return 'Sketch special mode active'
   }
 
   if (session.constraintAuthoring) {

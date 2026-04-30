@@ -11,7 +11,7 @@ import {
 } from '@/lib/local-file-system-access'
 
 interface WorkbenchDocumentActionCallbacks {
-  refreshAfterDocumentFileAction: (message: string, options?: { fitView?: boolean }) => Promise<void>
+  replaceAfterDocumentFileAction: (message: string, options?: { fitView?: boolean }) => Promise<void>
   reportDocumentFileActionFailure: (source: string, message: string, error: unknown) => void
   showWorkbenchError: (message: string) => void
   showWorkbenchInfo: (message: string) => void
@@ -19,7 +19,7 @@ interface WorkbenchDocumentActionCallbacks {
 
 export async function createNewWorkbenchDocument(input: {
   modelingService: Pick<ModelingService, 'createNewDocument'>
-} & Pick<WorkbenchDocumentActionCallbacks, 'refreshAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
+} & Pick<WorkbenchDocumentActionCallbacks, 'replaceAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
   try {
     const result = await input.modelingService.createNewDocument()
     if (!result.ok) {
@@ -27,7 +27,7 @@ export async function createNewWorkbenchDocument(input: {
       return
     }
 
-    await input.refreshAfterDocumentFileAction('Created a new document.')
+    await input.replaceAfterDocumentFileAction('Created a new document.')
   } catch (error) {
     input.reportDocumentFileActionFailure('workbench.file.new', 'New document failed.', error)
   }
@@ -36,7 +36,7 @@ export async function createNewWorkbenchDocument(input: {
 export async function importWorkbenchDocumentFile(input: {
   file: File
   modelingService: Pick<ModelingService, 'importDocument'>
-} & Pick<WorkbenchDocumentActionCallbacks, 'refreshAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
+} & Pick<WorkbenchDocumentActionCallbacks, 'replaceAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
   let payload: unknown
 
   try {
@@ -56,7 +56,7 @@ export async function importWorkbenchDocumentFile(input: {
       return
     }
 
-    await input.refreshAfterDocumentFileAction(`Imported ${input.file.name}.`)
+    await input.replaceAfterDocumentFileAction(`Imported ${input.file.name}.`)
   } catch (error) {
     input.reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
   }
@@ -64,7 +64,7 @@ export async function importWorkbenchDocumentFile(input: {
 
 export async function openWorkbenchLocalFile(input: {
   modelingService: Pick<ModelingService, 'bindLocalFile' | 'currentDocumentId' | 'importDocument'>
-} & Pick<WorkbenchDocumentActionCallbacks, 'refreshAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
+} & Pick<WorkbenchDocumentActionCallbacks, 'replaceAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
   const pickerResult = await showOpenLocalDocumentPicker()
   if (!pickerResult.ok) {
     if (pickerResult.reason === 'cancelled') {
@@ -113,7 +113,7 @@ export async function openWorkbenchLocalFile(input: {
       return
     }
 
-    await input.refreshAfterDocumentFileAction(`Opened ${pickerResult.handle.name}. Local file sync is active.`)
+    await input.replaceAfterDocumentFileAction(`Opened ${pickerResult.handle.name}. Local file sync is active.`)
   } catch (error: unknown) {
     input.reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed.', error)
   }

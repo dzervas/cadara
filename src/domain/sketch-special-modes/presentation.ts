@@ -2,11 +2,7 @@ import type { RequestId, SketchAuthoringOperationId, SketchId } from '@/contract
 import type { SketchOperationRef } from '@/contracts/shared/references'
 import type { SketchSessionState } from '@/domain/editor/sketch-session'
 import { sketchSelectionFilter, type PrimitiveRef, type SelectionFilter, type SelectionTargetCatalog } from '@/domain/editor/schema'
-import {
-  getSketchSpecialModeDefinition,
-  getRegisteredSketchSpecialModeDefinitions,
-  isRegisteredSketchSpecialModeId,
-} from '@/domain/sketch-special-modes/registry'
+import type { SketchSpecialModeRegistry } from '@/domain/sketch-special-modes/registry'
 import type {
   ActiveSketchSpecialModeSession,
   SketchSpecialModeDefinition,
@@ -39,18 +35,19 @@ function createOperationTarget(
 
 function resolveDefinition(
   session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
 ): {
   activeMode: ActiveSketchSpecialModeSession
   definition: SketchSpecialModeDefinition
 } | null {
   const activeMode = session.activeSpecialMode
-  if (!activeMode || !isRegisteredSketchSpecialModeId(activeMode.modeId)) {
+  if (!activeMode || !registry.has(activeMode.modeId)) {
     return null
   }
 
   return {
     activeMode,
-    definition: getSketchSpecialModeDefinition(activeMode.modeId),
+    definition: registry.get(activeMode.modeId),
   }
 }
 
@@ -134,8 +131,11 @@ export function sketchSessionHasActiveSpecialMode(session: SketchSessionState) {
   return session.activeSpecialMode !== null
 }
 
-export function getSketchSpecialModeSummaryLabel(session: SketchSessionState) {
-  const resolved = resolveDefinition(session)
+export function getSketchSpecialModeSummaryLabel(
+  session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
+) {
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return null
@@ -146,12 +146,13 @@ export function getSketchSpecialModeSummaryLabel(session: SketchSessionState) {
 
 export function enterSketchSpecialMode(input: {
   session: SketchSessionState
+  registry: SketchSpecialModeRegistry
   modeId: SketchSpecialModeId
   operationId: SketchAuthoringOperationId
   payload?: Record<string, unknown>
   requestId?: RequestId
 }): SketchSessionState {
-  if (!isRegisteredSketchSpecialModeId(input.modeId)) {
+  if (!input.registry.has(input.modeId)) {
     return {
       ...input.session,
       validationMessage: `Sketch special mode ${input.modeId} is not registered.`,
@@ -171,7 +172,7 @@ export function enterSketchSpecialMode(input: {
 
   const sketchId = getSessionSketchId(input.session)
   const operationTarget = createOperationTarget(sketchId, input.operationId)
-  const definition = getSketchSpecialModeDefinition(input.modeId)
+  const definition = input.registry.get(input.modeId)
   const entered = definition.enter({
     sketchSession: input.session,
     operationTarget,
@@ -204,12 +205,13 @@ export function enterSketchSpecialMode(input: {
 
 export function resolveSketchSpecialModeOpenRequest(
   input: SketchSpecialModeOpenContext,
+  registry: SketchSpecialModeRegistry,
 ): {
   modeId: SketchSpecialModeId
   operationId: SketchAuthoringOperationId
   payload?: Record<string, unknown>
 } | null {
-  for (const definition of getRegisteredSketchSpecialModeDefinitions()) {
+  for (const definition of registry.getAll()) {
     const request = definition.resolveOpenRequest?.(input)
     if (!request) {
       continue
@@ -230,8 +232,9 @@ function resolveSketchSpecialModeSelectionInput(
   target: PrimitiveRef,
   selection: readonly PrimitiveRef[],
   selectionCatalog: SelectionTargetCatalog | null,
+  registry: SketchSpecialModeRegistry,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return null
@@ -254,12 +257,19 @@ export function resolveSketchSpecialModeTarget(
   target: PrimitiveRef | null,
   selection: readonly PrimitiveRef[],
   selectionCatalog: SelectionTargetCatalog | null,
+  registry: SketchSpecialModeRegistry,
 ) {
   if (!target) {
     return null
   }
 
-  const resolvedSelection = resolveSketchSpecialModeSelectionInput(session, target, selection, selectionCatalog)
+  const resolvedSelection = resolveSketchSpecialModeSelectionInput(
+    session,
+    target,
+    selection,
+    selectionCatalog,
+    registry,
+  )
 
   if (!resolvedSelection) {
     return null
@@ -274,12 +284,19 @@ export function doesSketchSpecialModeAcceptTarget(
   target: PrimitiveRef | null,
   selection: readonly PrimitiveRef[],
   selectionCatalog: SelectionTargetCatalog | null,
+  registry: SketchSpecialModeRegistry,
 ) {
   if (!target) {
     return false
   }
 
-  const resolvedSelection = resolveSketchSpecialModeSelectionInput(session, target, selection, selectionCatalog)
+  const resolvedSelection = resolveSketchSpecialModeSelectionInput(
+    session,
+    target,
+    selection,
+    selectionCatalog,
+    registry,
+  )
 
   if (!resolvedSelection) {
     return false
@@ -301,8 +318,11 @@ export function doesSketchSpecialModeAcceptTarget(
     : sketchSelectionFilter.allowedKinds.includes(target.kind)
 }
 
-export function getSketchSpecialModeSelectionFilter(session: SketchSessionState): SelectionFilter | null {
-  const resolved = resolveDefinition(session)
+export function getSketchSpecialModeSelectionFilter(
+  session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
+): SelectionFilter | null {
+  const resolved = resolveDefinition(session, registry)
   const selectionContract = resolved?.definition.selection
 
   if (!selectionContract) {
@@ -332,8 +352,12 @@ export function getSketchSpecialModeSelectionFilter(session: SketchSessionState)
   }
 }
 
-export function cancelSketchSpecialMode(session: SketchSessionState, requestId?: RequestId) {
-  const resolved = resolveDefinition(session)
+export function cancelSketchSpecialMode(
+  session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
+  requestId?: RequestId,
+) {
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -349,8 +373,12 @@ export function cancelSketchSpecialMode(session: SketchSessionState, requestId?:
   )
 }
 
-export function commitSketchSpecialMode(session: SketchSessionState, requestId?: RequestId) {
-  const resolved = resolveDefinition(session)
+export function commitSketchSpecialMode(
+  session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
+  requestId?: RequestId,
+) {
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -382,9 +410,10 @@ export function handleSketchSpecialModeHover(
   target: PrimitiveRef | null,
   selection: readonly PrimitiveRef[],
   selectionCatalog: SelectionTargetCatalog | null,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -396,7 +425,7 @@ export function handleSketchSpecialModeHover(
       sketchSession: session,
       activeMode: resolved.activeMode,
       target,
-      resolvedTarget: resolveSketchSpecialModeTarget(session, target, selection, selectionCatalog),
+      resolvedTarget: resolveSketchSpecialModeTarget(session, target, selection, selectionCatalog, registry),
     }),
     requestId,
   )
@@ -408,9 +437,10 @@ export function handleSketchSpecialModeClick(
   target: PrimitiveRef | null,
   selection: readonly PrimitiveRef[],
   selectionCatalog: SelectionTargetCatalog | null,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -423,7 +453,7 @@ export function handleSketchSpecialModeClick(
       activeMode: resolved.activeMode,
       point,
       target,
-      resolvedTarget: resolveSketchSpecialModeTarget(session, target, selection, selectionCatalog),
+      resolvedTarget: resolveSketchSpecialModeTarget(session, target, selection, selectionCatalog, registry),
     }),
     requestId,
   )
@@ -435,9 +465,10 @@ export function handleSketchSpecialModeDoubleClick(
   target: PrimitiveRef | null,
   selection: readonly PrimitiveRef[],
   selectionCatalog: SelectionTargetCatalog | null,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -450,7 +481,7 @@ export function handleSketchSpecialModeDoubleClick(
       activeMode: resolved.activeMode,
       point,
       target,
-      resolvedTarget: resolveSketchSpecialModeTarget(session, target, selection, selectionCatalog),
+      resolvedTarget: resolveSketchSpecialModeTarget(session, target, selection, selectionCatalog, registry),
     }),
     requestId,
   )
@@ -460,9 +491,10 @@ export function handleSketchSpecialModeDragStart(
   session: SketchSessionState,
   handle: SketchSpecialModeHandleRef,
   point: import('@/contracts/modeling/schema').SketchPoint,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -486,9 +518,10 @@ export function handleSketchSpecialModeDragStart(
 export function handleSketchSpecialModeDragMove(
   session: SketchSessionState,
   point: import('@/contracts/modeling/schema').SketchPoint,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
   const handle = session.activeSpecialMode?.activeDragHandle
 
   if (!resolved || !handle) {
@@ -510,9 +543,10 @@ export function handleSketchSpecialModeDragMove(
 export function handleSketchSpecialModeDragEnd(
   session: SketchSessionState,
   point: import('@/contracts/modeling/schema').SketchPoint,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
   const handle = session.activeSpecialMode?.activeDragHandle
 
   if (!resolved || !handle) {
@@ -534,19 +568,20 @@ export function handleSketchSpecialModeDragEnd(
 export function handleSketchSpecialModePanelAction(
   session: SketchSessionState,
   action: SketchSpecialModePanelAction,
+  registry: SketchSpecialModeRegistry,
   requestId?: RequestId,
 ) {
   if (action.kind === 'command') {
     if (action.command === 'cancel') {
-      return cancelSketchSpecialMode(session, requestId)
+      return cancelSketchSpecialMode(session, registry, requestId)
     }
     if (action.command === 'commit') {
-      return commitSketchSpecialMode(session, requestId)
+      return commitSketchSpecialMode(session, registry, requestId)
     }
     return exitSketchSpecialMode(session)
   }
 
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return session
@@ -569,8 +604,9 @@ export function resolveSketchSpecialModeEffectRequest(session: SketchSessionStat
 
 export function getSketchSpecialModeOperationOwnedStateOverride(
   session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
 ): SketchSpecialModeOperationOwnedStateOverride | null {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return null
@@ -587,8 +623,9 @@ export function applySketchSpecialModeEffectResult(input: {
   requestId: RequestId
   effectId: string
   payload: Record<string, unknown>
+  registry: SketchSpecialModeRegistry
 }) {
-  const resolved = resolveDefinition(input.session)
+  const resolved = resolveDefinition(input.session, input.registry)
   const pendingEffect = input.session.activeSpecialMode?.pendingEffect
 
   if (
@@ -631,8 +668,11 @@ export function applySketchSpecialModeEffectResult(input: {
   }
 }
 
-export function getSketchSpecialModePanel(session: SketchSessionState): SketchSpecialModePanelSchema | null {
-  const resolved = resolveDefinition(session)
+export function getSketchSpecialModePanel(
+  session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
+): SketchSpecialModePanelSchema | null {
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return null
@@ -646,8 +686,9 @@ export function getSketchSpecialModePanel(session: SketchSessionState): SketchSp
 
 export function getSketchSpecialModeViewportPresentation(
   session: SketchSessionState,
+  registry: SketchSpecialModeRegistry,
 ): SketchSpecialModeViewportPresentation | null {
-  const resolved = resolveDefinition(session)
+  const resolved = resolveDefinition(session, registry)
 
   if (!resolved) {
     return null

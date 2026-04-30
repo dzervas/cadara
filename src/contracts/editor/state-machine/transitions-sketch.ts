@@ -46,6 +46,7 @@ import type {
   SketchEditorState,
   EditorState,
 } from './types'
+import type { EditorExtensionDependencies } from './dependencies'
 import {
   deriveSketchPointFromWorld,
   emitSketchReferenceImageImportWithPayloads,
@@ -437,6 +438,7 @@ export function handleSketchGeometryDragStarted(
 export function handleSketchGeometryDragMoved(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.geometryDragMoved' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch') {
     return { state, effects: [] }
@@ -451,7 +453,9 @@ export function handleSketchGeometryDragMoved(
     state: {
       ...state,
       session,
-      selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+      selectionFilter:
+        getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
+        ?? getDefaultSelectionFilterForMode('sketch'),
       command: {
         ...state.command,
         phase: 'editing',
@@ -600,6 +604,7 @@ export function handleSketchSpecialModeEntered(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModeEntered' }>,
   transitionEditorState: (state: EditorState, event: EditorEvent) => EditorTransitionResult,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')) {
     const session = state.snapshot
@@ -660,6 +665,7 @@ export function handleSketchSpecialModeEntered(
   const requestId = nextRequestId(state, 'sketch-special-enter')
   const session = enterSketchSpecialMode({
     session: state.session,
+    registry: dependencies.sketchSpecialModes,
     modeId: event.modeId,
     operationId: event.operationId,
     payload: event.payload,
@@ -670,27 +676,36 @@ export function handleSketchSpecialModeEntered(
     ...state,
     selection: [session.activeSpecialMode?.operationTarget ?? state.selection[0]].flatMap((target) => target ? [target] : []),
     hoverTarget: null,
-    selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
-  }, session, requestId)
+    selectionFilter:
+      getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
+      ?? getDefaultSelectionFilterForMode('sketch'),
+  }, session, requestId, dependencies)
 }
 
 export function handleSketchSpecialModePanelActionInvoked(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModePanelActionInvoked' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
     return { state, effects: [] }
   }
 
   const requestId = nextRequestId(state, 'sketch-special-panel')
-  const session = handleSketchSpecialModePanelAction(state.session, event.action, requestId)
+  const session = handleSketchSpecialModePanelAction(
+    state.session,
+    event.action,
+    dependencies.sketchSpecialModes,
+    requestId,
+  )
 
-  return emitSketchSpecialModeEffect(state, session, requestId)
+  return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
 }
 
 export function handleSketchSpecialModeClickRequested(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModeClickRequested' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
     return { state, effects: [] }
@@ -703,15 +718,17 @@ export function handleSketchSpecialModeClickRequested(
     event.target ?? null,
     state.selection,
     state.selectionCatalog,
+    dependencies.sketchSpecialModes,
     requestId,
   )
 
-  return emitSketchSpecialModeEffect(state, session, requestId)
+  return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
 }
 
 export function handleSketchSpecialModeDoubleClickRequested(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModeDoubleClickRequested' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch') {
     return { state, effects: [] }
@@ -725,7 +742,7 @@ export function handleSketchSpecialModeDoubleClickRequested(
       target: event.target ?? null,
       selection: state.selection,
       selectionCatalog: state.selectionCatalog,
-    })
+    }, dependencies.sketchSpecialModes)
 
     if (!request) {
       return { state, effects: [] }
@@ -734,6 +751,7 @@ export function handleSketchSpecialModeDoubleClickRequested(
     const requestId = nextRequestId(state, 'sketch-special-enter')
     const session = enterSketchSpecialMode({
       session: state.session,
+      registry: dependencies.sketchSpecialModes,
       modeId: request.modeId,
       operationId: request.operationId,
       payload: request.payload,
@@ -744,8 +762,10 @@ export function handleSketchSpecialModeDoubleClickRequested(
       ...state,
       selection: [session.activeSpecialMode?.operationTarget ?? state.selection[0]].flatMap((target) => target ? [target] : []),
       hoverTarget: null,
-      selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
-    }, session, requestId)
+      selectionFilter:
+        getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
+        ?? getDefaultSelectionFilterForMode('sketch'),
+    }, session, requestId, dependencies)
   }
 
   const requestId = nextRequestId(state, 'sketch-special-double-click')
@@ -755,15 +775,17 @@ export function handleSketchSpecialModeDoubleClickRequested(
     event.target ?? null,
     state.selection,
     state.selectionCatalog,
+    dependencies.sketchSpecialModes,
     requestId,
   )
 
-  return emitSketchSpecialModeEffect(state, session, requestId)
+  return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
 }
 
 export function handleSketchSpecialModeDragStarted(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModeDragStarted' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
     return { state, effects: [] }
@@ -774,15 +796,17 @@ export function handleSketchSpecialModeDragStarted(
     state.session,
     event.handle,
     deriveSketchPointFromWorld(state.session.plane, event.point),
+    dependencies.sketchSpecialModes,
     requestId,
   )
 
-  return emitSketchSpecialModeEffect(state, session, requestId)
+  return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
 }
 
 export function handleSketchSpecialModeDragMoved(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModeDragMoved' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
     return { state, effects: [] }
@@ -802,15 +826,17 @@ export function handleSketchSpecialModeDragMoved(
             : null,
         },
     deriveSketchPointFromWorld(state.session.plane, event.point),
+    dependencies.sketchSpecialModes,
     requestId,
   )
 
-  return emitSketchSpecialModeEffect(state, session, requestId)
+  return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
 }
 
 export function handleSketchSpecialModeDragEnded(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'sketch.specialModeDragEnded' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'editingSketch' || !sketchSessionHasActiveSpecialMode(state.session)) {
     return { state, effects: [] }
@@ -830,8 +856,9 @@ export function handleSketchSpecialModeDragEnded(
             : null,
         },
     deriveSketchPointFromWorld(state.session.plane, event.point),
+    dependencies.sketchSpecialModes,
     requestId,
   )
 
-  return emitSketchSpecialModeEffect(state, session, requestId)
+  return emitSketchSpecialModeEffect(state, session, requestId, dependencies)
 }

@@ -30,7 +30,7 @@ import type { ObjectExportModalState } from '@/domain/export/object-export-state
 import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import type { ExportProvider } from '@/contracts/export/provider'
 import type { FeatureEditorFormField, FeatureEditorFormSection } from '@/domain/feature-authoring/form-schema'
-import { getRegisteredExportProviders } from '@/domain/export/provider-registry'
+import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 
 interface DocumentExportModalProps {
   exportDocument: (input: ModelingExportDocumentInput) => Promise<ModelingExportDocumentResult>
@@ -194,7 +194,8 @@ function DocumentExportModalContent({
   onDownload,
   target,
 }: DocumentExportModalContentProps) {
-  const providers = getRegisteredExportProviders()
+  const { exportProviders } = useRuntimeExtensionRegistry()
+  const providers = exportProviders.getAll()
   const [format, setFormat] = useState(initialFormat)
   const [providerOptions, setProviderOptions] = useState<Record<string, unknown>>(() => {
     const map: Record<string, unknown> = {}

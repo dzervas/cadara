@@ -4,14 +4,13 @@ import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-mach
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { ImportProvider } from '@/contracts/import/provider'
 import {
-  applyImportPreparedActions,
   createImportCapabilities,
   createImportSession,
-  prepareImportActions,
   resolveLocalFileImportSource,
 } from '@/domain/import/orchestrator'
-import { getAcceptedImportFileTypes, getImportProviderById, matchImportProviders } from '@/domain/import/provider-registry'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
+import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
+import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 import { showOpenImportFilePicker } from '@/lib/import-file-picker'
 
 function promptForImportProvider(
@@ -37,7 +36,6 @@ function promptForImportProvider(
 interface WorkbenchPartImportControllerInput {
   activeEditSession: EditorViewState['activeEditSession']
   activeImportSession: EditorViewState['activeImportSession']
-  applyLoadedSnapshot: (snapshot: DocumentSnapshot) => void
   dispatch: (event: EditorEvent) => void
   modelingService: ModelingService
   showWorkbenchError: (message: string) => void
@@ -48,49 +46,30 @@ interface WorkbenchPartImportControllerInput {
 export function useWorkbenchPartImport({
   activeEditSession,
   activeImportSession,
-  applyLoadedSnapshot,
   dispatch,
   modelingService,
   showWorkbenchError,
   showWorkbenchInfo,
   snapshot,
 }: WorkbenchPartImportControllerInput) {
+  const documentOwner = useWorkbenchDocumentOwner()
+  const { importProviders } = useRuntimeExtensionRegistry()
+
   const commitImportSession = useCallback(async () => {
     if (!activeImportSession || !snapshot) {
-      return
-    }
-
-    const provider = getImportProviderById(activeImportSession.providerId)
-    if (!provider) {
-      showWorkbenchError('The selected import provider is no longer registered.')
       return
     }
 
     dispatch({ type: 'import.commitRequested' })
 
     try {
-      const capabilities = createImportCapabilities(modelingService, snapshot)
-      const actions = await prepareImportActions({
-        provider,
-        source: activeImportSession.resolvedSource,
-        review: activeImportSession.review,
-        selections: activeImportSession.selections,
-        capabilities,
-      })
-      const result = await applyImportPreparedActions({
-        modelingService,
-        baseRevisionId: snapshot.revisionId,
-        actions,
-      })
-
-      if (result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+      const result = await documentOwner.commitPartImport(activeImportSession)
+      if (!result.ok) {
         dispatch({ type: 'import.failed', diagnostics: result.diagnostics })
         showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
         return
       }
 
-      const nextSnapshot = await modelingService.getCurrentDocumentSnapshot()
-      applyLoadedSnapshot(nextSnapshot)
       dispatch({ type: 'import.committed' })
       if (result.createdEntityIds.sketchIds.length === 1) {
         dispatch({
@@ -117,7 +96,7 @@ export function useWorkbenchPartImport({
       })
       showWorkbenchError(message)
     }
-  }, [activeImportSession, applyLoadedSnapshot, dispatch, modelingService, showWorkbenchError, showWorkbenchInfo, snapshot])
+  }, [activeImportSession, dispatch, documentOwner, showWorkbenchError, showWorkbenchInfo, snapshot])
 
   const requestPartImport = useCallback(async () => {
     if (activeEditSession || activeImportSession) {
@@ -129,7 +108,7 @@ export function useWorkbenchPartImport({
       return
     }
 
-    const acceptedFileTypes = getAcceptedImportFileTypes()
+    const acceptedFileTypes = importProviders.getAcceptedFileTypes()
     if (acceptedFileTypes.length === 0) {
       showWorkbenchError('No part importers are currently registered.')
       return
@@ -153,7 +132,7 @@ export function useWorkbenchPartImport({
     }
 
     const resolvedSource = await resolveLocalFileImportSource(file)
-    const matchedProviders = matchImportProviders(resolvedSource)
+    const matchedProviders = importProviders.matchProviders(resolvedSource)
 
     if (matchedProviders.length === 0) {
       showWorkbenchError(`No importer is available for ${resolvedSource.name}.`)
@@ -178,7 +157,7 @@ export function useWorkbenchPartImport({
     } catch (error: unknown) {
       showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
     }
-  }, [activeEditSession, activeImportSession, dispatch, modelingService, showWorkbenchError, snapshot])
+  }, [activeEditSession, activeImportSession, dispatch, importProviders, modelingService, showWorkbenchError, snapshot])
 
   return {
     commitImportSession,

@@ -40,6 +40,11 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
     'Import and Export should remain one-shot actions that do not create or replace local filesystem sync bindings.',
   )
   assert(
+    fileActionsSource.includes('replaceAfterDocumentFileAction')
+      && workbenchSource.includes('replaceAfterDocumentFileAction'),
+    'Whole-document file flows should route through the explicit replacement handoff after file actions succeed.',
+  )
+  assert(
     workerRuntimeSource.includes('writeTextToLocalFileHandle')
       && workerRuntimeSource.includes('createLocalAuthoredDocumentPayload')
       && !workerRuntimeSource.includes('downloadDocumentExportResult')

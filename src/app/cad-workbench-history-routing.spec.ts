@@ -37,8 +37,9 @@ test('src/app/cad-workbench-history-routing.spec.ts', async () => {
     'Accepted document history reorders should create workbench undo entries in the shared history controller.',
   )
   assert(
-    historySource.includes('modelingService.reorderDocumentHistory'),
-    'Workbench reorder undo and redo should apply through the modeling service inside the shared history controller.',
+    historySource.includes('documentOwner.reorderDocumentHistory')
+      && !historySource.includes('modelingService.reorderDocumentHistory'),
+    'Workbench reorder undo and redo should route through the shared document owner instead of mutating modeling history directly.',
   )
   assert(
     historySource.includes("operation: 'Reorder document history'")
@@ -46,8 +47,9 @@ test('src/app/cad-workbench-history-routing.spec.ts', async () => {
     'Rejected document history reorders should surface through the workbench error notification path.',
   )
   assert(
-    historySource.includes('applyLoadedSnapshot(nextSnapshot)'),
-    'Accepted document history reorders should apply the loaded snapshot directly for immediate UI updates.',
+    historySource.includes('result.value.snapshot.presentation.documentHistory')
+      && !historySource.includes('applyLoadedSnapshot(nextSnapshot)'),
+    'Accepted document history reorders should derive their immediate UI state from the authoritative owner result.',
   )
   assert(
     historySource.includes('sketchSessionRef.current || isUndoRedoRunning'),

@@ -2,10 +2,12 @@ import { assign, createActor, fromPromise, raise, setup, type ActorRefFrom } fro
 
 import {
   createEditorEffectFailureEvent,
+  defaultEditorExtensionDependencies,
   getEditorViewState,
   initialEditorState,
   runEditorEffect,
   transitionEditorState,
+  type EditorExtensionDependencies,
   type EditorEffect,
   type EditorEffectRuntime,
   type EditorEvent,
@@ -25,12 +27,14 @@ interface EditorRuntimeContext {
   activeEffect: EditorEffect | null
   effectQueue: EditorEffect[]
   runtime: EditorEffectRuntime
+  dependencies: EditorExtensionDependencies
   errorReporter: ErrorReporter
   runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
 }
 
 interface EditorRuntimeInput {
   runtime: EditorEffectRuntime
+  dependencies: EditorExtensionDependencies
   errorReporter: ErrorReporter
   runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
 }
@@ -70,6 +74,7 @@ const editorEventTypes = [
   'history.undoRequested',
   'history.redoRequested',
   'document.snapshotLoaded',
+  'document.replaced',
   'sketch.historyOperationDeleteRequested',
   'sketch.annotationDeleteRequested',
   'sketch.annotationEditRequested',
@@ -313,7 +318,7 @@ const editorRuntimeMachine = setup({
   },
   actions: {
     applyEditorEvent: assign(({ context, event }) => {
-      const result = transitionEditorState(context.machineState, event)
+      const result = transitionEditorState(context.machineState, event, context.dependencies)
       const activeEffect =
         context.activeEffect && effectMatchesState(context.activeEffect, result.state)
           ? context.activeEffect
@@ -329,6 +334,7 @@ const editorRuntimeMachine = setup({
       const result = transitionEditorState(
         context.machineState,
         ((event as unknown) as { output: EditorEvent }).output,
+        context.dependencies,
       )
 
       return {
@@ -367,7 +373,7 @@ const editorRuntimeMachine = setup({
         appError,
         'Editor runtime invocation failed.',
       )
-      const result = transitionEditorState(context.machineState, failureEvent)
+      const result = transitionEditorState(context.machineState, failureEvent, context.dependencies)
 
       return {
         machineState: result.state,
@@ -405,6 +411,7 @@ const editorRuntimeMachine = setup({
     activeEffect: null,
     effectQueue: [],
     runtime: input.runtime,
+    dependencies: input.dependencies,
     errorReporter: input.errorReporter,
     runEffect: input.runEffect,
   }),
@@ -427,10 +434,12 @@ export function createEditorRuntimeActor(
   runtime: EditorEffectRuntime,
   errorReporter: ErrorReporter = createConsoleErrorReporter(),
   runEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent> = runEditorEffect,
+  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
 ) {
   return createActor(editorRuntimeMachine, {
     input: {
       runtime,
+      dependencies,
       errorReporter,
       runEffect,
     },

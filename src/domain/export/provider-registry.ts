@@ -1,33 +1,36 @@
 import type { ExportProvider } from '@/contracts/export/provider'
 
-const REGISTERED_EXPORT_PROVIDERS: ExportProvider<unknown>[] = []
-let defaultProviders: ExportProvider<unknown>[] | null = null
-
-export function getRegisteredExportProviders(): readonly ExportProvider<unknown>[] {
-  return REGISTERED_EXPORT_PROVIDERS
+export interface ExportProviderRegistry {
+  getAll(): readonly ExportProvider<unknown>[]
+  getByFormat(formatId: string): ExportProvider<unknown> | undefined
 }
 
-export function getExportProviderByFormat(formatId: string): ExportProvider<unknown> | undefined {
-  return REGISTERED_EXPORT_PROVIDERS.find((provider) => provider.formatId === formatId)
-}
+export function createExportProviderRegistry(
+  providers: readonly ExportProvider<unknown>[],
+): ExportProviderRegistry {
+  const dedupedProviders: ExportProvider<unknown>[] = []
+  const providersByFormat = new Map<string, ExportProvider<unknown>>()
+  const seenProviderIds = new Set<string>()
 
-export function registerExportProvider(provider: ExportProvider<unknown>) {
-  if (!REGISTERED_EXPORT_PROVIDERS.some((p) => p.id === provider.id)) {
-    REGISTERED_EXPORT_PROVIDERS.push(provider)
+  for (const provider of providers) {
+    if (seenProviderIds.has(provider.id)) {
+      continue
+    }
+
+    seenProviderIds.add(provider.id)
+    dedupedProviders.push(provider)
+
+    if (!providersByFormat.has(provider.formatId)) {
+      providersByFormat.set(provider.formatId, provider)
+    }
   }
-}
 
-export function registerExportProviderForTest(provider: ExportProvider<unknown>) {
-  if (defaultProviders === null) {
-    defaultProviders = [...REGISTERED_EXPORT_PROVIDERS]
-  }
-  REGISTERED_EXPORT_PROVIDERS.push(provider)
-}
-
-export function resetExportProvidersForTest() {
-  if (defaultProviders !== null) {
-    REGISTERED_EXPORT_PROVIDERS.length = 0
-    REGISTERED_EXPORT_PROVIDERS.push(...defaultProviders)
-    defaultProviders = null
+  return {
+    getAll() {
+      return dedupedProviders
+    },
+    getByFormat(formatId) {
+      return providersByFormat.get(formatId)
+    },
   }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 import type { EditorEvent, EditorHistoryAvailability } from '@/contracts/editor/state-machine'
-import { type AppError, type ErrorReporter } from '@/contracts/errors'
+import { ok, type AppError, type ErrorReporter } from '@/contracts/errors'
 import type {
   DocumentHistoryOrderEntry,
   DocumentSnapshot,
@@ -12,9 +12,9 @@ import {
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
-import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { getWorkbenchHistoryAvailability, documentHistoryOrdersEqual, getDocumentHistoryOrderRestoreMoves } from '@/app/workbench/history/workbench-history'
-import { requireAcceptedModelingResult, runWorkbenchAction } from '@/app/workbench/shared/workbench-action'
+import { runWorkbenchAction } from '@/app/workbench/shared/workbench-action'
+import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
 
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
 type WorkbenchUndoEntry =
@@ -33,11 +33,9 @@ type WorkbenchUndoEntry =
     }
 
 interface WorkbenchHistoryControllerInput {
-  applyLoadedSnapshot: (snapshot: DocumentSnapshot) => void
   dispatch: (event: EditorEvent) => void
   errorReporter: ErrorReporter
   history: EditorHistoryAvailability
-  modelingService: ModelingService
   setInvalidVariableValueMessages: Dispatch<SetStateAction<Record<string, string>>>
   showWorkbenchError: (message: string) => void
   sketchSession: unknown
@@ -45,16 +43,15 @@ interface WorkbenchHistoryControllerInput {
 }
 
 export function useWorkbenchHistory({
-  applyLoadedSnapshot,
   dispatch,
   errorReporter,
   history,
-  modelingService,
   setInvalidVariableValueMessages,
   showWorkbenchError,
   sketchSession,
   snapshot,
 }: WorkbenchHistoryControllerInput) {
+  const documentOwner = useWorkbenchDocumentOwner()
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
   const [redoStack, setRedoStack] = useState<WorkbenchUndoEntry[]>([])
   const [isUndoRedoRunning, setIsUndoRedoRunning] = useState(false)
@@ -117,13 +114,7 @@ export function useWorkbenchHistory({
         { key: 'baseRevisionId', value: currentSnapshot.document.revisionId },
         { key: 'variableId', value: variableId },
       ],
-      action: () => modelingService.updateDocumentVariable({
-        baseRevisionId: currentSnapshot.document.revisionId,
-        variableId,
-        name: next.name,
-        valueText: next.valueText,
-      }),
-      mapSuccess: (output) => requireAcceptedModelingResult(output, {
+      action: () => documentOwner.updateDocumentVariable(variableId, next, {
         operation: failureLabel,
         fallbackMessage: `${failureLabel} failed.`,
         context: [
@@ -131,6 +122,7 @@ export function useWorkbenchHistory({
           { key: 'variableId', value: variableId },
         ],
       }),
+      mapSuccess: (output) => ok(output),
       onError: (error) => setVariableFailure(variableId, error),
     })
 
@@ -140,7 +132,6 @@ export function useWorkbenchHistory({
         delete nextMessages[variableId]
         return nextMessages
       })
-      dispatch({ type: 'document.refreshRequested' })
       return true
     }
 
@@ -174,16 +165,12 @@ export function useWorkbenchHistory({
         operation: failureLabel,
         reporter: errorReporter,
         context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
-        action: () => modelingService.reorderDocumentHistory({
-          baseRevisionId: latestSnapshot.document.revisionId,
-          item: move.item,
-          beforeItem: move.beforeItem,
-        }),
-        mapSuccess: (output) => requireAcceptedModelingResult(output, {
+        action: () => documentOwner.reorderDocumentHistory(move.item, move.beforeItem, {
           operation: failureLabel,
           fallbackMessage: `${failureLabel} failed.`,
           context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
         }),
+        mapSuccess: (output) => ok(output),
         onError: (error) => showWorkbenchError(error.message),
       })
 
@@ -191,9 +178,6 @@ export function useWorkbenchHistory({
         accepted = false
         break
       }
-
-      const refreshedSnapshot = await modelingService.getCurrentDocumentSnapshot()
-      applyLoadedSnapshot(refreshedSnapshot)
     }
 
     const finalOrder = snapshotRef.current
@@ -302,13 +286,7 @@ export function useWorkbenchHistory({
         { key: 'baseRevisionId', value: snapshot.document.revisionId },
         { key: 'variableId', value: variable.variableId },
       ],
-      action: () => modelingService.updateDocumentVariable({
-        baseRevisionId: snapshot.document.revisionId,
-        variableId: variable.variableId,
-        name: next.name,
-        valueText: next.valueText,
-      }),
-      mapSuccess: (output) => requireAcceptedModelingResult(output, {
+      action: () => documentOwner.updateDocumentVariable(variable.variableId, next, {
         operation,
         fallbackMessage: `${operation} failed.`,
         context: [
@@ -316,6 +294,7 @@ export function useWorkbenchHistory({
           { key: 'variableId', value: variable.variableId },
         ],
       }),
+      mapSuccess: (output) => ok(output),
       onError: (error) => setVariableFailure(variable.variableId, error),
     }).then((result) => {
       if (result.isErr()) {
@@ -341,7 +320,6 @@ export function useWorkbenchHistory({
         },
       ])
       setRedoStack([])
-      dispatch({ type: 'document.refreshRequested' })
     })
   }
 
@@ -359,38 +337,31 @@ export function useWorkbenchHistory({
       operation: 'Reorder document history',
       reporter: errorReporter,
       context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
-      action: () => modelingService.reorderDocumentHistory({
-        baseRevisionId: snapshot.document.revisionId,
-        item,
-        beforeItem,
-      }),
-      mapSuccess: (output) => requireAcceptedModelingResult(output, {
+      action: () => documentOwner.reorderDocumentHistory(item, beforeItem, {
         operation: 'Reorder document history',
         fallbackMessage: 'Reorder document history failed.',
         context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
       }),
+      mapSuccess: (output) => ok(output),
       onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
         return
       }
 
-      return modelingService.getCurrentDocumentSnapshot().then((nextSnapshot) => {
-        applyLoadedSnapshot(nextSnapshot)
-        const afterOrder = createDocumentHistoryOrder(nextSnapshot.presentation.documentHistory)
-        if (!documentHistoryOrdersEqual(beforeOrder, afterOrder)) {
-          setUndoStack((current) => [
-            ...current,
-            {
-              kind: 'reorderDocumentHistory',
-              before: beforeOrder,
-              after: afterOrder,
-              label: 'document history reorder',
-            },
-          ])
-          setRedoStack([])
-        }
-      })
+      const afterOrder = createDocumentHistoryOrder(result.value.snapshot.presentation.documentHistory)
+      if (!documentHistoryOrdersEqual(beforeOrder, afterOrder)) {
+        setUndoStack((current) => [
+          ...current,
+          {
+            kind: 'reorderDocumentHistory',
+            before: beforeOrder,
+            after: afterOrder,
+            label: 'document history reorder',
+          },
+        ])
+        setRedoStack([])
+      }
     }).finally(() => {
       setIsDocumentHistoryReorderRunning(false)
     })

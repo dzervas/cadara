@@ -1,7 +1,7 @@
 import type { ExportCapabilities } from '@/contracts/export/capabilities'
 import type { DocumentExportFailureResult, DocumentExportResult, DocumentExportSuccessResult } from '@/contracts/modeling/export'
 import type { DurableRef } from '@/contracts/shared/references'
-import { getExportProviderByFormat } from '@/domain/export/provider-registry'
+import type { ExportProviderRegistry } from '@/domain/export/provider-registry'
 
 export interface OrchestratorGeometryExportInput {
   format: string
@@ -23,8 +23,9 @@ function createExportFilename(targetLabel: string, extension: string): string {
 export function orchestrateGeometryExport(
   input: OrchestratorGeometryExportInput,
   capabilities: ExportCapabilities,
+  exportProviders: ExportProviderRegistry,
 ): DocumentExportResult {
-  const provider = getExportProviderByFormat(input.format)
+  const provider = exportProviders.getByFormat(input.format)
 
   if (!provider) {
     const failure: DocumentExportFailureResult = {

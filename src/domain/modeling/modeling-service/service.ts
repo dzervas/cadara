@@ -1,7 +1,7 @@
 import type { GeometryAssetResolver, ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type { DocumentExportResult } from '@/contracts/modeling/export'
 import { orchestrateGeometryExport } from '@/domain/export/export-orchestrator'
-import { registerBuiltinExportProviders } from '@/domain/export/register-builtin-providers'
+import { createExportProviderRegistry } from '@/domain/export/provider-registry'
 import type {
   PrimitiveRef,
   RevisionId,
@@ -139,7 +139,7 @@ export function createModelingService(
   adapter: ModelingKernelAdapter,
   options: ModelingServiceOptions,
 ): ModelingService {
-  registerBuiltinExportProviders()
+  const exportProviders = options.exportProviders ?? createExportProviderRegistry([])
   const currentDocumentId = normalizeCurrentDocumentId(options.currentDocumentId)
   const sketchSolver = options.sketchSolver ? createSketchSolverService(options.sketchSolver) : null
   const operationHistoryStore = options.operationHistoryStore ?? null
@@ -1399,6 +1399,7 @@ export function createModelingService(
         return mapExportDocumentResponse(orchestrateGeometryExport(
           { format: request.format, options: request.options, target: request.target, targetLabel: request.targetLabel },
           capabilitiesOrDiagnostic,
+          exportProviders,
         ))
       }
 

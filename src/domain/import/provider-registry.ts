@@ -1,24 +1,52 @@
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { ResolvedImportSource } from '@/contracts/import/source'
 
-const REGISTERED_IMPORT_PROVIDERS: ImportProvider<unknown, unknown>[] = []
-
-export function getRegisteredImportProviders() {
-  return [...REGISTERED_IMPORT_PROVIDERS]
+export interface ImportProviderRegistry {
+  getAll(): readonly ImportProvider<unknown, unknown>[]
+  getById(providerId: string): ImportProvider<unknown, unknown> | null
+  matchProviders(source: ResolvedImportSource): readonly ImportProvider<unknown, unknown>[]
+  getAcceptedFileTypes(): readonly { extension: string; mediaType?: string }[]
 }
 
-export function getImportProviderById(providerId: string) {
-  return REGISTERED_IMPORT_PROVIDERS.find((provider) => provider.id === providerId) ?? null
+export function createImportProviderRegistry(
+  providers: readonly ImportProvider<unknown, unknown>[],
+): ImportProviderRegistry {
+  const dedupedProviders: ImportProvider<unknown, unknown>[] = []
+  const providersById = new Map<string, ImportProvider<unknown, unknown>>()
+
+  for (const provider of providers) {
+    if (providersById.has(provider.id)) {
+      continue
+    }
+
+    providersById.set(provider.id, provider)
+    dedupedProviders.push(provider)
+  }
+
+  const acceptedFileTypes = collectAcceptedImportFileTypes(dedupedProviders)
+
+  return {
+    getAll() {
+      return dedupedProviders
+    },
+    getById(providerId) {
+      return providersById.get(providerId) ?? null
+    },
+    matchProviders(source) {
+      return dedupedProviders.filter((provider) => provider.accepts(source))
+    },
+    getAcceptedFileTypes() {
+      return acceptedFileTypes
+    },
+  }
 }
 
-export function matchImportProviders(source: ResolvedImportSource) {
-  return REGISTERED_IMPORT_PROVIDERS.filter((provider) => provider.accepts(source))
-}
-
-export function getAcceptedImportFileTypes() {
+function collectAcceptedImportFileTypes(
+  providers: readonly ImportProvider<unknown, unknown>[],
+) {
   const deduped = new Map<string, { extension: string; mediaType?: string }>()
 
-  for (const provider of REGISTERED_IMPORT_PROVIDERS) {
+  for (const provider of providers) {
     for (const acceptedType of provider.acceptedFileTypes) {
       const extension = acceptedType.extension.trim().replace(/^\./, '').toLowerCase()
       const mediaType = acceptedType.mediaType?.trim().toLowerCase()
@@ -35,12 +63,4 @@ export function getAcceptedImportFileTypes() {
   }
 
   return [...deduped.values()]
-}
-
-export function registerImportProviderForTest(provider: ImportProvider<unknown, unknown>) {
-  REGISTERED_IMPORT_PROVIDERS.push(provider)
-}
-
-export function resetImportProvidersForTest() {
-  REGISTERED_IMPORT_PROVIDERS.length = 0
 }

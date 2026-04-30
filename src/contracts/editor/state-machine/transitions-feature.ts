@@ -11,6 +11,7 @@ import type {
   EditorTransitionResult,
   EditorState,
 } from './types'
+import type { EditorExtensionDependencies } from './dependencies'
 import {
   createFeatureSelectionPreview,
   createImportSelectionPreview,
@@ -75,6 +76,7 @@ export function handleFormReferencePickerActivated(
 
 export function handleFormReferencePickerCancelled(
   state: EditorState,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
     (state.kind !== 'editingFeature' && state.kind !== 'importing')
@@ -96,7 +98,7 @@ export function handleFormReferencePickerCancelled(
       preview:
         state.kind === 'editingFeature'
           ? createFeatureSelectionPreview(state.session)
-          : createImportSelectionPreview(state.session),
+          : createImportSelectionPreview(state.session, dependencies),
       command: {
         ...state.command,
         phase: 'editing',

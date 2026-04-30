@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader } from '@mantine/core'
 import { appVersion, gitCommit } from 'virtual:cadara-build-metadata'
 
@@ -39,16 +39,14 @@ import { useWorkbenchPartImport } from '@/app/workbench/controllers/use-workbenc
 import { useWorkbenchSidebarResize } from '@/app/workbench/controllers/use-workbench-sidebar-resize'
 import { useWorkbenchViewportEvents } from '@/app/workbench/controllers/use-workbench-viewport-events'
 import {
-  requireAcceptedModelingResult,
   runWorkbenchAction,
 } from '@/app/workbench/shared/workbench-action'
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
-  DocumentSnapshot,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
-import { createAppError, errorContext } from '@/contracts/errors'
+import { createAppError, errorContext, ok } from '@/contracts/errors'
 import {
   getSketchAnnotationDescriptors,
   getSketchToolPresentation,
@@ -82,7 +80,9 @@ import { installConsoleLoggingSubscribers } from '@/domain/tools/console-logging
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useErrorReporter } from '@/hooks/use-error-reporter'
 import { useFeatureEditing } from '@/hooks/use-feature-editing'
+import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
 import { useModelingService } from '@/hooks/use-modeling-service'
+import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 import { WorkbenchCommandProvider } from '@/hooks/workbench-command-provider'
 import { ShortcutProvider } from '@/hooks/shortcut-provider'
 import { useToolActionBus, useToolActions } from '@/hooks/use-tool-actions'
@@ -117,6 +117,8 @@ export function CadWorkbench() {
   const actionBus = useToolActionBus()
   const { triggerTool } = useToolActions()
   const modelingService = useModelingService()
+  const { sketchSpecialModes } = useRuntimeExtensionRegistry()
+  const documentOwner = useWorkbenchDocumentOwner()
   const errorReporter = useErrorReporter()
   const {
     machineState,
@@ -164,11 +166,6 @@ export function CadWorkbench() {
     errorReporter,
     modelingService,
   })
-
-  const applyLoadedSnapshot = useCallback((nextSnapshot: DocumentSnapshot) => {
-    snapshotRef.current = nextSnapshot
-    dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })
-  }, [dispatch])
 
   useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus])
 
@@ -298,7 +295,6 @@ export function CadWorkbench() {
   } = useWorkbenchPartImport({
     activeEditSession,
     activeImportSession,
-    applyLoadedSnapshot,
     dispatch,
     modelingService,
     showWorkbenchError,
@@ -315,11 +311,9 @@ export function CadWorkbench() {
     resetHistoryState,
     toolbarHistoryAvailability,
   } = useWorkbenchHistory({
-    applyLoadedSnapshot,
     dispatch,
     errorReporter,
     history,
-    modelingService,
     setInvalidVariableValueMessages,
     showWorkbenchError,
     sketchSession,
@@ -371,9 +365,9 @@ export function CadWorkbench() {
     [effectiveHiddenTargetKeys, previewRenderables, sketchSession, snapshot],
   )
   const sketchToolPresentation = sketchSession ? getSketchToolPresentation(sketchSession) : null
-  const sketchSpecialModePanel = sketchSession ? getSketchSpecialModePanel(sketchSession) : null
+  const sketchSpecialModePanel = sketchSession ? getSketchSpecialModePanel(sketchSession, sketchSpecialModes) : null
   const sketchSpecialModeViewportPresentation =
-    sketchSession ? getSketchSpecialModeViewportPresentation(sketchSession) : null
+    sketchSession ? getSketchSpecialModeViewportPresentation(sketchSession, sketchSpecialModes) : null
   const sketchAnnotations = sketchSession ? getSketchAnnotationDescriptors(sketchSession) : []
   const sketchRegionDiagnosticMessage = sketchSession
     ? getSketchSessionRegionDiagnostics(sketchSession).find((diagnostic) => diagnostic.severity !== 'info')?.message ?? null
@@ -508,11 +502,7 @@ export function CadWorkbench() {
         { key: 'baseRevisionId', value: snapshot.document.revisionId },
         { key: 'target', value: getPrimitiveRefKey(target) },
       ],
-      action: () => modelingService.deleteTarget({
-        baseRevisionId: snapshot.document.revisionId,
-        target,
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+      action: () => documentOwner.deleteTarget(target, {
         operation: `Delete ${label}`,
         fallbackMessage: `Delete ${label} failed.`,
         context: [
@@ -520,6 +510,7 @@ export function CadWorkbench() {
           { key: 'target', value: getPrimitiveRefKey(target) },
         ],
       }),
+      mapSuccess: (result) => ok(result),
       onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
@@ -527,7 +518,6 @@ export function CadWorkbench() {
       }
 
       showWorkbenchInfo(`Deleted ${label}.`)
-      dispatch({ type: 'document.refreshRequested' })
     })
   }
 
@@ -558,21 +548,13 @@ export function CadWorkbench() {
       operation: 'Add variable',
       reporter: errorReporter,
       context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
-      action: () => modelingService.addDocumentVariable({
-        baseRevisionId: snapshot.document.revisionId,
-        name: `var${snapshot.document.variables.length + 1}`,
-        valueText: '0',
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+      action: () => documentOwner.addDocumentVariable({
         operation: 'Add variable',
         fallbackMessage: 'Add variable failed.',
         context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
       }),
+      mapSuccess: (result) => ok(result),
       onError: (error) => showWorkbenchError(error.message),
-    }).then((result) => {
-      if (result.isOk()) {
-        dispatch({ type: 'document.refreshRequested' })
-      }
     })
   }
 
@@ -609,37 +591,22 @@ export function CadWorkbench() {
       return
     }
 
-    const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === item.sketchId)
-    if (!sketch) {
-      showWorkbenchError(`Could not find ${item.label}.`)
-      return
-    }
-
     void runWorkbenchAction({
       operation: `Rename ${item.label}`,
       reporter: errorReporter,
       context: [
         { key: 'baseRevisionId', value: snapshot.document.revisionId },
-        { key: 'sketchId', value: sketch.sketchId },
+        { key: 'sketchId', value: item.sketchId },
       ],
-      action: () => modelingService.commitSketch({
-        baseRevisionId: snapshot.document.revisionId,
-        solverCorrelation: null,
-        sketchId: sketch.sketchId,
-        sketchLabel: nextLabel,
-        plane: sketch.plane,
-        planeTarget: sketch.planeTarget,
-        planeKey: sketch.planeKey,
-        definition: sketch.sketch.definition,
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+      action: () => documentOwner.renameTarget({ kind: 'sketch', sketchId: item.sketchId }, nextLabel, {
         operation: `Rename ${item.label}`,
         fallbackMessage: `Rename ${item.label} failed.`,
         context: [
           { key: 'baseRevisionId', value: snapshot.document.revisionId },
-          { key: 'sketchId', value: sketch.sketchId },
+          { key: 'sketchId', value: item.sketchId },
         ],
       }),
+      mapSuccess: (result) => ok(result),
       onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
@@ -647,7 +614,6 @@ export function CadWorkbench() {
       }
 
       showWorkbenchInfo(`Renamed ${item.label} to ${nextLabel}.`)
-      dispatch({ type: 'document.refreshRequested' })
     })
   }
 
@@ -661,33 +627,22 @@ export function CadWorkbench() {
       return
     }
 
-    const feature = snapshot.document.features.find((entry) => entry.featureId === item.featureId)
-    if (!feature) {
-      showWorkbenchError(`Could not find ${item.label}.`)
-      return
-    }
-
     void runWorkbenchAction({
       operation: `Rename ${item.label}`,
       reporter: errorReporter,
       context: [
         { key: 'baseRevisionId', value: snapshot.document.revisionId },
-        { key: 'featureId', value: feature.featureId },
+        { key: 'featureId', value: item.featureId },
       ],
-      action: () => modelingService.updateFeature({
-        baseRevisionId: snapshot.document.revisionId,
-        featureId: feature.featureId,
-        featureLabel: nextLabel,
-        definition: feature.definition,
-      }),
-      mapSuccess: (result) => requireAcceptedModelingResult(result, {
+      action: () => documentOwner.renameTarget({ kind: 'feature', featureId: item.featureId }, nextLabel, {
         operation: `Rename ${item.label}`,
         fallbackMessage: `Rename ${item.label} failed.`,
         context: [
           { key: 'baseRevisionId', value: snapshot.document.revisionId },
-          { key: 'featureId', value: feature.featureId },
+          { key: 'featureId', value: item.featureId },
         ],
       }),
+      mapSuccess: (result) => ok(result),
       onError: (error) => showWorkbenchError(error.message),
     }).then((result) => {
       if (result.isErr()) {
@@ -695,7 +650,6 @@ export function CadWorkbench() {
       }
 
       showWorkbenchInfo(`Renamed ${item.label} to ${nextLabel}.`)
-      dispatch({ type: 'document.refreshRequested' })
     })
   }
 
@@ -736,12 +690,7 @@ export function CadWorkbench() {
           { key: 'baseRevisionId', value: snapshot.document.revisionId },
           { key: 'bodyId', value: target.bodyId },
         ],
-        action: () => modelingService.renameBody({
-          baseRevisionId: snapshot.document.revisionId,
-          bodyId: target.bodyId,
-          bodyLabel: nextLabel,
-        }),
-        mapSuccess: (result) => requireAcceptedModelingResult(result, {
+        action: () => documentOwner.renameTarget(target, nextLabel, {
           operation: `Rename ${label}`,
           fallbackMessage: `Rename ${label} failed.`,
           context: [
@@ -749,6 +698,7 @@ export function CadWorkbench() {
             { key: 'bodyId', value: target.bodyId },
           ],
         }),
+        mapSuccess: (result) => ok(result),
         onError: (error) => showWorkbenchError(error.message),
       }).then((result) => {
         if (result.isErr()) {
@@ -761,7 +711,6 @@ export function CadWorkbench() {
           return next
         })
         showWorkbenchInfo(`Renamed ${label} to ${nextLabel}.`)
-        dispatch({ type: 'document.refreshRequested' })
       })
       return
     }
@@ -912,7 +861,7 @@ export function CadWorkbench() {
     }
   }
 
-  const refreshAfterDocumentFileAction = async (
+  const replaceAfterDocumentFileAction = async (
     message: string,
     options: { fitView?: boolean } = {},
   ): Promise<void> => {
@@ -920,26 +869,21 @@ export function CadWorkbench() {
     setRawExplicitlyShownAutoHiddenTargetKeys({})
     setObjectLabelOverrides({})
     resetHistoryState()
-    if (options.fitView) {
-      try {
-        const nextSnapshot = await modelingService.getCurrentDocumentSnapshot()
-        applyLoadedSnapshot(nextSnapshot)
+    try {
+      await documentOwner.replaceActiveDocumentBasis()
+      if (options.fitView) {
         setViewportFitRequestId((current) => current + 1)
-        showWorkbenchInfo(message)
-      } catch (error: unknown) {
-        reportDocumentFileActionFailure('workbench.file.refresh', 'Document refresh failed.', error)
       }
-      return
+      showWorkbenchInfo(message)
+    } catch (error: unknown) {
+      reportDocumentFileActionFailure('workbench.file.replace', 'Document replacement failed.', error)
     }
-
-    dispatch({ type: 'document.refreshRequested' })
-    showWorkbenchInfo(message)
   }
 
   const handleNewDocument = async () => {
     await createNewWorkbenchDocument({
       modelingService,
-      refreshAfterDocumentFileAction,
+      replaceAfterDocumentFileAction,
       showWorkbenchError,
       reportDocumentFileActionFailure,
     })
@@ -949,7 +893,7 @@ export function CadWorkbench() {
     await importWorkbenchDocumentFile({
       file,
       modelingService,
-      refreshAfterDocumentFileAction,
+      replaceAfterDocumentFileAction,
       showWorkbenchError,
       reportDocumentFileActionFailure,
     })
@@ -958,7 +902,7 @@ export function CadWorkbench() {
   const handleOpenLocalFile = async () => {
     await openWorkbenchLocalFile({
       modelingService,
-      refreshAfterDocumentFileAction,
+      replaceAfterDocumentFileAction,
       reportDocumentFileActionFailure,
       showWorkbenchError,
     })

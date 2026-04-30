@@ -1,9 +1,9 @@
-import { getImportProviderById } from '@/domain/import/provider-registry'
 import type {
   EditorEvent,
   EditorTransitionResult,
   EditorState,
 } from './types'
+import type { EditorExtensionDependencies } from './dependencies'
 import {
   createImportSelectionPreview,
   createImportingState,
@@ -13,9 +13,10 @@ import {
 export function handleImportFileSelected(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'import.fileSelected' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   return {
-    state: createImportingState(state, event.session),
+    state: createImportingState(state, event.session, dependencies),
     effects: [],
   }
 }
@@ -29,12 +30,13 @@ export function handleImportProviderSelected(
 export function handleImportSelectionPatched(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'import.selectionPatched' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'importing') {
     return { state, effects: [] }
   }
 
-  const provider = getImportProviderById(state.session.providerId)
+  const provider = dependencies.importProviders.getById(state.session.providerId)
   if (!provider) {
     return { state, effects: [] }
   }
@@ -54,7 +56,7 @@ export function handleImportSelectionPatched(
     state: {
       ...state,
       session: nextSession,
-      preview: createImportSelectionPreview(nextSession, 'Selected'),
+      preview: createImportSelectionPreview(nextSession, dependencies, 'Selected'),
       command: {
         ...state.command,
         phase: 'collecting',
@@ -112,6 +114,7 @@ export function handleImportCommitted(
 export function handleImportFailed(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'import.failed' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind !== 'importing') {
     return { state, effects: [] }
@@ -128,7 +131,7 @@ export function handleImportFailed(
         ...state.command,
         phase: 'editing',
       },
-      preview: createImportSelectionPreview(state.session, 'Import failed'),
+      preview: createImportSelectionPreview(state.session, dependencies, 'Import failed'),
     },
     effects: [],
   }

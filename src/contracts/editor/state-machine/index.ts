@@ -18,6 +18,7 @@ export type {
   CommandCommitRequestedEvent,
   DocumentRefreshRequestedEvent,
   DocumentSnapshotLoadedEvent,
+  DocumentReplacedEvent,
   ViewportHoveredEvent,
   ViewportHoverClearedEvent,
   ViewportSelectionRequestedEvent,
@@ -71,6 +72,8 @@ export type {
 
 // Helpers (values)
 export { initialEditorState, createEditorEffectFailureEvent } from './helpers'
+export type { EditorExtensionDependencies } from './dependencies'
+export { defaultEditorExtensionDependencies } from './dependencies'
 
 // Core transition
 export { transitionEditorState } from './transitions-core'

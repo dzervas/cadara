@@ -63,12 +63,12 @@ import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-his
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createModelingService } from '@/domain/modeling/modeling-service'
-import { registerImportProviderForTest, resetImportProvidersForTest } from '@/domain/import/provider-registry'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createAppError, ResultAsync, type AppError } from '@/contracts/errors'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
+import { createScopedImportProviderRegistryForTest, createScopedSketchSpecialModeRegistryForTest } from '@/domain/extensions/test-registry-composition'
 
 test('src/contracts/editor/state-machine.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -479,7 +479,6 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   async function createImageImportSession() {
-    resetImportProvidersForTest()
     const provider: ImportProvider<{
       sourceName: string
     }, {
@@ -569,7 +568,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         return { diagnostics: [] }
       },
     }
-    registerImportProviderForTest(provider)
+    const dependencies = {
+      importProviders: createScopedImportProviderRegistryForTest([provider]),
+      sketchSpecialModes: createScopedSketchSpecialModeRegistryForTest(),
+    }
     const source = {
       name: 'reference.png',
       origin: {
@@ -625,12 +627,15 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const selections = provider.createDefaultSelections(review)
 
     return {
-      providerId: provider.id,
-      resolvedSource: source,
-      review,
-      selections,
-      formSchema: provider.getReviewFormSchema(review, selections),
-      diagnostics: [],
+      session: {
+        providerId: provider.id,
+        resolvedSource: source,
+        review,
+        selections,
+        formSchema: provider.getReviewFormSchema(review, selections),
+        diagnostics: [],
+      },
+      dependencies,
     }
   }
 
@@ -1902,8 +1907,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
       {
         type: 'import.fileSelected',
-        session: importSession,
+        session: importSession.session,
       },
+      importSession.dependencies,
     )
 
     assert(result.state.kind === 'importing', 'Import file selection should enter the importing state.')
@@ -1935,16 +1941,21 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
       {
         type: 'import.fileSelected',
-        session: importSession,
+        session: importSession.session,
       },
+      importSession.dependencies,
     )
 
     assert(opened.state.kind === 'importing', 'Import file selection should enter the importing state.')
 
-    const selected = transitionEditorState(opened.state, {
-      type: 'viewport.selectionRequested',
-      target: { kind: 'construction', constructionId: 'construction_plane-xy' },
-    })
+    const selected = transitionEditorState(
+      opened.state,
+      {
+        type: 'viewport.selectionRequested',
+        target: { kind: 'construction', constructionId: 'construction_plane-xy' },
+      },
+      importSession.dependencies,
+    )
 
     assert(selected.state.kind === 'importing', 'Plane selection should keep the editor inside the import session.')
     assert(
@@ -2892,6 +2903,30 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       fixedRefresh.state.snapshot?.document.diagnostics.length === 0,
       'Corrected refreshes should clear feature diagnostics.',
     )
+  }
+
+  function testDocumentReplacementResetsIntoPartIdleState() {
+    const loaded = transitionEditorState(initialEditorState, {
+      type: 'document.snapshotLoaded',
+      snapshot: createSnapshot(),
+    })
+    const sketchCommand = transitionEditorState(loaded.state, {
+      type: 'tool.activated',
+      toolId: 'sketch',
+    })
+    const replacement = createSnapshot()
+    replacement.revisionId = 'rev_replaced'
+    replacement.document.revisionId = 'rev_replaced'
+
+    const replaced = transitionEditorState(sketchCommand.state, {
+      type: 'document.replaced',
+      snapshot: replacement,
+    })
+
+    assert(replaced.state.kind === 'idle', 'Whole-document replacement should reset the editor into idle mode.')
+    assert(replaced.state.mode === 'part', 'Whole-document replacement should return the editor to part mode.')
+    assert(replaced.state.selection.length === 0, 'Whole-document replacement should clear the prior selection.')
+    assert(replaced.state.snapshot?.revisionId === 'rev_replaced', 'Whole-document replacement should load the replacement snapshot.')
   }
 
   async function testXStateRuntimeBootstrapsAndLoadsSnapshot() {
@@ -4500,7 +4535,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore()
   await testDocumentCursorRequestUsesSnapshotBasisAndRefreshesOnConflict()
   testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics()
+  testDocumentReplacementResetsIntoPartIdleState()
   await testXStateRuntimeBootstrapsAndLoadsSnapshot()
   await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
-  resetImportProvidersForTest()
 })

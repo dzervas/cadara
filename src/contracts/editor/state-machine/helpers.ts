@@ -36,7 +36,6 @@ import {
   type SelectionFilter,
   type SelectionTargetCatalog,
 } from '@/domain/editor/schema'
-import { getImportProviderById } from '@/domain/import/provider-registry'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import {
   getDocumentHistoryCursorBeforeTarget,
@@ -81,6 +80,7 @@ import type {
   SketchEditorState,
   SnapshotLoadedPayload,
 } from './types'
+import type { EditorExtensionDependencies } from './dependencies'
 
 export function nextCommandSessionId(state: EditorState, toolId: ToolId) {
   return `command_${toolId}-${state.nextCommandSequence}` as CommandSessionId
@@ -515,9 +515,10 @@ export function createFeatureEditingState(
 
 export function createImportSelectionPreview(
   session: ImportSessionState,
+  dependencies: EditorExtensionDependencies,
   prefix = 'Import',
 ): CommandPreview {
-  const provider = getImportProviderById(session.providerId)
+  const provider = dependencies.importProviders.getById(session.providerId)
 
   return {
     kind: 'selection',
@@ -529,6 +530,7 @@ export function createImportSelectionPreview(
 export function createImportingState(
   state: EditorState,
   session: ImportSessionState,
+  dependencies: EditorExtensionDependencies,
 ): ImportEditorState {
   const defaultReferenceField = getDefaultImportSelectionField(session)
   const selectionFilter = defaultReferenceField?.picker.selectionFilter ?? getDefaultSelectionFilterForMode('part')
@@ -545,7 +547,7 @@ export function createImportingState(
     selectionCatalog: state.selectionCatalog,
     preview: defaultReferenceField
       ? createSelectionPreviewForSelection([], selectionFilter)
-      : createImportSelectionPreview(session),
+      : createImportSelectionPreview(session, dependencies),
     nextCommandSequence: state.nextCommandSequence + 1,
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
@@ -1286,6 +1288,7 @@ export function emitSketchSpecialModeEffect(
   state: SketchEditorState,
   session: SketchSessionState,
   requestId: RequestId,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   const effect = resolveSketchSpecialModeEffectRequest(session)
 
@@ -1299,7 +1302,9 @@ export function emitSketchSpecialModeEffect(
       state: {
         ...state,
         session,
-        selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+        selectionFilter:
+          getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
+          ?? getDefaultSelectionFilterForMode('sketch'),
         command: {
           ...state.command,
           phase: 'editing',
@@ -1313,7 +1318,9 @@ export function emitSketchSpecialModeEffect(
     state: {
       ...state,
       session,
-      selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+      selectionFilter:
+        getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
+        ?? getDefaultSelectionFilterForMode('sketch'),
       nextRequestSequence: state.nextRequestSequence + 1,
       command: {
         ...state.command,
@@ -1416,6 +1423,29 @@ export function updateStateDocumentSnapshot(state: EditorState, snapshot: Docume
     snapshot,
     selectionCatalog: buildSelectionTargetCatalog(snapshot),
     pendingSnapshotRequestId: null,
+  }
+}
+
+export function replaceStateDocumentSnapshot(state: EditorState, snapshot: DocumentSnapshot): IdleEditorState {
+  return {
+    kind: 'idle',
+    mode: 'part',
+    document: {
+      documentId: snapshot.documentId,
+      revisionId: snapshot.revisionId,
+    },
+    snapshot,
+    previewRenderables: null,
+    selection: [],
+    hoverTarget: null,
+    selectionFilter: getDefaultSelectionFilterForMode('part'),
+    selectionCatalog: buildSelectionTargetCatalog(snapshot),
+    preview: null,
+    nextCommandSequence: state.nextCommandSequence,
+    nextRequestSequence: state.nextRequestSequence,
+    pendingSnapshotRequestId: null,
+    pendingHistoryCursorRequestId: null,
+    editSessionCursorContext: null,
   }
 }
 

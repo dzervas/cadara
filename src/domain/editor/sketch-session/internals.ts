@@ -53,14 +53,15 @@ import {
   collectActiveReferenceImageOperations,
 } from '@/domain/reference-image/operations'
 import {
+  REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+  type ReferenceImageCalibrationModeState,
+} from '@/domain/reference-image-calibration/mode/shared'
+import {
   isRegisteredSketchConstraintToolId,
 } from '@/domain/sketch-constraints/registry'
 import {
   isRegisteredSketchEditToolId,
 } from '@/domain/sketch-edit-tools/registry'
-import {
-  getSketchSpecialModeOperationOwnedStateOverride,
-} from '@/domain/sketch-special-modes/presentation'
 import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
@@ -188,16 +189,20 @@ export function createEmptyDefinition(): SketchDefinition {
 export function getReferenceImageOperationOverrides(
   session: SketchSessionState,
 ) {
-  const override = getSketchSpecialModeOperationOwnedStateOverride(session)
-  const state = override?.state as { kind?: unknown } | undefined
-  if (!override || state?.kind !== 'referenceImage') {
+  const activeMode = session.activeSpecialMode
+  if (!activeMode || activeMode.modeId !== REFERENCE_IMAGE_CALIBRATION_MODE_ID) {
+    return undefined
+  }
+
+  const modeState = activeMode.state as ReferenceImageCalibrationModeState
+  if (modeState.draftState.kind !== 'referenceImage') {
     return undefined
   }
 
   return new Map([
-    [override.operationId, {
-      state: override.state as ReferenceImageOperationState,
-      label: override.label,
+    [modeState.operationId, {
+      state: modeState.draftState as ReferenceImageOperationState,
+      label: modeState.draftState.image.fileName,
     }],
   ])
 }
@@ -1489,4 +1494,3 @@ export function createSessionCommitFactories(
 export function getSessionSketchId(session: SketchSessionState): SketchId {
   return session.sketchId ?? ('sketch_draft' as SketchId)
 }
-

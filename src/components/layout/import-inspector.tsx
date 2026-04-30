@@ -12,8 +12,8 @@ import {
 } from '@/domain/feature-authoring/form-adapter'
 import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
-import { getImportProviderById } from '@/domain/import/provider-registry'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 
 interface ImportInspectorProps {
   onCommit: () => void
@@ -28,7 +28,8 @@ export function ImportInspector({ onCommit }: ImportInspectorProps) {
     snapshot,
   } = editor.state
   const { dispatch } = editor
-  const provider = activeImportSession ? getImportProviderById(activeImportSession.providerId) : null
+  const { importProviders } = useRuntimeExtensionRegistry()
+  const provider = activeImportSession ? importProviders.getById(activeImportSession.providerId) : null
   const formSchema = useMemo(
     () => activeImportSession ? withSessionDiagnostics(activeImportSession.formSchema, activeImportSession.diagnostics) : null,
     [activeImportSession],

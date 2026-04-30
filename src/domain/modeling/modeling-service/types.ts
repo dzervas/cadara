@@ -55,6 +55,7 @@ import type { DocumentRepositoryMetadata } from '@/domain/modeling/document-repo
 import type { OperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import type { DocumentRepository } from '@/domain/modeling/document-repository'
 import type { AppResultAsync } from '@/contracts/errors'
+import type { ExportProviderRegistry } from '@/domain/export/provider-registry'
 
 export interface ModelingService {
   readonly currentDocumentId: DocumentId
@@ -99,6 +100,7 @@ export interface ModelingServiceOptions {
   operationHistoryStore?: OperationHistoryStore | null
   documentRepository?: DocumentRepository | null
   documentRepositoryPersistence?: 'blocking' | 'background'
+  exportProviders?: ExportProviderRegistry
 }
 
 export interface ModelingServiceDocumentChangeEvent {

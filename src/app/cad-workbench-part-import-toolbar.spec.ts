@@ -20,7 +20,7 @@ test('src/app/cad-workbench-part-import-toolbar.spec.ts', () => {
   )
   assert(
     importSource.includes('showOpenImportFilePicker')
-      && importSource.includes('matchImportProviders')
+      && importSource.includes('importProviders.matchProviders')
       && importSource.includes("dispatch({ type: 'import.fileSelected', session })"),
     'The shared part-import controller should own file picking, provider matching, and import-session startup.',
   )

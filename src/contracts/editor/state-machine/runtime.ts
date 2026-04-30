@@ -41,6 +41,10 @@ import type {
   EditorTransitionResult,
 } from './types'
 import {
+  defaultEditorExtensionDependencies,
+  type EditorExtensionDependencies,
+} from './dependencies'
+import {
   assertSketchPlaneSupport,
   createEditorEffectFailureEvent,
   EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
@@ -728,12 +732,15 @@ export function hydrateFeatureSessionFromSnapshot(
  * Minimal deterministic replay helper used by tests to prove that identical event traces
  * produce identical machine state and effect envelopes.
  */
-export function replayEditorEvents(events: readonly EditorEvent[]): EditorTransitionResult {
+export function replayEditorEvents(
+  events: readonly EditorEvent[],
+  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
+): EditorTransitionResult {
   let state = initialEditorState
   const effects: EditorEffect[] = []
 
   for (const event of events) {
-    const result = transitionEditorState(state, event)
+    const result = transitionEditorState(state, event, dependencies)
     state = result.state
     effects.push(...result.effects)
   }
@@ -748,12 +755,13 @@ export function replayEditorEvents(events: readonly EditorEvent[]): EditorTransi
 export async function replayEditorEventsWithRuntime(
   events: readonly EditorEvent[],
   runtime: EditorEffectRuntime,
+  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
 ): Promise<EditorTransitionResult> {
   let state = initialEditorState
   const effects: EditorEffect[] = []
 
   for (const event of events) {
-    const initial = transitionEditorState(state, event)
+    const initial = transitionEditorState(state, event, dependencies)
     state = initial.state
     effects.push(...initial.effects)
 
@@ -767,7 +775,7 @@ export async function replayEditorEventsWithRuntime(
       }
 
       const effectEvent = await runEditorEffect(effect, runtime)
-      const next = transitionEditorState(state, effectEvent)
+      const next = transitionEditorState(state, effectEvent, dependencies)
       state = next.state
       effects.push(...next.effects)
       queue = [...queue, ...next.effects]

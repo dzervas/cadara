@@ -6,6 +6,7 @@ import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from '@/contracts/shared/versi
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createModelingService } from '@/domain/modeling/modeling-service'
+import { createBuiltinExportProviderRegistry } from '@/domain/export/builtin-provider-composition'
 import { stepExportProvider } from '@/domain/export/providers/step-export-provider'
 import { stlExportProvider } from '@/domain/export/providers/stl-export-provider'
 
@@ -44,6 +45,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
   async function testGeometryExportPayloadMetadata() {
     const service = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
+      exportProviders: createBuiltinExportProviderRegistry(),
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
 
@@ -66,6 +68,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
   async function testUnexportableGeometryTargetReportsDiagnostic() {
     const service = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
+      exportProviders: createBuiltinExportProviderRegistry(),
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
 
@@ -146,9 +149,31 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     )
   }
 
+  async function testGeometryExportRequiresExplicitComposition() {
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+
+    const result = await service.exportDocument({
+      baseRevisionId: snapshot.revisionId,
+      target: { kind: 'body', bodyId: 'body_part-1' },
+      targetLabel: 'Part 1',
+      format: 'step',
+      options: stepExportProvider.getDefaultOptions(),
+    })
+
+    assert(!result.ok, 'Geometry export without an explicit export-provider composition should fail.')
+    assert(
+      result.diagnostics.some((diagnostic) => diagnostic.code === 'export-unsupported-format'),
+      'Missing explicit export-provider composition should surface an unsupported-format diagnostic.',
+    )
+  }
+
   await testCadaraExportsDurableDocumentJson()
   await testGeometryExportPayloadMetadata()
   await testUnexportableGeometryTargetReportsDiagnostic()
   await testFileMenuExportImportsAuthoredDocumentJson()
   await testFileMenuImportRejectsInvalidDocumentJson()
+  await testGeometryExportRequiresExplicitComposition()
 })

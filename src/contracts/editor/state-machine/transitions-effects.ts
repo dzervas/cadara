@@ -20,6 +20,7 @@ import type {
   EditorState,
   SketchEditorState,
 } from './types'
+import type { EditorExtensionDependencies } from './dependencies'
 import {
   continueAfterSnapshotRefresh,
   createFeatureEditingState,
@@ -745,6 +746,7 @@ export function handleEffectSketchReferenceImageImportFailed(
 export function handleEffectSketchSpecialModeEffectCompleted(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'effect.sketchSpecialModeEffectCompleted' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
     state.kind !== 'editingSketch'
@@ -760,6 +762,7 @@ export function handleEffectSketchSpecialModeEffectCompleted(
     requestId: event.requestId,
     effectId: event.effectId,
     payload: event.payload,
+    registry: dependencies.sketchSpecialModes,
   })
 
   return {
@@ -783,6 +786,7 @@ export function handleEffectSketchSpecialModeEffectCompleted(
 export function handleEffectSketchSpecialModeEffectFailed(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'effect.sketchSpecialModeEffectFailed' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
     state.kind !== 'editingSketch'
@@ -808,7 +812,9 @@ export function handleEffectSketchSpecialModeEffectFailed(
     state: {
       ...state,
       session,
-      selectionFilter: getSketchSpecialModeSelectionFilter(session) ?? getDefaultSelectionFilterForMode('sketch'),
+      selectionFilter:
+        getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
+        ?? getDefaultSelectionFilterForMode('sketch'),
       command: {
         ...state.command,
         phase: 'editing',

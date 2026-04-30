@@ -124,6 +124,7 @@ import {
   type WorkspaceVec3,
 } from '@/domain/workspace/sketch-plane-mapping'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 import {
   cancelCoalescedSketchGeometryDragMove,
@@ -203,6 +204,7 @@ export function ThreeCadViewport({
   specialModePresentation,
   fitViewRequestId,
 }: ThreeCadViewportProps) {
+  const { sketchSpecialModes } = useRuntimeExtensionRegistry()
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const viewCubeRef = useRef<HTMLDivElement | null>(null)
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null)
@@ -834,6 +836,7 @@ export function ThreeCadViewport({
           target,
           selectionRef.current,
           selectionCatalogRef.current,
+          sketchSpecialModes,
         )
       }
 
@@ -1441,7 +1444,7 @@ export function ThreeCadViewport({
       window.removeEventListener('click', handleClick, true)
       window.removeEventListener('dblclick', handleDoubleClick, true)
     }
-  }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove])
+  }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSpecialModes])
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -1715,4 +1718,3 @@ export function ThreeCadViewport({
     </div>
   )
 }
-

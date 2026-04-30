@@ -32,7 +32,6 @@ import {
   sketchStartSelectionFilter,
 } from '@/domain/editor/schema'
 import type { PrimitiveRef } from '@/domain/editor/schema'
-import { getImportProviderById } from '@/domain/import/provider-registry'
 import { resolveMeasureSelectionCandidate } from '@/domain/measure/measurement'
 import { createFeatureEditorReferenceSelectionPatch } from '@/domain/feature-authoring/form-events'
 import {
@@ -46,6 +45,7 @@ import type {
   EditorState,
   SketchEditorState,
 } from './types'
+import type { EditorExtensionDependencies } from './dependencies'
 import {
   createCommandState,
   createEditSessionCursorContext,
@@ -70,9 +70,16 @@ import { getSelectionFilterForFeatureType } from '@/domain/editor/feature-editin
 
 export function handleViewportHoverCleared(
   state: EditorState,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind === 'editingSketch' && sketchSessionHasActiveSpecialMode(state.session)) {
-    const session = handleSketchSpecialModeHover(state.session, null, state.selection, state.selectionCatalog)
+    const session = handleSketchSpecialModeHover(
+      state.session,
+      null,
+      state.selection,
+      state.selectionCatalog,
+      dependencies.sketchSpecialModes,
+    )
 
     return {
       state: {
@@ -139,11 +146,11 @@ export function handleViewportHoverCleared(
           }
         : state.kind === 'selectionCommand'
           ? createSelectionPreview(state, state.selectionFilter)
-          : state.kind === 'editingFeature'
-            ? createFeatureSelectionPreview(state.session)
-            : state.kind === 'importing'
-              ? createImportSelectionPreview(state.session)
-            : state.preview,
+            : state.kind === 'editingFeature'
+              ? createFeatureSelectionPreview(state.session)
+              : state.kind === 'importing'
+                ? createImportSelectionPreview(state.session, dependencies)
+                : state.preview,
     ),
     effects: [],
   }
@@ -152,9 +159,18 @@ export function handleViewportHoverCleared(
 export function handleViewportHovered(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'viewport.hovered' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind === 'editingSketch' && sketchSessionHasActiveSpecialMode(state.session)) {
-    if (!doesSketchSpecialModeAcceptTarget(state.session, event.target, state.selection, state.selectionCatalog)) {
+    if (
+      !doesSketchSpecialModeAcceptTarget(
+        state.session,
+        event.target,
+        state.selection,
+        state.selectionCatalog,
+        dependencies.sketchSpecialModes,
+      )
+    ) {
       return { state, effects: [] }
     }
 
@@ -163,6 +179,7 @@ export function handleViewportHovered(
       event.target,
       state.selection,
       state.selectionCatalog,
+      dependencies.sketchSpecialModes,
     )
 
     return {
@@ -247,6 +264,7 @@ export function handleViewportHovered(
 
 export function handleSelectionCleared(
   state: EditorState,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (state.kind === 'editingSketch' && state.session.constraintAuthoring) {
     const session = updateSketchConstraintHover(state.session, null)
@@ -322,10 +340,10 @@ export function handleSelectionCleared(
           }
         : state.kind === 'selectionCommand'
           ? createSelectionPreview(clearedState, state.selectionFilter)
-          : state.kind === 'editingFeature'
-            ? createFeatureSelectionPreview(state.session)
-            : state.kind === 'importing'
-              ? createImportSelectionPreview(state.session)
+        : state.kind === 'editingFeature'
+          ? createFeatureSelectionPreview(state.session)
+          : state.kind === 'importing'
+              ? createImportSelectionPreview(state.session, dependencies)
             : state.preview,
     ),
     effects: [],
@@ -497,11 +515,12 @@ function handleEditingFeatureViewportSelection(
 function handleImportViewportSelection(
   state: Extract<EditorState, { kind: 'importing' }>,
   event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   const activeReferenceField = getActiveImportReferencePickerField(state)
     ?? getDefaultImportSelectionField(state.session)
   const nextPatch = createImportViewportSelectionPatch(state, activeReferenceField, event.target)
-  const provider = getImportProviderById(state.session.providerId)
+  const provider = dependencies.importProviders.getById(state.session.providerId)
 
   if (!provider || !nextPatch) {
     return { state, effects: [] }
@@ -532,7 +551,7 @@ function handleImportViewportSelection(
         ...state.command,
         phase: activeReferenceField?.kind === 'referencePicker' ? 'editing' : 'collecting',
       },
-      preview: createImportSelectionPreview(nextSession, 'Selected'),
+      preview: createImportSelectionPreview(nextSession, dependencies, 'Selected'),
       activeReferencePickerFieldId:
         activeReferenceField?.kind === 'referencePicker'
           ? null
@@ -660,6 +679,7 @@ function handleEditingSketchViewportSelection(
 export function handleViewportSelectionRequested(
   state: EditorState,
   event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
     !selectionFilterAllowsTarget(
@@ -688,7 +708,7 @@ export function handleViewportSelectionRequested(
   }
 
   if (state.kind === 'importing') {
-    return handleImportViewportSelection(state, event)
+    return handleImportViewportSelection(state, event, dependencies)
   }
 
   if (state.kind === 'editingSketch') {

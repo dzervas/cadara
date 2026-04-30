@@ -275,6 +275,13 @@ export interface DocumentSnapshotLoadedEvent {
   snapshot: DocumentSnapshot
 }
 
+/** Replaces the active document basis through an explicit whole-document handoff. */
+export interface DocumentReplacedEvent {
+  type: 'document.replaced'
+  /** Full typed snapshot payload that becomes the next authoritative document basis. */
+  snapshot: DocumentSnapshot
+}
+
 /** Reports a viewport hover on a durable selectable target. */
 export interface ViewportHoveredEvent {
   type: 'viewport.hovered'
@@ -561,6 +568,7 @@ export type EditorEvent =
   | CommandCommitRequestedEvent
   | DocumentRefreshRequestedEvent
   | DocumentSnapshotLoadedEvent
+  | DocumentReplacedEvent
   | ViewportHoveredEvent
   | ViewportHoverClearedEvent
   | ViewportSelectionRequestedEvent
