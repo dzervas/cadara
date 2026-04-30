@@ -2,6 +2,8 @@ import type { OpenCascadeInstance } from 'opencascade.js/dist/opencascade.full'
 
 const DEFAULT_OPENCASCADE_WASM_CDN_URL =
   'https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.b5ff984/dist/opencascade.full.wasm'
+const DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL = '/cadara-occ.js'
+const DEFAULT_CUSTOM_OPENCASCADE_WASM_URL = '/cadara-occ.wasm'
 
 type OpenCascadeMainJS = new (module: Record<string, unknown>) => Promise<OpenCascadeInstance>
 
@@ -81,6 +83,16 @@ function getExplicitOpenCascadeWasmUrl() {
     : undefined
 }
 
+function getRuntimeAbsoluteAssetUrl(path: string) {
+  const locationLike = globalThis.location
+
+  if (locationLike?.origin) {
+    return new URL(path, locationLike.origin).href
+  }
+
+  return path
+}
+
 export function createOpenCascadeInitializerFromMainJS(
   defaultMainJS: OpenCascadeMainJS,
   getDefaultMainWasm = getConfiguredOpenCascadeWasmUrl,
@@ -124,12 +136,96 @@ export function createOpenCascadeInitializerFromMainJS(
   }
 }
 
+function assertRequiredOpenCascadeBindings(oc: OpenCascadeInstance) {
+  const p1 = new oc.gp_Pnt_3(0, 0, 0)
+  const p2 = new oc.gp_Pnt_3(1, 0, 0)
+  const p3 = new oc.gp_Pnt_3(1, 1, 0)
+  const p4 = new oc.gp_Pnt_3(0, 1, 0)
+  let e1Builder: { Edge(): unknown; delete?: () => void } | null = null
+  let e2Builder: { Edge(): unknown; delete?: () => void } | null = null
+  let e3Builder: { Edge(): unknown; delete?: () => void } | null = null
+  let e4Builder: { Edge(): unknown; delete?: () => void } | null = null
+  let wireBuilder: {
+    Add_1(edge: unknown): void
+    Wire(): unknown
+    delete?: () => void
+  } | null = null
+  let faceBuilder: { IsDone(): boolean; delete?: () => void } | null = null
+  let e1: unknown = null
+  let e2: unknown = null
+  let e3: unknown = null
+  let e4: unknown = null
+  let wire: unknown = null
+
+  try {
+    e1Builder = new oc.BRepBuilderAPI_MakeEdge_3(p1, p2)
+    e2Builder = new oc.BRepBuilderAPI_MakeEdge_3(p2, p3)
+    e3Builder = new oc.BRepBuilderAPI_MakeEdge_3(p3, p4)
+    e4Builder = new oc.BRepBuilderAPI_MakeEdge_3(p4, p1)
+    e1 = e1Builder.Edge()
+    e2 = e2Builder.Edge()
+    e3 = e3Builder.Edge()
+    e4 = e4Builder.Edge()
+    wireBuilder = new oc.BRepBuilderAPI_MakeWire_1()
+    wireBuilder.Add_1(e1 as InstanceType<OpenCascadeInstance['TopoDS_Edge']>)
+    wireBuilder.Add_1(e2 as InstanceType<OpenCascadeInstance['TopoDS_Edge']>)
+    wireBuilder.Add_1(e3 as InstanceType<OpenCascadeInstance['TopoDS_Edge']>)
+    wireBuilder.Add_1(e4 as InstanceType<OpenCascadeInstance['TopoDS_Edge']>)
+    wire = wireBuilder.Wire()
+    faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(
+      wire as InstanceType<OpenCascadeInstance['TopoDS_Wire']>,
+      true,
+    )
+    if (!faceBuilder.IsDone()) {
+      throw new Error('Custom OpenCascade build cannot construct a planar face from a closed wire.')
+    }
+  } finally {
+    faceBuilder?.delete?.()
+    ;(wire as { delete?: () => void } | null)?.delete?.()
+    wireBuilder?.delete?.()
+    ;(e4 as { delete?: () => void } | null)?.delete?.()
+    ;(e3 as { delete?: () => void } | null)?.delete?.()
+    ;(e2 as { delete?: () => void } | null)?.delete?.()
+    ;(e1 as { delete?: () => void } | null)?.delete?.()
+    e4Builder?.delete?.()
+    e3Builder?.delete?.()
+    e2Builder?.delete?.()
+    e1Builder?.delete?.()
+    p4.delete?.()
+    p3.delete?.()
+    p2.delete?.()
+    p1.delete?.()
+  }
+}
+
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
   if (getExplicitOpenCascadeWasmUrl()) {
     return import('./opencascade-cdn-entry')
   }
 
-  return import('opencascade.js')
+  const customMainJSImportUrl = getRuntimeAbsoluteAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL)
+  const customMainJSModule = await import(
+    /* @vite-ignore */
+    customMainJSImportUrl
+  ) as { default?: OpenCascadeMainJS }
+  const customMainJS = customMainJSModule.default
+
+  if (typeof customMainJS !== 'function') {
+    throw new Error('Custom OpenCascade build did not expose a default initializer module.')
+  }
+
+  const customInitializer = createOpenCascadeInitializerFromMainJS(
+    customMainJS,
+    () => getRuntimeAbsoluteAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_WASM_URL),
+  )
+
+  return {
+    default: async (settings = {}) => {
+      const oc = await customInitializer(settings)
+      assertRequiredOpenCascadeBindings(oc)
+      return oc
+    },
+  }
 }
 
 async function readNodeOpenCascadeWasmBinary(path: string) {

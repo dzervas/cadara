@@ -19,7 +19,6 @@ import {
   midpointOnArc,
   negate,
   toGpDir,
-  toGpPlane,
   toGpPnt,
   toVec3FromGpPoint,
   type Vec3,
@@ -857,7 +856,6 @@ export function buildRegionProfileFace(
 
   const plane = snapshotSketch.plane
   const projectedReferences = snapshotSketch.projectedReferences ?? snapshotSketch.sketch.projectedReferences ?? []
-  const planeShape = toGpPlane(oc, plane)
   let outerWire: ReturnType<typeof buildLoopWire> | null = null
   let faceBuilder: {
     Add(wire: unknown): void
@@ -868,7 +866,7 @@ export function buildRegionProfileFace(
 
   try {
     outerWire = buildLoopWire(oc, plane, snapshotSketch.sketch, outerLoop, projectedReferences)
-    faceBuilder = new oc.BRepBuilderAPI_MakeFace_16(planeShape, outerWire, true)
+    faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(outerWire, true)
 
     for (const innerLoop of region.loops.filter((loop) => loop.role === 'inner')) {
       assertLoopCanBuildProfile(snapshotSketch.sketch, region, innerLoop)
@@ -892,7 +890,6 @@ export function buildRegionProfileFace(
   } finally {
     deleteOccObject(faceBuilder)
     deleteOccObject(outerWire)
-    deleteOccObject(planeShape)
   }
 }
 

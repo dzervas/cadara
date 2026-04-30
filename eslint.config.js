@@ -17,6 +17,8 @@ export default defineConfig([
     '.playwright-cli',
     'playwright-report',
     'test-results',
+    '.tmp-*',
+    'public/cadara-occ.d.ts',
   ]),
   {
     files: ['**/*.{ts,tsx}'],

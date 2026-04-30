@@ -1,6 +1,7 @@
 import { chromium, type Page } from '@playwright/test'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -13,9 +14,39 @@ const PREVIEW_URL_BASE = `http://${PREVIEW_HOST}:${PREVIEW_PORT}/`
 const DOCUMENT_REPOSITORY_URL_STORAGE_KEY = 'cad.documentRepository.automergeUrls.v1'
 const SERVER_TIMEOUT_MS = 120_000
 const LOAD_TIMEOUT_MS = 120_000
+const CUSTOM_OCC_ASSET_BASENAMES = ['cadara-occ.js', 'cadara-occ.wasm'] as const
 
 function buildPreviewUrl(runId: string) {
   return `${PREVIEW_URL_BASE}?cadPerfMode=1&cadDisableRepository=1&cadRepositoryDbName=${encodeURIComponent(`load-time-${runId}`)}`
+}
+
+function sha256File(path: string) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function assertPreviewAssetsAreFresh() {
+  for (const basename of CUSTOM_OCC_ASSET_BASENAMES) {
+    const publicPath = `/app/public/${basename}`
+    const distPath = `/app/dist/${basename}`
+    const publicExists = existsSync(publicPath)
+    const distExists = existsSync(distPath)
+
+    if (!publicExists && !distExists) {
+      continue
+    }
+
+    if (publicExists !== distExists) {
+      throw new Error(
+        `Custom OpenCascade asset set is incomplete for preview: expected both ${publicPath} and ${distPath}. Run \`bun run build\` after rebuilding the custom kernel.`,
+      )
+    }
+
+    if (sha256File(publicPath) !== sha256File(distPath)) {
+      throw new Error(
+        `Preview asset is stale for ${basename}: ${publicPath} and ${distPath} differ. Run \`bun run build\` after rebuilding the custom kernel.`,
+      )
+    }
+  }
 }
 
 function startPreviewServer() {
@@ -126,6 +157,7 @@ async function main() {
   if (!existsSync('/app/dist/index.html')) {
     throw new Error('Preview build is missing. Run `bun run build` once a valid build baseline is available.')
   }
+  assertPreviewAssetsAreFresh()
 
   const runId = `${Date.now()}`
   const previewUrl = buildPreviewUrl(runId)

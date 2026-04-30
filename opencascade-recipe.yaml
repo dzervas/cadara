@@ -1,0 +1,136 @@
+# To build: docker run --rm -it -v "$(pwd):/src" -u "$(id -u):$(id -g)" donalffons/opencascade.js opencascade-recipe.yaml
+# TODO: Migrate to CI
+mainBuild:
+  name: cadara-occ.js
+
+  bindings:
+    - symbol: Adaptor3d_Curve
+    - symbol: Adaptor3d_Surface
+    - symbol: BRepAdaptor_Curve
+    - symbol: BRepAdaptor_Curve2d
+    - symbol: BRepAdaptor_Surface
+    - symbol: BRepAlgoAPI_Algo
+    - symbol: BRepAlgoAPI_BooleanOperation
+    - symbol: BRepAlgoAPI_BuilderAlgo
+    - symbol: BRepAlgoAPI_Common
+    - symbol: BRepAlgoAPI_Cut
+    - symbol: BRepAlgoAPI_Fuse
+    - symbol: BRepBuilderAPI_Command
+    - symbol: BRepBuilderAPI_EdgeError
+    - symbol: BRepBuilderAPI_FaceError
+    - symbol: BRepBuilderAPI_MakeEdge
+    - symbol: BRepBuilderAPI_MakeShape
+    - symbol: BRepBuilderAPI_MakeFace
+    - symbol: BRepBuilderAPI_MakePolygon
+    - symbol: BRepBuilderAPI_MakeWire
+    - symbol: BRepBuilderAPI_ModifyShape
+    - symbol: BRepBuilderAPI_NurbsConvert
+    - symbol: BRepBuilderAPI_Transform
+    - symbol: BRepBuilderAPI_WireError
+    - symbol: BRepFilletAPI_LocalOperation
+    - symbol: BRepFilletAPI_MakeChamfer
+    - symbol: BRepFilletAPI_MakeFillet
+    - symbol: BRepGProp
+    - symbol: BRepMesh_DiscretRoot
+    - symbol: BRepMesh_IncrementalMesh
+    - symbol: BRepOffsetAPI_MakeOffsetShape
+    - symbol: BRepOffsetAPI_DraftAngle
+    - symbol: BRepOffsetAPI_MakePipe
+    - symbol: BRepOffsetAPI_MakePipeShell
+    - symbol: BRepOffsetAPI_MakeThickSolid
+    - symbol: BRepOffsetAPI_ThruSections
+    - symbol: BRepOffset_Mode
+    - symbol: BRepPrimAPI_MakeOneAxis
+    - symbol: BRepPrimAPI_MakeSweep
+    - symbol: BRepPrimAPI_MakeBox
+    - symbol: BRepPrimAPI_MakeCylinder
+    - symbol: BRepPrimAPI_MakePrism
+    - symbol: BRepPrimAPI_MakeRevol
+    - symbol: BRepTools
+    - symbol: BRepTools_History
+    - symbol: BRepTools_WireExplorer
+    - symbol: BRep_Builder
+    - symbol: BRep_Tool
+    - symbol: ChFi3d_FilletShape
+    - symbol: CDM_Document
+    - symbol: GC_MakeArcOfCircle
+    - symbol: GC_MakeCircle
+    - symbol: GC_Root
+    - symbol: Geom2dAdaptor_Curve
+    - symbol: GProp_GProps
+    - symbol: GeomAbs_CurveType
+    - symbol: GeomAbs_JoinType
+    - symbol: GeomAbs_SurfaceType
+    - symbol: GeomFill_Trihedron
+    - symbol: Handle_Geom_Curve
+    - symbol: Handle_Poly_Polygon3D
+    - symbol: Handle_Poly_PolygonOnTriangulation
+    - symbol: Handle_Poly_Triangulation
+    - symbol: Handle_TNaming_NamedShape
+    - symbol: Handle_BRepTools_History
+    - symbol: Interface_Static
+    - symbol: Interface_TypedValue
+    - symbol: Message_ProgressRange
+    - symbol: NCollection_BaseList
+    - symbol: NCollection_BaseMap
+    - symbol: Poly_Polygon3D
+    - symbol: Poly_PolygonOnTriangulation
+    - symbol: Poly_Triangle
+    - symbol: Poly_Triangulation
+    - symbol: ShapeUpgrade_UnifySameDomain
+    - symbol: STEPControl_Controller
+    - symbol: STEPControl_StepModelType
+    - symbol: Standard_Transient
+    - symbol: STEPControl_Writer
+    - symbol: TCollection_ExtendedString
+    - symbol: TDF_Label
+    - symbol: TDF_LabelMap
+    - symbol: TDocStd_Document
+    - symbol: TNaming_Builder
+    - symbol: TNaming_Selector
+    - symbol: TNaming_Tool
+    - symbol: TopAbs_Orientation
+    - symbol: TopAbs_ShapeEnum
+    - symbol: TopExp
+    - symbol: TopExp_Explorer
+    - symbol: TopLoc_Location
+    - symbol: TopoDS_Builder
+    - symbol: TopoDS
+    - symbol: TopoDS_Compound
+    - symbol: TopoDS_Edge
+    - symbol: TopoDS_Face
+    - symbol: TopoDS_Shape
+    - symbol: TopoDS_Solid
+    - symbol: TopoDS_Vertex
+    - symbol: TopoDS_Wire
+    - symbol: TopTools_IndexedDataMapOfShapeListOfShape
+    - symbol: TopTools_IndexedMapOfShape
+    - symbol: TopTools_ListOfShape
+    - symbol: gp_Ax1
+    - symbol: gp_Ax2
+    - symbol: gp_Ax3
+    - symbol: gp_Circ
+    - symbol: gp_Cone
+    - symbol: gp_Cylinder
+    - symbol: gp_Dir
+    - symbol: gp_Lin
+    - symbol: gp_Pln
+    - symbol: gp_Pnt
+    - symbol: gp_Sphere
+    - symbol: gp_Torus
+    - symbol: gp_Trsf
+    - symbol: gp_Vec
+    - symbol: XSControl_Controller
+
+  emccFlags:
+    - -O3
+    - -sEXPORT_ES6=1
+    - -sUSE_ES6_IMPORT_META=0
+    - -sEXPORTED_RUNTIME_METHODS=['FS']
+    - -sINITIAL_MEMORY=100MB
+    - -sMAXIMUM_MEMORY=4GB
+    - -sALLOW_MEMORY_GROWTH=1
+    - -sUSE_FREETYPE=1
+
+  # Optional follow-up once the first custom build is green:
+  # - -sDISABLE_EXCEPTION_CATCHING=1
