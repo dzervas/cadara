@@ -49,7 +49,8 @@ import {
 } from './annotations'
 import {
   applyPointPositionsToDefinition,
-} from './editing'
+  addAnchorOffset,
+} from './definition-patches'
 
 export function buildConstraintSelectionGuide(
   toolId: SketchConstraintToolId,
@@ -223,21 +224,6 @@ export function getConstraintFloatingInputAnchor(
   return lastTarget
     ? { kind: 'sketchPoint', point: lastTarget.anchor, offset: { x: 18, y: -18 } }
     : undefined
-}
-
-export function addAnchorOffset(
-  anchor: SketchToolAnchorDescriptor,
-  offset: { x: number; y: number },
-): SketchToolAnchorDescriptor {
-  const currentOffset = anchor.offset ?? { x: 0, y: 0 }
-
-  return {
-    ...anchor,
-    offset: {
-      x: currentOffset.x + offset.x,
-      y: currentOffset.y + offset.y,
-    },
-  }
 }
 
 export function activateSketchConstraintTool(
@@ -610,4 +596,3 @@ export function commitSketchConstraintAuthoring(session: SketchSessionState): Sk
     activeDrag: null,
   }
 }
-

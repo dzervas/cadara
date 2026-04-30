@@ -102,12 +102,14 @@ import {
   selectSketchEditToolTarget,
 } from './editing'
 import {
-  buildCommitRequest,
   isSketchConstructionSelected,
 } from './state'
 import {
   getSketchStyleTargetDefinition,
 } from './styles'
+import {
+  buildCommitRequest,
+} from './history'
 
 export function buildConstructionTargetPresentation(): SketchToolPresentationSchema {
   return {
@@ -2080,4 +2082,3 @@ export function patchSketchDrawingToolValue(
     toolPresentation: toolDefinition.getPresentation(runtimeState),
   }
 }
-

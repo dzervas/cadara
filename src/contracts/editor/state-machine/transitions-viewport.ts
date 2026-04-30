@@ -331,29 +331,62 @@ export function handleSelectionCleared(
   }
 }
 
-export function handleViewportSelectionRequested(
-  state: EditorState,
-  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
-): EditorTransitionResult {
-  if (
-    !selectionFilterAllowsTarget(
-      state.selectionFilter,
-      state.selection,
-      event.target,
-      state.selectionCatalog,
-    )
-  ) {
-    return {
-      state: withPreview(state, {
-        kind: 'selection',
-        label: getSelectionFilterRejectionLabel(state.selectionFilter, event.target),
-        target: state.preview?.target ?? null,
-      }),
-      effects: [],
-    }
+function rejectViewportSelection(state: EditorState, label: string, target: PrimitiveRef | null): EditorTransitionResult {
+  return {
+    state: withPreview(state, {
+      kind: 'selection',
+      label,
+      target,
+    }),
+    effects: [],
   }
+}
 
-  if (state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')) {
+function applySketchSelectionState(
+  state: SketchEditorState,
+  session: SketchEditorState['session'],
+  target: PrimitiveRef,
+  commandPhase?: SketchEditorState['command']['phase'],
+): SketchEditorState {
+  return {
+    ...state,
+    selection: [target],
+    hoverTarget: target,
+    session,
+    command: commandPhase
+      ? {
+          ...state.command,
+          phase: commandPhase,
+        }
+      : state.command,
+    preview: {
+      kind: 'sketch',
+      label: getSketchSessionPreviewLabel(session),
+      target: session.planeTarget,
+    },
+  }
+}
+
+function createSketchPreviewState(
+  state: SketchEditorState,
+  session: SketchEditorState['session'],
+): SketchEditorState {
+  return {
+    ...state,
+    session,
+    preview: {
+      kind: 'sketch',
+      label: getSketchSessionPreviewLabel(session),
+      target: session.planeTarget,
+    },
+  }
+}
+
+function handleSelectionCommandViewportSelection(
+  state: Extract<EditorState, { kind: 'selectionCommand' }>,
+  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+): EditorTransitionResult | null {
+  if (state.command.toolId === 'sketch' || state.command.toolId === 'importImage') {
     return emitSketchOpen(
       {
         ...state,
@@ -364,19 +397,16 @@ export function handleViewportSelectionRequested(
     )
   }
 
-  if (state.kind === 'selectionCommand' && state.command.toolId === 'sectionView') {
+  if (state.command.toolId === 'sectionView') {
     if (
       (event.target.kind !== 'construction' && event.target.kind !== 'face' && event.target.kind !== 'region')
       || !event.cameraPosition
     ) {
-      return {
-        state: withPreview(state, {
-          kind: 'selection',
-          label: 'Section view requires a viewport-picked planar face, closed region, or construction plane.',
-          target: state.selection[0] ?? null,
-        }),
-        effects: [],
-      }
+      return rejectViewportSelection(
+        state,
+        'Section view requires a viewport-picked planar face, closed region, or construction plane.',
+        state.selection[0] ?? null,
+      )
     }
 
     const section = createSectionViewSession({
@@ -386,14 +416,11 @@ export function handleViewportSelectionRequested(
     })
 
     if (!section) {
-      return {
-        state: withPreview(state, {
-          kind: 'selection',
-          label: 'Selected target does not resolve to a usable section plane.',
-          target: event.target,
-        }),
-        effects: [],
-      }
+      return rejectViewportSelection(
+        state,
+        'Selected target does not resolve to a usable section plane.',
+        event.target,
+      )
     }
 
     return {
@@ -402,278 +429,15 @@ export function handleViewportSelectionRequested(
     }
   }
 
-  if (state.kind === 'editingFeature') {
-    const activeReferenceField = getActiveReferencePickerField(state)
-    const nextSelection = [event.target]
-    const nextSession: FeatureEditSessionState = {
-      ...(activeReferenceField
-        ? patchFeatureEditSession(
-            state.session,
-            createFeatureEditorReferenceSelectionPatch(activeReferenceField, event.target),
-          )
-        : applySelectionToFeatureEditSession(state.session, event.target)),
-      status: 'idle',
-    }
-
-    return emitFeaturePreview({
-      ...state,
-      selection: nextSelection,
-      hoverTarget: event.target,
-      command: {
-        ...state.command,
-        phase: 'collecting',
-      },
-      preview: createFeatureSelectionPreview(nextSession, 'Selected'),
-      session: nextSession,
-      activeReferencePickerFieldId: activeReferenceField?.id ?? state.activeReferencePickerFieldId,
-      pendingPreviewRequestId: null,
-    })
-  }
-
-  if (state.kind === 'importing') {
-    const activeReferenceField = getActiveImportReferencePickerField(state)
-      ?? getDefaultImportSelectionField(state.session)
-    const nextPatch = createImportViewportSelectionPatch(state, activeReferenceField, event.target)
-    const provider = getImportProviderById(state.session.providerId)
-
-    if (!provider || !nextPatch) {
-      return { state, effects: [] }
-    }
-
-    const nextSelections = provider.applySelectionPatch(
-      state.session.review,
-      state.session.selections,
-      nextPatch,
-    )
-    const nextSession = {
-      ...state.session,
-      selections: nextSelections,
-      formSchema: provider.getReviewFormSchema(state.session.review, nextSelections),
-    }
-
-    return {
-      state: {
-        ...state,
-        selection: [event.target],
-        hoverTarget: event.target,
-        session: nextSession,
-        selectionFilter:
-          activeReferenceField?.kind === 'referencePicker'
-            ? getDefaultSelectionFilterForMode('part')
-            : state.selectionFilter,
-        command: {
-          ...state.command,
-          phase: activeReferenceField?.kind === 'referencePicker' ? 'editing' : 'collecting',
-        },
-        preview: createImportSelectionPreview(nextSession, 'Selected'),
-        activeReferencePickerFieldId:
-          activeReferenceField?.kind === 'referencePicker'
-            ? null
-            : activeReferenceField?.id ?? state.activeReferencePickerFieldId,
-      },
-      effects: [],
-    }
-  }
-
-  if (state.kind === 'editingSketch' && getActiveSketchStyleToolId(state.session)) {
-    const nextSelection = [event.target]
-    const session = updateSketchStyleFocusTarget(state.session, nextSelection)
-
-    return {
-      state: {
-        ...state,
-        selection: nextSelection,
-        hoverTarget: event.target,
-        session,
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (state.kind === 'editingSketch' && state.session.constructionTargetPicking) {
-    const session = toggleSketchConstructionTarget(state.session, event.target)
-
-    return {
-      state: {
-        ...state,
-        selection: [event.target],
-        hoverTarget: event.target,
-        session,
-        command: {
-          ...state.command,
-          toolId: session.activeTool ?? 'sketch',
-          phase: 'editing',
-        },
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (state.kind === 'editingSketch' && state.session.referenceTargetPicking) {
-    const session = selectSketchReferenceTarget(state.session, event.target)
-    const nextState: SketchEditorState = {
-      ...state,
-      selection: [event.target],
-      hoverTarget: event.target,
-      selectionFilter: session.referenceTargetPicking
-        ? sketchReferenceSelectionFilter
-        : getDefaultSelectionFilterForMode('sketch'),
-      session,
-      command: {
-        ...state.command,
-        toolId: session.activeTool ?? 'sketch',
-        phase: 'editing',
-      },
-      preview: {
-        kind: 'sketch',
-        label: getSketchSessionPreviewLabel(session),
-        target: session.planeTarget,
-      },
-    }
-
-    return emitSketchReferenceProjection(nextState, session)
-  }
-
-  if (state.kind === 'editingSketch' && state.session.activeEditTool) {
-    const session = selectSketchEditToolTarget(state.session, event.target)
-
-    return {
-      state: {
-        ...state,
-        selection: [event.target],
-        hoverTarget: event.target,
-        session,
-        command: {
-          ...state.command,
-          phase: 'editing',
-        },
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (
-    state.kind === 'editingSketch'
-    && shouldPinSketchConstraintPreviewBeforeSelection(state.session)
-  ) {
-    const session = pinSketchConstraintPreview(
-      state.session,
-      state.session.constraintAuthoring?.pointer ?? null,
-    )
-
-    return {
-      state: {
-        ...state,
-        session,
-        command: {
-          ...state.command,
-          phase: 'collecting',
-        },
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (
-    state.kind === 'editingSketch'
-    && (event.target.kind === 'constraint' || event.target.kind === 'dimension')
-  ) {
-    const session = selectSketchAnnotation(state.session, event.target)
-
-    return {
-      state: {
-        ...state,
-        selection: [event.target],
-        hoverTarget: event.target,
-        session,
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (state.kind === 'editingSketch' && state.session.constraintAuthoring) {
-    const session = selectSketchConstraintTarget(state.session, event.target)
-
-    return {
-      state: {
-        ...state,
-        selection: [event.target],
-        hoverTarget: event.target,
-        session,
-        command: {
-          ...state.command,
-          phase: 'collecting',
-        },
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (state.kind === 'editingSketch' && event.target.kind === 'sketchPoint') {
-    const session = selectSketchEditTarget(state.session, event.target)
-
-    return {
-      state: {
-        ...state,
-        selection: [event.target],
-        hoverTarget: event.target,
-        session,
-        preview: {
-          kind: 'sketch',
-          label: getSketchSessionPreviewLabel(session),
-          target: session.planeTarget,
-        },
-      },
-      effects: [],
-    }
-  }
-
-  if (state.kind === 'inspectingSection') {
-    return { state, effects: [] }
-  }
-
-  if (state.kind === 'selectionCommand' && state.command.toolId === 'measure') {
+  if (state.command.toolId === 'measure') {
     const candidate = resolveMeasureSelectionCandidate(state.snapshot, state.selection, event.target)
 
     if (!candidate.accepted) {
-      return {
-        state: withPreview(state, {
-          kind: 'selection',
-          label: candidate.reason ?? getSelectionFilterRejectionLabel(state.selectionFilter, event.target),
-          target: state.selection[0] ?? null,
-        }),
-        effects: [],
-      }
+      return rejectViewportSelection(
+        state,
+        candidate.reason ?? getSelectionFilterRejectionLabel(state.selectionFilter, event.target),
+        state.selection[0] ?? null,
+      )
     }
 
     return {
@@ -693,6 +457,245 @@ export function handleViewportSelectionRequested(
       },
       effects: [],
     }
+  }
+
+  return null
+}
+
+function handleEditingFeatureViewportSelection(
+  state: Extract<EditorState, { kind: 'editingFeature' }>,
+  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+): EditorTransitionResult {
+  const activeReferenceField = getActiveReferencePickerField(state)
+  const nextSelection = [event.target]
+  const nextSession: FeatureEditSessionState = {
+    ...(activeReferenceField
+      ? patchFeatureEditSession(
+          state.session,
+          createFeatureEditorReferenceSelectionPatch(activeReferenceField, event.target),
+        )
+      : applySelectionToFeatureEditSession(state.session, event.target)),
+    status: 'idle',
+  }
+
+  return emitFeaturePreview({
+    ...state,
+    selection: nextSelection,
+    hoverTarget: event.target,
+    command: {
+      ...state.command,
+      phase: 'collecting',
+    },
+    preview: createFeatureSelectionPreview(nextSession, 'Selected'),
+    session: nextSession,
+    activeReferencePickerFieldId: activeReferenceField?.id ?? state.activeReferencePickerFieldId,
+    pendingPreviewRequestId: null,
+  })
+}
+
+function handleImportViewportSelection(
+  state: Extract<EditorState, { kind: 'importing' }>,
+  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+): EditorTransitionResult {
+  const activeReferenceField = getActiveImportReferencePickerField(state)
+    ?? getDefaultImportSelectionField(state.session)
+  const nextPatch = createImportViewportSelectionPatch(state, activeReferenceField, event.target)
+  const provider = getImportProviderById(state.session.providerId)
+
+  if (!provider || !nextPatch) {
+    return { state, effects: [] }
+  }
+
+  const nextSelections = provider.applySelectionPatch(
+    state.session.review,
+    state.session.selections,
+    nextPatch,
+  )
+  const nextSession = {
+    ...state.session,
+    selections: nextSelections,
+    formSchema: provider.getReviewFormSchema(state.session.review, nextSelections),
+  }
+
+  return {
+    state: {
+      ...state,
+      selection: [event.target],
+      hoverTarget: event.target,
+      session: nextSession,
+      selectionFilter:
+        activeReferenceField?.kind === 'referencePicker'
+          ? getDefaultSelectionFilterForMode('part')
+          : state.selectionFilter,
+      command: {
+        ...state.command,
+        phase: activeReferenceField?.kind === 'referencePicker' ? 'editing' : 'collecting',
+      },
+      preview: createImportSelectionPreview(nextSession, 'Selected'),
+      activeReferencePickerFieldId:
+        activeReferenceField?.kind === 'referencePicker'
+          ? null
+          : activeReferenceField?.id ?? state.activeReferencePickerFieldId,
+    },
+    effects: [],
+  }
+}
+
+function handleEditingSketchViewportSelection(
+  state: SketchEditorState,
+  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+): EditorTransitionResult {
+  if (getActiveSketchStyleToolId(state.session)) {
+    const session = updateSketchStyleFocusTarget(state.session, [event.target])
+    return {
+      state: applySketchSelectionState(state, session, event.target),
+      effects: [],
+    }
+  }
+
+  if (state.session.constructionTargetPicking) {
+    const session = toggleSketchConstructionTarget(state.session, event.target)
+    return {
+      state: {
+        ...applySketchSelectionState(state, session, event.target, 'editing'),
+        command: {
+          ...state.command,
+          toolId: session.activeTool ?? 'sketch',
+          phase: 'editing',
+        },
+      },
+      effects: [],
+    }
+  }
+
+  if (state.session.referenceTargetPicking) {
+    const session = selectSketchReferenceTarget(state.session, event.target)
+    const nextState: SketchEditorState = {
+      ...applySketchSelectionState(state, session, event.target, 'editing'),
+      selectionFilter: session.referenceTargetPicking
+        ? sketchReferenceSelectionFilter
+        : getDefaultSelectionFilterForMode('sketch'),
+      command: {
+        ...state.command,
+        toolId: session.activeTool ?? 'sketch',
+        phase: 'editing',
+      },
+    }
+
+    return emitSketchReferenceProjection(nextState, session)
+  }
+
+  if (state.session.activeEditTool) {
+    const session = selectSketchEditToolTarget(state.session, event.target)
+    return {
+      state: applySketchSelectionState(state, session, event.target, 'editing'),
+      effects: [],
+    }
+  }
+
+  if (shouldPinSketchConstraintPreviewBeforeSelection(state.session)) {
+    const session = pinSketchConstraintPreview(
+      state.session,
+      state.session.constraintAuthoring?.pointer ?? null,
+    )
+
+    return {
+      state: {
+        ...createSketchPreviewState(state, session),
+        command: {
+          ...state.command,
+          phase: 'collecting',
+        },
+      },
+      effects: [],
+    }
+  }
+
+  if (event.target.kind === 'constraint' || event.target.kind === 'dimension') {
+    const session = selectSketchAnnotation(state.session, event.target)
+    return {
+      state: applySketchSelectionState(state, session, event.target),
+      effects: [],
+    }
+  }
+
+  if (state.session.constraintAuthoring) {
+    const session = selectSketchConstraintTarget(state.session, event.target)
+    return {
+      state: applySketchSelectionState(state, session, event.target, 'collecting'),
+      effects: [],
+    }
+  }
+
+  if (event.target.kind === 'sketchPoint') {
+    const session = selectSketchEditTarget(state.session, event.target)
+    return {
+      state: applySketchSelectionState(state, session, event.target),
+      effects: [],
+    }
+  }
+
+  const candidate = resolveSelectionCandidate(
+    state.selectionFilter,
+    state.selection,
+    event.target,
+    state.selectionCatalog,
+  )
+
+  if (!candidate.accepted) {
+    return { state, effects: [] }
+  }
+
+  return {
+    state: {
+      ...state,
+      selection: candidate.nextSelection,
+      hoverTarget: event.target,
+    },
+    effects: [],
+  }
+}
+
+export function handleViewportSelectionRequested(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+): EditorTransitionResult {
+  if (
+    !selectionFilterAllowsTarget(
+      state.selectionFilter,
+      state.selection,
+      event.target,
+      state.selectionCatalog,
+    )
+  ) {
+    return rejectViewportSelection(
+      state,
+      getSelectionFilterRejectionLabel(state.selectionFilter, event.target),
+      state.preview?.target ?? null,
+    )
+  }
+
+  if (state.kind === 'selectionCommand') {
+    const result = handleSelectionCommandViewportSelection(state, event)
+    if (result) {
+      return result
+    }
+  }
+
+  if (state.kind === 'editingFeature') {
+    return handleEditingFeatureViewportSelection(state, event)
+  }
+
+  if (state.kind === 'importing') {
+    return handleImportViewportSelection(state, event)
+  }
+
+  if (state.kind === 'editingSketch') {
+    return handleEditingSketchViewportSelection(state, event)
+  }
+
+  if (state.kind === 'inspectingSection') {
+    return { state, effects: [] }
   }
 
   const candidate = resolveSelectionCandidate(

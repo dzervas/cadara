@@ -45,31 +45,29 @@ import {
   ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
   SKETCH_DIRECT_EDIT_TOLERANCES,
   createDeleteAuthoringOperation,
-  createSketchConstraintRef,
-  createSketchDimensionRef,
-  createSketchEntityRef,
-  createSketchPointRef,
   deriveSolvedRegionsForSession,
   filterSketchDefinitionThroughCursor,
   getAppendBaseAuthoringOperations,
   getTargetKey,
   normalizeConstraintValue,
   rebuildSessionCommitRequest,
+  createSketchConstraintRef,
+  createSketchDimensionRef,
+  createSketchEntityRef,
+  createSketchPointRef,
 } from './internals'
 import {
   addAnchorOffset,
-} from './constraints'
-import {
   getSketchDatumGuideExtent,
-} from './display'
-import {
   applyPointPositionsToDefinition,
-} from './editing'
+} from './definition-patches'
 import {
-  createTailSketchHistoryCursor,
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
-} from './state'
+} from './annotation-display'
+import {
+  createTailSketchHistoryCursor,
+} from './history'
 
 export function beginSketchAnnotationEdit(
   session: SketchSessionState,
@@ -2406,4 +2404,3 @@ export function formatDimensionVisibleLabel(dimension: DimensionDefinition) {
       return 'Coincident'
   }
 }
-

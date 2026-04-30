@@ -132,6 +132,375 @@ import {
   handleEffectSketchSpecialModeEffectFailed,
 } from './transitions-effects'
 
+type ToolActivatedEvent = Extract<EditorEvent, { type: 'tool.activated' }>
+
+function createSketchPreviewState(
+  state: Extract<EditorState, { kind: 'editingSketch' }>,
+  session: Extract<EditorState, { kind: 'editingSketch' }>['session'],
+) {
+  return {
+    ...state,
+    mode: 'sketch' as const,
+    session,
+    preview: {
+      kind: 'sketch' as const,
+      label: getSketchSessionPreviewLabel(session),
+      target: session.planeTarget,
+    },
+  }
+}
+
+function handleImportImageToolActivation(state: EditorState): EditorTransitionResult {
+  if (state.kind === 'editingSketch') {
+    return {
+      state: {
+        ...createSketchPreviewState(state, state.session),
+        command: {
+          ...state.command,
+          phase: 'editing',
+        },
+        preview: {
+          kind: 'sketch',
+          label: 'Select reference images',
+          target: state.session.planeTarget,
+        },
+      },
+      effects: [],
+    }
+  }
+
+  if (state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')) {
+    return {
+      state: {
+        ...state,
+        command: {
+          ...state.command,
+          phase: 'collecting',
+        },
+        preview: {
+          kind: 'sketch',
+          label: 'Select reference images',
+          target: state.selection[0] ?? null,
+        },
+      },
+      effects: [],
+    }
+  }
+
+  return { state, effects: [] }
+}
+
+function handleEditingSketchToolActivation(
+  state: Extract<EditorState, { kind: 'editingSketch' }>,
+  event: ToolActivatedEvent,
+): EditorTransitionResult | null {
+  if (event.toolId === 'finishSketch') {
+    return emitSketchCommit(state)
+  }
+
+  if (event.toolId === 'svgRendering') {
+    const session = toggleSketchSvgRendering(state.session)
+    return {
+      state: createSketchPreviewState(state, session),
+      effects: [],
+    }
+  }
+
+  if (isRegisteredSketchEditToolId(event.toolId)) {
+    const adoptedSelection = adoptCompatibleSketchEditToolTargets(
+      state.session,
+      event.toolId,
+      state.selection,
+    )
+    const activationState = withActivationSelection(state, adoptedSelection)
+    const session = beginSketchTool(
+      activationState.session,
+      event.toolId,
+      adoptedSelection,
+    )
+
+    return {
+      state: {
+        ...createSketchPreviewState(activationState, session),
+        selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+        command: {
+          ...activationState.command,
+          toolId: event.toolId,
+          phase: 'editing',
+        },
+      },
+      effects: [],
+    }
+  }
+
+  if (
+    isRegisteredSketchToolId(event.toolId)
+    || isRegisteredSketchConstraintToolId(event.toolId)
+    || event.toolId === 'dimension'
+    || event.toolId === 'construction'
+    || event.toolId === 'projectReference'
+  ) {
+    const session = beginSketchTool(
+      state.session,
+      event.toolId === 'dimension' ? 'dimensionDistance' : event.toolId,
+    )
+
+    return {
+      state: {
+        ...createSketchPreviewState(state, session),
+        selectionFilter: event.toolId === 'projectReference'
+          ? sketchReferenceSelectionFilter
+          : getDefaultSelectionFilterForMode('sketch'),
+        command: {
+          ...state.command,
+          toolId: event.toolId,
+          phase: 'editing',
+        },
+      },
+      effects: [],
+    }
+  }
+
+  if (isPassiveSketchTool(event.toolId)) {
+    const session = focusSketchStyleTool(state.session, state.selection, event.toolId)
+    return {
+      state: {
+        ...createSketchPreviewState(state, session),
+        command: {
+          ...state.command,
+          phase: 'editing',
+        },
+      },
+      effects: [],
+    }
+  }
+
+  return null
+}
+
+function handleSketchToolActivation(state: EditorState): EditorTransitionResult {
+  const adoptedSelection = adoptSelectionForFilter(
+    state.selection,
+    sketchStartSelectionFilter,
+    state.selectionCatalog,
+  )
+  const activationState = withActivationSelection(state, adoptedSelection)
+  const nextState = createCommandState(
+    activationState,
+    'sketch',
+    state.mode,
+    sketchStartSelectionFilter,
+    createSelectionPreview(activationState, sketchStartSelectionFilter),
+  )
+  const selectedTarget = nextState.selection[0] ?? null
+
+  if (
+    selectedTarget &&
+    selectionFilterAllowsTarget(
+      sketchStartSelectionFilter,
+      [],
+      selectedTarget,
+      nextState.selectionCatalog,
+    )
+  ) {
+    if (selectedTarget.kind === 'sketch') {
+      const cursorContext = createEditSessionCursorContext(state.snapshot, {
+        kind: 'sketch',
+        sketchId: selectedTarget.sketchId,
+      })
+
+      if (!cursorContext) {
+        return {
+          state: withPreview(nextState, {
+            kind: 'selection',
+            label: `Sketch ${selectedTarget.sketchId} is not in document history.`,
+            target: selectedTarget,
+          }),
+          effects: [],
+        }
+      }
+
+      return emitDocumentCursorMove(
+        {
+          ...nextState,
+          editSessionCursorContext: cursorContext,
+          preview: {
+            kind: 'selection',
+            label: `Rolling back before sketch ${selectedTarget.sketchId}`,
+            target: selectedTarget,
+          },
+        },
+        cursorContext.rollbackCursor,
+        true,
+      )
+    }
+
+    return emitSketchOpen(nextState, [selectedTarget])
+  }
+
+  return {
+    state: nextState,
+    effects: [],
+  }
+}
+
+function handleFeatureToolActivation(
+  state: EditorState,
+  toolId: ToolActivatedEvent['toolId'],
+): EditorTransitionResult {
+  const selectionFilter = getSelectionFilterForFeatureType(toolId)
+  const activationSelection =
+    state.selection.length === 1 && state.selection[0]?.kind === 'feature'
+      ? state.selection
+      : adoptCompatibleFeatureSelection(toolId, state.selection)
+  const activationState = withActivationSelection(state, activationSelection)
+  const nextState = createCommandState(
+    activationState,
+    toolId,
+    'part',
+    selectionFilter,
+    createSelectionPreview(activationState, selectionFilter),
+  )
+  const selectedTarget = nextState.selection[0] ?? null
+
+  if (selectedTarget?.kind === 'feature') {
+    const cursorContext = createEditSessionCursorContext(state.snapshot, {
+      kind: 'feature',
+      featureId: selectedTarget.featureId,
+    })
+
+    if (!cursorContext) {
+      return {
+        state: withPreview(nextState, {
+          kind: 'selection',
+          label: `Feature ${selectedTarget.featureId} is not in document history.`,
+          target: selectedTarget,
+        }),
+        effects: [],
+      }
+    }
+
+    return emitDocumentCursorMove(
+      {
+        ...nextState,
+        editSessionCursorContext: cursorContext,
+        preview: {
+          kind: 'selection',
+          label: `Rolling back before feature ${selectedTarget.featureId}`,
+          target: selectedTarget,
+        },
+      },
+      cursorContext.rollbackCursor,
+      true,
+    )
+  }
+
+  const session = createFeatureEditSession({
+    featureType: toolId,
+    selectedTargets: nextState.selection,
+  })
+
+  return emitFeaturePreview(createFeatureEditingState(nextState, nextState.command, session))
+}
+
+function handleToolActivated(state: EditorState, event: ToolActivatedEvent): EditorTransitionResult {
+  if (event.toolId === 'undo') {
+    return transitionEditorState(state, { type: 'history.undoRequested' })
+  }
+
+  if (event.toolId === 'redo') {
+    return transitionEditorState(state, { type: 'history.redoRequested' })
+  }
+
+  if (event.toolId === 'import') {
+    return { state, effects: [] }
+  }
+
+  if (event.toolId === 'importImage') {
+    return handleImportImageToolActivation(state)
+  }
+
+  if (state.kind === 'editingSketch') {
+    const result = handleEditingSketchToolActivation(state, event)
+    if (result) {
+      return result
+    }
+  }
+
+  if (event.toolId === 'sketch') {
+    return handleSketchToolActivation(state)
+  }
+
+  if (event.toolId === 'sectionView' || event.toolId === 'measure') {
+    const selectionFilter = getSelectionFilterForCommand(event.toolId, 'part')
+    return {
+      state: createCommandState(
+        state,
+        event.toolId,
+        'part',
+        selectionFilter,
+        createSelectionPreview(state, selectionFilter),
+      ),
+      effects: [],
+    }
+  }
+
+  if (isFeatureTool(event.toolId)) {
+    return handleFeatureToolActivation(state, event.toolId)
+  }
+
+  const mode =
+    event.toolId === 'line'
+      || event.toolId === 'rectangle'
+      || event.toolId === 'circle'
+      || event.toolId === 'construction'
+      || event.toolId === 'projectReference'
+      || isRegisteredSketchConstraintToolId(event.toolId)
+      ? 'sketch'
+      : state.mode
+  const filter = getSelectionFilterForCommand(event.toolId, mode)
+
+  return {
+    state: createCommandState(
+      state,
+      event.toolId,
+      mode,
+      filter,
+      createSelectionPreview(state, filter),
+    ),
+    effects: [],
+  }
+}
+
+function moveSketchHistory(
+  state: Extract<EditorState, { kind: 'editingSketch' }>,
+  direction: 'undo' | 'redo',
+): EditorTransitionResult {
+  const cursor = direction === 'undo'
+    ? getPreviousSketchHistoryCursor(state.session)
+    : getNextSketchHistoryCursor(state.session)
+  if (!cursor) {
+    return { state, effects: [] }
+  }
+
+  const session = moveSketchHistoryCursor(state.session, cursor)
+
+  return {
+    state: {
+      ...state,
+      selection: [],
+      hoverTarget: null,
+      session,
+      preview: {
+        kind: 'sketch',
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+    },
+    effects: [],
+  }
+}
+
 /**
  * Pure editor transition function for Phase 1.
  * The reducer never performs async work directly and emits only typed effect requests.
@@ -140,382 +509,15 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
   switch (event.type) {
     case 'session.started':
       return emitSnapshotFetch(state, null)
-    case 'tool.activated': {
-      if (event.toolId === 'undo') {
-        return transitionEditorState(state, { type: 'history.undoRequested' })
-      }
-
-      if (event.toolId === 'redo') {
-        return transitionEditorState(state, { type: 'history.redoRequested' })
-      }
-
-      if (event.toolId === 'import') {
-        return {
-          state,
-          effects: [],
-        }
-      }
-
-      if (event.toolId === 'importImage') {
-        return state.kind === 'editingSketch'
-          ? {
-            state: {
-              ...state,
-              command: {
-                ...state.command,
-                phase: 'editing',
-              },
-              preview: {
-                kind: 'sketch',
-                label: 'Select reference images',
-                target: state.session.planeTarget,
-              },
-            },
-            effects: [],
-          }
-          : state.kind === 'selectionCommand' && (state.command.toolId === 'sketch' || state.command.toolId === 'importImage')
-            ? {
-              state: {
-                ...state,
-                command: {
-                  ...state.command,
-                  phase: 'collecting',
-                },
-                preview: {
-                  kind: 'sketch',
-                  label: 'Select reference images',
-                  target: state.selection[0] ?? null,
-                },
-              },
-              effects: [],
-            }
-          : {
-              state,
-              effects: [],
-            }
-      }
-
-      if (event.toolId === 'finishSketch' && state.kind === 'editingSketch') {
-        return emitSketchCommit(state)
-      }
-
-      if (event.toolId === 'svgRendering' && state.kind === 'editingSketch') {
-        const session = toggleSketchSvgRendering(state.session)
-
-        return {
-          state: {
-            ...state,
-            mode: 'sketch',
-            session,
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-          },
-          effects: [],
-        }
-      }
-
-      if (
-        state.kind === 'editingSketch' &&
-        isRegisteredSketchEditToolId(event.toolId)
-      ) {
-        const adoptedSelection = adoptCompatibleSketchEditToolTargets(
-          state.session,
-          event.toolId,
-          state.selection,
-        )
-        const activationState = withActivationSelection(state, adoptedSelection)
-        const session = beginSketchTool(
-          activationState.session,
-          event.toolId,
-          adoptedSelection,
-        )
-
-        return {
-          state: {
-            ...activationState,
-            mode: 'sketch',
-            selectionFilter: getDefaultSelectionFilterForMode('sketch'),
-            command: {
-              ...activationState.command,
-              toolId: event.toolId,
-              phase: 'editing',
-            },
-            session,
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-          },
-          effects: [],
-        }
-      }
-
-      if (
-        state.kind === 'editingSketch' &&
-        (
-          isRegisteredSketchToolId(event.toolId)
-          || isRegisteredSketchConstraintToolId(event.toolId)
-          || event.toolId === 'dimension'
-          || event.toolId === 'construction'
-          || event.toolId === 'projectReference'
-        )
-      ) {
-        const session = beginSketchTool(
-          state.session,
-          event.toolId === 'dimension' ? 'dimensionDistance' : event.toolId,
-        )
-
-        return {
-          state: {
-            ...state,
-            mode: 'sketch',
-            selectionFilter: event.toolId === 'projectReference'
-              ? sketchReferenceSelectionFilter
-              : getDefaultSelectionFilterForMode('sketch'),
-            command: {
-              ...state.command,
-              toolId: event.toolId,
-              phase: 'editing',
-            },
-            session,
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-          },
-          effects: [],
-        }
-      }
-
-      if (state.kind === 'editingSketch' && isPassiveSketchTool(event.toolId)) {
-        const session = focusSketchStyleTool(state.session, state.selection, event.toolId)
-
-        return {
-          state: {
-            ...state,
-            mode: 'sketch',
-            session,
-            command: {
-              ...state.command,
-              phase: 'editing',
-            },
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-          },
-          effects: [],
-        }
-      }
-
-      if (event.toolId === 'sketch') {
-        const adoptedSelection = adoptSelectionForFilter(
-          state.selection,
-          sketchStartSelectionFilter,
-          state.selectionCatalog,
-        )
-        const nextState = createCommandState(
-          withActivationSelection(state, adoptedSelection),
-          event.toolId,
-          state.mode,
-          sketchStartSelectionFilter,
-          createSelectionPreview(withActivationSelection(state, adoptedSelection), sketchStartSelectionFilter),
-        )
-
-        const selectedTarget = nextState.selection[0] ?? null
-
-        if (
-          selectedTarget &&
-          selectionFilterAllowsTarget(
-            sketchStartSelectionFilter,
-            [],
-            selectedTarget,
-            nextState.selectionCatalog,
-          )
-        ) {
-          if (selectedTarget.kind === 'sketch') {
-            const cursorContext = createEditSessionCursorContext(state.snapshot, {
-              kind: 'sketch',
-              sketchId: selectedTarget.sketchId,
-            })
-
-            if (!cursorContext) {
-              return {
-                state: withPreview(nextState, {
-                  kind: 'selection',
-                  label: `Sketch ${selectedTarget.sketchId} is not in document history.`,
-                  target: selectedTarget,
-                }),
-                effects: [],
-              }
-            }
-
-            return emitDocumentCursorMove(
-              {
-                ...nextState,
-                editSessionCursorContext: cursorContext,
-                preview: {
-                  kind: 'selection',
-                  label: `Rolling back before sketch ${selectedTarget.sketchId}`,
-                  target: selectedTarget,
-                },
-              },
-              cursorContext.rollbackCursor,
-              true,
-            )
-          }
-
-          return emitSketchOpen(nextState, [selectedTarget])
-        }
-
-        return {
-          state: nextState,
-          effects: [],
-        }
-      }
-
-      if (event.toolId === 'sectionView') {
-        const selectionFilter = getSelectionFilterForCommand(event.toolId, 'part')
-
-        return {
-          state: createCommandState(
-            state,
-            event.toolId,
-            'part',
-            selectionFilter,
-            createSelectionPreview(state, selectionFilter),
-          ),
-          effects: [],
-        }
-      }
-
-      if (event.toolId === 'measure') {
-        const selectionFilter = getSelectionFilterForCommand(event.toolId, 'part')
-
-        return {
-          state: createCommandState(
-            state,
-            event.toolId,
-            'part',
-            selectionFilter,
-            createSelectionPreview(state, selectionFilter),
-          ),
-          effects: [],
-        }
-      }
-
-      if (isFeatureTool(event.toolId)) {
-        const selectionFilter = getSelectionFilterForFeatureType(event.toolId)
-        const activationSelection =
-          state.selection.length === 1 && state.selection[0]?.kind === 'feature'
-            ? state.selection
-            : adoptCompatibleFeatureSelection(event.toolId, state.selection)
-        const activationState = withActivationSelection(state, activationSelection)
-        const nextState = createCommandState(
-          activationState,
-          event.toolId,
-          'part',
-          selectionFilter,
-          createSelectionPreview(activationState, selectionFilter),
-        )
-
-        const selectedTarget = nextState.selection[0] ?? null
-
-        if (selectedTarget?.kind === 'feature') {
-          const cursorContext = createEditSessionCursorContext(state.snapshot, {
-            kind: 'feature',
-            featureId: selectedTarget.featureId,
-          })
-
-          if (!cursorContext) {
-            return {
-              state: withPreview(nextState, {
-                kind: 'selection',
-                label: `Feature ${selectedTarget.featureId} is not in document history.`,
-                target: selectedTarget,
-              }),
-              effects: [],
-            }
-          }
-
-          return emitDocumentCursorMove(
-            {
-              ...nextState,
-              editSessionCursorContext: cursorContext,
-              preview: {
-                kind: 'selection',
-                label: `Rolling back before feature ${selectedTarget.featureId}`,
-                target: selectedTarget,
-              },
-            },
-            cursorContext.rollbackCursor,
-            true,
-          )
-        }
-
-        const session = createFeatureEditSession({
-          featureType: event.toolId,
-          selectedTargets: nextState.selection,
-        })
-
-        return emitFeaturePreview(createFeatureEditingState(nextState, nextState.command, session))
-      }
-
-      const mode =
-        event.toolId === 'line'
-          || event.toolId === 'rectangle'
-          || event.toolId === 'circle'
-          || event.toolId === 'construction'
-          || event.toolId === 'projectReference'
-          || isRegisteredSketchConstraintToolId(event.toolId)
-          ? 'sketch'
-          : state.mode
-      const filter = getSelectionFilterForCommand(event.toolId, mode)
-
-      return {
-        state: createCommandState(
-          state,
-          event.toolId,
-          mode,
-          filter,
-          createSelectionPreview(state, filter),
-        ),
-        effects: [],
-      }
-    }
+    case 'tool.activated':
+      return handleToolActivated(state, event)
     case 'history.undoRequested': {
       if (!getEditorHistoryAvailability(state).canUndo) {
         return { state, effects: [] }
       }
 
       if (state.kind === 'editingSketch') {
-        const cursor = getPreviousSketchHistoryCursor(state.session)
-        if (!cursor) {
-          return { state, effects: [] }
-        }
-
-        const session = moveSketchHistoryCursor(state.session, cursor)
-
-        return {
-          state: {
-            ...state,
-            selection: [],
-            hoverTarget: null,
-            session,
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-          },
-          effects: [],
-        }
+        return moveSketchHistory(state, 'undo')
       }
 
       return { state, effects: [] }
@@ -526,27 +528,7 @@ export function transitionEditorState(state: EditorState, event: EditorEvent): E
       }
 
       if (state.kind === 'editingSketch') {
-        const cursor = getNextSketchHistoryCursor(state.session)
-        if (!cursor) {
-          return { state, effects: [] }
-        }
-
-        const session = moveSketchHistoryCursor(state.session, cursor)
-
-        return {
-          state: {
-            ...state,
-            selection: [],
-            hoverTarget: null,
-            session,
-            preview: {
-              kind: 'sketch',
-              label: getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-          },
-          effects: [],
-        }
+        return moveSketchHistory(state, 'redo')
       }
 
       return { state, effects: [] }

@@ -80,7 +80,7 @@ import {
   createTailSketchHistoryCursor,
   getSketchHistoryCursorIndex,
   getSketchHistoryItems,
-} from './state'
+} from './history'
 
 export const SKETCH_DIRECT_EDIT_TOLERANCES = {
   coincidence: 1e-6,
@@ -1489,5 +1489,4 @@ export function createSessionCommitFactories(
 export function getSessionSketchId(session: SketchSessionState): SketchId {
   return session.sketchId ?? ('sketch_draft' as SketchId)
 }
-
 

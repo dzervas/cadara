@@ -1,5 +1,4 @@
 import type {
-  CommitSketchRequest,
   SketchPlaneKey,
   SketchPoint,
   SketchSnapshotRecord,
@@ -20,12 +19,10 @@ import type {
   ConstraintDefinition,
   DimensionDefinition,
   SketchAuthoringOperation,
-  SketchDefinition,
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
 import {
   type PrimitiveRef,
-  getPrimitiveRefKey,
 } from '@/domain/editor/schema'
 import {
   createStandardPlaneDefinition,
@@ -43,10 +40,7 @@ import {
 } from '@/domain/workspace/sketch-plane-mapping'
 import type {
   SketchConstraintDisplayState,
-  SketchConstraintDisplaySummary,
-  SketchConstraintDisplayTargetState,
   SketchHistoryCursor,
-  SketchHistoryItem,
   SketchSessionState,
 } from './types'
 import {
@@ -58,7 +52,6 @@ import {
   createSketchOperationRef,
   createSketchPointRef,
   filterSketchDefinitionThroughCursor,
-  getDefinitionSketchId,
   getEntityPointIds,
   getHistorySequence,
   getNextDefinitionSequence,
@@ -69,13 +62,16 @@ import {
   sketchHistoryCursorsEqual,
 } from './internals'
 import {
-  getConstraintAffectedGeometryRefs,
-  getDimensionAffectedGeometryRefs,
-} from './annotations'
+  buildCommitRequest,
+  createTailSketchHistoryCursor,
+  getSketchHistoryCursorForIndex,
+  getSketchHistoryCursorIndex,
+  getSketchHistoryItems,
+} from './history'
 import {
   getSelectedReferenceImageOperationIds,
   getSelectedSketchGeometryIds,
-} from './editing'
+} from './selection'
 
 export function derivePlaneKeyFromTarget(target: SketchPlaneSupportRef): SketchPlaneKey | null {
   if (target.kind !== 'construction') {
@@ -102,110 +98,6 @@ export function normalizeSketchConstraintDisplayState(
   }
 
   return 'underconstrained'
-}
-
-export function getSketchConstraintDisplaySummary(input: {
-  sketchId: SketchId
-  definition: SketchDefinition
-  solvedSnapshot: SolvedSketchSnapshot
-}): SketchConstraintDisplaySummary {
-  const affectedTargetKeys = getSketchAffectedConstraintTargetKeys(input)
-
-  return {
-    state: normalizeSketchConstraintDisplayState(input.solvedSnapshot.status, affectedTargetKeys.size),
-    affectedTargetKeys,
-  }
-}
-
-export function getSketchConstraintDisplayForTarget(
-  target: PrimitiveRef | null,
-  summary: SketchConstraintDisplaySummary,
-): SketchConstraintDisplayTargetState {
-  return {
-    state: summary.state,
-    isAffectedOverconstraint: target !== null
-      && summary.state === 'overconstrained'
-      && summary.affectedTargetKeys.has(getPrimitiveRefKey(target)),
-  }
-}
-
-export function getSketchAffectedConstraintTargetKeys(input: {
-  sketchId: SketchId
-  definition: SketchDefinition
-  solvedSnapshot: SolvedSketchSnapshot
-}) {
-  const targetKeys = new Set<string>()
-
-  for (const diagnostic of input.solvedSnapshot.diagnostics) {
-    if (diagnostic.severity !== 'error' || !diagnostic.target) {
-      continue
-    }
-
-    for (const target of getSketchDiagnosticAffectedTargets(input.sketchId, input.definition, diagnostic.target)) {
-      targetKeys.add(getPrimitiveRefKey(target))
-    }
-  }
-
-  for (const status of input.solvedSnapshot.constraintStatuses) {
-    if (status.status === 'satisfied') {
-      continue
-    }
-
-    targetKeys.add(getPrimitiveRefKey(createSketchConstraintRef(input.sketchId, status.constraintId)))
-    const constraint = input.definition.constraints.find((entry) => entry.constraintId === status.constraintId)
-    if (!constraint) {
-      continue
-    }
-
-    for (const target of getConstraintAffectedGeometryRefs(input.sketchId, constraint)) {
-      targetKeys.add(getPrimitiveRefKey(target))
-    }
-  }
-
-  for (const status of input.solvedSnapshot.dimensionStatuses) {
-    if (status.status !== 'unsatisfied') {
-      continue
-    }
-
-    targetKeys.add(getPrimitiveRefKey(createSketchDimensionRef(input.sketchId, status.dimensionId)))
-    const dimension = input.definition.dimensions.find((entry) => entry.dimensionId === status.dimensionId)
-    if (!dimension) {
-      continue
-    }
-
-    for (const target of getDimensionAffectedGeometryRefs(input.sketchId, dimension)) {
-      targetKeys.add(getPrimitiveRefKey(target))
-    }
-  }
-
-  return targetKeys
-}
-
-export function getSketchDiagnosticAffectedTargets(
-  sketchId: SketchId,
-  definition: SketchDefinition,
-  target: NonNullable<SolvedSketchSnapshot['diagnostics'][number]['target']>,
-): readonly PrimitiveRef[] {
-  switch (target.kind) {
-    case 'entity':
-      return [createSketchEntityRef(sketchId, target.entityId)]
-    case 'point':
-      return [createSketchPointRef(sketchId, target.pointId)]
-    case 'region':
-      return [{ kind: 'region', sketchId, regionId: target.regionId }]
-    case 'constraint': {
-      const constraint = definition.constraints.find((entry) => entry.constraintId === target.constraintId)
-      return constraint
-        ? [createSketchConstraintRef(sketchId, target.constraintId), ...getConstraintAffectedGeometryRefs(sketchId, constraint)]
-        : [createSketchConstraintRef(sketchId, target.constraintId)]
-    }
-    case 'dimension': {
-      const dimension = definition.dimensions.find((entry) => entry.dimensionId === target.dimensionId)
-      return dimension
-        ? [createSketchDimensionRef(sketchId, target.dimensionId), ...getDimensionAffectedGeometryRefs(sketchId, dimension)]
-        : [createSketchDimensionRef(sketchId, target.dimensionId)]
-    }
-  }
 }
 
 export function getAuthoringOperationHistoryTarget(
@@ -244,68 +136,6 @@ export function getAuthoringOperationHistoryTarget(
     case 'dimension':
       return createSketchDimensionRef(sketchId, target.dimensionId)
   }
-}
-
-export function getSketchHistoryItems(definition: SketchDefinition): SketchHistoryItem[] {
-  const sketchId = getDefinitionSketchId(definition)
-  const operations = definition.authoringOperations ?? []
-  if (operations.length > 0) {
-    return operations.map((operation) => ({
-      kind: 'operation' as const,
-      id: operation.operationId,
-      label: operation.label,
-      operation,
-      target: getAuthoringOperationHistoryTarget(sketchId, operation),
-    }))
-  }
-
-  return [
-    ...definition.entities.map((entity) => ({
-      kind: 'entity' as const,
-      id: entity.entityId,
-      label: entity.label,
-      target: createSketchEntityRef(sketchId, entity.entityId),
-    })),
-    ...definition.constraints.map((constraint) => ({
-      kind: 'constraint' as const,
-      id: constraint.constraintId,
-      label: constraint.label,
-      target: createSketchConstraintRef(sketchId, constraint.constraintId),
-    })),
-    ...definition.dimensions.map((dimension) => ({
-      kind: 'dimension' as const,
-      id: dimension.dimensionId,
-      label: dimension.label,
-      target: createSketchDimensionRef(sketchId, dimension.dimensionId),
-    })),
-  ].sort((left, right) => {
-    const sequenceDelta = getHistorySequence(left.id) - getHistorySequence(right.id)
-    return sequenceDelta === 0 ? left.id.localeCompare(right.id) : sequenceDelta
-  })
-}
-
-export function createTailSketchHistoryCursor(definition: SketchDefinition): SketchHistoryCursor {
-  const tail = getSketchHistoryItems(definition).at(-1)
-  return tail ? { kind: 'item', itemId: tail.id } : { kind: 'empty' }
-}
-
-export function getSketchHistoryCursorIndex(
-  items: readonly SketchHistoryItem[],
-  cursor: SketchHistoryCursor,
-) {
-  if (cursor.kind === 'empty') {
-    return -1
-  }
-
-  return items.findIndex((item) => item.id === cursor.itemId)
-}
-
-export function getSketchHistoryCursorForIndex(
-  items: readonly SketchHistoryItem[],
-  index: number,
-): SketchHistoryCursor {
-  const item = items[index]
-  return item ? { kind: 'item', itemId: item.id } : { kind: 'empty' }
 }
 
 export function getPreviousSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
@@ -476,25 +306,6 @@ export function deriveSketchDisplayEntities(session: SketchSessionState): readon
   return session.toolStagedEntities.length === 0
     ? acceptedEntities
     : [...acceptedEntities, ...session.toolStagedEntities]
-}
-
-export function buildCommitRequest(input: {
-  sketchId: SketchId | null
-  sketchLabel: string
-  plane: SketchPlaneDefinition
-  planeTarget: CommitSketchRequest['planeTarget']
-  planeKey: SketchPlaneKey | null
-  definition: SketchDefinition
-}): SketchSessionState['commitRequest'] {
-  return {
-    solverCorrelation: null,
-    sketchId: input.sketchId,
-    sketchLabel: input.sketchLabel,
-    plane: input.plane,
-    planeTarget: input.planeTarget,
-    planeKey: input.planeKey,
-    definition: cloneDefinition(input.definition),
-  }
 }
 
 export function createNewSketchSessionFromSupport(planeTarget: SketchPlaneSupportRef): SketchSessionState {
@@ -713,4 +524,3 @@ export function mapSketchPointToWorld(
 ): readonly [number, number, number] {
   return mapSketchPointToWorkspaceWorld(plane, point)
 }
-

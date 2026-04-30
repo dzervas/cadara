@@ -182,6 +182,196 @@ function promptForImportProvider(
   return providers[selectedIndex - 1] ?? null
 }
 
+type WorkbenchDispatch = ReturnType<typeof useEditorState>['dispatch']
+type WorkbenchModelingService = ReturnType<typeof useModelingService>
+
+async function commitActiveImportSession(input: {
+  activeImportSession: NonNullable<ReturnType<typeof useEditorState>['state']['activeImportSession']>
+  snapshot: DocumentSnapshot
+  dispatch: WorkbenchDispatch
+  modelingService: WorkbenchModelingService
+  applyLoadedSnapshot: (snapshot: DocumentSnapshot) => void
+  showWorkbenchError: (message: string) => void
+  showWorkbenchInfo: (message: string) => void
+}) {
+  const provider = getImportProviderById(input.activeImportSession.providerId)
+  if (!provider) {
+    input.showWorkbenchError('The selected import provider is no longer registered.')
+    return
+  }
+
+  input.dispatch({ type: 'import.commitRequested' })
+
+  try {
+    const capabilities = createImportCapabilities(input.modelingService, input.snapshot)
+    const actions = await prepareImportActions({
+      provider,
+      source: input.activeImportSession.resolvedSource,
+      review: input.activeImportSession.review,
+      selections: input.activeImportSession.selections,
+      capabilities,
+    })
+    const result = await applyImportPreparedActions({
+      modelingService: input.modelingService,
+      baseRevisionId: input.snapshot.revisionId,
+      actions,
+    })
+
+    if (result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+      input.dispatch({ type: 'import.failed', diagnostics: result.diagnostics })
+      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
+      return
+    }
+
+    const nextSnapshot = await input.modelingService.getCurrentDocumentSnapshot()
+    input.applyLoadedSnapshot(nextSnapshot)
+    input.dispatch({ type: 'import.committed' })
+    if (result.createdEntityIds.sketchIds.length === 1) {
+      input.dispatch({
+        type: 'authoring.reopenRequested',
+        target: {
+          kind: 'sketch',
+          sketchId: result.createdEntityIds.sketchIds[0]!,
+        },
+        toolId: 'sketch',
+      })
+    }
+    input.showWorkbenchInfo(`Imported ${input.activeImportSession.resolvedSource.name}.`)
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Import failed.'
+    input.dispatch({
+      type: 'import.failed',
+      diagnostics: [{
+        code: 'import-commit-failed',
+        severity: 'error',
+        message,
+        target: null,
+        detail: null,
+      }],
+    })
+    input.showWorkbenchError(message)
+  }
+}
+
+async function openToolbarImportSession(input: {
+  activeEditSession: ReturnType<typeof useEditorState>['state']['activeEditSession']
+  activeImportSession: ReturnType<typeof useEditorState>['state']['activeImportSession']
+  snapshot: DocumentSnapshot | null
+  dispatch: WorkbenchDispatch
+  modelingService: WorkbenchModelingService
+  showWorkbenchError: (message: string) => void
+}) {
+  if (input.activeEditSession || input.activeImportSession) {
+    return
+  }
+
+  if (!input.snapshot) {
+    input.showWorkbenchError('The current document is still loading.')
+    return
+  }
+
+  const acceptedFileTypes = getAcceptedImportFileTypes()
+  if (acceptedFileTypes.length === 0) {
+    input.showWorkbenchError('No part importers are currently registered.')
+    return
+  }
+
+  const pickerResult = await showOpenImportFilePicker({
+    acceptedFileTypes,
+  })
+
+  if (!pickerResult.ok) {
+    if (pickerResult.reason === 'failed') {
+      input.showWorkbenchError('Import file selection failed.')
+    }
+    return
+  }
+
+  const file = pickerResult.files[0]
+  if (!file) {
+    input.showWorkbenchError('Import file selection failed.')
+    return
+  }
+
+  const resolvedSource = await resolveLocalFileImportSource(file)
+  const matchedProviders = matchImportProviders(resolvedSource)
+
+  if (matchedProviders.length === 0) {
+    input.showWorkbenchError(`No importer is available for ${resolvedSource.name}.`)
+    return
+  }
+
+  const provider = matchedProviders.length === 1
+    ? matchedProviders[0]!
+    : promptForImportProvider(matchedProviders)
+
+  if (!provider) {
+    return
+  }
+
+  try {
+    const session = await createImportSession({
+      provider,
+      source: resolvedSource,
+      capabilities: createImportCapabilities(input.modelingService, input.snapshot),
+    })
+    input.dispatch({ type: 'import.fileSelected', session })
+  } catch (error: unknown) {
+    input.showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
+  }
+}
+
+async function createNewWorkbenchDocument(input: {
+  modelingService: WorkbenchModelingService
+  refreshAfterDocumentFileAction: (message: string, options?: { fitView?: boolean }) => Promise<void>
+  showWorkbenchError: (message: string) => void
+  reportDocumentFileActionFailure: (source: string, message: string, error: unknown) => void
+}) {
+  try {
+    const result = await input.modelingService.createNewDocument()
+    if (!result.ok) {
+      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'New document could not be created.')
+      return
+    }
+
+    await input.refreshAfterDocumentFileAction('Created a new document.')
+  } catch (error) {
+    input.reportDocumentFileActionFailure('workbench.file.new', 'New document failed.', error)
+  }
+}
+
+async function importWorkbenchDocumentFile(input: {
+  file: File
+  modelingService: WorkbenchModelingService
+  refreshAfterDocumentFileAction: (message: string, options?: { fitView?: boolean }) => Promise<void>
+  showWorkbenchError: (message: string) => void
+  reportDocumentFileActionFailure: (source: string, message: string, error: unknown) => void
+}) {
+  let payload: unknown
+
+  try {
+    payload = await readCadaraDocumentFile(input.file)
+  } catch (error: unknown) {
+    const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
+      ? 'Import failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
+      : 'Import failed. Select a valid cadara JSON document.'
+    input.showWorkbenchError(message)
+    return
+  }
+
+  try {
+    const result = await input.modelingService.importDocument({ document: payload })
+    if (!result.ok) {
+      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
+      return
+    }
+
+    await input.refreshAfterDocumentFileAction(`Imported ${input.file.name}.`)
+  } catch (error) {
+    input.reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
+  }
+}
+
 export function CadWorkbench() {
   const actionBus = useToolActionBus()
   const { triggerTool } = useToolActions()
@@ -349,124 +539,26 @@ export function CadWorkbench() {
       return
     }
 
-    const provider = getImportProviderById(activeImportSession.providerId)
-    if (!provider) {
-      showWorkbenchError('The selected import provider is no longer registered.')
-      return
-    }
-
-    dispatch({ type: 'import.commitRequested' })
-
-    try {
-      const capabilities = createImportCapabilities(modelingService, snapshot)
-      const actions = await prepareImportActions({
-        provider,
-        source: activeImportSession.resolvedSource,
-        review: activeImportSession.review,
-        selections: activeImportSession.selections,
-        capabilities,
-      })
-      const result = await applyImportPreparedActions({
-        modelingService,
-        baseRevisionId: snapshot.revisionId,
-        actions,
-      })
-
-      if (result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
-        dispatch({ type: 'import.failed', diagnostics: result.diagnostics })
-        showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
-        return
-      }
-
-      const nextSnapshot = await modelingService.getCurrentDocumentSnapshot()
-      applyLoadedSnapshot(nextSnapshot)
-      dispatch({ type: 'import.committed' })
-      if (result.createdEntityIds.sketchIds.length === 1) {
-        dispatch({
-          type: 'authoring.reopenRequested',
-          target: {
-            kind: 'sketch',
-            sketchId: result.createdEntityIds.sketchIds[0]!,
-          },
-          toolId: 'sketch',
-        })
-      }
-      showWorkbenchInfo(`Imported ${activeImportSession.resolvedSource.name}.`)
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Import failed.'
-      dispatch({
-        type: 'import.failed',
-        diagnostics: [{
-          code: 'import-commit-failed',
-          severity: 'error',
-          message,
-          target: null,
-          detail: null,
-        }],
-      })
-      showWorkbenchError(message)
-    }
+    await commitActiveImportSession({
+      activeImportSession,
+      snapshot,
+      dispatch,
+      modelingService,
+      applyLoadedSnapshot,
+      showWorkbenchError,
+      showWorkbenchInfo,
+    })
   }, [activeImportSession, applyLoadedSnapshot, dispatch, modelingService, showWorkbenchError, showWorkbenchInfo, snapshot])
 
   const handleToolbarImport = useCallback(async () => {
-    if (activeEditSession || activeImportSession) {
-      return
-    }
-
-    if (!snapshot) {
-      showWorkbenchError('The current document is still loading.')
-      return
-    }
-
-    const acceptedFileTypes = getAcceptedImportFileTypes()
-    if (acceptedFileTypes.length === 0) {
-      showWorkbenchError('No part importers are currently registered.')
-      return
-    }
-
-    const pickerResult = await showOpenImportFilePicker({
-      acceptedFileTypes,
+    await openToolbarImportSession({
+      activeEditSession,
+      activeImportSession,
+      snapshot,
+      dispatch,
+      modelingService,
+      showWorkbenchError,
     })
-
-    if (!pickerResult.ok) {
-      if (pickerResult.reason === 'failed') {
-        showWorkbenchError('Import file selection failed.')
-      }
-      return
-    }
-
-    const file = pickerResult.files[0]
-    if (!file) {
-      showWorkbenchError('Import file selection failed.')
-      return
-    }
-
-    const resolvedSource = await resolveLocalFileImportSource(file)
-    const matchedProviders = matchImportProviders(resolvedSource)
-
-    if (matchedProviders.length === 0) {
-      showWorkbenchError(`No importer is available for ${resolvedSource.name}.`)
-      return
-    }
-
-    const provider = matchedProviders.length === 1
-      ? matchedProviders[0]!
-      : promptForImportProvider(matchedProviders)
-
-    if (!provider) {
-      return
-    }
-
-    try {
-      const session = await createImportSession({
-        provider,
-        source: resolvedSource,
-        capabilities: createImportCapabilities(modelingService, snapshot),
-      })
-      dispatch({ type: 'import.fileSelected', session })
-    } catch (error: unknown) {
-      showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
-    }
   }, [activeEditSession, activeImportSession, dispatch, modelingService, showWorkbenchError, snapshot])
 
   const viewportRenderables = useMemo(
@@ -1651,43 +1743,22 @@ export function CadWorkbench() {
   }, [modelingService, reportDocumentFileActionFailure, showWorkbenchInfo])
 
   const handleNewDocument = async () => {
-    try {
-      const result = await modelingService.createNewDocument()
-      if (!result.ok) {
-        showWorkbenchError(result.diagnostics[0]?.message ?? 'New document could not be created.')
-        return
-      }
-
-      refreshAfterDocumentFileAction('Created a new document.')
-    } catch (error) {
-      reportDocumentFileActionFailure('workbench.file.new', 'New document failed.', error)
-    }
+    await createNewWorkbenchDocument({
+      modelingService,
+      refreshAfterDocumentFileAction,
+      showWorkbenchError,
+      reportDocumentFileActionFailure,
+    })
   }
 
   const handleImportDocument = async (file: File) => {
-    let payload: unknown
-
-    try {
-      payload = await readCadaraDocumentFile(file)
-    } catch (error: unknown) {
-      const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
-        ? 'Import failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
-        : 'Import failed. Select a valid cadara JSON document.'
-      showWorkbenchError(message)
-      return
-    }
-
-    try {
-      const result = await modelingService.importDocument({ document: payload })
-      if (!result.ok) {
-        showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
-        return
-      }
-
-      refreshAfterDocumentFileAction(`Imported ${file.name}.`)
-    } catch (error) {
-      reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
-    }
+    await importWorkbenchDocumentFile({
+      file,
+      modelingService,
+      refreshAfterDocumentFileAction,
+      showWorkbenchError,
+      reportDocumentFileActionFailure,
+    })
   }
 
   const handleOpenLocalFile = async () => {

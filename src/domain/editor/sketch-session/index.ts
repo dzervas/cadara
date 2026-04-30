@@ -29,11 +29,30 @@ export type {
 } from './types'
 
 export {
+  getSketchConstraintDisplayForTarget,
+  getSketchConstraintDisplaySummary,
+  normalizeSketchConstraintDisplayState,
+} from './annotation-display'
+
+export {
+  createProjectedPrimitiveRef,
+  createReferencePrimitiveRef,
+  getConstraintAffectedGeometryRefs,
+  getDimensionAffectedGeometryRefs,
+} from './annotation-targets'
+
+export {
   beginSketchAnnotationEdit,
   deleteSelectedSketchAnnotation,
   getSketchAnnotationDescriptors,
   selectSketchAnnotation,
 } from './annotations'
+
+export {
+  addAnchorOffset,
+  applyPointPositionsToDefinition,
+  getSketchDatumGuideExtent,
+} from './definition-patches'
 
 export {
   patchSketchConstraintValue,
@@ -62,6 +81,14 @@ export {
 } from './editing'
 
 export {
+  buildCommitRequest,
+  createTailSketchHistoryCursor,
+  getSketchHistoryCursorForIndex,
+  getSketchHistoryCursorIndex,
+  getSketchHistoryItems,
+} from './history'
+
+export {
   filterSketchDefinitionThroughCursor,
   getSketchSessionRegionDiagnostics,
 } from './internals'
@@ -73,28 +100,29 @@ export {
 } from './references'
 
 export {
+  getSelectedReferenceImageOperationIds,
+  getSelectedSketchGeometryIds,
+  getOperationOwnedStateTargetIds,
+  pruneDirectOperationDependents,
+  repairSketchHistoryCursorAfterOperationRemoval,
+} from './selection'
+
+export {
   constraintReferencesSketchGeometry,
   createNewSketchSession,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
-  createTailSketchHistoryCursor,
   derivePlaneKeyFromTarget,
   deriveSketchDisplayEntities,
   dimensionReferencesSketchGeometry,
   getConnectedSketchEntitySelectionTargets,
   getNextSketchHistoryCursor,
   getPreviousSketchHistoryCursor,
-  getSketchConstraintDisplayForTarget,
-  getSketchConstraintDisplaySummary,
-  getSketchHistoryCursorForIndex,
-  getSketchHistoryCursorIndex,
-  getSketchHistoryItems,
   isEditableSketchGeometrySelection,
   isSketchConstructionSelected,
   isSketchReferenceToolSelected,
   mapSketchPointToWorld,
   moveSketchHistoryCursor,
-  normalizeSketchConstraintDisplayState,
 } from './state'
 
 export {

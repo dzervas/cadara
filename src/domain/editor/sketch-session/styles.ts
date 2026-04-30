@@ -195,4 +195,3 @@ export function patchSketchStyleValue(
     solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
   }
 }
-

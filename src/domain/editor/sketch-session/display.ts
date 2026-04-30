@@ -61,10 +61,15 @@ import {
 } from './internals'
 import {
   deriveSketchDisplayEntities,
-  getSketchConstraintDisplayForTarget,
-  getSketchConstraintDisplaySummary,
   mapSketchPointToWorld,
 } from './state'
+import {
+  getSketchConstraintDisplayForTarget,
+  getSketchConstraintDisplaySummary,
+} from './annotation-display'
+import {
+  getSketchDatumGuideExtent,
+} from './definition-patches'
 import {
   isSketchSvgRenderingEnabled,
 } from './styles'
@@ -915,45 +920,6 @@ export function createSketchDatumReferenceTarget(
   }
 }
 
-export function getSketchDatumGuideExtent(
-  definition: SketchDefinition,
-  projectedReferences: readonly ProjectedSketchReferenceRecord[],
-) {
-  const localCoordinates = definition.points.flatMap((point) => [Math.abs(point.position[0]), Math.abs(point.position[1])])
-  const projectedCoordinates = projectedReferences.flatMap((reference) => reference.geometry.flatMap((geometry) => {
-    switch (geometry.kind) {
-      case 'point':
-        return [Math.abs(geometry.position[0]), Math.abs(geometry.position[1])]
-      case 'lineSegment':
-        return [
-          Math.abs(geometry.startPosition[0]),
-          Math.abs(geometry.startPosition[1]),
-          Math.abs(geometry.endPosition[0]),
-          Math.abs(geometry.endPosition[1]),
-        ]
-      case 'circle':
-        return [
-          Math.abs(geometry.centerPosition[0]) + geometry.radius,
-          Math.abs(geometry.centerPosition[1]) + geometry.radius,
-        ]
-      case 'arc': {
-        const radius = Math.hypot(
-          geometry.startPosition[0] - geometry.centerPosition[0],
-          geometry.startPosition[1] - geometry.centerPosition[1],
-        )
-        return [
-          Math.abs(geometry.centerPosition[0]) + radius,
-          Math.abs(geometry.centerPosition[1]) + radius,
-        ]
-      }
-      case 'spline':
-        return geometry.fitPoints.flatMap((point) => [Math.abs(point[0]), Math.abs(point[1])])
-    }
-  }))
-  const maxCoordinate = Math.max(0, ...localCoordinates, ...projectedCoordinates)
-  return Math.max(10, maxCoordinate * 1.35 || 10)
-}
-
 export function createDisplayRenderableForSketchDatum(
   session: SketchSessionState,
   sketchId: SketchId,
@@ -1148,4 +1114,3 @@ export function createDisplayRenderableForProjectedGeometry(
     role: 'reference',
   }
 }
-
