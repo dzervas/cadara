@@ -9,31 +9,37 @@ test('src/app/cad-workbench-notifications.spec.ts', () => {
     }
   }
 
-  const source = readFileSync(join(process.cwd(), 'src/app/cad-workbench.tsx'), 'utf8')
+  const workbenchSource = readFileSync(join(process.cwd(), 'src/app/workbench/cad-workbench.tsx'), 'utf8')
+  const notificationsSource = readFileSync(join(process.cwd(), 'src/app/workbench/controllers/use-workbench-notifications.ts'), 'utf8')
 
   assert(
-    source.includes("from '@/components/layout/workbench-notification'"),
+    workbenchSource.includes("from '@/components/layout/workbench-notification'"),
     'CadWorkbench should render viewport feedback through the shared notification component.',
   )
   assert(
-    source.includes("type: 'info'") && source.includes("title: 'Workbench action'"),
-    'Workbench status feedback should use info notification presentation by default.',
+    notificationsSource.includes("type: 'info'") && notificationsSource.includes("title: 'Workbench action'"),
+    'Workbench status feedback should use info notification presentation by default in the shared notifications controller.',
   )
   assert(
-    source.includes("type: 'error'") && source.includes("title: 'Workbench action failed'"),
-    'Workbench action failures should use error notification presentation.',
+    notificationsSource.includes("type: 'error'") && notificationsSource.includes("title: 'Workbench action failed'"),
+    'Workbench action failures should use error notification presentation in the shared notifications controller.',
   )
   assert(
-    source.includes('type="error"') && source.includes('title="History restore failed"'),
+    workbenchSource.includes('type="error"') && workbenchSource.includes('title="History restore failed"'),
     'History restore failures should render as error notifications.',
   )
   assert(
-    source.includes('WORKBENCH_STATUS_TOP_WITH_RESTORE_PX') &&
-      source.includes('restoreMessage ? WORKBENCH_STATUS_TOP_WITH_RESTORE_PX : WORKBENCH_STATUS_TOP_PX'),
+    workbenchSource.includes('WORKBENCH_STATUS_TOP_WITH_RESTORE_PX') &&
+      workbenchSource.includes('restoreMessage ? WORKBENCH_STATUS_TOP_WITH_RESTORE_PX : WORKBENCH_STATUS_TOP_PX'),
     'Viewport-local notification surfaces should remain vertically separated when restore and status messages coexist.',
   )
   assert(
-    source.includes('right: notificationRightOffset'),
+    workbenchSource.includes('right: notificationRightOffset'),
     'Viewport-local notification surfaces should preserve the view-cube-safe right offset.',
+  )
+  assert(
+    notificationsSource.includes('modelingService.getHistoryRestoreState') &&
+      notificationsSource.includes("state.kind === 'failed'"),
+    'History restore failures should still be sourced from modeling-service restore state inside the notifications controller.',
   )
 })

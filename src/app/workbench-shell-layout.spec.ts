@@ -5,7 +5,7 @@ import {
   MIN_WORKBENCH_VIEWPORT_WIDTH,
   clampWorkbenchSidebarWidth,
   getWorkbenchSidebarWidthFromPointer,
-} from '@/app/workbench-shell-layout'
+} from '@/app/workbench/shell/workbench-shell-layout'
 
 test('src/app/workbench-shell-layout.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {

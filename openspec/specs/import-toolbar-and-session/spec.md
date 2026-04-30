@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines the generic part-mode import toolbar flow and the boundaries between part import sessions and sketch-owned image import behavior.
-
 ## Requirements
 ### Requirement: The toolbar SHALL have a single generic import button
 The toolbar SHALL display an import button in part mode that triggers a file picker accepting all file types from all registered import providers.
@@ -99,3 +98,17 @@ The raster image tracing workflow SHALL be owned by the sketch-mode `Import Imag
 - **WHEN** the user activates the generic import button in part mode after this change
 - **THEN** the workflow is limited to non-reference-image part workspace import providers
 - **AND** raster reference-image creation is not offered through that inspector
+
+### Requirement: Generic part import activation SHALL use one shared application-owned entrypoint
+The generic part-mode import flow SHALL start through one shared application-owned import entrypoint reused by toolbar and any other future trigger sources.
+
+#### Scenario: Toolbar starts generic part import
+- **WHEN** the user activates the generic part import action from the toolbar
+- **THEN** the workbench invokes the shared application-owned import entrypoint
+- **AND** the entrypoint owns file picking, source resolution, provider matching, and import-session startup
+
+#### Scenario: Another trigger starts generic part import
+- **WHEN** another supported trigger source requests the generic part import flow
+- **THEN** the workbench invokes the same shared application-owned import entrypoint
+- **AND** the import-session startup behavior matches the toolbar flow
+

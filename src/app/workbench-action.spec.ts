@@ -3,7 +3,7 @@ import { test } from 'bun:test'
 import {
   requireAcceptedModelingResult,
   runWorkbenchAction,
-} from '@/app/workbench-action'
+} from '@/app/workbench/shared/workbench-action'
 import { appErrorToModelingDiagnostic, createTestErrorReporter } from '@/contracts/errors'
 
 test('src/app/workbench-action.spec.ts', async () => {

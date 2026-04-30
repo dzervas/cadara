@@ -8,7 +8,7 @@ import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-conte
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
 import { getToolbarToolCommandId } from '@/domain/shortcuts/commands'
 import type { DropdownToolDefinition, RegisteredToolDefinition } from '@/domain/tools/tool-registry'
-import { useToolActions } from '@/hooks/use-tool-actions'
+import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
 
 interface ToolDropdownButtonProps {
   tool: DropdownToolDefinition
@@ -23,7 +23,7 @@ export function ToolDropdownButton({
   active = false,
   disabled = false,
 }: ToolDropdownButtonProps) {
-  const { triggerTool } = useToolActions()
+  const { activateTool } = useWorkbenchCommandHandlers()
   const [opened, setOpened] = useState(false)
   const commandId = getToolbarToolCommandId(tool.id)
   const controlBackground = disabled
@@ -46,7 +46,7 @@ export function ToolDropdownButton({
     setOpened(true)
 
     if (variantTools.some((variant) => variant.id === tool.id)) {
-      triggerTool(tool.id, {
+      void activateTool(tool.id, {
         source: 'toolbar',
       })
     }
@@ -62,7 +62,7 @@ export function ToolDropdownButton({
           }
 
           flushSync(() => setOpened(false))
-          triggerTool(variant.id, {
+          void activateTool(variant.id, {
             source: 'dropdown',
           })
         }}

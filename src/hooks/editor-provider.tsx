@@ -6,7 +6,7 @@ import {
   initialEditorState,
   type EditorEvent,
 } from '@/contracts/editor/state-machine'
-import { createAppEditorEffectRuntime } from '@/app/editor-effect-runtime'
+import { createAppEditorEffectRuntime } from '@/hooks/editor-effect-runtime'
 import {
   clearActiveDocumentTelemetryContext,
   createActiveDocumentTelemetryContext,

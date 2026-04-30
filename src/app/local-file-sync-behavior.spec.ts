@@ -9,26 +9,20 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
     }
   }
 
-  const workbenchSource = readFileSync(join(process.cwd(), 'src/app/cad-workbench.tsx'), 'utf8')
+  const workbenchSource = readFileSync(join(process.cwd(), 'src/app/workbench/cad-workbench.tsx'), 'utf8')
+  const fileActionsSource = readFileSync(join(process.cwd(), 'src/app/workbench/document/workbench-document-actions.ts'), 'utf8')
+  const localSyncSource = readFileSync(join(process.cwd(), 'src/app/workbench/controllers/use-workbench-local-file-sync.ts'), 'utf8')
   const workerRuntimeSource = readFileSync(join(process.cwd(), 'src/domain/modeling/document-sync-worker-runtime.ts'), 'utf8')
-  const importHandler = workbenchSource.slice(
-    workbenchSource.indexOf('const handleImportDocument'),
-    workbenchSource.indexOf('const handleOpenLocalFile'),
-  )
-  const exportHandler = workbenchSource.slice(
-    workbenchSource.indexOf('const handleExportDocument'),
-    workbenchSource.indexOf('return ('),
-  )
 
   assert(
-    workbenchSource.includes('Local file sync requires the File System Access API.')
-      && workbenchSource.includes('brave://flags/#file-system-access-api')
-      && workbenchSource.includes('Open local file failed. Select a valid cadara JSON document.')
-      && workbenchSource.includes('ZIP-backed .cadara packages are no longer supported')
-      && workbenchSource.includes('Local file write permission was denied.')
-      && workbenchSource.includes('Local file sync target could not be bound.')
-      && workbenchSource.includes('persistent-binding-unavailable'),
-    'Workbench should surface visible local sync unavailable, invalid file, permission, bind, and persistence-unavailable states.',
+    fileActionsSource.includes('Local file sync requires the File System Access API.')
+      && fileActionsSource.includes('brave://flags/#file-system-access-api')
+      && fileActionsSource.includes('Open local file failed. Select a valid cadara JSON document.')
+      && fileActionsSource.includes('ZIP-backed .cadara packages are no longer supported')
+      && fileActionsSource.includes('Local file write permission was denied.')
+      && fileActionsSource.includes('Local file sync target could not be bound.')
+      && localSyncSource.includes('persistent-binding-unavailable'),
+    'Workbench should surface visible local sync unavailable, invalid file, permission, bind, and persistence-unavailable states through the extracted controllers.',
   )
   assert(
     workbenchSource.includes('showBrowserStorageWarning')
@@ -36,7 +30,13 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
     'Workbench should keep the browser-storage warning wired to local file sync status with a cloud-save TODO.',
   )
   assert(
-    !importHandler.includes('bindLocalFile') && !exportHandler.includes('bindLocalFile'),
+    !fileActionsSource.slice(
+      fileActionsSource.indexOf('export async function importWorkbenchDocumentFile'),
+      fileActionsSource.indexOf('export async function openWorkbenchLocalFile'),
+    ).includes('bindLocalFile')
+      && !fileActionsSource.slice(
+        fileActionsSource.indexOf('export async function exportWorkbenchDocument'),
+      ).includes('bindLocalFile'),
     'Import and Export should remain one-shot actions that do not create or replace local filesystem sync bindings.',
   )
   assert(
@@ -52,5 +52,12 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
       && workerRuntimeSource.includes("'failed'")
       && workerRuntimeSource.includes('pendingWrites'),
     'Worker autosync should expose failed/permission states and keep coalescing pending writes explicitly.',
+  )
+  assert(
+    localSyncSource.includes('subscribeToLocalFileSyncStatus')
+      && localSyncSource.includes('restoreLocalFileBinding')
+      && localSyncSource.includes('showWorkbenchInfo')
+      && localSyncSource.includes('showWorkbenchError'),
+    'Workbench local sync controller should remain responsible for subscribing to sync state and surfacing status feedback.',
   )
 })

@@ -5,7 +5,7 @@ import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-conte
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
 import { getToolbarToolCommandId } from '@/domain/shortcuts/commands'
 import type { RegisteredToolDefinition } from '@/domain/tools/tool-registry'
-import { useToolActions } from '@/hooks/use-tool-actions'
+import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
 
 interface ToolButtonProps {
   tool: RegisteredToolDefinition
@@ -22,7 +22,7 @@ export function ToolButton({
   active = false,
   disabled = false,
 }: ToolButtonProps) {
-  const { triggerTool } = useToolActions()
+  const { activateTool } = useWorkbenchCommandHandlers()
   const commandId = getToolbarToolCommandId(tool.id)
   const isSuccessAction = tool.id === 'finishSketch'
   const emphasisBackground = isSuccessAction
@@ -58,7 +58,7 @@ export function ToolButton({
       return
     }
 
-    triggerTool(tool.id, {
+    void activateTool(tool.id, {
       source: inline ? 'search' : 'toolbar',
     })
     onTrigger?.()

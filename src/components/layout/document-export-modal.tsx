@@ -26,8 +26,8 @@ import type {
   ModelingExportDocumentInput,
   ModelingExportDocumentResult,
 } from '@/domain/modeling/modeling-service'
-import type { ObjectExportModalState } from '@/app/object-export-state'
-import { runWorkbenchAction } from '@/app/workbench-action'
+import type { ObjectExportModalState } from '@/domain/export/object-export-state'
+import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import type { ExportProvider } from '@/contracts/export/provider'
 import type { FeatureEditorFormField, FeatureEditorFormSection } from '@/domain/feature-authoring/form-schema'
 import { getRegisteredExportProviders } from '@/domain/export/provider-registry'

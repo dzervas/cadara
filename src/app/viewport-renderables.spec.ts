@@ -1,7 +1,7 @@
 import { test } from 'bun:test'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
-import { composeViewportRenderables, isTargetHidden } from '@/app/viewport-renderables'
+import { composeViewportRenderables, isTargetHidden } from '@/app/workbench/shell/viewport-renderables'
 import {
   acceptSketchDraw,
   beginSketchTool,

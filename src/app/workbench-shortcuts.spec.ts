@@ -2,7 +2,7 @@ import { test } from 'bun:test'
 
 import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-machine'
 import type { PrimitiveRef } from '@/domain/editor/schema'
-import { createWorkbenchShortcutCommandHandlers, getWorkbenchShortcutActiveScopes } from '@/app/workbench-shortcuts'
+import { createWorkbenchShortcutCommandHandlers, getWorkbenchShortcutActiveScopes } from '@/app/workbench/commands/workbench-shortcuts'
 import { createShortcutCommandRegistry, getShortcutCommandDefinitions } from '@/domain/shortcuts/commands'
 import { createEffectiveKeymap } from '@/domain/shortcuts/keymap'
 import { createShortcutResolver, type ShortcutResolverEvent } from '@/domain/shortcuts/resolver'
@@ -128,6 +128,16 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
     'Finish Sketch shortcut should trigger the finishSketch tool.',
   )
 
+  const undoFixture = createFixture({ canUndo: true, mode: 'part' })
+  const undoResult = undoFixture.press({ ctrlKey: true, key: 'z' })
+  assert(undoResult.commandId === 'editor.undo', 'Ctrl+Z should resolve to Undo.')
+  assert(undoFixture.undoRequests === 1, 'Undo shortcut should reuse the shared history entrypoint.')
+
+  const redoFixture = createFixture({ canRedo: true, mode: 'part' })
+  const redoResult = redoFixture.press({ ctrlKey: true, key: 'y' })
+  assert(redoResult.commandId === 'editor.redo', 'Ctrl+Y should resolve to Redo.')
+  assert(redoFixture.redoRequests === 1, 'Redo shortcut should reuse the shared history entrypoint.')
+
   const guardedInputFixture = createFixture({
     mode: 'sketch',
     sketchSession: createSketchSession(),
@@ -175,19 +185,25 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
 })
 
 interface FixtureOptions {
+  canRedo?: boolean
+  canUndo?: boolean
   mode: EditorViewState['mode']
   selection?: EditorViewState['selection']
   sketchSession?: EditorViewState['sketchSession']
 }
 
 function createFixture({
+  canRedo = true,
+  canUndo = true,
   mode,
   selection = [],
   sketchSession = null,
 }: FixtureOptions) {
   const actionBus = createToolActionBus()
   const dispatchedEvents: EditorEvent[] = []
+  let redoRequests = 0
   const triggeredToolIds: ToolId[] = []
+  let undoRequests = 0
   let observedLineSource: string | null = null
 
   actionBus.subscribeToTool('line', (event) => {
@@ -197,16 +213,24 @@ function createFixture({
   const commandHandlers = createWorkbenchShortcutCommandHandlers({
     activeCommand: null,
     activeReferencePickerFieldId: null,
+    activateTool: (toolId, metadata) => {
+      triggeredToolIds.push(toolId)
+      actionBus.triggerTool(toolId, mode, metadata)
+    },
+    canRedo,
+    canUndo,
     dispatch: (event) => {
       dispatchedEvents.push(event)
     },
     mode,
+    requestRedo: () => {
+      redoRequests += 1
+    },
+    requestUndo: () => {
+      undoRequests += 1
+    },
     selection,
     sketchSession,
-    triggerTool: (toolId, metadata) => {
-      triggeredToolIds.push(toolId)
-      actionBus.triggerTool(toolId, mode, metadata)
-    },
   })
   const registry = createShortcutCommandRegistry(getShortcutCommandDefinitions())
   const resolver = createShortcutResolver(registry, createEffectiveKeymap(registry))
@@ -217,6 +241,9 @@ function createFixture({
     },
     get observedLineSource() {
       return observedLineSource
+    },
+    get redoRequests() {
+      return redoRequests
     },
     press(event: ShortcutResolverEvent) {
       return resolver.handleKeyDown(event, {
@@ -229,6 +256,9 @@ function createFixture({
       })
     },
     triggeredToolIds,
+    get undoRequests() {
+      return undoRequests
+    },
   }
 }
 

@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 
-import { isInitialOccRenderPending } from '@/app/initial-occ-render-state'
+import { isInitialOccRenderPending } from '@/app/workbench/initial-occ-render-state'
 
 test('src/app/initial-occ-render-state.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

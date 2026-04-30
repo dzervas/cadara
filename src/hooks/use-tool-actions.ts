@@ -1,3 +1,5 @@
+import { useContext } from 'react'
+
 import { ToolActionContext } from '@/hooks/tool-action-context'
 import { createRequiredContextHook } from '@/hooks/create-required-context-hook'
 import type { ToolId } from '@/domain/tools/tool-registry'
@@ -7,8 +9,9 @@ import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
 import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
 import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
 import { supportedReferenceImageFileTypes } from '@/domain/reference-image/raster'
+import { readReferenceImagePayload } from '@/domain/reference-image/import-flow'
+import { WorkbenchCommandContext } from '@/hooks/workbench-command-context'
 import { showOpenImportFilePicker } from '@/lib/import-file-picker'
-import { readReferenceImagePayload } from '@/app/sketch-image-import-flow'
 
 const useRequiredToolActionContext = createRequiredContextHook(
   ToolActionContext,
@@ -22,6 +25,7 @@ export function useToolActionBus() {
 
 export function useToolActions() {
   const { actionBus } = useRequiredToolActionContext()
+  const commandHandlers = useContext(WorkbenchCommandContext)
   const {
     machineState,
     dispatch,
@@ -33,7 +37,9 @@ export function useToolActions() {
   return {
     async triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
       if (toolId === 'undo') {
-        if (machineState.kind === 'editingSketch') {
+        if (commandHandlers) {
+          commandHandlers.requestUndo()
+        } else if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.undoRequested' })
         }
         actionBus.triggerTool(toolId, machineState.mode, metadata)
@@ -41,7 +47,9 @@ export function useToolActions() {
       }
 
       if (toolId === 'redo') {
-        if (machineState.kind === 'editingSketch') {
+        if (commandHandlers) {
+          commandHandlers.requestRedo()
+        } else if (machineState.kind === 'editingSketch') {
           dispatch({ type: 'history.redoRequested' })
         }
         actionBus.triggerTool(toolId, machineState.mode, metadata)
@@ -49,6 +57,9 @@ export function useToolActions() {
       }
 
       if (toolId === 'import') {
+        if (commandHandlers) {
+          void commandHandlers.requestPartImport()
+        }
         actionBus.triggerTool(toolId, machineState.mode, metadata)
         return
       }

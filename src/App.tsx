@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 
-import { CadWorkbench } from "@/app/cad-workbench";
+import { CadWorkbench } from "@/app/workbench/cad-workbench";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createLocalStorageOperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
 import { createLocalStorageDocumentRepositoryUrlStore } from "@/domain/modeling/automerge-indexeddb-document-repository";

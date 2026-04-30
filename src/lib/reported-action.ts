@@ -50,7 +50,7 @@ function isAppResult<T>(value: T | AppResult<T>): value is AppResult<T> {
   )
 }
 
-export function runWorkbenchAction<TOutput, TSuccess>(input: {
+export function runReportedAction<TOutput, TSuccess>(input: {
   operation: string
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter
@@ -59,7 +59,7 @@ export function runWorkbenchAction<TOutput, TSuccess>(input: {
   mapSuccess: (output: TOutput) => AppResult<TSuccess>
   onError: (error: AppError) => void
 }): Promise<AppResult<TSuccess>>
-export function runWorkbenchAction<TOutput, TSuccess>(input: {
+export function runReportedAction<TOutput, TSuccess>(input: {
   operation: string
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter
@@ -68,7 +68,7 @@ export function runWorkbenchAction<TOutput, TSuccess>(input: {
   mapSuccess: (output: TOutput) => AppResult<TSuccess>
   onError: (error: AppError) => void
 }): Promise<AppResult<TSuccess>>
-export async function runWorkbenchAction<TOutput, TSuccess>(input: {
+export async function runReportedAction<TOutput, TSuccess>(input: {
   operation: string
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter

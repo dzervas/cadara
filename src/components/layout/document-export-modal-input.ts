@@ -1,5 +1,5 @@
 import type { ModelingExportDocumentInput } from '@/domain/modeling/modeling-service'
-import type { ObjectExportModalState } from '@/app/object-export-state'
+import type { ObjectExportModalState } from '@/domain/export/object-export-state'
 
 export function buildDocumentExportModalInput(
   target: ObjectExportModalState,

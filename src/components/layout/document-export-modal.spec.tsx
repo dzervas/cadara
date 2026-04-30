@@ -7,7 +7,7 @@ import {
 } from '@/components/layout/document-export-modal'
 import { buildDocumentExportModalInput } from '@/components/layout/document-export-modal-input'
 import { createTestErrorReporter } from '@/contracts/errors'
-import type { ObjectExportModalState } from '@/app/object-export-state'
+import type { ObjectExportModalState } from '@/domain/export/object-export-state'
 import { workbenchTheme } from '@/theme/workbench-theme'
 import { registerBuiltinExportProviders } from '@/domain/export/register-builtin-providers'
 import { stepExportProvider } from '@/domain/export/providers/step-export-provider'

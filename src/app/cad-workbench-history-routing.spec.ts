@@ -7,47 +7,50 @@ test('src/app/cad-workbench-history-routing.spec.ts', async () => {
     }
   }
 
-  const source = await Bun.file(new URL('./cad-workbench.tsx', import.meta.url)).text()
+  const workbenchSource = await Bun.file(new URL('./workbench/cad-workbench.tsx', import.meta.url)).text()
+  const historySource = await Bun.file(new URL('./workbench/controllers/use-workbench-history.ts', import.meta.url)).text()
 
   assert(
-    !source.includes('modelingService.setFeatureCursor'),
+    !workbenchSource.includes('modelingService.setFeatureCursor'),
     'Workbench document history UI should not call modelingService.setFeatureCursor directly.',
   )
   assert(
-    source.includes("type: 'document.historyCursorRequested'"),
-    'Workbench document history UI should dispatch editor cursor requests.',
+    workbenchSource.includes('onReopenTarget={handleNavigationReopen}'),
+    'Workbench document history UI should route history-row reopen actions through the shared viewport/navigation controller.',
   )
   assert(
-    source.includes('onReopenTarget={handleNavigationReopen}'),
-    'Workbench document history UI should route history-row edit and double-click reopen through the shared navigation reopen callback.',
-  )
-  assert(
-    source.includes('onDocumentCursorRequested={handleTimelineCursorRequested}'),
+    workbenchSource.includes('onDocumentCursorRequested={handleTimelineCursorRequested}'),
     'Workbench document history UI should route history-row cursor actions through the shared timeline cursor request handler.',
   )
   assert(
-    source.includes('const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {')
-      && source.includes("dispatch({ type: 'document.historyCursorRequested', cursor })"),
+    workbenchSource.includes("dispatch({ type: 'document.historyCursorRequested', cursor })"),
     'Workbench timeline cursor requests should dispatch the existing editor-owned document cursor event.',
   )
   assert(
-    source.includes("kind: 'reorderDocumentHistory'"),
-    'Accepted document history reorders should create workbench undo entries.',
+    workbenchSource.includes('requestUndo,')
+      && workbenchSource.includes('requestRedo,')
+      && workbenchSource.includes('activateTool: triggerTool'),
+    'Workbench should compose shared history and tool command entrypoints before wiring shortcuts and toolbar surfaces.',
   )
   assert(
-    source.includes('modelingService.reorderDocumentHistory'),
-    'Workbench reorder undo and redo should apply through the modeling service.',
+    historySource.includes("kind: 'reorderDocumentHistory'"),
+    'Accepted document history reorders should create workbench undo entries in the shared history controller.',
   )
   assert(
-    source.includes("operation: 'Reorder document history'") && source.includes('onError: (error) => showWorkbenchError(error.message)'),
+    historySource.includes('modelingService.reorderDocumentHistory'),
+    'Workbench reorder undo and redo should apply through the modeling service inside the shared history controller.',
+  )
+  assert(
+    historySource.includes("operation: 'Reorder document history'")
+      && historySource.includes('onError: (error) => showWorkbenchError(error.message)'),
     'Rejected document history reorders should surface through the workbench error notification path.',
   )
   assert(
-    source.includes("type: 'document.snapshotLoaded'"),
+    historySource.includes('applyLoadedSnapshot(nextSnapshot)'),
     'Accepted document history reorders should apply the loaded snapshot directly for immediate UI updates.',
   )
   assert(
-    source.includes('sketchSessionRef.current || isUndoRedoRunning'),
+    historySource.includes('sketchSessionRef.current || isUndoRedoRunning'),
     'Workbench undo/redo should keep sketch-local history priority while sketch editing is active.',
   )
 })

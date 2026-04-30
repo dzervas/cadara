@@ -2,19 +2,23 @@ import type { EditorEvent, EditorViewState } from '@/contracts/editor/state-mach
 import { isEditableSketchGeometrySelection } from '@/domain/editor/sketch-session'
 import { getEscapeEvent } from '@/domain/editor/workbench-interactions'
 import { getToolCommandId, type ShortcutScope } from '@/domain/shortcuts/commands'
-import type { ToolTriggerMetadata } from '@/domain/tools/schema'
-import { toolDefinitions, type ToolId } from '@/domain/tools/tool-registry'
+import { toolDefinitions } from '@/domain/tools/tool-registry'
+import type { WorkbenchCommandHandlers } from '@/hooks/workbench-command-context'
 import type { ShortcutCommandHandlers } from '@/hooks/shortcut-provider'
 
 export interface WorkbenchShortcutHandlerOptions {
   activeCommand: EditorViewState['activeCommand']
   activeReferencePickerFieldId: EditorViewState['activeReferencePickerFieldId']
+  canRedo?: boolean
+  canUndo?: boolean
   dispatch: (event: EditorEvent) => void
   focusSearch?: () => void
   mode: EditorViewState['mode']
+  requestRedo?: () => void
+  requestUndo?: () => void
   selection: EditorViewState['selection']
   sketchSession: EditorViewState['sketchSession']
-  triggerTool: (toolId: ToolId, metadata: ToolTriggerMetadata) => void
+  activateTool: WorkbenchCommandHandlers['activateTool']
 }
 
 export function getWorkbenchShortcutActiveScopes(mode: EditorViewState['mode']): readonly ShortcutScope[] {
@@ -24,12 +28,16 @@ export function getWorkbenchShortcutActiveScopes(mode: EditorViewState['mode']):
 export function createWorkbenchShortcutCommandHandlers({
   activeCommand,
   activeReferencePickerFieldId,
+  canRedo = true,
+  canUndo = true,
   dispatch,
   focusSearch = focusWorkbenchSearch,
   mode,
+  requestRedo,
+  requestUndo,
   selection,
   sketchSession,
-  triggerTool,
+  activateTool,
 }: WorkbenchShortcutHandlerOptions): ShortcutCommandHandlers {
   const commandHandlers: ShortcutCommandHandlers = {
     'editor.cancel': {
@@ -52,6 +60,18 @@ export function createWorkbenchShortcutCommandHandlers({
         sketchSession,
       }) !== null,
     },
+    'editor.redo': {
+      execute: () => {
+        requestRedo?.()
+      },
+      isEnabled: () => canRedo,
+    },
+    'editor.undo': {
+      execute: () => {
+        requestUndo?.()
+      },
+      isEnabled: () => canUndo,
+    },
     'editor.deleteSelection': {
       execute: () => dispatch({ type: 'sketch.annotationDeleteRequested' }),
       isEnabled: () =>
@@ -72,7 +92,9 @@ export function createWorkbenchShortcutCommandHandlers({
 
   for (const tool of toolDefinitions) {
     commandHandlers[getToolCommandId(tool.id)] = {
-      execute: () => triggerTool(tool.id, { source: 'shortcut' }),
+      execute: () => {
+        void activateTool(tool.id, { source: 'shortcut' })
+      },
       isEnabled: () =>
         (tool.modes as readonly typeof mode[]).includes(mode)
         && (tool.id !== 'finishSketch' || sketchSession !== null)

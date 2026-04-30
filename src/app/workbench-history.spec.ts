@@ -3,7 +3,7 @@ import { test } from 'bun:test'
 import {
   getDocumentHistoryOrderRestoreMoves,
   getWorkbenchHistoryAvailability,
-} from '@/app/workbench-history'
+} from '@/app/workbench/history/workbench-history'
 import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-history'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
