@@ -13,7 +13,7 @@ import {
   isDropdownTool,
   type RegisteredToolDefinition,
   searchToolDefinitions,
-} from '@/domain/tools/tool-registry'
+} from '@/core/tools/tool-registry'
 import {
   getActiveSketchStyleToolId,
   isSketchSvgRenderingEnabled,

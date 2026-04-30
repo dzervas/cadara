@@ -5,10 +5,10 @@ import { createExportProviderRegistry } from '@/domain/export/provider-registry'
 import type {
   PrimitiveRef,
   RevisionId,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getPrimitiveRefKey,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   DocumentSnapshot,
   ModelingDiagnostic,

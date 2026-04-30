@@ -20,7 +20,7 @@ import type {
   SketchSpecialModePanelButton,
   SketchSpecialModePanelField,
   SketchSpecialModePanelSchema,
-} from '@/domain/sketch-special-modes/schema'
+} from '@/core/sketch-special-modes/schema'
 
 interface SketchSpecialModePanelProps {
   schema: SketchSpecialModePanelSchema | null

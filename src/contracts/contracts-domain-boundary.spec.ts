@@ -20,14 +20,23 @@ test('src/contracts/contracts-domain-boundary.spec.ts', () => {
     }
 
     const source = readFileSync(filePath, 'utf8')
-    if (source.includes("from '@/domain/") || source.includes('from "@/domain/')) {
+    if (
+      source.includes("from '@/domain/'")
+      || source.includes('from "@/domain/')
+      || source.includes("from '@/core/'")
+      || source.includes('from "@/core/')
+      || source.includes("from '@/application/'")
+      || source.includes('from "@/application/')
+      || source.includes("from '@/infrastructure/'")
+      || source.includes('from "@/infrastructure/')
+    ) {
       offenders.push(relative(ROOT, filePath))
     }
   }
 
   assert(
     offenders.length === 0,
-    `Contracts modules must not import domain-layer modules.\n${offenders.join('\n')}`,
+    `Contracts modules must not import implementation-layer modules.\n${offenders.join('\n')}`,
   )
 })
 

@@ -2,7 +2,7 @@ import { test } from 'bun:test'
 import * as THREE from 'three'
 
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import {
   MARKER_SPHERE_GEOMETRY,
   GEOMETRY_HIGHLIGHT_COLORS,

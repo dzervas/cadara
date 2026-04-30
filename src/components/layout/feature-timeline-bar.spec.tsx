@@ -14,7 +14,7 @@ import {
   getEditorViewState,
   initialEditorState,
 } from '@/domain/editor/state-machine'
-import { getPrimitiveRefKey } from '@/domain/editor/schema'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createSketchSessionFromSnapshot } from '@/domain/editor/sketch-session'
 import { EditorContext } from '@/hooks/editor-context'

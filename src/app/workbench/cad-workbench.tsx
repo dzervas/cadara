@@ -55,14 +55,14 @@ import {
 import {
   getSketchSpecialModePanel,
   getSketchSpecialModeViewportPresentation,
-} from '@/domain/sketch-special-modes/presentation'
+} from '@/core/sketch-special-modes/presentation'
 import {
   getPrimitiveRefLabel,
   getPrimitiveRefKey,
   isDurablePrimitiveRef,
   primitiveRefEquals,
   type PrimitiveRef,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getAutoHiddenSketchTargetKeys,
   getWorkbenchVisibilityState,

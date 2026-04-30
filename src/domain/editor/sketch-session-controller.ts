@@ -1,4 +1,4 @@
-import type { PrimitiveRef, RevisionId } from '@/domain/editor/schema'
+import type { PrimitiveRef, RevisionId } from '@/core/editor/schema'
 import {
   createNewSketchSession,
   createNewSketchSessionFromSupport,
@@ -15,8 +15,8 @@ import type {
   ModelingService,
 } from '@/domain/modeling/modeling-service'
 import type { AppResult } from '@/contracts/errors'
-import { getPrimitiveRefKey } from '@/domain/editor/schema'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 
 type Vec3 = readonly [number, number, number]
 

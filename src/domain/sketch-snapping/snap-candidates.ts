@@ -6,7 +6,7 @@ import type {
   SketchEntityId,
   SketchPointId,
 } from '@/contracts/shared/ids'
-import type { SketchToolId } from '@/domain/sketch-tools/definition'
+import type { SketchToolId } from '@/core/sketch-tools/definition'
 import {
   distanceBetween,
   midpoint,

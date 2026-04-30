@@ -23,7 +23,7 @@ import type {
 } from '@/contracts/sketch/schema'
 import {
   type PrimitiveRef,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   createStandardPlaneDefinition,
   deriveStandardPlaneKeyFromConstructionId,
@@ -34,10 +34,10 @@ import {
 import {
   materializeLegacyReferenceImageAnchorBindings,
 } from '@/domain/reference-image/operations'
-import type { SketchDraftEntity } from '@/domain/sketch-tools/definition'
+import type { SketchDraftEntity } from '@/core/sketch-tools/definition'
 import {
   mapSketchPointToWorkspaceWorld,
-} from '@/domain/workspace/sketch-plane-mapping'
+} from '@/core/workspace/sketch-plane-mapping'
 import type {
   SketchConstraintDisplayState,
   SketchHistoryCursor,

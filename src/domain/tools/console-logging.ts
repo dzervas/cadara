@@ -1,5 +1,5 @@
-import type { ToolActionBus } from '@/domain/tools/tool-action-bus'
-import { toolDefinitions, toolGroups } from '@/domain/tools/tool-registry'
+import type { ToolActionBus } from '@/core/tools/tool-action-bus'
+import { toolDefinitions, toolGroups } from '@/core/tools/tool-registry'
 
 export function installConsoleLoggingSubscribers(actionBus: ToolActionBus) {
   const disposers = [

@@ -18,8 +18,8 @@ import {
   getPrimitiveRefLabel,
   primitiveRefEquals,
   type PrimitiveRef,
-} from '@/domain/editor/schema'
-import { mapSketchPointToWorkspaceWorld, type WorkspaceVec3 } from '@/domain/workspace/sketch-plane-mapping'
+} from '@/core/editor/schema'
+import { mapSketchPointToWorkspaceWorld, type WorkspaceVec3 } from '@/core/workspace/sketch-plane-mapping'
 
 export interface MeasurementRow {
   id: string

@@ -9,8 +9,8 @@ import {
   normalizeFeatureEditorFormValues,
   shouldResetFeatureEditorFormValues,
   type FeatureEditorFormValues,
-} from '@/domain/feature-authoring/form-adapter'
-import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+} from '@/core/feature-authoring/form-adapter'
+import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'

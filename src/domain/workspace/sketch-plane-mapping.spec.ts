@@ -5,7 +5,7 @@ import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
   mapSketchPointToWorkspaceWorld,
   mapWorldPointToWorkspaceSketch,
-} from '@/domain/workspace/sketch-plane-mapping'
+} from '@/core/workspace/sketch-plane-mapping'
 
 test('src/domain/workspace/sketch-plane-mapping.spec.ts', () => {
   const yzPlane: SketchPlaneDefinition = {

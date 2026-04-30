@@ -1,8 +1,8 @@
 // Barrel re-exports for sketch-session module
 
 // Type re-exports from types.ts
-export type { SketchDraftEntity, SketchToolId } from '@/domain/sketch-tools/definition'
-export type { SketchConstraintToolId } from '@/domain/sketch-constraints/definition'
+export type { SketchDraftEntity, SketchToolId } from '@/core/sketch-tools/definition'
+export type { SketchConstraintToolId } from '@/core/sketch-constraints/definition'
 export type {
   SketchConstructionToolId,
   SketchReferenceToolId,

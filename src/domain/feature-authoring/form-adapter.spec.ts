@@ -8,11 +8,11 @@ import {
   featureEditorFormValuesEqual,
   getFeatureEditorExpressionSourceState,
   normalizeFeatureEditorFormValues,
-} from '@/domain/feature-authoring/form-adapter'
+} from '@/core/feature-authoring/form-adapter'
 import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
 import { createFeatureEditSession, patchFeatureEditSession } from '@/domain/editor/feature-editing'
 import { createExpressionAuthoredValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 
 test('src/domain/feature-authoring/form-adapter.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {

@@ -4,7 +4,7 @@ import {
   createShortcutCommandRegistry,
   getShortcutCommandDefinitions,
   getToolCommandId,
-} from '@/domain/shortcuts/commands'
+} from '@/core/shortcuts/commands'
 
 test('src/domain/shortcuts/commands.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

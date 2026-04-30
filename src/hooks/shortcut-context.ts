@@ -5,13 +5,13 @@ import type {
   ShortcutCommandId,
   ShortcutCommandRegistry,
   ShortcutScope,
-} from '@/domain/shortcuts/commands'
+} from '@/core/shortcuts/commands'
 import type {
   EffectiveShortcutMap,
   ShortcutConflict,
   ShortcutProfileOverrides,
-} from '@/domain/shortcuts/keymap'
-import type { ShortcutSequence } from '@/domain/shortcuts/shortcut-grammar'
+} from '@/core/shortcuts/keymap'
+import type { ShortcutSequence } from '@/core/shortcuts/shortcut-grammar'
 
 export interface ShortcutContextValue {
   activeScopes: readonly ShortcutScope[]

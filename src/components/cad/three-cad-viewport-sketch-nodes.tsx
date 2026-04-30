@@ -17,7 +17,7 @@ import {
   bindRenderableObject,
   createMarkerPickProxy,
   getVisibleMarkerRadius,
-} from '@/domain/workspace/render-picking'
+} from '@/infrastructure/viewport/render-picking'
 
 interface SketchDisplayRenderableNodeProps {
   renderable: SketchSessionDisplayRenderable

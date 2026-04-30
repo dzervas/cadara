@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { PropsWithChildren } from 'react'
 
 import { ToolActionContext } from '@/hooks/tool-action-context'
-import type { ToolActionBus } from '@/domain/tools/tool-action-bus'
+import type { ToolActionBus } from '@/core/tools/tool-action-bus'
 
 interface ToolActionProviderProps extends PropsWithChildren {
   actionBus: ToolActionBus

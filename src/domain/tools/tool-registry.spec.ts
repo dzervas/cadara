@@ -1,7 +1,7 @@
 import { test } from 'bun:test'
 
-import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/domain/tools/tool-registry'
-import { toolIconAssetFileNames } from '@/domain/tools/tool-icons'
+import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/core/tools/tool-registry'
+import { toolIconAssetFileNames } from '@/core/tools/tool-icons'
 
 test('src/domain/tools/tool-registry.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

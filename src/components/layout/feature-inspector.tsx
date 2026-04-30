@@ -6,7 +6,7 @@ import { Controller, type Control, type ControllerRenderProps, useForm } from 'r
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { Input } from '@/components/ui/input'
 import type { DocumentVariableRecord, FeatureSnapshotRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
-import { getPrimitiveRefLabel, primitiveRefEquals, type PrimitiveRef } from '@/domain/editor/schema'
+import { getPrimitiveRefLabel, primitiveRefEquals, type PrimitiveRef } from '@/core/editor/schema'
 import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
 import {
   createFeatureEditorExpressionControlFormValue,
@@ -22,16 +22,16 @@ import {
   type FeatureEditorExpressionField,
   type FeatureEditorExpressionPreview,
   type FeatureEditorFormValues,
-} from '@/domain/feature-authoring/form-adapter'
+} from '@/core/feature-authoring/form-adapter'
 import {
   createFeatureEditorClearReferencePatch,
   createFeatureEditorRemoveReferenceItemPatch,
-} from '@/domain/feature-authoring/form-events'
+} from '@/core/feature-authoring/form-events'
 import type {
   FeatureEditorFormField,
   FeatureEditorFormSection,
   FeatureNumericField,
-} from '@/domain/feature-authoring/form-schema'
+} from '@/core/feature-authoring/form-schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureInspectorProps {

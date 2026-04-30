@@ -1,10 +1,10 @@
-import type { ShortcutCommandRegistry } from '@/domain/shortcuts/commands'
+import type { ShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import {
   createEffectiveKeymap,
   detectShortcutConflicts,
   type ShortcutConflict,
   type ShortcutProfileOverrides,
-} from '@/domain/shortcuts/keymap'
+} from '@/core/shortcuts/keymap'
 
 export interface ShortcutOverrideUpdateValidation {
   conflicts: readonly ShortcutConflict[]

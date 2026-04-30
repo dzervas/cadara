@@ -240,8 +240,8 @@ test('src/domain/modeling/worker-backed-document-repository.spec.ts', async () =
 
   function testBrowserWorkerReceivesRepositorySearchOptions() {
     const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
-    const clientSource = readFileSync(join(process.cwd(), 'src/domain/modeling/document-sync-worker-client.ts'), 'utf8')
-    const workerSource = readFileSync(join(process.cwd(), 'src/domain/modeling/document-sync.worker.ts'), 'utf8')
+    const clientSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync-worker-client.ts'), 'utf8')
+    const workerSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync.worker.ts'), 'utf8')
 
     assert(
       appSource.includes('createBrowserDocumentSyncWorkerClient({ search: window.location.search })'),

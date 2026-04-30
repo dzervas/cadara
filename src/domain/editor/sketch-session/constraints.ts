@@ -8,23 +8,23 @@ import {
   solveSketchDefinitionCore,
 } from '@/contracts/sketch/solver-core'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import type {
   SketchConstraintTargetRecord,
   SketchConstraintToolId,
-} from '@/domain/sketch-constraints/definition'
+} from '@/core/sketch-constraints/definition'
 import {
   getSketchConstraintDefinition,
   inferDimensionAnnotationPlacement,
   resolveSketchConstraintTarget,
-} from '@/domain/sketch-constraints/registry'
+} from '@/core/sketch-constraints/registry'
 import type {
   SketchToolAnchorDescriptor,
   SketchToolFloatingInputDescriptor,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
   SketchToolSelectionGuideDescriptor,
-} from '@/domain/sketch-tools/editor-schema'
+} from '@/core/sketch-tools/editor-schema'
 import type {
   SketchConstraintAuthoringState,
   SketchSessionState,

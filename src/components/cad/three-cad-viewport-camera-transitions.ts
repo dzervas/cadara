@@ -1,18 +1,18 @@
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
-import { computeSketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
+import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
+import { computeSketchCameraFrame } from '@/infrastructure/viewport/sketch-camera-framing'
 import {
   captureViewportCameraFrame,
   cloneViewportCameraFrame,
   type ViewportCamera,
   type ViewportCameraFrame,
-} from '@/domain/workspace/viewport-projection'
+} from '@/infrastructure/viewport/viewport-projection'
 import {
   createViewNavigationCameraFrame,
   getViewNavigationDirection,
   type ViewNavigationPresetId,
-} from '@/domain/workspace/view-navigation'
+} from '@/infrastructure/viewport/view-navigation'
 
 export interface ViewportSketchCameraSession {
   sketchId: string | null

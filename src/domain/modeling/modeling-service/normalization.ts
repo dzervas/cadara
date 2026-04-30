@@ -7,7 +7,7 @@ import type {
   PrimitiveRef,
   RenderableId,
   SnapshotEntityId,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   BodySnapshotRecord,
   ConstructionSnapshotRecord,

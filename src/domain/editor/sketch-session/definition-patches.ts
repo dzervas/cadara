@@ -10,7 +10,7 @@ import {
 } from '@/contracts/sketch/derived-geometry'
 import type {
   SketchToolAnchorDescriptor,
-} from '@/domain/sketch-tools/editor-schema'
+} from '@/core/sketch-tools/editor-schema'
 
 export function addAnchorOffset(
   anchor: SketchToolAnchorDescriptor,

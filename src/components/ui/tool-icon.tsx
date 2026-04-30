@@ -1,5 +1,5 @@
-import type { ToolIconId } from '@/domain/tools/schema'
-import { getToolIconSrc } from '@/domain/tools/tool-icons'
+import type { ToolIconId } from '@/core/tools/schema'
+import { getToolIconSrc } from '@/core/tools/tool-icons'
 import { cn } from '@/lib/utils'
 
 interface ToolIconProps {

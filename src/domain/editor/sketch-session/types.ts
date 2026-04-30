@@ -23,37 +23,37 @@ import type {
   SketchPoint,
 } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type {
   SketchToolAnchorDescriptor,
   SketchToolControlValue,
   SketchToolPresentationSchema,
-} from '@/domain/sketch-tools/editor-schema'
+} from '@/core/sketch-tools/editor-schema'
 import type { SketchSnapCandidate } from '@/domain/sketch-snapping/snap-candidates'
 import type { SketchStyleFocus } from '@/domain/sketch-styles/definition'
 import type { OffsetSide } from '@/domain/sketch-editing/operations'
-import type { SketchEditToolId } from '@/domain/sketch-edit-tools/definition'
-import type { ActiveSketchSpecialModeSession } from '@/domain/sketch-special-modes/schema'
+import type { SketchEditToolId } from '@/core/sketch-edit-tools/definition'
+import type { ActiveSketchSpecialModeSession } from '@/core/sketch-special-modes/schema'
 import type { DimensionAnnotationPlacement, RegionRecord } from '@/contracts/sketch/schema'
 
-export type { SketchDraftEntity, SketchToolId } from '@/domain/sketch-tools/definition'
-export type { SketchConstraintToolId } from '@/domain/sketch-constraints/definition'
+export type { SketchDraftEntity, SketchToolId } from '@/core/sketch-tools/definition'
+export type { SketchConstraintToolId } from '@/core/sketch-constraints/definition'
 
 export type SketchConstructionToolId = 'construction'
 export type SketchReferenceToolId = 'projectReference'
 export type SketchAuthoringToolId =
-  | import('@/domain/sketch-tools/definition').SketchToolId
+  | import('@/core/sketch-tools/definition').SketchToolId
   | SketchEditToolId
-  | import('@/domain/sketch-constraints/definition').SketchConstraintToolId
+  | import('@/core/sketch-constraints/definition').SketchConstraintToolId
   | SketchConstructionToolId
   | SketchReferenceToolId
 export type SketchSessionStatus = 'idle' | 'drawing' | 'collectingTargets' | 'awaitingValue'
 
 export interface SketchConstraintAuthoringState {
-  toolId: import('@/domain/sketch-constraints/definition').SketchConstraintToolId
-  selectedTargets: import('@/domain/sketch-constraints/definition').SketchConstraintTargetRecord[]
-  hoverTarget: import('@/domain/sketch-constraints/definition').SketchConstraintTargetRecord | null
+  toolId: import('@/core/sketch-constraints/definition').SketchConstraintToolId
+  selectedTargets: import('@/core/sketch-constraints/definition').SketchConstraintTargetRecord[]
+  hoverTarget: import('@/core/sketch-constraints/definition').SketchConstraintTargetRecord | null
   pointer: SketchPoint | null
   isPreviewPinned: boolean
   pendingValue: number | null
@@ -130,7 +130,7 @@ export interface SketchSessionState {
   plane: SketchPlaneDefinition
   planeTarget: SketchPlaneSupportRef
   planeKey: SketchPlaneKey | null
-  toolStagedEntities: readonly import('@/domain/sketch-tools/definition').SketchDraftEntity[]
+  toolStagedEntities: readonly import('@/core/sketch-tools/definition').SketchDraftEntity[]
   definition: SketchDefinition
   fullDefinition: SketchDefinition
   historyCursor: SketchHistoryCursor

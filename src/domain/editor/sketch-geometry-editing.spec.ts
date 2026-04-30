@@ -26,7 +26,7 @@ import {
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
 import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
-import { toolDefinitions } from '@/domain/tools/tool-registry'
+import { toolDefinitions } from '@/core/tools/tool-registry'
 
 test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

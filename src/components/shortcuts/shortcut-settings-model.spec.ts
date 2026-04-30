@@ -12,17 +12,17 @@ import {
   createShortcutCommandRegistry,
   type ShortcutCommandDefinition,
   type ShortcutCommandId,
-} from '@/domain/shortcuts/commands'
+} from '@/core/shortcuts/commands'
 import {
   createEffectiveKeymap,
   getPrimaryShortcut,
   type ShortcutProfileOverrides,
-} from '@/domain/shortcuts/keymap'
+} from '@/core/shortcuts/keymap'
 import {
   disableCommandShortcut,
   setCommandShortcutOverride,
-} from '@/domain/shortcuts/profile-repository'
-import { createShortcutReferenceGroups } from '@/domain/shortcuts/reference'
+} from '@/core/shortcuts/profile-repository'
+import { createShortcutReferenceGroups } from '@/core/shortcuts/reference'
 import { validateShortcutOverrideUpdate } from '@/hooks/shortcut-validation'
 
 test('src/components/shortcuts/shortcut-settings-model.spec.ts', () => {

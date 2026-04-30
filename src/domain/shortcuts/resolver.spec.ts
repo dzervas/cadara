@@ -1,9 +1,9 @@
 import { test } from 'bun:test'
 
-import type { ShortcutCommandDefinition } from '@/domain/shortcuts/commands'
-import { createShortcutCommandRegistry } from '@/domain/shortcuts/commands'
-import { createEffectiveKeymap } from '@/domain/shortcuts/keymap'
-import { createShortcutResolver } from '@/domain/shortcuts/resolver'
+import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
+import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
+import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
+import { createShortcutResolver } from '@/core/shortcuts/resolver'
 
 test('src/domain/shortcuts/resolver.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

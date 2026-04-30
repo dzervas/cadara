@@ -6,7 +6,7 @@ import {
   initialEditorState,
   type EditorEvent,
 } from '@/domain/editor/state-machine'
-import { createAppEditorEffectRuntime } from '@/hooks/editor-effect-runtime'
+import { createAppEditorEffectRuntime } from '@/application/editor/create-app-editor-effect-runtime'
 import {
   clearActiveDocumentTelemetryContext,
   createActiveDocumentTelemetryContext,
@@ -15,7 +15,7 @@ import {
 import {
   createEditorRuntimeActor,
   type EditorRuntimeActor,
-} from '@/domain/editor/runtime-machine'
+} from '@/application/editor/runtime-machine'
 import type { EditorExtensionDependencies } from '@/domain/editor/state-machine'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { EditorContext } from '@/hooks/editor-context'

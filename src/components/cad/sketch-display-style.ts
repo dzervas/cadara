@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import { SURFACE_COLORS } from '@/domain/workspace/render-picking'
-import type { ToolbarMode } from '@/domain/tools/schema'
+import { SURFACE_COLORS } from '@/infrastructure/viewport/render-picking'
+import type { ToolbarMode } from '@/core/tools/schema'
 import type { SketchRenderingPalette } from '@/components/cad/sketch-rendering-palette'
 
 export interface SketchDisplayMeshMaterialConfig {

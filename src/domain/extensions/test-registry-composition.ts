@@ -1,11 +1,15 @@
 import type { ExportProvider } from '@/contracts/export/provider'
 import type { ImportProvider } from '@/contracts/import/provider'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
-import type { SketchSpecialModeDefinition } from '@/domain/sketch-special-modes/schema'
-import { createBuiltinExportProviderRegistry, builtinExportProviders } from '@/domain/export/builtin-provider-composition'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
+import type { SketchSpecialModeDefinition } from '@/core/sketch-special-modes/schema'
+import {
+  createBuiltinExportProviderRegistry,
+  builtinExportProviders,
+} from '@/domain/export/builtin-provider-composition'
 import { createExportProviderRegistry } from '@/domain/export/provider-registry'
 import { createImportProviderRegistry } from '@/domain/import/provider-registry'
-import { createSketchSpecialModeRegistry, builtinSketchSpecialModeDefinitions } from '@/domain/sketch-special-modes/registry'
+import { createSketchSpecialModeRegistry } from '@/core/sketch-special-modes/registry'
+import { builtinSketchSpecialModeDefinitions } from '@/domain/sketch-special-modes/registry'
 import type { RuntimeExtensionRegistryComposition } from '@/domain/extensions/runtime-registry-composition'
 
 export function createScopedExportProviderRegistryForTest(

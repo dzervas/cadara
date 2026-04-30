@@ -9,7 +9,7 @@ import {
 import type {
   SketchSpecialModeHandleRef,
   SketchSpecialModeViewportPresentation,
-} from '@/domain/sketch-special-modes/schema'
+} from '@/core/sketch-special-modes/schema'
 
 interface SketchSpecialModeViewportFeedbackProps {
   presentation: SketchSpecialModeViewportPresentation | null

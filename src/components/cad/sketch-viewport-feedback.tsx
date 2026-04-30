@@ -5,7 +5,7 @@ import type {
   SketchToolFloatingInputDescriptor,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
-} from '@/domain/sketch-tools/editor-schema'
+} from '@/core/sketch-tools/editor-schema'
 import {
   getFloatingInputProjectionId,
   getOverlayGeometryProjectionId,

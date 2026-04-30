@@ -2,7 +2,7 @@ import { test } from 'bun:test'
 
 import type { DocumentSnapshot, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import {
   deriveMeasurementViewModel,
   isMeasureSelectableTarget,

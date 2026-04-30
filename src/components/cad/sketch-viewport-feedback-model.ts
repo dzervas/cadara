@@ -2,7 +2,7 @@ import type {
   SketchToolAnchorDescriptor,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
-} from '@/domain/sketch-tools/editor-schema'
+} from '@/core/sketch-tools/editor-schema'
 
 export interface SketchViewportFeedbackProjection {
   id: string

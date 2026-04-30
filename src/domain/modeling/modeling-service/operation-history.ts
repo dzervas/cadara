@@ -3,7 +3,7 @@ import type {
   DocumentId,
   RevisionId,
   SketchId,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   CommitSketchResponse,
   ModelingOperationResult,

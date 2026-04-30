@@ -1,5 +1,5 @@
 import type { ExportProvider } from '@/contracts/export/provider'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 
 export interface ExportProviderRegistry {
   getAll(): readonly ExportProvider<unknown, FeatureEditorFormSchema>[]

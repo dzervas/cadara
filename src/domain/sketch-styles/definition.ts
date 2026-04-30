@@ -4,12 +4,12 @@ import type {
   SketchStrokeJoin,
   SketchStyleDefinition,
 } from '@/contracts/sketch/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import type {
   SketchToolControlDescriptor,
   SketchToolPresentationSchema,
-} from '@/domain/sketch-tools/editor-schema'
-import type { ToolId } from '@/domain/tools/tool-registry'
+} from '@/core/sketch-tools/editor-schema'
+import type { ToolId } from '@/core/tools/tool-registry'
 
 export const SKETCH_STYLE_PATCH_INTENT = 'patchSketchStyle' as const
 

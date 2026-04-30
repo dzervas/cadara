@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
-import { getToolIconSrc, toolIconAssetFileNames } from '@/domain/tools/tool-icons'
+import { getToolIconSrc, toolIconAssetFileNames } from '@/core/tools/tool-icons'
 
 test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
   function assert(condition: unknown, message: string): asserts condition {

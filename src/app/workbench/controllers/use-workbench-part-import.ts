@@ -3,7 +3,7 @@ import { useCallback } from 'react'
 import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { ImportProvider } from '@/contracts/import/provider'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 import {
   createImportCapabilities,
   createImportSession,

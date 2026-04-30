@@ -4,17 +4,17 @@ import type {
   EditorViewState,
 } from '@/domain/editor/state-machine'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
-import type { PrimitiveRef, SelectionFilter } from '@/domain/editor/schema'
-import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
+import type { PrimitiveRef, SelectionFilter } from '@/core/editor/schema'
+import { getRegisteredFeatureAuthoringDefinitions } from '@/core/feature-authoring/registry'
 import {
   getActiveSketchStyleToolId,
   isSketchConstructionSelected,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
 } from '@/domain/editor/sketch-session'
-import { isRegisteredSketchEditToolId } from '@/domain/sketch-edit-tools/registry'
-import { isRegisteredSketchConstraintToolId } from '@/domain/sketch-constraints/registry'
-import { isRegisteredSketchToolId } from '@/domain/sketch-tools/registry'
+import { isRegisteredSketchEditToolId } from '@/core/sketch-edit-tools/registry'
+import { isRegisteredSketchConstraintToolId } from '@/core/sketch-constraints/registry'
+import { isRegisteredSketchToolId } from '@/core/sketch-tools/registry'
 
 export function getNavigationReopenRequest(
   snapshot: DocumentSnapshot | null,

@@ -1,12 +1,12 @@
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 
-import { getSectionPlaneOrigin, type SectionViewSession } from '@/domain/section-view/session'
+import { getSectionPlaneOrigin, type SectionViewSession } from '@/core/section-view/session'
 import {
   createSectionHatchTexture,
   getSectionPlaneBasis,
   type SectionCapRenderable,
-} from '@/domain/section-view/rendering'
+} from '@/infrastructure/section-view/rendering'
 
 export function SectionCapLayer({
   caps,

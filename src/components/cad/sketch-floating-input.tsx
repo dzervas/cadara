@@ -1,4 +1,4 @@
-import type { SketchToolFloatingInputDescriptor } from '@/domain/sketch-tools/editor-schema'
+import type { SketchToolFloatingInputDescriptor } from '@/core/sketch-tools/editor-schema'
 
 interface SketchFloatingInputProps {
   descriptor: SketchToolFloatingInputDescriptor | null | undefined

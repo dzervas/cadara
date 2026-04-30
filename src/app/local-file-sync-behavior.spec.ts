@@ -12,7 +12,7 @@ test('src/app/local-file-sync-behavior.spec.ts', () => {
   const workbenchSource = readFileSync(join(process.cwd(), 'src/app/workbench/cad-workbench.tsx'), 'utf8')
   const fileActionsSource = readFileSync(join(process.cwd(), 'src/app/workbench/document/workbench-document-actions.ts'), 'utf8')
   const localSyncSource = readFileSync(join(process.cwd(), 'src/app/workbench/controllers/use-workbench-local-file-sync.ts'), 'utf8')
-  const workerRuntimeSource = readFileSync(join(process.cwd(), 'src/domain/modeling/document-sync-worker-runtime.ts'), 'utf8')
+  const workerRuntimeSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync-worker-runtime.ts'), 'utf8')
 
   assert(
     fileActionsSource.includes('Local file sync requires the File System Access API.')

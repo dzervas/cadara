@@ -1,16 +1,16 @@
 import type { AuthoredFeatureKind, FeatureDefinition, FeatureSnapshotRecord } from '@/contracts/modeling/schema'
-import type { FeatureId, PrimitiveRef, SelectionFilter } from '@/domain/editor/schema'
+import type { FeatureId, PrimitiveRef, SelectionFilter } from '@/core/editor/schema'
 import type {
   FeatureDraftPatch,
   FeatureEditSessionState,
   FeatureEditSessionStateBase,
   FeatureEditSessionStateForKind,
-} from '@/domain/feature-authoring/definition'
+} from '@/core/feature-authoring/definition'
 import {
   getFeatureAuthoringDefinition,
   findFeatureAuthoringDefinition,
-} from '@/domain/feature-authoring/registry'
-import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+} from '@/core/feature-authoring/registry'
+import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 
 export type {
   ExtrudeFeatureEditSessionState,
@@ -44,7 +44,7 @@ export type {
   MirrorFeatureParameterDraft,
   TransformFeatureEditSessionState,
   TransformFeatureParameterDraft,
-} from '@/domain/feature-authoring/definition'
+} from '@/core/feature-authoring/definition'
 
 function createBaseFeatureSession(
   featureType: FeatureEditSessionState['featureType'],

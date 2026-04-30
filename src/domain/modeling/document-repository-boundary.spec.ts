@@ -17,7 +17,8 @@ test('src/domain/modeling/document-repository-boundary.spec.ts', () => {
     const source = readFileSync(file, 'utf8')
     if (
       source.includes('@automerge/automerge')
-      && !relativePath.includes('src/domain/modeling/automerge-indexeddb-document-repository.ts')
+      && !relativePath.includes('src/infrastructure/persistence/indexeddb-automerge-document-repository.ts')
+      && !relativePath.includes('src/infrastructure/persistence/document-repository-url-store.ts')
       && !relativePath.includes('src/domain/modeling/document-repository-boundary.spec.ts')
     ) {
       offenders.push(relativePath)

@@ -6,8 +6,8 @@ import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
-import { getToolbarToolCommandId } from '@/domain/shortcuts/commands'
-import type { DropdownToolDefinition, RegisteredToolDefinition } from '@/domain/tools/tool-registry'
+import { getToolbarToolCommandId } from '@/core/shortcuts/commands'
+import type { DropdownToolDefinition, RegisteredToolDefinition } from '@/core/tools/tool-registry'
 import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
 
 interface ToolDropdownButtonProps {

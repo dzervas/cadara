@@ -1,4 +1,4 @@
-import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
 
 type SketchToolControl = NonNullable<SketchToolPresentationSchema['controls']>[number]
 

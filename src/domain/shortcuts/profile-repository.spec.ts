@@ -7,7 +7,7 @@ import {
   resetCommandShortcut,
   setCommandShortcutOverride,
   type ShortcutStorageLike,
-} from '@/domain/shortcuts/profile-repository'
+} from '@/core/shortcuts/profile-repository'
 
 test('src/domain/shortcuts/profile-repository.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {

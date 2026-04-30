@@ -21,7 +21,7 @@ import type {
 } from '@/contracts/shared/references'
 import type {
   PrimitiveRef,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   SketchHistoryCursor,
   SketchHistoryItem,

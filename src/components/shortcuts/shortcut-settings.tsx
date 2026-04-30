@@ -13,8 +13,8 @@ import {
   setShortcutConflictState,
   startShortcutRecording,
 } from '@/components/shortcuts/shortcut-settings-model'
-import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
-import { createShortcutReferenceGroups } from '@/domain/shortcuts/reference'
+import type { ShortcutCommandId } from '@/core/shortcuts/commands'
+import { createShortcutReferenceGroups } from '@/core/shortcuts/reference'
 import { useShortcuts } from '@/hooks/use-shortcuts'
 
 export function ShortcutSettingsButton() {

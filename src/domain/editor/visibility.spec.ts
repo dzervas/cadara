@@ -6,7 +6,7 @@ import {
   reconcileVisibilityIntentKeys,
   toggleWorkbenchTargetVisibility,
 } from '@/domain/editor/visibility'
-import { getPrimitiveRefKey } from '@/domain/editor/schema'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/domain/editor/visibility.spec.ts', async () => {

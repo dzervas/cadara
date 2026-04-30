@@ -9,7 +9,7 @@ import {
   createSectionClippingPlane,
   resolveSectionDragOffset,
 } from '@/domain/section-view/rendering'
-import type { SectionViewSession } from '@/domain/section-view/session'
+import type { SectionViewSession } from '@/core/section-view/session'
 
 test('src/domain/section-view/rendering.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

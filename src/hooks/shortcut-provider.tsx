@@ -5,17 +5,17 @@ import type {
   ShortcutCommandId,
   ShortcutCommandRegistry,
   ShortcutScope,
-} from '@/domain/shortcuts/commands'
+} from '@/core/shortcuts/commands'
 import {
   createShortcutCommandRegistry,
   getShortcutCommandDefinitions,
-} from '@/domain/shortcuts/commands'
+} from '@/core/shortcuts/commands'
 import {
   createEffectiveKeymap,
   detectShortcutConflicts,
   getPrimaryShortcut,
   type ShortcutProfileOverrides,
-} from '@/domain/shortcuts/keymap'
+} from '@/core/shortcuts/keymap'
 import {
   createLocalShortcutProfileRepository,
   disableCommandShortcut,
@@ -24,8 +24,8 @@ import {
   resetCommandShortcut,
   setCommandShortcutOverride,
   type ShortcutProfileRepository,
-} from '@/domain/shortcuts/profile-repository'
-import { createShortcutResolver } from '@/domain/shortcuts/resolver'
+} from '@/core/shortcuts/profile-repository'
+import { createShortcutResolver } from '@/core/shortcuts/resolver'
 import { ShortcutContext } from '@/hooks/shortcut-context'
 import { isTextEditingTarget } from '@/hooks/shortcut-targets'
 import { validateShortcutOverrideUpdate } from '@/hooks/shortcut-validation'

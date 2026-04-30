@@ -5,7 +5,7 @@ import type {
   SketchDimensionAnnotationDragHandle,
 } from '@/domain/editor/sketch-session'
 import type { SketchConstraintRef, SketchDimensionRef } from '@/contracts/shared/references'
-import { getToolIconSrc } from '@/domain/tools/tool-icons'
+import { getToolIconSrc } from '@/core/tools/tool-icons'
 import {
   getAnnotationProjectionId,
   layoutSketchAnnotationProjections,

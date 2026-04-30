@@ -7,10 +7,10 @@ import type {
 } from '@/contracts/sketch/schema'
 import type {
   PrimitiveRef,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getPrimitiveRefKey,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getConstraintAffectedGeometryRefs,
   getDimensionAffectedGeometryRefs,

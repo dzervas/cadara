@@ -10,7 +10,7 @@ import type {
 } from '@/contracts/sketch/schema'
 import type {
   PrimitiveRef,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 
 export function createProjectedPrimitiveRef(
   reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },

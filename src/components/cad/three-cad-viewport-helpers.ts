@@ -1,20 +1,20 @@
 import * as THREE from 'three'
 
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import type { SectionViewSession } from '@/domain/section-view/session'
-import { getSectionPlaneOrigin } from '@/domain/section-view/session'
+import type { SectionViewSession } from '@/core/section-view/session'
+import { getSectionPlaneOrigin } from '@/core/section-view/session'
 import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,
   type SelectionFilter,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   DEFAULT_LINE_PICK_THRESHOLD,
   applyWireMaterialDepthPolicy,
   getBoundTarget,
   type PickResolutionOptions,
-} from '@/domain/workspace/render-picking'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+} from '@/infrastructure/viewport/render-picking'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 
 export const WORKSPACE_SCAFFOLD_RENDER_ORDER = 0
 const MEASURE_LINE_PICK_THRESHOLD = 0.12

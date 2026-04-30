@@ -14,10 +14,10 @@ import {
   createFeatureEditorFieldPatch,
   createFeatureEditorReferenceSelectionPatch,
   createFeatureEditorRemoveReferenceItemPatch,
-} from '@/domain/feature-authoring/form-events'
-import { getRegisteredFeatureAuthoringDefinitions } from '@/domain/feature-authoring/registry'
-import type { FeatureAuthoringDefinition } from '@/domain/feature-authoring/definition'
-import type { FeatureEditorFormField } from '@/domain/feature-authoring/form-schema'
+} from '@/core/feature-authoring/form-events'
+import { getRegisteredFeatureAuthoringDefinitions } from '@/core/feature-authoring/registry'
+import type { FeatureAuthoringDefinition } from '@/core/feature-authoring/definition'
+import type { FeatureEditorFormField } from '@/core/feature-authoring/form-schema'
 
 test('src/domain/feature-authoring/registry.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -1366,18 +1366,18 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
   function testAdvancedAuthoringAndInspectorDoNotImportKernelModules() {
     const files = [
-      'src/domain/feature-authoring/definition.ts',
-      'src/domain/feature-authoring/form-schema.ts',
-      'src/domain/feature-authoring/form-events.ts',
-      'src/domain/feature-authoring/features/sweep.ts',
-      'src/domain/feature-authoring/features/loft.ts',
-      'src/domain/feature-authoring/features/chamfer.ts',
-      'src/domain/feature-authoring/features/thicken.ts',
-      'src/domain/feature-authoring/features/combine.ts',
-      'src/domain/feature-authoring/features/split.ts',
-      'src/domain/feature-authoring/features/delete-solid.ts',
-      'src/domain/feature-authoring/features/mirror.ts',
-      'src/domain/feature-authoring/features/transform.ts',
+      'src/core/feature-authoring/definition.ts',
+      'src/core/feature-authoring/form-schema.ts',
+      'src/core/feature-authoring/form-events.ts',
+      'src/core/feature-authoring/features/sweep.ts',
+      'src/core/feature-authoring/features/loft.ts',
+      'src/core/feature-authoring/features/chamfer.ts',
+      'src/core/feature-authoring/features/thicken.ts',
+      'src/core/feature-authoring/features/combine.ts',
+      'src/core/feature-authoring/features/split.ts',
+      'src/core/feature-authoring/features/delete-solid.ts',
+      'src/core/feature-authoring/features/mirror.ts',
+      'src/core/feature-authoring/features/transform.ts',
       'src/components/layout/feature-inspector.tsx',
     ]
 

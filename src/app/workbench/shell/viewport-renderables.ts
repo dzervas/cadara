@@ -6,9 +6,9 @@ import {
   getSketchConstraintDisplaySummary,
 } from '@/domain/editor/sketch-session'
 import { mergeSketchRenderables, type MergedSketchRenderables } from '@/domain/editor/sketch-session-controller'
-import { getPrimitiveRefKey } from '@/domain/editor/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 
 export interface ComposeViewportRenderablesInput {
   snapshotRenderables: RenderableEntityRecord[]

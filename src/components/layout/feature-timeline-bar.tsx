@@ -16,11 +16,11 @@ import {
   getModelingDiagnosticRepairMessage,
   isFeatureScopedModelingDiagnostic,
 } from '@/contracts/modeling/diagnostics'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import {
   getPrimitiveRefKey,
   selectionFilterAllowsTarget,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getSketchHistoryCursorForIndex,
   getSketchHistoryCursorIndex,
@@ -43,7 +43,7 @@ import {
 import {
   getDocumentHistoryItemToolIcon,
   getSketchHistoryItemToolIcon,
-} from '@/domain/tools/tool-icon-resolvers'
+} from '@/core/tools/tool-icon-resolvers'
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 

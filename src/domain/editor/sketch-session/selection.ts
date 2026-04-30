@@ -8,7 +8,7 @@ import type {
 } from '@/contracts/sketch/schema'
 import type {
   PrimitiveRef,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   collectActiveReferenceImageOperations,
 } from '@/domain/reference-image/operations'

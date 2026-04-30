@@ -9,9 +9,9 @@ import type { MeasurementWitness } from '@/domain/measure/measurement'
 import {
   MARKER_SPHERE_GEOMETRY,
   getVisibleMarkerRadius,
-} from '@/domain/workspace/render-picking'
-import { createViewportCameraTransitionController } from '@/domain/workspace/viewport-camera-transition'
-import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+} from '@/infrastructure/viewport/render-picking'
+import { createViewportCameraTransitionController } from '@/infrastructure/viewport/viewport-camera-transition'
+import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
 import {
   applyViewportCameraFrame,
   applyViewportCameraFrameToCamera,
@@ -22,12 +22,12 @@ import {
   type ViewportCamera,
   type ViewportCameraFrame,
   type ViewportProjectionMode,
-} from '@/domain/workspace/viewport-projection'
+} from '@/infrastructure/viewport/viewport-projection'
 import {
   selectViewportLodTierForRenderables,
   type OccTessellationTierId,
 } from '@/domain/modeling/occ/tessellation'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 import {
   createRenderIdleTracker,
   configureWorkspaceScaffoldWireObject,

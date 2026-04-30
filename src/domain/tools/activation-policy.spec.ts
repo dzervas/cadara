@@ -3,7 +3,7 @@ import { test } from 'bun:test'
 import {
   getToolCommandBehavior,
   resolveToolActivationMode,
-} from '@/domain/tools/activation-policy'
+} from '@/core/tools/activation-policy'
 
 test('src/domain/tools/activation-policy.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

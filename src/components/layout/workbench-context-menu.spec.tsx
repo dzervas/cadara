@@ -3,9 +3,9 @@ import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
-import { createShortcutCommandRegistry } from '@/domain/shortcuts/commands'
-import type { ShortcutCommandDefinition } from '@/domain/shortcuts/commands'
-import { createEffectiveKeymap } from '@/domain/shortcuts/keymap'
+import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
+import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
+import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
 import { ShortcutContext } from '@/hooks/shortcut-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 

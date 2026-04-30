@@ -1,6 +1,6 @@
 import { createContext } from 'react'
 
-import type { ToolActionBus } from '@/domain/tools/tool-action-bus'
+import type { ToolActionBus } from '@/core/tools/tool-action-bus'
 
 export interface ToolActionContextValue {
   actionBus: ToolActionBus

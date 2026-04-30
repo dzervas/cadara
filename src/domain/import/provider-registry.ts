@@ -1,6 +1,6 @@
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { ResolvedImportSource } from '@/contracts/import/source'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 
 export interface ImportProviderRegistry {
   getAll(): readonly ImportProvider<unknown, unknown, FeatureEditorFormSchema>[]

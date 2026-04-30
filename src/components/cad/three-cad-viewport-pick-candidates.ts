@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import {
   type PrimitiveRef,
   primitiveRefEquals,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type { SketchAnnotationDescriptor } from '@/domain/editor/sketch-session'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
 import type {
@@ -16,9 +16,9 @@ import {
   DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
   shouldIncludeProjectedPickCandidate,
   type PickCandidate,
-} from '@/domain/workspace/render-picking'
-import type { ViewportCamera } from '@/domain/workspace/viewport-projection'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+} from '@/infrastructure/viewport/render-picking'
+import type { ViewportCamera } from '@/infrastructure/viewport/viewport-projection'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 
 export function collectProjectedVertexCandidates({
   clientX,

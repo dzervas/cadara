@@ -1,7 +1,7 @@
 import { Text } from '@mantine/core'
 
-import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
-import { formatShortcut, type ShortcutSequence } from '@/domain/shortcuts/shortcut-grammar'
+import type { ShortcutCommandId } from '@/core/shortcuts/commands'
+import { formatShortcut, type ShortcutSequence } from '@/core/shortcuts/shortcut-grammar'
 import { useShortcutDisplay } from '@/hooks/use-shortcuts'
 
 interface ShortcutHintProps {

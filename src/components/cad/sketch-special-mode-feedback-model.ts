@@ -1,8 +1,8 @@
-import type { SketchToolAnchorDescriptor } from '@/domain/sketch-tools/editor-schema'
+import type { SketchToolAnchorDescriptor } from '@/core/sketch-tools/editor-schema'
 import type {
   SketchSpecialModeViewportOverlay,
   SketchSpecialModeViewportPresentation,
-} from '@/domain/sketch-special-modes/schema'
+} from '@/core/sketch-special-modes/schema'
 
 export interface SketchSpecialModeFeedbackProjection {
   id: string

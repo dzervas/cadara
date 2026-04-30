@@ -5,15 +5,15 @@ import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,
   selectionFilterAllowsTarget,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type { DocumentSnapshot, DocumentVariableRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
-import { getObjectTreeNodeToolIcon } from '@/domain/tools/tool-icon-resolvers'
+import { getObjectTreeNodeToolIcon } from '@/core/tools/tool-icon-resolvers'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureSidebarProps {

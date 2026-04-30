@@ -1,21 +1,7 @@
-import { createRegistry, type DomainRegistry } from '@/domain/tools/registry-factory'
-import type {
-  SketchSpecialModeDefinition,
-  SketchSpecialModeId,
-} from '@/domain/sketch-special-modes/schema'
+import type { SketchSpecialModeDefinition } from '@/core/sketch-special-modes/schema'
 import { referenceImageCalibrationModeDefinition } from '@/domain/reference-image-calibration/mode/definition'
 
-export type SketchSpecialModeRegistry = DomainRegistry<SketchSpecialModeId, SketchSpecialModeDefinition>
-
-export function createSketchSpecialModeRegistry(
-  definitions: readonly SketchSpecialModeDefinition[],
-): SketchSpecialModeRegistry {
-  return createRegistry<SketchSpecialModeId, SketchSpecialModeDefinition>(
-    definitions,
-    (definition) => definition.id,
-    'Sketch special mode',
-  )
-}
+export * from '@/core/sketch-special-modes/registry'
 
 export const builtinSketchSpecialModeDefinitions = [
   referenceImageCalibrationModeDefinition,

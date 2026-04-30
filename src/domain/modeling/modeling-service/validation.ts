@@ -10,10 +10,10 @@ import type {
   RevisionId,
   SketchId,
   VertexId,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getPrimitiveRefKey,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   ExtrudeProfileRef,
   FilletEdgeRef,

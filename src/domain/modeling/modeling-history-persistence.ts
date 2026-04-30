@@ -45,37 +45,6 @@ export function createMemoryOperationHistoryStore(
   }
 }
 
-export function createLocalStorageOperationHistoryStore(
-  storage: StorageLike,
-  key = MODELING_OPERATION_HISTORY_STORAGE_KEY,
-): OperationHistoryStore {
-  return {
-    load() {
-      const serialized = storage.getItem(key)
-
-      if (serialized === null) {
-        return { ok: true, payload: null }
-      }
-
-      try {
-        return validateOperationHistoryPayload(JSON.parse(serialized) as unknown)
-      } catch {
-        return {
-          ok: false,
-          reasonCode: 'invalid-json',
-          message: 'Operation history storage did not contain valid JSON.',
-        }
-      }
-    },
-    save(payload) {
-      storage.setItem(key, JSON.stringify(payload))
-    },
-    clear() {
-      storage.removeItem(key)
-    },
-  }
-}
-
 export function loadOrCreateOperationHistory(
   store: OperationHistoryStore | null,
   documentId: DocumentId,
@@ -97,3 +66,5 @@ export function loadOrCreateOperationHistory(
     payload: result.payload ?? createEmptyOperationHistory(documentId),
   }
 }
+
+export { createLocalStorageOperationHistoryStore } from '@/infrastructure/persistence/local-storage-operation-history-store'

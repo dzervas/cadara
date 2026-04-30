@@ -1,12 +1,12 @@
 import { test } from 'bun:test'
 
-import type { ShortcutCommandDefinition } from '@/domain/shortcuts/commands'
-import { createShortcutCommandRegistry } from '@/domain/shortcuts/commands'
+import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
+import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import {
   disableCommandShortcut,
   resetCommandShortcut,
   setCommandShortcutOverride,
-} from '@/domain/shortcuts/profile-repository'
+} from '@/core/shortcuts/profile-repository'
 import { validateShortcutOverrideUpdate } from '@/hooks/shortcut-validation'
 
 test('src/hooks/shortcut-provider.spec.ts', () => {

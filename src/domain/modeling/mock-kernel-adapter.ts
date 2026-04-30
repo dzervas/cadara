@@ -22,7 +22,7 @@ import type {
   SnapshotEntityId,
   VertexId,
 } from '@/contracts/shared/ids'
-import { getPrimitiveRefKey } from '@/domain/editor/schema'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
 import {
   createDocumentHistoryItems,
   createDocumentHistoryOrder,

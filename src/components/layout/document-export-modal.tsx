@@ -29,7 +29,7 @@ import type {
 import type { ObjectExportModalState } from '@/domain/export/object-export-state'
 import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import type { ExportProvider } from '@/contracts/export/provider'
-import type { FeatureEditorFormField, FeatureEditorFormSection } from '@/domain/feature-authoring/form-schema'
+import type { FeatureEditorFormField, FeatureEditorFormSection } from '@/core/feature-authoring/form-schema'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 
 interface DocumentExportModalProps {

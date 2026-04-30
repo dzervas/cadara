@@ -3,7 +3,15 @@ import { join, relative } from 'node:path'
 import { test } from 'bun:test'
 
 const ROOT = process.cwd()
-const LAYER_ROOTS = ['src/components', 'src/contracts', 'src/domain', 'src/hooks'] as const
+const LAYER_ROOTS = [
+  'src/application',
+  'src/components',
+  'src/contracts',
+  'src/core',
+  'src/domain',
+  'src/hooks',
+  'src/infrastructure',
+] as const
 
 test('src/app/workbench-architecture-boundary.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
@@ -92,12 +100,14 @@ test('src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
   const importSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-part-import.ts'), 'utf8')
   const fileActionsSource = readFileSync(join(ROOT, 'src/app/workbench/document/workbench-document-actions.ts'), 'utf8')
   const ownerHookSource = readFileSync(join(ROOT, 'src/hooks/use-workbench-document-owner.ts'), 'utf8')
+  const ownerServiceSource = readFileSync(join(ROOT, 'src/application/workbench/document-owner.ts'), 'utf8')
   const presentationHookSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-document-presentation.ts'), 'utf8')
 
   assert(
-    ownerHookSource.includes("dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })")
-      && ownerHookSource.includes("dispatch({ type: 'document.replaced', snapshot: nextSnapshot })"),
-    'Workbench document owner hook should provide distinct incremental snapshot and whole-document replacement handoffs.',
+    ownerHookSource.includes('createWorkbenchDocumentOwner')
+      && ownerServiceSource.includes("dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })")
+      && ownerServiceSource.includes("dispatch({ type: 'document.replaced', snapshot: nextSnapshot })"),
+    'Workbench document owner should keep distinct incremental snapshot and whole-document replacement handoffs while the hook remains a thin adapter.',
   )
   assert(
     historySource.includes('useWorkbenchDocumentOwner')
@@ -143,8 +153,8 @@ test('src/app/workbench-architecture-boundary.spec.ts extension registry composi
   const appSource = readFileSync(join(ROOT, 'src/App.tsx'), 'utf8')
   const modelingServiceSource = readFileSync(join(ROOT, 'src/domain/modeling/modeling-service/service.ts'), 'utf8')
   const importControllerSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-part-import.ts'), 'utf8')
-  const specialModeRegistrySource = readFileSync(join(ROOT, 'src/domain/sketch-special-modes/registry.ts'), 'utf8')
-  const specialModePresentationSource = readFileSync(join(ROOT, 'src/domain/sketch-special-modes/presentation.ts'), 'utf8')
+  const specialModeRegistrySource = readFileSync(join(ROOT, 'src/core/sketch-special-modes/registry.ts'), 'utf8')
+  const specialModePresentationSource = readFileSync(join(ROOT, 'src/core/sketch-special-modes/presentation.ts'), 'utf8')
 
   assert(
     appSource.includes('createBuiltinRuntimeExtensionRegistryComposition')

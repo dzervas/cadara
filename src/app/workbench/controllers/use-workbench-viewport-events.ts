@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 
 import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import { getNavigationReopenRequest } from '@/domain/editor/workbench-interactions'
-import type { SketchSpecialModeHandleRef } from '@/domain/sketch-special-modes/schema'
+import type { SketchSpecialModeHandleRef } from '@/core/sketch-special-modes/schema'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { ModelingService } from '@/domain/modeling/modeling-service'

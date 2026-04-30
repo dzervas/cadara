@@ -1,13 +1,13 @@
 import { test } from 'bun:test'
 
-import type { ShortcutCommandDefinition } from '@/domain/shortcuts/commands'
-import { createShortcutCommandRegistry } from '@/domain/shortcuts/commands'
+import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
+import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import {
   createEffectiveKeymap,
   detectShortcutConflicts,
   getPrimaryShortcut,
-} from '@/domain/shortcuts/keymap'
-import { serializeShortcut } from '@/domain/shortcuts/shortcut-grammar'
+} from '@/core/shortcuts/keymap'
+import { serializeShortcut } from '@/core/shortcuts/shortcut-grammar'
 
 test('src/domain/shortcuts/keymap.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

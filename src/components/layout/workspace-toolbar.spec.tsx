@@ -16,7 +16,7 @@ import {
   startSketchDraw,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
-import { createToolActionBus } from '@/domain/tools/tool-action-bus'
+import { createToolActionBus } from '@/core/tools/tool-action-bus'
 import { EditorContext } from '@/hooks/editor-context'
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import { WorkbenchCommandProvider } from '@/hooks/workbench-command-provider'

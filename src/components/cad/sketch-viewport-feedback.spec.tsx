@@ -2,7 +2,7 @@ import { test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { SketchViewportFeedbackLayer } from '@/components/cad/sketch-viewport-feedback'
-import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
 
 test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
   function assert(condition: unknown, message: string): asserts condition {

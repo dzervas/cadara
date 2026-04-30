@@ -43,7 +43,7 @@ import {
   solveSketchDefinitionCore,
 } from '@/contracts/sketch/solver-core'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import {
   buildReferenceImageAnchorProjectedReferences,
   mergeReferenceImageAnchorReferences,
@@ -58,18 +58,18 @@ import {
 } from '@/domain/reference-image-calibration/mode/shared'
 import {
   isRegisteredSketchConstraintToolId,
-} from '@/domain/sketch-constraints/registry'
+} from '@/core/sketch-constraints/registry'
 import {
   isRegisteredSketchEditToolId,
-} from '@/domain/sketch-edit-tools/registry'
+} from '@/core/sketch-edit-tools/registry'
 import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
   SketchToolId,
-} from '@/domain/sketch-tools/definition'
+} from '@/core/sketch-tools/definition'
 import {
   sampleArcPoints,
-} from '@/domain/sketch-tools/geometry'
+} from '@/core/sketch-tools/geometry'
 import type {
   SketchAuthoringToolId,
   SketchHistoryCursor,

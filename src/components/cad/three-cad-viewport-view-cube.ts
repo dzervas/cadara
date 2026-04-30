@@ -3,12 +3,12 @@ import * as THREE from 'three'
 import {
   VIEW_CUBE_CORNER_TARGETS,
   VIEW_CUBE_FACE_TARGETS,
-} from '@/domain/workspace/view-cube-navigation'
+} from '@/infrastructure/viewport/view-cube-navigation'
 import type {
   ViewNavigationCornerPresetId,
   ViewNavigationFacePresetId,
   ViewNavigationPresetId,
-} from '@/domain/workspace/view-navigation'
+} from '@/infrastructure/viewport/view-navigation'
 
 export const VIEW_CUBE_BODY_HALF_SIZE = 0.58
 export const VIEW_CUBE_SURFACE_OFFSET = 0.002

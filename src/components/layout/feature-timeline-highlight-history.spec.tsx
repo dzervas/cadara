@@ -39,7 +39,7 @@ import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 import { buildOccWorkspaceSnapshot } from '@/domain/modeling/occ/snapshot'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { getTargetContributingFeatureIds } from '@/domain/modeling/document-snapshot-view'
-import { getPrimitiveRefKey, type PrimitiveRef } from '@/domain/editor/schema'
+import { getPrimitiveRefKey, type PrimitiveRef } from '@/core/editor/schema'
 import { EditorContext } from '@/hooks/editor-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 

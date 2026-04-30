@@ -4,7 +4,7 @@ import { strict as assert } from 'node:assert'
 import {
   VIEW_CUBE_CORNER_TARGETS,
   VIEW_CUBE_FACE_TARGETS,
-} from '@/domain/workspace/view-cube-navigation'
+} from '@/infrastructure/viewport/view-cube-navigation'
 
 test('src/domain/workspace/view-cube-navigation.spec.ts', async () => {
   assert.equal(VIEW_CUBE_FACE_TARGETS.length, 6, 'The cube should expose the six principal face targets.')

@@ -16,8 +16,8 @@ import {
   getRenderableRenderOrder,
   getVisibleMarkerRadius,
   isSeededDatumPlaneRenderable,
-} from '@/domain/workspace/render-picking'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+} from '@/infrastructure/viewport/render-picking'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 
 function getDocumentRenderableMaterialOptions(
   entry: ViewportRenderableRecord,

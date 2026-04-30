@@ -8,7 +8,7 @@ import {
   type PrimitiveRef,
   type SelectionFilter,
   type SelectionTargetCatalog,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 
 interface CadTestStateWindow {
   __cadTestState?: WorkbenchStateDebuggerModel

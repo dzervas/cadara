@@ -3,7 +3,7 @@ import {
   serializeShortcut,
   shortcutFromKeyboardEvent,
   type KeyboardShortcutEvent,
-} from '@/domain/shortcuts/shortcut-grammar'
+} from '@/core/shortcuts/shortcut-grammar'
 
 export function getRecordedShortcutStep(event: KeyboardShortcutEvent) {
   if (isModifierOnlyShortcutEvent(event)) {

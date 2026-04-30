@@ -16,20 +16,20 @@ import type {
 import {
   type PrimitiveRef,
   primitiveRefEquals,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getSketchConstraintDefinition,
   inferDimensionAnnotationPlacement,
   isRegisteredSketchConstraintToolId,
-} from '@/domain/sketch-constraints/registry'
+} from '@/core/sketch-constraints/registry'
 import type {
   SketchEditToolId,
   SketchEditToolSelectionRequirement,
-} from '@/domain/sketch-edit-tools/definition'
+} from '@/core/sketch-edit-tools/definition'
 import {
   getSketchEditToolDefinition,
   isRegisteredSketchEditToolId,
-} from '@/domain/sketch-edit-tools/registry'
+} from '@/core/sketch-edit-tools/registry'
 import {
   type SketchSnapCandidate,
   type SketchSnapSourceRef,
@@ -44,16 +44,16 @@ import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
   SketchToolId,
-} from '@/domain/sketch-tools/definition'
+} from '@/core/sketch-tools/definition'
 import type {
   SketchToolAnchorDescriptor,
   SketchToolControlValue,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
-} from '@/domain/sketch-tools/editor-schema'
+} from '@/core/sketch-tools/editor-schema'
 import {
   getSketchToolDefinition,
-} from '@/domain/sketch-tools/registry'
+} from '@/core/sketch-tools/registry'
 import type {
   SketchAuthoringToolId,
   SketchConstraintAuthoringState,
@@ -1657,7 +1657,7 @@ export function startSketchDraw(session: SketchSessionState, point: SketchPoint)
       placedPoints: [],
       settings: session.toolSettings,
       validationMessage: null,
-    } satisfies import('@/domain/sketch-tools/definition').SketchToolRuntimeState,
+    } satisfies import('@/core/sketch-tools/definition').SketchToolRuntimeState,
     point: snap.point,
   })
 
@@ -1909,7 +1909,7 @@ export function getSnapConstraintPreviewDetail(candidate: SketchSnapCandidate) {
   }
 }
 
-export function getToolRuntimeState(session: SketchSessionState): import('@/domain/sketch-tools/definition').SketchToolRuntimeState {
+export function getToolRuntimeState(session: SketchSessionState): import('@/core/sketch-tools/definition').SketchToolRuntimeState {
   return {
     status: session.status === 'drawing' ? 'drawing' : 'idle',
     pointerDownPoint: session.pointerDownPoint,

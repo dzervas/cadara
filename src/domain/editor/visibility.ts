@@ -1,5 +1,5 @@
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
-import { getPrimitiveRefKey, type PrimitiveRef } from '@/domain/editor/schema'
+import { getPrimitiveRefKey, type PrimitiveRef } from '@/core/editor/schema'
 
 export interface WorkbenchVisibilityState {
   autoHiddenSketchTargetKeys: Record<string, boolean>

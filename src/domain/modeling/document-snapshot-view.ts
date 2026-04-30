@@ -1,12 +1,12 @@
-import { getPrimitiveRefKey, getPrimitiveRefLabel } from '@/domain/editor/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import { getPrimitiveRefKey, getPrimitiveRefLabel } from '@/core/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import type {
   DocumentSnapshot,
   FeatureSnapshotRecord,
   SnapshotEntityRecord,
 } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
-import type { SelectionTargetCatalog } from '@/domain/editor/schema'
+import type { SelectionTargetCatalog } from '@/core/editor/schema'
 
 export interface DocumentSelectionDetail {
   label: string

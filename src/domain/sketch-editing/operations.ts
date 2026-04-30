@@ -13,7 +13,7 @@ import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
   SketchToolCommitFactories,
-} from '@/domain/sketch-tools/definition'
+} from '@/core/sketch-tools/definition'
 import { distanceBetween as distanceBetweenPoints } from '@/domain/sketch/point-math'
 
 export type OffsetSide = 'left' | 'right'

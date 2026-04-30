@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { CadWorkbench } from "@/app/workbench/cad-workbench";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createLocalStorageOperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
-import { createLocalStorageDocumentRepositoryUrlStore } from "@/domain/modeling/automerge-indexeddb-document-repository";
-import { createBrowserDocumentSyncWorkerClient } from "@/domain/modeling/document-sync-worker-client";
-import { createWorkerBackedDocumentRepository } from "@/domain/modeling/worker-backed-document-repository";
-import { registerOpenCascadeAssetCache } from "@/domain/modeling/occ/asset-cache";
+import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
+import { createLocalStorageDocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
+import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
+import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
+import { registerOpenCascadeAssetCache } from "@/infrastructure/occ/asset-cache";
 import {
 	getBrowserOccKernelAdapter,
 	startBrowserOccWarmup,
-} from "@/domain/modeling/occ/browser-kernel-runtime";
+} from "@/infrastructure/occ/browser-kernel-runtime";
 import {
 	OCC_KERNEL_DOCUMENT_ID,
 } from "@/domain/modeling/opencascade-kernel-seed";
@@ -20,7 +20,7 @@ import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
 import { ToolActionProvider } from "@/hooks/tool-action-provider";
-import { createToolActionBus } from "@/domain/tools/tool-action-bus";
+import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import { ReportedErrorBoundary } from "@/components/layout/reported-error-boundary";
 import { BuildMetadataLabel } from "@/components/layout/build-metadata-label";
 import { SentryAdBlockNotification } from "@/components/layout/sentry-ad-block-notification";

@@ -1,6 +1,6 @@
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { DurableRef } from '@/contracts/shared/references'
-import { isDurablePrimitiveRef, type PrimitiveRef } from '@/domain/editor/schema'
+import { isDurablePrimitiveRef, type PrimitiveRef } from '@/core/editor/schema'
 
 export interface ObjectExportModalState {
   target: DurableRef

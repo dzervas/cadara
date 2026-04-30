@@ -17,14 +17,14 @@ import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import {
   type PrimitiveRef,
   primitiveRefEquals,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   collectActiveReferenceImageOperations,
   createReferenceImageDeleteOperation,
 } from '@/domain/reference-image/operations'
 import {
   getSketchEditToolDefinition,
-} from '@/domain/sketch-edit-tools/registry'
+} from '@/core/sketch-edit-tools/registry'
 import {
   type OffsetCurveDescriptor,
   type SketchEditOperationResult,

@@ -6,7 +6,7 @@ import {
   parseShortcut,
   serializeShortcut,
   shortcutFromKeyboardEvent,
-} from '@/domain/shortcuts/shortcut-grammar'
+} from '@/core/shortcuts/shortcut-grammar'
 
 test('src/domain/shortcuts/shortcut-grammar.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

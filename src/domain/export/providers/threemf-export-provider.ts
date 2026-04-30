@@ -4,7 +4,7 @@ import type { ExportCapabilities, MeshTriangle } from '@/contracts/export/capabi
 import type { ExportProvider, ExportProviderInput } from '@/contracts/export/provider'
 import type { ExportResult } from '@/contracts/export/result'
 import type { DurableRef } from '@/contracts/shared/references'
-import type { FeatureEditorFormSchema } from '@/domain/feature-authoring/form-schema'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 
 export interface ThreeMfMeshAccuracyOptions {
   chordTolerance: number

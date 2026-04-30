@@ -7,10 +7,10 @@ import type {
   PrimitiveRef,
   RevisionId,
   SketchId,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   getPrimitiveRefLabel as formatPrimitiveRefLabel,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   CommitSketchRequest,
   AddDocumentVariableRequest,

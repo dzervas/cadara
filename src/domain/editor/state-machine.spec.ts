@@ -20,8 +20,8 @@ import {
   primitiveRefEquals,
   type PrimitiveRef,
   type SelectionTargetCatalog,
-} from '@/domain/editor/schema'
-import type { ToolId } from '@/domain/tools/tool-registry'
+} from '@/core/editor/schema'
+import type { ToolId } from '@/core/tools/tool-registry'
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'

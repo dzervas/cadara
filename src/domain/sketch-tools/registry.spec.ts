@@ -16,12 +16,12 @@ import {
   getRegisteredSketchToolDefinitions,
   getSketchToolDefinition,
   isRegisteredSketchToolId,
-} from '@/domain/sketch-tools/registry'
+} from '@/core/sketch-tools/registry'
 import {
   getRegisteredSketchEditToolDefinitions,
   isRegisteredSketchEditToolId,
-} from '@/domain/sketch-edit-tools/registry'
-import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/domain/tools/tool-registry'
+} from '@/core/sketch-edit-tools/registry'
+import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/core/tools/tool-registry'
 
 test('src/domain/sketch-tools/registry.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {

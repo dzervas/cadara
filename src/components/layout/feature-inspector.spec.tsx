@@ -10,13 +10,13 @@ import {
   createFeatureEditorFormValues,
   previewFeatureEditorFieldExpression,
   shouldResetFeatureEditorFormValues,
-} from '@/domain/feature-authoring/form-adapter'
+} from '@/core/feature-authoring/form-adapter'
 import {
   createFeatureEditSession,
   getFeatureEditorFormSchema,
   patchFeatureEditSession,
 } from '@/domain/editor/feature-editing'
-import type { ToolId } from '@/domain/tools/tool-registry'
+import type { ToolId } from '@/core/tools/tool-registry'
 import { EditorContext } from '@/hooks/editor-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 

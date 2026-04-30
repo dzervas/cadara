@@ -1,14 +1,14 @@
 import { useContext } from 'react'
 
-import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
+import type { ShortcutCommandId } from '@/core/shortcuts/commands'
 import {
   createShortcutCommandRegistry,
   getShortcutCommandDefinitions,
-} from '@/domain/shortcuts/commands'
+} from '@/core/shortcuts/commands'
 import {
   createEffectiveKeymap,
   getPrimaryShortcut,
-} from '@/domain/shortcuts/keymap'
+} from '@/core/shortcuts/keymap'
 import { ShortcutContext } from '@/hooks/shortcut-context'
 
 const defaultCommands = getShortcutCommandDefinitions()

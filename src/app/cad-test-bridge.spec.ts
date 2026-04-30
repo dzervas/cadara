@@ -5,7 +5,7 @@ import {
   resolveCadTestTarget,
   syncCadTestState,
 } from '@/app/workbench/cad-test-bridge'
-import { defaultSelectionFilter } from '@/domain/editor/schema'
+import { defaultSelectionFilter } from '@/core/editor/schema'
 import type { DocumentSnapshot } from '@/contracts/modeling/schema'
 import type { EditorEvent } from '@/domain/editor/state-machine'
 import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'

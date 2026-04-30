@@ -1,8 +1,8 @@
 import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
 import { isEditableSketchGeometrySelection } from '@/domain/editor/sketch-session'
 import { getEscapeEvent } from '@/domain/editor/workbench-interactions'
-import { getToolCommandId, type ShortcutScope } from '@/domain/shortcuts/commands'
-import { toolDefinitions } from '@/domain/tools/tool-registry'
+import { getToolCommandId, type ShortcutScope } from '@/core/shortcuts/commands'
+import { toolDefinitions } from '@/core/tools/tool-registry'
 import type { WorkbenchCommandHandlers } from '@/hooks/workbench-command-context'
 import type { ShortcutCommandHandlers } from '@/hooks/shortcut-provider'
 

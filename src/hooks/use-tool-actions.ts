@@ -2,13 +2,13 @@ import { useContext } from 'react'
 
 import { ToolActionContext } from '@/hooks/tool-action-context'
 import { createRequiredContextHook } from '@/hooks/create-required-context-hook'
-import type { ToolId } from '@/domain/tools/tool-registry'
-import type { ToolTriggerMetadata } from '@/domain/tools/schema'
+import type { ToolId } from '@/core/tools/tool-registry'
+import type { ToolTriggerMetadata } from '@/core/tools/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
 import {
   getToolCommandBehavior,
   resolveToolActivationMode,
-} from '@/domain/tools/activation-policy'
+} from '@/core/tools/activation-policy'
 import { supportedReferenceImageFileTypes } from '@/domain/reference-image/raster'
 import { readReferenceImagePayload } from '@/domain/reference-image/import-flow'
 import { WorkbenchCommandContext } from '@/hooks/workbench-command-context'

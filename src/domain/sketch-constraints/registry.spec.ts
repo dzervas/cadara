@@ -18,13 +18,13 @@ import {
   updateSketchPointer,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
-import { toolIconAssetFileNames } from '@/domain/tools/tool-icons'
+import { toolIconAssetFileNames } from '@/core/tools/tool-icons'
 import {
   getRegisteredSketchConstraintDefinitions,
   selectPointToPointDimensionReference,
-} from '@/domain/sketch-constraints/registry'
-import { getToolById, getToolbarSectionsForMode } from '@/domain/tools/tool-registry'
-import { mapSketchPointToWorkspaceWorld } from '@/domain/workspace/sketch-plane-mapping'
+} from '@/core/sketch-constraints/registry'
+import { getToolById, getToolbarSectionsForMode } from '@/core/tools/tool-registry'
+import { mapSketchPointToWorkspaceWorld } from '@/core/workspace/sketch-plane-mapping'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 
 test('src/domain/sketch-constraints/registry.spec.ts', async () => {

@@ -1,4 +1,4 @@
-import type { ToolIconId } from '@/domain/tools/schema'
+import type { ToolIconId } from '@/core/tools/schema'
 import { ToolIcon } from '@/components/ui/tool-icon'
 
 interface ToolbarToolIconProps {

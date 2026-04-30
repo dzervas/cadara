@@ -6,12 +6,12 @@ import type {
 } from '@/contracts/reference-image/schema'
 import type { SketchEntityDefinition, SketchPointDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
 import type { SketchAuthoringOperationId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 
 import {
   createSketchSpecialModeHandleRef,
   createSketchSpecialModeTargetRef,
-} from '@/domain/sketch-special-modes/presentation'
+} from '@/core/sketch-special-modes/presentation'
 import type {
   SketchSpecialModeDefinition,
   SketchSpecialModePanelButton,
@@ -20,7 +20,7 @@ import type {
   SketchSpecialModePanelSection,
   SketchSpecialModeViewportOverlay,
   SketchSpecialModeViewportPresentation,
-} from '@/domain/sketch-special-modes/schema'
+} from '@/core/sketch-special-modes/schema'
 import {
   collectActiveReferenceImageOperations,
 } from '@/domain/reference-image/operations'

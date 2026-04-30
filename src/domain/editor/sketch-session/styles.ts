@@ -5,7 +5,7 @@ import type {
 import {
   type PrimitiveRef,
   primitiveRefEquals,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import {
   type SketchStyleToolId,
   isSketchStyleTarget,

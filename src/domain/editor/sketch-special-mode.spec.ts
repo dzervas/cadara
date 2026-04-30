@@ -16,9 +16,9 @@ import {
 import {
   createSketchSpecialModeHandleRef,
   createSketchSpecialModeTargetRef,
-} from '@/domain/sketch-special-modes/presentation'
+} from '@/core/sketch-special-modes/presentation'
+import type { SketchSpecialModeDefinition } from '@/core/sketch-special-modes/schema'
 import { sketchSpecialModeDefinitions } from '@/domain/sketch-special-modes/registry'
-import type { SketchSpecialModeDefinition } from '@/domain/sketch-special-modes/schema'
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from '@/domain/extensions/test-registry-composition'
 
 test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {

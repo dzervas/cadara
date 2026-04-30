@@ -20,7 +20,7 @@ import {
   solveSketchDefinitionCore,
 } from '@/contracts/sketch/solver-core'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import {
   solveReferenceImageOperationState,
 } from '@/domain/reference-image-calibration/state'
@@ -32,7 +32,7 @@ import {
   createReferenceImageTextureSourceKey,
   getReferenceImageCornerPoints,
 } from '@/domain/reference-image/rendering'
-import type { SketchDraftEntity } from '@/domain/sketch-tools/definition'
+import type { SketchDraftEntity } from '@/core/sketch-tools/definition'
 import {
   ShapeUtils,
   Vector2,

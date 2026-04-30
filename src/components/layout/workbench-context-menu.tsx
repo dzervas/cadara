@@ -13,7 +13,7 @@ import {
 import { createPortal } from 'react-dom'
 
 import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
-import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
+import type { ShortcutCommandId } from '@/core/shortcuts/commands'
 
 export type WorkbenchContextMenuEntry =
   | {

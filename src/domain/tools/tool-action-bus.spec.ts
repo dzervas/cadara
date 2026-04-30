@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 
-import { createToolActionBus } from '@/domain/tools/tool-action-bus'
+import { createToolActionBus } from '@/core/tools/tool-action-bus'
 
 test('src/domain/tools/tool-action-bus.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {

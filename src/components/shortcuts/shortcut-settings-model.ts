@@ -1,5 +1,5 @@
-import type { ShortcutCommandId } from '@/domain/shortcuts/commands'
-import { formatShortcut } from '@/domain/shortcuts/shortcut-grammar'
+import type { ShortcutCommandId } from '@/core/shortcuts/commands'
+import { formatShortcut } from '@/core/shortcuts/shortcut-grammar'
 
 export interface ShortcutSettingsState {
   recordingCommandId: ShortcutCommandId | null

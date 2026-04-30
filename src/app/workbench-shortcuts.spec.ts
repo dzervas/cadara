@@ -1,13 +1,13 @@
 import { test } from 'bun:test'
 
 import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 import { createWorkbenchShortcutCommandHandlers, getWorkbenchShortcutActiveScopes } from '@/app/workbench/commands/workbench-shortcuts'
-import { createShortcutCommandRegistry, getShortcutCommandDefinitions } from '@/domain/shortcuts/commands'
-import { createEffectiveKeymap } from '@/domain/shortcuts/keymap'
-import { createShortcutResolver, type ShortcutResolverEvent } from '@/domain/shortcuts/resolver'
-import { createToolActionBus } from '@/domain/tools/tool-action-bus'
-import type { ToolId } from '@/domain/tools/tool-registry'
+import { createShortcutCommandRegistry, getShortcutCommandDefinitions } from '@/core/shortcuts/commands'
+import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
+import { createShortcutResolver, type ShortcutResolverEvent } from '@/core/shortcuts/resolver'
+import { createToolActionBus } from '@/core/tools/tool-action-bus'
+import type { ToolId } from '@/core/tools/tool-registry'
 import { isTextEditingTarget } from '@/hooks/shortcut-targets'
 
 test('src/app/workbench-shortcuts.spec.ts', () => {

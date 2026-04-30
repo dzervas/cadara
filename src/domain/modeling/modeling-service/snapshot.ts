@@ -1,6 +1,6 @@
 import type {
   DocumentId,
-} from '@/domain/editor/schema'
+} from '@/core/editor/schema'
 import type {
   CommitSketchResponse,
   CreateFeatureResponse,

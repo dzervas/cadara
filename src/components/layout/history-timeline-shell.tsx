@@ -10,7 +10,7 @@ import type {
   DocumentSnapshot,
 } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
-import type { PrimitiveRef } from '@/domain/editor/schema'
+import type { PrimitiveRef } from '@/core/editor/schema'
 
 interface HistoryTimelineShellProps {
   snapshot: DocumentSnapshot | null

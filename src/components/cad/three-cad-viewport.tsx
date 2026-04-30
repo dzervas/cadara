@@ -63,18 +63,18 @@ import {
   type PrimitiveRef,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
-} from '@/domain/editor/schema'
-import { getSectionPlaneOrigin, type SectionViewSession, type Vec3 } from '@/domain/section-view/session'
+} from '@/core/editor/schema'
+import { getSectionPlaneOrigin, type SectionViewSession, type Vec3 } from '@/core/section-view/session'
 import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
 } from '@/domain/editor/sketch-session'
-import type { SketchToolPresentationSchema } from '@/domain/sketch-tools/editor-schema'
+import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
 import type {
   SketchSpecialModeHandleRef,
   SketchSpecialModeViewportPresentation,
-} from '@/domain/sketch-special-modes/schema'
-import { doesSketchSpecialModeAcceptTarget } from '@/domain/sketch-special-modes/presentation'
+} from '@/core/sketch-special-modes/schema'
+import { doesSketchSpecialModeAcceptTarget } from '@/core/sketch-special-modes/presentation'
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
@@ -87,15 +87,15 @@ import {
   isSeededDatumPlaneRenderable,
   resolveAllCandidates,
   updateWorkspaceHighlight,
-} from '@/domain/workspace/render-picking'
-import { createViewportCameraTransitionController } from '@/domain/workspace/viewport-camera-transition'
+} from '@/infrastructure/viewport/render-picking'
+import { createViewportCameraTransitionController } from '@/infrastructure/viewport/viewport-camera-transition'
 import {
   getViewportCanvasClickIntent,
   shouldViewportClickEventRequestConnectedSketchSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
 } from '@/domain/editor/workbench-interactions'
-import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
 import {
   DEFAULT_VIEWPORT_PROJECTION_MODE,
   applyViewportRenderableFitFrame,
@@ -108,21 +108,21 @@ import {
   type ViewportCamera,
   type ViewportCameraFrame,
   type ViewportProjectionMode,
-} from '@/domain/workspace/viewport-projection'
-import { computeSketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
-import type { ViewportRenderableRecord } from '@/domain/workspace/viewport-renderables'
+} from '@/infrastructure/viewport/viewport-projection'
+import { computeSketchCameraFrame } from '@/infrastructure/viewport/sketch-camera-framing'
+import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
-import type { ViewNavigationPresetId } from '@/domain/workspace/view-navigation'
+import type { ViewNavigationPresetId } from '@/infrastructure/viewport/view-navigation'
 import {
   createSectionCapRenderables,
   createSectionClippingPlane,
   getSectionRenderableBounds,
-} from '@/domain/section-view/rendering'
-import { projectSketchFeedbackAnchor } from '@/domain/workspace/sketch-feedback-projection'
+} from '@/infrastructure/section-view/rendering'
+import { projectSketchFeedbackAnchor } from '@/core/workspace/sketch-feedback-projection'
 import {
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
-} from '@/domain/workspace/sketch-plane-mapping'
+} from '@/core/workspace/sketch-plane-mapping'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'

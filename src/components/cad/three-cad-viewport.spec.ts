@@ -19,7 +19,7 @@ import {
 } from '@/components/cad/three-cad-viewport-camera-transitions'
 import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
 import { bindRenderableObject } from '@/domain/workspace/render-picking'
-import { measureSelectionFilter } from '@/domain/editor/schema'
+import { measureSelectionFilter } from '@/core/editor/schema'
 import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import * as THREE from 'three'

@@ -2,7 +2,7 @@ import type { AuthoredFeatureRecord } from '@/contracts/modeling/authored-docume
 import type { FeatureDefinition, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
-import { getPrimitiveRefKey } from '@/domain/editor/schema'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
 import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 
 interface FeatureFieldAttribution {
