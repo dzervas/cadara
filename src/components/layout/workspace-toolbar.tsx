@@ -24,6 +24,7 @@ import { useEditorState } from '@/hooks/use-editor-state'
 import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
 
 const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
+const DISCORD_URL = 'https://discord.gg/T2dBRp4SAQ'
 
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
@@ -233,8 +234,29 @@ export function WorkspaceToolbar({
         <Tooltip
           label={
             <ToolbarTooltipContent
+              title="Discord"
+              description="Join the CADara community."
+            />
+          }
+        >
+          <ActionIcon
+            component="a"
+            href={DISCORD_URL}
+            target="_blank"
+            rel="noreferrer"
+            variant="subtle"
+            color="workbench"
+            className="shrink-0"
+            aria-label="Join Discord community"
+          >
+            <WorkbenchIcon name="discord" className="h-4 w-4" />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip
+          label={
+            <ToolbarTooltipContent
               title="GitHub"
-              description="Open the Cadara repository."
+              description="Open the CADara repository."
             />
           }
         >

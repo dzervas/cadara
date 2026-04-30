@@ -1,12 +1,19 @@
-import type React from 'react'
 import { ActionIcon, Button, Paper, Select, Text, Tooltip } from '@mantine/core'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { Input } from '@/components/ui/input'
+import {
+  SECTION_HEADER_CLASSES,
+  compactActionIconStyles,
+  compactInputStyles,
+  compactSelectStyles,
+  fieldSurfaceStyle,
+} from '@/components/ui/workbench-panel-styles'
 import type { DocumentVariableRecord, FeatureSnapshotRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { getPrimitiveRefLabel, primitiveRefEquals, type PrimitiveRef } from '@/core/editor/schema'
+import { formatInspectorDiagnosticDetail } from '@/domain/modeling/diagnostic-formatting'
 import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
 import {
   createFeatureEditorExpressionControlFormValue,
@@ -16,13 +23,12 @@ import {
   createFeatureEditorPatchFromFormValue,
   getFeatureEditorControlFormValueText,
   getFeatureEditorExpressionSourceState,
-  normalizeFeatureEditorFormValues,
   previewFeatureEditorFieldExpression,
-  shouldResetFeatureEditorFormValues,
   type FeatureEditorExpressionField,
   type FeatureEditorExpressionPreview,
   type FeatureEditorFormValues,
 } from '@/core/feature-authoring/form-adapter'
+import { useFeatureEditorFormSync } from '@/hooks/use-feature-editor-form-sync'
 import {
   createFeatureEditorClearReferencePatch,
   createFeatureEditorRemoveReferenceItemPatch,
@@ -64,7 +70,7 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
           <p className="mt-1 text-sm text-[var(--mantine-color-dark-0)]">{diagnostic.message}</p>
           {diagnostic.detail ? (
             <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">
-              {formatDiagnosticDetail(diagnostic)}
+              {formatInspectorDiagnosticDetail(diagnostic)}
             </p>
           ) : null}
           <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">{diagnostic.code}</p>
@@ -74,28 +80,6 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
   )
 }
 
-function formatDiagnosticDetail(diagnostic: ModelingDiagnostic) {
-  const detail = diagnostic.detail
-
-  if (!detail) {
-    return null
-  }
-
-  switch (detail.kind) {
-    case 'invalidReference':
-      return `Broken ref ${getPrimitiveRefLabel(detail.reference.target)}: ${detail.reference.reason}`
-    case 'revisionConflict':
-      return `Expected ${detail.expectedRevisionId}, current ${detail.actualRevisionId}`
-    case 'stalePreview':
-      return `Preview ${detail.previewId} used ${detail.requestedRevisionId}; current is ${detail.currentRevisionId}`
-    case 'rebuildFailure':
-      return `Affected features: ${detail.affectedFeatureIds.join(', ') || 'none'}`
-    case 'advancedFeatureValidation':
-      return detail.diagnostic.role
-        ? `${detail.diagnostic.role}: ${detail.diagnostic.message}`
-        : detail.diagnostic.message
-  }
-}
 
 function renderReference(value: unknown) {
   return value && typeof value === 'object' && 'kind' in value
@@ -107,59 +91,6 @@ function isPrimitiveRefValue(value: unknown): value is PrimitiveRef {
   return !!value && typeof value === 'object' && 'kind' in value
 }
 
-function fieldSurfaceStyle(field: Pick<FeatureEditorFormField, 'error'>, isActive = false): React.CSSProperties {
-  if (field.error) {
-    return {
-      background: 'var(--workbench-shell-danger-surface)',
-      boxShadow: '0 0 0 1px var(--workbench-shell-danger-border)',
-      color: 'var(--workbench-shell-danger-text)',
-    }
-  }
-
-  if (isActive) {
-    return {
-      background: 'var(--workbench-shell-overlay-strong)',
-      boxShadow: '0 0 0 1px var(--workbench-shell-accent)',
-      color: 'var(--mantine-color-workbench-4)',
-    }
-  }
-
-  return {
-    background: 'var(--workbench-shell-overlay-soft)',
-    color: 'var(--mantine-color-dark-0)',
-  }
-}
-
-function compactInputStyles(input: { hasError?: boolean; disabled?: boolean } = {}) {
-  return {
-    input: {
-      backgroundColor: 'transparent',
-      border: 0,
-      color: input.disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
-      fontFamily: 'var(--mantine-font-family-monospace)',
-      fontSize: 12.5,
-      height: 28,
-      minHeight: 28,
-      paddingInline: 4,
-    },
-  }
-}
-
-function compactActionIconStyles(input: { active?: boolean; danger?: boolean } = {}) {
-  return {
-    root: {
-      backgroundColor: 'transparent',
-      border: 0,
-      color: input.danger
-        ? 'var(--workbench-shell-danger-text)'
-        : input.active
-          ? 'var(--workbench-shell-accent)'
-          : 'var(--workbench-shell-text-muted)',
-      flex: '0 0 auto',
-      opacity: input.active ? 1 : 0.72,
-    },
-  }
-}
 
 function compactFieldLabel(label: string) {
   return label
@@ -615,28 +546,7 @@ function EnumField(props: {
           }}
           allowDeselect={false}
           comboboxProps={{ withinPortal: true }}
-          styles={{
-            input: {
-              backgroundColor: 'transparent',
-              border: 0,
-              color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
-              fontSize: 12.5,
-              height: 28,
-              minHeight: 28,
-              paddingLeft: 4,
-            },
-            section: {
-              color: 'var(--workbench-shell-text-muted)',
-            },
-            dropdown: {
-              backgroundColor: 'var(--workbench-shell-overlay-strong)',
-              border: 'none',
-              boxShadow: 'var(--workbench-shell-elevation-md)',
-            },
-            option: {
-              color: 'var(--workbench-shell-text)',
-            },
-          }}
+          styles={compactSelectStyles({ disabled })}
         />
       )}
     />
@@ -971,7 +881,7 @@ export function FeatureFormFieldRenderer(props: {
     case 'optionGroup':
       return (
         <div className="space-y-1 rounded-[3px] px-2 py-1.5" style={{ background: 'var(--workbench-shell-overlay-soft)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+          <p className={SECTION_HEADER_CLASSES}>
             {props.field.label}
           </p>
           <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
@@ -996,7 +906,7 @@ export function FeatureFormFieldRenderer(props: {
 
       return (
         <div className="space-y-1 rounded-[3px] px-2 py-1.5" style={{ background: 'var(--workbench-shell-overlay-soft)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
+          <p className={SECTION_HEADER_CLASSES}>
             {field.label}
           </p>
           <FieldMessage helper={formatParticipantHelper(field)} error={field.error} />
@@ -1058,34 +968,7 @@ export function FeatureInspector({
   const documentVariables = editor.state.snapshot?.variables ?? []
   const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
   const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })
-  const lastSessionKeyRef = useRef<string | null>(null)
-  const lastSyncedValuesRef = useRef<FeatureEditorFormValues>(initialFormValues)
-
-  useEffect(() => {
-    if (!activeCommandSessionId || !formSchema) {
-      form.reset({})
-      lastSessionKeyRef.current = null
-      lastSyncedValuesRef.current = {}
-      return
-    }
-
-    const nextValues = createFeatureEditorFormValues(formSchema)
-    const currentValues = normalizeFeatureEditorFormValues(formSchema, form.getValues())
-
-    if (shouldResetFeatureEditorFormValues({
-      schema: formSchema,
-      sessionKey: activeCommandSessionId,
-      lastSessionKey: lastSessionKeyRef.current,
-      currentValues,
-      lastSyncedValues: lastSyncedValuesRef.current,
-      nextValues,
-    })) {
-      form.reset(nextValues)
-    }
-
-    lastSessionKeyRef.current = activeCommandSessionId
-    lastSyncedValuesRef.current = nextValues
-  }, [activeCommandSessionId, activeEditSession, form, formSchema])
+  useFeatureEditorFormSync({ sessionKey: activeCommandSessionId, formSchema, form })
 
   if (!activeEditSession || !formSchema) {
     return null
@@ -1135,7 +1018,7 @@ export function FeatureInspector({
           return (
             <section key={section.id} className="pb-1">
               <div className="flex items-center justify-between px-3 pb-1 pt-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.20em] text-[var(--mantine-color-dark-3)]">
+                <p className={SECTION_HEADER_CLASSES}>
                   {section.title}
                 </p>
                 {profileReferenceField ? (

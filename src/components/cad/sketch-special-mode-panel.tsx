@@ -4,7 +4,6 @@ import {
   Alert,
   Button,
   Code,
-  Divider,
   Group,
   NumberInput,
   Paper,
@@ -21,6 +20,12 @@ import type {
   SketchSpecialModePanelField,
   SketchSpecialModePanelSchema,
 } from '@/core/sketch-special-modes/schema'
+import {
+  SECTION_HEADER_CLASSES,
+  compactInputStyles,
+  compactSelectStyles,
+  fieldSurfaceStyle,
+} from '@/components/ui/workbench-panel-styles'
 
 interface SketchSpecialModePanelProps {
   schema: SketchSpecialModePanelSchema | null
@@ -46,9 +51,7 @@ export function SketchSpecialModePanel({
     >
       <header className="px-3 pb-2.5 pt-3">
         <Stack gap={4}>
-          <Text size="10px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.2em' }}>
-            Special mode
-          </Text>
+          <p className={SECTION_HEADER_CLASSES}>Special mode</p>
           <Text size="13px" fw={500} c="dark.0">
             {schema.title}
           </Text>
@@ -72,7 +75,7 @@ export function SketchSpecialModePanel({
                   styles={{
                     root: {
                       background: 'var(--workbench-shell-overlay-soft)',
-                      border: '1px solid var(--cad-border)',
+                      border: '1px solid var(--workbench-shell-border)',
                     },
                     body: {
                       color: 'var(--workbench-shell-text)',
@@ -89,17 +92,14 @@ export function SketchSpecialModePanel({
         {schema.sections.map((section) => (
           <section key={section.id} className="pb-1">
             <div className="flex items-center justify-between px-3 pb-1 pt-3">
-              <Text size="10px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.2em' }}>
-                {section.title}
-              </Text>
+              <p className={SECTION_HEADER_CLASSES}>{section.title}</p>
             </div>
-            <div className="space-y-2 px-2">
-              <Paper
-                withBorder
+            <div className="space-y-0.5 px-2">
+              <div
                 className="rounded-[6px] px-3 py-3"
                 style={{
                   background: 'var(--workbench-shell-overlay-soft)',
-                  borderColor: 'var(--cad-border)',
+                  border: '1px solid var(--workbench-shell-border)',
                 }}
               >
                 <Stack gap="sm">
@@ -125,7 +125,7 @@ export function SketchSpecialModePanel({
                           border:
                             diagnostic.severity === 'error'
                               ? '1px solid var(--workbench-shell-danger-border)'
-                              : '1px solid var(--cad-border)',
+                              : '1px solid var(--workbench-shell-border)',
                         },
                         body: {
                           color:
@@ -146,7 +146,7 @@ export function SketchSpecialModePanel({
                     </Group>
                   ) : null}
                 </Stack>
-              </Paper>
+              </div>
             </div>
           </section>
         ))}
@@ -154,7 +154,7 @@ export function SketchSpecialModePanel({
 
       {schema.footerButtons && schema.footerButtons.length > 0 ? (
         <>
-          <Divider color="var(--cad-border)" />
+          <div className="border-t border-[var(--workbench-shell-border)]" />
           <footer className="flex items-center justify-end gap-2 px-3 py-2.5">
             {schema.footerButtons.map((button) => (
               <PanelButton key={button.id} button={button} onAction={onAction} />
@@ -173,125 +173,149 @@ function SpecialModePanelField({
   field: SketchSpecialModePanelField
   onAction: (action: SketchSpecialModePanelAction) => void
 }) {
+  const fieldError = 'error' in field && field.error ? { message: field.error } : null
+  const rowStyle = fieldSurfaceStyle({ error: fieldError })
+
   if (field.kind === 'text') {
     return (
-      <TextInput
-        label={field.label}
-        value={field.value}
-        placeholder={field.placeholder}
-        description={field.helper}
-        error={field.error}
-        disabled={field.disabled}
-        size="xs"
-        styles={fieldStyles}
-        onChange={(event) => {
-          onAction({
-            kind: 'patch',
-            patch: {
-              ...field.action.patch,
-              value: event.currentTarget.value,
-            },
-          })
-        }}
-      />
+      <div
+        className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+        style={rowStyle}
+      >
+        <label
+          className="flex w-[88px] shrink-0 items-center pl-2 pr-2 text-[11px] font-medium text-[var(--workbench-shell-text-dim)]"
+          htmlFor={field.id}
+        >
+          {field.label}
+        </label>
+        <div className="min-w-0 flex-1">
+          <TextInput
+            id={field.id}
+            value={field.value}
+            placeholder={field.placeholder}
+            disabled={field.disabled}
+            size="xs"
+            styles={compactInputStyles({ disabled: field.disabled })}
+            onChange={(event) => {
+              onAction({
+                kind: 'patch',
+                patch: { ...field.action.patch, value: event.currentTarget.value },
+              })
+            }}
+          />
+        </div>
+      </div>
     )
   }
 
   if (field.kind === 'numeric') {
     return (
-      <NumberInput
-        label={field.label}
-        value={field.value ?? ''}
-        suffix={field.unit ? ` ${field.unit}` : undefined}
-        description={field.helper}
-        error={field.error}
-        disabled={field.disabled}
-        size="xs"
-        styles={fieldStyles}
-        onChange={(nextValue) => {
-          onAction({
-            kind: 'patch',
-            patch: {
-              ...field.action.patch,
-              value: typeof nextValue === 'number' && !Number.isNaN(nextValue) ? nextValue : null,
-            },
-          })
-        }}
-      />
+      <div
+        className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+        style={rowStyle}
+      >
+        <label
+          className="flex w-[88px] shrink-0 items-center pl-2 pr-2 text-[11px] font-medium text-[var(--workbench-shell-text-dim)]"
+          htmlFor={field.id}
+        >
+          {field.label}
+          {field.unit ? <span className="ml-1 font-mono text-[10px] opacity-60">{field.unit}</span> : null}
+        </label>
+        <div className="min-w-0 flex-1">
+          <NumberInput
+            id={field.id}
+            value={field.value ?? ''}
+            disabled={field.disabled}
+            size="xs"
+            styles={compactInputStyles({ disabled: field.disabled })}
+            onChange={(nextValue) => {
+              onAction({
+                kind: 'patch',
+                patch: {
+                  ...field.action.patch,
+                  value: typeof nextValue === 'number' && !Number.isNaN(nextValue) ? nextValue : null,
+                },
+              })
+            }}
+          />
+        </div>
+      </div>
     )
   }
 
   if (field.kind === 'toggle') {
     return (
-      <Switch
-        label={field.label}
-        checked={field.value}
-        description={field.helper}
-        disabled={field.disabled}
-        size="xs"
-        color="teal"
-        styles={{
-          ...fieldStyles,
-          label: {
-            color: 'var(--workbench-shell-text)',
-            fontSize: '12px',
-          },
-          description: {
-            color: 'var(--workbench-shell-text-dim)',
-            fontSize: '11px',
-          },
-        }}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => {
-          onAction({
-            kind: 'patch',
-            patch: {
-              ...field.action.patch,
-              value: event.currentTarget.checked,
+      <div
+        className="flex min-h-7 items-center rounded-[3px] px-2 transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+        style={rowStyle}
+      >
+        <Switch
+          id={field.id}
+          label={field.label}
+          checked={field.value}
+          disabled={field.disabled}
+          size="xs"
+          color="teal"
+          styles={{
+            label: {
+              color: 'var(--workbench-shell-text)',
+              fontSize: '12px',
             },
-          })
-        }}
-      />
+          }}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            onAction({
+              kind: 'patch',
+              patch: { ...field.action.patch, value: event.currentTarget.checked },
+            })
+          }}
+        />
+      </div>
     )
   }
 
   if (field.kind === 'option') {
     return (
-      <Select
-        label={field.label}
-        value={field.value}
-        data={field.options.map((option) => ({
-          value: option.value,
-          label: option.label,
-        }))}
-        description={field.helper}
-        error={field.error}
-        disabled={field.disabled}
-        size="xs"
-        styles={fieldStyles}
-        onChange={(value) => {
-          onAction({
-            kind: 'patch',
-            patch: {
-              ...field.action.patch,
-              value,
-            },
-          })
-        }}
-      />
+      <div
+        className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
+        style={rowStyle}
+      >
+        <label
+          className="flex w-[88px] shrink-0 items-center pl-2 pr-2 text-[11px] font-medium text-[var(--workbench-shell-text-dim)]"
+          htmlFor={field.id}
+        >
+          {field.label}
+        </label>
+        <div className="min-w-0 flex-1">
+          <Select
+            id={field.id}
+            value={field.value}
+            data={field.options.map((option) => ({ value: option.value, label: option.label }))}
+            disabled={field.disabled}
+            allowDeselect={false}
+            comboboxProps={{ withinPortal: true }}
+            size="xs"
+            styles={compactSelectStyles({ disabled: field.disabled })}
+            onChange={(value) => {
+              onAction({
+                kind: 'patch',
+                patch: { ...field.action.patch, value },
+              })
+            }}
+          />
+        </div>
+      </div>
     )
   }
 
   return (
-    <div>
-      <Text size="12px" fw={500} c="dark.1" mb={4}>
-        {field.label}
-      </Text>
+    <div className="space-y-1">
+      <p className={SECTION_HEADER_CLASSES}>{field.label}</p>
       <Code
         block
         className="rounded-[6px] px-2 py-2 text-[12px]"
         style={{
           background: 'var(--workbench-shell-overlay-strong)',
-          border: '1px solid var(--cad-border)',
+          border: '1px solid var(--workbench-shell-border)',
           color: 'var(--mantine-color-dark-0)',
         }}
       >
@@ -340,30 +364,3 @@ function PanelButton({
     </Button>
   )
 }
-
-const fieldStyles = {
-  label: {
-    color: 'var(--workbench-shell-text)',
-    fontSize: '12px',
-    marginBottom: 4,
-  },
-  input: {
-    background: 'var(--workbench-shell-overlay-strong)',
-    borderColor: 'var(--cad-border)',
-    color: 'var(--workbench-shell-text)',
-  },
-  description: {
-    color: 'var(--workbench-shell-text-dim)',
-    fontSize: '11px',
-  },
-  error: {
-    fontSize: '11px',
-  },
-  dropdown: {
-    background: 'var(--workbench-shell-surface-panel-elev)',
-    borderColor: 'var(--cad-border)',
-  },
-  option: {
-    color: 'var(--workbench-shell-text)',
-  },
-} as const

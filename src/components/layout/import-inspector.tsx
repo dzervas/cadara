@@ -1,18 +1,18 @@
 import { Button, Paper, Text, ThemeIcon } from '@mantine/core'
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 
 import { FeatureFormFieldRenderer } from '@/components/layout/feature-inspector'
+import { SECTION_HEADER_CLASSES } from '@/components/ui/workbench-panel-styles'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import {
   createFeatureEditorFormValues,
-  normalizeFeatureEditorFormValues,
-  shouldResetFeatureEditorFormValues,
   type FeatureEditorFormValues,
 } from '@/core/feature-authoring/form-adapter'
 import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { useFeatureEditorFormSync } from '@/hooks/use-feature-editor-form-sync'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 
 interface ImportInspectorProps {
@@ -35,37 +35,10 @@ export function ImportInspector({ onCommit }: ImportInspectorProps) {
     [activeImportSession],
   )
   const documentVariables = snapshot?.variables ?? []
+  const activeCommandSessionId = activeCommand?.commandSessionId ?? null
   const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
   const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })
-  const lastSessionKeyRef = useRef<string | null>(null)
-  const lastSyncedValuesRef = useRef<FeatureEditorFormValues>(initialFormValues)
-  const activeCommandSessionId = activeCommand?.commandSessionId ?? null
-
-  useEffect(() => {
-    if (!activeCommandSessionId || !formSchema) {
-      form.reset({})
-      lastSessionKeyRef.current = null
-      lastSyncedValuesRef.current = {}
-      return
-    }
-
-    const nextValues = createFeatureEditorFormValues(formSchema)
-    const currentValues = normalizeFeatureEditorFormValues(formSchema, form.getValues())
-
-    if (shouldResetFeatureEditorFormValues({
-      schema: formSchema,
-      sessionKey: activeCommandSessionId,
-      lastSessionKey: lastSessionKeyRef.current,
-      currentValues,
-      lastSyncedValues: lastSyncedValuesRef.current,
-      nextValues,
-    })) {
-      form.reset(nextValues)
-    }
-
-    lastSessionKeyRef.current = activeCommandSessionId
-    lastSyncedValuesRef.current = nextValues
-  }, [activeCommandSessionId, form, formSchema])
+  useFeatureEditorFormSync({ sessionKey: activeCommandSessionId, formSchema, form })
 
   if (!activeImportSession || !formSchema) {
     return null
@@ -99,7 +72,7 @@ export function ImportInspector({ onCommit }: ImportInspectorProps) {
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {formSchema.sections.map((section) => (
           <section key={section.id} className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mantine-color-dark-3)]">
+            <p className={SECTION_HEADER_CLASSES}>
               {section.title}
             </p>
             {section.fields.map((field) => (

@@ -13,6 +13,7 @@ import {
 } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
+import { SECTION_HEADER_CLASSES, compactInputStyles, compactSelectStyles } from '@/components/ui/workbench-panel-styles'
 import type { DocumentExportSuccessResult } from '@/contracts/modeling/export'
 import {
   appErrorFromModelingResult,
@@ -124,6 +125,7 @@ function renderFormField(
         min={0.001}
         step={field.step}
         value={typeof field.value === 'number' ? field.value : undefined}
+        styles={compactInputStyles()}
         onChange={(value) => onPatch({ [field.patch.patchKey]: toNumber(value, typeof field.value === 'number' ? field.value : 0) })}
       />
     )
@@ -136,6 +138,9 @@ function renderFormField(
         label={field.label}
         data={field.options.map((opt) => ({ label: opt.label, value: opt.value }))}
         value={field.value}
+        allowDeselect={false}
+        comboboxProps={{ withinPortal: true }}
+        styles={compactSelectStyles()}
         onChange={(value) => { if (value !== null) { onPatch({ [field.patch.patchKey]: value }) } }}
       />
     )
@@ -162,7 +167,7 @@ function renderFormSection(
 ): React.ReactNode {
   return (
     <Stack key={section.id} gap="xs">
-      <Text size="sm" fw={600}>{section.title}</Text>
+      <p className={SECTION_HEADER_CLASSES}>{section.title}</p>
       {section.fields.map((field) => renderFormField(field, onPatch))}
     </Stack>
   )

@@ -8,6 +8,7 @@ export type WorkbenchIconName =
   | 'chevronRight'
   | 'close'
   | 'component'
+  | 'discord'
   | 'download'
   | 'edit'
   | 'error'
@@ -42,6 +43,7 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   chevronRight: 'arrow-right.svg',
   close: 'close.svg',
   component: 'composite-part.svg',
+  discord: 'discord-logo.svg',
   download: 'export.svg',
   edit: 'edit.svg',
   error: 'error.svg',

@@ -15,6 +15,7 @@ import type { DocumentSnapshot, DocumentVariableRecord, ModelingDiagnostic } fro
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 import { getObjectTreeNodeToolIcon } from '@/core/tools/tool-icon-resolvers'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { formatSidebarDiagnosticDetail } from '@/domain/modeling/diagnostic-formatting'
 
 interface FeatureSidebarProps {
   hiddenTargetKeys: Record<string, boolean>
@@ -34,32 +35,6 @@ interface FeatureSidebarProps {
   visibleSelection: PrimitiveRef[]
 }
 
-function formatDocumentDiagnosticDetail(diagnostic: ModelingDiagnostic) {
-  const detail = diagnostic.detail
-
-  if (!detail) {
-    return null
-  }
-
-  switch (detail.kind) {
-    case 'invalidReference':
-      return `Broken ref ${getPrimitiveRefLabel(detail.reference.target)} from ${
-        detail.reference.sourceTarget ? getPrimitiveRefLabel(detail.reference.sourceTarget) : 'document state'
-      }`
-    case 'revisionConflict':
-      return `Expected ${detail.expectedRevisionId}, current ${detail.actualRevisionId}`
-    case 'stalePreview':
-      return `Preview ${detail.previewId} requested ${detail.requestedRevisionId}, current ${detail.currentRevisionId}`
-    case 'rebuildFailure':
-      return `Affected features: ${detail.affectedFeatureIds.join(', ') || 'none'} | Targets: ${
-        detail.affectedTargets.map((target) => getPrimitiveRefLabel(target)).join(', ') || 'none'
-      }`
-    case 'advancedFeatureValidation':
-      return detail.diagnostic.role
-        ? `${detail.diagnostic.role}: ${detail.diagnostic.message}`
-        : detail.diagnostic.message
-  }
-}
 
 type VariableResultPresentation =
   | { kind: 'success'; text: string }
@@ -614,9 +589,9 @@ export function FeatureSidebar({
                           Target {getPrimitiveRefLabel(diagnostic.target)}
                         </p>
                       ) : null}
-                      {formatDocumentDiagnosticDetail(diagnostic) ? (
+                      {formatSidebarDiagnosticDetail(diagnostic) ? (
                         <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">
-                          {formatDocumentDiagnosticDetail(diagnostic)}
+                          {formatSidebarDiagnosticDetail(diagnostic)}
                         </p>
                       ) : null}
                       <p className="mt-1 text-xs text-[var(--mantine-color-dark-3)]">{diagnostic.code}</p>
