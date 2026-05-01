@@ -123,6 +123,8 @@ mainBuild:
     - symbol: XSControl_Controller
 
   emccFlags:
+    - -flto
+    - -fexceptions
     - -O3
     - -sEXPORT_ES6=1
     - -sUSE_ES6_IMPORT_META=0
@@ -132,5 +134,10 @@ mainBuild:
     - -sALLOW_MEMORY_GROWTH=1
     - -sUSE_FREETYPE=1
 
-  # Optional follow-up once the first custom build is green:
-  # - -sDISABLE_EXCEPTION_CATCHING=1
+    # TODO: Multithreaded https://github.com/battlesquid/opencascade.js-vite-multithreading-poc
+    # TODO: Use worker
+    # - -sENVIRONMENT='web,worker'
+    # - -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency'
+
+# Optional follow-up once the first custom build is green:
+# - -sDISABLE_EXCEPTION_CATCHING=1
