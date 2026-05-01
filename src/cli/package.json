@@ -1,0 +1,7 @@
+{
+  "name": "cadara-cli",
+  "version": "0.0.1",
+  "description": "CADara CLI",
+  "author": "Dimitris Zervas <dzervas@dzervas.gr>",
+  "license": "AGPL-3.0-or-later"
+}

@@ -60,7 +60,20 @@ export default defineConfig({
     ],
   },
   optimizeDeps: {
-    entries: ['index.html'],
+    // Pre-scan worker entrypoints up front so Vite does not discover their
+    // package dependencies after the browser session has already started.
+    entries: [
+      'index.html',
+      'src/infrastructure/workers/document-sync.worker.ts',
+      'src/domain/modeling/occ/worker.ts',
+    ],
+    // The browser OCC runtime is served from /public as a versioned custom
+    // asset pair and should not be pulled into dependency optimization.
+    exclude: [
+      'opencascade.js',
+      'opencascade.js/dist/node.js',
+      'opencascade.js/dist/opencascade.full',
+    ],
   },
   build: {
     sourcemap: true,

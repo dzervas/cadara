@@ -43,7 +43,7 @@
 
 ## Testing Policy
 
-- Follow `docs/testing.md` for test placement, lane selection, and seam-based coverage policy.
+- Before adding or mutating ANY test, read `docs/testing.md`
 - Use `bun run test:logic`, `bun run test:ui`, `bun run test:static`, and `bun run test:e2e` as the primary lane commands. `bun run test` is the umbrella non-Playwright workflow, and `bun run test:logic:coverage` is the non-UI coverage command.
 - Default non-UI coverage to exported seams in `contracts`, `core`, `domain`, `application`, and appropriate `infrastructure` modules.
 - Keep repository policy guards in `test/static/` so they stay executable without being counted as behavioral coverage.
