@@ -5,7 +5,7 @@ import {
 } from '@/domain/modeling/document-history'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
 import { getDefaultSelectionFilterForMode } from '@/core/editor/schema'
 import { emitEditSessionCursorRestore, emitFeatureHydration, emitSketchOpen } from './effect-emitters'
@@ -45,17 +45,17 @@ export function updateStateDocument(state: EditorState, payload: SnapshotLoadedP
   }
 }
 
-function hasFeatureScopedError(snapshot: DocumentSnapshot) {
+function hasFeatureScopedError(snapshot: WorkspaceSnapshot) {
   return snapshot.document.diagnostics.some((diagnostic) =>
     diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
   )
 }
 
 export function applyRenderPreservationForFeatureDiagnostics(
-  previousSnapshot: DocumentSnapshot | null,
-  nextSnapshot: DocumentSnapshot,
+  previousSnapshot: WorkspaceSnapshot | null,
+  nextSnapshot: WorkspaceSnapshot,
   shouldPreserve: boolean,
-): DocumentSnapshot {
+): WorkspaceSnapshot {
   if (!shouldPreserve || !previousSnapshot || !hasFeatureScopedError(nextSnapshot)) {
     return nextSnapshot
   }
@@ -71,16 +71,15 @@ export function applyRenderPreservationForFeatureDiagnostics(
       ...nextSnapshot.document,
       render,
     },
-    render,
   }
 }
 
-export function updateStateDocumentSnapshot(state: EditorState, snapshot: DocumentSnapshot): EditorState {
+export function updateStateDocumentSnapshot(state: EditorState, snapshot: WorkspaceSnapshot): EditorState {
   return {
     ...state,
     document: {
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
     },
     snapshot,
     selectionCatalog: buildSelectionTargetCatalog(snapshot),
@@ -88,13 +87,13 @@ export function updateStateDocumentSnapshot(state: EditorState, snapshot: Docume
   }
 }
 
-export function replaceStateDocumentSnapshot(state: EditorState, snapshot: DocumentSnapshot): IdleEditorState {
+export function replaceStateDocumentSnapshot(state: EditorState, snapshot: WorkspaceSnapshot): IdleEditorState {
   return {
     kind: 'idle',
     mode: 'part',
     document: {
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
     },
     snapshot,
     previewRenderables: null,
@@ -221,7 +220,7 @@ export function eventMatchesOptionalDocument(
 }
 
 export function createEditSessionCursorContext(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   target: DocumentHistoryOrderEntry,
 ): EditSessionCursorContext | null {
   if (!snapshot) {
@@ -246,7 +245,7 @@ export function createEditSessionCursorContext(
 }
 
 export function canReopenSketchDirectlyFromCurrentCursor(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   target: Extract<import('@/core/editor/schema').PrimitiveRef, { kind: 'sketch' }>,
 ) {
   return snapshot?.document.cursor.kind === 'sketch'

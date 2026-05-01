@@ -4,7 +4,7 @@ import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine
 import type { PrimitiveRef } from '@/core/editor/schema'
 import { getNavigationReopenRequest } from '@/domain/editor/workbench-interactions'
 import type { SketchSpecialModeHandleRef } from '@/core/sketch-special-modes/schema'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 
@@ -12,7 +12,7 @@ interface WorkbenchViewportEventsInput {
   activeCommand: EditorViewState['activeCommand']
   dispatch: (event: EditorEvent) => void
   modelingService: Pick<ModelingService, 'setViewportLodTier'>
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
 }
 
 export function useWorkbenchViewportEvents({

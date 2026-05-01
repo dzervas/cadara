@@ -383,7 +383,6 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {
       detail: null,
     },
   ]
-  erroredTimelineSnapshot.diagnostics = erroredTimelineSnapshot.document.diagnostics
   const erroredTimelineMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <EditorContext.Provider value={editorValue}>

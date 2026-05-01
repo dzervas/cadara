@@ -19,7 +19,10 @@ test('src/domain/modeling/feature-value-expressions.spec.ts', () => {
     parameters: {
       profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
       startExtent: { kind: 'profilePlane' },
-      endExtent: { kind: 'blind', direction: 'positive', distance: distance as never },
+      extent: {
+        mode: 'oneSide',
+        end: { kind: 'blind', direction: 'positive', distance: distance as never },
+      },
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     },
@@ -29,21 +32,21 @@ test('src/domain/modeling/feature-value-expressions.spec.ts', () => {
     definition: extrude(createLiteralAuthoredValue(12)),
     variables: [],
   })
-  assert(literal.ok && literal.definition.parameters.endExtent.distance === 12, 'Literal authored values should resolve to concrete values.')
+  assert(literal.ok && literal.definition.parameters.extent.end.distance === 12, 'Literal authored values should resolve to concrete values.')
 
   const expression = createExpressionAuthoredValue('depth + 3')
   const resolved = resolveFeatureDefinitionValues({
     definition: extrude(expression),
     variables: [{ variableId: 'variable_depth', name: 'depth', valueText: '9' }],
   })
-  assert(resolved.ok && resolved.definition.parameters.endExtent.distance === 12, 'Expression authored values should resolve from document variables.')
+  assert(resolved.ok && resolved.definition.parameters.extent.end.distance === 12, 'Expression authored values should resolve from document variables.')
   assert(expression.valueText === 'depth + 3', 'Resolution must not rewrite the authored expression source.')
 
   const recomputed = resolveFeatureDefinitionValues({
     definition: extrude(expression),
     variables: [{ variableId: 'variable_depth', name: 'depth', valueText: '15' }],
   })
-  assert(recomputed.ok && recomputed.definition.parameters.endExtent.distance === 18, 'Variable changes should recompute dependent feature values.')
+  assert(recomputed.ok && recomputed.definition.parameters.extent.end.distance === 18, 'Variable changes should recompute dependent feature values.')
 
   const invalidSyntax = resolveFeatureDefinitionValues({
     definition: extrude(createExpressionAuthoredValue('depth +')),

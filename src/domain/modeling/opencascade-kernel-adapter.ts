@@ -205,8 +205,6 @@ function createAuthoredModelDocumentFromAuthoringState(
       sketchId: sketch.sketchId,
       label: sketch.label,
       plane: structuredClone(sketch.plane),
-      planeTarget: structuredClone(sketch.planeTarget),
-      planeKey: sketch.planeKey,
       definition: structuredClone(sketch.sketch.definition),
     })),
     features: state.features.map((feature) => ({
@@ -566,8 +564,6 @@ function buildSketchSnapshotRecord(
     sketchId,
     label: request.sketchLabel,
     plane: request.plane,
-    planeTarget: request.plane.support,
-    planeKey: request.plane.key,
     sketch,
   }
 }
@@ -1088,7 +1084,7 @@ function getNewInvalidatedTargets(
 }
 
 function buildPreviewRenderRecords(
-  records: ReturnType<typeof buildOccWorkspaceSnapshot>['render']['records'],
+  records: ReturnType<typeof buildOccWorkspaceSnapshot>['document']['render']['records'],
   previewFeatureId: FeatureId,
 ) {
   return records.filter((record) => record.ownerFeatureId === previewFeatureId)
@@ -1448,8 +1444,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         sketchId,
         sketchLabel: sketch.label,
         plane: structuredClone(sketch.plane),
-        planeTarget: structuredClone(sketch.planeTarget),
-        planeKey: sketch.planeKey,
         definition,
       },
       sketchId,
@@ -1761,49 +1755,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     request: CommitSketchRequest,
   ): ModelingDiagnostic[] {
     const diagnostics: ModelingDiagnostic[] = []
-
-    if (request.planeTarget.kind !== request.plane.support.kind) {
-      diagnostics.push(
-        createValidationDiagnostic(
-          'Commit sketch planeTarget must match plane.support exactly.',
-          request.plane.support,
-        ),
-      )
-    } else if (
-      request.planeTarget.kind === 'construction'
-      && request.plane.support.kind === 'construction'
-      && request.planeTarget.constructionId !== request.plane.support.constructionId
-    ) {
-      diagnostics.push(
-        createValidationDiagnostic(
-          'Commit sketch planeTarget must match plane.support exactly.',
-          request.plane.support,
-        ),
-      )
-    } else if (
-      request.planeTarget.kind === 'face'
-      && request.plane.support.kind === 'face'
-      && (
-        request.planeTarget.bodyId !== request.plane.support.bodyId
-        || request.planeTarget.faceId !== request.plane.support.faceId
-      )
-    ) {
-      diagnostics.push(
-        createValidationDiagnostic(
-          'Commit sketch planeTarget must match plane.support exactly.',
-          request.plane.support,
-        ),
-      )
-    }
-
-    if (request.planeKey !== request.plane.key) {
-      diagnostics.push(
-        createValidationDiagnostic(
-          'Commit sketch planeKey must match plane.key exactly.',
-          request.plane.support,
-        ),
-      )
-    }
 
     if (
       request.sketchId !== null
@@ -3221,7 +3172,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       const previewDiagnostics = filterPreviewInvalidationDiagnostics(
         runtimeState.authoringState,
         previewState,
-        snapshot.diagnostics,
+        snapshot.document.diagnostics,
       )
       const diagnostics = request.baseRevisionId === currentRevisionId
         ? previewDiagnostics
@@ -3243,8 +3194,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
               currentRevisionId,
         },
         render: {
-          schemaVersion: snapshot.render.schemaVersion,
-          records: buildPreviewRenderRecords(snapshot.render.records, previewFeatureId),
+          schemaVersion: snapshot.document.render.schemaVersion,
+          records: buildPreviewRenderRecords(snapshot.document.render.records, previewFeatureId),
         },
         diagnostics,
       }

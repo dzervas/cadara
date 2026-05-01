@@ -9,7 +9,6 @@ import type {
   DeleteFeatureResponse,
   DocumentVariableRecord,
   DocumentFeatureCursor,
-  DocumentSnapshot,
   EvaluatePreviewResponse,
   FeatureDefinition,
   GetDocumentSnapshotResponse,
@@ -228,11 +227,6 @@ const extrudeExtentSchema = z.discriminatedUnion('mode', [
     secondEnd: extrudeEndSchema,
   }).strict(),
 ])
-const legacyExtrudeEndExtentSchema = extrudeBlindEndSchema.transform((value) => ({
-  kind: value.kind,
-  direction: value.direction,
-  distance: value.distance,
-}))
 const revolveBlindEndSchema = z.object({
   kind: z.literal('blind'),
   direction: angularDirectionSchema,
@@ -287,12 +281,6 @@ const revolveExplicitExtentSchema = z.discriminatedUnion('mode', [
     secondEnd: nonFullRevolveEndSchema,
   }).strict(),
 ])
-const legacyRevolveAngleExtentSchema = z.object({
-  kind: z.literal('angle'),
-  direction: angularDirectionSchema,
-  radians: authoredPositiveNumberSchema('Revolve angle must be positive.'),
-}).passthrough()
-
 const extrudeDefinitionSchema = z.object({
   kind: z.literal('extrude'),
   featureTypeVersion: z.literal(EXTRUDE_FEATURE_SCHEMA_VERSION).transform((value) => value as ExtrudeFeatureSchemaVersion),
@@ -302,18 +290,10 @@ const extrudeDefinitionSchema = z.object({
       z.object({ kind: z.literal('face'), bodyId: z.string(), faceId: z.string() }),
     ])).nonempty('Extrude profiles must be non-empty.'),
     startExtent: z.object({ kind: z.string() }).passthrough(),
-    extent: extrudeExtentSchema.optional(),
-    endExtent: legacyExtrudeEndExtentSchema.optional(),
+    extent: extrudeExtentSchema,
     operation: booleanOperationAuthoredSchema,
     booleanScope: z.object({ kind: z.string() }).passthrough(),
-  }).passthrough().superRefine((value, ctx) => {
-    if (!value.extent && !value.endExtent) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Extrude parameters must include extent or legacy endExtent.',
-      })
-    }
-  }),
+  }).passthrough(),
 })
 
 const revolveDefinitionSchema = z.object({
@@ -323,8 +303,7 @@ const revolveDefinitionSchema = z.object({
     profiles: z.array(z.unknown()).nonempty('Revolve profiles must be non-empty.'),
     axis: z.unknown(),
     startAngle: authoredNumberSchema('Revolve start angle'),
-    extent: z.union([revolveExplicitExtentSchema, legacyRevolveAngleExtentSchema]),
-    angle: authoredPositiveNumberSchema('Revolve angle must be positive.').optional(),
+    extent: revolveExplicitExtentSchema,
     operation: booleanOperationAuthoredSchema,
     booleanScope: z.object({ kind: z.string() }).passthrough(),
   }).passthrough(),
@@ -566,8 +545,6 @@ const sketchSnapshotRecordSchema = z.object({
     definition: sketchDefinitionSchema,
   }).passthrough(),
   plane: sketchPlaneDefinitionSchema,
-  planeTarget: durableRefSchema,
-  planeKey: z.union([z.literal('xy'), z.literal('yz'), z.literal('xz')]).nullable(),
 }).passthrough()
 
 export const kernelDocumentSnapshotSchema = z.object({
@@ -619,35 +596,10 @@ export const workspaceSnapshotSchema = z.object({
       z.literal('reset'),
     ]).nullable(),
   }).nullable().optional(),
-}).transform((value) => {
-  const document = value.document
-  const presentation = value.presentation
-
-  return {
-    document,
-    presentation,
-    provenance: value.provenance ?? null,
-    contractVersion: document.contractVersion,
-    schemaVersion: document.schemaVersion,
-    documentId: document.documentId,
-    revisionId: document.revisionId,
-    settings: document.settings,
-    capabilities: document.capabilities,
-    featureTree: presentation.featureTree,
-    objects: presentation.objects,
-    documentHistory: presentation.documentHistory,
-    features: document.features,
-    cursor: document.cursor,
-    sketches: document.sketches,
-    bodies: document.bodies,
-    constructions: document.constructions,
-    variables: document.variables,
-    entities: presentation.entities,
-    references: document.references,
-    diagnostics: document.diagnostics,
-    render: document.render,
-  } as WorkspaceSnapshot
-})
+}).transform((value) => ({
+  ...value,
+  provenance: value.provenance ?? null,
+}) as WorkspaceSnapshot)
 
 export const getDocumentSnapshotResponseSchema = z.object({
   contractVersion: contractVersionSchema,
@@ -750,6 +702,6 @@ export const deleteDocumentTargetRequestSchema = modelingMutationRequestEnvelope
   target: durableRefSchema,
 }).transform((value) => value as DeleteDocumentTargetRequest)
 
-export function parseWorkspaceSnapshot(value: unknown): DocumentSnapshot {
-  return workspaceSnapshotSchema.parse(value) as DocumentSnapshot
+export function parseWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
+  return workspaceSnapshotSchema.parse(value) as WorkspaceSnapshot
 }

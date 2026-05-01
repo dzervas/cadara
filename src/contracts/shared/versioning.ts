@@ -7,7 +7,7 @@ export type ContractVersion = 'modeling-contract/v1alpha1'
 
 /**
  * Document snapshot payload schema version.
- * This version applies only to `DocumentSnapshot` payload structure.
+ * This version applies only to `WorkspaceSnapshot` payload structure.
  */
 export type SnapshotSchemaVersion = 'document-snapshot/v1alpha1'
 
@@ -74,11 +74,6 @@ export type FeatureTypeVersion =
   | ShellFeatureSchemaVersion
 
 /**
- * Legacy generic feature-definition schema version retained for transitional callers.
- */
-export type LegacyFeatureTypeVersion = 'feature-type/v1alpha1'
-
-/**
  * Render export payload schema version.
  * This version applies only to renderer-neutral render export payloads.
  */
@@ -143,12 +138,6 @@ export const REVOLVE_FEATURE_SCHEMA_VERSION: RevolveFeatureSchemaVersion = 'feat
  * Current shell feature schema version literal.
  */
 export const SHELL_FEATURE_SCHEMA_VERSION: ShellFeatureSchemaVersion = 'feature-type/shell/v1alpha1'
-
-/**
- * Legacy alias retained for older callers that still import one generic
- * feature-type constant. New code should use the per-feature constants above.
- */
-export const FEATURE_TYPE_VERSION: LegacyFeatureTypeVersion = 'feature-type/v1alpha1'
 
 /**
  * Current render export schema version literal.

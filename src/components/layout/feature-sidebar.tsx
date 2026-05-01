@@ -11,7 +11,7 @@ import {
   getPrimitiveRefLabel,
   selectionFilterAllowsTarget,
 } from '@/core/editor/schema'
-import type { DocumentSnapshot, DocumentVariableRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot, DocumentVariableRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 import { getObjectTreeNodeToolIcon } from '@/core/tools/tool-icon-resolvers'
 import { useEditorState } from '@/hooks/use-editor-state'
@@ -30,7 +30,7 @@ interface FeatureSidebarProps {
   onReopenTarget: (target: PrimitiveRef) => void
   onToggleTargetVisibility: (target: PrimitiveRef) => void
   onUpdateVariable: (variable: DocumentVariableRecord, next: Pick<DocumentVariableRecord, 'name' | 'valueText'>) => void
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   onSelectTarget: (target: PrimitiveRef) => void
   visibleSelection: PrimitiveRef[]
 }

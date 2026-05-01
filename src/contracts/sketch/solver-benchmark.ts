@@ -208,8 +208,6 @@ function makeAuthoredSketchRecord(
     sketchId,
     label,
     plane,
-    planeTarget: plane.support,
-    planeKey: plane.key,
     definition,
   }
 }

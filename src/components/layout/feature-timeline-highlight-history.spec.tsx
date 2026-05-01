@@ -253,7 +253,10 @@ test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async 
     parameters: {
       profiles: [{ kind: 'region', sketchId, regionId }],
       startExtent: { kind: 'profilePlane' },
-      endExtent: { kind: 'blind', direction: 'positive', distance: 6 },
+      extent: {
+        mode: 'oneSide',
+        end: { kind: 'blind', direction: 'positive', distance: 6 },
+      },
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     },

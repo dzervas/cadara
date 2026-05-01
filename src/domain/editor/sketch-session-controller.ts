@@ -7,7 +7,7 @@ import {
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type {
@@ -24,7 +24,7 @@ const FACE_PLANE_TOLERANCE = 1e-9
 
 export function openSketchSessionFromSelection(
   selection: PrimitiveRef[],
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
 ): SketchSessionState | null {
   const primary = selection[0]
 
@@ -57,7 +57,7 @@ export function openSketchSessionFromSelection(
   return null
 }
 
-export function canStartSketchFromTarget(target: PrimitiveRef, snapshot: DocumentSnapshot | null) {
+export function canStartSketchFromTarget(target: PrimitiveRef, snapshot: WorkspaceSnapshot | null) {
   if (target.kind === 'construction') {
     return true
   }
@@ -74,7 +74,7 @@ export function canStartSketchFromTarget(target: PrimitiveRef, snapshot: Documen
 }
 
 function createFaceBackedSketchPlane(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'face' }>,
 ): SketchPlaneDefinition | null {
   const targetKey = getPrimitiveRefKey(target)

@@ -680,7 +680,7 @@ export function handleEffectSketchReferenceImageImportCompleted(
     {
       ...state,
       document: {
-        documentId: event.snapshot.documentId,
+        documentId: event.snapshot.document.documentId,
         revisionId: event.revisionId,
       },
       snapshot: event.snapshot,

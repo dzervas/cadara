@@ -1,4 +1,4 @@
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { getPrimitiveRefKey, type PrimitiveRef } from '@/core/editor/schema'
 
 export interface WorkbenchVisibilityState {
@@ -19,7 +19,7 @@ export interface ToggleWorkbenchTargetVisibilityResult {
   explicitlyShownAutoHiddenTargetKeys: Record<string, boolean>
 }
 
-export function getAutoHiddenSketchTargetKeys(snapshot: DocumentSnapshot | null): Record<string, boolean> {
+export function getAutoHiddenSketchTargetKeys(snapshot: WorkspaceSnapshot | null): Record<string, boolean> {
   if (!snapshot) {
     return {}
   }
@@ -41,7 +41,7 @@ export function reconcileVisibilityIntentKeys(
 }
 
 export function getWorkbenchVisibilityState(input: {
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   explicitHiddenTargetKeys: Record<string, boolean>
   explicitlyShownAutoHiddenTargetKeys: Record<string, boolean>
 }): WorkbenchVisibilityState {

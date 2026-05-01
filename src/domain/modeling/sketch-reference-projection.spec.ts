@@ -1,5 +1,5 @@
 import { test } from 'bun:test'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION, RENDER_EXPORT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import { projectSketchExternalReferencesFromSnapshot } from './sketch-reference-projection'
@@ -10,7 +10,7 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-function createSnapshotWithEdge(points: readonly (readonly [number, number, number])[], isClosed: boolean): DocumentSnapshot {
+function createSnapshotWithEdge(points: readonly (readonly [number, number, number])[], isClosed: boolean): WorkspaceSnapshot {
   const document = {
     contractVersion: CONTRACT_VERSION,
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -77,7 +77,7 @@ function createSnapshotWithEdge(points: readonly (readonly [number, number, numb
     provenance: null,
     ...document,
     documentHistory: [],
-  } as DocumentSnapshot
+  } as WorkspaceSnapshot
 }
 
 function projectEdge(points: readonly (readonly [number, number, number])[], isClosed: boolean) {

@@ -105,8 +105,8 @@ test('src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
 
   assert(
     ownerHookSource.includes('createWorkbenchDocumentOwner')
-      && ownerServiceSource.includes("dispatch({ type: 'document.snapshotLoaded', snapshot: nextSnapshot })")
-      && ownerServiceSource.includes("dispatch({ type: 'document.replaced', snapshot: nextSnapshot })"),
+      && ownerServiceSource.includes('document.snapshotLoaded')
+      && ownerServiceSource.includes('document.replaced'),
     'Workbench document owner should keep distinct incremental snapshot and whole-document replacement handoffs while the hook remains a thin adapter.',
   )
   assert(

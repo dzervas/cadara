@@ -1,120 +1,126 @@
-import { getPrimitiveRefKey, getPrimitiveRefLabel } from '@/core/editor/schema'
-import type { PrimitiveRef } from '@/core/editor/schema'
+import { getPrimitiveRefKey, getPrimitiveRefLabel } from "@/core/editor/schema";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
-  DocumentSnapshot,
-  FeatureSnapshotRecord,
-  SnapshotEntityRecord,
-} from '@/contracts/modeling/schema'
-import type { FeatureId } from '@/contracts/shared/ids'
-import type { SelectionTargetCatalog } from '@/core/editor/schema'
+	WorkspaceSnapshot,
+	FeatureSnapshotRecord,
+	SnapshotEntityRecord,
+} from "@/contracts/modeling/schema";
+import type { FeatureId } from "@/contracts/shared/ids";
+import type { SelectionTargetCatalog } from "@/core/editor/schema";
 
 export interface DocumentSelectionDetail {
-  label: string
-  kindLabel: string
-  ownerLabel: string
-  relatedLabels: string[]
+	label: string;
+	kindLabel: string;
+	ownerLabel: string;
+	relatedLabels: string[];
 }
 
-function getFeatureLabel(snapshot: DocumentSnapshot, featureId: DocumentSelectionDetail['label']) {
-  return snapshot.document.features.find((feature) => feature.featureId === featureId)?.label ?? null
+function getFeatureLabel(snapshot: WorkspaceSnapshot, featureId: DocumentSelectionDetail["label"]) {
+	return (
+		snapshot.document.features.find((feature) => feature.featureId === featureId)?.label ?? null
+	);
 }
 
-function getSketchLabel(snapshot: DocumentSnapshot, sketchId: DocumentSelectionDetail['label']) {
-  return snapshot.document.sketches.find((sketch) => sketch.sketchId === sketchId)?.label ?? null
+function getSketchLabel(snapshot: WorkspaceSnapshot, sketchId: DocumentSelectionDetail["label"]) {
+	return snapshot.document.sketches.find((sketch) => sketch.sketchId === sketchId)?.label ?? null;
 }
 
-function getBodyLabel(snapshot: DocumentSnapshot, bodyId: DocumentSelectionDetail['label']) {
-  return snapshot.document.bodies.find((body) => body.bodyId === bodyId)?.label ?? null
+function getBodyLabel(snapshot: WorkspaceSnapshot, bodyId: DocumentSelectionDetail["label"]) {
+	return snapshot.document.bodies.find((body) => body.bodyId === bodyId)?.label ?? null;
 }
 
-export function getEntityRecordForTarget(snapshot: DocumentSnapshot, target: PrimitiveRef) {
-  const targetKey = getPrimitiveRefKey(target)
-  return snapshot.presentation.entities.find((entity) => getPrimitiveRefKey(entity.target) === targetKey) ?? null
+export function getEntityRecordForTarget(snapshot: WorkspaceSnapshot, target: PrimitiveRef) {
+	const targetKey = getPrimitiveRefKey(target);
+	return (
+		snapshot.presentation.entities.find(
+			(entity) => getPrimitiveRefKey(entity.target) === targetKey,
+		) ?? null
+	);
 }
 
 export function getTargetContributingFeatureIds(
-  snapshot: DocumentSnapshot,
-  target: PrimitiveRef | null,
+	snapshot: WorkspaceSnapshot,
+	target: PrimitiveRef | null,
 ): FeatureId[] {
-  if (!target) {
-    return []
-  }
+	if (!target) {
+		return [];
+	}
 
-  return [...(getEntityRecordForTarget(snapshot, target)?.contributingFeatureIds ?? [])]
+	return [...(getEntityRecordForTarget(snapshot, target)?.contributingFeatureIds ?? [])];
 }
 
-function getOwnerLabel(snapshot: DocumentSnapshot, entity: SnapshotEntityRecord) {
-  if (entity.ownerFeatureId) {
-    return getFeatureLabel(snapshot, entity.ownerFeatureId) ?? entity.ownerFeatureId
-  }
+function getOwnerLabel(snapshot: WorkspaceSnapshot, entity: SnapshotEntityRecord) {
+	if (entity.ownerFeatureId) {
+		return getFeatureLabel(snapshot, entity.ownerFeatureId) ?? entity.ownerFeatureId;
+	}
 
-  if (entity.ownerSketchId) {
-    return getSketchLabel(snapshot, entity.ownerSketchId) ?? entity.ownerSketchId
-  }
+	if (entity.ownerSketchId) {
+		return getSketchLabel(snapshot, entity.ownerSketchId) ?? entity.ownerSketchId;
+	}
 
-  if (entity.ownerBodyId) {
-    return getBodyLabel(snapshot, entity.ownerBodyId) ?? entity.ownerBodyId
-  }
+	if (entity.ownerBodyId) {
+		return getBodyLabel(snapshot, entity.ownerBodyId) ?? entity.ownerBodyId;
+	}
 
-  return 'Document root'
+	return "Document root";
 }
 
 export function getSelectionDetail(
-  snapshot: DocumentSnapshot,
-  target: PrimitiveRef,
+	snapshot: WorkspaceSnapshot,
+	target: PrimitiveRef,
 ): DocumentSelectionDetail {
-  const entity = getEntityRecordForTarget(snapshot, target)
+	const entity = getEntityRecordForTarget(snapshot, target);
 
-  if (!entity) {
-    return {
-      label: getPrimitiveRefLabel(target),
-      kindLabel: target.kind,
-      ownerLabel: 'Unresolved selection',
-      relatedLabels: [],
-    }
-  }
+	if (!entity) {
+		return {
+			label: getPrimitiveRefLabel(target),
+			kindLabel: target.kind,
+			ownerLabel: "Unresolved selection",
+			relatedLabels: [],
+		};
+	}
 
-  return {
-    label: entity.label,
-    kindLabel: entity.target.kind,
-    ownerLabel: getOwnerLabel(snapshot, entity),
-    relatedLabels: entity.relatedTargets.map((relatedTarget) => {
-      const relatedEntity = getEntityRecordForTarget(snapshot, relatedTarget)
+	return {
+		label: entity.label,
+		kindLabel: entity.target.kind,
+		ownerLabel: getOwnerLabel(snapshot, entity),
+		relatedLabels: entity.relatedTargets.map((relatedTarget) => {
+			const relatedEntity = getEntityRecordForTarget(snapshot, relatedTarget);
 
-      if (!relatedEntity) {
-        throw new Error(
-          `Related target ${getPrimitiveRefKey(relatedTarget)} is missing from snapshot.entities.`,
-        )
-      }
+			if (!relatedEntity) {
+				throw new Error(
+					`Related target ${getPrimitiveRefKey(relatedTarget)} is missing from snapshot.presentation.entities.`,
+				);
+			}
 
-      return relatedEntity.label
-    }),
-  }
+			return relatedEntity.label;
+		}),
+	};
 }
 
 export function getFeatureSnapshot(
-  snapshot: DocumentSnapshot,
-  featureId: FeatureSnapshotRecord['featureId'],
+	snapshot: WorkspaceSnapshot,
+	featureId: FeatureSnapshotRecord["featureId"],
 ) {
-  return snapshot.document.features.find((feature) => feature.featureId === featureId) ?? null
+	return snapshot.document.features.find((feature) => feature.featureId === featureId) ?? null;
 }
 
-export function buildSelectionTargetCatalog(snapshot: DocumentSnapshot): SelectionTargetCatalog {
-  const entries = snapshot.presentation.entities.map((entity) => ({
-    key: getPrimitiveRefKey(entity.target),
-    semantics: entity.selectionSemantics,
-  }))
+export function buildSelectionTargetCatalog(snapshot: WorkspaceSnapshot): SelectionTargetCatalog {
+	const entries = snapshot.presentation.entities.map((entity) => ({
+		key: getPrimitiveRefKey(entity.target),
+		semantics: entity.selectionSemantics,
+	}));
 
-  return {
-    selectableTargetKeys: entries.map((entry) => entry.key),
-    existingSketchKeys: entries
-      .filter((entry) => entry.semantics.includes('existingSketch'))
-      .map((entry) => entry.key),
-    constructionPlaneKeys: entries
-      .filter((entry) => entry.semantics.includes('constructionPlane'))
-      .map((entry) => entry.key),
-    planarFaceKeys: entries
-      .filter((entry) => entry.semantics.includes('planarFace'))
-      .map((entry) => entry.key),
-  }
+	return {
+		selectableTargetKeys: entries.map((entry) => entry.key),
+		existingSketchKeys: entries
+			.filter((entry) => entry.semantics.includes("existingSketch"))
+			.map((entry) => entry.key),
+		constructionPlaneKeys: entries
+			.filter((entry) => entry.semantics.includes("constructionPlane"))
+			.map((entry) => entry.key),
+		planarFaceKeys: entries
+			.filter((entry) => entry.semantics.includes("planarFace"))
+			.map((entry) => entry.key),
+	};
 }

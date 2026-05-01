@@ -21,8 +21,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
   const snapshotEffect: EditorEffect = {
     type: 'document.fetchSnapshot',
     requestId: 'request_editor_snapshot' as EditorEffect['requestId'],
-    documentId: snapshot.documentId,
-    revisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    revisionId: snapshot.document.revisionId,
     commandSessionId: null,
     preserveRenderRecordsOnFeatureDiagnostics: true,
   }
@@ -36,8 +36,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
   assert(
     loaded.type === 'effect.snapshotLoaded'
       && loaded.payload.snapshot === snapshot
-      && loaded.payload.documentId === snapshot.documentId
-      && loaded.payload.revisionId === snapshot.revisionId
+      && loaded.payload.documentId === snapshot.document.documentId
+      && loaded.payload.revisionId === snapshot.document.revisionId
       && loaded.payload.preserveRenderRecordsOnFeatureDiagnostics === true
       && loaded.payload.selectionCatalog.selectableTargetKeys.length > 0,
     'Successful snapshot fetches should hand off the loaded snapshot and derived selection catalog.',
@@ -62,8 +62,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
     requestId: 'request_editor_open_sketch' as EditorEffect['requestId'],
     commandSessionId: 'command_open_sketch' as EditorEffect['commandSessionId'],
     selection: [{ kind: 'sketch', sketchId: sketch.sketchId }],
-    documentId: snapshot.documentId,
-    revisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    revisionId: snapshot.document.revisionId,
   }
   const opened = await runEditorEffect(openEffect, {
     async getCurrentDocumentSnapshot() {
@@ -95,8 +95,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
     type: 'feature.hydrateFromSelection',
     requestId: 'request_editor_hydrate_feature' as EditorEffect['requestId'],
     commandSessionId: 'command_hydrate_feature' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    revisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    revisionId: snapshot.document.revisionId,
     selectedFeatureId: feature.featureId,
   }
   const hydrated = await runEditorEffect(hydrateEffect, {
@@ -141,14 +141,14 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
     type: 'feature.evaluatePreview',
     requestId: 'request_editor_preview' as EditorEffect['requestId'],
     commandSessionId: 'command_preview' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     featureSession,
   }
   const preview = await runEditorEffect(previewEffect, {
     async evaluatePreview() {
       return {
-        revisionId: 'rev_preview' as typeof snapshot.revisionId,
+        revisionId: 'rev_preview' as typeof snapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
@@ -159,7 +159,7 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
   assert(
     preview.type === 'effect.featurePreviewCompleted'
       && preview.revisionId === 'rev_preview'
-      && preview.baseRevisionId === snapshot.revisionId
+      && preview.baseRevisionId === snapshot.document.revisionId
       && preview.stale === false,
     'Feature preview success should preserve the returned preview revision and stale flag.',
   )
@@ -180,19 +180,19 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
     type: 'feature.commit',
     requestId: 'request_editor_commit_feature' as EditorEffect['requestId'],
     commandSessionId: 'command_commit_feature' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     mutationBasis: { baseRepositoryHeads: ['head_feature_1'] },
     featureSession,
   }
   const committed = await runEditorEffect(commitEffect, {
     async commitFeature() {
       return {
-        revisionId: 'rev_feature_commit' as typeof snapshot.revisionId,
+        revisionId: 'rev_feature_commit' as typeof snapshot.document.revisionId,
         featureId: featureSession.featureId!,
         accepted: false,
         diagnostics: [],
-        actualRevisionId: 'rev_feature_actual' as typeof snapshot.revisionId,
+        actualRevisionId: 'rev_feature_actual' as typeof snapshot.document.revisionId,
         errorContext,
       }
     },
@@ -210,8 +210,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
     type: 'sketch.commit',
     requestId: 'request_editor_commit_sketch' as EditorEffect['requestId'],
     commandSessionId: 'command_commit_sketch' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     mutationBasis: { baseRepositoryHeads: ['head_sketch_1'] },
     session: sketchSession,
   }
@@ -223,7 +223,7 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
   assert(noopSketchCommit.type === 'effect.sketchCommitted', 'Sketch commit should still complete when the runtime reports no mutation.')
   assert(
     noopSketchCommit.type === 'effect.sketchCommitted'
-      && noopSketchCommit.revisionId === snapshot.revisionId
+      && noopSketchCommit.revisionId === snapshot.document.revisionId
       && noopSketchCommit.accepted === true
       && noopSketchCommit.diagnostics.length === 0,
     'No-op sketch commits should map to an accepted event pinned to the base revision.',
@@ -233,8 +233,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
     type: 'sketch.projectReferences',
     requestId: 'request_editor_project_refs' as EditorEffect['requestId'],
     commandSessionId: 'command_project_refs' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     session: sketchSession,
   }, {
     async projectSketchReferences() {
@@ -248,7 +248,7 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
   assert(
     projected.type === 'effect.sketchReferencesProjected'
       && projected.projectedReferences.length === 0
-      && projected.baseRevisionId === snapshot.revisionId,
+      && projected.baseRevisionId === snapshot.document.revisionId,
     'Projected reference results should preserve the returned references and base revision.',
   )
 })
@@ -266,8 +266,8 @@ test('editor effect runtime covers reference-image import, special modes, and hi
     type: 'sketch.importReferenceImages',
     requestId: 'request_editor_import_images' as EditorEffect['requestId'],
     commandSessionId: 'command_import_images' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     mutationBasis: { baseRepositoryHeads: ['head_import_1'] },
     session: sketchSession,
     payloads: [],
@@ -284,7 +284,7 @@ test('editor effect runtime covers reference-image import, special modes, and hi
     async importSketchReferenceImages() {
       return {
         status: 'committed',
-        revisionId: 'rev_imported_images' as typeof snapshot.revisionId,
+        revisionId: 'rev_imported_images' as typeof snapshot.document.revisionId,
         snapshot,
         selectionCatalog: {
           selectableTargetKeys: [],
@@ -310,8 +310,8 @@ test('editor effect runtime covers reference-image import, special modes, and hi
     type: 'sketch.specialModeEffect',
     requestId: 'request_editor_special_mode' as EditorEffect['requestId'],
     commandSessionId: 'command_special_mode' as EditorEffect['commandSessionId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     modeId: 'reference-image-calibration' as EditorEffect['type'] extends never ? never : never,
     effectId: 'effect_calibrate',
     kind: 'measure',
@@ -335,8 +335,8 @@ test('editor effect runtime covers reference-image import, special modes, and hi
   const cursorEffect: EditorEffect = {
     type: 'document.moveHistoryCursor',
     requestId: 'request_editor_cursor' as EditorEffect['requestId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     mutationBasis: { baseRepositoryHeads: ['head_cursor_1'] },
     cursor: snapshot.document.cursor,
     transient: true,
@@ -347,7 +347,7 @@ test('editor effect runtime covers reference-image import, special modes, and hi
     },
     async setDocumentCursor() {
       return {
-        revisionId: 'rev_cursor_moved' as typeof snapshot.revisionId,
+        revisionId: 'rev_cursor_moved' as typeof snapshot.document.revisionId,
         accepted: true,
         diagnostics: [],
       }
@@ -364,10 +364,10 @@ test('editor effect runtime covers reference-image import, special modes, and hi
   const rejectedMove = await runEditorEffect(cursorEffect, {
     async setDocumentCursor() {
       return {
-        revisionId: 'rev_cursor_conflict' as typeof snapshot.revisionId,
+        revisionId: 'rev_cursor_conflict' as typeof snapshot.document.revisionId,
         accepted: false,
         diagnostics: [],
-        actualRevisionId: 'rev_cursor_actual' as typeof snapshot.revisionId,
+        actualRevisionId: 'rev_cursor_actual' as typeof snapshot.document.revisionId,
       }
     },
   } as EditorEffectRuntime)
@@ -396,7 +396,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   assert(hydratedFeatureSession, 'Seed snapshot should expose an editable feature for runtime adapter coverage.')
   assert(sketchSession, 'Seed snapshot should expose a sketch session for runtime adapter coverage.')
 
-  const commitCalls: Array<{ sketchLabel: string; sketchId: string | null; planeTarget: { kind: string }; baseRepositoryHeads?: readonly string[] }> = []
+  const commitCalls: Array<{ sketchLabel: string; sketchId: string | null; planeKind: string; baseRepositoryHeads?: readonly string[] }> = []
   const createFeatureCalls: Array<{ definitionKind: string; baseRepositoryHeads?: readonly string[] }> = []
   const updateFeatureCalls: Array<{ featureId: string; definitionKind: string }> = []
   const cursorCalls: Array<{ persistHistory: boolean | undefined }> = []
@@ -409,11 +409,11 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
       commitCalls.push({
         sketchLabel: input.sketchLabel,
         sketchId: input.sketchId,
-        planeTarget: input.planeTarget,
+        planeKind: input.plane.support.kind,
         baseRepositoryHeads: input.baseRepositoryHeads,
       })
       return ok({
-        revisionId: 'rev_runtime_sketch' as typeof snapshot.revisionId,
+        revisionId: 'rev_runtime_sketch' as typeof snapshot.document.revisionId,
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
       })
@@ -428,7 +428,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     sketchSolver: null,
     async evaluatePreview(input) {
       return {
-        revisionId: `${input.previewId}_rev` as typeof snapshot.revisionId,
+        revisionId: `${input.previewId}_rev` as typeof snapshot.document.revisionId,
         stale: true,
         diagnostics: [],
         renderables: [],
@@ -440,7 +440,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
         baseRepositoryHeads: input.baseRepositoryHeads,
       })
       return ok({
-        revisionId: 'rev_feature_created' as typeof snapshot.revisionId,
+        revisionId: 'rev_feature_created' as typeof snapshot.document.revisionId,
         featureId: 'feature_plane_created' as typeof snapshot.document.features[number]['featureId'],
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
@@ -452,7 +452,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
         definitionKind: input.definition.kind,
       })
       return ok({
-        revisionId: 'rev_feature_updated' as typeof snapshot.revisionId,
+        revisionId: 'rev_feature_updated' as typeof snapshot.document.revisionId,
         featureId: input.featureId,
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
@@ -461,7 +461,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     async setFeatureCursor(input) {
       cursorCalls.push({ persistHistory: input.persistHistory })
       return ok({
-        revisionId: 'rev_cursor_runtime' as typeof snapshot.revisionId,
+        revisionId: 'rev_cursor_runtime' as typeof snapshot.document.revisionId,
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
       })
@@ -470,7 +470,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
 
   const committedSketch = await runtime.commitSketch({
     requestId: 'request_runtime_sketch' as EditorEffect['requestId'],
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     baseRepositoryHeads: ['head_runtime_sketch'],
     session: sketchSession,
   })
@@ -479,15 +479,15 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
       && committedSketch.revisionId === 'rev_runtime_sketch'
       && commitCalls[0]?.sketchId === sketchSession.sketchId
       && commitCalls[0]?.sketchLabel === sketchSession.sketchLabel
-      && commitCalls[0]?.planeTarget.kind === 'construction'
+      && commitCalls[0]?.planeKind === 'construction'
       && commitCalls[0]?.baseRepositoryHeads?.[0] === 'head_runtime_sketch',
     'Sketch commit runtime adaptation should forward commit defaults and accepted results.',
   )
 
   const noReferenceProjection = await runtime.projectSketchReferences({
     requestId: 'request_runtime_projection_empty' as EditorEffect['requestId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     session: {
       ...sketchSession,
       definition: {
@@ -504,8 +504,8 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
 
   const projected = await runtime.projectSketchReferences({
     requestId: 'request_runtime_projection' as EditorEffect['requestId'],
-    documentId: snapshot.documentId,
-    baseRevisionId: snapshot.revisionId,
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId,
     session: sketchSession,
   })
   assert(
@@ -516,7 +516,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   )
 
   const preview = await runtime.evaluatePreview({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     featureSession: hydratedFeatureSession,
   })
   assert(
@@ -525,12 +525,12 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   )
 
   const createdFeature = await runtime.commitFeature({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     baseRepositoryHeads: ['head_feature_create'],
     featureSession: planeCreateSession,
   })
   const updatedFeature = await runtime.commitFeature({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     baseRepositoryHeads: ['head_feature_edit'],
     featureSession: hydratedFeatureSession,
   })
@@ -550,7 +550,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   )
 
   const movedCursor = await runtime.setDocumentCursor({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     baseRepositoryHeads: ['head_cursor_runtime'],
     cursor: snapshot.document.cursor,
     transient: true,
@@ -566,9 +566,9 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   try {
     await runtime.runSketchSpecialModeEffect?.({
       requestId: 'request_runtime_special_mode' as EditorEffect['requestId'],
-      documentId: snapshot.documentId,
+      documentId: snapshot.document.documentId,
       commandSessionId: 'command_runtime_special_mode' as EditorEffect['commandSessionId'],
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       modeId: 'reference-image-calibration' as never,
       effectId: 'effect_runtime_special_mode',
       kind: 'measure',
@@ -588,7 +588,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     },
     async commitSketch() {
       return ok({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
       })
@@ -602,7 +602,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     sketchSolver: null,
     async evaluatePreview() {
       return {
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
@@ -610,7 +610,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     },
     async createFeature() {
       return ok({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         featureId: 'feature_create_ok' as typeof snapshot.document.features[number]['featureId'],
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
@@ -618,7 +618,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     },
     async updateFeature() {
       return ok({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         featureId: hydratedFeatureSession.featureId!,
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
@@ -626,7 +626,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     },
     async setFeatureCursor() {
       return ok({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
       })
@@ -636,7 +636,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   let incompletePreviewMessage: string | null = null
   try {
     await errorRuntime.evaluatePreview({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       featureSession: incompleteFeatureSession,
     })
   } catch (error: unknown) {
@@ -650,7 +650,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   let incompleteCommitMessage: string | null = null
   try {
     await errorRuntime.commitFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       featureSession: incompleteFeatureSession,
     })
   } catch (error: unknown) {
@@ -681,7 +681,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     sketchSolver: null,
     async evaluatePreview() {
       return {
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
@@ -689,7 +689,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     },
     async createFeature() {
       return ok({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         featureId: 'feature_create_ok' as typeof snapshot.document.features[number]['featureId'],
         revisionState: { kind: 'accepted' as const },
         diagnostics: [],
@@ -712,11 +712,11 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   } as never)
 
   const rejectedFeature = await rejectedRuntime.commitFeature({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     featureSession: hydratedFeatureSession,
   })
   const rejectedCursor = await rejectedRuntime.setDocumentCursor({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     cursor: snapshot.document.cursor,
   })
   assert(

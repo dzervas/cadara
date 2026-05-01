@@ -1362,8 +1362,6 @@ export function rebuildSessionCommitRequest(session: SketchSessionState, definit
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,
     plane: session.plane,
-    planeTarget: session.planeTarget,
-    planeKey: session.planeKey,
     definition: evaluatedDefinition,
   })
 }

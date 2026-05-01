@@ -6,7 +6,7 @@ import type {
   CreateFeatureResponse,
   DeleteDocumentTargetResponse,
   DeleteFeatureResponse,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   EvaluatePreviewResponse,
   GetDocumentSnapshotResponse,
   GetDocumentSnapshotRequest,
@@ -57,20 +57,20 @@ import type {
 import { CONTRACT_VERSION, SNAPSHOT_SCHEMA_VERSION } from './helpers'
 import { normalizeWorkspaceSnapshot } from './normalization'
 
-export function buildDocumentRequest(documentId: DocumentSnapshot['documentId']): GetDocumentSnapshotRequest {
+export function buildDocumentRequest(documentId: WorkspaceSnapshot['document']['documentId']): GetDocumentSnapshotRequest {
   return {
     contractVersion: CONTRACT_VERSION,
     documentId,
   }
 }
 
-export function assertKernelContractVersion(contractVersion: GetDocumentSnapshotResponse['snapshot']['contractVersion']) {
+export function assertKernelContractVersion(contractVersion: GetDocumentSnapshotResponse['snapshot']['document']['contractVersion']) {
   if (contractVersion !== CONTRACT_VERSION) {
     throw new Error('Kernel contract version does not match the active modeling service.')
   }
 }
 
-export function assertSnapshotSchemaVersion(schemaVersion: DocumentSnapshot['schemaVersion']) {
+export function assertSnapshotSchemaVersion(schemaVersion: WorkspaceSnapshot['document']['schemaVersion']) {
   if (schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
     throw new Error('Snapshot schema version does not match the active modeling service.')
   }
@@ -89,7 +89,7 @@ export function assertKernelDocumentIdMatches(
 export function validateSnapshotResponse(
   response: GetDocumentSnapshotResponse,
   expectedDocumentId: DocumentId,
-): DocumentSnapshot {
+): WorkspaceSnapshot {
   const parsed = getDocumentSnapshotResponseSchema.parse(response)
   assertKernelContractVersion(parsed.snapshot.document.contractVersion)
   assertSnapshotSchemaVersion(parsed.snapshot.document.schemaVersion)

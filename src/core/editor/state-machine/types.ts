@@ -23,7 +23,7 @@ import type {
 } from '@/domain/editor/sketch-session'
 import type {
   DocumentFeatureCursor,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   ModelingDiagnostic,
   SnapshotMutationBasis,
 } from '@/contracts/modeling/schema'
@@ -97,7 +97,7 @@ interface EditorStateBase {
    * This snapshot is read-only from the editor perspective and changes only through
    * explicit snapshot result events.
    */
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   /**
    * Preview renderables owned by the most recent accepted preview effect.
    * These are transient and must be discarded on draft changes, cancellation, or stale responses.
@@ -230,7 +230,7 @@ export interface SnapshotLoadedPayload {
   /** Revision represented by `snapshot`. */
   revisionId: RevisionId
   /** Full typed snapshot payload loaded into the editor runtime. */
-  snapshot: DocumentSnapshot
+  snapshot: WorkspaceSnapshot
   /** Derived selection catalog built from `snapshot` for command filtering. */
   selectionCatalog: SelectionTargetCatalog
   /** Keep prior viewport render records when this snapshot contains repairable feature errors. */
@@ -272,14 +272,14 @@ export interface DocumentRefreshRequestedEvent {
 export interface DocumentSnapshotLoadedEvent {
   type: 'document.snapshotLoaded'
   /** Full typed snapshot payload to load into the editor runtime. */
-  snapshot: DocumentSnapshot
+  snapshot: WorkspaceSnapshot
 }
 
 /** Replaces the active document basis through an explicit whole-document handoff. */
 export interface DocumentReplacedEvent {
   type: 'document.replaced'
   /** Full typed snapshot payload that becomes the next authoritative document basis. */
-  snapshot: DocumentSnapshot
+  snapshot: WorkspaceSnapshot
 }
 
 /** Reports a viewport hover on a durable selectable target. */
@@ -791,7 +791,7 @@ export type EditorEvent =
       baseRevisionId: RevisionId
       status: 'cancelled' | 'committed'
       revisionId: RevisionId
-      snapshot?: DocumentSnapshot
+      snapshot?: WorkspaceSnapshot
       selectionCatalog?: SelectionTargetCatalog
       session?: SketchSessionState
       importedCount?: number
@@ -835,7 +835,7 @@ export type EditorEvent =
       /** Whether the cursor mutation was accepted against `baseRevisionId`. */
       accepted: boolean
       /** Fresh snapshot after the accepted cursor move, when the runtime can provide it immediately. */
-      snapshot?: DocumentSnapshot
+      snapshot?: WorkspaceSnapshot
       /** Machine-readable diagnostics returned by the mutation. */
       diagnostics: ModelingDiagnostic[]
       /** Actual revision encountered when `accepted` is false due to conflict. */
@@ -1037,7 +1037,7 @@ export interface EditorTransitionResult {
  */
 export interface EditorEffectRuntime {
   /** Fetches the latest typed snapshot for the active document. */
-  getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
+  getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>
   /** Commits the active sketch session against a base revision. */
   commitSketch(input: {
     requestId: RequestId
@@ -1073,7 +1073,7 @@ export interface EditorEffectRuntime {
   }): Promise<{
     status: 'cancelled' | 'committed'
     revisionId: RevisionId
-    snapshot?: DocumentSnapshot
+    snapshot?: WorkspaceSnapshot
     selectionCatalog?: SelectionTargetCatalog
     session?: SketchSessionState
     importedCount?: number
@@ -1161,7 +1161,7 @@ export interface EditorViewState {
   /** Active temporary section-view session, or null when inactive. */
   activeSectionView?: SectionViewSession | null
   /** Last loaded document snapshot owned by the machine. */
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   /** Most recent accepted preview renderables, or null when none are active. */
   previewRenderables: RenderableEntityRecord[] | null
   /** Availability of toolbar history actions in the active editor context. */

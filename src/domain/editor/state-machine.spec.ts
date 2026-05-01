@@ -25,7 +25,7 @@ import {
 } from '@/core/editor/schema'
 import type { ToolId } from '@/core/tools/tool-registry'
 import type { ImportProvider } from '@/contracts/import/provider'
-import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { SnapshotEntityRecord, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
   ConstructionId,
@@ -124,7 +124,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
-  function createSectionSelectionSnapshot(): DocumentSnapshot {
+  function createSectionSelectionSnapshot(): WorkspaceSnapshot {
     const base = createSnapshot()
     const plane = createStandardPlaneDefinition('xy')
 
@@ -333,7 +333,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
-  function createSnapshot(): DocumentSnapshot {
+  function createSnapshot(): WorkspaceSnapshot {
     return {
       contractVersion: 'modeling-contract/v1alpha1',
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -663,10 +663,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   function cloneSnapshotWithCursor(
-    snapshot: DocumentSnapshot,
-    cursor: DocumentSnapshot['document']['cursor'],
+    snapshot: WorkspaceSnapshot,
+    cursor: WorkspaceSnapshot['document']['cursor'],
     revisionId: RevisionId,
-  ): DocumentSnapshot {
+  ): WorkspaceSnapshot {
     return {
       ...snapshot,
       revisionId,
@@ -679,7 +679,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
-  function createRenderRecord(id: string, featureId: FeatureId): DocumentSnapshot['document']['render']['records'][number] {
+  function createRenderRecord(id: string, featureId: FeatureId): WorkspaceSnapshot['document']['render']['records'][number] {
     return {
       id: id as RenderableId,
       label: id,
@@ -700,18 +700,18 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
   }
 
-  function createCursorAwareRuntime(initialSnapshot: DocumentSnapshot) {
+  function createCursorAwareRuntime(initialSnapshot: WorkspaceSnapshot) {
     let snapshot = structuredClone(initialSnapshot)
     let nextRevisionSequence = 1
     let snapshotReadCount = 0
     const cursorMoves: {
       baseRevisionId: RevisionId
-      cursor: DocumentSnapshot['document']['cursor']
+      cursor: WorkspaceSnapshot['document']['cursor']
       transient?: boolean
     }[] = []
     const previewCalls: {
       baseRevisionId: RevisionId
-      cursor: DocumentSnapshot['document']['cursor']
+      cursor: WorkspaceSnapshot['document']['cursor']
     }[] = []
     const featureCommitCalls: RevisionId[] = []
     const sketchCommitCalls: RevisionId[] = []
@@ -800,19 +800,19 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
 
     const sketch2 = {
-      ...structuredClone(snapshot.sketches[0]!),
+      ...structuredClone(snapshot.document.sketches[0]!),
       sketchId: 'sketch_second' as SketchId,
       ownerSketchId: 'sketch_second' as SketchId,
       label: 'Sketch 2',
       sketch: {
-        ...structuredClone(snapshot.sketches[0]!.sketch),
+        ...structuredClone(snapshot.document.sketches[0]!.sketch),
         sketchId: 'sketch_second' as SketchId,
         ownerSketchId: 'sketch_second' as SketchId,
         label: 'Sketch 2',
       },
     }
     const revolve = {
-      ...structuredClone(snapshot.features.find((feature) => feature.featureId === 'feature_extrude-1')!),
+      ...structuredClone(snapshot.document.features.find((feature) => feature.featureId === 'feature_extrude-1')!),
       featureId: 'feature_revolve-1',
       ownerFeatureId: 'feature_revolve-1',
       label: 'Revolve 1',
@@ -843,9 +843,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       ...snapshot,
       cursor,
       documentHistory,
-      sketches: [...snapshot.sketches, sketch2],
+      sketches: [...snapshot.document.sketches, sketch2],
       features: [
-        ...snapshot.features.filter((feature) => feature.featureId === 'feature_extrude-1'),
+        ...snapshot.document.features.filter((feature) => feature.featureId === 'feature_extrude-1'),
         revolve,
       ],
       document: {
@@ -861,7 +861,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         ...snapshot.presentation,
         documentHistory,
       },
-    } satisfies DocumentSnapshot
+    } satisfies WorkspaceSnapshot
   }
 
   function runEventTrace(events: readonly EditorEvent[]) {
@@ -952,8 +952,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       {
         ...initialEditorState,
         document: {
-          documentId: snapshot.documentId,
-          revisionId: snapshot.revisionId,
+          documentId: snapshot.document.documentId,
+          revisionId: snapshot.document.revisionId,
         },
         snapshot,
         selectionCatalog,
@@ -973,8 +973,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       {
         ...initialEditorState,
         document: {
-          documentId: snapshot.documentId,
-          revisionId: snapshot.revisionId,
+          documentId: snapshot.document.documentId,
+          revisionId: snapshot.document.revisionId,
         },
         snapshot,
         selectionCatalog,
@@ -1277,7 +1277,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(worldPoint[0] === 0 && worldPoint[1] === 2 && worldPoint[2] === 3, 'Sketch display mapping must use the stored plane definition.')
   }
 
-  function createReopenableYzSketchSnapshot(): DocumentSnapshot {
+  function createReopenableYzSketchSnapshot(): WorkspaceSnapshot {
     const yzSketchId = 'sketch_yz' as SketchId
     const yzPlane: SketchPlaneDefinition = {
       support: { kind: 'construction', constructionId: 'construction_plane-yz' as ConstructionId },
@@ -1372,7 +1372,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       cursor: { kind: 'sketch', sketchId: yzSketchId },
       documentHistory: [yzHistoryItem],
       sketches: [
-        ...baseSnapshot.sketches,
+        ...baseSnapshot.document.sketches,
         yzSketch,
       ],
       document: {
@@ -1388,7 +1388,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         ],
       },
       entities: [
-        ...baseSnapshot.entities,
+        ...baseSnapshot.presentation.entities,
         yzSketchEntity,
       ],
       presentation: {
@@ -2054,8 +2054,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const snapshot = createSnapshot()
     const payload = {
       requestId: 'request_snapshot-1' as const,
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
       snapshot,
       selectionCatalog: createSelectionCatalog(),
     }
@@ -2088,14 +2088,14 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const loadedState = {
       ...initialEditorState,
       document: {
-        documentId: initialSnapshot.documentId,
-        revisionId: initialSnapshot.revisionId,
+        documentId: initialSnapshot.document.documentId,
+        revisionId: initialSnapshot.document.revisionId,
       },
       snapshot: initialSnapshot,
       selectionCatalog: buildSelectionTargetCatalog(initialSnapshot),
     }
     const nextSnapshot = structuredClone(initialSnapshot)
-    nextSnapshot.revisionId = 'rev_2'
+    nextSnapshot.document.revisionId = 'rev_2'
     nextSnapshot.document.revisionId = 'rev_2'
 
     const loaded = transitionEditorState(loadedState, {
@@ -2104,7 +2104,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
 
     assert(loaded.effects.length === 0, 'Direct snapshot loads should not request another snapshot fetch.')
-    assert(loaded.state.snapshot?.revisionId === 'rev_2', 'Direct snapshot loads should update visible snapshot state immediately.')
+    assert(loaded.state.snapshot?.document.revisionId === 'rev_2', 'Direct snapshot loads should update visible snapshot state immediately.')
     assert(loaded.state.document.revisionId === 'rev_2', 'Direct snapshot loads should update the editor document revision.')
   }
 
@@ -2114,7 +2114,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   async function testRuntimeLoopProcessesSketchOpen() {
-    const runtimeSnapshot: DocumentSnapshot = createSnapshot()
+    const runtimeSnapshot: WorkspaceSnapshot = createSnapshot()
     const runtime: EditorEffectRuntime = {
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
@@ -2177,13 +2177,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
-        revisionId: runtimeSnapshot.revisionId,
+        revisionId: runtimeSnapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
       }),
       commitFeature: async () => ({
-        revisionId: runtimeSnapshot.revisionId,
+        revisionId: runtimeSnapshot.document.revisionId,
         featureId: 'feature_alpha' as const,
         accepted: true,
         diagnostics: [],
@@ -2197,8 +2197,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
           type: 'effect.snapshotLoaded',
           payload: {
             requestId: 'request_snapshot-1',
-            documentId: runtimeSnapshot.documentId,
-            revisionId: runtimeSnapshot.revisionId,
+            documentId: runtimeSnapshot.document.documentId,
+            revisionId: runtimeSnapshot.document.revisionId,
             snapshot: runtimeSnapshot,
             selectionCatalog: buildSelectionTargetCatalog(runtimeSnapshot),
           },
@@ -2219,7 +2219,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   }
 
   async function testRuntimeLoopOpensSketchFromNonXYConstruction() {
-    const runtimeSnapshot: DocumentSnapshot = {
+    const runtimeSnapshot: WorkspaceSnapshot = {
       ...createSnapshot(),
       constructions: [
         {
@@ -2403,19 +2403,19 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
-        revisionId: runtimeSnapshot.revisionId,
+        revisionId: runtimeSnapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
       }),
       commitFeature: async () => ({
-        revisionId: runtimeSnapshot.revisionId,
+        revisionId: runtimeSnapshot.document.revisionId,
         featureId: 'feature_extrude-1' as const,
         accepted: true,
         diagnostics: [],
       }),
       setDocumentCursor: async () => ({
-        revisionId: runtimeSnapshot.revisionId,
+        revisionId: runtimeSnapshot.document.revisionId,
         accepted: true,
         diagnostics: [],
       }),
@@ -2428,8 +2428,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
           type: 'effect.snapshotLoaded',
           payload: {
             requestId: 'request_snapshot-1',
-            documentId: runtimeSnapshot.documentId,
-            revisionId: runtimeSnapshot.revisionId,
+            documentId: runtimeSnapshot.document.documentId,
+            revisionId: runtimeSnapshot.document.revisionId,
             snapshot: runtimeSnapshot,
             selectionCatalog: buildSelectionTargetCatalog(runtimeSnapshot),
           },
@@ -2624,7 +2624,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   async function testFeatureEditCommitRestoresNonTailCursor() {
     const tailSnapshot = await createSketchExtrudeSketchRevolveSnapshot()
     const entryCursor = { kind: 'sketch' as const, sketchId: 'sketch_second' as SketchId }
-    const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.revisionId)
+    const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.document.revisionId)
     const { runtime, cursorMoves, featureCommitCalls } = createCursorAwareRuntime(snapshot)
 
     const result = await replayEditorEventsWithRuntime(
@@ -2683,7 +2683,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   async function testFinishSketchAtCurrentSketchCursorSkipsRestore() {
     const tailSnapshot = await createSketchExtrudeSketchRevolveSnapshot()
     const entryCursor = { kind: 'sketch' as const, sketchId: 'sketch_second' as SketchId }
-    const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.revisionId)
+    const snapshot = cloneSnapshotWithCursor(tailSnapshot, entryCursor, tailSnapshot.document.revisionId)
     const { runtime, cursorMoves } = createCursorAwareRuntime(snapshot)
 
     const result = await replayEditorEventsWithRuntime(
@@ -2766,8 +2766,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'effect.snapshotLoaded',
       payload: {
         requestId: fetchEffect.requestId,
-        documentId: snapshot.documentId,
-        revisionId: snapshot.revisionId,
+        documentId: snapshot.document.documentId,
+        revisionId: snapshot.document.revisionId,
         snapshot,
         selectionCatalog: buildSelectionTargetCatalog(snapshot),
       },
@@ -2780,7 +2780,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     assert(cursorEffect?.type === 'document.moveHistoryCursor', 'Timeline cursor requests should emit the document cursor effect.')
     assert(
-      cursorEffect.mutationBasis.baseRevisionId === snapshot.revisionId
+      cursorEffect.mutationBasis.baseRevisionId === snapshot.document.revisionId
         && cursorEffect.mutationBasis.baseRepositoryHeads?.[0] === 'head_a',
       'Document cursor effects should carry the loaded snapshot repository basis.',
     )
@@ -2792,8 +2792,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const conflicted = transitionEditorState(requested.state, {
       type: 'effect.documentCursorMoved',
       requestId: cursorEffect.requestId,
-      documentId: snapshot.documentId,
-      baseRevisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      baseRevisionId: snapshot.document.revisionId,
       revisionId: 'rev_9999',
       accepted: false,
       actualRevisionId: 'rev_9999',
@@ -2941,13 +2941,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
       commitSketch: async () => null,
       evaluatePreview: async () => ({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
       }),
       commitFeature: async () => ({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         featureId: 'feature_alpha' as const,
         accepted: true,
         diagnostics: [],
@@ -2962,16 +2962,16 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const machineState = actor.getState()
 
     assert(snapshotCallCount === 1, 'The editor event loop should bootstrap the initial snapshot load itself.')
-    assert(machineState.document.documentId === snapshot.documentId, 'Bootstrap should hydrate the document id.')
-    assert(machineState.document.revisionId === snapshot.revisionId, 'Bootstrap should hydrate the revision id.')
-    assert(machineState.snapshot?.revisionId === snapshot.revisionId, 'Bootstrap should store the loaded snapshot.')
+    assert(machineState.document.documentId === snapshot.document.documentId, 'Bootstrap should hydrate the document id.')
+    assert(machineState.document.revisionId === snapshot.document.revisionId, 'Bootstrap should hydrate the revision id.')
+    assert(machineState.snapshot?.revisionId === snapshot.document.revisionId, 'Bootstrap should store the loaded snapshot.')
     actor.stop()
   }
 
   async function testEditorEventLoopCancelsObsoleteSketchOpenEffects() {
     const snapshot = createSnapshot()
     let snapshotCallCount = 0
-    let resolveOpenSnapshot: ((value: DocumentSnapshot) => void) | null = null
+    let resolveOpenSnapshot: ((value: WorkspaceSnapshot) => void) | null = null
 
     const runtime: EditorEffectRuntime = {
       getCurrentDocumentSnapshot: () => {
@@ -2981,19 +2981,19 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
           return Promise.resolve(snapshot)
         }
 
-        return new Promise<DocumentSnapshot>((resolve) => {
+        return new Promise<WorkspaceSnapshot>((resolve) => {
           resolveOpenSnapshot = resolve
         })
       },
       commitSketch: async () => null,
       evaluatePreview: async () => ({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         stale: false,
         diagnostics: [],
         renderables: [],
       }),
       commitFeature: async () => ({
-        revisionId: snapshot.revisionId,
+        revisionId: snapshot.document.revisionId,
         featureId: 'feature_alpha' as const,
         accepted: true,
         diagnostics: [],
@@ -3019,7 +3019,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       commandSessionId: selectionState.command.commandSessionId,
     })
 
-    const pendingOpenSnapshotResolver = resolveOpenSnapshot as ((value: DocumentSnapshot) => void) | null
+    const pendingOpenSnapshotResolver = resolveOpenSnapshot as ((value: WorkspaceSnapshot) => void) | null
 
     if (pendingOpenSnapshotResolver) {
       pendingOpenSnapshotResolver(snapshot)
@@ -4130,7 +4130,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(session.commitRequest, 'Sketch conflict fixture should have a commit payload.')
 
     const staleSnapshot = createSnapshot()
-    staleSnapshot.revisionId = 'rev_0001'
+    staleSnapshot.document.revisionId = 'rev_0001'
     staleSnapshot.document.revisionId = 'rev_0001'
     const diagnostic: ModelingDiagnostic = {
       code: 'occ-revision-conflict',
@@ -4189,14 +4189,14 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(conflicted.state.pendingSnapshotRequestId === refreshEffect.requestId, 'Conflict refresh should be tracked as pending.')
 
     const refreshedSnapshot = createSnapshot()
-    refreshedSnapshot.revisionId = 'rev_0002'
+    refreshedSnapshot.document.revisionId = 'rev_0002'
     refreshedSnapshot.document.revisionId = 'rev_0002'
     const refreshed = transitionEditorState(conflicted.state, {
       type: 'effect.snapshotLoaded',
       payload: {
         requestId: refreshEffect.requestId,
-        documentId: refreshedSnapshot.documentId,
-        revisionId: refreshedSnapshot.revisionId,
+        documentId: refreshedSnapshot.document.documentId,
+        revisionId: refreshedSnapshot.document.revisionId,
         snapshot: refreshedSnapshot,
         selectionCatalog: buildSelectionTargetCatalog(refreshedSnapshot),
       },
@@ -4298,8 +4298,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       kind: 'editingSketch',
       mode: 'sketch',
       document: {
-        documentId: snapshot.documentId,
-        revisionId: snapshot.revisionId,
+        documentId: snapshot.document.documentId,
+        revisionId: snapshot.document.revisionId,
       },
       snapshot,
       selection: [session.planeTarget],
@@ -4340,7 +4340,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       async importSketchReferenceImages() {
         return {
           status: 'committed' as const,
-          revisionId: snapshot.revisionId,
+          revisionId: snapshot.document.revisionId,
           snapshot,
           selectionCatalog: buildSelectionTargetCatalog(snapshot),
           session: reopenedSession,

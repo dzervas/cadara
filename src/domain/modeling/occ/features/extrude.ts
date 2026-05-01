@@ -150,7 +150,7 @@ function resolveExtrudeDistance(
   if (end.kind === 'blind') {
     const distance = end.distance as number
     if (distance <= 0) {
-      throw new Error('Extrude endExtent.distance must be positive.')
+      throw new Error('Extrude blind distance must be positive.')
     }
     return distance
   }

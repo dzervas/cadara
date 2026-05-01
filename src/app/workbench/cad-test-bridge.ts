@@ -1,5 +1,5 @@
 import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { EditorEvent } from '@/domain/editor/state-machine'
 import {
   getPrimitiveRefKey,
@@ -22,7 +22,7 @@ export function syncCadTestState(
 }
 
 export function resolveCadTestTarget(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   targetId: string,
 ): PrimitiveRef | null {
   const entities = snapshot?.presentation.entities ?? []
@@ -36,7 +36,7 @@ export function resolveCadTestTarget(
 
 export function dispatchCadTestSelection(input: {
   targetId: string
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   selection: PrimitiveRef[]
   selectionFilter: SelectionFilter | null
   selectionCatalog: SelectionTargetCatalog | null

@@ -7,13 +7,13 @@ import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   DocumentHistoryOrderEntry,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
 } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
 import type { PrimitiveRef } from '@/core/editor/schema'
 
 interface HistoryTimelineShellProps {
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   sketchSession: SketchSessionState | null
   historyHighlightFeatureIds: readonly FeatureId[]
   onSelectTarget: (target: PrimitiveRef) => void

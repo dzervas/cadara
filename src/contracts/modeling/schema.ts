@@ -315,7 +315,7 @@ export type RevolveFeatureExtent =
  * Fully typed extrude parameters.
  * `profiles` is the single authoritative ordered profile seed collection;
  * callers must not repeat the same meaning in side-band generic arrays.
- * `endExtent.distance` is expressed in document modeling units and must be strictly positive.
+ * Blind extrude distances are expressed in document modeling units and must be strictly positive.
  */
 export interface ExtrudeFeatureParameters {
 	/** Non-empty ordered profile seeds for the extrude operation. */
@@ -323,13 +323,7 @@ export interface ExtrudeFeatureParameters {
 	/** Explicit start condition for the extrusion path. */
 	startExtent: { kind: "profilePlane" };
 	/** Explicit end controls for all active extrude sides. */
-	extent?: ExtrudeFeatureExtent;
-	/** Deprecated compatibility alias for legacy blind one-side extents. */
-	endExtent?: {
-		kind: "blind";
-		direction: LinearExtentDirection;
-		distance: MaybeAuthoredValue<number>;
-	};
+	extent: ExtrudeFeatureExtent;
 	/** Boolean behavior applied to the extrude result. */
 	operation: FeatureBooleanOperation;
 	/** Explicit participant scope for non-standalone boolean operations. */
@@ -410,11 +404,7 @@ export interface RevolveFeatureParameters {
 	/** Explicit start angle in radians from the profile's zero-angle pose. */
 	startAngle: number;
 	/** Explicit angular end controls for all active revolve sides. */
-	extent:
-		| RevolveFeatureExtent
-		| { kind: "angle"; direction: AngularExtentDirection; radians: MaybeAuthoredValue<number> };
-	/** Deprecated alias for legacy one-side blind angular extents. */
-	angle?: MaybeAuthoredValue<number>;
+	extent: RevolveFeatureExtent;
 	/** Boolean behavior applied to the revolve result. */
 	operation: FeatureBooleanOperation;
 	/** Explicit participant scope for non-standalone boolean operations. */
@@ -816,10 +806,6 @@ export interface SketchSnapshotRecord extends SnapshotOwnershipRecord {
 	label: string;
 	/** Explicit plane support and frame used to interpret the sketch definition. */
 	plane: SketchPlaneDefinition;
-	/** Deprecated convenience alias for `plane.support`. */
-	planeTarget: SketchPlaneSupportRef;
-	/** Deprecated convenience alias for `plane.key`. */
-	planeKey: SketchPlaneKey | null;
 	/** Full authored, solved, and derived sketch payload for this snapshot row. */
 	sketch: SketchRecord;
 }
@@ -1025,55 +1011,7 @@ export interface WorkspaceSnapshot {
 	presentation: DocumentPresentationSnapshot;
 	/** Repository metadata used to build this snapshot, when backed by a repository. */
 	provenance: DocumentSnapshotProvenance | null;
-	/** Deprecated passthrough for `document.contractVersion`. */
-	contractVersion: KernelDocumentSnapshot["contractVersion"];
-	/** Deprecated passthrough for `document.schemaVersion`. */
-	schemaVersion: KernelDocumentSnapshot["schemaVersion"];
-	/** Deprecated passthrough for `document.documentId`. */
-	documentId: KernelDocumentSnapshot["documentId"];
-	/** Deprecated passthrough for `document.revisionId`. */
-	revisionId: KernelDocumentSnapshot["revisionId"];
-	/** Deprecated passthrough for `document.settings`. */
-	settings: KernelDocumentSnapshot["settings"];
-	/** Deprecated passthrough for `document.capabilities`. */
-	capabilities: KernelDocumentSnapshot["capabilities"];
-	/** Deprecated passthrough for `presentation.featureTree`. */
-	featureTree: DocumentPresentationSnapshot["featureTree"];
-	/** Deprecated passthrough for `presentation.objects`. */
-	objects: DocumentPresentationSnapshot["objects"];
-	/** Deprecated passthrough for `presentation.documentHistory`. */
-	documentHistory: DocumentPresentationSnapshot["documentHistory"];
-	/** Deprecated passthrough for `document.features`. */
-	features: KernelDocumentSnapshot["features"];
-	/** Deprecated passthrough for `document.cursor`. */
-	cursor: KernelDocumentSnapshot["cursor"];
-	/** Deprecated passthrough for `document.sketches`. */
-	sketches: KernelDocumentSnapshot["sketches"];
-	/** Deprecated passthrough for `document.bodies`. */
-	bodies: KernelDocumentSnapshot["bodies"];
-	/** Deprecated passthrough for `document.constructions`. */
-	constructions: KernelDocumentSnapshot["constructions"];
-	/** Deprecated passthrough for `document.variables`. */
-	variables: KernelDocumentSnapshot["variables"];
-	/** Deprecated passthrough for `presentation.entities`. */
-	entities: DocumentPresentationSnapshot["entities"];
-	/** Deprecated passthrough for `document.references`. */
-	references: KernelDocumentSnapshot["references"];
-	/** Deprecated passthrough for `document.diagnostics`. */
-	diagnostics: KernelDocumentSnapshot["diagnostics"];
-	/** Deprecated passthrough for `document.render`. */
-	render: KernelDocumentSnapshot["render"];
 }
-
-/** Backward-compatible helper aliases for the split snapshot families. */
-export type DocumentPresentation = DocumentPresentationSnapshot;
-/** Backward-compatible helper aliases for the split snapshot families. */
-export type KernelSnapshot = KernelDocumentSnapshot;
-
-/**
- * Backward-compatible alias used by the current app runtime.
- */
-export type DocumentSnapshot = WorkspaceSnapshot;
 
 /**
  * Base request envelope for all modeling operations.
@@ -1131,7 +1069,7 @@ export interface GetDocumentSnapshotResponse {
 	/** Shared top-level contract version used to encode this result. */
 	contractVersion: ContractVersion;
 	/** Full workspace snapshot payload for the requested document. */
-	snapshot: DocumentSnapshot;
+	snapshot: WorkspaceSnapshot;
 }
 
 /**
@@ -1274,10 +1212,6 @@ export interface CommitSketchRequest extends DocumentMutationRequest {
 	sketchLabel: string;
 	/** Explicit plane support and embedding for the committed sketch definition. */
 	plane: SketchPlaneDefinition;
-	/** Deprecated convenience alias for `plane.support`. */
-	planeTarget: SketchPlaneSupportRef;
-	/** Deprecated convenience alias for `plane.key`. */
-	planeKey: SketchPlaneKey | null;
 	/** Full authored sketch graph submitted for solve and commit. */
 	definition: SketchRecord["definition"];
 }

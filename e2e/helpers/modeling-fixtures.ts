@@ -253,8 +253,6 @@ function createCommitSketchRequest(
         handedness: 'rightHanded',
       },
     },
-    planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
-    planeKey: 'xy',
     definition: createRectangleSketchDefinition(sketchId, idPrefix, bounds),
   }
 }
@@ -273,7 +271,10 @@ function createExtrudeFeatureRequest(
       parameters: {
         profiles: [{ kind: 'region', sketchId, regionId }],
         startExtent: { kind: 'profilePlane' },
-        endExtent: { kind: 'blind', direction: 'positive', distance: 10 },
+        extent: {
+          mode: 'oneSide',
+          end: { kind: 'blind', direction: 'positive', distance: 10 },
+        },
         operation: 'newBody',
         booleanScope: { kind: 'standalone' },
       },
@@ -342,8 +343,6 @@ export function createVertexReferencedCircleOperationHistory(): ModelingOperatio
               handedness: 'rightHanded',
             },
           },
-          planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
-          planeKey: 'xy',
           definition: {
             schemaVersion: SKETCH_SCHEMA_VERSION,
             referenceIds: [referenceId],
@@ -432,12 +431,6 @@ export function createFaceBackedVertexReferencedCircleOperationHistory(): Modeli
               handedness: 'rightHanded',
             },
           },
-          planeTarget: {
-            kind: 'face',
-            bodyId: 'body_feature_extrude-1',
-            faceId: 'face_body_feature_extrude-1_t0001_6',
-          },
-          planeKey: null,
           definition: {
             schemaVersion: SKETCH_SCHEMA_VERSION,
             referenceIds: [referenceId],

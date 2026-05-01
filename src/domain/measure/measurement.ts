@@ -1,4 +1,4 @@
-import type { DocumentSnapshot, SketchSnapshotRecord } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type {
   RenderMeshGeometry,
   RenderPoint3D,
@@ -87,14 +87,14 @@ const WITNESS_MARKER_RADIUS = 0.16
 const DISTANCE_EPSILON = 1e-9
 
 export function isMeasureSelectableTarget(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   target: PrimitiveRef,
 ) {
   return resolveMeasuredTarget(snapshot, target) !== null
 }
 
 export function resolveMeasureSelectionCandidate(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   selection: readonly PrimitiveRef[],
   target: PrimitiveRef,
 ) {
@@ -152,7 +152,7 @@ export function resolveMeasureSelectionCandidate(
 export function deriveMeasurementViewModel(input: {
   activeToolId: string | null
   selection: readonly PrimitiveRef[]
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
 }): MeasurementViewModel | null {
   if (input.activeToolId !== 'measure' || !input.snapshot || input.selection.length === 0) {
     return null
@@ -210,7 +210,7 @@ export function deriveMeasurementViewModel(input: {
 }
 
 function resolveMeasuredTarget(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   target: PrimitiveRef | null,
 ): MeasuredTarget | null {
   if (!snapshot || !target) {
@@ -253,7 +253,7 @@ function resolveMeasuredTarget(
 }
 
 function resolveBodyTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'body' }>,
 ): MeasuredTarget | null {
   const body = snapshot.document.bodies.find((entry) => entry.bodyId === target.bodyId)
@@ -296,7 +296,7 @@ function resolveBodyTarget(
 }
 
 function resolveFaceTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'face' }>,
 ): MeasuredTarget | null {
   const renderable = getRenderableForTarget(snapshot, target)
@@ -340,7 +340,7 @@ function resolveFaceTarget(
 }
 
 function resolveEdgeTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'edge' }>,
 ): MeasuredTarget | null {
   const renderable = getRenderableForTarget(snapshot, target)
@@ -372,7 +372,7 @@ function resolveEdgeTarget(
 }
 
 function resolveVertexTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'vertex' }>,
 ): MeasuredTarget | null {
   const renderable = getRenderableForTarget(snapshot, target)
@@ -402,7 +402,7 @@ function resolveVertexTarget(
 }
 
 function resolveRegionTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'region' }>,
 ): MeasuredTarget | null {
   const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === target.sketchId)
@@ -448,7 +448,7 @@ function resolveRegionTarget(
 }
 
 function resolveSketchPointTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'sketchPoint' }>,
 ): MeasuredTarget | null {
   const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === target.sketchId)
@@ -481,7 +481,7 @@ function resolveSketchPointTarget(
 }
 
 function resolveSketchEntityTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'sketchEntity' }>,
 ): MeasuredTarget | null {
   const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === target.sketchId)
@@ -595,7 +595,7 @@ function resolveSketchEntityTarget(
 }
 
 function resolveProjectedGeometryTarget(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'projectedReferenceGeometry' }>,
 ): MeasuredTarget | null {
   const sketch = snapshot.document.sketches.find((entry) =>
@@ -1050,28 +1050,28 @@ function closestPointsBetweenSegmentAndTriangle(
   return candidates.reduce((best, entry) => entry.distance < best.distance ? entry : best)
 }
 
-function getBodyFaceRenderables(snapshot: DocumentSnapshot, bodyId: string) {
-  return snapshot.render.records.filter((renderable) =>
+function getBodyFaceRenderables(snapshot: WorkspaceSnapshot, bodyId: string) {
+  return snapshot.document.render.records.filter((renderable) =>
     renderable.ownerBodyId === bodyId
     && renderable.binding.target.kind === 'face'
     && renderable.geometry.kind === 'mesh',
   ) as Array<RenderableEntityRecord & { geometry: RenderMeshGeometry }>
 }
 
-function getBodyEdgeRenderables(snapshot: DocumentSnapshot, bodyId: string) {
-  return snapshot.render.records.filter((renderable) =>
+function getBodyEdgeRenderables(snapshot: WorkspaceSnapshot, bodyId: string) {
+  return snapshot.document.render.records.filter((renderable) =>
     renderable.ownerBodyId === bodyId
     && renderable.binding.target.kind === 'edge'
     && renderable.geometry.kind === 'polyline',
   ) as Array<RenderableEntityRecord & { geometry: Extract<RenderableEntityRecord['geometry'], { kind: 'polyline' }> }>
 }
 
-function getRenderableForTarget(snapshot: DocumentSnapshot, target: PrimitiveRef) {
+function getRenderableForTarget(snapshot: WorkspaceSnapshot, target: PrimitiveRef) {
   const key = getPrimitiveRefKey(target)
-  return snapshot.render.records.find((record) => getPrimitiveRefKey(record.binding.target) === key) ?? null
+  return snapshot.document.render.records.find((record) => getPrimitiveRefKey(record.binding.target) === key) ?? null
 }
 
-function getTargetLabel(snapshot: DocumentSnapshot, target: PrimitiveRef) {
+function getTargetLabel(snapshot: WorkspaceSnapshot, target: PrimitiveRef) {
   return snapshot.presentation.entities.find((entry) => getPrimitiveRefKey(entry.target) === getPrimitiveRefKey(target))?.label
     ?? getPrimitiveRefLabel(target)
 }

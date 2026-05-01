@@ -290,7 +290,10 @@ function createExtrudeDefinition(
     parameters: {
       profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
       startExtent: { kind: 'profilePlane' },
-      endExtent: { kind: 'blind', direction: 'positive', distance },
+      extent: {
+        mode: 'oneSide',
+        end: { kind: 'blind', direction: 'positive', distance },
+      },
       operation: boolean.operation,
       booleanScope: boolean.booleanScope,
     },

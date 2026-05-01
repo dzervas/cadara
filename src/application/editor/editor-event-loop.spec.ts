@@ -94,8 +94,8 @@ test('src/application/editor/editor-event-loop.spec.ts bootstraps through start(
   const state = await waitForState(loop, (candidate) => candidate.document.revisionId !== null)
 
   assert(snapshotCallCount === 1, 'Starting the loop should dispatch session.started and fetch the initial snapshot once.')
-  assert(state.document.documentId === snapshot.documentId, 'Starting the loop should hydrate the document id.')
-  assert(state.document.revisionId === snapshot.revisionId, 'Starting the loop should hydrate the revision id.')
+  assert(state.document.documentId === snapshot.document.documentId, 'Starting the loop should hydrate the document id.')
+  assert(state.document.revisionId === snapshot.document.revisionId, 'Starting the loop should hydrate the revision id.')
 
   loop.stop()
 })
@@ -118,7 +118,7 @@ test('src/application/editor/editor-event-loop.spec.ts dispatches synchronous ev
   await waitForState(loop, (candidate) => candidate.document.revisionId !== null)
 
   const importedSnapshot = structuredClone(snapshot)
-  importedSnapshot.revisionId = 'rev_imported'
+  importedSnapshot.document.revisionId = 'rev_imported'
   importedSnapshot.document.revisionId = 'rev_imported'
 
   loop.dispatch({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
@@ -168,8 +168,8 @@ test('src/application/editor/editor-event-loop.spec.ts executes effects serially
     type: 'effect.snapshotLoaded',
     payload: {
       requestId: firstEffect.requestId,
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
       snapshot,
       selectionCatalog: buildSelectionTargetCatalog(snapshot),
       preserveRenderRecordsOnFeatureDiagnostics: false,
@@ -187,8 +187,8 @@ test('src/application/editor/editor-event-loop.spec.ts executes effects serially
       type: 'effect.snapshotLoaded',
       payload: {
         requestId: secondEffect.requestId,
-        documentId: snapshot.documentId,
-        revisionId: snapshot.revisionId,
+        documentId: snapshot.document.documentId,
+        revisionId: snapshot.document.revisionId,
         snapshot,
         selectionCatalog: buildSelectionTargetCatalog(snapshot),
         preserveRenderRecordsOnFeatureDiagnostics: false,
@@ -255,8 +255,8 @@ test('src/application/editor/editor-event-loop.spec.ts stop() discards queued an
     type: 'effect.snapshotLoaded',
     payload: {
       requestId: inFlightRequestId ?? ('request_snapshot_after_stop' as EditorEffect['requestId']),
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
       snapshot,
       selectionCatalog: buildSelectionTargetCatalog(snapshot),
       preserveRenderRecordsOnFeatureDiagnostics: false,
@@ -303,8 +303,8 @@ test('src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
     type: 'effect.snapshotLoaded',
     payload: {
       requestId: startedEffects[0]?.requestId ?? ('request_snapshot_stale' as EditorEffect['requestId']),
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
       snapshot,
       selectionCatalog: buildSelectionTargetCatalog(snapshot),
       preserveRenderRecordsOnFeatureDiagnostics: false,
@@ -320,8 +320,8 @@ test('src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
     type: 'effect.snapshotLoaded',
     payload: {
       requestId: restartedEffect.requestId,
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
       snapshot,
       selectionCatalog: buildSelectionTargetCatalog(snapshot),
       preserveRenderRecordsOnFeatureDiagnostics: false,
@@ -330,6 +330,6 @@ test('src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
 
   const state = await waitForState(loop, (candidate) => candidate.document.revisionId !== null)
 
-  assert(state.document.revisionId === snapshot.revisionId, 'Restarted drains should still deliver the snapshot into loop state.')
+  assert(state.document.revisionId === snapshot.document.revisionId, 'Restarted drains should still deliver the snapshot into loop state.')
   loop.stop()
 })

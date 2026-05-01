@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 
 import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 import {
@@ -43,7 +43,7 @@ interface WorkbenchPartImportControllerInput {
   modelingService: ModelingService
   showWorkbenchError: (message: string) => void
   showWorkbenchInfo: (message: string) => void
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
 }
 
 interface WorkbenchPartImportDependencies {

@@ -82,8 +82,6 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         handedness: 'rightHanded',
       },
     },
-    planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
-    planeKey: 'xy',
     definition: sketchDefinition,
   }
 
@@ -97,7 +95,10 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       parameters: {
         profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
         startExtent: { kind: 'profilePlane' },
-        endExtent: { kind: 'blind', direction: 'positive', distance: 10 },
+        extent: {
+          mode: 'oneSide',
+          end: { kind: 'blind', direction: 'positive', distance: 10 },
+        },
         operation: 'newBody',
         booleanScope: { kind: 'standalone' },
       },
@@ -475,8 +476,6 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
             sketchId: null,
             sketchLabel: 'Legacy Draft Sketch',
             plane: commitSketchRequest.plane,
-            planeTarget: commitSketchRequest.planeTarget,
-            planeKey: commitSketchRequest.planeKey,
             definition: createDraftSketchDefinition('sketch_draft'),
           },
         },
@@ -530,8 +529,6 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
             sketchId: null,
             sketchLabel: 'Broken Sketch',
             plane: commitSketchRequest.plane,
-            planeTarget: commitSketchRequest.planeTarget,
-            planeKey: commitSketchRequest.planeKey,
             definition: {
               ...createDraftSketchDefinition('sketch_draft'),
               entities: [
@@ -590,9 +587,13 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         ...createExtrudeDefinition,
         parameters: {
           ...createExtrudeDefinition.parameters,
-          endExtent: {
-            ...createExtrudeDefinition.parameters.endExtent!,
-            distance: createExpressionAuthoredValue('depth + 3'),
+          extent: {
+            mode: 'oneSide',
+            end: {
+              kind: 'blind',
+              direction: 'positive',
+              distance: createExpressionAuthoredValue('depth + 3'),
+            },
           },
         },
       },
@@ -607,7 +608,9 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
     assert(result.payload.entries[0]?.kind === 'createFeature', 'Feature expression history entry kind should be preserved.')
     const definition = result.payload.entries[0].payload.definition
     assert(definition.kind === 'extrude', 'Feature expression history entry should preserve the extrude definition.')
-    const distance = definition.parameters.endExtent?.distance
+    const distance = definition.parameters.extent.end.kind === 'blind'
+      ? definition.parameters.extent.end.distance
+      : null
     assert(isExpressionAuthoredValue(distance), 'Feature expression history should preserve authored expression text.')
     assert(distance.valueText === 'depth + 3', 'Feature expression history should not persist resolved runtime values.')
   }

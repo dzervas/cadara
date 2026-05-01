@@ -73,7 +73,6 @@ import {
   getOccDurableRefKey,
   type OccTrackedBody,
 } from '@/domain/modeling/occ/topology'
-import { getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import {
   getOccTessellationTier,
   type OccTessellationTierId,
@@ -308,8 +307,7 @@ function createSnapshotFeatureDefinition(
         parameters: {
           profiles: definition.parameters.profiles,
           startExtent: { kind: 'profilePlane' },
-          ...(definition.parameters.extent ? { extent: definition.parameters.extent } : {}),
-          endExtent: definition.parameters.endExtent,
+          extent: definition.parameters.extent,
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
@@ -331,10 +329,8 @@ function createSnapshotFeatureDefinition(
           mode: 'coplanar',
           reference: definition.parameters.reference,
         },
-      }
+    }
     case 'revolve': {
-      const revolveExtent = getRevolveFeatureExtent(definition.parameters)
-      const firstRevolveEnd = revolveExtent.mode === 'twoSide' ? revolveExtent.firstEnd : revolveExtent.end
       return {
         kind: 'revolve',
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
@@ -343,7 +339,6 @@ function createSnapshotFeatureDefinition(
           axis: definition.parameters.axis,
           startAngle: definition.parameters.startAngle,
           extent: definition.parameters.extent,
-          angle: firstRevolveEnd.kind === 'blind' ? firstRevolveEnd.angle : definition.parameters.angle,
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
@@ -1775,24 +1770,5 @@ export function buildOccWorkspaceSnapshot(
     document,
     presentation,
     provenance: null,
-    contractVersion: document.contractVersion,
-    schemaVersion: document.schemaVersion,
-    documentId: document.documentId,
-    revisionId: document.revisionId,
-    settings: document.settings,
-    capabilities: document.capabilities,
-    featureTree: presentation.featureTree,
-    objects: presentation.objects,
-    documentHistory: presentation.documentHistory,
-    features: document.features,
-    cursor: document.cursor,
-    sketches: document.sketches,
-    bodies: document.bodies,
-    constructions: document.constructions,
-    variables: document.variables,
-    entities: presentation.entities,
-    references: document.references,
-    diagnostics: document.diagnostics,
-    render: document.render,
   }
 }

@@ -18,7 +18,6 @@ import type {
   ExtrudeProfileRef,
   FilletEdgeRef,
   RevolveAxisRef,
-  RevolveFeatureParameters,
   UpToOffsetDirection,
 } from '@/contracts/modeling/schema'
 import type { DurableRef } from '@/contracts/shared/references'
@@ -42,12 +41,6 @@ export function isAuthoredNumberLike(value: unknown) {
 export function isAuthoredEnumLike(value: unknown, options: readonly string[]) {
   const literal = getAuthoredLiteralValue(value as MaybeAuthoredValue<unknown>)
   return (typeof literal === 'string' && options.includes(literal)) || isExpressionAuthoredValue(value)
-}
-
-export function isLegacyRevolveAngleExtent(
-  extent: RevolveFeatureParameters['extent'],
-): extent is Extract<RevolveFeatureParameters['extent'], { kind: 'angle' }> {
-  return 'kind' in extent && extent.kind === 'angle'
 }
 
 export function assertDocumentId(value: unknown): DocumentId {

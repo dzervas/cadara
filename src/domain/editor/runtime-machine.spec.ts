@@ -312,13 +312,13 @@ test('src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load ev
     await waitForState(actor, (state) => state.document.revisionId !== null)
 
     const importedSnapshot = structuredClone(await runtime.getCurrentDocumentSnapshot())
-    importedSnapshot.revisionId = 'rev_imported'
+    importedSnapshot.document.revisionId = 'rev_imported'
     importedSnapshot.document.revisionId = 'rev_imported'
 
     actor.dispatch({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
     const loaded = await waitForState(actor, (state) => state.document.revisionId === 'rev_imported')
 
-    assert(loaded.snapshot?.revisionId === 'rev_imported', 'Runtime should forward direct snapshot loads to the editor reducer.')
+    assert(loaded.snapshot?.document.revisionId === 'rev_imported', 'Runtime should forward direct snapshot loads to the editor reducer.')
     assert(loaded.selectionCatalog !== null, 'Direct snapshot loads should rebuild the selection catalog.')
   } finally {
     actor.stop()

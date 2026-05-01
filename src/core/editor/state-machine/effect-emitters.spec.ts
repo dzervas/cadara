@@ -27,8 +27,8 @@ function makeLoadedState(snapshot: Awaited<ReturnType<typeof createSeedDocumentS
   return {
     ...initialEditorState,
     document: {
-      documentId: snapshot.documentId,
-      revisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
     },
     snapshot,
   }
@@ -99,12 +99,12 @@ test('effect-emitters.ts derives snapshot mutation bases with and without reposi
   })
 
   assert(
-    matchingBasis?.baseRevisionId === snapshot.revisionId
+    matchingBasis?.baseRevisionId === snapshot.document.revisionId
       && JSON.stringify(matchingBasis.baseRepositoryHeads) === JSON.stringify(['head_1', 'head_2']),
     'Matching loaded snapshots should carry repository heads into mutation bases.',
   )
   assert(
-    staleSnapshotBasis?.baseRevisionId === snapshot.revisionId
+    staleSnapshotBasis?.baseRevisionId === snapshot.document.revisionId
       && staleSnapshotBasis.baseRepositoryHeads === undefined,
     'Stale snapshots should fall back to a revision-only mutation basis.',
   )
@@ -172,7 +172,7 @@ test('effect-emitters.ts guards feature preview when no document revision is loa
   const result = emitFeaturePreview({
     ...makeFeatureState(snapshot),
     document: {
-      documentId: snapshot.documentId,
+      documentId: snapshot.document.documentId,
       revisionId: null,
     },
   })

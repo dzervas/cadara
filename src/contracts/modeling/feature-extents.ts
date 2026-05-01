@@ -8,37 +8,11 @@ import type {
 } from '@/contracts/modeling/schema'
 
 export function getExtrudeFeatureExtent(parameters: ExtrudeFeatureParameters): ExtrudeFeatureExtent {
-  if (parameters.extent) {
-    return parameters.extent
-  }
-
-  if (parameters.endExtent) {
-    return {
-      mode: 'oneSide',
-      end: {
-        kind: 'blind',
-        direction: parameters.endExtent.direction,
-        distance: parameters.endExtent.distance,
-      },
-    }
-  }
-
-  throw new Error('Extrude parameters must include explicit extent controls.')
+  return parameters.extent
 }
 
 export function getRevolveFeatureExtent(parameters: RevolveFeatureParameters): RevolveFeatureExtent {
-  if ('kind' in parameters.extent && parameters.extent.kind === 'angle') {
-    return {
-      mode: 'oneSide',
-      end: {
-        kind: 'blind',
-        direction: parameters.extent.direction,
-        angle: parameters.extent.radians,
-      },
-    }
-  }
-
-  return parameters.extent as RevolveFeatureExtent
+  return parameters.extent
 }
 
 export function getExtrudeExtentEnds(extent: ExtrudeFeatureExtent): readonly ExtrudeEndCondition[] {

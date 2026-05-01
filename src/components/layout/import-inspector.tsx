@@ -34,7 +34,7 @@ export function ImportInspector({ onCommit }: ImportInspectorProps) {
     () => activeImportSession ? withSessionDiagnostics(activeImportSession.formSchema, activeImportSession.diagnostics) : null,
     [activeImportSession],
   )
-  const documentVariables = snapshot?.variables ?? []
+  const documentVariables = snapshot?.document.variables ?? []
   const activeCommandSessionId = activeCommand?.commandSessionId ?? null
   const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
   const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })

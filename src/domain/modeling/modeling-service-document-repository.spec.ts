@@ -59,7 +59,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
   async function getSeedExtrudeDefinition(service: ModelingService): Promise<ExtrudeFeatureDefinition> {
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const seedExtrude = snapshot.features.find(
+    const seedExtrude = snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -73,7 +73,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       parameters: {
         ...seedExtrude.definition.parameters,
         startExtent: { kind: 'profilePlane' },
-        endExtent: { kind: 'blind', direction: 'positive', distance: 7 },
+        extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 7  } },
       },
     }
   }
@@ -125,14 +125,14 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const definition = await getSeedExtrudeDefinition(service)
 
     await service.evaluatePreview({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       previewId: 'preview_repository',
       definition,
     })
     assert(documentRepository.savedDocuments.length === 0, 'Preview evaluations should not persist authored documents.')
 
     const rejected = await expectModelingError(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition: {
         kind: 'plane',
         featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
@@ -148,7 +148,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(documentRepository.savedDocuments.length === 0, 'Rejected mutations should not persist authored documents.')
 
     const accepted = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
     assert(accepted.revisionState.kind === 'accepted', 'Accepted feature creation should commit.')
@@ -176,11 +176,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
         )
 
         snapshot.document.features = snapshot.document.features.filter((feature) => appliedFeatureIds.has(feature.featureId))
-        snapshot.features = snapshot.document.features
         snapshot.document.sketches = snapshot.document.sketches.filter((sketch) => appliedSketchIds.has(sketch.sketchId))
-        snapshot.sketches = snapshot.document.sketches
         snapshot.presentation.documentHistory = appliedHistory
-        snapshot.documentHistory = appliedHistory
 
         return {
           ...response,
@@ -195,16 +192,14 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const initial = await service.getCurrentDocumentSnapshot()
-    const sourceSketch = initial.sketches[0]
+    const sourceSketch = initial.document.sketches[0]
 
     assert(sourceSketch, 'Seed sketch should exist for repository cursor persistence coverage.')
     const secondSketch = await unwrapModelingResult(service.commitSketch({
-      baseRevisionId: initial.revisionId,
+      baseRevisionId: initial.document.revisionId,
       sketchId: 'sketch_after_tail',
       sketchLabel: 'Sketch After Tail',
       plane: sourceSketch.plane,
-      planeTarget: sourceSketch.planeTarget,
-      planeKey: sourceSketch.planeKey,
       solverCorrelation: {
         requestId: 'request_repository_cursor_sketch',
         projectionRequestId: 'request_repository_cursor_sketch:project',
@@ -267,7 +262,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
     const rollback = await unwrapModelingResult(service.setFeatureCursor({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
     const forward = await unwrapModelingResult(service.setFeatureCursor({
@@ -298,19 +293,19 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const initial = await service.getCurrentDocumentSnapshot()
     const rollback = await unwrapModelingResult(service.setFeatureCursor({
-      baseRevisionId: initial.revisionId,
+      baseRevisionId: initial.document.revisionId,
       baseRepositoryHeads: initial.provenance?.repositoryHeads,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
     const afterRollback = await service.getCurrentDocumentSnapshot()
     const redo = await unwrapModelingResult(service.setFeatureCursor({
-      baseRevisionId: afterRollback.revisionId,
+      baseRevisionId: afterRollback.document.revisionId,
       baseRepositoryHeads: afterRollback.provenance?.repositoryHeads,
       cursor: { kind: 'feature', featureId: 'feature_fillet-1' },
     }))
     const afterRedo = await service.getCurrentDocumentSnapshot()
     const rollbackAgain = await unwrapModelingResult(service.setFeatureCursor({
-      baseRevisionId: afterRedo.revisionId,
+      baseRevisionId: afterRedo.document.revisionId,
       baseRepositoryHeads: afterRedo.provenance?.repositoryHeads,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
@@ -337,7 +332,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
     const renamed = await unwrapModelingResult(service.renameBody({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Repository Restored Body',
     }))
@@ -351,7 +346,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
     assert(restoredState.kind === 'restored', 'Existing authored repository documents should restore on startup.')
     assert(
-      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Restored Body',
+      restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Restored Body',
       'Repository-authored state should hydrate the kernel snapshot before exposure.',
     )
   }
@@ -395,7 +390,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(resetCount === 0, 'Repairable broken authored documents should not trigger repository reset.')
     assert(documentRepository.savedDocuments.length === 0, 'Repairable broken restore should not seed an empty replacement document.')
     assert(
-      restoredSnapshot.features.some((feature) => feature.featureId === brokenExtrude.featureId),
+      restoredSnapshot.document.features.some((feature) => feature.featureId === brokenExtrude.featureId),
       'Repairable broken features should remain available in restored authored history.',
     )
   }
@@ -408,7 +403,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const historySnapshot = await historyService.getCurrentDocumentSnapshot()
     const historyRename = await unwrapModelingResult(historyService.renameBody({
-      baseRevisionId: historySnapshot.revisionId,
+      baseRevisionId: historySnapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Stale History Body',
     }))
@@ -433,7 +428,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(restoreState.entriesReplayed === 0, 'Repository restore should not replay stale operation history.')
     assert(documentRepository.savedDocuments.length === 0, 'Repository restore should not rewrite the restored document.')
     assert(
-      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Wins Body',
+      restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Wins Body',
       'Repository restore should hydrate the authored document instead of replaying stale operation history.',
     )
   }
@@ -455,7 +450,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const snapshot = await service.getCurrentDocumentSnapshot()
     const renamed = await unwrapModelingResult(service.renameBody({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Recovered Body',
     }))
@@ -488,7 +483,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(getClearCount() === 0, 'Existing authored repository restore should not clear ignored operation history.')
     assert(documentRepository.savedDocuments.length === 0, 'Existing authored repository restore should not rewrite the restored document.')
     assert(
-      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Existing Body',
+      restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Existing Body',
       'Existing authored repository data should remain authoritative over invalid stale history.',
     )
   }
@@ -502,7 +497,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const firstSnapshot = await firstService.getCurrentDocumentSnapshot()
     const renamed = await unwrapModelingResult(firstService.renameBody({
-      baseRevisionId: firstSnapshot.revisionId,
+      baseRevisionId: firstSnapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Migrated Body',
     }))
@@ -524,7 +519,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
     assert(
-      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Migrated Body',
+      restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Migrated Body',
       'Existing authored documents should be preferred over operation history after migration.',
     )
   }
@@ -537,7 +532,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const historySnapshot = await historyService.getCurrentDocumentSnapshot()
     const historyRename = await unwrapModelingResult(historyService.renameBody({
-      baseRevisionId: historySnapshot.revisionId,
+      baseRevisionId: historySnapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Recovered History Body',
     }))
@@ -557,7 +552,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(restoreState.entriesReplayed === 1, 'Seed repository restore should replay the browser fallback operation.')
     assert(documentRepository.savedDocuments.length === 1, 'Recovered browser fallback history should migrate into the repository.')
     assert(
-      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered History Body',
+      restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered History Body',
       'Restored seed repositories should recover the document from operation history before exposing snapshots.',
     )
   }
@@ -592,7 +587,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(restoreState.entriesReplayed === 1, 'Repository-based operation-history fallback should replay its pending entry.')
     assert(documentRepository.savedDocuments.length === 1, 'Recovered repository fallback history should migrate into the repository.')
     assert(
-      restoredSnapshot.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered Repository Tail Body',
+      restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered Repository Tail Body',
       'Restored repository documents should replay operation-history entries saved against the same repository heads.',
     )
   }
@@ -626,7 +621,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const definition = await getSeedExtrudeDefinition(service)
 
     const accepted = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
 
@@ -667,19 +662,17 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepositoryPersistence: 'background',
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const sourceSketch = snapshot.sketches[0]
+    const sourceSketch = snapshot.document.sketches[0]
     assert(sourceSketch, 'Seed sketch should exist for compact background sketch fallback coverage.')
     const firstPointId = sourceSketch.sketch.definition.pointIds[0]
     const firstEntityId = sourceSketch.sketch.definition.entityIds[0]
     assert(firstPointId && firstEntityId, 'Seed sketch should expose graph members for compact fallback coverage.')
 
     const committed = await unwrapModelingResult(service.commitSketch({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       sketchId: sourceSketch.sketchId,
       sketchLabel: 'Compacted Background Sketch',
       plane: sourceSketch.plane,
-      planeTarget: sourceSketch.planeTarget,
-      planeKey: sourceSketch.planeKey,
       solverCorrelation: {
         requestId: 'request_compact_background_sketch',
         projectionRequestId: 'request_compact_background_sketch:project',
@@ -724,16 +717,14 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const sourceSketch = snapshot.sketches[0]
+    const sourceSketch = snapshot.document.sketches[0]
 
     assert(sourceSketch, 'Seed sketch should exist for reference-image persistence coverage.')
     const committed = await unwrapModelingResult(service.commitSketch({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       sketchId: 'sketch_reference_image',
       sketchLabel: 'Reference Image Sketch',
       plane: sourceSketch.plane,
-      planeTarget: sourceSketch.planeTarget,
-      planeKey: sourceSketch.planeKey,
       solverCorrelation: {
         requestId: 'request_reference_image_persist',
         projectionRequestId: 'request_reference_image_persist:project',
@@ -875,7 +866,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository: restoredRepository,
     })
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
-    const restoredSketch = restoredSnapshot.sketches.find((sketch) => sketch.sketchId === 'sketch_reference_image')
+    const restoredSketch = restoredSnapshot.document.sketches.find((sketch) => sketch.sketchId === 'sketch_reference_image')
 
     assert(restoredSketch, 'Repository restore should reopen committed reference-image sketches.')
     assert(restoredSketch.sketch.definition.points.length === 0, 'Restored reference-image sketches should still avoid local points.')
@@ -919,7 +910,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
     const first = await unwrapModelingResult(service.renameBody({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'First Background Body',
     }))
@@ -969,7 +960,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const initial = await service.getCurrentDocumentSnapshot()
 
     const renamed = await unwrapModelingResult(service.renameBody({
-      baseRevisionId: initial.revisionId,
+      baseRevisionId: initial.document.revisionId,
       baseRepositoryHeads: initial.provenance?.repositoryHeads,
       bodyId: 'body_part-1',
       bodyLabel: 'Local Background Body',
@@ -980,7 +971,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const current = await service.getCurrentDocumentSnapshot()
     const definition = await getSeedExtrudeDefinition(service)
     const committed = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: current.revisionId,
+      baseRevisionId: current.document.revisionId,
       baseRepositoryHeads: initial.provenance?.repositoryHeads,
       definition,
     }))
@@ -1000,7 +991,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const snapshot = await historyService.getCurrentDocumentSnapshot()
     const renamed = await unwrapModelingResult(historyService.renameBody({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Retry Migrated Body',
     }))
@@ -1075,7 +1066,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const snapshot = await service.getCurrentDocumentSnapshot()
     const renamed = await unwrapModelingResult(service.renameBody({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Must Not Overwrite Unsupported Document',
     }))
@@ -1113,7 +1104,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(peerResult.ok, 'Test peer document should be accepted by the repository.')
 
     const staleMutation = await expectModelingError(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       baseRepositoryHeads: snapshot.provenance?.repositoryHeads,
       definition,
     }))
@@ -1131,11 +1122,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     assert(peerEventCount === 1, 'Modeling service subscribers should receive peer repository events.')
     assert(refreshed.provenance?.repositorySource === 'peer', 'Peer-refreshed snapshots should carry peer provenance.')
     assert(
-      refreshed.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Peer Synced Body',
+      refreshed.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Peer Synced Body',
       'Peer repository changes should hydrate the modeling snapshot through the service.',
     )
     const accepted = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: refreshed.revisionId,
+      baseRevisionId: refreshed.document.revisionId,
       baseRepositoryHeads: refreshed.provenance?.repositoryHeads,
       definition,
     }))
@@ -1175,7 +1166,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     }
 
     const result = await expectModelingError(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       baseRepositoryHeads: snapshot.provenance?.repositoryHeads,
       definition,
     }))
@@ -1193,7 +1184,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const refreshed = await service.getCurrentDocumentSnapshot()
     assert(
-      refreshed.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'In-flight Peer Body',
+      refreshed.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'In-flight Peer Body',
       'Repository head conflict handling should leave the service on the peer-authored snapshot.',
     )
   }
@@ -1251,7 +1242,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const snapshotAfterImport = await service.getCurrentDocumentSnapshot()
     const rename = await unwrapModelingResult(service.renameBody({
-      baseRevisionId: snapshotAfterImport.revisionId,
+      baseRevisionId: snapshotAfterImport.document.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Asset Body',
     }))

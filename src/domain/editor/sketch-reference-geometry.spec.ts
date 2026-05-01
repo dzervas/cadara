@@ -158,8 +158,6 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       sketchId: 'sketch_face',
       label: 'Face Sketch',
       plane,
-      planeTarget: plane.support,
-      planeKey: null,
       sketch: {
         ownerDocumentId: 'doc_workspace',
         ownerRevisionId: 'rev_0001',
@@ -176,7 +174,7 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
     } satisfies SketchSnapshotRecord)
 
     assert(session.plane.key === null, 'Face-backed reopened sketches should preserve a null authored plane key.')
-    assert(session.commitRequest?.planeKey === null, 'Face-backed reopened sketch commits should not default planeKey to XY.')
+    assert(session.commitRequest?.plane.key === null, 'Face-backed reopened sketch commits should not default planeKey to XY.')
   }
 
   function testDuplicateReferencesAreRejected() {

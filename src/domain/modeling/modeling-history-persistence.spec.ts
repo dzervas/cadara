@@ -35,7 +35,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
 
   async function getSeedExtrudeDefinition(service: ModelingService): Promise<ExtrudeFeatureDefinition> {
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const seedExtrude = snapshot.features.find(
+    const seedExtrude = snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -49,7 +49,10 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       parameters: {
         ...seedExtrude.definition.parameters,
         startExtent: { kind: 'profilePlane' },
-        endExtent: { kind: 'blind', direction: 'positive', distance: 9 },
+        extent: {
+          mode: 'oneSide',
+          end: { kind: 'blind', direction: 'positive', distance: 9 },
+        },
       },
     }
   }
@@ -72,13 +75,13 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const definition = await getSeedExtrudeDefinition(service)
 
     await service.evaluatePreview({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       previewId: 'preview_history',
       definition,
     })
 
     const rejected = await expectModelingError(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition: {
         kind: 'plane',
         featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
@@ -93,7 +96,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     assert(rejected.code === 'modeling/diagnostic', 'Unsupported mock plane create should be rejected.')
 
     const accepted = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
 
@@ -106,11 +109,11 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
   async function testPersistedHistoryReplaysSketchAndFeatureMutations() {
     const { service, store } = await createServiceWithStore()
     const before = await service.getCurrentDocumentSnapshot()
-    const seedSketch = before.sketches[0]
+    const seedSketch = before.document.sketches[0]
     assert(seedSketch, 'Seed sketch must exist.')
 
     const sketch = await unwrapModelingResult(service.commitSketch({
-      baseRevisionId: before.revisionId,
+      baseRevisionId: before.document.revisionId,
       solverCorrelation: {
         requestId: 'request_history_commit',
         projectionRequestId: 'request_history_commit:project',
@@ -121,8 +124,6 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       sketchId: 'sketch_history',
       sketchLabel: 'History Sketch',
       plane: seedSketch.plane,
-      planeTarget: seedSketch.planeTarget,
-      planeKey: seedSketch.planeKey,
       definition: seedSketch.sketch.definition,
     }))
     assert(sketch.revisionState.kind === 'accepted', 'Sketch commit should be stored for replay.')
@@ -139,8 +140,6 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       sketchId: 'sketch_history',
       sketchLabel: 'Renamed History Sketch',
       plane: seedSketch.plane,
-      planeTarget: seedSketch.planeTarget,
-      planeKey: seedSketch.planeKey,
       definition: seedSketch.sketch.definition,
     }))
     assert(renamedSketch.revisionState.kind === 'accepted', 'Sketch rename should be stored for replay.')
@@ -160,7 +159,10 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
         ...definition,
         parameters: {
           ...definition.parameters,
-          endExtent: { kind: 'blind', direction: 'positive', distance: 12 },
+          extent: {
+            mode: 'oneSide',
+            end: { kind: 'blind', direction: 'positive', distance: 12 },
+          },
         },
       },
     }))
@@ -213,7 +215,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     assert(restoreState.kind === 'restored', 'Valid persisted history should restore explicitly.')
     assert(restoreState.entriesReplayed === finalHistory.entries.length, 'Restore should replay every entry in order.')
     assert(
-      restoredSnapshot.sketches.some((entry) => entry.sketchId === 'sketch_history'),
+      restoredSnapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_history'),
       'Replay should rebuild persisted sketches.',
     )
     assert(
@@ -227,8 +229,8 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       'Replay should preserve the derived consumed-sketch auto-hide set.',
     )
     assert(
-      restoredSnapshot.features.map((feature) => feature.featureId).join(',')
-        === originalSnapshot.features.map((feature) => feature.featureId).join(','),
+      restoredSnapshot.document.features.map((feature) => feature.featureId).join(',')
+        === originalSnapshot.document.features.map((feature) => feature.featureId).join(','),
       'Replay should preserve feature order.',
     )
     assert(
@@ -241,30 +243,30 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       'Replay should preserve mixed sketch and feature document history order.',
     )
     assert(
-      restoredSnapshot.features.find((feature) => feature.featureId === created.featureId)?.definition.kind === 'extrude',
+      restoredSnapshot.document.features.find((feature) => feature.featureId === created.featureId)?.definition.kind === 'extrude',
       'Replay should rebuild persisted feature definitions.',
     )
     assert(
-      originalSnapshot.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed Extrude'
-        && restoredSnapshot.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed Extrude',
+      originalSnapshot.document.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed Extrude'
+        && restoredSnapshot.document.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed Extrude',
       'Replay should preserve persisted feature rename labels.',
     )
     assert(
-      originalSnapshot.sketches.find((entry) => entry.sketchId === 'sketch_history')?.label === 'Renamed History Sketch'
-        && restoredSnapshot.sketches.find((entry) => entry.sketchId === 'sketch_history')?.label === 'Renamed History Sketch',
+      originalSnapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_history')?.label === 'Renamed History Sketch'
+        && restoredSnapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_history')?.label === 'Renamed History Sketch',
       'Replay should preserve persisted sketch rename labels.',
     )
     assert(
-      originalSnapshot.bodies.find((entry) => entry.bodyId === 'body_part-1')?.label === 'Renamed Part'
-        && restoredSnapshot.bodies.find((entry) => entry.bodyId === 'body_part-1')?.label === 'Renamed Part'
+      originalSnapshot.document.bodies.find((entry) => entry.bodyId === 'body_part-1')?.label === 'Renamed Part'
+        && restoredSnapshot.document.bodies.find((entry) => entry.bodyId === 'body_part-1')?.label === 'Renamed Part'
         && restoredSnapshot.presentation.objects.find((entry) => entry.target.kind === 'body' && entry.target.bodyId === 'body_part-1')?.label === 'Renamed Part',
       'Replay should preserve persisted body rename labels in body and object records.',
     )
     assert(
-      restoredSnapshot.cursor.kind === originalSnapshot.cursor.kind
-        && restoredSnapshot.cursor.kind === 'feature'
-        && originalSnapshot.cursor.kind === 'feature'
-        && restoredSnapshot.cursor.featureId === originalSnapshot.cursor.featureId,
+      restoredSnapshot.document.cursor.kind === originalSnapshot.document.cursor.kind
+        && restoredSnapshot.document.cursor.kind === 'feature'
+        && originalSnapshot.document.cursor.kind === 'feature'
+        && restoredSnapshot.document.cursor.featureId === originalSnapshot.document.cursor.featureId,
       'Replay should preserve persisted document cursor state.',
     )
   }
@@ -274,7 +276,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const snapshot = await service.getCurrentDocumentSnapshot()
     const definition = await getSeedExtrudeDefinition(service)
     const created = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
     assert(created.revisionState.kind === 'accepted', 'Feature create should commit before delete.')
@@ -295,7 +297,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
     assert(
-      !restoredSnapshot.features.some((feature) => feature.featureId === created.featureId),
+      !restoredSnapshot.document.features.some((feature) => feature.featureId === created.featureId),
       'Replay should apply persisted feature deletes.',
     )
   }
@@ -304,7 +306,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const { service, store } = await createServiceWithStore()
     const snapshot = await service.getCurrentDocumentSnapshot()
     const deleted = await unwrapModelingResult(service.deleteTarget({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       target: { kind: 'body', bodyId: 'body_part-1' },
     }))
     assert(deleted.revisionState.kind === 'accepted', 'Generic body delete should commit.')
@@ -346,7 +348,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const { service, store } = await createServiceWithStore()
     const snapshot = await service.getCurrentDocumentSnapshot()
     const added = await unwrapModelingResult(service.addDocumentVariable({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       variableId: 'variable_width',
       name: 'width',
       valueText: '12',
@@ -444,7 +446,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const snapshot = await service.getCurrentDocumentSnapshot()
     const definition = await getSeedExtrudeDefinition(service)
     const created = await unwrapModelingResult(service.createFeature({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
     assert(created.revisionState.kind === 'accepted', 'Feature create should produce startup replay history.')
@@ -459,7 +461,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const startupSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
     assert(
-      startupSnapshot.features.some((feature) => feature.featureId === created.featureId),
+      startupSnapshot.document.features.some((feature) => feature.featureId === created.featureId),
       'Startup snapshot should include replayed history before editor exposure.',
     )
   }

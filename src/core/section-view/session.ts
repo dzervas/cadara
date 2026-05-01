@@ -1,4 +1,4 @@
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { PrimitiveRef } from '@/core/editor/schema'
 import { getPrimitiveRefKey } from '@/core/editor/schema'
@@ -19,7 +19,7 @@ export interface SectionViewSession {
 const FACE_PLANE_TOLERANCE = 1e-9
 
 export function createSectionViewSession(input: {
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   seed: SectionViewSeedTarget
   cameraPosition: Vec3
 }): SectionViewSession | null {
@@ -38,7 +38,7 @@ export function createSectionViewSession(input: {
 }
 
 export function resolveSectionViewPlane(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   seed: SectionViewSeedTarget,
 ): SketchPlaneDefinition | null {
   switch (seed.kind) {
@@ -57,7 +57,7 @@ export function resolveSectionViewPlane(
         ? {
             support: sketch.plane.support,
             frame: sketch.plane.frame,
-            key: sketch.plane.key ?? sketch.planeKey ?? null,
+            key: sketch.plane.key ?? null,
           }
         : null
     }
@@ -122,7 +122,7 @@ export function mapSectionPlanePointToWorld(
 }
 
 function createFaceBackedPlane(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: 'face' }>,
 ): SketchPlaneDefinition | null {
   const targetKey = getPrimitiveRefKey(target)
@@ -156,7 +156,7 @@ function createFaceBackedPlane(
 }
 
 function createPlaneFrameFromMesh(
-  geometry: Extract<DocumentSnapshot['document']['render']['records'][number]['geometry'], { kind: 'mesh' }>,
+  geometry: Extract<WorkspaceSnapshot['document']['render']['records'][number]['geometry'], { kind: 'mesh' }>,
 ): SketchPlaneDefinition['frame'] | null {
   for (const triangle of geometry.triangleIndices) {
     const p0 = geometry.vertexPositions[triangle[0]]

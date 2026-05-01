@@ -4,7 +4,7 @@ import type { ImportProvider } from '@/contracts/import/provider'
 import type { ImportResult } from '@/contracts/import/result'
 import type { ImportReviewEnvelope } from '@/contracts/import/review'
 import type { ResolvedImportSource } from '@/contracts/import/source'
-import type { ModelingDiagnostic, DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { ModelingDiagnostic, WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 import { hashGeometryAssetBytes } from '@/domain/modeling/geometry-asset-store'
@@ -29,13 +29,13 @@ export async function resolveLocalFileImportSource(file: File): Promise<Resolved
 
 export function createImportCapabilities(
   _modelingService: ModelingService,
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
 ): ImportCapabilities {
   return {
     context: {
       contractVersion: CONTRACT_VERSION,
-      documentId: snapshot.documentId,
-      baseRevisionId: snapshot.revisionId,
+      documentId: snapshot.document.documentId,
+      baseRevisionId: snapshot.document.revisionId,
     },
     modeling: {
       async bakeGeometry() {
@@ -103,7 +103,7 @@ export async function createImportSession(input: {
 
 export async function applyImportPreparedActions(input: {
   modelingService: ModelingService
-  baseRevisionId: DocumentSnapshot['revisionId']
+  baseRevisionId: WorkspaceSnapshot['document']['revisionId']
   actions: ImportPreparedActions
 }) {
   let revisionId = input.baseRevisionId

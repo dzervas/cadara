@@ -10,7 +10,7 @@ import {
 } from '@/contracts/shared/versioning'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import type { BodyId, FeatureId, ObjectTreeNodeId } from '@/contracts/shared/ids'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import {
   combineAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
@@ -26,15 +26,15 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     }
   }
 
-  function getPrimaryRegionTarget(snapshot: DocumentSnapshot) {
-    const sketch = snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')
+  function getPrimaryRegionTarget(snapshot: WorkspaceSnapshot) {
+    const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_primary')
     const region = sketch?.sketch.regions[0]
     assert(sketch && region, 'Mock fixture should expose a primary sketch region.')
     return { kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }
   }
 
   async function addMockToolBody(adapter: MockKernelAdapter, bodyId: BodyId) {
-    const snapshot = await (adapter as unknown as { getSnapshot(): Promise<DocumentSnapshot> }).getSnapshot()
+    const snapshot = await (adapter as unknown as { getSnapshot(): Promise<WorkspaceSnapshot> }).getSnapshot()
     const sourceBody = snapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')
     const sourceObject = snapshot.presentation.objects.find((item) => item.target.kind === 'body' && item.target.bodyId === 'body_part-1')
 
@@ -50,7 +50,6 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
         ownerFeatureId: 'feature_mock_tool' as FeatureId,
       },
     ]
-    snapshot.bodies = snapshot.document.bodies
     snapshot.presentation.objects = [
       ...snapshot.presentation.objects,
       {
@@ -63,7 +62,6 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       },
     ]
     snapshot.document.objects = snapshot.presentation.objects
-    snapshot.objects = snapshot.presentation.objects
   }
 
   async function testSourceBackedSketchReferenceProjection() {
@@ -72,7 +70,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const sketch = snapshot.snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')
+    const sketch = snapshot.snapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_primary')
     assert(sketch, 'Seed sketch must be available for source-backed projection tests.')
 
     const projection = await adapter.projectSketchExternalReferences({
@@ -80,7 +78,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       solverSchemaVersion: 'sketch-solver/v1alpha1',
       requestId: 'request_source_projection',
       documentId: 'doc_workspace',
-      revisionId: snapshot.snapshot.revisionId,
+      revisionId: snapshot.snapshot.document.revisionId,
       sketchId: sketch.sketchId,
       plane: sketch.plane.frame,
       tolerances: {
@@ -172,7 +170,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const existingExtrude = snapshot.snapshot.features.find(
+    const existingExtrude = snapshot.snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -191,7 +189,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
         parameters: {
           profiles: existingExtrude.definition.parameters.profiles,
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 12 },
+          extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 12  } },
           operation: 'newBody',
           booleanScope: { kind: 'standalone' },
         },
@@ -233,7 +231,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
         parameters: {
           profiles: existingExtrude.definition.parameters.profiles,
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 0 },
+          extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 0  } },
           operation: 'newBody',
           booleanScope: { kind: 'standalone' },
         },
@@ -252,7 +250,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       currentDocumentId: 'doc_workspace',
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
-    const existingExtrude = snapshot.features.find(
+    const existingExtrude = snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -297,7 +295,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       let rejected = false
       try {
         await service.evaluatePreview({
-          baseRevisionId: snapshot.revisionId,
+          baseRevisionId: snapshot.document.revisionId,
           previewId: 'preview_invalid_profiles',
           definition: {
             kind: 'extrude',
@@ -348,8 +346,8 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const initialRevisionId = snapshot.snapshot.revisionId
-    const extrude = snapshot.snapshot.features.find(
+    const initialRevisionId = snapshot.snapshot.document.revisionId
+    const extrude = snapshot.snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -367,7 +365,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
         parameters: {
           ...extrude.definition.parameters,
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 8 },
+          extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 8  } },
         },
       },
     })
@@ -397,8 +395,8 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const beforeRevisionId = before.snapshot.revisionId
-    const seedExtrude = before.snapshot.features.find(
+    const beforeRevisionId = before.snapshot.document.revisionId
+    const seedExtrude = before.snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -409,14 +407,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: {
         kind: 'extrude',
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
           ...seedExtrude.definition.parameters,
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 16 },
+          extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 16  } },
         },
       },
     })
@@ -427,10 +425,10 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     })
 
     assert(created.revisionState.kind === 'accepted', 'Accepted creates must report accepted revision state.')
-    assert(created.revisionId === after.snapshot.revisionId, 'Accepted creates must advance the committed snapshot revision.')
-    assert(after.snapshot.revisionId !== beforeRevisionId, 'Accepted creates must change the committed revision basis.')
+    assert(created.revisionId === after.snapshot.document.revisionId, 'Accepted creates must advance the committed snapshot revision.')
+    assert(after.snapshot.document.revisionId !== beforeRevisionId, 'Accepted creates must change the committed revision basis.')
     assert(
-      after.snapshot.features.some((feature) => feature.featureId === created.featureId),
+      after.snapshot.document.features.some((feature) => feature.featureId === created.featureId),
       'Accepted creates must appear in subsequent committed snapshots.',
     )
   }
@@ -445,13 +443,13 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const rollback = await adapter.setFeatureCursor({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     })
 
     assert(rollback.revisionState.kind === 'accepted', 'Rollback cursor changes must be accepted for valid features.')
     assert(rollback.cursor.kind === 'feature' && rollback.cursor.featureId === 'feature_extrude-1', 'Rollback must target the requested feature.')
-    const seedExtrude = before.snapshot.features.find(
+    const seedExtrude = before.snapshot.document.features.find(
       (feature) => feature.featureId === 'feature_extrude-1' && feature.definition.kind === 'extrude',
     )
 
@@ -469,7 +467,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
         parameters: {
           ...seedExtrude.definition.parameters,
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 18 },
+          extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 18  } },
         },
       },
     })
@@ -478,7 +476,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const featureOrder = after.snapshot.features.map((feature) => feature.featureId)
+    const featureOrder = after.snapshot.document.features.map((feature) => feature.featureId)
 
     assert(created.revisionState.kind === 'accepted', 'Feature creation after rollback must be accepted.')
     assert(
@@ -486,7 +484,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'Feature creation after rollback must insert immediately after the cursor and preserve later features.',
     )
     assert(
-      after.snapshot.cursor.kind === 'feature' && after.snapshot.cursor.featureId === created.featureId,
+      after.snapshot.document.cursor.kind === 'feature' && after.snapshot.document.cursor.featureId === created.featureId,
       'Feature creation after rollback must advance the cursor to the new feature.',
     )
   }
@@ -500,7 +498,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const rollback = await adapter.setFeatureCursor({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       cursor: { kind: 'empty' },
     })
     assert(rollback.revisionState.kind === 'accepted', 'Mock cursor rollback before the first item should be accepted.')
@@ -539,8 +537,8 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const beforeRevisionId = before.snapshot.revisionId
-    const sourceSketch = before.snapshot.sketches[0]
+    const beforeRevisionId = before.snapshot.document.revisionId
+    const sourceSketch = before.snapshot.document.sketches[0]
 
     if (!sourceSketch) {
       throw new Error('Seed sketch must exist for sketch commit coverage.')
@@ -549,7 +547,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const committed = await adapter.commitSketch({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       solverCorrelation: {
         requestId: 'request_commit_1',
         projectionRequestId: 'request_commit_1:project',
@@ -560,8 +558,6 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       sketchId: 'sketch_phase8',
       sketchLabel: 'Phase 8 Sketch',
       plane: sourceSketch.plane,
-      planeTarget: sourceSketch.planeTarget,
-      planeKey: sourceSketch.planeKey,
       definition: sourceSketch.sketch.definition,
     })
 
@@ -571,17 +567,17 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     })
 
     assert(committed.revisionState.kind === 'accepted', 'Accepted sketch commits must report accepted revision state.')
-    assert(after.snapshot.revisionId === committed.revisionId, 'Committed sketch revisions must match the observed snapshot revision.')
-    assert(after.snapshot.revisionId !== beforeRevisionId, 'Accepted sketch commits must change the committed revision basis.')
+    assert(after.snapshot.document.revisionId === committed.revisionId, 'Committed sketch revisions must match the observed snapshot revision.')
+    assert(after.snapshot.document.revisionId !== beforeRevisionId, 'Accepted sketch commits must change the committed revision basis.')
     assert(
-      after.snapshot.sketches.some((sketch) => sketch.sketchId === committed.sketchId),
+      after.snapshot.document.sketches.some((sketch) => sketch.sketchId === committed.sketchId),
       'Accepted sketch commits must appear in subsequent committed snapshots.',
     )
 
-    const reopenedSketch = after.snapshot.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
+    const reopenedSketch = after.snapshot.document.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
     assert(reopenedSketch, 'Committed sketch snapshots must remain available for reopen flows.')
     assert(
-      reopenedSketch.planeTarget.kind === sourceSketch.planeTarget.kind
+      reopenedSketch.plane.support.kind === sourceSketch.plane.support.kind
       && reopenedSketch.plane.key === sourceSketch.plane.key,
       'Committed sketch snapshots must preserve their stored plane identity for later reopen.',
     )
@@ -599,7 +595,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const sourceSketch = before.snapshot.sketches[0]
+    const sourceSketch = before.snapshot.document.sketches[0]
 
     if (!sourceSketch) {
       throw new Error('Seed sketch must exist for authoring operation commit coverage.')
@@ -608,7 +604,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const committed = await adapter.commitSketch({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       solverCorrelation: {
         requestId: 'request_commit_authoring_operations',
         projectionRequestId: 'request_commit_authoring_operations:project',
@@ -619,8 +615,6 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       sketchId: null,
       sketchLabel: 'Authoring Operation Sketch',
       plane: sourceSketch.plane,
-      planeTarget: sourceSketch.planeTarget,
-      planeKey: sourceSketch.planeKey,
       definition: {
         schemaVersion: 'sketch-definition/v1alpha1',
         referenceIds: [],
@@ -707,7 +701,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const reopenedSketch = after.snapshot.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
+    const reopenedSketch = after.snapshot.document.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
 
     assert(committed.revisionState.kind === 'accepted', 'Sketch with authoring operation metadata should commit.')
     assert(reopenedSketch, 'Committed sketch should be available for reopen.')
@@ -754,7 +748,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const sourceSketch = before.snapshot.sketches[0]
+    const sourceSketch = before.snapshot.document.sketches[0]
 
     if (!sourceSketch) {
       throw new Error('Seed sketch must exist for projected sketch commit coverage.')
@@ -779,7 +773,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const committed = await adapter.commitSketch({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       solverCorrelation: {
         requestId: 'request_commit_projection',
         projectionRequestId: 'request_commit_projection:project',
@@ -790,8 +784,6 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       sketchId: 'sketch_projected_snapshot',
       sketchLabel: 'Projected Snapshot Sketch',
       plane: sourceSketch.plane,
-      planeTarget: sourceSketch.planeTarget,
-      planeKey: sourceSketch.planeKey,
       definition,
     })
 
@@ -799,7 +791,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const reopenedSketch = after.snapshot.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
+    const reopenedSketch = after.snapshot.document.sketches.find((sketch) => sketch.sketchId === committed.sketchId)
 
     assert(committed.revisionState.kind === 'accepted', 'Projected sketch commits should be accepted.')
     const persistedProjection = reopenedSketch?.sketch.projectedReferences?.find((reference) => reference.referenceId === referenceId)
@@ -824,7 +816,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const missingUpdate = await adapter.updateFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: snapshot.snapshot.revisionId,
+      baseRevisionId: snapshot.snapshot.document.revisionId,
       featureId: 'feature_missing',
       definition: {
         kind: 'plane',
@@ -841,14 +833,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const missingDelete = await adapter.deleteFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: snapshot.snapshot.revisionId,
+      baseRevisionId: snapshot.snapshot.document.revisionId,
       featureId: 'feature_missing',
     })
 
     const missingReorder = await adapter.reorderFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: snapshot.snapshot.revisionId,
+      baseRevisionId: snapshot.snapshot.document.revisionId,
       featureId: 'feature_extrude-1',
       beforeFeatureId: 'feature_missing',
     })
@@ -867,7 +859,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const deletedFeature = await featureAdapter.deleteTarget({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: initialFeature.snapshot.revisionId,
+      baseRevisionId: initialFeature.snapshot.document.revisionId,
       target: { kind: 'feature', featureId: 'feature_extrude-1' },
     })
     assert(deletedFeature.revisionState.kind === 'accepted', 'Generic feature deletion should be accepted.')
@@ -892,7 +884,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const deletedSketch = await sketchAdapter.deleteTarget({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: initialSketch.snapshot.revisionId,
+      baseRevisionId: initialSketch.snapshot.document.revisionId,
       target: { kind: 'sketch', sketchId: 'sketch_primary' },
     })
     assert(deletedSketch.revisionState.kind === 'accepted', 'Generic sketch deletion should be accepted.')
@@ -913,7 +905,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const deletedBody = await bodyAdapter.deleteTarget({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: initialBody.snapshot.revisionId,
+      baseRevisionId: initialBody.snapshot.document.revisionId,
       target: { kind: 'body', bodyId: 'body_part-1' },
     })
     assert(deletedBody.revisionState.kind === 'accepted', 'Generic body deletion should be accepted.')
@@ -929,7 +921,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const unsupported = await bodyAdapter.deleteTarget({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: afterBodyDelete.snapshot.revisionId,
+      baseRevisionId: afterBodyDelete.snapshot.document.revisionId,
       target: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
     })
     assert(unsupported.revisionState.kind === 'rejected', 'Unsupported generic delete targets should be rejected.')
@@ -953,18 +945,18 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const feature = initial.snapshot.presentation.documentHistory.find((item) => item.kind === 'feature')
     assert(sketch?.kind === 'sketch', 'Mock fixture should expose a sketch history item.')
     assert(feature?.kind === 'feature', 'Mock fixture should expose a feature history item.')
-    const seedFeature = initial.snapshot.features.find((entry) => entry.featureId === feature.featureId)
+    const seedFeature = initial.snapshot.document.features.find((entry) => entry.featureId === feature.featureId)
     assert(seedFeature?.definition.kind === 'extrude', 'Mock fixture should expose the seeded extrude definition.')
 
     const secondFeature = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: initial.snapshot.revisionId,
+      baseRevisionId: initial.snapshot.document.revisionId,
       definition: {
         ...seedFeature.definition,
         parameters: {
           ...seedFeature.definition.parameters,
-          endExtent: { kind: 'blind', direction: 'positive', distance: 14 },
+          extent: { mode: 'oneSide', end: { kind: 'blind', direction: 'positive', distance: 14  } },
         },
       },
     })
@@ -984,8 +976,8 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       documentId: 'doc_workspace',
     })
     assert(
-      featureReordered.snapshot.features[0]?.featureId === secondFeature.featureId
-        && featureReordered.snapshot.features[1]?.featureId === feature.featureId,
+      featureReordered.snapshot.document.features[0]?.featureId === secondFeature.featureId
+        && featureReordered.snapshot.document.features[1]?.featureId === feature.featureId,
       'Mock document history feature reorders should update feature execution order.',
     )
     const cursorBeforeSketchReorder = featureReordered.snapshot.document.cursor
@@ -1033,7 +1025,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const conflict = await adapter.reorderDocumentHistory({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: initial.snapshot.revisionId,
+      baseRevisionId: initial.snapshot.document.revisionId,
       item: { kind: 'feature', featureId: feature.featureId },
       beforeItem: null,
     })
@@ -1125,14 +1117,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_split_unsupported',
       definition: splitAdvancedFeatureExample,
     })
     const create = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: splitAdvancedFeatureExample,
     })
     const after = await adapter.getDocumentSnapshot({
@@ -1146,8 +1138,8 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'Unsupported advanced previews must return structured advanced-feature diagnostics.',
     )
     assert(create.revisionState.kind === 'rejected', 'Unsupported advanced create requests should be rejected.')
-    assert(after.snapshot.revisionId === before.snapshot.revisionId, 'Rejected advanced create requests must not mutate the committed document revision.')
-    assert(after.snapshot.features.length === before.snapshot.features.length, 'Rejected advanced create requests must not add committed features.')
+    assert(after.snapshot.document.revisionId === before.snapshot.document.revisionId, 'Rejected advanced create requests must not mutate the committed document revision.')
+    assert(after.snapshot.document.features.length === before.snapshot.document.features.length, 'Rejected advanced create requests must not add committed features.')
   }
 
   async function testSweepPreviewAndCommitUseAdvancedParticipants() {
@@ -1172,21 +1164,21 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_sweep_valid',
       definition: sweepDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: sweepDefinition,
     })
     const after = await adapter.getDocumentSnapshot({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedSweep = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedSweep = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock sweep previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock sweep previews should not emit diagnostics.')
@@ -1232,14 +1224,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const guidePreview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_sweep_guide_unsupported',
       definition: guideCurveDefinition,
     })
     const booleanCreate = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: booleanDefinition,
     })
     const after = await adapter.getDocumentSnapshot({
@@ -1253,7 +1245,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'Unsupported sweep previews must return structured advanced-feature diagnostics.',
     )
     assert(booleanCreate.revisionState.kind === 'rejected', 'Unsupported sweep boolean create requests should be rejected.')
-    assert(after.snapshot.revisionId === before.snapshot.revisionId, 'Rejected sweep create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === before.snapshot.document.revisionId, 'Rejected sweep create requests must not mutate committed document state.')
   }
 
   async function testLoftPreviewAndCommitUseOrderedAdvancedParticipants() {
@@ -1283,21 +1275,21 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_loft_valid',
       definition: loftDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: loftDefinition,
     })
     const after = await adapter.getDocumentSnapshot({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedLoft = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedLoft = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock loft previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock loft previews should not emit diagnostics.')
@@ -1377,21 +1369,21 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const guidePreview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_loft_guide_supported',
       definition: guideCurveDefinition,
     })
     const pathGuidePreview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_loft_path_guide_unsupported',
       definition: pathAndGuideDefinition,
     })
     const booleanCreate = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: booleanDefinition,
     })
     const after = await adapter.getDocumentSnapshot({
@@ -1406,7 +1398,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'Unsupported loft previews must return structured advanced-feature diagnostics.',
     )
     assert(booleanCreate.revisionState.kind === 'rejected', 'Unsupported loft boolean create requests should be rejected.')
-    assert(after.snapshot.revisionId === before.snapshot.revisionId, 'Rejected loft create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === before.snapshot.document.revisionId, 'Rejected loft create requests must not mutate committed document state.')
   }
 
   async function testChamferPreviewCommitAndUnsupportedCasesUseAdvancedParticipants() {
@@ -1436,14 +1428,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_chamfer_valid',
       definition: chamferDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: chamferDefinition,
     })
     const invalid = await adapter.createFeature({
@@ -1456,7 +1448,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedChamfer = afterInvalid.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedChamfer = afterInvalid.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock chamfer previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock chamfer previews should not emit diagnostics.')
@@ -1468,7 +1460,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     )
     assert(committedChamfer.definition.parameters.options?.distance === 0.5, 'Committed mock chamfer should preserve the distance option.')
     assert(invalid.revisionState.kind === 'rejected', 'Invalid chamfer distance should reject explicitly.')
-    assert(afterInvalid.snapshot.revisionId === created.revisionId, 'Rejected chamfer create requests must not mutate committed document state.')
+    assert(afterInvalid.snapshot.document.revisionId === created.revisionId, 'Rejected chamfer create requests must not mutate committed document state.')
   }
 
   async function testThickenPreviewCommitAndUnsupportedCasesUseAdvancedParticipants() {
@@ -1511,14 +1503,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_thicken_valid',
       definition: thickenDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: thickenDefinition,
     })
     const invalid = await adapter.createFeature({
@@ -1537,7 +1529,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedThicken = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedThicken = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock thicken previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock thicken previews should not emit diagnostics.')
@@ -1550,7 +1542,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(committedThicken.definition.parameters.options?.thickness === 0.5, 'Committed mock thicken should preserve the thickness option.')
     assert(invalid.revisionState.kind === 'rejected', 'Invalid thicken thickness should reject explicitly.')
     assert(booleanCreate.revisionState.kind === 'rejected', 'Unsupported thicken boolean create requests should reject explicitly.')
-    assert(after.snapshot.revisionId === created.revisionId, 'Rejected thicken create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === created.revisionId, 'Rejected thicken create requests must not mutate committed document state.')
   }
 
   async function testSplitPreviewCommitAndUnsupportedCasesUseAdvancedParticipants() {
@@ -1583,14 +1575,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_split_valid',
       definition: splitDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: splitDefinition,
     })
     const unsupported = await adapter.createFeature({
@@ -1603,7 +1595,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedSplit = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedSplit = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock split previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock split previews should not emit diagnostics.')
@@ -1614,7 +1606,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'Committed mock split should preserve the explicit toolBody participant role.',
     )
     assert(unsupported.revisionState.kind === 'rejected', 'Unsupported plane-based split create requests should reject explicitly.')
-    assert(after.snapshot.revisionId === created.revisionId, 'Rejected split create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === created.revisionId, 'Rejected split create requests must not mutate committed document state.')
   }
 
   async function testCombinePreviewCommitAndValidationUseAdvancedParticipants() {
@@ -1648,14 +1640,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_combine_valid',
       definition: combineDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: combineDefinition,
     })
     const invalid = await adapter.createFeature({
@@ -1668,8 +1660,8 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedCombine = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
-    const targetBody = after.snapshot.bodies.find((body) => body.bodyId === 'body_part-1')
+    const committedCombine = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
+    const targetBody = after.snapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')
 
     assert(preview.render.records.length > 0, 'Supported mock combine previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock combine previews should not emit diagnostics.')
@@ -1677,13 +1669,13 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(committedCombine?.definition.kind === 'combine', 'Committed mock combine should be present in the next snapshot.')
     assert(committedCombine.definition.parameters.operationIntent === 'subtract', 'Committed mock combine should preserve the operation intent.')
     assert(targetBody?.label.includes('(subtract)') === true, 'Committed mock combine should visibly relabel the target body output.')
-    assert(!after.snapshot.bodies.some((body) => body.bodyId === 'body_part-2'), 'Committed mock combine should consume the tool body row.')
+    assert(!after.snapshot.document.bodies.some((body) => body.bodyId === 'body_part-2'), 'Committed mock combine should consume the tool body row.')
     assert(
       !after.snapshot.presentation.objects.some((item) => item.target.kind === 'body' && item.target.bodyId === 'body_part-2'),
       'Committed mock combine should remove the consumed tool body from object navigation.',
     )
     assert(invalid.revisionState.kind === 'rejected', 'Invalid combine role overlap should reject explicitly.')
-    assert(after.snapshot.revisionId === created.revisionId, 'Rejected combine create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === created.revisionId, 'Rejected combine create requests must not mutate committed document state.')
   }
 
   async function testDeleteSolidPreviewCommitAndValidationUseAdvancedParticipants() {
@@ -1716,14 +1708,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_delete_solid_valid',
       definition: deleteDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: deleteDefinition,
     })
     const invalid = await adapter.createFeature({
@@ -1736,7 +1728,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedDelete = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedDelete = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock delete-solid previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock delete-solid previews should not emit diagnostics.')
@@ -1744,7 +1736,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(committedDelete?.definition.kind === 'deleteSolid', 'Committed mock delete-solid should be present in the next snapshot.')
     assert(committedDelete.definition.parameters.participants[0]?.targets.length === 1, 'Committed mock delete-solid should preserve the selected body participants.')
     assert(invalid.revisionState.kind === 'rejected', 'Invalid delete-solid body targets should reject explicitly.')
-    assert(after.snapshot.revisionId === created.revisionId, 'Rejected delete-solid create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === created.revisionId, 'Rejected delete-solid create requests must not mutate committed document state.')
   }
 
   async function testMirrorPreviewCommitAndUnsupportedCasesUseAdvancedParticipants() {
@@ -1775,14 +1767,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_mirror_valid',
       definition: mirrorDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: mirrorDefinition,
     })
     const unsupported = await adapter.createFeature({
@@ -1795,7 +1787,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedMirror = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedMirror = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock mirror previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock mirror previews should not emit diagnostics.')
@@ -1804,7 +1796,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(committedMirror.definition.parameters.participants.some((participant) => participant.role === 'plane'), 'Committed mock mirror should preserve the explicit plane participant.')
     assert(committedMirror.definition.parameters.options?.copy === true, 'Committed mock mirror should preserve the copy option.')
     assert(unsupported.revisionState.kind === 'rejected', 'Unsupported mirror replace requests should reject explicitly.')
-    assert(after.snapshot.revisionId === created.revisionId, 'Rejected mirror create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === created.revisionId, 'Rejected mirror create requests must not mutate committed document state.')
   }
 
   async function testTransformPreviewCommitAndValidationUseAdvancedParticipants() {
@@ -1835,14 +1827,14 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const preview = await adapter.evaluatePreview({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       previewId: 'preview_transform_valid',
       definition: transformDefinition,
     })
     const created = await adapter.createFeature({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: before.snapshot.revisionId,
+      baseRevisionId: before.snapshot.document.revisionId,
       definition: transformDefinition,
     })
     const invalid = await adapter.createFeature({
@@ -1855,7 +1847,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
     })
-    const committedTransform = after.snapshot.features.find((feature) => feature.featureId === created.featureId)
+    const committedTransform = after.snapshot.document.features.find((feature) => feature.featureId === created.featureId)
 
     assert(preview.render.records.length > 0, 'Supported mock transform previews should return transient renderables.')
     assert(preview.diagnostics.length === 0, 'Supported mock transform previews should not emit diagnostics.')
@@ -1864,7 +1856,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     assert(committedTransform.definition.parameters.participants.some((participant) => participant.role === 'transformReference'), 'Committed mock transform should preserve the explicit transform reference.')
     assert(committedTransform.definition.parameters.options?.distance === 2, 'Committed mock transform should preserve the typed distance option.')
     assert(invalid.revisionState.kind === 'rejected', 'Invalid transform distance requests should reject explicitly.')
-    assert(after.snapshot.revisionId === created.revisionId, 'Rejected transform create requests must not mutate committed document state.')
+    assert(after.snapshot.document.revisionId === created.revisionId, 'Rejected transform create requests must not mutate committed document state.')
   }
 
   async function testSnapshotRenderablesExposeSemanticBindings() {
@@ -1874,7 +1866,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       documentId: 'doc_workspace',
     })
 
-    const planarFace = snapshot.snapshot.render.records.find(
+    const planarFace = snapshot.snapshot.document.render.records.find(
       (renderable) => renderable.binding.semanticClass === 'planarFace',
     )
 
@@ -1885,7 +1877,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'Planar face bindings must round-trip through a durable face ref.',
     )
 
-    const topFaceEntity = snapshot.snapshot.entities.find(
+    const topFaceEntity = snapshot.snapshot.presentation.entities.find(
       (entity) => entity.target.kind === 'face' && entity.target.faceId === 'face_top',
     )
 
@@ -1902,7 +1894,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       documentId: 'doc_workspace',
     })
 
-    const constructionMeshTargets = snapshot.snapshot.render.records
+    const constructionMeshTargets = snapshot.snapshot.document.render.records
       .filter((record) => record.binding.semanticClass === 'construction' && record.geometry.kind === 'mesh')
       .map((record) => record.binding.target)
 
@@ -1920,7 +1912,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
       'The XZ construction plane should expose a filled mesh render record.',
     )
 
-    const yzPlane = snapshot.snapshot.constructions.find(
+    const yzPlane = snapshot.snapshot.document.constructions.find(
       (construction) => construction.constructionId === 'construction_plane-yz',
     )?.plane
 
@@ -2185,7 +2177,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {
     const x = await adapter.addDocumentVariable({
       contractVersion: 'modeling-contract/v1alpha1',
       documentId: 'doc_workspace',
-      baseRevisionId: initial.snapshot.revisionId,
+      baseRevisionId: initial.snapshot.document.revisionId,
       variableId: 'variable_x',
       name: 'x',
       valueText: '50',

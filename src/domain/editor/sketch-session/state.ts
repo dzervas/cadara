@@ -202,14 +202,14 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
   const fullDefinition = materializeLegacyReferenceImageAnchorBindings(cloneDefinition(sketch.sketch.definition))
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
   const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
-  const planeKey = sketch.planeKey ?? sketch.plane.key ?? null
+  const planeKey = sketch.plane.key ?? null
   const projectedReferences = buildReferenceImageAnchorProjectedReferences(definition)
 
   return {
     sketchId,
     sketchLabel: sketch.label,
     plane: sketch.plane,
-    planeTarget: sketch.planeTarget,
+    planeTarget: sketch.plane.support,
     planeKey,
     toolStagedEntities: [],
     definition,
@@ -244,8 +244,6 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
       sketchId,
       sketchLabel: sketch.label,
       plane: sketch.plane,
-      planeTarget: sketch.planeTarget,
-      planeKey,
       definition,
     }),
     validationMessage: null,

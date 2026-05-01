@@ -1,7 +1,7 @@
 import type { AppError } from '@/contracts/errors'
 import type { EditorEvent } from '@/domain/editor/state-machine'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RequestId, RevisionId, SketchId } from '@/contracts/shared/ids'
 import {
   appendReferenceImageOperations,
@@ -49,7 +49,7 @@ export type SketchImageImportFlowResult =
       kind: 'committed'
       payloads: readonly ReferenceImagePayload[]
       sketchId: SketchId
-      snapshot: DocumentSnapshot
+      snapshot: WorkspaceSnapshot
       commitResult: ModelingCommitSketchResult
       reopenRequest: Extract<EditorEvent, { type: 'authoring.reopenRequested' }>
     }
@@ -66,7 +66,7 @@ type SketchImageImportModelingService = Pick<ModelingService, 'getCurrentDocumen
 }
 
 function resolveSketchImageImportCommitBasis(input: {
-  snapshot: DocumentSnapshot
+  snapshot: WorkspaceSnapshot
   baseRevisionId?: RevisionId
   baseRepositoryHeads?: readonly string[]
 }) {
@@ -95,7 +95,7 @@ export async function runSketchImageImportFlow(input: {
   baseRevisionId?: RevisionId
   baseRepositoryHeads?: readonly string[]
   session: SketchSessionState
-  snapshot: DocumentSnapshot
+  snapshot: WorkspaceSnapshot
   modelingService: SketchImageImportModelingService
   payloads?: readonly ReferenceImagePayload[]
   pickFiles?: (input: {

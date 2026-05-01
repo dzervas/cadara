@@ -423,7 +423,10 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
               regionId: region.regionId,
             }],
             startExtent: { kind: 'profilePlane' },
-            endExtent: { kind: 'blind', direction: 'positive', distance: 6 },
+            extent: {
+              mode: 'oneSide',
+              end: { kind: 'blind', direction: 'positive', distance: 6 },
+            },
             operation: 'newBody',
             booleanScope: { kind: 'standalone' },
           },
@@ -540,7 +543,10 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
           parameters: {
             profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
             startExtent: { kind: 'profilePlane' },
-            endExtent: { kind: 'blind', direction: 'positive', distance: 5 },
+            extent: {
+              mode: 'oneSide',
+              end: { kind: 'blind', direction: 'positive', distance: 5 },
+            },
             operation: 'newBody',
             booleanScope: { kind: 'standalone' },
           },
@@ -588,7 +594,10 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
           parameters: {
             profiles: [{ kind: 'face', bodyId: body.bodyId, faceId }],
             startExtent: { kind: 'profilePlane' },
-            endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+            extent: {
+              mode: 'oneSide',
+              end: { kind: 'blind', direction: 'positive', distance: 4 },
+            },
             operation: 'newBody',
             booleanScope: { kind: 'standalone' },
           },
@@ -627,7 +636,10 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
       parameters: {
         profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
         startExtent: { kind: 'profilePlane' },
-        endExtent: { kind: 'blind', direction: 'positive', distance: 6 },
+        extent: {
+          mode: 'oneSide',
+          end: { kind: 'blind', direction: 'positive', distance: 6 },
+        },
         operation: 'newBody',
         booleanScope: { kind: 'standalone' },
       },
@@ -895,7 +907,10 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {
               regionId: region.regionId,
             }],
             startExtent: { kind: 'profilePlane' },
-            endExtent: { kind: 'blind', direction: 'positive', distance: 8 },
+            extent: {
+              mode: 'oneSide',
+              end: { kind: 'blind', direction: 'positive', distance: 8 },
+            },
             operation: 'join',
             booleanScope: { kind: 'targetBody', bodyId: baseBody.bodyId },
           },

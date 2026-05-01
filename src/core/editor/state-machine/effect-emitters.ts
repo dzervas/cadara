@@ -63,7 +63,7 @@ export function getSnapshotMutationBasis(state: EditorState): SnapshotMutationBa
   }
 
   const repositoryHeads =
-    state.snapshot?.revisionId === baseRevisionId
+    state.snapshot?.document.revisionId === baseRevisionId
       ? state.snapshot.provenance?.repositoryHeads
       : undefined
 

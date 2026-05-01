@@ -24,7 +24,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
     currentDocumentId: 'doc_workspace',
   })
   const snapshot = await seedService.getCurrentDocumentSnapshot()
-  const sourceSketch = snapshot.sketches[0]
+  const sourceSketch = snapshot.document.sketches[0]
   assert(sourceSketch, 'Seed sketch should exist for sketch image-import coverage.')
 
   const session = createSketchSessionFromSnapshot(sourceSketch)
@@ -182,7 +182,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
     'Sketch image import should return the sketch reopen request needed to keep the editor in sketch mode after commit.',
   )
   assert(
-    result.snapshot.sketches.some((sketch) =>
+    result.snapshot.document.sketches.some((sketch) =>
       sketch.sketchId === result.sketchId
         && sketch.sketch.definition.authoringOperations?.some((operation) =>
           operation.kind === 'referenceImage'
@@ -231,7 +231,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
 
   assert(result.kind === 'committed', 'Importing into a new draft sketch should commit successfully through the modeling service.')
   assert(
-    result.snapshot.sketches.some((sketch) =>
+    result.snapshot.document.sketches.some((sketch) =>
       sketch.sketchId === result.sketchId
         && sketch.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
     ),
@@ -280,7 +280,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
   })
 
   assert(result.kind === 'committed', 'OpenCascade should accept reference-image-only sketch commits.')
-  const committedSketch = result.snapshot.sketches.find((sketch) => sketch.sketchId === result.sketchId)
+  const committedSketch = result.snapshot.document.sketches.find((sketch) => sketch.sketchId === result.sketchId)
   assert(committedSketch, 'Committed reference-image sketch should exist in the refreshed OpenCascade snapshot.')
   assert(
     committedSketch.sketch.solvedSnapshot.status.solveState === 'notEvaluated',
@@ -315,7 +315,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision
     currentDocumentId: 'doc_workspace',
   })
   const seedSnapshot = await seedService.getCurrentDocumentSnapshot()
-  const sourceSketch = seedSnapshot.sketches[0]
+  const sourceSketch = seedSnapshot.document.sketches[0]
   assert(sourceSketch, 'Seed sketch should exist for stale-basis import coverage.')
 
   const session = createSketchSessionFromSnapshot(sourceSketch)

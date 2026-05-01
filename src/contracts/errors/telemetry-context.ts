@@ -2,7 +2,7 @@ import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from '@/contracts/modeling/authored-document'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   type AuthoredModelDocumentSchemaVersion,
@@ -80,7 +80,7 @@ export function getErrorReporterTelemetryContext(): ErrorReporterTelemetryContex
 }
 
 export function createActiveDocumentTelemetryContext(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   options: ActiveDocumentTelemetryOptions = {},
 ): ActiveDocumentTelemetryContext {
   const documentId = snapshot.document.documentId
@@ -132,7 +132,7 @@ export function createActiveDocumentTelemetryContext(
 }
 
 function getActiveDocumentTelemetryAssetDiagnostics(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
 ): ActiveDocumentTelemetryAssetDiagnostic[] {
   return snapshot.document.diagnostics.flatMap((diagnostic) => {
     if (diagnostic.detail?.kind !== 'geometryAsset') {
@@ -150,7 +150,7 @@ function getActiveDocumentTelemetryAssetDiagnostics(
   })
 }
 
-function getActiveDocumentTelemetryCounts(snapshot: DocumentSnapshot): ActiveDocumentTelemetryCounts {
+function getActiveDocumentTelemetryCounts(snapshot: WorkspaceSnapshot): ActiveDocumentTelemetryCounts {
   return {
     sketches: snapshot.document.sketches.length,
     features: snapshot.document.features.length,

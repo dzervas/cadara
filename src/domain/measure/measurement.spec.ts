@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 
-import type { DocumentSnapshot, SnapshotEntityRecord } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/core/editor/schema'
 import {
@@ -22,7 +22,7 @@ test('src/domain/measure/measurement.spec.ts', () => {
     }
   }
 
-  function createMeasurementSnapshot(): DocumentSnapshot {
+  function createMeasurementSnapshot(): WorkspaceSnapshot {
     const plane = createStandardPlaneDefinition('xy')
     const entities: SnapshotEntityRecord[] = [
       createEntity('body_measure', 'Body A', { kind: 'body', bodyId: 'body_measure' }, ['body']),
@@ -313,7 +313,7 @@ test('src/domain/measure/measurement.spec.ts', () => {
         documentHistory: [],
         entities,
       },
-    } satisfies DocumentSnapshot
+    } satisfies WorkspaceSnapshot
 
     return snapshot
   }

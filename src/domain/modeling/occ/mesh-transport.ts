@@ -24,14 +24,11 @@ export type PackedRenderableEntityRecord =
     geometry: Exclude<RenderableEntityRecord['geometry'], RenderMeshGeometry> | PackedMeshGeometry
   }
 
-export type PackedWorkspaceSnapshot = Omit<WorkspaceSnapshot, 'document' | 'render'> & {
+export type PackedWorkspaceSnapshot = Omit<WorkspaceSnapshot, 'document'> & {
   document: Omit<WorkspaceSnapshot['document'], 'render'> & {
     render: Omit<WorkspaceSnapshot['document']['render'], 'records'> & {
       records: PackedRenderableEntityRecord[]
     }
-  }
-  render: Omit<WorkspaceSnapshot['render'], 'records'> & {
-    records: PackedRenderableEntityRecord[]
   }
 }
 
@@ -145,10 +142,6 @@ export function packWorkspaceSnapshotRenderMeshes(snapshot: WorkspaceSnapshot) {
         records,
       },
     },
-    render: {
-      ...structuredClone(snapshot.render),
-      records,
-    },
   }
 
   return {
@@ -168,10 +161,6 @@ export function unpackWorkspaceSnapshotRenderMeshes(snapshot: WorkspaceSnapshot 
         ...structuredClone(snapshot.document.render),
         records,
       },
-    },
-    render: {
-      ...structuredClone(snapshot.render),
-      records,
     },
   } as WorkspaceSnapshot
 }

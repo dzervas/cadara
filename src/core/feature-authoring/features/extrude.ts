@@ -589,14 +589,6 @@ export const extrudeAuthoringDefinition = {
 						],
 						startExtent: { kind: "profilePlane" },
 						extent,
-						endExtent:
-							firstEnd.kind === "blind"
-								? {
-										kind: "blind",
-										direction: firstEnd.direction,
-										distance: authoredDefinitionValue(firstEnd.distance, 12),
-									}
-								: undefined,
 						operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
 						booleanScope: draft.booleanScope,
 					},

@@ -10,7 +10,7 @@ import {
   getPrimitiveRefKey,
 } from '@/core/editor/schema'
 import type {
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   ModelingDiagnostic,
   ModelingOperationResult,
   MutationRevisionState,
@@ -213,7 +213,7 @@ export function createModelingService(
     return [...missingSketchIds].every((sketchId) => replayedSketchIds.has(sketchId))
   }
 
-  function attachRepositoryProvenance(snapshot: DocumentSnapshot): DocumentSnapshot {
+  function attachRepositoryProvenance(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     const metadata = documentRepository ? currentRepositoryMetadata ?? documentRepository.getMetadata(currentDocumentId) : null
     if (!metadata) {
       return {
@@ -568,11 +568,11 @@ export function createModelingService(
 
     return {
       ...result,
-      revisionId: snapshot.revisionId,
+      revisionId: snapshot.document.revisionId,
       revisionState: {
         kind: 'conflict',
         expectedRevisionId,
-        actualRevisionId: snapshot.revisionId,
+        actualRevisionId: snapshot.document.revisionId,
       },
       rebuildResult: {
         kind: 'skipped',

@@ -11,7 +11,7 @@ import {
   hydrateFeatureEditSession as hydrateFeatureEditSessionFromEntry,
   type FeatureEditSessionState,
 } from '@/domain/editor/feature-editing'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
 import type {
   EditorHistoryAvailability,
@@ -71,10 +71,10 @@ export function getEditorViewState(state: EditorState) {
 }
 
 export function hydrateFeatureSessionFromSnapshot(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   featureId: FeatureId,
 ): FeatureEditSessionState | null {
-  const feature = snapshot.features.find((entry) => entry.featureId === featureId)
+  const feature = snapshot.document.features.find((entry) => entry.featureId === featureId)
 
   return feature ? hydrateFeatureEditSessionFromEntry(feature) : null
 }

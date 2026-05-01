@@ -11,7 +11,6 @@ import type {
 import type {
   BodySnapshotRecord,
   ConstructionSnapshotRecord,
-  DocumentSnapshot,
   DocumentVariableRecord,
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
@@ -92,7 +91,6 @@ import {
   isString,
   isAuthoredNumberLike,
   isAuthoredEnumLike,
-  isLegacyRevolveAngleExtent,
   assertBodyId,
   assertDocumentId,
   assertDocumentVariableId,
@@ -222,14 +220,7 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
   }
 }
 
-export function normalizeExtrudeExtent(value: unknown, legacyEndExtent: unknown): ExtrudeFeatureExtent {
-  if (value === undefined && isRecord(legacyEndExtent)) {
-    return {
-      mode: 'oneSide',
-      end: normalizeExtrudeEnd(legacyEndExtent),
-    }
-  }
-
+export function normalizeExtrudeExtent(value: unknown): ExtrudeFeatureExtent {
   if (!isRecord(value)) {
     throw new Error('Invalid extrude extent payload.')
   }
@@ -270,20 +261,12 @@ export function normalizeExtrudeFeatureParameters(value: unknown): ExtrudeFeatur
     throw new Error('Invalid extrude operation payload.')
   }
 
-  const extent = normalizeExtrudeExtent(value.extent, value.endExtent)
-  const firstEnd = extent.mode === 'twoSide' ? extent.firstEnd : extent.end
+  const extent = normalizeExtrudeExtent(value.extent)
 
   return {
     profiles: assertExtrudeProfileRefs(value.profiles, 'Extrude'),
     startExtent: { kind: 'profilePlane' },
     extent,
-    endExtent: firstEnd.kind === 'blind'
-      ? {
-          kind: 'blind',
-          direction: firstEnd.direction,
-          distance: firstEnd.distance,
-        }
-      : undefined,
     operation: value.operation as ExtrudeFeatureParameters['operation'],
     booleanScope:
       isRecord(value.booleanScope) && value.booleanScope.kind === 'targetBody' && isString(value.booleanScope.bodyId)
@@ -387,37 +370,7 @@ export function normalizeRevolveEnd(value: unknown): RevolveEndCondition {
   }
 }
 
-export function normalizeRevolveExtent(value: unknown, angleAlias: unknown): RevolveFeatureParameters['extent'] {
-  if (isRecord(value) && value.kind === 'angle') {
-    if (!isAuthoredNumberLike(value.radians)) {
-      throw new Error('Invalid revolve angular extent payload.')
-    }
-    const literalAngle = getAuthoredLiteralValue(value.radians as MaybeAuthoredValue<number>)
-    if (literalAngle !== null && literalAngle <= 0) {
-      throw new Error('Revolve angle must be positive.')
-    }
-    const direction = value.direction === 'clockwise' || value.direction === 'counterClockwise'
-      ? value.direction
-      : 'counterClockwise'
-
-    return {
-      kind: 'angle',
-      direction,
-      radians: value.radians as MaybeAuthoredValue<number>,
-    }
-  }
-
-  if (!isRecord(value) && isAuthoredNumberLike(angleAlias)) {
-    return {
-      mode: 'oneSide',
-      end: {
-        kind: 'blind',
-        direction: 'counterClockwise',
-        angle: angleAlias as MaybeAuthoredValue<number>,
-      },
-    }
-  }
-
+export function normalizeRevolveExtent(value: unknown): RevolveFeatureParameters['extent'] {
   if (!isRecord(value)) {
     throw new Error('Invalid revolve extent payload.')
   }
@@ -460,22 +413,13 @@ export function normalizeRevolveFeatureParameters(value: unknown): RevolveFeatur
     throw new Error('Invalid revolve operation payload.')
   }
 
-  const extent = normalizeRevolveExtent(value.extent, value.angle)
-  let firstEnd: RevolveEndCondition
-  if (isLegacyRevolveAngleExtent(extent)) {
-    firstEnd = { kind: 'blind', direction: extent.direction, angle: extent.radians }
-  } else if (extent.mode === 'twoSide') {
-    firstEnd = extent.firstEnd
-  } else {
-    firstEnd = extent.end
-  }
+  const extent = normalizeRevolveExtent(value.extent)
 
   return {
     profiles: assertExtrudeProfileRefs(value.profiles, 'Revolve'),
     axis: assertRevolveAxisRef(value.axis),
     startAngle: isAuthoredNumberLike(value.startAngle) ? value.startAngle as RevolveFeatureParameters['startAngle'] : 0,
     extent,
-    angle: firstEnd.kind === 'blind' ? firstEnd.angle : undefined,
     operation: value.operation as RevolveFeatureParameters['operation'],
     booleanScope:
       isRecord(value.booleanScope) && value.booleanScope.kind === 'targetBody' && isString(value.booleanScope.bodyId)
@@ -872,7 +816,7 @@ export function normalizeRebuildResult(value: unknown): RebuildResult {
   }
 }
 
-export function normalizeFeatureTree(value: unknown): DocumentSnapshot['featureTree'] {
+export function normalizeFeatureTree(value: unknown): WorkspaceSnapshot['presentation']['featureTree'] {
   if (!Array.isArray(value)) {
     throw new Error('Invalid feature tree payload.')
   }
@@ -901,7 +845,7 @@ export function normalizeFeatureTree(value: unknown): DocumentSnapshot['featureT
   })
 }
 
-export function normalizeDocumentPresentation(value: unknown): DocumentSnapshot['presentation'] {
+export function normalizeDocumentPresentation(value: unknown): WorkspaceSnapshot['presentation'] {
   if (!isRecord(value)) {
     throw new Error('Invalid document presentation payload.')
   }
@@ -1390,8 +1334,6 @@ export function normalizeSketches(value: unknown): SketchSnapshotRecord[] {
       sketchId: assertSketchId(entry.sketchId),
       label: entry.label,
       plane: normalizeSketchPlaneDefinition(entry.plane),
-      planeTarget: assertSketchPlaneSupportRef(entry.planeTarget),
-      planeKey: normalizeSketchPlaneKey(entry.planeKey),
       sketch: normalizeSketchRecord(entry.sketch),
     }
   })
@@ -2654,25 +2596,6 @@ export function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
     ...parsed,
     document,
     presentation,
-    contractVersion: document.contractVersion,
-    schemaVersion: document.schemaVersion,
-    documentId: document.documentId,
-    revisionId: document.revisionId,
-    settings: document.settings,
-    capabilities: document.capabilities,
-    featureTree: presentation.featureTree,
-    objects: presentation.objects,
-    documentHistory: presentation.documentHistory,
-    features: document.features,
-    cursor: document.cursor,
-    sketches: document.sketches,
-    bodies: document.bodies,
-    constructions: document.constructions,
-    variables: document.variables,
-    entities: presentation.entities,
-    references: document.references,
-    diagnostics: document.diagnostics,
-    render: document.render,
   }
 }
 

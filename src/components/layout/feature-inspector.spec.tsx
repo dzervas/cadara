@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { FeatureExpressionEditorControl, FeatureInspector } from '@/components/layout/feature-inspector'
 import { initialEditorState, type EditorViewState } from '@/domain/editor/state-machine'
 import { createExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import {
   createFeatureEditorFormValues,
   previewFeatureEditorFieldExpression,
@@ -30,7 +30,7 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
   function renderInspector(input: {
     activeEditSession: NonNullable<EditorViewState['activeEditSession']>
     activeReferencePickerFieldId?: string | null
-    snapshot?: DocumentSnapshot | null
+    snapshot?: WorkspaceSnapshot | null
   }) {
     const viewState: EditorViewState = {
       mode: 'part',
@@ -190,8 +190,10 @@ test('src/components/layout/feature-inspector.spec.tsx', async () => {
   const expressionShellMarkup = renderInspector({
     activeEditSession: expressionShellSession,
     snapshot: {
-      variables: [{ variableId: 'variable_wall', name: 'wall', valueText: '2' }],
-    } as DocumentSnapshot,
+      document: {
+        variables: [{ variableId: 'variable_wall', name: 'wall', valueText: '2' }],
+      },
+    } as WorkspaceSnapshot,
   })
 
   assert(

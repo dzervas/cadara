@@ -8,7 +8,7 @@ import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   DocumentHistoryOrderEntry,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { FeatureId } from '@/contracts/shared/ids'
@@ -48,7 +48,7 @@ import {
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: 'feature' }>
 
 interface FeatureTimelineBarProps {
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   historyHighlightFeatureIds: readonly FeatureId[]
   onSelectTarget: (target: PrimitiveRef) => void
   onReopenTarget: (target: PrimitiveRef) => void

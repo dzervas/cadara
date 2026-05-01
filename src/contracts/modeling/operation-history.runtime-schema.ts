@@ -30,7 +30,7 @@ import {
 } from '@/contracts/shared/runtime-schema'
 import { durableRefSchema } from '@/contracts/shared/references.runtime-schema'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
-import { sketchPlaneDefinitionSchema, sketchPlaneSupportRefSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
+import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 
 const transportOnlyFields = ['contractVersion', 'documentId', 'baseRevisionId', 'requestId', 'solverCorrelation'] as const
 const advancedFeatureKinds = new Set([
@@ -79,8 +79,6 @@ const persistedCommitSketchPayloadSchema = z.object({
   sketchId: stringSchema.nullable(),
   sketchLabel: stringSchema,
   plane: sketchPlaneDefinitionSchema,
-  planeTarget: sketchPlaneSupportRefSchema,
-  planeKey: z.union([z.literal('xy'), z.literal('yz'), z.literal('xz')]).nullable(),
   definition: sketchDefinitionSchema,
 }).superRefine((value, ctx) => {
   const expectedSketchId = value.sketchId
@@ -138,7 +136,7 @@ const rawFeatureDefinitionSchema = z.unknown().superRefine((value, ctx) => {
       if ('profile' in parameters) {
         ctx.addIssue({
           code: 'custom',
-          message: `${definition.kind} uses legacy parameters.profile instead of profiles.`,
+          message: `${definition.kind} uses unsupported parameters.profile instead of profiles.`,
         })
         return
       }
@@ -438,7 +436,7 @@ function mapIssueToValidationFailure(issue: ZodIssue): Exclude<OperationHistoryV
     }
   }
 
-  if (issue.message.includes('legacy parameters.profile')) {
+  if (issue.message.includes('parameters.profile')) {
     return {
       ok: false,
       reasonCode: 'legacy-profile-parameter',

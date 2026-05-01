@@ -103,7 +103,10 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
     parameters: {
       profiles: [{ kind: 'region', sketchId: 'sketch_deleted', regionId: 'region_deleted' }],
       startExtent: { kind: 'profilePlane' },
-      endExtent: { kind: 'blind', direction: 'positive', distance: 1 },
+      extent: {
+        mode: 'oneSide',
+        end: { kind: 'blind', direction: 'positive', distance: 1 },
+      },
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     },

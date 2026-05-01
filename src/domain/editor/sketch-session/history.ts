@@ -1,10 +1,4 @@
-import type {
-  CommitSketchRequest,
-  SketchPlaneKey,
-} from '@/contracts/modeling/schema'
-import type {
-  SketchId,
-} from '@/contracts/shared/ids'
+import type { SketchId } from '@/contracts/shared/ids'
 import type {
   SketchPlaneDefinition,
 } from '@/contracts/shared/sketch-plane'
@@ -201,8 +195,6 @@ export function buildCommitRequest(input: {
   sketchId: SketchId | null
   sketchLabel: string
   plane: SketchPlaneDefinition
-  planeTarget: CommitSketchRequest['planeTarget']
-  planeKey: SketchPlaneKey | null
   definition: SketchDefinition
 }): SketchSessionState['commitRequest'] {
   return {
@@ -210,8 +202,6 @@ export function buildCommitRequest(input: {
     sketchId: input.sketchId,
     sketchLabel: input.sketchLabel,
     plane: input.plane,
-    planeTarget: input.planeTarget,
-    planeKey: input.planeKey,
     definition: cloneDefinition(input.definition),
   }
 }

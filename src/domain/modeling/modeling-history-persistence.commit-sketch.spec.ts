@@ -8,7 +8,7 @@ import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type {
   CommitSketchRequest,
   CreateFeatureRequest,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   FeatureSnapshotRecord,
   SketchSnapshotRecord,
 } from '@/contracts/modeling/schema'
@@ -227,8 +227,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
                 handedness: 'rightHanded' as const,
               },
             },
-            planeTarget: { kind: 'construction' as const, constructionId: 'construction_plane-xy' as const },
-            planeKey: 'xy' as const,
             definition: createDraftSketchDefinition('sketch_draft'),
           },
         },
@@ -261,9 +259,9 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
 
   function createWorkspaceSnapshot(
     revisionId: `rev_${string}`,
-    sketches: DocumentSnapshot['sketches'] = [],
-    features: DocumentSnapshot['features'] = [],
-  ): DocumentSnapshot {
+    sketches: WorkspaceSnapshot['sketches'] = [],
+    features: WorkspaceSnapshot['features'] = [],
+  ): WorkspaceSnapshot {
     const document = {
       contractVersion: CONTRACT_VERSION,
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -356,8 +354,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           sketchId,
           label: request.sketchLabel,
           plane: request.plane,
-          planeTarget: request.planeTarget,
-          planeKey: request.planeKey,
           sketch: {
             ownerDocumentId: 'doc_workspace',
             ownerRevisionId: revisionId,
@@ -480,7 +476,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           return {
             contractVersion: CONTRACT_VERSION,
             documentId: 'doc_workspace',
-            revisionId: currentSnapshot.revisionId,
+            revisionId: currentSnapshot.document.revisionId,
             sketchId: request.sketchId,
             revisionState: {
               kind: 'rejected' as const,
@@ -509,8 +505,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           sketchId,
           label: request.sketchLabel,
           plane: request.plane,
-          planeTarget: request.planeTarget,
-          planeKey: request.planeKey,
           sketch: {
             ownerDocumentId: 'doc_workspace',
             ownerRevisionId: revisionId,
@@ -610,7 +604,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           return {
             contractVersion: CONTRACT_VERSION,
             documentId: 'doc_workspace',
-            revisionId: currentSnapshot.revisionId,
+            revisionId: currentSnapshot.document.revisionId,
             deletedTarget: request.target,
             revisionState: {
               kind: 'rejected' as const,
@@ -707,8 +701,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           handedness: 'rightHanded',
         },
       },
-      planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
-      planeKey: 'xy',
       definition: createDraftSketchDefinition('sketch_draft'),
     }))
 
@@ -750,15 +742,15 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
 
     const snapshot = await service.getCurrentDocumentSnapshot()
     assert(
-      snapshot.sketches.some((entry) => entry.label === 'Legacy Draft Sketch' && entry.sketchId === 'sketch_legacy_replayed'),
+      snapshot.document.sketches.some((entry) => entry.label === 'Legacy Draft Sketch' && entry.sketchId === 'sketch_legacy_replayed'),
       'Legacy commitSketch history should rebuild the committed sketch snapshot.',
     )
     assert(
-      snapshot.sketches[0]?.sketch.definition.points.every((point) => point.target.sketchId === 'sketch_legacy_replayed'),
+      snapshot.document.sketches[0]?.sketch.definition.points.every((point) => point.target.sketchId === 'sketch_legacy_replayed'),
       'Legacy commitSketch replay should normalize point targets to the committed sketch id.',
     )
     assert(
-      snapshot.sketches[0]?.sketch.definition.entities.every((entity) => entity.target.sketchId === 'sketch_legacy_replayed'),
+      snapshot.document.sketches[0]?.sketch.definition.entities.every((entity) => entity.target.sketchId === 'sketch_legacy_replayed'),
       'Legacy commitSketch replay should normalize entity targets to the committed sketch id.',
     )
   }
@@ -790,8 +782,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           handedness: 'rightHanded',
         },
       },
-      planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
-      planeKey: 'xy',
       definition: draftDefinition,
     } satisfies CommitSketchRequest
     const replayRegionId = getFirstDerivedRegionId('doc_workspace', 'rev_0002', 'sketch_primary', draftDefinition)
@@ -805,7 +795,10 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
         parameters: {
           profiles: [{ kind: 'region', sketchId: 'sketch_primary', regionId: replayRegionId }],
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 10 },
+          extent: {
+            mode: 'oneSide',
+            end: { kind: 'blind', direction: 'positive', distance: 10 },
+          },
           operation: 'newBody',
           booleanScope: { kind: 'standalone' },
         },
@@ -820,8 +813,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
             sketchId: sketchRequest.sketchId,
             sketchLabel: sketchRequest.sketchLabel,
             plane: sketchRequest.plane,
-            planeTarget: sketchRequest.planeTarget,
-            planeKey: sketchRequest.planeKey,
             definition: sketchRequest.definition,
           },
         },
@@ -844,11 +835,11 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     assert(
-      snapshot.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
+      snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
       'Replay should recreate the expected primary sketch id.',
     )
     assert(
-      snapshot.features.some((entry) => entry.featureId === 'feature_extrude-1' && entry.definition.kind === 'extrude'),
+      snapshot.document.features.some((entry) => entry.featureId === 'feature_extrude-1' && entry.definition.kind === 'extrude'),
       'Replay should continue into downstream feature history after recreating the sketch.',
     )
   }
@@ -882,8 +873,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           handedness: 'rightHanded',
         },
       },
-      planeTarget: { kind: 'construction', constructionId: 'construction_plane-xy' },
-      planeKey: 'xy',
       definition: firstDefinition,
     } satisfies CommitSketchRequest
     const secondSketchRequest = {
@@ -922,8 +911,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
             sketchId: sketchRequest.sketchId,
             sketchLabel: sketchRequest.sketchLabel,
             plane: sketchRequest.plane,
-            planeTarget: sketchRequest.planeTarget,
-            planeKey: sketchRequest.planeKey,
             definition: sketchRequest.definition,
           },
         },
@@ -933,8 +920,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
             sketchId: secondSketchRequest.sketchId,
             sketchLabel: secondSketchRequest.sketchLabel,
             plane: secondSketchRequest.plane,
-            planeTarget: secondSketchRequest.planeTarget,
-            planeKey: secondSketchRequest.planeKey,
             definition: secondSketchRequest.definition,
           },
         },
@@ -950,8 +935,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
             sketchId: reusedSketchRequest.sketchId,
             sketchLabel: reusedSketchRequest.sketchLabel,
             plane: reusedSketchRequest.plane,
-            planeTarget: reusedSketchRequest.planeTarget,
-            planeKey: reusedSketchRequest.planeKey,
             definition: reusedSketchRequest.definition,
           },
         },
@@ -973,13 +956,13 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     assert(
-      snapshot.sketches.length === 2
-        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_2')
-        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
+      snapshot.document.sketches.length === 2
+        && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_2')
+        && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
       'Replay should recreate the allocator-compatible sketch id after deletion.',
     )
     assert(
-      snapshot.sketches.find((entry) => entry.sketchId === 'sketch_primary')?.label === 'Reused Replay Sketch',
+      snapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_primary')?.label === 'Reused Replay Sketch',
       'Replay should preserve the final reused sketch entry.',
     )
   }
@@ -1015,8 +998,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
             handedness: 'rightHanded' as const,
           },
         },
-        planeTarget: { kind: 'construction' as const, constructionId: 'construction_plane-xy' },
-        planeKey: 'xy',
         definition: createDraftSketchDefinition(sketchId),
       } satisfies CommitSketchRequest
     }
@@ -1028,8 +1009,6 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           sketchId: request.sketchId,
           sketchLabel: request.sketchLabel,
           plane: request.plane,
-          planeTarget: request.planeTarget,
-          planeKey: request.planeKey,
           definition: request.definition,
         },
       }
@@ -1070,9 +1049,9 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     assert(
-      !snapshot.sketches.some((entry) => entry.sketchId === 'sketch_2')
-        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_3')
-        && snapshot.sketches.some((entry) => entry.sketchId === 'sketch_4'),
+      !snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_2')
+        && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_3')
+        && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_4'),
       'Replay should skip the deleted ordinal and restore the next allocated sketch id.',
     )
   }

@@ -11,7 +11,7 @@ import type { SketchSolverAdapter as SketchSolverAdapterFromBarrel } from '@/con
 import type { SketchSolverAdapter as SketchSolverAdapterDirect } from '@/contracts/solver/adapter'
 import type {
   CreateFeatureRequest,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   FeatureDefinition,
   FeatureTreeNodeRecord,
   ModelingFeatureKind,
@@ -120,7 +120,7 @@ type SolverBarrelExportsAdapterInterface = Assert<
 type KernelSnapshotBoundaryIsTyped = Assert<
   Equals<
     Awaited<ReturnType<ModelingKernelAdapter['getDocumentSnapshot']>>['snapshot'],
-    import('@/contracts/modeling/schema').DocumentSnapshot
+    import('@/contracts/modeling/schema').WorkspaceSnapshot
   >
 >
 
@@ -153,11 +153,11 @@ type SnapshotEntitiesUseCanonicalRefs = Assert<
 >
 
 type SnapshotReferencesAreModelingOwned = Assert<
-  Equals<DocumentSnapshot['references'][number], ReferenceRecord>
+  Equals<WorkspaceSnapshot['document']['references'][number], ReferenceRecord>
 >
 
 type SnapshotRenderUsesRenderContract = Assert<
-  Equals<DocumentSnapshot['render'], RenderExport>
+  Equals<WorkspaceSnapshot['document']['render'], RenderExport>
 >
 
 /**

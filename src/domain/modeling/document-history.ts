@@ -1,5 +1,5 @@
 import type {
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   FeatureDefinition,
@@ -310,7 +310,7 @@ export function getDocumentHistoryCursorBeforeTarget(
   return targetIndex < 0 ? null : getDocumentHistoryCursorForIndex(items, targetIndex - 1)
 }
 
-export function getPreviousDocumentHistoryCursor(snapshot: DocumentSnapshot): DocumentFeatureCursor | null {
+export function getPreviousDocumentHistoryCursor(snapshot: WorkspaceSnapshot): DocumentFeatureCursor | null {
   const items = snapshot.presentation.documentHistory
   const cursor = snapshot.document.cursor
   const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
@@ -322,7 +322,7 @@ export function getPreviousDocumentHistoryCursor(snapshot: DocumentSnapshot): Do
   return cursorIndex > -1 ? getDocumentHistoryCursorForIndex(items, cursorIndex - 1) : null
 }
 
-export function getNextDocumentHistoryCursor(snapshot: DocumentSnapshot): DocumentFeatureCursor | null {
+export function getNextDocumentHistoryCursor(snapshot: WorkspaceSnapshot): DocumentFeatureCursor | null {
   const items = snapshot.presentation.documentHistory
   const cursor = snapshot.document.cursor
   const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)

@@ -17,7 +17,7 @@ import type {
   CreateFeatureRequest,
   DeleteDocumentTargetRequest,
   DeleteFeatureRequest,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   EvaluatePreviewRequest,
   KernelDocumentSnapshot,
   ModelingDiagnostic,
@@ -372,7 +372,7 @@ export function stringifyCadaraDocument(document: KernelDocumentSnapshot, pretty
   return JSON.stringify(stableJsonValue(document), null, pretty ? 2 : 0)
 }
 
-export function normalizeCurrentDocumentId(value: DocumentSnapshot['documentId']): DocumentId {
+export function normalizeCurrentDocumentId(value: WorkspaceSnapshot['document']['documentId']): DocumentId {
   return assertDocumentId(value)
 }
 

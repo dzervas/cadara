@@ -108,7 +108,7 @@ test('document snapshot view resolves selection details, contributing features, 
     relatedTargetMessage = error instanceof Error ? error.message : String(error)
   }
   assert(
-    relatedTargetMessage === 'Related target feature:feature_missing is missing from snapshot.entities.',
+    relatedTargetMessage === 'Related target feature:feature_missing is missing from snapshot.presentation.entities.',
     'Missing related targets should fail loudly instead of silently dropping broken presentation links.',
   )
 })

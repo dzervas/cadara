@@ -301,10 +301,13 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
         startExtent: {
           kind: 'profilePlane',
         },
-        endExtent: {
-          kind: 'blind',
-          direction: 'positive',
-          distance: 12,
+        extent: {
+          mode: 'oneSide',
+          end: {
+            kind: 'blind',
+            direction: 'positive',
+            distance: 12,
+          },
         },
         operation: 'newBody',
         booleanScope: {
@@ -469,10 +472,13 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
         startExtent: {
           kind: 'profilePlane',
         },
-        endExtent: {
-          kind: 'blind',
-          direction: 'positive',
-          distance: 18,
+        extent: {
+          mode: 'oneSide',
+          end: {
+            kind: 'blind',
+            direction: 'positive',
+            distance: 18,
+          },
         },
         operation: 'newBody',
         booleanScope: {
@@ -565,7 +571,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
   function testCreateExtrudeExampleUsesTypedProfileRef() {
     assert(createExtrudeRequest.definition.kind === 'extrude', 'Create-extrude example must use the extrude feature family.')
     assert(createExtrudeRequest.definition.parameters.profiles[0]?.kind === 'region', 'Create-extrude example must use an explicit derived region reference.')
-    assert(createExtrudeRequest.definition.parameters.endExtent.distance > 0, 'Create-extrude example must use a positive blind end extent distance.')
+    assert(createExtrudeRequest.definition.parameters.extent.end.distance > 0, 'Create-extrude example must use a positive blind extent distance.')
     assert(createExtrudeResponse.revisionState.kind === 'accepted', 'Create-extrude response must report explicit revision acceptance.')
     assert(createExtrudeResponse.rebuildResult.kind === 'rebuilt', 'Create-extrude response must report explicit rebuild success.')
   }

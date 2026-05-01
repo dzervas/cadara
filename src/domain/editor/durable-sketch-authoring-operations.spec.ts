@@ -107,7 +107,7 @@ test('src/domain/editor/durable-sketch-authoring-operations.spec.ts', () => {
     partialSolvePolicy: 'bestEffort',
   })
   assert(
-    JSON.stringify(firstSolve.solvedSnapshot.entities) === JSON.stringify(secondSolve.solvedSnapshot.entities),
+    JSON.stringify(firstSolve.solvedSnapshot.solvedEntities) === JSON.stringify(secondSolve.solvedSnapshot.solvedEntities),
     'Different operation metadata over the same flat graph should not change solved output.',
   )
 

@@ -4,7 +4,7 @@ import type { EditorEvent, EditorHistoryAvailability } from '@/domain/editor/sta
 import { ok, type AppError, type ErrorReporter } from '@/contracts/errors'
 import type {
   DocumentHistoryOrderEntry,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   DocumentVariableRecord,
 } from '@/contracts/modeling/schema'
 import {
@@ -40,7 +40,7 @@ interface WorkbenchHistoryControllerInput {
   setInvalidVariableValueMessages: Dispatch<SetStateAction<Record<string, string>>>
   showWorkbenchError: (message: string) => void
   sketchSession: unknown
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
 }
 
 interface WorkbenchHistoryDependencies {

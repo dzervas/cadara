@@ -19,7 +19,7 @@ import type {
   DeleteDocumentTargetRequest,
   DeleteFeatureRequest,
   DocumentFeatureCursor,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   EvaluatePreviewRequest,
   EvaluatePreviewResponse,
   ModelingDiagnostic,
@@ -64,7 +64,7 @@ export interface ModelingService {
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
   setViewportLodTier(tierId: OccTessellationTierId): boolean
-  getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
+  getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
   exportCurrentDocument(): Promise<DocumentExportSuccessResult>
@@ -95,7 +95,7 @@ export interface ModelingService {
 }
 
 export interface ModelingServiceOptions {
-  currentDocumentId: DocumentSnapshot['documentId']
+  currentDocumentId: WorkspaceSnapshot['document']['documentId']
   sketchSolver?: SketchSolverBoundary
   operationHistoryStore?: OperationHistoryStore | null
   documentRepository?: DocumentRepository | null
@@ -140,7 +140,7 @@ export interface SketchSolverService {
 }
 
 export interface ModelingFeatureMutationResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   featureId: FeatureId
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -149,7 +149,7 @@ export interface ModelingFeatureMutationResult {
 }
 
 export interface ModelingDeleteFeatureResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   deletedFeatureId: FeatureId
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -158,7 +158,7 @@ export interface ModelingDeleteFeatureResult {
 }
 
 export interface ModelingDeleteTargetResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   deletedTarget: PrimitiveRef
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -167,7 +167,7 @@ export interface ModelingDeleteTargetResult {
 }
 
 export interface ModelingRenameBodyResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   bodyId: BodyId
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -176,7 +176,7 @@ export interface ModelingRenameBodyResult {
 }
 
 export interface ModelingReorderFeatureResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   featureId: FeatureId
   beforeFeatureId: FeatureId | null
   revisionState: MutationRevisionState
@@ -186,7 +186,7 @@ export interface ModelingReorderFeatureResult {
 }
 
 export interface ModelingReorderDocumentHistoryResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   item: ReorderDocumentHistoryResponse['item']
   beforeItem: ReorderDocumentHistoryResponse['beforeItem']
   revisionState: MutationRevisionState
@@ -196,7 +196,7 @@ export interface ModelingReorderDocumentHistoryResult {
 }
 
 export interface ModelingSetFeatureCursorResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   cursor: DocumentFeatureCursor
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -205,7 +205,7 @@ export interface ModelingSetFeatureCursorResult {
 }
 
 export interface ModelingCommitSketchResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   sketchId: SketchId
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -214,7 +214,7 @@ export interface ModelingCommitSketchResult {
 }
 
 export interface ModelingDocumentVariableMutationResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   variableId: DocumentVariableId
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
@@ -271,7 +271,7 @@ export type ModelingProjectSketchExternalReferencesInput = Omit<
 >
 
 export interface ModelingPreviewResult {
-  revisionId: DocumentSnapshot['revisionId']
+  revisionId: WorkspaceSnapshot['document']['revisionId']
   previewId: EvaluatePreviewResponse['previewId']
   renderables: RenderExport['records']
   freshness: PreviewFreshness

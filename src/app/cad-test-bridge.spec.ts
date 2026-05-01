@@ -6,7 +6,7 @@ import {
   syncCadTestState,
 } from '@/app/workbench/cad-test-bridge'
 import { defaultSelectionFilter } from '@/core/editor/schema'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { EditorEvent } from '@/domain/editor/state-machine'
 import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 
@@ -62,7 +62,7 @@ test('src/app/cad-test-bridge.spec.ts', () => {
         target: { kind: 'body', bodyId: 'body_feature_extrude-1' },
       }],
     },
-  } as DocumentSnapshot
+  } as WorkspaceSnapshot
   const events: EditorEvent[] = []
   const selected = dispatchCadTestSelection({
     targetId: 'body_feature_extrude-1',

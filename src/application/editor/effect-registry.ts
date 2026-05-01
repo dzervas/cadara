@@ -10,7 +10,7 @@ import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-c
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import type {
   DocumentFeatureCursor,
-  DocumentSnapshot,
+  WorkspaceSnapshot,
   ModelingDiagnostic,
 } from '@/contracts/modeling/schema'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
@@ -40,7 +40,6 @@ import {
   isModelingMutationError,
   modelingMutationErrorToDiagnostic,
 } from '@/core/editor/state-machine/error-mapping'
-import { assertSketchPlaneSupport } from '@/core/editor/state-machine/utility-helpers'
 
 export function createEffectExecutor(runtime: EditorEffectRuntime) {
   return async function executeEffect(effect: EditorEffect): Promise<EditorEvent> {
@@ -53,8 +52,8 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             type: 'effect.snapshotLoaded',
             payload: {
               requestId: effect.requestId,
-              documentId: snapshot.documentId,
-              revisionId: snapshot.revisionId,
+              documentId: snapshot.document.documentId,
+              revisionId: snapshot.document.revisionId,
               snapshot,
               selectionCatalog: buildSelectionTargetCatalog(snapshot),
               preserveRenderRecordsOnFeatureDiagnostics: effect.preserveRenderRecordsOnFeatureDiagnostics,
@@ -73,8 +72,8 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             return {
               type: 'effect.sketchSessionOpenFailed',
               requestId: effect.requestId,
-              documentId: snapshot.documentId,
-              revisionId: snapshot.revisionId,
+              documentId: snapshot.document.documentId,
+              revisionId: snapshot.document.revisionId,
               commandSessionId: effect.commandSessionId,
               message: 'Sketch requires an existing sketch, construction plane, or planar face selection.',
             }
@@ -83,8 +82,8 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           return {
             type: 'effect.sketchSessionOpened',
             requestId: effect.requestId,
-            documentId: snapshot.documentId,
-            revisionId: snapshot.revisionId,
+            documentId: snapshot.document.documentId,
+            revisionId: snapshot.document.revisionId,
             commandSessionId: effect.commandSessionId,
             session,
           }
@@ -101,8 +100,8 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             return {
               type: 'effect.featureSessionHydrationFailed',
               requestId: effect.requestId,
-              documentId: snapshot.documentId,
-              revisionId: snapshot.revisionId,
+              documentId: snapshot.document.documentId,
+              revisionId: snapshot.document.revisionId,
               commandSessionId: effect.commandSessionId,
               message: `Feature ${effect.selectedFeatureId} cannot be edited in the current feature session flow.`,
             }
@@ -111,8 +110,8 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           return {
             type: 'effect.featureSessionHydrated',
             requestId: effect.requestId,
-            documentId: snapshot.documentId,
-            revisionId: snapshot.revisionId,
+            documentId: snapshot.document.documentId,
+            revisionId: snapshot.document.revisionId,
             commandSessionId: effect.commandSessionId,
             session,
           }
@@ -343,7 +342,7 @@ export async function runEditorEffect(
 }
 
 export function createModelingServiceEditorEffectRuntime(modelingService: {
-  getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
+  getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>
   projectSketchExternalReferences(input: {
     solverSchemaVersion: typeof SOLVER_SCHEMA_VERSION
     requestId: RequestId
@@ -395,12 +394,6 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       ? never
       : NonNullable<SketchSessionState['commitRequest']>['sketchLabel']
     plane: SketchPlaneDefinition
-    planeTarget: SketchSessionState['commitRequest'] extends null
-      ? never
-      : NonNullable<SketchSessionState['commitRequest']>['planeTarget']
-    planeKey: SketchSessionState['commitRequest'] extends null
-      ? never
-      : NonNullable<SketchSessionState['commitRequest']>['planeKey']
     definition: SketchSessionState['commitRequest'] extends null
       ? never
       : NonNullable<SketchSessionState['commitRequest']>['definition']
@@ -480,8 +473,6 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         sketchId: input.session.commitRequest?.sketchId ?? null,
         sketchLabel: input.session.commitRequest?.sketchLabel ?? input.session.sketchLabel,
         plane: input.session.commitRequest?.plane ?? input.session.plane,
-        planeTarget: assertSketchPlaneSupport(input.session.commitRequest?.planeTarget ?? input.session.planeTarget),
-        planeKey: input.session.commitRequest?.planeKey ?? input.session.planeKey,
         definition: input.session.commitRequest?.definition ?? input.session.definition,
         solverCorrelation: modelingService.sketchSolver
           ? modelingService.sketchSolver.createCommitCorrelation(input.requestId)

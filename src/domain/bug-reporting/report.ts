@@ -2,7 +2,7 @@ import { strToU8, zipSync } from 'fflate'
 
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { validateOperationHistoryPayload, type ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
-import type { DocumentSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { EditorViewState } from '@/domain/editor/state-machine'
 import { MODELING_OPERATION_HISTORY_STORAGE_KEY, type StorageLike } from '@/domain/modeling/modeling-history-persistence'
 
@@ -215,7 +215,7 @@ export interface BugReportPayloadInput {
     | 'activeReferencePickerFieldId'
     | 'sketchSession'
   >
-  snapshot: DocumentSnapshot | null
+  snapshot: WorkspaceSnapshot | null
   storage?: StorageLike | null
   environment?: BrowserReportEnvironment
 }
@@ -656,7 +656,7 @@ export function createFallbackBugReportIssueUrl(error: unknown) {
 }
 
 function createAuthoredDocumentSection(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   sectionByteLimit: number,
 ): BugReportSection<AuthoredModelDocument> {
   if (!snapshot) {
@@ -766,7 +766,7 @@ function loadFullOperationHistory(storage: StorageLike | null): BugReportSection
   }
 }
 
-function createDocumentSummary(snapshot: DocumentSnapshot | null): BugReportDocumentSummary {
+function createDocumentSummary(snapshot: WorkspaceSnapshot | null): BugReportDocumentSummary {
   if (!snapshot) {
     return {
       availability: 'unavailable',
@@ -778,8 +778,8 @@ function createDocumentSummary(snapshot: DocumentSnapshot | null): BugReportDocu
     availability: 'loaded',
     documentId: snapshot.document.documentId,
     revisionId: snapshot.document.revisionId,
-    contractVersion: snapshot.contractVersion,
-    schemaVersion: snapshot.schemaVersion,
+    contractVersion: snapshot.document.contractVersion,
+    schemaVersion: snapshot.document.schemaVersion,
     counts: {
       sketches: snapshot.document.sketches.length,
       features: snapshot.document.features.length,
@@ -807,7 +807,7 @@ function createDocumentSummary(snapshot: DocumentSnapshot | null): BugReportDocu
 }
 
 function createDiagnosticsContext(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   editorState: BugReportPayloadInput['editorState'],
 ): BugReportDiagnosticsContext {
   return {

@@ -99,7 +99,7 @@ export function getFeatureFieldAttribution(
         return { fieldId: 'profiles', fieldPath: ['parameters', 'profiles'], label: 'profile selection' }
       }
       if (includesTarget(getExtrudeEndTargets(definition), target)) {
-        return { fieldId: 'endExtent', fieldPath: ['parameters', 'endExtent'], label: 'end condition target' }
+        return { fieldId: 'extent', fieldPath: ['parameters', 'extent'], label: 'end condition target' }
       }
       if (scopeContainsTarget(definition.parameters.booleanScope, target)) {
         return { fieldId: 'booleanScope', fieldPath: ['parameters', 'booleanScope'], label: 'boolean target' }
@@ -120,7 +120,7 @@ export function getFeatureFieldAttribution(
         return { fieldId: 'axis', fieldPath: ['parameters', 'axis'], label: 'axis selection' }
       }
       if (includesTarget(getRevolveEndTargets(definition), target)) {
-        return { fieldId: 'endExtent', fieldPath: ['parameters', 'endExtent'], label: 'end condition target' }
+        return { fieldId: 'extent', fieldPath: ['parameters', 'extent'], label: 'end condition target' }
       }
       if (scopeContainsTarget(definition.parameters.booleanScope, target)) {
         return { fieldId: 'booleanScope', fieldPath: ['parameters', 'booleanScope'], label: 'boolean target' }

@@ -40,5 +40,5 @@ test('reopen and finish preserves a face-backed referenced-vertex circle sketch'
   await workbench.activateTool('Exit the active sketch.')
 
   await workbench.expectMachine('idle')
-  await expect.poll(() => page.locator('body').textContent(), { timeout: 30_000 }).not.toContain('Commit sketch planeKey must match plane.key exactly')
+  await expect.poll(() => page.locator('body').textContent(), { timeout: 30_000 }).not.toContain('replay-exception')
 })

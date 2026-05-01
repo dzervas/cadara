@@ -18,33 +18,41 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
     parameters: {
       profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
       startExtent: { kind: 'profilePlane' },
-      endExtent: { kind: 'blind', direction: 'positive', distance: 12 },
+      extent: {
+        mode: 'oneSide',
+        end: { kind: 'blind', direction: 'positive', distance: 12 },
+      },
       operation: 'newBody',
       booleanScope: { kind: 'standalone' },
     },
   }
 
-  const legacyLiteral = featureDefinitionSchema.parse(baseExtrude)
+  const parsedExtrude = featureDefinitionSchema.parse(baseExtrude)
   assert(
-    legacyLiteral.kind === 'extrude' &&
-      getAuthoredLiteralValue(legacyLiteral.parameters.endExtent.distance) === 12,
-    'Runtime validation should normalize supported legacy literals to literal authored wrappers.',
+    parsedExtrude.kind === 'extrude' &&
+      getAuthoredLiteralValue(parsedExtrude.parameters.extent.end.kind === 'blind' ? parsedExtrude.parameters.extent.end.distance : null) === 12,
+    'Runtime validation should preserve literal authored wrappers on canonical extrude extents.',
   )
 
   const expression = featureDefinitionSchema.parse({
     ...baseExtrude,
     parameters: {
       ...baseExtrude.parameters,
-      endExtent: {
-        ...baseExtrude.parameters.endExtent,
-        distance: { source: 'expression', valueText: 'depth + 1' },
+      extent: {
+        mode: 'oneSide',
+        end: {
+          kind: 'blind',
+          direction: 'positive',
+          distance: { source: 'expression', valueText: 'depth + 1' },
+        },
       },
     },
   })
   assert(
     expression.kind === 'extrude' &&
-      isExpressionAuthoredValue(expression.parameters.endExtent.distance) &&
-      expression.parameters.endExtent.distance.valueText === 'depth + 1',
+      expression.parameters.extent.end.kind === 'blind' &&
+      isExpressionAuthoredValue(expression.parameters.extent.end.distance) &&
+      expression.parameters.extent.end.distance.valueText === 'depth + 1',
     'Runtime validation should accept expression-authored wrappers on expression-capable fields.',
   )
 
@@ -52,9 +60,13 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
     ...baseExtrude,
     parameters: {
       ...baseExtrude.parameters,
-      endExtent: {
-        ...baseExtrude.parameters.endExtent,
-        distance: { source: 'literal', value: '12' },
+      extent: {
+        mode: 'oneSide',
+        end: {
+          kind: 'blind',
+          direction: 'positive',
+          distance: { source: 'literal', value: '12' },
+        },
       },
     },
   })

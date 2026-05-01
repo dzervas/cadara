@@ -17,7 +17,7 @@ test('src/contracts/sketch/solver-benchmark.spec.ts', () => {
   function assertAuthoredSketchRecord(sketch: AuthoredSketchRecord) {
     assert(sketch.sketchId.startsWith('sketch_'), 'Benchmark fixtures should expose document-held sketch ids.')
     assert(sketch.plane.key === 'xy', 'Benchmark fixtures should include sketch plane context.')
-    assert(sketch.planeTarget.kind === 'construction', 'Benchmark fixtures should include the plane target.')
+    assert(sketch.plane.support.kind === 'construction', 'Benchmark fixtures should include the plane target.')
     assert(sketch.definition.schemaVersion === 'sketch-definition/v1alpha1', 'Benchmark fixtures should expose authored definitions.')
   }
 

@@ -24,7 +24,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     const result = await service.exportDocument({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       target: { kind: 'body', bodyId: 'body_part-1' },
       targetLabel: 'Part 1',
       format: 'cadara',
@@ -50,7 +50,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     const result = await service.exportDocument({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       target: { kind: 'body', bodyId: 'body_part-1' },
       targetLabel: 'Part 1',
       format: 'step',
@@ -73,7 +73,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     const result = await service.exportDocument({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       target: { kind: 'sketch', sketchId: 'sketch_primary' },
       targetLabel: 'Sketch 1',
       format: 'stl',
@@ -156,7 +156,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     const snapshot = await service.getCurrentDocumentSnapshot()
 
     const result = await service.exportDocument({
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       target: { kind: 'body', bodyId: 'body_part-1' },
       targetLabel: 'Part 1',
       format: 'step',

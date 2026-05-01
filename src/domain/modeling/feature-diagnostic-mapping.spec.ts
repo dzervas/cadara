@@ -27,7 +27,10 @@ test('src/domain/modeling/feature-diagnostic-mapping.spec.ts', () => {
     parameters: {
       profiles: [missingRegion],
       startExtent: { kind: 'profilePlane' },
-      endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+      extent: {
+        mode: 'oneSide',
+        end: { kind: 'blind', direction: 'positive', distance: 4 },
+      },
       operation: 'join',
       booleanScope: { kind: 'targetBody', bodyId: 'body_target_deleted' as BodyId },
     },

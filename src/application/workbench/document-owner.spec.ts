@@ -98,7 +98,7 @@ test('document owner accepts variable mutations and refreshes the snapshot', asy
     machineState: { snapshot } as EditorState,
     dispatch: (event) => dispatched.push(event),
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         return nextSnapshot
@@ -144,7 +144,7 @@ test('document owner preserves rejected and errored variable mutations without r
     machineState: { snapshot } as EditorState,
     dispatch: (event) => dispatched.push(event),
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         throw new Error('Rejected mutations should not refresh the snapshot.')
@@ -170,7 +170,7 @@ test('document owner preserves rejected and errored variable mutations without r
     machineState: { snapshot } as EditorState,
     dispatch: (event) => dispatched.push(event),
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         throw new Error('Errored mutations should not refresh the snapshot.')
@@ -203,7 +203,7 @@ test('document owner covers snapshot replacement and loading guards', async () =
     machineState: { snapshot } as EditorState,
     dispatch: (event) => dispatched.push(event),
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         return nextSnapshot
@@ -221,7 +221,7 @@ test('document owner covers snapshot replacement and loading guards', async () =
   const loadingOwner = createOwner({
     machineState: { snapshot: null } as EditorState,
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async addDocumentVariable() {
         throw new Error('Loading guards should stop before hitting the modeling service.')
@@ -257,7 +257,7 @@ test('document owner routes rename operations for bodies, features, and sketches
     machineState: { snapshot } as EditorState,
     dispatch: (event) => dispatched.push(event),
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: {
         createCommitCorrelation(requestId) {
           const correlation = {
@@ -352,7 +352,7 @@ test('document owner enforces rename and delete guardrails', async () => {
   const owner = createOwner({
     machineState: { snapshot } as EditorState,
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         return snapshot
@@ -427,7 +427,7 @@ test('document owner forwards history reorder, variable update, and durable dele
   const owner = createOwner({
     machineState: { snapshot } as EditorState,
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         return nextSnapshot
@@ -499,7 +499,7 @@ test('document owner handles import provider lookup, diagnostic failures, and su
       assert(source.name === 'fixture.step', 'Import source should be forwarded to the provider.')
       assert((review as ImportReviewEnvelope<{ units: 'mm' }>).providerReview.units === 'mm', 'Provider review should be forwarded unchanged.')
       assert((selections as { enabled: boolean }).enabled === true, 'Import selections should be forwarded unchanged.')
-      assert(capabilities.context.baseRevisionId === snapshot.revisionId, 'Import capabilities should target the active snapshot revision.')
+      assert(capabilities.context.baseRevisionId === snapshot.document.revisionId, 'Import capabilities should target the active snapshot revision.')
       return {
         addDocumentVariables: [{
           name: 'scale',
@@ -523,7 +523,7 @@ test('document owner handles import provider lookup, diagnostic failures, and su
     machineState: { snapshot } as EditorState,
     importProvider: provider,
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         return nextSnapshot
@@ -557,7 +557,7 @@ test('document owner handles import provider lookup, diagnostic failures, and su
     'Successful imports should replay created ids and refresh the snapshot.',
   )
   assert(
-    mutationCalls[0] === snapshot.revisionId,
+    mutationCalls[0] === snapshot.document.revisionId,
     'Prepared import actions should start from the active snapshot revision.',
   )
 
@@ -569,7 +569,7 @@ test('document owner handles import provider lookup, diagnostic failures, and su
       }),
     }),
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         throw new Error('Blocked imports should not refresh the snapshot.')
@@ -597,7 +597,7 @@ test('document owner handles import provider lookup, diagnostic failures, and su
     machineState: { snapshot } as EditorState,
     importProvider: null,
     modelingService: {
-      currentDocumentId: snapshot.documentId,
+      currentDocumentId: snapshot.document.documentId,
       sketchSolver: null,
     },
   })

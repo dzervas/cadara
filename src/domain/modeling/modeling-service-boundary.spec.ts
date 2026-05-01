@@ -44,11 +44,11 @@ test('src/domain/modeling/modeling-service-boundary.spec.ts', async () => {
     currentDocumentId: 'doc_workspace',
   })
   const snapshot = await service.getCurrentDocumentSnapshot()
-  const seedFeature = snapshot.features.find((feature) => feature.definition.kind === 'extrude')
+  const seedFeature = snapshot.document.features.find((feature) => feature.definition.kind === 'extrude')
   assert(seedFeature?.definition.kind === 'extrude', 'Seed extrude feature must exist.')
 
   const featureResult = await service.createFeature({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     definition: seedFeature.definition,
   })
 
@@ -58,7 +58,7 @@ test('src/domain/modeling/modeling-service-boundary.spec.ts', async () => {
   assert(featureResult.error.message.includes('featureId'), 'Feature response errors should include actionable schema issue paths.')
 
   const variableResult = await service.addDocumentVariable({
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     variableId: 'variable_width',
     name: 'width',
     valueText: '10',

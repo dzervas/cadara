@@ -295,7 +295,7 @@ export const OCC_KERNEL_SEED_SKETCH_DEFINITION: SketchDefinition = {
 
 export function createSeedSketchCommitRequest(): Pick<
   CommitSketchRequest,
-  'sketchId' | 'sketchLabel' | 'plane' | 'planeTarget' | 'planeKey' | 'definition'
+  'sketchId' | 'sketchLabel' | 'plane' | 'definition'
 > {
   const plane = createStandardPlaneDefinition('xy')
 
@@ -303,8 +303,6 @@ export function createSeedSketchCommitRequest(): Pick<
     sketchId: null,
     sketchLabel: 'Sketch 1',
     plane,
-    planeTarget: plane.support,
-    planeKey: plane.key,
     definition: OCC_KERNEL_SEED_SKETCH_DEFINITION,
   }
 }
@@ -330,7 +328,10 @@ export function createSeedFeatureDefinitions(
             regionId,
           }],
           startExtent: { kind: 'profilePlane' },
-          endExtent: { kind: 'blind', direction: 'positive', distance: 12 },
+          extent: {
+            mode: 'oneSide',
+            end: { kind: 'blind', direction: 'positive', distance: 12 },
+          },
           operation: 'newBody',
           booleanScope: { kind: 'standalone' },
         },

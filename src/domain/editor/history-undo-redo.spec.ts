@@ -70,8 +70,8 @@ test('src/contracts/editor/history-undo-redo.spec.ts', async () => {
       type: 'effect.snapshotLoaded',
       payload: {
         requestId: fetchEffect.requestId,
-        documentId: snapshot.documentId,
-        revisionId: snapshot.revisionId,
+        documentId: snapshot.document.documentId,
+        revisionId: snapshot.document.revisionId,
         snapshot,
         selectionCatalog: buildSelectionTargetCatalog(snapshot),
       },

@@ -108,7 +108,10 @@ function createRepairableFeatureErrorHistory(): ModelingOperationHistoryPayload 
               regionId: 'region_deleted' as RegionId,
             }],
             startExtent: { kind: 'profilePlane' },
-            endExtent: { kind: 'blind', direction: 'positive', distance: 4 },
+            extent: {
+              mode: 'oneSide',
+              end: { kind: 'blind', direction: 'positive', distance: 4 },
+            },
             operation: 'newBody',
             booleanScope: { kind: 'standalone' },
           },

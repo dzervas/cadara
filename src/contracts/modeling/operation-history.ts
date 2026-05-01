@@ -195,8 +195,6 @@ export function createCommitSketchHistoryEntry(
       sketchId: committedSketchId,
       sketchLabel: payload.sketchLabel,
       plane: payload.plane,
-      planeTarget: payload.planeTarget,
-      planeKey: payload.planeKey,
       definition: normalizeCommitSketchDefinitionForSketchId(payload.definition, committedSketchId, options),
     },
   }

@@ -56,9 +56,9 @@ test('create-app-editor-effect-runtime.ts maps cancelled sketch image imports ba
   )
   const result = await runtime.importSketchReferenceImages?.({
     requestId: 'request_sketch-import-1',
-    documentId: snapshot.documentId,
+    documentId: snapshot.document.documentId,
     commandSessionId: 'command_sketch-1',
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     baseRepositoryHeads: ['head_1'],
     session,
     payloads: [{
@@ -71,7 +71,7 @@ test('create-app-editor-effect-runtime.ts maps cancelled sketch image imports ba
   })
 
   assert(
-    result?.status === 'cancelled' && result.revisionId === snapshot.revisionId,
+    result?.status === 'cancelled' && result.revisionId === snapshot.document.revisionId,
     'Cancelled reference-image imports should resolve through the cancelled result seam pinned to the original base revision.',
   )
 })
@@ -112,7 +112,7 @@ test('create-app-editor-effect-runtime.ts rethrows failed import-flow results an
           sketchId: snapshot.document.sketches[0]!.sketchId,
           snapshot,
           commitResult: {
-            revisionId: snapshot.revisionId,
+            revisionId: snapshot.document.revisionId,
             sketchId: snapshot.document.sketches[0]!.sketchId,
             revisionState: { kind: 'accepted' },
             rebuildResult: 'reused',
@@ -135,9 +135,9 @@ test('create-app-editor-effect-runtime.ts rethrows failed import-flow results an
   await expectRejects(
     () => failingRuntime.importSketchReferenceImages?.({
       requestId: 'request_sketch-import-failed',
-      documentId: snapshot.documentId,
+      documentId: snapshot.document.documentId,
       commandSessionId: 'command_sketch-1',
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       session,
       payloads: [],
     }),
@@ -147,9 +147,9 @@ test('create-app-editor-effect-runtime.ts rethrows failed import-flow results an
   await expectRejects(
     () => reopenFailureRuntime.importSketchReferenceImages?.({
       requestId: 'request_sketch-import-reopen',
-      documentId: snapshot.documentId,
+      documentId: snapshot.document.documentId,
       commandSessionId: 'command_sketch-1',
-      baseRevisionId: snapshot.revisionId,
+      baseRevisionId: snapshot.document.revisionId,
       session,
       payloads: [],
     }),

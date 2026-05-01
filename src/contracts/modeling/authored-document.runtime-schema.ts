@@ -17,12 +17,9 @@ import {
   stringSchema,
 } from '@/contracts/shared/runtime-schema'
 import { featureDefinitionSchema } from '@/contracts/modeling/runtime-schema'
-import { sketchPlaneDefinitionSchema, sketchPlaneSupportRefSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
+import { sketchPlaneDefinitionSchema } from '@/contracts/shared/sketch-plane.runtime-schema'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
-import {
-  geometryAssetManifestSchema,
-  legacyGeometryAssetManifestSchema,
-} from '@/contracts/modeling/geometry-assets.runtime-schema'
+import { geometryAssetManifestSchema } from '@/contracts/modeling/geometry-assets.runtime-schema'
 import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
 import { embeddedBinaryAssetRecordSchema } from '@/contracts/modeling/embedded-binary-assets.runtime-schema'
 import type {
@@ -46,8 +43,6 @@ const authoredSketchRecordSchema = z.object({
   sketchId: sketchIdSchema,
   label: stringSchema,
   plane: sketchPlaneDefinitionSchema,
-  planeTarget: sketchPlaneSupportRefSchema,
-  planeKey: z.union([z.literal('xy'), z.literal('yz'), z.literal('xz')]).nullable(),
   definition: sketchDefinitionSchema,
 }).strict()
 
@@ -87,13 +82,10 @@ export const authoredModelDocumentSchema = z.object({
   sketches: z.array(authoredSketchRecordSchema),
   features: z.array(authoredFeatureRecordSchema),
   featureOrder: z.array(featureIdSchema),
-  historyOrder: z.array(authoredDocumentHistoryOrderEntrySchema).optional(),
+  historyOrder: z.array(authoredDocumentHistoryOrderEntrySchema),
   cursor: authoredDocumentFeatureCursorSchema,
   bodyLabels: z.array(authoredBodyLabelRecordSchema),
-  assets: z.union([
-    geometryAssetManifestSchema,
-    legacyGeometryAssetManifestSchema,
-  ]).optional(),
+  assets: geometryAssetManifestSchema.optional(),
   embeddedBinaryAssets: z.array(embeddedBinaryAssetRecordSchema).optional(),
 }).strict().superRefine((value, ctx) => {
   const featureIds = value.features.map((feature) => feature.featureId)
@@ -117,10 +109,7 @@ export const authoredModelDocumentSchema = z.object({
   }
 
   const sketchIds = new Set(value.sketches.map((sketch) => sketch.sketchId))
-  const historyOrder = value.historyOrder ?? [
-    ...value.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
-    ...value.featureOrder.map((featureId) => ({ kind: 'feature' as const, featureId })),
-  ]
+  const historyOrder = value.historyOrder
   const seenHistoryTargets = new Set<string>()
   for (const item of historyOrder) {
     const key = item.kind === 'sketch' ? `sketch:${item.sketchId}` : `feature:${item.featureId}`

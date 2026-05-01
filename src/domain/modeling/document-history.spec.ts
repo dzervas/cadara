@@ -161,12 +161,12 @@ test('src/domain/modeling/document-history.spec.ts', async () => {
   const committed = await adapter.commitSketch({
     contractVersion: 'modeling-contract/v1alpha1',
     documentId: 'doc_workspace',
-    baseRevisionId: snapshot.revisionId,
+    baseRevisionId: snapshot.document.revisionId,
     sketchId: 'sketch_after_seed_feature',
     sketchLabel: 'Sketch After Seed Feature',
-    plane: snapshot.sketches[0]!.plane,
-    planeTarget: snapshot.sketches[0]!.planeTarget,
-    planeKey: snapshot.sketches[0]!.planeKey,
+    plane: snapshot.document.sketches[0]!.plane,
+    planeTarget: snapshot.document.sketches[0]!.planeTarget,
+    planeKey: snapshot.document.sketches[0]!.planeKey,
     solverCorrelation: {
       requestId: 'request_history_order_sketch',
       projectionRequestId: 'request_history_order_sketch:project',

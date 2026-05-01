@@ -448,8 +448,6 @@ export const revolveAuthoringDefinition = {
       : draft.extentMode === 'symmetric'
         ? { mode: 'symmetric', end: definitionEnd(firstEnd) as Extract<RevolveEndCondition, { kind: 'blind' }> }
         : { mode: 'oneSide', end: definitionEnd(firstEnd) }
-    const legacyAngle = firstEnd.kind === 'blind' ? authoredDefinitionValue(firstEnd.angle, Math.PI * 2) : undefined
-
     return draft.profileTargets.length > 0
       && draft.axisTarget
       && hasBooleanTargetScope(operation, draft.booleanScope)
@@ -464,7 +462,6 @@ export const revolveAuthoringDefinition = {
             axis: draft.axisTarget,
             startAngle: authoredDefinitionValue(draft.startAngle, 0) as number,
             extent,
-            angle: legacyAngle,
             operation: authoredDefinitionValue(draft.operation, operation) as typeof operation,
             booleanScope: draft.booleanScope,
           },

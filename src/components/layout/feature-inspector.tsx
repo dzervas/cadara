@@ -965,7 +965,7 @@ export function FeatureInspector({
   const { dispatch } = editor
   const activeCommandSessionId = activeCommand?.commandSessionId ?? null
   const formSchema = activeEditSession ? getFeatureEditorFormSchema(activeEditSession) : null
-  const documentVariables = editor.state.snapshot?.variables ?? []
+  const documentVariables = editor.state.snapshot?.document?.variables ?? []
   const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
   const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })
   useFeatureEditorFormSync({ sessionKey: activeCommandSessionId, formSchema, form })

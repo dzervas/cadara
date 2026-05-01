@@ -1,4 +1,4 @@
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord, RenderPoint3D } from '@/contracts/render/schema'
 import type { SketchPoint2D, SketchReferenceDefinition } from '@/contracts/sketch/schema'
 import type { ProjectedGeometryId, ReferenceId, SketchPointId } from '@/contracts/shared/ids'
@@ -122,7 +122,7 @@ function sameTarget(left: DurableRef, right: DurableRef) {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-function findRenderRecords(snapshot: DocumentSnapshot, target: DurableRef) {
+function findRenderRecords(snapshot: WorkspaceSnapshot, target: DurableRef) {
   return snapshot.document.render.records.filter((record) => sameTarget(record.binding.target, target))
 }
 
@@ -292,7 +292,7 @@ function geometryFromWorldPolyline(input: {
 }
 
 function projectModelVertex(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   plane: SketchPlaneFrame,
   tolerances: SolverTolerancePolicy,
@@ -321,7 +321,7 @@ function projectModelVertex(
 }
 
 function projectModelEdge(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   plane: SketchPlaneFrame,
   tolerances: SolverTolerancePolicy,
@@ -374,7 +374,7 @@ function boundaryEdgesFromTriangles(triangles: readonly (readonly [number, numbe
 }
 
 function projectModelFace(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   plane: SketchPlaneFrame,
   tolerances: SolverTolerancePolicy,
@@ -412,7 +412,7 @@ function projectModelFace(
 }
 
 function projectSketchPoint(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   plane: SketchPlaneFrame,
   tolerances: SolverTolerancePolicy,
@@ -447,7 +447,7 @@ function projectSketchPoint(
 }
 
 function projectSketchEntityGeometry(input: {
-  snapshot: DocumentSnapshot
+  snapshot: WorkspaceSnapshot
   referenceId: ReferenceId
   sourceSketchId: string
   sourceEntityId: string
@@ -544,7 +544,7 @@ function projectSketchEntityGeometry(input: {
 }
 
 function projectSketchEntity(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   plane: SketchPlaneFrame,
   tolerances: SolverTolerancePolicy,
@@ -589,7 +589,7 @@ function projectSketchEntity(
 }
 
 function projectWholeSketch(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   plane: SketchPlaneFrame,
   tolerances: SolverTolerancePolicy,
@@ -626,7 +626,7 @@ function projectWholeSketch(
 }
 
 function projectReference(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   reference: ProjectSketchExternalReferencesRequest['references'][number],
   request: ProjectSketchExternalReferencesRequest,
 ): ProjectedSketchReferenceRecord {
@@ -685,7 +685,7 @@ function projectReference(
 }
 
 export function projectSketchExternalReferencesFromSnapshot(
-  snapshot: DocumentSnapshot,
+  snapshot: WorkspaceSnapshot,
   request: ProjectSketchExternalReferencesRequest,
 ): ProjectSketchExternalReferencesResponse {
   if (snapshot.document.documentId !== request.documentId || snapshot.document.revisionId !== request.revisionId) {

@@ -47,7 +47,6 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
         { path: ['parameters', 'extent', 'secondEnd', 'distance'], label: 'Extrude second depth', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'extent', 'secondEnd', 'draftAngle'], label: 'Extrude second draft angle', valueKind: { kind: 'angle' } },
         { path: ['parameters', 'extent', 'secondEnd', 'offset', 'distance'], label: 'Extrude second up-to offset', valueKind: { kind: 'finiteNumber' } },
-        { path: ['parameters', 'endExtent', 'distance'], label: 'Extrude depth', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'operation'], label: 'Extrude operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },
       ]
     case 'fillet':
@@ -63,8 +62,6 @@ export function getFeatureValueExpressionFields(definition: FeatureDefinition): 
         { path: ['parameters', 'extent', 'firstEnd', 'offset', 'angle'], label: 'Revolve first up-to offset', valueKind: { kind: 'angle' } },
         { path: ['parameters', 'extent', 'secondEnd', 'angle'], label: 'Revolve second angle', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'extent', 'secondEnd', 'offset', 'angle'], label: 'Revolve second up-to offset', valueKind: { kind: 'angle' } },
-        { path: ['parameters', 'extent', 'radians'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
-        { path: ['parameters', 'angle'], label: 'Revolve angle', valueKind: { kind: 'positiveNumber' } },
         { path: ['parameters', 'operation'], label: 'Revolve operation', valueKind: { kind: 'enumString', options: BOOLEAN_OPERATION_OPTIONS } },
       ]
     case 'shell':

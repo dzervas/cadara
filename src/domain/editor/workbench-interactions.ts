@@ -3,7 +3,7 @@ import type {
   EditorEvent,
   EditorViewState,
 } from '@/domain/editor/state-machine'
-import type { DocumentSnapshot } from '@/contracts/modeling/schema'
+import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { PrimitiveRef, SelectionFilter } from '@/core/editor/schema'
 import { getRegisteredFeatureAuthoringDefinitions } from '@/core/feature-authoring/registry'
 import {
@@ -17,7 +17,7 @@ import { isRegisteredSketchConstraintToolId } from '@/core/sketch-constraints/re
 import { isRegisteredSketchToolId } from '@/core/sketch-tools/registry'
 
 export function getNavigationReopenRequest(
-  snapshot: DocumentSnapshot | null,
+  snapshot: WorkspaceSnapshot | null,
   target: PrimitiveRef,
 ): AuthoringReopenRequestedEvent | null {
   if (target.kind === 'sketch') {

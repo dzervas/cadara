@@ -1,10 +1,10 @@
 import type {
   DocumentFeatureCursor,
-  DocumentSnapshot,
   DocumentVariableRecord,
   FeatureDefinition,
   KernelDocumentSnapshot,
   SketchSnapshotRecord,
+  WorkspaceSnapshot,
 } from '@/contracts/modeling/schema'
 import type { BodyId, DocumentId, FeatureId, RevisionId, SketchId } from '@/contracts/shared/ids'
 import type { GeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
@@ -21,8 +21,6 @@ export interface AuthoredSketchRecord {
   sketchId: SketchId
   label: string
   plane: SketchSnapshotRecord['plane']
-  planeTarget: SketchSnapshotRecord['planeTarget']
-  planeKey: SketchSnapshotRecord['planeKey']
   definition: SketchSnapshotRecord['sketch']['definition']
 }
 
@@ -51,7 +49,7 @@ export interface AuthoredModelDocument {
   sketches: AuthoredSketchRecord[]
   features: AuthoredFeatureRecord[]
   featureOrder: FeatureId[]
-  historyOrder?: AuthoredDocumentHistoryOrderEntry[]
+  historyOrder: AuthoredDocumentHistoryOrderEntry[]
   cursor: DocumentFeatureCursor
   bodyLabels: AuthoredBodyLabelRecord[]
   assets: GeometryAssetManifest
@@ -67,7 +65,7 @@ export type AuthoredModelDocumentMigrationResult =
   | { ok: true; document: AuthoredModelDocument; migrated: boolean }
   | { ok: false; diagnostic: AuthoredModelDocumentDiagnostic }
 
-export function createAuthoredModelDocumentFromSnapshot(snapshot: DocumentSnapshot): AuthoredModelDocument {
+export function createAuthoredModelDocumentFromSnapshot(snapshot: WorkspaceSnapshot): AuthoredModelDocument {
   return {
     contractVersion: CONTRACT_VERSION,
     schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
@@ -79,8 +77,6 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: DocumentSnapsh
       sketchId: sketch.sketchId,
       label: sketch.label,
       plane: structuredClone(sketch.plane),
-      planeTarget: structuredClone(sketch.planeTarget),
-      planeKey: sketch.planeKey,
       definition: structuredClone(sketch.sketch.definition),
     })),
     features: snapshot.document.features.map((feature) => ({
