@@ -1,35 +1,22 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { test } from 'bun:test'
 
-import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
-import type { DocumentRepositoryUrlStore } from '@/domain/modeling/automerge-indexeddb-document-repository'
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
-import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/domain/modeling/document-sync-worker-client'
+import { createSeedAuthoredModelDocument } from '@/domain/modeling/modeling-test-fixtures'
 import type { DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from '@/domain/modeling/document-sync-worker-protocol'
-import { createWorkerBackedDocumentRepository } from '@/domain/modeling/worker-backed-document-repository'
-import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import { createWorkerBackedDocumentRepository } from '@/infrastructure/modeling/worker-backed-document-repository'
+import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
+import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/infrastructure/workers/document-sync-worker-client'
 
-test('src/domain/modeling/worker-backed-document-repository.spec.ts', async () => {
+test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
     }
   }
 
-  async function createSeedDocument() {
-    const adapter = new MockKernelAdapter()
-    const snapshot = (await adapter.getDocumentSnapshot({
-      contractVersion: CONTRACT_VERSION,
-      documentId: 'doc_workspace',
-    })).snapshot
-    return createAuthoredModelDocumentFromSnapshot(snapshot)
-  }
-
   async function testLoadMutatePeerUpdateAndDiagnostics() {
-    const seed = await createSeedDocument()
+    const seed = await createSeedAuthoredModelDocument()
     const worker = new FakeDocumentSyncWorker()
     const client = new DocumentSyncWorkerClient({ worker })
     const urlStore = createMemoryUrlStore()
@@ -230,38 +217,7 @@ test('src/domain/modeling/worker-backed-document-repository.spec.ts', async () =
     client.dispose()
   }
 
-  function testModelingServiceDoesNotImportMainThreadCollaborativeNormalization() {
-    const source = readFileSync(join(process.cwd(), 'src/domain/modeling/modeling-service.ts'), 'utf8')
-    assert(
-      !source.includes('normalizeCollaborativeAuthoredModelDocument'),
-      'Modeling service should consume worker-normalized authored documents instead of importing main-thread collaborative normalization.',
-    )
-  }
-
-  function testBrowserWorkerReceivesRepositorySearchOptions() {
-    const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
-    const clientSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync-worker-client.ts'), 'utf8')
-    const workerSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync.worker.ts'), 'utf8')
-
-    assert(
-      appSource.includes('createBrowserDocumentSyncWorkerClient({ search: window.location.search })'),
-      'App should pass repository URL parameters to the browser document sync worker.',
-    )
-    assert(
-      clientSource.includes('workerUrl.search = options.search ?? \'\''),
-      'Browser document sync worker client should forward search params through the worker URL.',
-    )
-    assert(
-      workerSource.includes("workerSearchParams.get('cadLocalPeerSync') === '1'")
-        && workerSource.includes("workerSearchParams.get('cadLocalPeerSyncChannel')")
-        && workerSource.includes("workerSearchParams.get('cadRepositoryDbName')"),
-      'Document sync worker should consume opt-in peer-sync and repository database URL parameters.',
-    )
-  }
-
   await testLoadMutatePeerUpdateAndDiagnostics()
-  testModelingServiceDoesNotImportMainThreadCollaborativeNormalization()
-  testBrowserWorkerReceivesRepositorySearchOptions()
 })
 
 function createMemoryUrlStore(): DocumentRepositoryUrlStore {

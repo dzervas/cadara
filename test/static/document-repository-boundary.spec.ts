@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { test } from 'bun:test'
 
-test('src/domain/modeling/document-repository-boundary.spec.ts', () => {
+test('test/static/document-repository-boundary.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -19,7 +19,6 @@ test('src/domain/modeling/document-repository-boundary.spec.ts', () => {
       source.includes('@automerge/automerge')
       && !relativePath.includes('src/infrastructure/persistence/indexeddb-automerge-document-repository.ts')
       && !relativePath.includes('src/infrastructure/persistence/document-repository-url-store.ts')
-      && !relativePath.includes('src/domain/modeling/document-repository-boundary.spec.ts')
     ) {
       offenders.push(relativePath)
     }

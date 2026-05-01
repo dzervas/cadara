@@ -4,9 +4,9 @@ import type { UserConfig } from 'vite'
 import viteConfig, {
   getOpenCascadeAssetHeaders,
   shouldUseCloudflareOpenCascadeCdn,
-} from '../vite.config'
+} from '../../vite.config'
 
-test('src/build-config.spec.ts', async () => {
+test('test/static/build-config.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)

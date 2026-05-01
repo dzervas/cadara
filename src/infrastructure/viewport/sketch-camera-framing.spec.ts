@@ -5,9 +5,9 @@ import * as THREE from 'three'
 
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import { computeSketchCameraFrame } from '@/domain/workspace/sketch-camera-framing'
+import { computeSketchCameraFrame } from '@/infrastructure/viewport/sketch-camera-framing'
 
-test('src/domain/workspace/sketch-camera-framing.spec.ts', async () => {
+test('src/infrastructure/viewport/sketch-camera-framing.spec.ts', async () => {
   const xyPlane: SketchPlaneDefinition = {
     support: { kind: 'construction', constructionId: 'construction_plane-xy' },
     key: 'xy',

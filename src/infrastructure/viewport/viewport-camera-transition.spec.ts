@@ -3,10 +3,10 @@ import { strict as assert } from 'node:assert'
 
 import * as THREE from 'three'
 
-import { createViewportCameraTransitionController } from '@/domain/workspace/viewport-camera-transition'
-import type { ViewportCameraFrame } from '@/domain/workspace/viewport-projection'
+import { createViewportCameraTransitionController } from '@/infrastructure/viewport/viewport-camera-transition'
+import type { ViewportCameraFrame } from '@/infrastructure/viewport/viewport-projection'
 
-test('src/domain/workspace/viewport-camera-transition.spec.ts', () => {
+test('src/infrastructure/viewport/viewport-camera-transition.spec.ts', () => {
   function createFrame(input: {
     position: readonly [number, number, number]
     target?: readonly [number, number, number]

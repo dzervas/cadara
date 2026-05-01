@@ -7,9 +7,9 @@ import {
   OCC_SERVICE_WORKER_PATH,
   getOpenCascadeServiceWorkerRegistrationOptions,
   isOpenCascadeAssetUrl,
-} from '@/domain/modeling/occ/asset-cache'
+} from '@/infrastructure/occ/asset-cache'
 
-test('src/domain/modeling/occ/asset-cache.spec.ts', () => {
+test('src/infrastructure/occ/asset-cache.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)

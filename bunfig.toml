@@ -1,0 +1,12 @@
+[test]
+coveragePathIgnorePatterns = [
+  "**/*.spec.ts",
+  "**/*.test.ts",
+  "**/*.tsx",
+
+  "src/theme/**",
+  "src/*.ts",
+
+  "*.config.ts",
+  "*.config.js",
+]

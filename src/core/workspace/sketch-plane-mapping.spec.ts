@@ -7,7 +7,7 @@ import {
   mapWorldPointToWorkspaceSketch,
 } from '@/core/workspace/sketch-plane-mapping'
 
-test('src/domain/workspace/sketch-plane-mapping.spec.ts', () => {
+test('src/core/workspace/sketch-plane-mapping.spec.ts', () => {
   const yzPlane: SketchPlaneDefinition = {
     support: { kind: 'construction', constructionId: 'construction_plane-yz' },
     key: 'yz',

@@ -40,3 +40,11 @@
 - Runtime contract validation uses `zod`; prefer shared schemas for transport and persistence boundaries, and keep domain invariants in plain TypeScript when schemas do not make the code smaller or clearer.
 - Stateful editor/runtime orchestration uses `xstate`; keep machine logic in domain/contracts modules and avoid leaking state-machine concerns into presentational components.
 - Non-E2E tests use `bun:test`; add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
+
+## Testing Policy
+
+- Follow `docs/testing.md` for test placement, lane selection, and seam-based coverage policy.
+- Use `bun run test:logic`, `bun run test:ui`, `bun run test:static`, and `bun run test:e2e` as the primary lane commands. `bun run test` is the umbrella non-Playwright workflow, and `bun run test:logic:coverage` is the non-UI coverage command.
+- Default non-UI coverage to exported seams in `contracts`, `core`, `domain`, `application`, and appropriate `infrastructure` modules.
+- Keep repository policy guards in `test/static/` so they stay executable without being counted as behavioral coverage.
+- Keep static checks separate from behavioral tests, and do not use UI or static-check tests to stand in for missing non-UI seam coverage.

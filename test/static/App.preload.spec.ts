@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'bun:test'
 
-test('src/App.preload.spec.ts', () => {
+test('test/static/App.preload.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)

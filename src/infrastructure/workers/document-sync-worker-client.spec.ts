@@ -1,40 +1,30 @@
 import { test } from 'bun:test'
 
-import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
-import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/domain/modeling/document-sync-worker-client'
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import { createSeedAuthoredModelDocument } from '@/domain/modeling/modeling-test-fixtures'
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
   DocumentSyncWriteStatus,
 } from '@/domain/modeling/document-sync-worker-protocol'
-import { createDocumentSyncWorkerMessageHandler } from '@/domain/modeling/document-sync-worker-runtime'
 import type { LocalFileBindingRecord, LocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
-import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/infrastructure/workers/document-sync-worker-client'
+import { createDocumentSyncWorkerMessageHandler } from '@/infrastructure/workers/document-sync-worker-runtime'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
-test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
+test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
     }
   }
 
-  async function createSeedDocument() {
-    const adapter = new MockKernelAdapter()
-    const snapshot = (await adapter.getDocumentSnapshot({
-      contractVersion: CONTRACT_VERSION,
-      documentId: 'doc_workspace',
-    })).snapshot
-    return createAuthoredModelDocumentFromSnapshot(snapshot)
-  }
-
   async function testRequestOrderingAndStructuredFailures() {
     const worker = new FakeDocumentSyncWorker()
     const client = new DocumentSyncWorkerClient({ worker })
-    const seed = await createSeedDocument()
+    const seed = await createSeedAuthoredModelDocument()
 
     const first = client.getWriteStatus({ documentId: seed.documentId })
     const second = client.getWriteStatus({ documentId: seed.documentId })
@@ -79,7 +69,7 @@ test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
   async function testSubscriptionDisposalAndStaleWriteStatusFiltering() {
     const worker = new FakeDocumentSyncWorker()
     const client = new DocumentSyncWorkerClient({ worker })
-    const seed = await createSeedDocument()
+    const seed = await createSeedAuthoredModelDocument()
     const observedDocuments: AuthoredModelDocument[] = []
 
     const pendingSubscription = client.subscribe(seed.documentId, (event) => {
@@ -131,7 +121,7 @@ test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
   }
 
   async function testWorkerRuntimeShell() {
-    const seed = await createSeedDocument()
+    const seed = await createSeedAuthoredModelDocument()
     const repository = createMemoryDocumentRepository()
     const posted: DocumentSyncWorkerResponse[] = []
     const handle = createDocumentSyncWorkerMessageHandler({ repository }, (message) => posted.push(message))
@@ -206,7 +196,7 @@ test('src/domain/modeling/document-sync-worker-client.spec.ts', async () => {
   }
 
   async function testWorkerRuntimeFileBindingAutosyncAndPermissionFailures() {
-    const seed = await createSeedDocument()
+    const seed = await createSeedAuthoredModelDocument()
     const repository = createMemoryDocumentRepository()
     const bindingStore = new MemoryLocalFileBindingStore()
     const posted: DocumentSyncWorkerResponse[] = []

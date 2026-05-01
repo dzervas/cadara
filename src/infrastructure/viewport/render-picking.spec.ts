@@ -22,9 +22,9 @@ import {
   resolvePickTarget,
   shouldIncludeProjectedPickCandidate,
   updateWorkspaceHighlight,
-} from '@/domain/workspace/render-picking'
+} from '@/infrastructure/viewport/render-picking'
 
-test('src/domain/workspace/render-picking.spec.ts', async () => {
+test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
   function assert(condition: unknown, message = 'Assertion failed'): asserts condition {
     if (!condition) {
       throw new Error(message)

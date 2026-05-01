@@ -8,11 +8,11 @@ import {
   getViewNavigationDirection,
   snapCameraToPreset,
   snapCameraToVector,
-} from '@/domain/workspace/view-navigation'
-import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
-import { getViewportCameraProjectionMode } from '@/domain/workspace/viewport-projection'
+} from '@/infrastructure/viewport/view-navigation'
+import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
+import { getViewportCameraProjectionMode } from '@/infrastructure/viewport/viewport-projection'
 
-test('src/domain/workspace/view-navigation.spec.ts', async () => {
+test('src/infrastructure/viewport/view-navigation.spec.ts', async () => {
   function approx(actual: number, expected: number, epsilon = 1e-6) {
     assert(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`)
   }

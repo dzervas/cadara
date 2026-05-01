@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert'
 
 import * as THREE from 'three'
 
-import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-controls'
+import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
 import {
   DEFAULT_VIEWPORT_PROJECTION_MODE,
   applyViewportRenderableFitFrame,
@@ -13,10 +13,10 @@ import {
   createViewportCamera,
   getDefaultViewportCameraFrame,
   getViewportCameraProjectionMode,
-} from '@/domain/workspace/viewport-projection'
+} from '@/infrastructure/viewport/viewport-projection'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 
-test('src/domain/workspace/viewport-projection.spec.ts', () => {
+test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
   function approx(actual: number, expected: number, epsilon = 1e-6) {
     assert(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`)
   }

@@ -3,7 +3,7 @@ import { test } from 'bun:test'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { projectSketchFeedbackAnchor, resolveSketchFeedbackAnchorWorldPoint } from '@/core/workspace/sketch-feedback-projection'
 
-test('src/domain/workspace/sketch-feedback-projection.spec.ts', () => {
+test('src/core/workspace/sketch-feedback-projection.spec.ts', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)

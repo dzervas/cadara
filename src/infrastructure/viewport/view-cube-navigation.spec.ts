@@ -6,7 +6,7 @@ import {
   VIEW_CUBE_FACE_TARGETS,
 } from '@/infrastructure/viewport/view-cube-navigation'
 
-test('src/domain/workspace/view-cube-navigation.spec.ts', async () => {
+test('src/infrastructure/viewport/view-cube-navigation.spec.ts', async () => {
   assert.equal(VIEW_CUBE_FACE_TARGETS.length, 6, 'The cube should expose the six principal face targets.')
   assert.deepEqual(
     VIEW_CUBE_FACE_TARGETS.map(({ label }) => label),
