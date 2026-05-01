@@ -1,7 +1,8 @@
-const OCC_ASSET_CACHE_NAME = 'cadara-occ-assets-opencascade-2.0.0-beta.b5ff984'
+const OCC_ASSET_CACHE_VERSION = new URL(self.location.href).searchParams.get('v') || 'unversioned'
+const OCC_ASSET_CACHE_NAME = `cadara-occ-assets-opencascade-2.0.0-beta.b5ff984-${OCC_ASSET_CACHE_VERSION}`
 
 function isOpenCascadeAssetUrl(url) {
-  return /opencascade.*\.(wasm|worker\.js)$/.test(new URL(url).pathname)
+  return /cadara-occ\.(?:js|wasm)$/.test(new URL(url).pathname)
 }
 
 self.addEventListener('install', () => {

@@ -4,6 +4,8 @@ import {
   createOpenCascadeInstanceLoader,
   getDefaultOpenCascadeEntrySpecifier,
   getDefaultOpenCascadeInstance,
+  getOpenCascadeRuntimeAssetVersion,
+  getVersionedOpenCascadeRuntimeAssetUrl,
   loadDefaultOpenCascadeFactory,
   resetDefaultOpenCascadeInstanceForTests,
   type OpenCascadeInitializer,
@@ -140,7 +142,7 @@ test('src/domain/modeling/occ/runtime.spec.ts', async () => {
     assert(recovered === instance, 'Loader must recover and cache the next successful initialization result.')
   }
 
-  async function testBrowserOpenCascadeInitializerUsesConfiguredWasmUrl() {
+  async function testBrowserOpenCascadeInitializerUsesProvidedWasmUrl() {
     const instance = createMockOpenCascadeInstance()
     const modules: Record<string, unknown>[] = []
     const mainJS = function (module: Record<string, unknown>) {
@@ -163,11 +165,40 @@ test('src/domain/modeling/occ/runtime.spec.ts', async () => {
     assert(typeof locateFile === 'function', 'Browser initializer must provide a locateFile hook.')
     assert(
       locateFile('opencascade.full.wasm') === 'https://cdn.example/opencascade.full.wasm',
-      'Browser initializer must resolve the OCC wasm file from the configured CDN URL.',
+      'Browser initializer must resolve the OCC wasm file from the provided wasm URL.',
     )
     assert(
       locateFile('opencascade.full.worker.js') === 'opencascade.full.worker.js',
       'Browser initializer must leave unrelated files untouched when no worker URL is configured.',
+    )
+  }
+
+  function testRuntimeAssetVersioningUsesCurrentBuildScriptUrl() {
+    const documentLike = {
+      querySelector(selector: string) {
+        return selector === 'script[type="module"][src]'
+          ? {
+              getAttribute(name: string) {
+                return name === 'src' ? '/assets/index-prod-build.js' : null
+              },
+            }
+          : null
+      },
+    }
+
+    assert(
+      getOpenCascadeRuntimeAssetVersion(documentLike) === '/assets/index-prod-build.js',
+      'Browser OCC runtime assets should derive their version token from the current build script URL.',
+    )
+    assert(
+      getVersionedOpenCascadeRuntimeAssetUrl('/cadara-occ.js', documentLike)
+        === 'https://cadara.local/cadara-occ.js?v=%2Fassets%2Findex-prod-build.js',
+      'Browser OCC runtime should request the custom module with a build-specific cache-busting token.',
+    )
+    assert(
+      getVersionedOpenCascadeRuntimeAssetUrl('/cadara-occ.wasm', documentLike)
+        === 'https://cadara.local/cadara-occ.wasm?v=%2Fassets%2Findex-prod-build.js',
+      'Browser OCC runtime should request the custom wasm asset with a build-specific cache-busting token.',
     )
   }
 
@@ -195,7 +226,8 @@ test('src/domain/modeling/occ/runtime.spec.ts', async () => {
   await testLoadDefaultOpenCascadeFactoryUsesBrowserEntryOutsideNodeRuntime()
   await testCreateOpenCascadeInstanceLoaderCachesTheInitializedInstance()
   await testCreateOpenCascadeInstanceLoaderRetriesAfterInitializationFailure()
-  await testBrowserOpenCascadeInitializerUsesConfiguredWasmUrl()
+  await testBrowserOpenCascadeInitializerUsesProvidedWasmUrl()
+  testRuntimeAssetVersioningUsesCurrentBuildScriptUrl()
   await testGetDefaultOpenCascadeInstanceInitializesNodeOpenCascade()
 
   console.log('OCC phase 1 runtime bootstrap tests passed.')

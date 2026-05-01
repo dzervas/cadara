@@ -4,7 +4,7 @@ import { CadWorkbench } from "@/app/workbench/cad-workbench";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
 import { createLocalStorageDocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
-import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
+import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
 import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
 import { registerOpenCascadeAssetCache } from "@/infrastructure/occ/asset-cache";
 import {

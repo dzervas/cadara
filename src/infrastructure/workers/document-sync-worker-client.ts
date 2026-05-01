@@ -208,12 +208,3 @@ export class DocumentSyncWorkerClient {
     return `subscription_document_sync_${this.nextSubscriptionSequence}` as DocumentSyncSubscriptionId
   }
 }
-
-export function createBrowserDocumentSyncWorkerClient(options: BrowserDocumentSyncWorkerClientOptions = {}) {
-  const workerUrl = new URL('./document-sync.worker.ts', import.meta.url)
-  workerUrl.search = options.search ?? ''
-
-  return new DocumentSyncWorkerClient({
-    worker: new Worker(workerUrl, { type: 'module' }),
-  })
-}

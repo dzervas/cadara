@@ -6,6 +6,8 @@ import {
   OCC_ASSET_CACHE_NAME,
   OCC_SERVICE_WORKER_PATH,
   getOpenCascadeServiceWorkerRegistrationOptions,
+  getOpenCascadeServiceWorkerUrl,
+  getOpenCascadeServiceWorkerVersion,
   isOpenCascadeAssetUrl,
 } from '@/infrastructure/occ/asset-cache'
 
@@ -17,26 +19,49 @@ test('src/infrastructure/occ/asset-cache.spec.ts', () => {
   }
 
   assert(
-    isOpenCascadeAssetUrl('/assets/opencascade.full.wasm'),
-    'OCC wasm URL audit should recognize local app-served wasm assets.',
+    isOpenCascadeAssetUrl('/cadara-occ.wasm'),
+    'OCC wasm URL audit should recognize the custom app-served OpenCascade wasm asset.',
   )
   assert(
-    isOpenCascadeAssetUrl('https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.b5ff984/dist/opencascade.full.wasm'),
-    'OCC wasm URL audit should recognize the CDN-backed OpenCascade entry path.',
-  )
-  assert(
-    isOpenCascadeAssetUrl('/assets/opencascade.full.worker.js'),
-    'OCC worker URL audit should recognize OpenCascade worker assets.',
+    isOpenCascadeAssetUrl('/cadara-occ.js'),
+    'OCC asset URL audit should recognize the custom app-served OpenCascade bootstrap module.',
   )
   assert(
     getOpenCascadeServiceWorkerRegistrationOptions().scope === '/',
-    'OCC asset service worker registration scope should cover app and CDN-routed OCC requests from the shell.',
+    'OCC asset service worker registration scope should cover the custom app-served OCC requests from the shell.',
+  )
+  assert(
+    getOpenCascadeServiceWorkerVersion({
+      querySelector(selector) {
+        return selector === 'script[type="module"][src]'
+          ? {
+              getAttribute(name) {
+                return name === 'src' ? '/assets/index-live-build.js' : null
+              },
+            }
+          : null
+      },
+    }) === '/assets/index-live-build.js',
+    'OCC asset cache registration should derive its cache version from the current build module script URL.',
+  )
+  assert(
+    getOpenCascadeServiceWorkerUrl({
+      querySelector() {
+        return {
+          getAttribute(name) {
+            return name === 'src' ? '/assets/index-live-build.js' : null
+          },
+        }
+      },
+    }) === '/occ-asset-cache-sw.js?v=%2Fassets%2Findex-live-build.js',
+    'OCC asset cache registration should version the service worker script URL per build.',
   )
 
   const serviceWorkerSource = readFileSync(join(process.cwd(), 'public/occ-asset-cache-sw.js'), 'utf8')
   assert(
     OCC_SERVICE_WORKER_PATH === '/occ-asset-cache-sw.js' &&
-      serviceWorkerSource.includes(OCC_ASSET_CACHE_NAME),
-    'The OCC service worker cache should be versioned with the OpenCascade package version.',
+      serviceWorkerSource.includes(OCC_ASSET_CACHE_NAME) &&
+      serviceWorkerSource.includes("searchParams.get('v')"),
+    'The OCC service worker cache should be versioned with the OpenCascade package version and current build identifier.',
   )
 })

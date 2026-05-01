@@ -5,23 +5,8 @@ import path from 'node:path'
 
 import { createBuildMetadataPlugin } from './build-metadata'
 
-export function shouldUseCloudflareOpenCascadeCdn(env: NodeJS.ProcessEnv = process.env) {
-  return env.CF_PAGES === '1'
-    || env.WORKERS_CI === '1'
-    || env.CADARA_USE_OCC_CDN === '1'
-}
-
-function createOpenCascadeAlias() {
-  return shouldUseCloudflareOpenCascadeCdn()
-    ? [{
-        find: /^opencascade\.js$/,
-        replacement: path.resolve(__dirname, './src/domain/modeling/occ/opencascade-cdn-entry.ts'),
-      }]
-    : []
-}
-
 export function getOpenCascadeAssetHeaders(pathname: string): Record<string, string> {
-  if (!/opencascade.*\.(wasm|worker\.js)$/.test(pathname)) {
+  if (!/cadara-occ\.(?:js|wasm)$/.test(pathname)) {
     return {}
   }
 
@@ -64,7 +49,6 @@ export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   resolve: {
     alias: [
-      ...createOpenCascadeAlias(),
       {
         find: '@',
         replacement: path.resolve(__dirname, './src'),

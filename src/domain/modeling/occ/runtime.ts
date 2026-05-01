@@ -1,7 +1,5 @@
 import type { OpenCascadeInstance } from 'opencascade.js/dist/opencascade.full'
 
-const DEFAULT_OPENCASCADE_WASM_CDN_URL =
-  'https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.b5ff984/dist/opencascade.full.wasm'
 const DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL = '/cadara-occ.js'
 const DEFAULT_CUSTOM_OPENCASCADE_WASM_URL = '/cadara-occ.wasm'
 
@@ -44,6 +42,12 @@ interface OpenCascadeFactoryLoadOptions {
   loadNodeModule?: () => Promise<OpenCascadeFactoryModule>
 }
 
+interface RuntimeAssetVersionDocumentLike {
+  querySelector(selector: string): null | {
+    getAttribute(name: string): string | null
+  }
+}
+
 function isNodeRuntime() {
   const processLike = (globalThis as typeof globalThis & {
     process?: { versions?: { node?: string } }
@@ -61,28 +65,6 @@ export function getDefaultOpenCascadeEntrySpecifier(
     : 'opencascade.js'
 }
 
-function getConfiguredOpenCascadeWasmUrl() {
-  const viteEnv = (import.meta as ImportMeta & {
-    env?: { VITE_OPENCASCADE_WASM_URL?: string }
-  }).env
-  const configuredUrl = viteEnv?.VITE_OPENCASCADE_WASM_URL?.trim()
-
-  return configuredUrl && configuredUrl.length > 0
-    ? configuredUrl
-    : DEFAULT_OPENCASCADE_WASM_CDN_URL
-}
-
-function getExplicitOpenCascadeWasmUrl() {
-  const viteEnv = (import.meta as ImportMeta & {
-    env?: { VITE_OPENCASCADE_WASM_URL?: string }
-  }).env
-  const configuredUrl = viteEnv?.VITE_OPENCASCADE_WASM_URL?.trim()
-
-  return configuredUrl && configuredUrl.length > 0
-    ? configuredUrl
-    : undefined
-}
-
 function getRuntimeAbsoluteAssetUrl(path: string) {
   const locationLike = globalThis.location
 
@@ -93,9 +75,38 @@ function getRuntimeAbsoluteAssetUrl(path: string) {
   return path
 }
 
+export function getOpenCascadeRuntimeAssetVersion(
+  documentLike: RuntimeAssetVersionDocumentLike | null =
+    typeof document === 'undefined' ? null : document,
+) {
+  const moduleScriptSrc = documentLike
+    ?.querySelector('script[type="module"][src]')
+    ?.getAttribute('src')
+    ?.trim()
+
+  return moduleScriptSrc && moduleScriptSrc.length > 0
+    ? moduleScriptSrc
+    : null
+}
+
+export function getVersionedOpenCascadeRuntimeAssetUrl(
+  path: string,
+  documentLike: RuntimeAssetVersionDocumentLike | null =
+    typeof document === 'undefined' ? null : document,
+) {
+  const assetUrl = new URL(getRuntimeAbsoluteAssetUrl(path), globalThis.location?.origin ?? 'https://cadara.local')
+  const version = getOpenCascadeRuntimeAssetVersion(documentLike)
+
+  if (version) {
+    assetUrl.searchParams.set('v', version)
+  }
+
+  return assetUrl.href
+}
+
 export function createOpenCascadeInitializerFromMainJS(
   defaultMainJS: OpenCascadeMainJS,
-  getDefaultMainWasm = getConfiguredOpenCascadeWasmUrl,
+  getDefaultMainWasm = () => getVersionedOpenCascadeRuntimeAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_WASM_URL),
 ): OpenCascadeInitializer {
   return async ({
     mainJS = defaultMainJS,
@@ -199,11 +210,7 @@ function assertRequiredOpenCascadeBindings(oc: OpenCascadeInstance) {
 }
 
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  if (getExplicitOpenCascadeWasmUrl()) {
-    return import('./opencascade-cdn-entry')
-  }
-
-  const customMainJSImportUrl = getRuntimeAbsoluteAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL)
+  const customMainJSImportUrl = getVersionedOpenCascadeRuntimeAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL)
   const customMainJSModule = await import(
     /* @vite-ignore */
     customMainJSImportUrl
@@ -216,7 +223,7 @@ async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule>
 
   const customInitializer = createOpenCascadeInitializerFromMainJS(
     customMainJS,
-    () => getRuntimeAbsoluteAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_WASM_URL),
+    () => getVersionedOpenCascadeRuntimeAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_WASM_URL),
   )
 
   return {
