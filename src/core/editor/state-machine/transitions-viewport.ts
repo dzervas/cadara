@@ -36,6 +36,7 @@ import { resolveMeasureSelectionCandidate } from '@/domain/measure/measurement'
 import { createFeatureEditorReferenceSelectionPatch } from '@/core/feature-authoring/form-events'
 import {
   applySelectionToFeatureEditSession,
+  getSelectionFilterForFeatureType,
   patchFeatureEditSession,
   type FeatureEditSessionState,
 } from '@/domain/editor/feature-editing'
@@ -47,26 +48,33 @@ import type {
 } from './types'
 import type { EditorExtensionDependencies } from './dependencies'
 import {
-  createCommandState,
-  createEditSessionCursorContext,
+  createImportViewportSelectionPatch,
+  getActiveImportReferencePickerField,
+  getActiveReferencePickerField,
+  getDefaultImportSelectionField,
+} from './form-traversal'
+import {
   createFeatureSelectionPreview,
   createImportSelectionPreview,
-  createImportViewportSelectionPatch,
-  createSectionViewEditingState,
   createSelectionPreview,
+} from './selection-helpers'
+import {
+  createCommandState,
+  createSectionViewEditingState,
+  enterSketchEditing,
+  withPreview,
+} from './state-creators'
+import {
+  canReopenSketchDirectlyFromCurrentCursor,
+  createEditSessionCursorContext,
+} from './document-helpers'
+import {
   emitDocumentCursorMove,
   emitFeaturePreview,
   emitSketchOpen,
   emitSketchReferenceProjection,
-  enterSketchEditing,
-  getActiveImportReferencePickerField,
-  getActiveReferencePickerField,
-  getDefaultImportSelectionField,
-  isFeatureTool,
-  withPreview,
-  canReopenSketchDirectlyFromCurrentCursor,
-} from './helpers'
-import { getSelectionFilterForFeatureType } from '@/domain/editor/feature-editing'
+} from './effect-emitters'
+import { isFeatureTool } from './utility-helpers'
 
 export function handleViewportHoverCleared(
   state: EditorState,

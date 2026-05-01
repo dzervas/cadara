@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo } from 'react'
 import type { PropsWithChildren } from 'react'
 
 import {
   getEditorViewState,
-  initialEditorState,
-  type EditorEvent,
 } from '@/domain/editor/state-machine'
 import { createAppEditorEffectRuntime } from '@/application/editor/create-app-editor-effect-runtime'
 import {
@@ -12,10 +10,7 @@ import {
   createActiveDocumentTelemetryContext,
   publishActiveDocumentTelemetryContext,
 } from '@/contracts/errors/telemetry-context'
-import {
-  createEditorRuntimeActor,
-  type EditorRuntimeActor,
-} from '@/application/editor/runtime-machine'
+import { useEditorEventLoop } from '@/hooks/use-editor-event-loop'
 import type { EditorExtensionDependencies } from '@/domain/editor/state-machine'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { EditorContext } from '@/hooks/editor-context'
@@ -32,33 +27,30 @@ export function EditorProvider({ modelingService, editorDependencies, children }
     () => createAppEditorEffectRuntime(modelingService),
     [modelingService],
   )
-  const actorRef = useRef<EditorRuntimeActor | null>(null)
-  const [machineState, setMachineState] = useState(() => initialEditorState)
+  const stableEditorDependencies = useMemo(
+    () => ({
+      importProviders: editorDependencies.importProviders,
+      sketchSpecialModes: editorDependencies.sketchSpecialModes,
+    }),
+    [editorDependencies.importProviders, editorDependencies.sketchSpecialModes],
+  )
+  const { machineState, dispatch } = useEditorEventLoop(
+    runtime,
+    errorReporter,
+    stableEditorDependencies,
+  )
+
+  const handleDocumentChange = useEffectEvent((event: Parameters<ModelingService['subscribeToDocumentChanges']>[0] extends (event: infer TEvent) => void ? TEvent : never) => {
+    if (event.metadata.source === 'peer') {
+      dispatch({ type: 'document.refreshRequested' })
+    }
+  })
 
   useEffect(() => {
-    const actor = createEditorRuntimeActor(runtime, errorReporter, undefined, editorDependencies)
-    actorRef.current = actor
-
-    const subscription = actor.subscribe((snapshot) => {
-      setMachineState(snapshot.context.machineState)
+    return modelingService.subscribeToDocumentChanges((event) => {
+      handleDocumentChange(event)
     })
-
-    actor.start()
-    const documentSubscription = modelingService.subscribeToDocumentChanges((event) => {
-      if (event.metadata.source === 'peer') {
-        actor.send({ type: 'document.refreshRequested' })
-      }
-    })
-
-    return () => {
-      documentSubscription()
-      subscription.unsubscribe()
-      if (actorRef.current === actor) {
-        actorRef.current = null
-      }
-      actor.stop()
-    }
-  }, [editorDependencies, errorReporter, modelingService, runtime])
+  }, [modelingService])
 
   useEffect(() => {
     if (!machineState.snapshot) {
@@ -71,10 +63,6 @@ export function EditorProvider({ modelingService, editorDependencies, children }
       clearActiveDocumentTelemetryContext()
     }
   }, [machineState.snapshot])
-
-  const dispatch = useCallback((event: EditorEvent) => {
-    actorRef.current?.send(event)
-  }, [])
 
   const value = useMemo(
     () => ({

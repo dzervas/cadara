@@ -1,6 +1,6 @@
 import {
   createModelingServiceEditorEffectRuntime,
-} from '@/application/editor/state-machine-runtime'
+} from '@/application/editor/effect-registry'
 import type { EditorEffectRuntime } from '@/core/editor/state-machine'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'

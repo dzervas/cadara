@@ -6,9 +6,11 @@ import type {
 import type { EditorExtensionDependencies } from './dependencies'
 import {
   createImportSelectionPreview,
+} from './selection-helpers'
+import {
   createImportingState,
   toIdleState,
-} from './helpers'
+} from './state-creators'
 
 export function handleImportFileSelected(
   state: EditorState,

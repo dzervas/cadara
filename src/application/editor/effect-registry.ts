@@ -25,332 +25,323 @@ import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { AppResultAsync } from '@/contracts/errors'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import {
-  defaultEditorExtensionDependencies,
   EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
   hydrateFeatureSessionFromSnapshot,
-  initialEditorState,
-  transitionEditorState,
-  type EditorExtensionDependencies,
 } from '@/core/editor/state-machine'
 import type {
   EditorEffect,
   EditorEffectRuntime,
   EditorEvent,
-  EditorTransitionResult,
 } from '@/core/editor/state-machine'
 import {
-  assertSketchPlaneSupport,
   createEditorEffectFailureEvent,
   getAppErrorRevisionId,
   getDurableDiagnosticTarget,
   isModelingMutationError,
   modelingMutationErrorToDiagnostic,
-} from '@/core/editor/state-machine/helpers'
+} from '@/core/editor/state-machine/error-mapping'
+import { assertSketchPlaneSupport } from '@/core/editor/state-machine/utility-helpers'
 
-/**
- * Executes one explicit editor effect against the provided runtime and converts
- * the outcome back into a single typed editor event. Callers are responsible for
- * dispatching the returned event back through `transitionEditorState`.
- */
-export async function runEditorEffect(
-  effect: EditorEffect,
-  runtime: EditorEffectRuntime,
-): Promise<EditorEvent> {
-  switch (effect.type) {
-    case 'document.fetchSnapshot': {
-      try {
-        const snapshot = await runtime.getCurrentDocumentSnapshot()
+export function createEffectExecutor(runtime: EditorEffectRuntime) {
+  return async function executeEffect(effect: EditorEffect): Promise<EditorEvent> {
+    switch (effect.type) {
+      case 'document.fetchSnapshot': {
+        try {
+          const snapshot = await runtime.getCurrentDocumentSnapshot()
 
-        return {
-          type: 'effect.snapshotLoaded',
-          payload: {
-            requestId: effect.requestId,
-            documentId: snapshot.documentId,
-            revisionId: snapshot.revisionId,
-            snapshot,
-            selectionCatalog: buildSelectionTargetCatalog(snapshot),
-            preserveRenderRecordsOnFeatureDiagnostics: effect.preserveRenderRecordsOnFeatureDiagnostics,
-          },
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Snapshot refresh failed.')
-      }
-    }
-    case 'sketch.openSession': {
-      try {
-        const snapshot = await runtime.getCurrentDocumentSnapshot()
-        const session = openSketchSessionFromSelection(effect.selection.slice(), snapshot)
-
-        if (!session) {
           return {
-            type: 'effect.sketchSessionOpenFailed',
+            type: 'effect.snapshotLoaded',
+            payload: {
+              requestId: effect.requestId,
+              documentId: snapshot.documentId,
+              revisionId: snapshot.revisionId,
+              snapshot,
+              selectionCatalog: buildSelectionTargetCatalog(snapshot),
+              preserveRenderRecordsOnFeatureDiagnostics: effect.preserveRenderRecordsOnFeatureDiagnostics,
+            },
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Snapshot refresh failed.')
+        }
+      }
+      case 'sketch.openSession': {
+        try {
+          const snapshot = await runtime.getCurrentDocumentSnapshot()
+          const session = openSketchSessionFromSelection(effect.selection.slice(), snapshot)
+
+          if (!session) {
+            return {
+              type: 'effect.sketchSessionOpenFailed',
+              requestId: effect.requestId,
+              documentId: snapshot.documentId,
+              revisionId: snapshot.revisionId,
+              commandSessionId: effect.commandSessionId,
+              message: 'Sketch requires an existing sketch, construction plane, or planar face selection.',
+            }
+          }
+
+          return {
+            type: 'effect.sketchSessionOpened',
             requestId: effect.requestId,
             documentId: snapshot.documentId,
             revisionId: snapshot.revisionId,
             commandSessionId: effect.commandSessionId,
-            message: 'Sketch requires an existing sketch, construction plane, or planar face selection.',
+            session,
           }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Sketch session could not be opened.')
         }
-
-        return {
-          type: 'effect.sketchSessionOpened',
-          requestId: effect.requestId,
-          documentId: snapshot.documentId,
-          revisionId: snapshot.revisionId,
-          commandSessionId: effect.commandSessionId,
-          session,
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Sketch session could not be opened.')
       }
-    }
-    case 'feature.hydrateFromSelection': {
-      try {
-        const snapshot = await runtime.getCurrentDocumentSnapshot()
-        const session = hydrateFeatureSessionFromSnapshot(snapshot, effect.selectedFeatureId)
+      case 'feature.hydrateFromSelection': {
+        try {
+          const snapshot = await runtime.getCurrentDocumentSnapshot()
+          const session = hydrateFeatureSessionFromSnapshot(snapshot, effect.selectedFeatureId)
 
-        if (!session) {
+          if (!session) {
+            return {
+              type: 'effect.featureSessionHydrationFailed',
+              requestId: effect.requestId,
+              documentId: snapshot.documentId,
+              revisionId: snapshot.revisionId,
+              commandSessionId: effect.commandSessionId,
+              message: `Feature ${effect.selectedFeatureId} cannot be edited in the current feature session flow.`,
+            }
+          }
+
           return {
-            type: 'effect.featureSessionHydrationFailed',
+            type: 'effect.featureSessionHydrated',
             requestId: effect.requestId,
             documentId: snapshot.documentId,
             revisionId: snapshot.revisionId,
             commandSessionId: effect.commandSessionId,
-            message: `Feature ${effect.selectedFeatureId} cannot be edited in the current feature session flow.`,
+            session,
           }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Feature session hydration failed.')
         }
-
-        return {
-          type: 'effect.featureSessionHydrated',
-          requestId: effect.requestId,
-          documentId: snapshot.documentId,
-          revisionId: snapshot.revisionId,
-          commandSessionId: effect.commandSessionId,
-          session,
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Feature session hydration failed.')
       }
-    }
-    case 'feature.evaluatePreview': {
-      try {
-        const result = await runtime.evaluatePreview({
-          baseRevisionId: effect.baseRevisionId,
-          featureSession: effect.featureSession,
-        })
+      case 'feature.evaluatePreview': {
+        try {
+          const result = await runtime.evaluatePreview({
+            baseRevisionId: effect.baseRevisionId,
+            featureSession: effect.featureSession,
+          })
 
-        return {
-          type: 'effect.featurePreviewCompleted',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          revisionId: result.revisionId,
-          stale: result.stale,
-          diagnostics: result.diagnostics,
-          renderables: result.renderables,
+          return {
+            type: 'effect.featurePreviewCompleted',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            revisionId: result.revisionId,
+            stale: result.stale,
+            diagnostics: result.diagnostics,
+            renderables: result.renderables,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Feature preview failed.')
         }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Feature preview failed.')
       }
-    }
-    case 'feature.commit': {
-      try {
-        const result = await runtime.commitFeature({
-          baseRevisionId: effect.baseRevisionId,
-          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
-          featureSession: effect.featureSession,
-        })
+      case 'feature.commit': {
+        try {
+          const result = await runtime.commitFeature({
+            baseRevisionId: effect.baseRevisionId,
+            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
+            featureSession: effect.featureSession,
+          })
 
-        return {
-          type: 'effect.featureCommitted',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          revisionId: result.revisionId,
-          featureId: result.featureId,
-          accepted: result.accepted,
-          diagnostics: result.diagnostics,
-          actualRevisionId: result.actualRevisionId,
-          errorContext: result.errorContext,
+          return {
+            type: 'effect.featureCommitted',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            revisionId: result.revisionId,
+            featureId: result.featureId,
+            accepted: result.accepted,
+            diagnostics: result.diagnostics,
+            actualRevisionId: result.actualRevisionId,
+            errorContext: result.errorContext,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Feature commit failed.')
         }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Feature commit failed.')
       }
-    }
-    case 'sketch.commit': {
-      try {
-        const result = await runtime.commitSketch({
-          requestId: effect.requestId,
-          baseRevisionId: effect.baseRevisionId,
-          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
-          session: effect.session,
-        })
+      case 'sketch.commit': {
+        try {
+          const result = await runtime.commitSketch({
+            requestId: effect.requestId,
+            baseRevisionId: effect.baseRevisionId,
+            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
+            session: effect.session,
+          })
 
-        if (!result) {
+          if (!result) {
+            return {
+              type: 'effect.sketchCommitted',
+              requestId: effect.requestId,
+              documentId: effect.documentId,
+              commandSessionId: effect.commandSessionId,
+              baseRevisionId: effect.baseRevisionId,
+              revisionId: effect.baseRevisionId,
+              accepted: true,
+              diagnostics: [],
+            }
+          }
+
           return {
             type: 'effect.sketchCommitted',
             requestId: effect.requestId,
             documentId: effect.documentId,
             commandSessionId: effect.commandSessionId,
             baseRevisionId: effect.baseRevisionId,
-            revisionId: effect.baseRevisionId,
-            accepted: true,
-            diagnostics: [],
+            revisionId: result.revisionId,
+            accepted: result.accepted,
+            diagnostics: result.diagnostics,
+            actualRevisionId: result.actualRevisionId,
+            errorContext: result.errorContext,
           }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Sketch commit failed.')
         }
+      }
+      case 'sketch.projectReferences': {
+        try {
+          const result = await runtime.projectSketchReferences({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            baseRevisionId: effect.baseRevisionId,
+            session: effect.session,
+          })
 
+          return {
+            type: 'effect.sketchReferencesProjected',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            projectedReferences: result.projectedReferences,
+            diagnostics: result.diagnostics,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Sketch reference projection failed.')
+        }
+      }
+      case 'sketch.importReferenceImages': {
+        try {
+          if (!runtime.importSketchReferenceImages) {
+            throw new Error('Sketch reference-image import runtime is not available.')
+          }
+
+          const result = await runtime.importSketchReferenceImages({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
+            session: effect.session,
+            payloads: effect.payloads,
+          })
+
+          return {
+            type: 'effect.sketchReferenceImageImportCompleted',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            status: result.status,
+            revisionId: result.revisionId,
+            snapshot: result.snapshot,
+            selectionCatalog: result.selectionCatalog,
+            session: result.session,
+            importedCount: result.importedCount,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Sketch reference-image import failed.')
+        }
+      }
+      case 'sketch.specialModeEffect': {
+        try {
+          if (!runtime.runSketchSpecialModeEffect) {
+            throw new Error('Sketch special mode effect runtime is not available.')
+          }
+
+          const result = await runtime.runSketchSpecialModeEffect({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            modeId: effect.modeId,
+            effectId: effect.effectId,
+            kind: effect.kind,
+            payload: effect.payload,
+          })
+
+          return {
+            type: 'effect.sketchSpecialModeEffectCompleted',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            effectId: result.effectId,
+            payload: result.payload,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Sketch special mode effect failed.')
+        }
+      }
+      case 'document.moveHistoryCursor': {
+        try {
+          if (!runtime.setDocumentCursor) {
+            throw new Error('Document history cursor mutation runtime is not available.')
+          }
+
+          const result = await runtime.setDocumentCursor({
+            baseRevisionId: effect.baseRevisionId,
+            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
+            cursor: effect.cursor,
+            transient: effect.transient,
+          })
+
+          const snapshot = result.accepted
+            ? await runtime.getCurrentDocumentSnapshot()
+            : undefined
+
+          return {
+            type: 'effect.documentCursorMoved',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            baseRevisionId: effect.baseRevisionId,
+            revisionId: result.revisionId,
+            accepted: result.accepted,
+            snapshot,
+            diagnostics: result.diagnostics,
+            actualRevisionId: result.actualRevisionId,
+            errorContext: result.errorContext,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Document history cursor move failed.')
+        }
+      }
+      default:
         return {
-          type: 'effect.sketchCommitted',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          revisionId: result.revisionId,
-          accepted: result.accepted,
-          diagnostics: result.diagnostics,
-          actualRevisionId: result.actualRevisionId,
-          errorContext: result.errorContext,
+          type: 'effect.snapshotFailed',
+          requestId: 'request_unreachable',
+          documentId: null,
+          revisionId: null,
+          error: 'Unsupported effect.',
         }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Sketch commit failed.')
-      }
     }
-    case 'sketch.projectReferences': {
-      try {
-        const result = await runtime.projectSketchReferences({
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          baseRevisionId: effect.baseRevisionId,
-          session: effect.session,
-        })
-
-        return {
-          type: 'effect.sketchReferencesProjected',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          projectedReferences: result.projectedReferences,
-          diagnostics: result.diagnostics,
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Sketch reference projection failed.')
-      }
-    }
-    case 'sketch.importReferenceImages': {
-      try {
-        if (!runtime.importSketchReferenceImages) {
-          throw new Error('Sketch reference-image import runtime is not available.')
-        }
-
-        const result = await runtime.importSketchReferenceImages({
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
-          session: effect.session,
-          payloads: effect.payloads,
-        })
-
-        return {
-          type: 'effect.sketchReferenceImageImportCompleted',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          status: result.status,
-          revisionId: result.revisionId,
-          snapshot: result.snapshot,
-          selectionCatalog: result.selectionCatalog,
-          session: result.session,
-          importedCount: result.importedCount,
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Sketch reference-image import failed.')
-      }
-    }
-    case 'sketch.specialModeEffect': {
-      try {
-        if (!runtime.runSketchSpecialModeEffect) {
-          throw new Error('Sketch special mode effect runtime is not available.')
-        }
-
-        const result = await runtime.runSketchSpecialModeEffect({
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          modeId: effect.modeId,
-          effectId: effect.effectId,
-          kind: effect.kind,
-          payload: effect.payload,
-        })
-
-        return {
-          type: 'effect.sketchSpecialModeEffectCompleted',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          commandSessionId: effect.commandSessionId,
-          baseRevisionId: effect.baseRevisionId,
-          effectId: result.effectId,
-          payload: result.payload,
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Sketch special mode effect failed.')
-      }
-    }
-    case 'document.moveHistoryCursor': {
-      try {
-        if (!runtime.setDocumentCursor) {
-          throw new Error('Document history cursor mutation runtime is not available.')
-        }
-
-        const result = await runtime.setDocumentCursor({
-          baseRevisionId: effect.baseRevisionId,
-          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
-          cursor: effect.cursor,
-          transient: effect.transient,
-        })
-
-        const snapshot = result.accepted
-          ? await runtime.getCurrentDocumentSnapshot()
-          : undefined
-
-        return {
-          type: 'effect.documentCursorMoved',
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          baseRevisionId: effect.baseRevisionId,
-          revisionId: result.revisionId,
-          accepted: result.accepted,
-          snapshot,
-          diagnostics: result.diagnostics,
-          actualRevisionId: result.actualRevisionId,
-          errorContext: result.errorContext,
-        }
-      } catch (error: unknown) {
-        return createEditorEffectFailureEvent(effect, error, 'Document history cursor move failed.')
-      }
-    }
-    default:
-      return {
-        type: 'effect.snapshotFailed',
-        requestId: 'request_unreachable',
-        documentId: null,
-        revisionId: null,
-        error: 'Unsupported effect.',
-      }
   }
 }
 
-/**
- * Creates a minimal effect runtime adapter over the modeling service boundary.
- * This keeps the provider thin while preserving the same explicit effect/event contracts
- * used by replay tests.
- */
+export async function runEditorEffect(
+  effect: EditorEffect,
+  runtime: EditorEffectRuntime,
+): Promise<EditorEvent> {
+  return createEffectExecutor(runtime)(effect)
+}
+
 export function createModelingServiceEditorEffectRuntime(modelingService: {
   getCurrentDocumentSnapshot(): Promise<DocumentSnapshot>
   projectSketchExternalReferences(input: {
@@ -649,61 +640,4 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       }
     },
   }
-}
-
-/**
- * Minimal deterministic replay helper used by tests to prove that identical event traces
- * produce identical machine state and effect envelopes.
- */
-export function replayEditorEvents(
-  events: readonly EditorEvent[],
-  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
-): EditorTransitionResult {
-  let state = initialEditorState
-  const effects: EditorEffect[] = []
-
-  for (const event of events) {
-    const result = transitionEditorState(state, event, dependencies)
-    state = result.state
-    effects.push(...result.effects)
-  }
-
-  return { state, effects }
-}
-
-/**
- * Executes an event trace end-to-end by running every emitted effect immediately
- * through the provided runtime. This is intended for deterministic runtime-loop tests.
- */
-export async function replayEditorEventsWithRuntime(
-  events: readonly EditorEvent[],
-  runtime: EditorEffectRuntime,
-  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
-): Promise<EditorTransitionResult> {
-  let state = initialEditorState
-  const effects: EditorEffect[] = []
-
-  for (const event of events) {
-    const initial = transitionEditorState(state, event, dependencies)
-    state = initial.state
-    effects.push(...initial.effects)
-
-    let queue = [...initial.effects]
-
-    while (queue.length > 0) {
-      const effect = queue.shift()
-
-      if (!effect) {
-        break
-      }
-
-      const effectEvent = await runEditorEffect(effect, runtime)
-      const next = transitionEditorState(state, effectEvent, dependencies)
-      state = next.state
-      effects.push(...next.effects)
-      queue = [...queue, ...next.effects]
-    }
-  }
-
-  return { state, effects }
 }

@@ -17,7 +17,7 @@ import type {
   EditorHistoryAvailability,
   EditorState,
 } from './types'
-import { hasPendingDocumentCursorRefresh } from './helpers'
+import { hasPendingDocumentCursorRefresh } from './document-helpers'
 
 export function getEditorHistoryAvailability(state: EditorState): EditorHistoryAvailability {
   if (state.kind === 'editingSketch') {

@@ -34,6 +34,13 @@ function App() {
 		() => createBuiltinRuntimeExtensionRegistryComposition(),
 		[],
 	);
+	const editorDependencies = useMemo(
+		() => ({
+			importProviders: runtimeExtensionRegistries.importProviders,
+			sketchSpecialModes: runtimeExtensionRegistries.sketchSpecialModes,
+		}),
+		[runtimeExtensionRegistries],
+	);
 	const editorSketchSolver = useMemo(
 		() =>
 			new SketchConstraintSolverAdapter({
@@ -99,10 +106,7 @@ function App() {
 					<ModelingServiceProvider modelingService={modelingService}>
 						<EditorProvider
 							modelingService={modelingService}
-							editorDependencies={{
-								importProviders: runtimeExtensionRegistries.importProviders,
-								sketchSpecialModes: runtimeExtensionRegistries.sketchSpecialModes,
-							}}
+							editorDependencies={editorDependencies}
 						>
 							<ToolActionProvider actionBus={actionBus}>
 								<CadWorkbench />

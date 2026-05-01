@@ -855,6 +855,39 @@ export type EditorEvent =
       message: string
     }
 
+export type SketchEvent = Extract<
+  EditorEvent,
+  | { type: `sketch.${string}` }
+  | { type: 'tool.activated' }
+  | { type: 'command.cancelled' }
+  | { type: 'command.commitRequested' }
+  | { type: 'history.undoRequested' }
+  | { type: 'history.redoRequested' }
+>
+
+export type FeatureEvent = Extract<
+  EditorEvent,
+  | { type: `form.${string}` }
+  | { type: 'command.cancelled' }
+  | { type: 'command.commitRequested' }
+>
+
+export type ImportEvent = Extract<
+  EditorEvent,
+  | { type: `import.${string}` }
+  | { type: 'form.referencePickerActivated' }
+  | { type: 'form.referencePickerCancelled' }
+  | { type: 'command.cancelled' }
+>
+
+export type ImportWorkflowEvent = Exclude<ImportEvent, { type: 'import.fileSelected' }>
+
+export type SectionEvent = Extract<
+  EditorEvent,
+  | { type: `section.${string}` }
+  | { type: 'command.cancelled' }
+>
+
 /**
  * Explicit side-effect requests emitted by the pure transition function.
  * The React runtime executes these requests and feeds their results back as events.

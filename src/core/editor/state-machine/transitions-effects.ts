@@ -21,24 +21,31 @@ import type {
   SketchEditorState,
 } from './types'
 import type { EditorExtensionDependencies } from './dependencies'
+import { advanceCursorPhase } from './cursor-lifecycle'
 import {
   continueAfterSnapshotRefresh,
-  createFeatureEditingState,
+  eventMatchesDocument,
+  eventMatchesOptionalDocument,
+  isRefreshableDocumentCursorConflict,
+  updateStateDocument,
+  updateStateDocumentSnapshot,
+} from './document-helpers'
+import {
   createPreviewFailedDiagnostics,
+  getDurableDiagnosticTarget,
+} from './error-mapping'
+import {
   emitFeaturePreview,
   emitSketchReferenceProjection,
   emitSnapshotFetch,
+} from './effect-emitters'
+import {
+  createFeatureEditingState,
   enterSketchEditing,
-  eventMatchesDocument,
-  eventMatchesOptionalDocument,
-  getDurableDiagnosticTarget,
-  isFeatureTool,
-  isRefreshableDocumentCursorConflict,
   toIdleState,
-  updateStateDocument,
-  updateStateDocumentSnapshot,
   withPreview,
-} from './helpers'
+} from './state-creators'
+import { isFeatureTool } from './utility-helpers'
 
 export function handleEffectDocumentCursorMoved(
   state: EditorState,
@@ -79,14 +86,6 @@ export function handleEffectDocumentCursorMoved(
       revisionId: event.revisionId,
     },
     pendingHistoryCursorRequestId: null,
-    editSessionCursorContext: state.editSessionCursorContext
-      ? {
-          ...state.editSessionCursorContext,
-          phase: state.editSessionCursorContext.phase === 'rollingBack'
-            ? 'opening'
-            : state.editSessionCursorContext.phase,
-        }
-      : null,
     preview: null,
   } satisfies EditorState
 
@@ -390,10 +389,7 @@ export function handleEffectFeatureCommitted(
       return emitSnapshotFetch(
         {
           ...idleState,
-          editSessionCursorContext: {
-            ...state.editSessionCursorContext,
-            phase: 'restorePending',
-          },
+          editSessionCursorContext: advanceCursorPhase(state.editSessionCursorContext, 'commitCompleted'),
         },
         state.command.commandSessionId,
         {
@@ -532,10 +528,7 @@ export function handleEffectSketchCommitted(
       return emitSnapshotFetch(
         {
           ...idleState,
-          editSessionCursorContext: {
-            ...state.editSessionCursorContext,
-            phase: 'restorePending',
-          },
+          editSessionCursorContext: advanceCursorPhase(state.editSessionCursorContext, 'commitCompleted'),
         },
         state.command.commandSessionId,
       )

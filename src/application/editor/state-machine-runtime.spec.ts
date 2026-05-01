@@ -1,6 +1,6 @@
 import { test } from 'bun:test'
 
-import { runEditorEffect } from '@/application/editor/state-machine-runtime'
+import { runEditorEffect } from '@/application/editor/effect-registry'
 import type { EditorEffect, EditorEffectRuntime } from '@/core/editor/state-machine'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
 

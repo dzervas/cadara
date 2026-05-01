@@ -38,13 +38,22 @@
 - TypeScript strict mode on React 19 + React 19, Vite 8, Bun, Three.js, Mantine, Tailwind CSS v4, OpenCascade.js
 - Always prefer @react-three packages to interact with three.js (@react-three/drai, @react-three/fiber, etc.)
 - Runtime contract validation uses `zod`; prefer shared schemas for transport and persistence boundaries, and keep domain invariants in plain TypeScript when schemas do not make the code smaller or clearer.
-- Stateful editor/runtime orchestration uses `xstate`; keep machine logic in domain/contracts modules and avoid leaking state-machine concerns into presentational components.
+- Stateful editor/runtime orchestration uses the TEA-style `EditorEventLoop`; keep orchestration logic in domain/contracts and application seams, and avoid leaking event-loop concerns into presentational components.
 - Non-E2E tests use `bun:test`; add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
 
 ## Testing Policy
 
-- Before adding or mutating ANY test, read `docs/testing.md`
-- Use `bun run test:logic`, `bun run test:ui`, `bun run test:static`, and `bun run test:e2e` as the primary lane commands. `bun run test` is the umbrella non-Playwright workflow, and `bun run test:logic:coverage` is the non-UI coverage command.
-- Default non-UI coverage to exported seams in `contracts`, `core`, `domain`, `application`, and appropriate `infrastructure` modules.
-- Keep repository policy guards in `test/static/` so they stay executable without being counted as behavioral coverage.
-- Keep static checks separate from behavioral tests, and do not use UI or static-check tests to stand in for missing non-UI seam coverage.
+1. Read `docs/testing.md` in the current turn before making any test-related edit.
+2. In a `commentary` update before editing tests, state:
+   - the chosen lane: `logic`, `ui`, `e2e`, or `static`
+   - the seam being tested
+   - why that lane is correct under `docs/testing.md`
+3. Only then edit or add tests.
+4. In the final response, explicitly confirm:
+   - `docs/testing.md` was reviewed
+   - which lane was used
+   - what seam the test covers
+
+## Validation
+
+After a set of changes, run `bun run test:all`

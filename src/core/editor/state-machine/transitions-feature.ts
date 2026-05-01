@@ -16,9 +16,9 @@ import {
   createFeatureSelectionPreview,
   createImportSelectionPreview,
   createSelectionPreview,
-  emitFeaturePreview,
-  getImportSessionFormField,
-} from './helpers'
+} from './selection-helpers'
+import { emitFeaturePreview } from './effect-emitters'
+import { getImportSessionFormField } from './form-traversal'
 
 export function handleFormFeaturePatched(
   state: EditorState,

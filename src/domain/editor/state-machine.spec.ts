@@ -5,15 +5,17 @@ import {
   getEditorSelectionKey,
   type EditorEffectRuntime,
   initialEditorState,
-  replayEditorEvents,
-  replayEditorEventsWithRuntime,
   runEditorEffect,
   type SketchEditorState,
   transitionEditorState,
   type EditorEvent,
   createModelingServiceEditorEffectRuntime,
 } from './state-machine'
-import { createEditorRuntimeActor } from './runtime-machine'
+import { createEditorEventLoop } from './runtime-machine'
+import {
+  replayEditorEvents,
+  replayEditorEventsWithRuntime,
+} from '@/domain/editor/state-machine-test-builder'
 import {
   getDefaultSelectionFilterForMode,
   planeSelectionFilter,
@@ -2929,7 +2931,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     assert(replaced.state.snapshot?.revisionId === 'rev_replaced', 'Whole-document replacement should load the replacement snapshot.')
   }
 
-  async function testXStateRuntimeBootstrapsAndLoadsSnapshot() {
+  async function testEditorEventLoopBootstrapsAndLoadsSnapshot() {
     const snapshot = createSnapshot()
     let snapshotCallCount = 0
     const runtime: EditorEffectRuntime = {
@@ -2952,21 +2954,21 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }),
     }
 
-    const actor = createEditorRuntimeActor(runtime)
+    const actor = createEditorEventLoop(runtime)
 
     actor.start()
     await flushAsyncWork()
 
-    const machineState = actor.getSnapshot().context.machineState
+    const machineState = actor.getState()
 
-    assert(snapshotCallCount === 1, 'The XState runtime should bootstrap the initial snapshot load itself.')
+    assert(snapshotCallCount === 1, 'The editor event loop should bootstrap the initial snapshot load itself.')
     assert(machineState.document.documentId === snapshot.documentId, 'Bootstrap should hydrate the document id.')
     assert(machineState.document.revisionId === snapshot.revisionId, 'Bootstrap should hydrate the revision id.')
     assert(machineState.snapshot?.revisionId === snapshot.revisionId, 'Bootstrap should store the loaded snapshot.')
     actor.stop()
   }
 
-  async function testXStateRuntimeCancelsObsoleteSketchOpenEffects() {
+  async function testEditorEventLoopCancelsObsoleteSketchOpenEffects() {
     const snapshot = createSnapshot()
     let snapshotCallCount = 0
     let resolveOpenSnapshot: ((value: DocumentSnapshot) => void) | null = null
@@ -2998,21 +3000,21 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }),
     }
 
-    const actor = createEditorRuntimeActor(runtime)
+    const actor = createEditorEventLoop(runtime)
 
     actor.start()
     await flushAsyncWork()
-    actor.send({ type: 'tool.activated', toolId: 'sketch' })
-    actor.send({
+    actor.dispatch({ type: 'tool.activated', toolId: 'sketch' })
+    actor.dispatch({
       type: 'viewport.selectionRequested',
       target: { kind: 'construction', constructionId: 'construction_plane-xy' },
     })
     await flushAsyncWork()
 
-    const selectionState = actor.getSnapshot().context.machineState
+    const selectionState = actor.getState()
     assert(selectionState.kind === 'selectionCommand', 'Sketch activation should reach the selection workflow before opening.')
 
-    actor.send({
+    actor.dispatch({
       type: 'command.cancelled',
       commandSessionId: selectionState.command.commandSessionId,
     })
@@ -3024,7 +3026,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     }
     await flushAsyncWork()
 
-    const cancelledState = actor.getSnapshot().context.machineState
+    const cancelledState = actor.getState()
 
     assert(cancelledState.kind === 'idle', 'Cancelling sketch selection should return the runtime to idle.')
     actor.stop()
@@ -4536,6 +4538,6 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
   await testDocumentCursorRequestUsesSnapshotBasisAndRefreshesOnConflict()
   testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics()
   testDocumentReplacementResetsIntoPartIdleState()
-  await testXStateRuntimeBootstrapsAndLoadsSnapshot()
-  await testXStateRuntimeCancelsObsoleteSketchOpenEffects()
+  await testEditorEventLoopBootstrapsAndLoadsSnapshot()
+  await testEditorEventLoopCancelsObsoleteSketchOpenEffects()
 })

@@ -48,13 +48,15 @@ import type {
 } from './types'
 import type { EditorExtensionDependencies } from './dependencies'
 import {
-  deriveSketchPointFromWorld,
   emitSketchReferenceImageImportWithPayloads,
   emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
+} from './effect-emitters'
+import { withPreview } from './state-creators'
+import {
+  deriveSketchPointFromWorld,
   nextRequestId,
-  withPreview,
-} from './helpers'
+} from './utility-helpers'
 
 export function handleSketchPointerMoved(
   state: EditorState,

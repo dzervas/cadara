@@ -43,6 +43,10 @@ export type {
   DocumentHistoryCursorRequestedEvent,
   HistoryUndoRequestedEvent,
   HistoryRedoRequestedEvent,
+  SketchEvent,
+  FeatureEvent,
+  ImportEvent,
+  SectionEvent,
   SketchHistoryOperationDeleteRequestedEvent,
   SketchAnnotationDeleteRequestedEvent,
   SketchAnnotationEditRequestedEvent,
@@ -70,13 +74,13 @@ export type {
 } from './types'
 
 export {
-  EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
   initialEditorState,
-  createEditorEffectFailureEvent,
-} from './helpers'
+} from './state-creators'
+export { createEditorEffectFailureEvent } from './error-mapping'
+export { EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES } from './utility-helpers'
 export type { EditorExtensionDependencies } from './dependencies'
 export { defaultEditorExtensionDependencies } from './dependencies'
-export { transitionEditorState } from './transitions-core'
+export { transitionEditorState } from './reducer-root'
 export {
   getEditorHistoryAvailability,
   getEditorSelectionKey,

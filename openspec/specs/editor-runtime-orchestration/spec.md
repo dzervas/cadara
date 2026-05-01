@@ -1,40 +1,46 @@
 # editor-runtime-orchestration Specification
 
 ## Purpose
-TBD - created by archiving change migrate-editor-runtime-to-xstate. Update Purpose after archive.
+
+Define the editor runtime orchestration model, including the reducer-driven event loop, async effect sequencing, cursor sequencing, and application/runtime ownership boundaries.
+
 ## Requirements
+
 ### Requirement: Editor runtime SHALL use explicit statechart-owned orchestration for command workflows
-The editor runtime SHALL orchestrate command workflows through an explicit statechart/actor model rather than through a custom reducer-plus-effect-runner loop.
+The editor runtime SHALL orchestrate command workflows through an explicit event loop and pure reducer rather than through an xstate statechart/actor model. The event loop SHALL dispatch events through the pure transition function, manage an effect queue, execute effects serially, and feed results back through the transition function.
 
 #### Scenario: Runtime enters an active command workflow
 - **WHEN** the user activates a tool that opens a command workflow
-- **THEN** the editor runtime enters the corresponding explicit orchestration state for that command flow
+- **THEN** the editor event loop dispatches the tool activation event through the pure transition function
+- **AND** the resulting state reflects the corresponding workflow kind
 
 #### Scenario: Runtime manages an async command effect
 - **WHEN** a command workflow requires async work such as snapshot loading, sketch open, feature hydration, preview evaluation, or commit execution
-- **THEN** that work is owned by the runtime statechart/actor lifecycle rather than by an external React effect flush loop
+- **THEN** that work is queued as a typed effect and executed serially by the event loop's effect executor
+- **AND** the effect result is dispatched back through the pure transition function
 
 ### Requirement: Editor runtime SHALL preserve current effect-ordering and stale-result safety
 The editor runtime SHALL preserve current command correlation, effect ordering, and stale-result rejection behavior after the orchestration migration.
 
 #### Scenario: Stale preview response arrives
 - **WHEN** an async response arrives for an outdated command or request basis
-- **THEN** the editor runtime safely ignores or rejects that stale result instead of mutating the active command state
+- **THEN** the pure transition function safely ignores or rejects that stale result instead of mutating the active command state
 
 #### Scenario: Command is cancelled while async work is in flight
 - **WHEN** the user cancels a command with in-flight async work
-- **THEN** the runtime orchestration cancels or ignores that in-flight work according to the command lifecycle
+- **THEN** the event loop continues processing the in-flight effect but the pure transition function rejects the stale result when it arrives
 
 ### Requirement: Orchestration migration SHALL allow React `useEffect` reduction in the editor runtime layer
-The editor runtime SHALL allow React `useEffect` usage to be reduced or removed where those effects exist only to orchestrate state-machine side effects, while leaving non-orchestration DOM and resource lifecycle effects outside the statechart.
+The editor runtime SHALL allow React `useEffect` usage to be reduced or removed where those effects exist only to orchestrate state-machine side effects, while leaving non-orchestration DOM and resource lifecycle effects outside the event loop.
 
-#### Scenario: Session bootstrap is runtime-owned
+#### Scenario: Session bootstrap is event-loop-owned
 - **WHEN** the editor runtime needs to bootstrap its initial session behavior
-- **THEN** that bootstrap can be owned by the statechart lifecycle rather than by a React `useEffect` whose only purpose is to dispatch the initial runtime event
+- **THEN** that bootstrap is owned by the event loop's `start` method which dispatches the initial `session.started` event
+- **AND** no React `useEffect` is needed solely for dispatching the initial runtime event
 
 #### Scenario: DOM lifecycle effect remains outside the runtime machine
 - **WHEN** a component owns a browser or DOM lifecycle concern that is not command orchestration
-- **THEN** that concern may remain in React rather than being forced into the editor runtime statechart
+- **THEN** that concern may remain in React rather than being forced into the editor event loop
 
 ### Requirement: Editor runtime SHALL sequence document cursor effects
 The editor runtime SHALL own document cursor effect sequencing, stale-result rejection, accepted-result revision updates, and follow-up snapshot refreshes.
@@ -102,13 +108,13 @@ The system SHALL keep editor session state, command-session sequencing, and docu
 #### Scenario: Toolbar action opens an editor command
 - **WHEN** the user activates a tool that starts or changes an editor command workflow
 - **THEN** an application-layer controller selects the appropriate shared command entrypoint
-- **AND** the resulting editor event is dispatched through the editor runtime
+- **AND** the resulting editor event is dispatched through the editor event loop
 - **AND** the runtime remains the owner of command-session state
 
 #### Scenario: Browser-facing coordination is required
 - **WHEN** a command flow needs browser-facing coordination such as a file picker, shortcut dispatch mapping, or workbench notification
 - **THEN** that coordination is handled by an application-layer controller
-- **AND** the editor runtime is not used as the owner of that browser-specific flow
+- **AND** the editor event loop is not used as the owner of that browser-specific flow
 
 ### Requirement: Editor runtime SHALL own sequencing for covered workbench document mutations
 For workbench flows covered by this change, the editor runtime SHALL own accepted mutation sequencing and follow-up refresh sequencing instead of relying on application controllers to mutate the modeling service directly and repair state afterward.
@@ -134,4 +140,3 @@ The editor runtime SHALL expose distinct sequencing behavior for ordinary increm
 - **WHEN** the application requests replacement of the active document basis
 - **THEN** the runtime processes that request through an explicit replacement handoff
 - **AND** the replacement path is not reused as the generic completion path for ordinary workbench mutations
-

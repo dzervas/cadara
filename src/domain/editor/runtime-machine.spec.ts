@@ -2,14 +2,13 @@ import { test } from 'bun:test'
 
 import type { EditorEffectRuntime, EditorState } from '@/domain/editor/state-machine'
 import {
-  createEditorRuntimeActor,
-  getEditorRuntimeState,
-  type EditorRuntimeActor,
+  createEditorEventLoop,
+  type EditorEventLoop,
 } from '@/domain/editor/runtime-machine'
 import { createTestErrorReporter } from '@/contracts/errors'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/contracts/editor/runtime-machine.spec.ts', async () => {
+test('src/domain/editor/runtime-machine.spec.ts', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -17,10 +16,10 @@ test('src/contracts/editor/runtime-machine.spec.ts', async () => {
   }
 
   function waitForState(
-    actor: EditorRuntimeActor,
+    actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
-    const current = getEditorRuntimeState(actor)
+    const current = actor.getState()
 
     if (predicate(current)) {
       return Promise.resolve(current)
@@ -32,7 +31,7 @@ test('src/contracts/editor/runtime-machine.spec.ts', async () => {
         reject(new Error('Timed out waiting for editor runtime state.'))
       }, 2_000)
       const subscription = actor.subscribe(() => {
-        const state = getEditorRuntimeState(actor)
+        const state = actor.getState()
 
         if (!predicate(state)) {
           return
@@ -63,34 +62,34 @@ test('src/contracts/editor/runtime-machine.spec.ts', async () => {
       throw new Error('Feature commit is not used by this test.')
     },
   }
-  const actor = createEditorRuntimeActor(runtime)
+  const actor = createEditorEventLoop(runtime)
 
   actor.start()
 
   try {
     await waitForState(actor, (state) => state.document.revisionId !== null)
 
-    actor.send({ type: 'tool.activated', toolId: 'sketch' })
-    actor.send({
+    actor.dispatch({ type: 'tool.activated', toolId: 'sketch' })
+    actor.dispatch({
       type: 'viewport.selectionRequested',
       target: { kind: 'construction', constructionId: 'construction_plane-xy' },
     })
     await waitForState(actor, (state) => state.kind === 'editingSketch')
 
-    actor.send({ type: 'tool.activated', toolId: 'line' })
-    actor.send({ type: 'sketch.pointerReleased', point: [0, 0] })
-    actor.send({ type: 'sketch.pointerReleased', point: [1, 0.3] })
+    actor.dispatch({ type: 'tool.activated', toolId: 'line' })
+    actor.dispatch({ type: 'sketch.pointerReleased', point: [0, 0] })
+    actor.dispatch({ type: 'sketch.pointerReleased', point: [1, 0.3] })
 
-    const beforeDrag = getEditorRuntimeState(actor)
+    const beforeDrag = actor.getState()
     assert(beforeDrag.kind === 'editingSketch', 'Expected active sketch session before drag.')
     const point = beforeDrag.session.definition.points[0]
     assert(point, 'Expected a point to drag after drawing a line.')
 
-    actor.send({ type: 'sketch.geometryDragStarted', target: point.target, point: point.position })
-    actor.send({ type: 'sketch.geometryDragMoved', point: [2, 3] })
-    actor.send({ type: 'sketch.geometryDragEnded', point: [2, 3] })
+    actor.dispatch({ type: 'sketch.geometryDragStarted', target: point.target, point: point.position })
+    actor.dispatch({ type: 'sketch.geometryDragMoved', point: [2, 3] })
+    actor.dispatch({ type: 'sketch.geometryDragEnded', point: [2, 3] })
 
-    const afterDrag = getEditorRuntimeState(actor)
+    const afterDrag = actor.getState()
     assert(afterDrag.kind === 'editingSketch', 'Expected sketch session to remain active after drag.')
 
     const movedPoint = afterDrag.session.definition.points.find((entry) => entry.pointId === point.pointId)
@@ -102,7 +101,7 @@ test('src/contracts/editor/runtime-machine.spec.ts', async () => {
   }
 })
 
-test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invocation failures', async () => {
+test('src/domain/editor/runtime-machine.spec.ts reports escaped effect invocation failures', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -110,10 +109,10 @@ test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invoca
   }
 
   function waitForState(
-    actor: EditorRuntimeActor,
+    actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
-    const current = getEditorRuntimeState(actor)
+    const current = actor.getState()
 
     if (predicate(current)) {
       return Promise.resolve(current)
@@ -125,7 +124,7 @@ test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invoca
         reject(new Error('Timed out waiting for editor runtime state.'))
       }, 2_000)
       const subscription = actor.subscribe(() => {
-        const state = getEditorRuntimeState(actor)
+        const state = actor.getState()
 
         if (!predicate(state)) {
           return
@@ -153,7 +152,7 @@ test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invoca
     },
   }
   const reporter = createTestErrorReporter()
-  const actor = createEditorRuntimeActor(
+  const actor = createEditorEventLoop(
     runtime,
     reporter,
     async () => {
@@ -175,7 +174,7 @@ test('src/contracts/editor/runtime-machine.spec.ts reports escaped effect invoca
   }
 })
 
-test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear events', async () => {
+test('src/domain/editor/runtime-machine.spec.ts forwards selection clear events', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -183,10 +182,10 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear even
   }
 
   function waitForState(
-    actor: EditorRuntimeActor,
+    actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
-    const current = getEditorRuntimeState(actor)
+    const current = actor.getState()
 
     if (predicate(current)) {
       return Promise.resolve(current)
@@ -198,7 +197,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear even
         reject(new Error('Timed out waiting for editor runtime state.'))
       }, 2_000)
       const subscription = actor.subscribe(() => {
-        const state = getEditorRuntimeState(actor)
+        const state = actor.getState()
 
         if (!predicate(state)) {
           return
@@ -229,20 +228,20 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear even
       throw new Error('Feature commit is not used by this test.')
     },
   }
-  const actor = createEditorRuntimeActor(runtime)
+  const actor = createEditorEventLoop(runtime)
 
   actor.start()
 
   try {
     await waitForState(actor, (state) => state.document.revisionId !== null)
 
-    actor.send({
+    actor.dispatch({
       type: 'viewport.selectionRequested',
       target: { kind: 'construction', constructionId: 'construction_plane-xy' },
     })
     await waitForState(actor, (state) => state.selection.length === 1)
 
-    actor.send({ type: 'selection.cleared' })
+    actor.dispatch({ type: 'selection.cleared' })
     const cleared = await waitForState(actor, (state) => state.selection.length === 0)
 
     assert(cleared.hoverTarget === null, 'Runtime should forward selection clear events to the editor reducer.')
@@ -251,7 +250,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards selection clear even
   }
 })
 
-test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load events', async () => {
+test('src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load events', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -259,10 +258,10 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load
   }
 
   function waitForState(
-    actor: EditorRuntimeActor,
+    actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
-    const current = getEditorRuntimeState(actor)
+    const current = actor.getState()
 
     if (predicate(current)) {
       return Promise.resolve(current)
@@ -274,7 +273,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load
         reject(new Error('Timed out waiting for editor runtime state.'))
       }, 2_000)
       const subscription = actor.subscribe(() => {
-        const state = getEditorRuntimeState(actor)
+        const state = actor.getState()
 
         if (!predicate(state)) {
           return
@@ -305,7 +304,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load
       throw new Error('Feature commit is not used by this test.')
     },
   }
-  const actor = createEditorRuntimeActor(runtime)
+  const actor = createEditorEventLoop(runtime)
 
   actor.start()
 
@@ -316,7 +315,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load
     importedSnapshot.revisionId = 'rev_imported'
     importedSnapshot.document.revisionId = 'rev_imported'
 
-    actor.send({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
+    actor.dispatch({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
     const loaded = await waitForState(actor, (state) => state.document.revisionId === 'rev_imported')
 
     assert(loaded.snapshot?.revisionId === 'rev_imported', 'Runtime should forward direct snapshot loads to the editor reducer.')
@@ -326,7 +325,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards direct snapshot load
   }
 })
 
-test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch selection events', async () => {
+test('src/domain/editor/runtime-machine.spec.ts forwards connected sketch selection events', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -334,10 +333,10 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch sel
   }
 
   function waitForState(
-    actor: EditorRuntimeActor,
+    actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
-    const current = getEditorRuntimeState(actor)
+    const current = actor.getState()
 
     if (predicate(current)) {
       return Promise.resolve(current)
@@ -349,7 +348,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch sel
         reject(new Error('Timed out waiting for editor runtime state.'))
       }, 2_000)
       const subscription = actor.subscribe(() => {
-        const state = getEditorRuntimeState(actor)
+        const state = actor.getState()
 
         if (!predicate(state)) {
           return
@@ -380,23 +379,23 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch sel
       throw new Error('Feature commit is not used by this test.')
     },
   }
-  const actor = createEditorRuntimeActor(runtime)
+  const actor = createEditorEventLoop(runtime)
 
   actor.start()
 
   try {
     await waitForState(actor, (state) => state.document.revisionId !== null)
 
-    actor.send({ type: 'tool.activated', toolId: 'sketch' })
-    actor.send({
+    actor.dispatch({ type: 'tool.activated', toolId: 'sketch' })
+    actor.dispatch({
       type: 'viewport.selectionRequested',
       target: { kind: 'construction', constructionId: 'construction_plane-xy' },
     })
     await waitForState(actor, (state) => state.kind === 'editingSketch')
 
-    actor.send({ type: 'tool.activated', toolId: 'rectangle' })
-    actor.send({ type: 'sketch.pointerReleased', point: [0, 0] })
-    actor.send({ type: 'sketch.pointerReleased', point: [4, 3] })
+    actor.dispatch({ type: 'tool.activated', toolId: 'rectangle' })
+    actor.dispatch({ type: 'sketch.pointerReleased', point: [0, 0] })
+    actor.dispatch({ type: 'sketch.pointerReleased', point: [4, 3] })
 
     const rectangleState = await waitForState(
       actor,
@@ -406,7 +405,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch sel
     const rectangleEdge = rectangleState.session.definition.entities[0]?.target
     assert(rectangleEdge?.kind === 'sketchEntity', 'Expected a selectable rectangle edge.')
 
-    actor.send({ type: 'sketch.connectedSelectionRequested', target: rectangleEdge })
+    actor.dispatch({ type: 'sketch.connectedSelectionRequested', target: rectangleEdge })
     const connected = await waitForState(actor, (state) => state.selection.length === 4)
 
     assert(
@@ -418,7 +417,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards connected sketch sel
   }
 })
 
-test('src/contracts/editor/runtime-machine.spec.ts forwards active section offset updates', async () => {
+test('src/domain/editor/runtime-machine.spec.ts forwards active section offset updates', async () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -426,10 +425,10 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards active section offse
   }
 
   function waitForState(
-    actor: EditorRuntimeActor,
+    actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
-    const current = getEditorRuntimeState(actor)
+    const current = actor.getState()
 
     if (predicate(current)) {
       return Promise.resolve(current)
@@ -441,7 +440,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards active section offse
         reject(new Error('Timed out waiting for editor runtime state.'))
       }, 2_000)
       const subscription = actor.subscribe(() => {
-        const state = getEditorRuntimeState(actor)
+        const state = actor.getState()
 
         if (!predicate(state)) {
           return
@@ -472,15 +471,15 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards active section offse
       throw new Error('Feature commit is not used by this test.')
     },
   }
-  const actor = createEditorRuntimeActor(runtime)
+  const actor = createEditorEventLoop(runtime)
 
   actor.start()
 
   try {
     await waitForState(actor, (state) => state.document.revisionId !== null)
 
-    actor.send({ type: 'tool.activated', toolId: 'sectionView' })
-    actor.send({
+    actor.dispatch({ type: 'tool.activated', toolId: 'sectionView' })
+    actor.dispatch({
       type: 'viewport.selectionRequested',
       target: { kind: 'construction', constructionId: 'construction_plane-xy' },
       cameraPosition: [0, 0, 20],
@@ -489,7 +488,7 @@ test('src/contracts/editor/runtime-machine.spec.ts forwards active section offse
     const selected = await waitForState(actor, (state) => state.kind === 'inspectingSection')
     assert(selected.kind === 'inspectingSection', 'Expected an active section after picking a valid section seed.')
 
-    actor.send({
+    actor.dispatch({
       type: 'section.offsetUpdated',
       commandSessionId: selected.command.commandSessionId,
       offset: 6,

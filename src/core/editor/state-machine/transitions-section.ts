@@ -4,7 +4,7 @@ import type {
   EditorTransitionResult,
   EditorState,
 } from './types'
-import { toIdleState } from './helpers'
+import { toIdleState } from './state-creators'
 
 export function handleSectionOffsetUpdated(
   state: EditorState,
