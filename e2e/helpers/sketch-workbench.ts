@@ -39,6 +39,7 @@ export class SketchWorkbenchHarness {
 
   async openPreservingStorage(path = '/') {
     await this.page.goto(path)
+    await this.waitForCadStateReady()
     await expect.poll(() => this.readMachineLabel(), { timeout: 30_000 }).not.toBe('')
     await expect.poll(() => this.revisionLabel(), { timeout: 30_000 }).not.toBe('loading')
   }
@@ -120,19 +121,23 @@ export class SketchWorkbenchHarness {
   }
 
   async currentHoverTarget() {
-    return this.page.evaluate(() => window.__cadTestState?.hoverTarget ?? 'none')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.hoverTarget ?? 'none')
   }
 
   async currentEditorSelection() {
-    return this.page.evaluate(() => window.__cadTestState?.selectionTargets ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.selectionTargets ?? '')
   }
 
   async currentSketchSession() {
-    return this.page.evaluate(() => window.__cadTestState?.sketchSession ?? 'none')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.sketchSession ?? 'none')
   }
 
   async currentMachineSelectionCount() {
-    return this.page.evaluate(() => window.__cadTestState?.selectionCount ?? Number.NaN)
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.selectionCount ?? Number.NaN)
+  }
+
+  async currentPhase() {
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.phase ?? '')
   }
 
   async clearHoverByLeavingViewport() {
@@ -164,7 +169,7 @@ export class SketchWorkbenchHarness {
   }
 
   async waitForAnimationFrames(count = 2) {
-    await this.page.evaluate((frames) => new Promise<void>((resolve) => {
+    await this.evaluateWithNavigationRetry((frames) => new Promise<void>((resolve) => {
       let remaining = frames
 
       const advance = () => {
@@ -183,30 +188,80 @@ export class SketchWorkbenchHarness {
   }
 
   async expectSketchPlane(label: string) {
-    await expect.poll(() => this.page.evaluate(() => window.__cadTestState?.sketchPlane ?? 'none')).toBe(label)
+    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadTestState?.sketchPlane ?? 'none')).toBe(label)
   }
 
   async expectSketchSessionActive() {
     await this.expectMachine('editingSketch')
-    await expect.poll(() => this.page.evaluate(() => window.__cadTestState?.sketchPlane ?? 'none')).not.toBe('none')
+    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadTestState?.sketchPlane ?? 'none')).not.toBe('none')
   }
 
   async expectMachine(kind: string, timeout = 10_000) {
     await expect.poll(() => this.readMachineLabel(), { timeout }).toContain(kind)
   }
 
+  protected async evaluateWithNavigationRetry<Result>(pageFunction: () => Result): Promise<Result>
+  protected async evaluateWithNavigationRetry<Arg, Result>(
+    pageFunction: (arg: Arg) => Result,
+    arg: Arg,
+  ): Promise<Result>
+  protected async evaluateWithNavigationRetry<Arg, Result>(
+    pageFunction: (() => Result) | ((arg: Arg) => Result),
+    arg?: Arg,
+  ): Promise<Result> {
+    let lastError: unknown
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        return await this.page.evaluate(pageFunction as (arg: Arg) => Result, arg as Arg)
+      } catch (error) {
+        lastError = error
+
+        if (!isNavigationContextError(error) || attempt === 4) {
+          throw error
+        }
+
+        await this.page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined)
+        await this.page.waitForTimeout(50 * (attempt + 1))
+      }
+    }
+
+    throw lastError
+  }
+
+  private async waitForCadStateReady() {
+    await this.page.waitForLoadState('domcontentloaded')
+    await this.page.waitForFunction(
+      () => Boolean(window.__cadTestState?.machineState || window.__cadTestState?.revision),
+      undefined,
+      { timeout: 30_000 },
+    )
+  }
+
   private async revisionLabel() {
-    return this.page.evaluate(() => window.__cadTestState?.revision ?? 'loading')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.revision ?? 'loading')
   }
 
   private async readMachineLabel() {
-    return this.page.evaluate(() => window.__cadTestState?.machineState ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.machineState ?? '')
   }
 
   private async currentPath() {
-    return this.page.evaluate(() => `${window.location.pathname}${window.location.search}${window.location.hash}`)
+    return this.evaluateWithNavigationRetry(() => `${window.location.pathname}${window.location.search}${window.location.hash}`)
   }
 
+}
+
+function isNavigationContextError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  return [
+    'Execution context was destroyed',
+    'Cannot find context with specified id',
+    'Frame was detached',
+  ].some((message) => error.message.includes(message))
 }
 
 function withDisabledRepository(path: string) {

@@ -1,68 +1,268 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { test } from 'bun:test'
+import { beforeEach, mock, test } from 'bun:test'
 
-test('src/app/local-file-sync-behavior.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
+import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
+
+import {
+  createHookTestHarness,
+  flushMicrotasks,
+} from './workbench/controllers/controller-test-harness'
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message)
+  }
+}
+
+const hookHarness = createHookTestHarness()
+const actualReactModule = await import('react')
+mock.module('react', () => hookHarness.reactModule)
+
+const { useWorkbenchLocalFileSync } = await import('./workbench/controllers/use-workbench-local-file-sync')
+mock.module('react', () => actualReactModule)
+
+beforeEach(() => {
+  hookHarness.reset()
+})
+
+function makeStatus(
+  status: Omit<DocumentSyncWriteStatus, 'documentId' | 'sequence'>,
+): DocumentSyncWriteStatus {
+  return {
+    documentId: 'document_local_sync',
+    sequence: 1,
+    ...status,
+  } as DocumentSyncWriteStatus
+}
+
+test('useWorkbenchLocalFileSync restores a binding on mount and reports restore failures', async () => {
+  const infos: string[] = []
+  const failures: unknown[] = []
+
+  let controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: {
+        async restoreLocalFileBinding() {
+          return { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
+        },
+        subscribeToLocalFileSyncStatus() {
+          return () => undefined
+        },
+      },
+      reportDocumentFileActionFailure(source, message, error) {
+        failures.push({ error, message, source })
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Successful restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo(message) {
+        infos.push(message)
+      },
+    }),
+  )
+
+  await hookHarness.flushEffects()
+  await flushMicrotasks()
+
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: {
+        async restoreLocalFileBinding() {
+          return { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
+        },
+        subscribeToLocalFileSyncStatus() {
+          return () => undefined
+        },
+      },
+      reportDocumentFileActionFailure(source, message, error) {
+        failures.push({ error, message, source })
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Successful restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo(message) {
+        infos.push(message)
+      },
+    }),
+  )
+
+  assert(
+    JSON.stringify(infos) === JSON.stringify(['Restored local file sync for assembly.cadara.']),
+    'Restoring a saved local-file binding should surface a user-facing confirmation on mount.',
+  )
+  assert(controller.localFileSyncEnabled === false, 'A one-time restore message should not toggle sync-enabled state by itself.')
+  assert(failures.length === 0, 'Successful restore should not report a document-file action failure.')
+
+  const restoreFailure = new Error('Local file binding store is unavailable.')
+  hookHarness.reset()
+  hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: {
+        async restoreLocalFileBinding() {
+          throw restoreFailure
+        },
+        subscribeToLocalFileSyncStatus() {
+          return () => undefined
+        },
+      },
+      reportDocumentFileActionFailure(source, message, error) {
+        failures.push({ error, message, source })
+      },
+      showWorkbenchError() {
+        throw new Error('Restore failures should route through the shared document-file failure reporter.')
+      },
+      showWorkbenchInfo() {
+        throw new Error('Restore failures should not show a success message.')
+      },
+    }),
+  )
+
+  await hookHarness.flushEffects()
+  await flushMicrotasks()
+
+  assert(
+    JSON.stringify(failures) === JSON.stringify([{
+      error: restoreFailure,
+      message: 'Local file sync restore failed.',
+      source: 'workbench.file.restoreLocalBinding',
+    }]),
+    'Restore failures should be forwarded through the shared document-file failure reporting seam.',
+  )
+})
+
+test('useWorkbenchLocalFileSync maps worker status updates to visible messages and enabled state', async () => {
+  const infos: string[] = []
+  const errors: string[] = []
+  let statusListener: ((status: DocumentSyncWriteStatus) => void) | null = null
+
+  const modelingService = {
+    async restoreLocalFileBinding() {
+      return null
+    },
+    subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void) {
+      statusListener = listener
+      return () => {
+        statusListener = null
+      }
+    },
   }
 
-  const workbenchSource = readFileSync(join(process.cwd(), 'src/app/workbench/cad-workbench.tsx'), 'utf8')
-  const fileActionsSource = readFileSync(join(process.cwd(), 'src/app/workbench/document/workbench-document-actions.ts'), 'utf8')
-  const localSyncSource = readFileSync(join(process.cwd(), 'src/app/workbench/controllers/use-workbench-local-file-sync.ts'), 'utf8')
-  const workerRuntimeSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync-worker-runtime.ts'), 'utf8')
+  let controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Live status updates should not use the restore failure seam.')
+      },
+      showWorkbenchError(message) {
+        errors.push(message)
+      },
+      showWorkbenchInfo(message) {
+        infos.push(message)
+      },
+    }),
+  )
+
+  await hookHarness.flushEffects()
+  assert(statusListener instanceof Function, 'The controller should subscribe to local-file sync status updates on mount.')
+
+  statusListener?.(makeStatus({
+    kind: 'binding-restored',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Live status updates should not use the restore failure seam.')
+      },
+      showWorkbenchError(message) {
+        errors.push(message)
+      },
+      showWorkbenchInfo(message) {
+        infos.push(message)
+      },
+    }),
+  )
+  assert(controller.localFileSyncEnabled, 'Binding restoration should mark local-file sync as enabled.')
+
+  statusListener?.(makeStatus({
+    kind: 'syncing',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  statusListener?.(makeStatus({
+    kind: 'synced',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  statusListener?.(makeStatus({
+    kind: 'persistent-binding-unavailable',
+    message: 'Persistent local bindings are unavailable in this browser.',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Live status updates should not use the restore failure seam.')
+      },
+      showWorkbenchError(message) {
+        errors.push(message)
+      },
+      showWorkbenchInfo(message) {
+        infos.push(message)
+      },
+    }),
+  )
 
   assert(
-    fileActionsSource.includes('Local file sync requires the File System Access API.')
-      && fileActionsSource.includes('brave://flags/#file-system-access-api')
-      && fileActionsSource.includes('Open local file failed. Select a valid cadara JSON document.')
-      && fileActionsSource.includes('ZIP-backed .cadara packages are no longer supported')
-      && fileActionsSource.includes('Local file write permission was denied.')
-      && fileActionsSource.includes('Local file sync target could not be bound.')
-      && localSyncSource.includes('persistent-binding-unavailable'),
-    'Workbench should surface visible local sync unavailable, invalid file, permission, bind, and persistence-unavailable states through the extracted controllers.',
+    JSON.stringify(infos) === JSON.stringify([
+      'Restored local file sync for assembly.cadara.',
+      'Syncing assembly.cadara.',
+      'Synced assembly.cadara.',
+      'Persistent local bindings are unavailable in this browser.',
+    ]),
+    'Enabled sync states should surface the expected user-facing information messages.',
   )
-  assert(
-    workbenchSource.includes('showBrowserStorageWarning')
-      && workbenchSource.includes('TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.'),
-    'Workbench should keep the browser-storage warning wired to local file sync status with a cloud-save TODO.',
+  assert(controller.localFileSyncEnabled, 'Persistent-binding warnings should still keep sync marked as enabled.')
+
+  statusListener?.(makeStatus({
+    kind: 'permission-required',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Live status updates should not use the restore failure seam.')
+      },
+      showWorkbenchError(message) {
+        errors.push(message)
+      },
+      showWorkbenchInfo(message) {
+        infos.push(message)
+      },
+    }),
   )
+  assert(!controller.localFileSyncEnabled, 'Permission-required status should disable local-file sync until access is granted.')
+
+  statusListener?.(makeStatus({
+    kind: 'permission-denied',
+    message: 'Local file write permission was denied.',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  statusListener?.(makeStatus({
+    kind: 'failed',
+    message: 'Local file sync target could not be bound.',
+    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+  statusListener?.(makeStatus({
+    kind: 'idle',
+  }))
+
   assert(
-    !fileActionsSource.slice(
-      fileActionsSource.indexOf('export async function importWorkbenchDocumentFile'),
-      fileActionsSource.indexOf('export async function openWorkbenchLocalFile'),
-    ).includes('bindLocalFile')
-      && !fileActionsSource.slice(
-        fileActionsSource.indexOf('export async function exportWorkbenchDocument'),
-      ).includes('bindLocalFile'),
-    'Import and Export should remain one-shot actions that do not create or replace local filesystem sync bindings.',
-  )
-  assert(
-    fileActionsSource.includes('replaceAfterDocumentFileAction')
-      && workbenchSource.includes('replaceAfterDocumentFileAction'),
-    'Whole-document file flows should route through the explicit replacement handoff after file actions succeed.',
-  )
-  assert(
-    workerRuntimeSource.includes('writeTextToLocalFileHandle')
-      && workerRuntimeSource.includes('createLocalAuthoredDocumentPayload')
-      && !workerRuntimeSource.includes('downloadDocumentExportResult')
-      && !workerRuntimeSource.includes('showSaveFilePicker')
-      && !workerRuntimeSource.includes('showOpenFilePicker'),
-    'Worker autosync should write the retained file handle directly without download/export or repeated picker code paths.',
-  )
-  assert(
-    workerRuntimeSource.includes("'permission-denied'")
-      && workerRuntimeSource.includes("'failed'")
-      && workerRuntimeSource.includes('pendingWrites'),
-    'Worker autosync should expose failed/permission states and keep coalescing pending writes explicitly.',
-  )
-  assert(
-    localSyncSource.includes('subscribeToLocalFileSyncStatus')
-      && localSyncSource.includes('restoreLocalFileBinding')
-      && localSyncSource.includes('showWorkbenchInfo')
-      && localSyncSource.includes('showWorkbenchError'),
-    'Workbench local sync controller should remain responsible for subscribing to sync state and surfacing status feedback.',
+    JSON.stringify(errors) === JSON.stringify([
+      'Local file sync needs write permission for assembly.cadara.',
+      'Local file write permission was denied.',
+      'Local file sync target could not be bound.',
+    ]),
+    'Permission and failure statuses should map to the expected workbench error messages.',
   )
 })

@@ -12,6 +12,7 @@ import { createMemoryDocumentRepository } from '@/domain/modeling/memory-documen
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/infrastructure/workers/document-sync-worker-client'
 import { createDocumentSyncWorkerMessageHandler } from '@/infrastructure/workers/document-sync-worker-runtime'
+import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
 test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () => {
@@ -143,6 +144,13 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
     assert(posted[1]?.kind === 'subscribed', 'Worker shell should acknowledge repository subscriptions.')
 
     await handle({
+      kind: 'unsubscribe',
+      requestId: 'request_document_sync_unsubscribe' as DocumentSyncWorkerRequest['requestId'],
+      subscriptionId: 'subscription_document_sync_test',
+    })
+    assert(posted[2]?.kind === 'unsubscribed', 'Worker shell should acknowledge repository unsubscriptions.')
+
+    await handle({
       kind: 'mutate',
       requestId: 'request_document_sync_mutate' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
@@ -154,7 +162,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         })),
       },
     })
-    assert(posted.some((message) => message.kind === 'documentChanged'), 'Worker shell should forward repository change events.')
+    assert(!posted.some((message) => message.kind === 'documentChanged'), 'Unsubscribed listeners should not receive later repository change events.')
     assert(posted.some((message) => message.kind === 'mutated'), 'Worker shell should respond to repository mutations.')
 
     await handle({
@@ -192,6 +200,112 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
     assert(
       posted.some((message) => message.kind === 'geometryAssetRecord' && message.bytes?.byteLength === asset.bytes.byteLength),
       'Worker shell should proxy verified embedded asset bytes from the repository.',
+    )
+  }
+
+  async function testWorkerRuntimeStorageResetAndBindingFailures() {
+    const seed = await createSeedAuthoredModelDocument()
+    const repository = createMemoryDocumentRepository()
+    const urlStore = new MemoryDocumentRepositoryUrlStore()
+    const failingBindingStore = new FailingLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, repositoryUrlStore: urlStore, bindingStore: failingBindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle({
+      kind: 'load',
+      requestId: 'request_document_sync_storage_load' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+      storageKey: 'automerge:stored-url',
+      seedDocument: seed,
+    })
+    assert(
+      urlStore.values.get(seed.documentId) === 'automerge:stored-url'
+        && posted[0]?.kind === 'loaded',
+      'Load should persist the provided repository storage key before delegating to the repository.',
+    )
+
+    await handle({
+      kind: 'getWriteStatus',
+      requestId: 'request_document_sync_idle_status' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+    })
+    assert(
+      posted.some((message) => message.kind === 'writeStatus' && message.status.kind === 'idle' && message.status.sequence === 0),
+      'Write-status requests should default to an idle status before any sync activity has occurred.',
+    )
+
+    await handle({
+      kind: 'getGeometryAssetBytes',
+      requestId: 'request_document_sync_asset_bytes_missing' as DocumentSyncWorkerRequest['requestId'],
+      hash: 'sha256:missing' as DocumentSyncWorkerRequest['kind'] extends never ? never : never,
+    })
+    assert(
+      posted.some((message) => message.kind === 'geometryAssetBytes' && message.bytes === null),
+      'Repositories without geometry-asset support should return null asset bytes cleanly.',
+    )
+
+    await handle({
+      kind: 'restoreBinding',
+      requestId: 'request_document_sync_restore_failure' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+    })
+    assert(
+      posted.some((message) => message.kind === 'failure' && message.error.message === 'Persistent local file binding storage is unavailable.'),
+      'Unsupported persistent binding storage should surface a structured worker failure during binding restore.',
+    )
+
+    const writableHandle = createWritableHandle({
+      name: 'persist-unavailable.cadara',
+      writes: [],
+      permission: 'granted',
+    })
+    await handle({
+      kind: 'bindFileHandle',
+      requestId: 'request_document_sync_bind_persist_unavailable' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+      handle: writableHandle.handle,
+      metadata: {
+        documentId: seed.documentId,
+        fileName: 'persist-unavailable.cadara',
+        storedAt: '2026-04-23T00:00:00.000Z',
+      },
+    })
+    assert(
+      posted.some((message) => message.kind === 'fileHandleBound')
+        && posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'persistent-binding-unavailable')
+        && posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'synced'),
+      'Unsupported binding persistence should still bind the handle, publish persistence-unavailable status, and keep sync active.',
+    )
+
+    failingBindingStore.failSave = true
+    await handle({
+      kind: 'bindFileHandle',
+      requestId: 'request_document_sync_bind_failure' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+      handle: writableHandle.handle,
+      metadata: {
+        documentId: seed.documentId,
+        fileName: 'persist-failure.cadara',
+        storedAt: '2026-04-23T00:01:00.000Z',
+      },
+    })
+    assert(
+      posted.some((message) => message.kind === 'failure' && message.error.message === 'Local file binding could not be persisted.'),
+      'Persisted binding failures should surface a structured worker failure.',
+    )
+
+    await handle({
+      kind: 'reset',
+      requestId: 'request_document_sync_storage_reset' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+    })
+    assert(
+      urlStore.deleted.includes(seed.documentId)
+        && posted.some((message) => message.kind === 'reset' && message.status.kind === 'reset'),
+      'Reset should clear the stored repository url and return the repository reset status.',
     )
   }
 
@@ -321,6 +435,21 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       documentId: seed.documentId,
     })
     assert(
+      posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'binding-restored')
+        && posted.some((message) => message.kind === 'bindingRestored' && message.record?.metadata.fileName === 'failed.cadara'),
+      'Restoring a persisted binding should publish binding-restored status before returning the restored record.',
+    )
+
+    await handle({
+      kind: 'getWriteStatus',
+      requestId: 'request_document_sync_file_status_after_restore' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+    })
+    assert(
+      posted.some((message) => message.kind === 'writeStatus' && message.status.kind === 'binding-restored'),
+      'The latest write status should report the restored binding after a successful binding restore.',
+    )
+    assert(
       posted.some((message) => message.kind === 'bindingRestored' && message.record?.metadata.fileName === 'failed.cadara'),
       'Persisted local file bindings should restore through the worker binding store.',
     )
@@ -330,6 +459,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
   await testSubscriptionDisposalAndStaleWriteStatusFiltering()
   await testWorkerRuntimeShell()
   await testWorkerRuntimeFileBindingAutosyncAndPermissionFailures()
+  await testWorkerRuntimeStorageResetAndBindingFailures()
 })
 
 class FakeDocumentSyncWorker implements DocumentSyncWorkerLike {
@@ -379,6 +509,46 @@ class MemoryLocalFileBindingStore implements LocalFileBindingStore {
   async clear(documentId: LocalFileBindingRecord['metadata']['documentId']) {
     this.saved = this.saved.filter((record) => record.metadata.documentId !== documentId)
     return { ok: true as const, value: null }
+  }
+}
+
+class FailingLocalFileBindingStore implements LocalFileBindingStore {
+  failSave = false
+
+  isSupported() {
+    return true
+  }
+
+  async load() {
+    return { ok: false as const, reason: 'unsupported-storage' as const }
+  }
+
+  async save(_record: LocalFileBindingRecord) {
+    return this.failSave
+      ? { ok: false as const, reason: 'failed' as const }
+      : { ok: false as const, reason: 'unsupported-storage' as const }
+  }
+
+  async clear() {
+    return { ok: true as const, value: null }
+  }
+}
+
+class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
+  values = new Map<string, string>()
+  deleted: string[] = []
+
+  get(documentId: string) {
+    return this.values.get(documentId) ?? null
+  }
+
+  set(documentId: string, url: string) {
+    this.values.set(documentId, url)
+  }
+
+  delete(documentId: string) {
+    this.deleted.push(documentId)
+    this.values.delete(documentId)
   }
 }
 

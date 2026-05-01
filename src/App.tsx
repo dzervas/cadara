@@ -11,9 +11,7 @@ import {
 	getBrowserOccKernelAdapter,
 	startBrowserOccWarmup,
 } from "@/infrastructure/occ/browser-kernel-runtime";
-import {
-	OCC_KERNEL_DOCUMENT_ID,
-} from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { EditorProvider } from "@/hooks/editor-provider";
 import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";

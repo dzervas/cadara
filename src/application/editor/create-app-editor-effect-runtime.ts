@@ -13,6 +13,13 @@ import {
 } from '@/domain/reference-image/import-flow'
 import { showOpenImportFilePicker } from '@/lib/import-file-picker'
 
+export interface AppEditorEffectRuntimeDependencies {
+  pickReferenceImagePayload?: () => Promise<ReferenceImagePayload | null>
+  runSketchImageImportFlow?: typeof runSketchImageImportFlow
+  openSketchSessionFromSelection?: typeof openSketchSessionFromSelection
+  buildSelectionTargetCatalog?: typeof buildSelectionTargetCatalog
+}
+
 async function pickReferenceImagePayload(): Promise<ReferenceImagePayload | null> {
   const pickerResult = await showOpenImportFilePicker({
     acceptedFileTypes: supportedReferenceImageFileTypes,
@@ -32,13 +39,14 @@ async function pickReferenceImagePayload(): Promise<ReferenceImagePayload | null
 async function runSketchSpecialModeAppEffect(input: {
   effectId: string
   kind: string
+  pickReferenceImagePayload: () => Promise<ReferenceImagePayload | null>
 }): Promise<{
   effectId: string
   payload: Record<string, unknown>
 }> {
   switch (input.kind) {
     case 'reference-image-replace-image': {
-      const image = await pickReferenceImagePayload()
+      const image = await input.pickReferenceImagePayload()
       return {
         effectId: input.effectId,
         payload: image ? { image } : {},
@@ -51,8 +59,15 @@ async function runSketchSpecialModeAppEffect(input: {
 
 export function createAppEditorEffectRuntime(
   modelingService: ModelingService,
+  dependencies: AppEditorEffectRuntimeDependencies = {},
 ): EditorEffectRuntime {
   const baseRuntime = createModelingServiceEditorEffectRuntime(modelingService)
+  const pickReferenceImagePayloadImpl = dependencies.pickReferenceImagePayload ?? pickReferenceImagePayload
+  const runSketchImageImportFlowImpl = dependencies.runSketchImageImportFlow ?? runSketchImageImportFlow
+  const openSketchSessionFromSelectionImpl =
+    dependencies.openSketchSessionFromSelection ?? openSketchSessionFromSelection
+  const buildSelectionTargetCatalogImpl =
+    dependencies.buildSelectionTargetCatalog ?? buildSelectionTargetCatalog
 
   return {
     ...baseRuntime,
@@ -60,7 +75,7 @@ export function createAppEditorEffectRuntime(
       input: Parameters<NonNullable<EditorEffectRuntime['importSketchReferenceImages']>>[0],
     ) {
       const snapshot = await modelingService.getCurrentDocumentSnapshot()
-      const result = await runSketchImageImportFlow({
+      const result = await runSketchImageImportFlowImpl({
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,
         baseRepositoryHeads: input.baseRepositoryHeads,
@@ -81,7 +96,7 @@ export function createAppEditorEffectRuntime(
         throw result.error ?? new Error(result.message)
       }
 
-      const session = openSketchSessionFromSelection([{
+      const session = openSketchSessionFromSelectionImpl([{
         kind: 'sketch',
         sketchId: result.sketchId,
       }], result.snapshot)
@@ -93,7 +108,7 @@ export function createAppEditorEffectRuntime(
         status: 'committed',
         revisionId: result.snapshot.document.revisionId,
         snapshot: result.snapshot,
-        selectionCatalog: buildSelectionTargetCatalog(result.snapshot),
+        selectionCatalog: buildSelectionTargetCatalogImpl(result.snapshot),
         session,
         importedCount: result.payloads.length,
       }
@@ -104,6 +119,7 @@ export function createAppEditorEffectRuntime(
       return runSketchSpecialModeAppEffect({
         effectId: input.effectId,
         kind: input.kind,
+        pickReferenceImagePayload: pickReferenceImagePayloadImpl,
       })
     },
   }

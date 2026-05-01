@@ -9,6 +9,7 @@ import {
   createImportSession,
   resolveLocalFileImportSource,
 } from '@/domain/import/orchestrator'
+import type { ImportProviderRegistry } from '@/domain/import/provider-registry'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
@@ -37,6 +38,7 @@ function promptForImportProvider(
 interface WorkbenchPartImportControllerInput {
   activeEditSession: EditorViewState['activeEditSession']
   activeImportSession: EditorViewState['activeImportSession']
+  deps?: Partial<WorkbenchPartImportDependencies>
   dispatch: (event: EditorEvent) => void
   modelingService: ModelingService
   showWorkbenchError: (message: string) => void
@@ -44,17 +46,35 @@ interface WorkbenchPartImportControllerInput {
   snapshot: DocumentSnapshot | null
 }
 
+interface WorkbenchPartImportDependencies {
+  createCapabilities: typeof createImportCapabilities
+  createSession: typeof createImportSession
+  documentOwner: Pick<ReturnType<typeof useWorkbenchDocumentOwner>, 'commitPartImport'>
+  importProviders: ImportProviderRegistry
+  openImportFilePicker: typeof showOpenImportFilePicker
+  promptForProvider: typeof promptForImportProvider
+  resolveImportSource: typeof resolveLocalFileImportSource
+}
+
 export function useWorkbenchPartImport({
   activeEditSession,
   activeImportSession,
+  deps,
   dispatch,
   modelingService,
   showWorkbenchError,
   showWorkbenchInfo,
   snapshot,
 }: WorkbenchPartImportControllerInput) {
-  const documentOwner = useWorkbenchDocumentOwner()
-  const { importProviders } = useRuntimeExtensionRegistry()
+  const hookDocumentOwner = useWorkbenchDocumentOwner()
+  const runtimeExtensionRegistry = useRuntimeExtensionRegistry()
+  const documentOwner = deps?.documentOwner ?? hookDocumentOwner
+  const importProviders = deps?.importProviders ?? runtimeExtensionRegistry.importProviders
+  const openImportFilePicker = deps?.openImportFilePicker ?? showOpenImportFilePicker
+  const resolveImportSource = deps?.resolveImportSource ?? resolveLocalFileImportSource
+  const createCapabilities = deps?.createCapabilities ?? createImportCapabilities
+  const createSession = deps?.createSession ?? createImportSession
+  const promptForProvider = deps?.promptForProvider ?? promptForImportProvider
 
   const commitImportSession = useCallback(async () => {
     if (!activeImportSession || !snapshot) {
@@ -115,7 +135,7 @@ export function useWorkbenchPartImport({
       return
     }
 
-    const pickerResult = await showOpenImportFilePicker({
+    const pickerResult = await openImportFilePicker({
       acceptedFileTypes,
     })
 
@@ -132,7 +152,7 @@ export function useWorkbenchPartImport({
       return
     }
 
-    const resolvedSource = await resolveLocalFileImportSource(file)
+    const resolvedSource = await resolveImportSource(file)
     const matchedProviders = importProviders.matchProviders(resolvedSource)
 
     if (matchedProviders.length === 0) {
@@ -142,23 +162,36 @@ export function useWorkbenchPartImport({
 
     const provider = matchedProviders.length === 1
       ? matchedProviders[0]!
-      : promptForImportProvider(matchedProviders)
+      : promptForProvider(matchedProviders)
 
     if (!provider) {
       return
     }
 
     try {
-      const session = await createImportSession({
+      const session = await createSession({
         provider,
         source: resolvedSource,
-        capabilities: createImportCapabilities(modelingService, snapshot),
+        capabilities: createCapabilities(modelingService, snapshot),
       })
       dispatch({ type: 'import.fileSelected', session })
     } catch (error: unknown) {
       showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
     }
-  }, [activeEditSession, activeImportSession, dispatch, importProviders, modelingService, showWorkbenchError, snapshot])
+  }, [
+    activeEditSession,
+    activeImportSession,
+    createCapabilities,
+    createSession,
+    dispatch,
+    importProviders,
+    modelingService,
+    openImportFilePicker,
+    promptForProvider,
+    resolveImportSource,
+    showWorkbenchError,
+    snapshot,
+  ])
 
   return {
     commitImportSession,

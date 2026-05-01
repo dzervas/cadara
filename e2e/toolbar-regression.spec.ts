@@ -10,6 +10,16 @@ function getShortcutProfileLoadCount(page: Page) {
   return page.evaluate(() => {
     const trackedWindow = window as ShortcutLoadWindow
     return trackedWindow.__shortcutProfileLoadCount ?? 0
+  }).catch(async (error) => {
+    if (!isNavigationContextError(error)) {
+      throw error
+    }
+
+    await page.waitForLoadState('domcontentloaded')
+    return page.evaluate(() => {
+      const trackedWindow = window as ShortcutLoadWindow
+      return trackedWindow.__shortcutProfileLoadCount ?? 0
+    })
   })
 }
 
@@ -57,7 +67,7 @@ test('pattern dropdown stays responsive without restarting shortcut profile load
       await page.keyboard.press('Escape')
     }
 
-    await expect.poll(() => page.evaluate(() => document.readyState)).toBe('complete')
+    await page.waitForLoadState('load')
   }
 
   await expect(patternButton).toHaveAttribute('aria-pressed', 'true')
@@ -67,3 +77,15 @@ test('pattern dropdown stays responsive without restarting shortcut profile load
 
   expect(afterOpenLoadCount - beforeOpenLoadCount).toBeLessThanOrEqual(2)
 })
+
+function isNavigationContextError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  return [
+    'Execution context was destroyed',
+    'Cannot find context with specified id',
+    'Frame was detached',
+  ].some((message) => error.message.includes(message))
+}

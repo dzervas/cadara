@@ -41,16 +41,8 @@ test('importing a sketch reference image through the file chooser should add ske
     buffer: REFERENCE_IMAGE_BYTES,
   })
 
-  await expect.poll(
-    () => page.evaluate(() => ({
-      machineState: window.__cadTestState?.machineState ?? '',
-      phase: window.__cadTestState?.phase ?? '',
-    })),
-    { timeout: 30_000 },
-  ).toEqual({
-    machineState: 'editingSketch',
-    phase: 'editing',
-  })
+  await workbench.expectMachine('editingSketch', 30_000)
+  await expect.poll(() => workbench.currentPhase(), { timeout: 30_000 }).toBe('editing')
 
   await workbench.waitForAnimationFrames(6)
 

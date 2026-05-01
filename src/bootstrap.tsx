@@ -1,22 +1,22 @@
-import { StrictMode } from 'react'
-import { MantineProvider } from '@mantine/core'
-import { createRoot } from 'react-dom/client'
-import '@mantine/core/styles.css'
-import './index.css'
-import App from './App.tsx'
-import { startBrowserOccWarmup } from '@/infrastructure/occ/browser-kernel-runtime'
-import { workbenchCssVariablesResolver, workbenchTheme } from '@/theme/workbench-theme'
+import { StrictMode } from "react";
+import { MantineProvider } from "@mantine/core";
+import { createRoot } from "react-dom/client";
+import "@mantine/core/styles.css";
+import "./index.css";
+import App from "./App.tsx";
+import { startBrowserOccWarmup } from "@/infrastructure/occ/browser-kernel-runtime";
+import { workbenchCssVariablesResolver, workbenchTheme } from "@/theme/workbench-theme";
 
-startBrowserOccWarmup()
+startBrowserOccWarmup();
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <MantineProvider
-      theme={workbenchTheme}
-      defaultColorScheme="dark"
-      cssVariablesResolver={workbenchCssVariablesResolver}
-    >
-      <App />
-    </MantineProvider>
-  </StrictMode>,
-)
+createRoot(document.getElementById("root")!).render(
+	<StrictMode>
+		<MantineProvider
+			theme={workbenchTheme}
+			defaultColorScheme="dark"
+			cssVariablesResolver={workbenchCssVariablesResolver}
+		>
+			<App />
+		</MantineProvider>
+	</StrictMode>,
+);

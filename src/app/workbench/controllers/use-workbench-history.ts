@@ -33,6 +33,7 @@ type WorkbenchUndoEntry =
     }
 
 interface WorkbenchHistoryControllerInput {
+  deps?: Partial<WorkbenchHistoryDependencies>
   dispatch: (event: EditorEvent) => void
   errorReporter: ErrorReporter
   history: EditorHistoryAvailability
@@ -42,7 +43,13 @@ interface WorkbenchHistoryControllerInput {
   snapshot: DocumentSnapshot | null
 }
 
+interface WorkbenchHistoryDependencies {
+  documentOwner: Pick<ReturnType<typeof useWorkbenchDocumentOwner>, 'reorderDocumentHistory' | 'updateDocumentVariable'>
+  runWorkbenchAction: typeof runWorkbenchAction
+}
+
 export function useWorkbenchHistory({
+  deps,
   dispatch,
   errorReporter,
   history,
@@ -51,7 +58,9 @@ export function useWorkbenchHistory({
   sketchSession,
   snapshot,
 }: WorkbenchHistoryControllerInput) {
-  const documentOwner = useWorkbenchDocumentOwner()
+  const hookDocumentOwner = useWorkbenchDocumentOwner()
+  const documentOwner = deps?.documentOwner ?? hookDocumentOwner
+  const runAction = deps?.runWorkbenchAction ?? runWorkbenchAction
   const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
   const [redoStack, setRedoStack] = useState<WorkbenchUndoEntry[]>([])
   const [isUndoRedoRunning, setIsUndoRedoRunning] = useState(false)
@@ -107,7 +116,7 @@ export function useWorkbenchHistory({
       return false
     }
 
-    const result = await runWorkbenchAction({
+    const result = await runAction({
       operation: failureLabel,
       reporter: errorReporter,
       context: [
@@ -161,7 +170,7 @@ export function useWorkbenchHistory({
         return false
       }
 
-      const result = await runWorkbenchAction({
+      const result = await runAction({
         operation: failureLabel,
         reporter: errorReporter,
         context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
@@ -279,7 +288,7 @@ export function useWorkbenchHistory({
     }
 
     const operation = `Update ${variable.name || variable.variableId}`
-    void runWorkbenchAction({
+    void runAction({
       operation,
       reporter: errorReporter,
       context: [
@@ -333,7 +342,7 @@ export function useWorkbenchHistory({
 
     const beforeOrder = createDocumentHistoryOrder(snapshot.presentation.documentHistory)
     setIsDocumentHistoryReorderRunning(true)
-    void runWorkbenchAction({
+    void runAction({
       operation: 'Reorder document history',
       reporter: errorReporter,
       context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],

@@ -172,7 +172,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     if (expectedFeatureId) {
       await expect.poll(
-        () => this.page.evaluate(
+        () => this.evaluateWithNavigationRetry(
           (featureId) => window.__cadTestState?.featureIds.includes(featureId) ?? false,
           expectedFeatureId,
         ),
@@ -212,7 +212,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async selectReferenceThroughCurrentUi(targetId: string) {
-    const selected = await this.page.evaluate((id) => window.__cadSelectTarget?.(id) ?? false, targetId)
+    const selected = await this.evaluateWithNavigationRetry(
+      (id) => window.__cadSelectTarget?.(id) ?? false,
+      targetId,
+    )
 
     if (selected) {
       return
@@ -258,7 +261,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {
-    const targetId = await this.page.evaluate(
+    const targetId = await this.evaluateWithNavigationRetry(
       ({ source, flags }) => {
         const matcher = new RegExp(source, flags)
         const targets = window.__cadTestState?.selectableTargets ?? []
@@ -298,19 +301,19 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async revisionLabel() {
-    return this.page.evaluate(() => window.__cadTestState?.revision ?? 'loading')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.revision ?? 'loading')
   }
 
   private async machineLabel() {
-    return this.page.evaluate(() => window.__cadTestState?.machineState ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.machineState ?? '')
   }
 
   private async featureSessionLabel() {
-    return this.page.evaluate(() => window.__cadTestState?.featureSession ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.featureSession ?? '')
   }
 
   private async currentPreviewDiagnosticsText() {
-    return this.page.evaluate(() => window.__cadTestState?.previewDiagnostics ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.previewDiagnostics ?? '')
   }
 
   private async hasVisibleFeatureErrorDiagnostics() {
@@ -318,7 +321,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async projectTargetToScreen(targetId: string) {
-    return this.page.evaluate((id) => window.__cadProjectToScreen?.(id) ?? null, targetId)
+    return this.evaluateWithNavigationRetry((id) => window.__cadProjectToScreen?.(id) ?? null, targetId)
   }
 }
 

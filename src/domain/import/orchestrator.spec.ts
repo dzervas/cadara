@@ -1,7 +1,14 @@
 import { test } from 'bun:test'
 
 import { ResultAsync, createAppError } from '@/contracts/errors'
-import { applyImportPreparedActions } from '@/domain/import/orchestrator'
+import type { ImportProvider } from '@/contracts/import/provider'
+import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
+import {
+  applyImportPreparedActions,
+  createImportSession,
+  prepareImportActions,
+  resolveLocalFileImportSource,
+} from '@/domain/import/orchestrator'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 
 test('src/domain/import/orchestrator.spec.ts', async () => {
@@ -104,5 +111,148 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
       && result.createdEntityIds.featureIds[0] === 'feature_image_support'
       && result.createdEntityIds.sketchIds[0] === 'sketch_imported_image',
     'Import action application should preserve created ids for variables, features, and sketches.',
+  )
+
+  const file = new File([new Uint8Array([0xde, 0xad, 0xbe, 0xef])], 'fixture.step', { type: 'model/step' })
+  const source = await resolveLocalFileImportSource(file)
+  assert(
+    source.name === 'fixture.step'
+      && source.origin.kind === 'localFile'
+      && source.origin.fileName === 'fixture.step'
+      && source.mediaType === 'model/step'
+      && source.bytes.length === 4
+      && source.fingerprint.startsWith('sha256:'),
+    'Local-file import source resolution should preserve file metadata, bytes, and a deterministic fingerprint.',
+  )
+
+  const review = {
+    providerReview: { units: 'mm' as const },
+    proposedActionKinds: ['createFeature' as const],
+    diagnostics: [],
+  }
+  const providerCalls: string[] = []
+  const provider: ImportProvider<{ units: 'mm' }, { body: string }, FeatureEditorFormSchema> = {
+    id: 'step',
+    label: 'STEP',
+    acceptedFileTypes: [{ extension: '.step', mediaType: 'model/step' }],
+    accepts: () => true,
+    async review() {
+      providerCalls.push('review')
+      return review
+    },
+    createDefaultSelections(returnedReview) {
+      providerCalls.push('defaults')
+      assert(returnedReview === review, 'Import session creation should forward the provider review into default-selection creation.')
+      return { body: 'Body 1' }
+    },
+    getReviewFormSchema(returnedReview, selections) {
+      providerCalls.push('schema')
+      assert(returnedReview === review && selections.body === 'Body 1', 'Import session creation should build form schema from the provider review and default selections.')
+      return { sections: [] } as FeatureEditorFormSchema
+    },
+    applySelectionPatch(_review, selections) {
+      return selections
+    },
+    async prepare(input) {
+      providerCalls.push('prepare')
+      assert(
+        input.source === source
+          && input.review === review
+          && input.selections.body === 'Body 1'
+          && input.capabilities.context.documentId === 'doc_workspace',
+        'Prepared import actions should receive the resolved source, persisted review, selections, and import capabilities.',
+      )
+      return {
+        createFeatures: [{
+          featureType: 'plane',
+          featureLabel: 'Imported plane',
+          participantTargets: [],
+          parameterValues: {},
+        }],
+        diagnostics: [{ severity: 'warning', message: 'Imported with defaults.' }],
+      }
+    },
+  }
+
+  const session = await createImportSession({
+    provider,
+    source,
+    capabilities: {
+      context: {
+        contractVersion: 'cadara/v1alpha1',
+        documentId: 'doc_workspace',
+        baseRevisionId: 'rev_1',
+      },
+      modeling: {
+        async bakeGeometry() {
+          throw new Error('not used')
+        },
+        async reconstructMeshToBrep() {
+          throw new Error('not used')
+        },
+      },
+      sketch: {
+        async convertVectorToSketch() {
+          throw new Error('not used')
+        },
+      },
+      assets: {
+        async registerGeometryAsset() {
+          throw new Error('not used')
+        },
+        async storeEmbeddedBinary() {
+          throw new Error('not used')
+        },
+      },
+    },
+  })
+  assert(
+    session.providerId === 'step'
+      && session.resolvedSource === source
+      && session.review === review
+      && (session.selections as { body: string }).body === 'Body 1'
+      && providerCalls.slice(0, 3).join(',') === 'review,defaults,schema',
+    'Import session creation should run provider review, default selection, and form-schema wiring in order.',
+  )
+
+  const prepared = await prepareImportActions({
+    provider,
+    source,
+    review,
+    selections: { body: 'Body 1' },
+    capabilities: {
+      context: {
+        contractVersion: 'cadara/v1alpha1',
+        documentId: 'doc_workspace',
+        baseRevisionId: 'rev_1',
+      },
+      modeling: {
+        async bakeGeometry() {
+          throw new Error('not used')
+        },
+        async reconstructMeshToBrep() {
+          throw new Error('not used')
+        },
+      },
+      sketch: {
+        async convertVectorToSketch() {
+          throw new Error('not used')
+        },
+      },
+      assets: {
+        async registerGeometryAsset() {
+          throw new Error('not used')
+        },
+        async storeEmbeddedBinary() {
+          throw new Error('not used')
+        },
+      },
+    },
+  })
+  assert(
+    providerCalls.includes('prepare')
+      && prepared.createFeatures?.[0]?.featureLabel === 'Imported plane'
+      && prepared.diagnostics?.[0]?.message === 'Imported with defaults.',
+    'Prepared import actions should come directly from the provider and preserve provider diagnostics.',
   )
 })

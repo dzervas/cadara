@@ -1,0 +1,194 @@
+import { test } from 'bun:test'
+
+import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { ExportProvider } from '@/contracts/export/provider'
+import type { DurableRef } from '@/contracts/shared/references'
+import type { ExportProviderRegistry } from '@/domain/export/provider-registry'
+import { orchestrateGeometryExport } from '@/domain/export/export-orchestrator'
+
+test('orchestrateGeometryExport returns an unsupported-format diagnostic when no provider is registered', () => {
+  const target = makeTarget()
+  const result = orchestrateGeometryExport(
+    {
+      format: 'step',
+      options: { schema: 'AP242' },
+      target,
+      targetLabel: 'Main Body',
+    },
+    makeCapabilities(),
+    makeRegistry(),
+  )
+
+  assert(result.ok === false, 'Missing providers should return a failure result.')
+  assert(result.format === 'step', 'Failure results should preserve the requested format.')
+  assert(
+    result.diagnostics[0]?.code === 'export-unsupported-format'
+      && result.diagnostics[0].target === target,
+    'Unsupported-format failures should point back to the requested target.',
+  )
+})
+
+test('orchestrateGeometryExport preserves provider failures without rewriting diagnostics', () => {
+  const diagnostic = {
+    code: 'provider-failed',
+    severity: 'error' as const,
+    message: 'Kernel export failed.',
+    target: makeTarget(),
+  }
+  const provider = makeProvider({
+    export() {
+      return { ok: false as const, diagnostics: [diagnostic] }
+    },
+  })
+
+  const result = orchestrateGeometryExport(
+    {
+      format: 'step',
+      options: { schema: 'AP242' },
+      target: diagnostic.target,
+      targetLabel: 'Part A',
+    },
+    makeCapabilities(),
+    makeRegistry(provider),
+  )
+
+  assert(result.ok === false, 'Provider export failures should remain failures at the orchestrator seam.')
+  assert(
+    result.diagnostics[0] === diagnostic,
+    'Provider diagnostics should pass through untouched so callers see the original export failure.',
+  )
+})
+
+test('orchestrateGeometryExport slugs filenames and maps provider success metadata', () => {
+  const provider = makeProvider({
+    formatId: 'mesh',
+    fileExtension: 'stl',
+    mimeType: 'model/stl',
+    export() {
+      return {
+        ok: true as const,
+        payload: new Uint8Array([1, 2, 3]),
+        diagnostics: [],
+      }
+    },
+  })
+
+  const result = orchestrateGeometryExport(
+    {
+      format: 'mesh',
+      options: { tolerance: 0.1 },
+      target: makeTarget(),
+      targetLabel: '  Rotor Housing / Rev B  ',
+    },
+    makeCapabilities(),
+    makeRegistry(provider),
+  )
+
+  assert(result.ok === true, 'Successful provider exports should produce a success result.')
+  assert(
+    result.filename === 'rotor-housing-rev-b.stl',
+    'Success results should expose a slugged download filename derived from the target label.',
+  )
+  assert(
+    result.extension === 'stl'
+      && result.mimeType === 'model/stl'
+      && result.payload instanceof Uint8Array,
+    'Success results should map provider extension, mime type, and payload through the seam.',
+  )
+})
+
+test('orchestrateGeometryExport falls back to cadara-export when the target label cannot produce a slug', () => {
+  const provider = makeProvider({
+    export() {
+      return {
+        ok: true as const,
+        payload: 'payload',
+        diagnostics: [],
+      }
+    },
+  })
+
+  const result = orchestrateGeometryExport(
+    {
+      format: 'step',
+      options: { schema: 'AP242' },
+      target: makeTarget(),
+      targetLabel: '!!!',
+    },
+    makeCapabilities(),
+    makeRegistry(provider),
+  )
+
+  assert(result.ok === true, 'Labels that slug to empty should still export successfully.')
+  assert(result.filename === 'cadara-export.step', 'Empty slugs should fall back to the default export filename.')
+})
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message)
+  }
+}
+
+function makeTarget(): DurableRef {
+  return {
+    kind: 'feature',
+    featureId: 'feature_export_target' as DurableRef extends { kind: 'feature'; featureId: infer T } ? T : never,
+  }
+}
+
+function makeCapabilities(): ExportCapabilities {
+  return {
+    mesh: {
+      tessellate() {
+        return []
+      },
+    },
+    brep: {
+      writeStep() {
+        return { payload: '' }
+      },
+    },
+  }
+}
+
+function makeProvider(
+  overrides: Partial<ExportProvider<{ schema: string }>>,
+): ExportProvider<{ schema: string }> {
+  return {
+    id: 'provider_step',
+    label: 'STEP',
+    formatId: 'step',
+    fileExtension: 'step',
+    mimeType: 'model/step',
+    getDefaultOptions() {
+      return { schema: 'AP242' }
+    },
+    getOptionFormSchema() {
+      return { kind: 'group', fields: [] }
+    },
+    applyOptionPatch(options) {
+      return options
+    },
+    export() {
+      return {
+        ok: true as const,
+        payload: 'ok',
+        diagnostics: [],
+      }
+    },
+    ...overrides,
+  }
+}
+
+function makeRegistry(
+  ...providers: ExportProvider<{ schema: string }>[]
+): ExportProviderRegistry {
+  return {
+    getAll() {
+      return providers
+    },
+    getByFormat(formatId) {
+      return providers.find((provider) => provider.formatId === formatId)
+    },
+  }
+}

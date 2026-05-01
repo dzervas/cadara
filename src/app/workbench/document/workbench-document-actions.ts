@@ -17,6 +17,26 @@ interface WorkbenchDocumentActionCallbacks {
   showWorkbenchInfo: (message: string) => void
 }
 
+interface WorkbenchDocumentActionIo {
+  downloadDocumentExportResult: typeof downloadDocumentExportResult
+  ensureLocalFileWritePermission: typeof ensureLocalFileWritePermission
+  readCadaraDocumentFile: typeof readCadaraDocumentFile
+  readLocalCadaraDocument: typeof readLocalCadaraDocument
+  showOpenLocalDocumentPicker: typeof showOpenLocalDocumentPicker
+  showSaveLocalDocumentPicker: typeof showSaveLocalDocumentPicker
+  writeTextToLocalFileHandle: typeof writeTextToLocalFileHandle
+}
+
+const defaultWorkbenchDocumentActionIo: WorkbenchDocumentActionIo = {
+  downloadDocumentExportResult,
+  ensureLocalFileWritePermission,
+  readCadaraDocumentFile,
+  readLocalCadaraDocument,
+  showOpenLocalDocumentPicker,
+  showSaveLocalDocumentPicker,
+  writeTextToLocalFileHandle,
+}
+
 export async function createNewWorkbenchDocument(input: {
   modelingService: Pick<ModelingService, 'createNewDocument'>
 } & Pick<WorkbenchDocumentActionCallbacks, 'replaceAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
@@ -36,11 +56,13 @@ export async function createNewWorkbenchDocument(input: {
 export async function importWorkbenchDocumentFile(input: {
   file: File
   modelingService: Pick<ModelingService, 'importDocument'>
+  io?: Partial<WorkbenchDocumentActionIo>
 } & Pick<WorkbenchDocumentActionCallbacks, 'replaceAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
+  const io = { ...defaultWorkbenchDocumentActionIo, ...input.io }
   let payload: unknown
 
   try {
-    payload = await readCadaraDocumentFile(input.file)
+    payload = await io.readCadaraDocumentFile(input.file)
   } catch (error: unknown) {
     const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
       ? 'Import failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
@@ -64,8 +86,10 @@ export async function importWorkbenchDocumentFile(input: {
 
 export async function openWorkbenchLocalFile(input: {
   modelingService: Pick<ModelingService, 'bindLocalFile' | 'currentDocumentId' | 'importDocument'>
+  io?: Partial<WorkbenchDocumentActionIo>
 } & Pick<WorkbenchDocumentActionCallbacks, 'replaceAfterDocumentFileAction' | 'reportDocumentFileActionFailure' | 'showWorkbenchError'>) {
-  const pickerResult = await showOpenLocalDocumentPicker()
+  const io = { ...defaultWorkbenchDocumentActionIo, ...input.io }
+  const pickerResult = await io.showOpenLocalDocumentPicker()
   if (!pickerResult.ok) {
     if (pickerResult.reason === 'cancelled') {
       return
@@ -81,14 +105,14 @@ export async function openWorkbenchLocalFile(input: {
     return
   }
 
-  if (!await ensureLocalFileWritePermission(pickerResult.handle)) {
+  if (!await io.ensureLocalFileWritePermission(pickerResult.handle)) {
     input.showWorkbenchError('Local file write permission was denied.')
     return
   }
 
   let payload: unknown
   try {
-    payload = await readLocalCadaraDocument(pickerResult.handle)
+    payload = await io.readLocalCadaraDocument(pickerResult.handle)
   } catch (error: unknown) {
     const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
       ? 'Open local file failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
@@ -121,8 +145,10 @@ export async function openWorkbenchLocalFile(input: {
 
 export async function saveWorkbenchLocalFile(input: {
   modelingService: Pick<ModelingService, 'bindLocalFile' | 'currentDocumentId' | 'exportCurrentDocument'>
+  io?: Partial<WorkbenchDocumentActionIo>
 } & Pick<WorkbenchDocumentActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchError' | 'showWorkbenchInfo'>) {
-  const pickerResult = await showSaveLocalDocumentPicker()
+  const io = { ...defaultWorkbenchDocumentActionIo, ...input.io }
+  const pickerResult = await io.showSaveLocalDocumentPicker()
   if (!pickerResult.ok) {
     if (pickerResult.reason === 'cancelled') {
       return
@@ -139,13 +165,13 @@ export async function saveWorkbenchLocalFile(input: {
   }
 
   try {
-    if (!await ensureLocalFileWritePermission(pickerResult.handle)) {
+    if (!await io.ensureLocalFileWritePermission(pickerResult.handle)) {
       input.showWorkbenchError('Local file write permission was denied.')
       return
     }
 
     const result = await input.modelingService.exportCurrentDocument()
-    const writeResult = await writeTextToLocalFileHandle(pickerResult.handle, result.payload)
+    const writeResult = await io.writeTextToLocalFileHandle(pickerResult.handle, result.payload)
     if (!writeResult.ok) {
       if (writeResult.reason === 'permission-denied') {
         input.showWorkbenchError('Local file write permission was denied.')
@@ -173,10 +199,12 @@ export async function saveWorkbenchLocalFile(input: {
 
 export async function exportWorkbenchDocument(input: {
   modelingService: Pick<ModelingService, 'exportCurrentDocument'>
+  io?: Partial<WorkbenchDocumentActionIo>
 } & Pick<WorkbenchDocumentActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchInfo'>) {
+  const io = { ...defaultWorkbenchDocumentActionIo, ...input.io }
   try {
     const result = await input.modelingService.exportCurrentDocument()
-    downloadDocumentExportResult(result)
+    io.downloadDocumentExportResult(result)
     input.showWorkbenchInfo(`Exported ${result.filename}.`)
   } catch (error) {
     input.reportDocumentFileActionFailure('workbench.file.export', 'Export failed.', error)
