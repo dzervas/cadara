@@ -1,6 +1,5 @@
 import type {
   ReferenceImageCalibrationAnchor,
-  ReferenceImageCalibrationConstraint,
   ReferenceImageCalibrationDiagnostic,
   ReferenceImageCalibrationState,
   ReferenceImageOperationState,
@@ -27,7 +26,7 @@ export function solveReferenceImageOperationState(
   },
 ): SolvedReferenceImageOperationState {
   const calibration = state.calibration ?? createDefaultReferenceImageCalibrationState()
-  const diagnostics = collectCompatibilityDiagnostics(calibration, input?.pointPositionsById)
+  const diagnostics = collectCalibrationDiagnostics(calibration, input?.pointPositionsById)
   const solveResult = solveReferenceImageCalibration({
     image: state.image,
     initialPlacement: state.placement,
@@ -37,7 +36,7 @@ export function solveReferenceImageOperationState(
       label: anchor.label,
       uv: anchor.uv,
       pointId: anchor.pointId,
-      worldPosition: input?.pointPositionsById?.get(anchor.pointId) ?? anchor.legacyWorldPosition ?? null,
+      worldPosition: input?.pointPositionsById?.get(anchor.pointId) ?? null,
     })),
     constraints: [],
   })
@@ -76,31 +75,12 @@ export function createReferenceImageCalibrationAnchor(input: {
   anchorIndex: number
   uv: SketchPoint2D
   pointId: string
-  legacyWorldPosition?: SketchPoint2D | null
 }): ReferenceImageCalibrationAnchor {
   return {
     anchorId: input.anchorId,
     label: `Anchor ${input.anchorIndex + 1}`,
     uv: clampUv(input.uv),
     pointId: input.pointId,
-    ...(input.legacyWorldPosition !== undefined ? { legacyWorldPosition: input.legacyWorldPosition } : {}),
-  }
-}
-
-export function createReferenceImageCalibrationConstraint(input: {
-  constraintId: string
-  constraintIndex: number
-  firstAnchorId: string
-  secondAnchorId: string
-  distance: number
-}): ReferenceImageCalibrationConstraint {
-  return {
-    constraintId: input.constraintId,
-    kind: 'distance',
-    label: `Distance ${input.constraintIndex + 1}`,
-    firstAnchorId: input.firstAnchorId,
-    secondAnchorId: input.secondAnchorId,
-    distance: input.distance,
   }
 }
 
@@ -153,22 +133,14 @@ export function replaceReferenceImagePayloadPreservingCalibration(input: {
   })
 }
 
-function collectCompatibilityDiagnostics(
+function collectCalibrationDiagnostics(
   calibration: ReferenceImageCalibrationState,
   pointPositionsById?: ReadonlyMap<string, SketchPoint2D>,
 ): ReferenceImageCalibrationDiagnostic[] {
   const diagnostics: ReferenceImageCalibrationDiagnostic[] = []
 
-  if (calibration.legacyConstraints && calibration.legacyConstraints.length > 0) {
-    diagnostics.push({
-      code: 'legacy-calibration-constraints-dropped',
-      severity: 'warning',
-      message: 'Legacy calibration-only distance constraints were ignored. Reapply any required intent with ordinary sketch dimensions or constraints.',
-    })
-  }
-
   for (const anchor of calibration.anchors) {
-    if (!pointPositionsById?.has(anchor.pointId) && anchor.legacyWorldPosition === undefined) {
+    if (!pointPositionsById?.has(anchor.pointId)) {
       diagnostics.push({
         code: 'missing-bound-anchor-point',
         severity: 'warning',

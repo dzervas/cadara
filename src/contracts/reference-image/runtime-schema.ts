@@ -2,7 +2,6 @@ import { z } from 'zod'
 
 import type {
   ReferenceImageCalibrationAnchor,
-  ReferenceImageCalibrationConstraint,
   ReferenceImageCalibrationScaleMode,
   ReferenceImageCalibrationState,
   ReferenceImageOperationState,
@@ -32,62 +31,21 @@ export const referenceImageCalibrationScaleModeSchema = z.union([
   z.literal('independent'),
 ]).transform((value) => value as ReferenceImageCalibrationScaleMode)
 
-const referenceImageCalibrationAnchorBindingSchema = z.object({
+export const referenceImageCalibrationAnchorSchema = z.object({
   anchorId: z.string().trim().min(1, 'Reference-image anchor id must not be empty.'),
   label: z.string().trim().min(1, 'Reference-image anchor label must not be empty.'),
   uv: point2dSchema,
   pointId: z.string().trim().min(1, 'Reference-image anchors must bind to a local point id.'),
-  legacyWorldPosition: point2dSchema.nullable().optional(),
-})
-
-const referenceImageLegacyCalibrationAnchorSchema = z.object({
-  anchorId: z.string().trim().min(1, 'Reference-image anchor id must not be empty.'),
-  label: z.string().trim().min(1, 'Reference-image anchor label must not be empty.'),
-  uv: point2dSchema,
-  worldPosition: point2dSchema.nullable(),
-})
-
-export const referenceImageCalibrationAnchorSchema = z.union([
-  referenceImageCalibrationAnchorBindingSchema,
-  referenceImageLegacyCalibrationAnchorSchema,
-]).transform((value) => {
-  if ('pointId' in value) {
-    return value as ReferenceImageCalibrationAnchor
-  }
-
-  return {
-    anchorId: value.anchorId,
-    label: value.label,
-    uv: value.uv,
-    pointId: `sketch_point_reference_image_legacy_${value.anchorId}`,
-    legacyWorldPosition: value.worldPosition,
-  } satisfies ReferenceImageCalibrationAnchor
-})
-
-export const referenceImageCalibrationConstraintSchema = z.object({
-  constraintId: z.string().trim().min(1, 'Reference-image calibration constraint id must not be empty.'),
-  kind: z.literal('distance'),
-  label: z.string().trim().min(1, 'Reference-image calibration constraint label must not be empty.'),
-  firstAnchorId: z.string().trim().min(1, 'Reference-image calibration constraints must reference a first anchor id.'),
-  secondAnchorId: z.string().trim().min(1, 'Reference-image calibration constraints must reference a second anchor id.'),
-  distance: positiveNumberSchema('Reference-image calibration distances must be positive.'),
-}).transform((value) => value as ReferenceImageCalibrationConstraint)
+}).strict().transform((value) => value as ReferenceImageCalibrationAnchor)
 
 export const referenceImageCalibrationStateSchema = z.object({
   scaleMode: referenceImageCalibrationScaleModeSchema,
   anchors: z.array(referenceImageCalibrationAnchorSchema),
-  constraints: z.array(referenceImageCalibrationConstraintSchema).optional(),
-  legacyConstraints: z.array(referenceImageCalibrationConstraintSchema).optional(),
   showExportedAnchorsInSketch: z.boolean().optional(),
-}).transform((value) => ({
+}).strict().transform((value) => ({
   scaleMode: value.scaleMode,
   showExportedAnchorsInSketch: value.showExportedAnchorsInSketch ?? true,
   anchors: value.anchors,
-  ...(value.legacyConstraints && value.legacyConstraints.length > 0
-    ? { legacyConstraints: value.legacyConstraints }
-    : value.constraints && value.constraints.length > 0
-      ? { legacyConstraints: value.constraints }
-      : {}),
 }) as ReferenceImageCalibrationState)
 
 export const referenceImageOperationStateSchema = z.object({

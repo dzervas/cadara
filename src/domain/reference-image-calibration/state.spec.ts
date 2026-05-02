@@ -3,7 +3,6 @@ import { test } from 'bun:test'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 import {
   createReferenceImageCalibrationAnchor,
-  createReferenceImageCalibrationConstraint,
   replaceReferenceImagePayloadPreservingCalibration,
   solveReferenceImageOperationState,
 } from '@/domain/reference-image-calibration/state'
@@ -74,7 +73,7 @@ test('src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs 
   )
 })
 
-test('src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when bound anchors are insufficient or legacy constraints are dropped', () => {
+test('src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when bound anchors are insufficient', () => {
   function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
       throw new Error(message)
@@ -107,15 +106,6 @@ test('src/domain/reference-image-calibration/state.spec.ts preserves the last st
           pointId: 'sketch_point_anchor_a',
         }),
       ],
-      legacyConstraints: [
-        createReferenceImageCalibrationConstraint({
-          constraintId: 'legacy_constraint',
-          constraintIndex: 0,
-          firstAnchorId: 'anchor_a',
-          secondAnchorId: 'anchor_b',
-          distance: 10,
-        }),
-      ],
     },
   }, {
     pointPositionsById: new Map([
@@ -126,10 +116,6 @@ test('src/domain/reference-image-calibration/state.spec.ts preserves the last st
   assert(
     solved.calibration.solveResult.diagnostics.some((diagnostic) => diagnostic.code === 'underconstrained-calibration'),
     'A single bound anchor should leave the independent fit underconstrained.',
-  )
-  assert(
-    solved.calibration.solveResult.diagnostics.some((diagnostic) => diagnostic.code === 'legacy-calibration-constraints-dropped'),
-    'Dropped legacy calibration-only constraints should surface as diagnostics.',
   )
   assert(
     JSON.stringify(solved.placement) === JSON.stringify(initialPlacement),

@@ -1,10 +1,18 @@
 import type {
-  ReferenceImageCalibrationConstraint,
   ReferenceImageCalibrationScaleMode,
   ReferenceImagePlacement,
   ReferenceImagePayload,
 } from '@/contracts/reference-image/schema'
 import type { SketchPoint2D } from '@/contracts/sketch/schema'
+
+export interface ReferenceImageCalibrationConstraint {
+  constraintId: string
+  kind: 'distance'
+  label: string
+  firstAnchorId: string
+  secondAnchorId: string
+  distance: number
+}
 
 export interface ReferenceImageCalibrationSolverAnchor {
   anchorId: string

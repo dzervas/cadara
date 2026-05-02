@@ -66,7 +66,6 @@ export const referenceImageCalibrationModeDefinition = {
     }
 
     const draftPoints = collectDraftPoints(
-      sketchSession.sketchId ?? 'sketch_draft',
       sketchSession.definition.points,
       activeOperation.state,
     )
@@ -603,21 +602,16 @@ function solveModeState(
 }
 
 function collectDraftPoints(
-  sketchId: SketchId,
   definitionPoints: readonly SketchPointDefinition[],
   state: Pick<ReferenceImageOperationState, 'calibration'>,
 ) {
   const calibration = state.calibration ?? { anchors: [] }
   const pointLookup = new Map(definitionPoints.map((point) => [point.pointId, point] as const))
 
-  return calibration.anchors.flatMap((anchor, index) => {
+  return calibration.anchors.flatMap((anchor) => {
     const point = pointLookup.get(anchor.pointId as SketchPointId)
     if (point) {
       return [point]
-    }
-
-    if (anchor.legacyWorldPosition) {
-      return [createDraftPoint(sketchId, anchor.pointId as SketchPointId, anchor.label || getAnchorLabel(index), anchor.legacyWorldPosition)]
     }
 
     return []

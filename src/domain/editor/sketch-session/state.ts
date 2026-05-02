@@ -31,9 +31,6 @@ import {
 import {
   buildReferenceImageAnchorProjectedReferences,
 } from '@/domain/reference-image-calibration/export/references'
-import {
-  materializeLegacyReferenceImageAnchorBindings,
-} from '@/domain/reference-image/operations'
 import type { SketchDraftEntity } from '@/core/sketch-tools/definition'
 import {
   mapSketchPointToWorkspaceWorld,
@@ -199,7 +196,7 @@ export function getNextSketchHistoryCursor(session: SketchSessionState): SketchH
 
 export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): SketchSessionState {
   const sketchId = sketch.sketchId
-  const fullDefinition = materializeLegacyReferenceImageAnchorBindings(cloneDefinition(sketch.sketch.definition))
+  const fullDefinition = cloneDefinition(sketch.sketch.definition)
   const historyCursor = createTailSketchHistoryCursor(fullDefinition)
   const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
   const planeKey = sketch.plane.key ?? null

@@ -22,16 +22,6 @@ export interface ReferenceImageCalibrationAnchor {
   label: string
   uv: SketchPoint2D
   pointId: string
-  legacyWorldPosition?: SketchPoint2D | null
-}
-
-export interface ReferenceImageCalibrationConstraint {
-  constraintId: string
-  kind: 'distance'
-  label: string
-  firstAnchorId: string
-  secondAnchorId: string
-  distance: number
 }
 
 export interface ReferenceImageCalibrationDiagnostic {
@@ -56,7 +46,6 @@ export interface ReferenceImageCalibrationState {
   scaleMode: ReferenceImageCalibrationScaleMode
   showExportedAnchorsInSketch: boolean
   anchors: readonly ReferenceImageCalibrationAnchor[]
-  legacyConstraints?: readonly ReferenceImageCalibrationConstraint[]
 }
 
 export interface SolvedReferenceImageCalibrationState extends ReferenceImageCalibrationState {

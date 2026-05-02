@@ -99,7 +99,7 @@ test('src/contracts/sketch/reference-image-runtime-schema.spec.ts', () => {
   })
   assert(!missingPlacement.success, 'Runtime schema should reject non-positive placement extents.')
 
-  const legacyCalibration = sketchDefinitionSchema.safeParse({
+  const legacyAnchor = sketchDefinitionSchema.safeParse({
     ...baseDefinition,
     authoringOperations: [{
       ...baseDefinition.authoringOperations![0]!,
@@ -108,17 +108,38 @@ test('src/contracts/sketch/reference-image-runtime-schema.spec.ts', () => {
         calibration: {
           scaleMode: 'lockedAspect',
           anchors: [{
-            anchorId: 'anchor_legacy',
-            label: 'Legacy anchor',
+            anchorId: 'anchor_a',
+            label: 'Anchor A',
             uv: [0.25, 0.5],
             worldPosition: [10, 5],
+          }],
+          showExportedAnchorsInSketch: true,
+        },
+      },
+    }],
+  })
+  assert(!legacyAnchor.success, 'Runtime schema should reject calibration anchors that omit a sketch point binding.')
+
+  const legacyConstraints = sketchDefinitionSchema.safeParse({
+    ...baseDefinition,
+    authoringOperations: [{
+      ...baseDefinition.authoringOperations![0]!,
+      ownedState: {
+        ...baseDefinition.authoringOperations![0]!.ownedState!,
+        calibration: {
+          scaleMode: 'lockedAspect',
+          anchors: [{
+            anchorId: 'anchor_a',
+            label: 'Anchor A',
+            uv: [0.25, 0.5],
+            pointId: 'sketch_point_anchor_a',
           }],
           constraints: [{
             constraintId: 'legacy_distance',
             kind: 'distance',
             label: 'Legacy distance',
-            firstAnchorId: 'anchor_legacy',
-            secondAnchorId: 'anchor_missing',
+            firstAnchorId: 'anchor_a',
+            secondAnchorId: 'anchor_b',
             distance: 10,
           }],
           showExportedAnchorsInSketch: true,
@@ -126,12 +147,5 @@ test('src/contracts/sketch/reference-image-runtime-schema.spec.ts', () => {
       },
     }],
   })
-  assert(legacyCalibration.success, 'Runtime schema should accept legacy calibration payloads during migration.')
-  const legacyAnchor = legacyCalibration.data.authoringOperations?.[0]?.ownedState?.kind === 'referenceImage'
-    ? legacyCalibration.data.authoringOperations[0].ownedState.calibration?.anchors[0]
-    : null
-  assert(
-    legacyAnchor?.pointId.includes('sketch_point_reference_image_legacy_') === true,
-    'Legacy anchor payloads should normalize to a temporary point binding for migration.',
-  )
+  assert(!legacyConstraints.success, 'Runtime schema should reject deprecated calibration-only constraint payloads.')
 })
