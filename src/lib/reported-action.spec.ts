@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   createAppError,
   createTestErrorReporter,
@@ -7,12 +8,6 @@ import {
   ok,
 } from '@/contracts/errors'
 import { runReportedAction } from '@/lib/reported-action'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 test('runReportedAction maps plain values and AppResults without reporting success', async () => {
   const reporter = createTestErrorReporter()
@@ -25,7 +20,7 @@ test('runReportedAction maps plain values and AppResults without reporting succe
     mapSuccess: (value) => ok(value * 2),
     onError: (error) => handled.push(error.message),
   })
-  assert(plain.isOk() && plain.value === 42, 'Plain successful actions should be wrapped and mapped through the success contract.')
+  expectTrue(plain.isOk() && plain.value === 42, 'Plain successful actions should be wrapped and mapped through the success contract.')
 
   const appResult = await runReportedAction({
     operation: 'Create sketch',
@@ -34,10 +29,10 @@ test('runReportedAction maps plain values and AppResults without reporting succe
     mapSuccess: (value) => ok(value + 5),
     onError: (error) => handled.push(error.message),
   })
-  assert(appResult.isOk() && appResult.value === 15, 'Successful AppResult actions should flow through mapSuccess unchanged.')
+  expectTrue(appResult.isOk() && appResult.value === 15, 'Successful AppResult actions should flow through mapSuccess unchanged.')
 
-  assert(reporter.reports.length === 0, 'Successful actions should not be reported.')
-  assert(handled.length === 0, 'Successful actions should not call the error callback.')
+  expectTrue(reporter.reports.length === 0, 'Successful actions should not be reported.')
+  expectTrue(handled.length === 0, 'Successful actions should not call the error callback.')
 })
 
 test('runReportedAction reports mapped failures and preserves caller metadata', async () => {
@@ -60,15 +55,15 @@ test('runReportedAction reports mapped failures and preserves caller metadata', 
     onError: (error) => handled.push(error.message),
   })
 
-  assert(result.isErr(), 'Mapped failures should resolve as AppError results.')
-  assert(
+  expectTrue(result.isErr(), 'Mapped failures should resolve as AppError results.')
+  expectTrue(
     reporter.reports[0]?.error === mappedError
       && reporter.reports[0]?.metadata.source === 'workbench'
       && reporter.reports[0]?.metadata.visibility === 'user'
       && reporter.reports[0]?.metadata.dedupeKey === 'caller-specified-key',
     'Mapped failures should be reported with workbench source, user visibility, and caller metadata.',
   )
-  assert(
+  expectTrue(
     handled[0] === 'Mapped validation failed.',
     'Mapped failures should call onError with the normalized AppError.',
   )
@@ -89,8 +84,8 @@ test('runReportedAction normalizes thrown errors and derives dedupe keys from op
     onError: (error) => handled.push(error.message),
   })
 
-  assert(result.isErr(), 'Thrown failures should normalize into AppError results.')
-  assert(
+  expectTrue(result.isErr(), 'Thrown failures should normalize into AppError results.')
+  expectTrue(
     result.isErr()
       && result.error.code === 'workbench/action-failed'
       && result.error.message === 'Kernel exploded.'
@@ -98,11 +93,11 @@ test('runReportedAction normalizes thrown errors and derives dedupe keys from op
       && result.error.context.some((entry) => entry.key === 'featureId' && entry.value === 'feature_1'),
     'Thrown failures should normalize with workbench/action-failed and merged context entries.',
   )
-  assert(
+  expectTrue(
     reporter.reports[0]?.metadata.dedupeKey === 'Delete feature:Kernel exploded.',
     'Thrown failures should derive a dedupe key from the operation and normalized error message when the caller does not provide one.',
   )
-  assert(handled[0] === 'Kernel exploded.', 'Thrown failures should be forwarded to onError.')
+  expectTrue(handled[0] === 'Kernel exploded.', 'Thrown failures should be forwarded to onError.')
 })
 
 test('runReportedAction preserves reporter dedupe behavior while still notifying callers', async () => {
@@ -128,12 +123,12 @@ test('runReportedAction preserves reporter dedupe behavior while still notifying
     onError: (error) => handled.push(error.message),
   })
 
-  assert(first.isErr() && second.isErr(), 'Repeated AppResult failures should still resolve as failures.')
-  assert(
+  expectTrue(first.isErr() && second.isErr(), 'Repeated AppResult failures should still resolve as failures.')
+  expectTrue(
     reporter.reports.length === 1,
     'Reporter dedupe should suppress duplicate reports that share the same operation-derived key.',
   )
-  assert(
+  expectTrue(
     handled.join(',') === 'Selection is invalid.,Selection is invalid.',
     'Caller error handlers should still run even when the reporter dedupes duplicate failures.',
   )

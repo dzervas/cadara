@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
@@ -14,7 +15,7 @@ test('createBrowserDocumentSyncWorkerClient bootstraps the worker search string 
     createWorker: () => worker,
   })
 
-  assert(
+  expectTrue(
     worker.bootstrapMessages.length === 1
       && worker.bootstrapMessages[0]?.search === '?document=abc',
     'The browser worker client should bootstrap the worker with the requested location search string.',
@@ -24,7 +25,7 @@ test('createBrowserDocumentSyncWorkerClient bootstraps the worker search string 
     documentId: 'document_browser_worker' as DocumentSyncWorkerRequest extends { kind: 'getWriteStatus'; documentId: infer T } ? T : never,
   })
   const request = worker.postedRequests[0]
-  assert(request?.kind === 'getWriteStatus', 'The returned client should be wired to the created worker instance.')
+  expectTrue(request?.kind === 'getWriteStatus', 'The returned client should be wired to the created worker instance.')
   worker.emit({
     kind: 'writeStatus',
     requestId: request.requestId,
@@ -36,10 +37,10 @@ test('createBrowserDocumentSyncWorkerClient bootstraps the worker search string 
   })
 
   const status = await statusPromise
-  assert(status.kind === 'idle', 'The browser client seam should proxy worker responses through the returned DocumentSyncWorkerClient.')
+  expectTrue(status.kind === 'idle', 'The browser client seam should proxy worker responses through the returned DocumentSyncWorkerClient.')
 
   client.dispose()
-  assert(worker.terminated === true, 'Disposing the browser client should terminate the owned worker instance.')
+  expectTrue(worker.terminated === true, 'Disposing the browser client should terminate the owned worker instance.')
 })
 
 test('createBrowserDocumentSyncWorkerClient defaults bootstrap search to an empty string', () => {
@@ -49,17 +50,11 @@ test('createBrowserDocumentSyncWorkerClient defaults bootstrap search to an empt
     createWorker: () => worker,
   }).dispose()
 
-  assert(
+  expectTrue(
     worker.bootstrapMessages[0]?.search === '',
     'Browser worker bootstrap should default the search string when none is provided.',
   )
 })
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 class FakeBrowserWorker implements DocumentSyncWorkerLike {
   readonly postedRequests: Extract<DocumentSyncWorkerRequest, { kind: 'getWriteStatus' }>[] = []

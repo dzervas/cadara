@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import type { FeatureDefinition } from '@/contracts/modeling/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
@@ -12,24 +13,17 @@ import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-
 import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-history-persistence'
 import { getAutoHiddenSketchTargetKeys } from '@/domain/editor/visibility'
 
-test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
+test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {  type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
 
   async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
     const resolved = await result
-    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    expectTrue(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
     return resolved.value
   }
 
   async function expectModelingError<T>(result: AppResultAsync<T>) {
     const resolved = await result
-    assert(resolved.isErr(), 'Modeling result should be an error.')
+    expectTrue(resolved.isErr(), 'Modeling result should be an error.')
     return resolved.error
   }
 
@@ -93,24 +87,24 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
         },
       },
     }))
-    assert(rejected.code === 'modeling/diagnostic', 'Unsupported mock plane create should be rejected.')
+    expectTrue(rejected.code === 'modeling/diagnostic', 'Unsupported mock plane create should be rejected.')
 
     const accepted = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
 
-    assert(accepted.revisionState.kind === 'accepted', 'Valid feature create should commit.')
-    assert(store.savedPayloads.length === 1, 'Only accepted mutations should write operation history.')
-    assert(store.savedPayloads[0]?.entries.length === 1, 'Exactly one operation should be stored.')
-    assert(store.savedPayloads[0]?.entries[0]?.kind === 'createFeature', 'Stored operation kind should match the committed mutation.')
+    expectTrue(accepted.revisionState.kind === 'accepted', 'Valid feature create should commit.')
+    expectTrue(store.savedPayloads.length === 1, 'Only accepted mutations should write operation history.')
+    expectTrue(store.savedPayloads[0]?.entries.length === 1, 'Exactly one operation should be stored.')
+    expectTrue(store.savedPayloads[0]?.entries[0]?.kind === 'createFeature', 'Stored operation kind should match the committed mutation.')
   }
 
   async function testPersistedHistoryReplaysSketchAndFeatureMutations() {
     const { service, store } = await createServiceWithStore()
     const before = await service.getCurrentDocumentSnapshot()
     const seedSketch = before.document.sketches[0]
-    assert(seedSketch, 'Seed sketch must exist.')
+    expectTrue(seedSketch, 'Seed sketch must exist.')
 
     const sketch = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: before.document.revisionId,
@@ -126,7 +120,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       plane: seedSketch.plane,
       definition: seedSketch.sketch.definition,
     }))
-    assert(sketch.revisionState.kind === 'accepted', 'Sketch commit should be stored for replay.')
+    expectTrue(sketch.revisionState.kind === 'accepted', 'Sketch commit should be stored for replay.')
 
     const renamedSketch = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: sketch.revisionId,
@@ -142,14 +136,14 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       plane: seedSketch.plane,
       definition: seedSketch.sketch.definition,
     }))
-    assert(renamedSketch.revisionState.kind === 'accepted', 'Sketch rename should be stored for replay.')
+    expectTrue(renamedSketch.revisionState.kind === 'accepted', 'Sketch rename should be stored for replay.')
 
     const definition = await getSeedExtrudeDefinition(service)
     const created = await unwrapModelingResult(service.createFeature({
       baseRevisionId: renamedSketch.revisionId,
       definition,
     }))
-    assert(created.revisionState.kind === 'accepted', 'Feature create should be stored for replay.')
+    expectTrue(created.revisionState.kind === 'accepted', 'Feature create should be stored for replay.')
 
     const updated = await unwrapModelingResult(service.updateFeature({
       baseRevisionId: created.revisionId,
@@ -166,21 +160,21 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
         },
       },
     }))
-    assert(updated.revisionState.kind === 'accepted', 'Feature update should be stored for replay.')
+    expectTrue(updated.revisionState.kind === 'accepted', 'Feature update should be stored for replay.')
 
     const reordered = await unwrapModelingResult(service.reorderFeature({
       baseRevisionId: updated.revisionId,
       featureId: created.featureId,
       beforeFeatureId: 'feature_extrude-1',
     }))
-    assert(reordered.revisionState.kind === 'accepted', 'Feature reorder should be stored for replay.')
+    expectTrue(reordered.revisionState.kind === 'accepted', 'Feature reorder should be stored for replay.')
 
     const documentHistoryReordered = await unwrapModelingResult(service.reorderDocumentHistory({
       baseRevisionId: reordered.revisionId,
       item: { kind: 'feature', featureId: created.featureId },
       beforeItem: { kind: 'sketch', sketchId: 'sketch_history' },
     }))
-    assert(
+    expectTrue(
       documentHistoryReordered.revisionState.kind === 'accepted',
       'Mixed document history reorder should be stored for replay.',
     )
@@ -189,18 +183,18 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       baseRevisionId: documentHistoryReordered.revisionId,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
-    assert(cursor.revisionState.kind === 'accepted', 'Feature cursor rollback should be stored for replay.')
+    expectTrue(cursor.revisionState.kind === 'accepted', 'Feature cursor rollback should be stored for replay.')
 
     const renamedBody = await unwrapModelingResult(service.renameBody({
       baseRevisionId: cursor.revisionId,
       bodyId: 'body_part-1',
       bodyLabel: 'Renamed Part',
     }))
-    assert(renamedBody.revisionState.kind === 'accepted', 'Body rename should be stored for replay.')
+    expectTrue(renamedBody.revisionState.kind === 'accepted', 'Body rename should be stored for replay.')
 
     const originalSnapshot = await service.getCurrentDocumentSnapshot()
     const finalHistory = store.savedPayloads.at(-1)
-    assert(finalHistory, 'Committed mutations should save a final history payload.')
+    expectTrue(finalHistory, 'Committed mutations should save a final history payload.')
 
     const restoredStore = createMemoryOperationHistoryStore(finalHistory)
     const restoredService = createModelingService(new MockKernelAdapter(), {
@@ -212,57 +206,57 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const originalAutoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(originalSnapshot)
     const restoredAutoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(restoredSnapshot)
 
-    assert(restoreState.kind === 'restored', 'Valid persisted history should restore explicitly.')
-    assert(restoreState.entriesReplayed === finalHistory.entries.length, 'Restore should replay every entry in order.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Valid persisted history should restore explicitly.')
+    expectTrue(restoreState.entriesReplayed === finalHistory.entries.length, 'Restore should replay every entry in order.')
+    expectTrue(
       restoredSnapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_history'),
       'Replay should rebuild persisted sketches.',
     )
-    assert(
+    expectTrue(
       originalAutoHiddenSketchTargetKeys['sketch:sketch_primary'] === true
         && restoredAutoHiddenSketchTargetKeys['sketch:sketch_primary'] === true,
       'Replay should auto-hide the same consumed committed sketch rows after rebuild.',
     )
-    assert(
+    expectTrue(
       Object.keys(restoredAutoHiddenSketchTargetKeys).join(',')
         === Object.keys(originalAutoHiddenSketchTargetKeys).join(','),
       'Replay should preserve the derived consumed-sketch auto-hide set.',
     )
-    assert(
+    expectTrue(
       restoredSnapshot.document.features.map((feature) => feature.featureId).join(',')
         === originalSnapshot.document.features.map((feature) => feature.featureId).join(','),
       'Replay should preserve feature order.',
     )
-    assert(
+    expectTrue(
       finalHistory.entries.some((entry) => entry.kind === 'reorderDocumentHistory'),
       'Accepted mixed document history reorders should be persisted.',
     )
-    assert(
+    expectTrue(
       restoredSnapshot.presentation.documentHistory.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join(',')
         === originalSnapshot.presentation.documentHistory.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join(','),
       'Replay should preserve mixed sketch and feature document history order.',
     )
-    assert(
+    expectTrue(
       restoredSnapshot.document.features.find((feature) => feature.featureId === created.featureId)?.definition.kind === 'extrude',
       'Replay should rebuild persisted feature definitions.',
     )
-    assert(
+    expectTrue(
       originalSnapshot.document.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed Extrude'
         && restoredSnapshot.document.features.find((feature) => feature.featureId === created.featureId)?.label === 'Renamed Extrude',
       'Replay should preserve persisted feature rename labels.',
     )
-    assert(
+    expectTrue(
       originalSnapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_history')?.label === 'Renamed History Sketch'
         && restoredSnapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_history')?.label === 'Renamed History Sketch',
       'Replay should preserve persisted sketch rename labels.',
     )
-    assert(
+    expectTrue(
       originalSnapshot.document.bodies.find((entry) => entry.bodyId === 'body_part-1')?.label === 'Renamed Part'
         && restoredSnapshot.document.bodies.find((entry) => entry.bodyId === 'body_part-1')?.label === 'Renamed Part'
         && restoredSnapshot.presentation.objects.find((entry) => entry.target.kind === 'body' && entry.target.bodyId === 'body_part-1')?.label === 'Renamed Part',
       'Replay should preserve persisted body rename labels in body and object records.',
     )
-    assert(
+    expectTrue(
       restoredSnapshot.document.cursor.kind === originalSnapshot.document.cursor.kind
         && restoredSnapshot.document.cursor.kind === 'feature'
         && originalSnapshot.document.cursor.kind === 'feature'
@@ -279,16 +273,16 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
-    assert(created.revisionState.kind === 'accepted', 'Feature create should commit before delete.')
+    expectTrue(created.revisionState.kind === 'accepted', 'Feature create should commit before delete.')
 
     const deleted = await unwrapModelingResult(service.deleteFeature({
       baseRevisionId: created.revisionId,
       featureId: created.featureId,
     }))
-    assert(deleted.revisionState.kind === 'accepted', 'Feature delete should commit.')
+    expectTrue(deleted.revisionState.kind === 'accepted', 'Feature delete should commit.')
 
     const finalHistory = store.savedPayloads.at(-1)
-    assert(finalHistory, 'Create/delete sequence should save history.')
+    expectTrue(finalHistory, 'Create/delete sequence should save history.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -296,7 +290,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
-    assert(
+    expectTrue(
       !restoredSnapshot.document.features.some((feature) => feature.featureId === created.featureId),
       'Replay should apply persisted feature deletes.',
     )
@@ -309,11 +303,11 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       baseRevisionId: snapshot.document.revisionId,
       target: { kind: 'body', bodyId: 'body_part-1' },
     }))
-    assert(deleted.revisionState.kind === 'accepted', 'Generic body delete should commit.')
+    expectTrue(deleted.revisionState.kind === 'accepted', 'Generic body delete should commit.')
 
     const finalHistory = store.savedPayloads.at(-1)
-    assert(finalHistory, 'Generic delete should save operation history.')
-    assert(finalHistory.entries.at(-1)?.kind === 'deleteTarget', 'Generic delete should persist as a generic delete entry.')
+    expectTrue(finalHistory, 'Generic delete should save operation history.')
+    expectTrue(finalHistory.entries.at(-1)?.kind === 'deleteTarget', 'Generic delete should persist as a generic delete entry.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -321,7 +315,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
-    assert(
+    expectTrue(
       restoredSnapshot.presentation.objects.every((item) => item.target.kind !== 'body' || item.target.bodyId !== 'body_part-1'),
       'Replay should apply persisted generic body deletes.',
     )
@@ -337,8 +331,8 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
 
     const state = await service.getHistoryRestoreState()
-    assert(state.kind === 'failed', 'Unsupported persisted generic delete targets should fail restore explicitly.')
-    assert(
+    expectTrue(state.kind === 'failed', 'Unsupported persisted generic delete targets should fail restore explicitly.')
+    expectTrue(
       state.diagnostics[0]?.reasonCode === 'mock-unsupported-delete-target',
       'Unsupported generic delete restore failures should expose adapter diagnostics.',
     )
@@ -353,7 +347,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       name: 'width',
       valueText: '12',
     }))
-    assert(added.revisionState.kind === 'accepted', 'Variable add should be stored for replay.')
+    expectTrue(added.revisionState.kind === 'accepted', 'Variable add should be stored for replay.')
 
     const updated = await unwrapModelingResult(service.updateDocumentVariable({
       baseRevisionId: added.revisionId,
@@ -361,7 +355,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       name: 'width',
       valueText: '18',
     }))
-    assert(updated.revisionState.kind === 'accepted', 'Variable update should be stored for replay.')
+    expectTrue(updated.revisionState.kind === 'accepted', 'Variable update should be stored for replay.')
 
     const dependent = await unwrapModelingResult(service.addDocumentVariable({
       baseRevisionId: updated.revisionId,
@@ -369,14 +363,14 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       name: 'depth',
       valueText: 'width + 50',
     }))
-    assert(dependent.revisionState.kind === 'accepted', 'Dependent variable add should be stored for replay.')
+    expectTrue(dependent.revisionState.kind === 'accepted', 'Dependent variable add should be stored for replay.')
 
     const finalHistory = store.savedPayloads.at(-1)
-    assert(finalHistory, 'Variable mutations should save history.')
-    assert(finalHistory.entries[0]?.kind === 'addDocumentVariable', 'Variable create should persist as document history.')
-    assert(finalHistory.entries[1]?.kind === 'updateDocumentVariable', 'Variable edit should persist as document history.')
-    assert(finalHistory.entries[2]?.kind === 'addDocumentVariable', 'Dependent variable create should persist as document history.')
-    assert(!('isValid' in finalHistory.entries[1]!.payload), 'Variable history must not persist validation state.')
+    expectTrue(finalHistory, 'Variable mutations should save history.')
+    expectTrue(finalHistory.entries[0]?.kind === 'addDocumentVariable', 'Variable create should persist as document history.')
+    expectTrue(finalHistory.entries[1]?.kind === 'updateDocumentVariable', 'Variable edit should persist as document history.')
+    expectTrue(finalHistory.entries[2]?.kind === 'addDocumentVariable', 'Dependent variable create should persist as document history.')
+    expectTrue(!('isValid' in finalHistory.entries[1]!.payload), 'Variable history must not persist validation state.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -385,15 +379,15 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     const restoreState = await restoredService.getHistoryRestoreState()
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
-    assert(restoreState.kind === 'restored', 'Variable history should restore explicitly.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Variable history should restore explicitly.')
+    expectTrue(
       restoredSnapshot.document.variables.map((variable) => `${variable.variableId}:${variable.name}:${variable.valueText}`).join(',')
         === 'variable_width:width:18,variable_depth:depth:width + 50',
       'Replay should restore ordered document variable records without expression evaluation.',
     )
     const evaluation = evaluateDocumentVariableExpressions(restoredSnapshot.document.variables)
-    assert(evaluation.ok && evaluation.valuesByName.get('depth') === 68, 'Restored dependent variable expressions should remain evaluable.')
-    assert(
+    expectTrue(evaluation.ok && evaluation.valuesByName.get('depth') === 68, 'Restored dependent variable expressions should remain evaluable.')
+    expectTrue(
       restoredSnapshot.document.references.length > 0,
       'Variable replay should preserve snapshot reference records.',
     )
@@ -410,8 +404,8 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
 
     const state = await service.getHistoryRestoreState()
-    assert(state.kind === 'failed', 'Unsupported history versions should fail restore explicitly.')
-    assert(
+    expectTrue(state.kind === 'failed', 'Unsupported history versions should fail restore explicitly.')
+    expectTrue(
       state.diagnostics[0]?.reasonCode === 'unsupported-schema-version',
       'Unsupported history version restore failures should expose diagnostics.',
     )
@@ -434,8 +428,8 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
 
     const state = await service.getHistoryRestoreState()
-    assert(state.kind === 'failed', 'Invalid persisted cursor references should fail restore explicitly.')
-    assert(
+    expectTrue(state.kind === 'failed', 'Invalid persisted cursor references should fail restore explicitly.')
+    expectTrue(
       state.diagnostics[0]?.reasonCode === 'mock-invalid-document-cursor',
       'Invalid persisted cursor restore failures should expose cursor diagnostics.',
     )
@@ -449,10 +443,10 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
       baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
-    assert(created.revisionState.kind === 'accepted', 'Feature create should produce startup replay history.')
+    expectTrue(created.revisionState.kind === 'accepted', 'Feature create should produce startup replay history.')
 
     const finalHistory = store.savedPayloads.at(-1)
-    assert(finalHistory, 'Feature create should save history.')
+    expectTrue(finalHistory, 'Feature create should save history.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -460,7 +454,7 @@ test('src/domain/modeling/modeling-history-persistence.spec.ts', async () => {
     })
     const startupSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
-    assert(
+    expectTrue(
       startupSnapshot.document.features.some((feature) => feature.featureId === created.featureId),
       'Startup snapshot should include replayed history before editor exposure.',
     )

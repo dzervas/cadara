@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createWorkbenchDocumentOwner } from '@/application/workbench/document-owner'
 import { createAppError, err, ok } from '@/contracts/errors'
 import type { ImportProvider } from '@/contracts/import/provider'
@@ -14,12 +15,6 @@ import type {
   ModelingCommitSketchCorrelation,
   ModelingService,
 } from '@/domain/modeling/modeling-service'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function createDiagnostic(message: string, severity: ModelingDiagnostic['severity'] = 'error'): ModelingDiagnostic {
   return {
@@ -118,14 +113,14 @@ test('document owner accepts variable mutations and refreshes the snapshot', asy
     fallbackMessage: 'Add variable failed.',
   })
 
-  assert(result.isOk(), 'Accepted variable mutations should resolve successfully through the document owner seam.')
-  assert(
+  expectTrue(result.isOk(), 'Accepted variable mutations should resolve successfully through the document owner seam.')
+  expectTrue(
     addCalls[0]?.baseRevisionId === snapshot.document.revisionId
       && addCalls[0]?.name === `var${snapshot.document.variables.length + 1}`
       && addCalls[0]?.valueText === '0',
     'Document owner should derive variable defaults from the active snapshot revision and variable count.',
   )
-  assert(
+  expectTrue(
     dispatched[0]?.type === 'document.snapshotLoaded' && dispatched[0].snapshot === nextSnapshot,
     'Accepted variable mutations should refresh and dispatch the next snapshot.',
   )
@@ -163,8 +158,8 @@ test('document owner preserves rejected and errored variable mutations without r
     fallbackMessage: 'Add variable failed.',
   })
 
-  assert(rejectedResult.isErr(), 'Rejected modeling results should propagate as workbench errors.')
-  assert(dispatched.length === 0, 'Rejected mutations should not dispatch a refreshed snapshot.')
+  expectTrue(rejectedResult.isErr(), 'Rejected modeling results should propagate as workbench errors.')
+  expectTrue(dispatched.length === 0, 'Rejected mutations should not dispatch a refreshed snapshot.')
 
   const erroredOwner = createOwner({
     machineState: { snapshot } as EditorState,
@@ -186,12 +181,12 @@ test('document owner preserves rejected and errored variable mutations without r
     fallbackMessage: 'Add variable failed.',
   })
 
-  assert(erroredResult.isErr(), 'Upstream AppError results should pass through the document owner seam.')
-  assert(
+  expectTrue(erroredResult.isErr(), 'Upstream AppError results should pass through the document owner seam.')
+  expectTrue(
     erroredResult.isErr() && erroredResult.error.message === 'Repository offline.',
     'The owner should not wrap modeling AppErrors when the modeling service already normalized them.',
   )
-  assert(dispatched.length === 0, 'Errored mutations should not dispatch a refreshed snapshot.')
+  expectTrue(dispatched.length === 0, 'Errored mutations should not dispatch a refreshed snapshot.')
 })
 
 test('document owner covers snapshot replacement and loading guards', async () => {
@@ -212,8 +207,8 @@ test('document owner covers snapshot replacement and loading guards', async () =
   })
 
   const replaced = await owner.replaceActiveDocumentBasis()
-  assert(replaced === nextSnapshot, 'Replacing the active document basis should return the fetched snapshot.')
-  assert(
+  expectTrue(replaced === nextSnapshot, 'Replacing the active document basis should return the fetched snapshot.')
+  expectTrue(
     dispatched[0]?.type === 'document.replaced' && dispatched[0].snapshot === nextSnapshot,
     'Replacing the active document basis should dispatch the replacement event.',
   )
@@ -238,7 +233,7 @@ test('document owner covers snapshot replacement and loading guards', async () =
   } catch (error: unknown) {
     message = error instanceof Error ? error.message : String(error)
   }
-  assert(message === 'The current document is still loading.', 'Mutation entrypoints should guard against missing snapshots.')
+  expectTrue(message === 'The current document is still loading.', 'Mutation entrypoints should guard against missing snapshots.')
 })
 
 test('document owner routes rename operations for bodies, features, and sketches', async () => {
@@ -322,26 +317,26 @@ test('document owner routes rename operations for bodies, features, and sketches
     { operation: 'Rename sketch', fallbackMessage: 'Rename sketch failed.' },
   )
 
-  assert(bodyRename.isOk() && featureRename.isOk() && sketchRename.isOk(), 'Accepted rename flows should resolve successfully.')
-  assert(
+  expectTrue(bodyRename.isOk() && featureRename.isOk() && sketchRename.isOk(), 'Accepted rename flows should resolve successfully.')
+  expectTrue(
     renameBodyCalls[0]?.bodyId === body.bodyId
       && renameBodyCalls[0]?.bodyLabel === 'Renamed body'
       && renameBodyCalls[0]?.baseRevisionId === snapshot.document.revisionId,
     'Body renames should forward the body id, new label, and active base revision.',
   )
-  assert(
+  expectTrue(
     updateFeatureCalls[0]?.featureId === feature.featureId
       && updateFeatureCalls[0]?.featureLabel === 'Renamed feature'
       && updateFeatureCalls[0]?.definition === feature.definition,
     'Feature renames should preserve the existing definition while updating the label.',
   )
-  assert(
+  expectTrue(
     commitSketchCalls[0]?.sketchId === sketch.sketchId
       && commitSketchCalls[0]?.sketchLabel === 'Renamed sketch'
       && commitSketchCalls[0]?.solverCorrelation === correlations[0],
     'Sketch renames should hand the sketch solver correlation through the modeling service port.',
   )
-  assert(
+  expectTrue(
     dispatched.filter((event) => event.type === 'document.snapshotLoaded').length === 3,
     'Accepted rename mutations should refresh the snapshot after each accepted operation.',
   )
@@ -377,7 +372,7 @@ test('document owner enforces rename and delete guardrails', async () => {
   } catch (error: unknown) {
     deleteMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(deleteMessage === 'Only durable document targets can be deleted.', 'Delete should reject non-durable targets.')
+  expectTrue(deleteMessage === 'Only durable document targets can be deleted.', 'Delete should reject non-durable targets.')
 
   let featureMissingMessage: string | null = null
   try {
@@ -389,7 +384,7 @@ test('document owner enforces rename and delete guardrails', async () => {
   } catch (error: unknown) {
     featureMissingMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(featureMissingMessage === 'Could not find feature_missing.', 'Feature rename should fail when the selected feature is missing.')
+  expectTrue(featureMissingMessage === 'Could not find feature_missing.', 'Feature rename should fail when the selected feature is missing.')
 
   let sketchMissingMessage: string | null = null
   try {
@@ -401,7 +396,7 @@ test('document owner enforces rename and delete guardrails', async () => {
   } catch (error: unknown) {
     sketchMissingMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(sketchMissingMessage === 'Could not find sketch_missing.', 'Sketch rename should fail when the selected sketch is missing.')
+  expectTrue(sketchMissingMessage === 'Could not find sketch_missing.', 'Sketch rename should fail when the selected sketch is missing.')
 
   let unsupportedMessage: string | null = null
   try {
@@ -413,7 +408,7 @@ test('document owner enforces rename and delete guardrails', async () => {
   } catch (error: unknown) {
     unsupportedMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(unsupportedMessage === 'Only sketches, features, and bodies can be renamed.', 'Rename should reject unsupported durable target kinds.')
+  expectTrue(unsupportedMessage === 'Only sketches, features, and bodies can be renamed.', 'Rename should reject unsupported durable target kinds.')
 })
 
 test('document owner forwards history reorder, variable update, and durable delete mutations', async () => {
@@ -462,8 +457,8 @@ test('document owner forwards history reorder, variable update, and durable dele
     { name: 'width', valueText: '42 mm' },
     { operation: 'Update variable', fallbackMessage: 'Update variable failed.' },
   )
-  assert(variableResult.isOk(), 'Variable updates should resolve through the accepted mutation path.')
-  assert(
+  expectTrue(variableResult.isOk(), 'Variable updates should resolve through the accepted mutation path.')
+  expectTrue(
     variableUpdates[0]?.variableId === variableId
       && variableUpdates[0]?.name === 'width'
       && variableUpdates[0]?.valueText === '42 mm',
@@ -480,12 +475,12 @@ test('document owner forwards history reorder, variable update, and durable dele
     { operation: 'Delete body', fallbackMessage: 'Delete body failed.' },
   )
 
-  assert(reorderResult.isOk() && deleteResult.isOk(), 'History reorder and durable delete flows should resolve successfully.')
-  assert(
+  expectTrue(reorderResult.isOk() && deleteResult.isOk(), 'History reorder and durable delete flows should resolve successfully.')
+  expectTrue(
     reorderCalls[0]?.item === historyItem && reorderCalls[0]?.beforeItem === null,
     'History reorders should forward the selected item and anchor to the modeling service.',
   )
-  assert(
+  expectTrue(
     deleteCalls[0]?.kind === 'body' && deleteCalls[0].bodyId === snapshot.document.bodies[0]!.bodyId,
     'Durable delete should forward the selected durable target unchanged.',
   )
@@ -496,10 +491,10 @@ test('document owner handles import provider lookup, diagnostic failures, and su
   const nextSnapshot = await createSeedDocumentSnapshot()
   const provider = createImportProvider({
     prepare: async ({ source, review, selections, capabilities }) => {
-      assert(source.name === 'fixture.step', 'Import source should be forwarded to the provider.')
-      assert((review as ImportReviewEnvelope<{ units: 'mm' }>).providerReview.units === 'mm', 'Provider review should be forwarded unchanged.')
-      assert((selections as { enabled: boolean }).enabled === true, 'Import selections should be forwarded unchanged.')
-      assert(capabilities.context.baseRevisionId === snapshot.document.revisionId, 'Import capabilities should target the active snapshot revision.')
+      expectTrue(source.name === 'fixture.step', 'Import source should be forwarded to the provider.')
+      expectTrue((review as ImportReviewEnvelope<{ units: 'mm' }>).providerReview.units === 'mm', 'Provider review should be forwarded unchanged.')
+      expectTrue((selections as { enabled: boolean }).enabled === true, 'Import selections should be forwarded unchanged.')
+      expectTrue(capabilities.context.baseRevisionId === snapshot.document.revisionId, 'Import capabilities should target the active snapshot revision.')
       return {
         addDocumentVariables: [{
           name: 'scale',
@@ -549,14 +544,14 @@ test('document owner handles import provider lookup, diagnostic failures, and su
   })
 
   const success = await successfulOwner.commitPartImport(activeImportSession)
-  assert(success.ok, 'Successful imports should return a committed import result.')
-  assert(
+  expectTrue(success.ok, 'Successful imports should return a committed import result.')
+  expectTrue(
     success.ok
       && success.createdEntityIds.variableIds[0] === 'variable_scale'
       && success.snapshot === nextSnapshot,
     'Successful imports should replay created ids and refresh the snapshot.',
   )
-  assert(
+  expectTrue(
     mutationCalls[0] === snapshot.document.revisionId,
     'Prepared import actions should start from the active snapshot revision.',
   )
@@ -587,8 +582,8 @@ test('document owner handles import provider lookup, diagnostic failures, and su
   })
 
   const blocked = await diagnosticsOwner.commitPartImport(activeImportSession)
-  assert(!blocked.ok, 'Error-severity import diagnostics should block a successful import result.')
-  assert(
+  expectTrue(!blocked.ok, 'Error-severity import diagnostics should block a successful import result.')
+  expectTrue(
     !blocked.ok && blocked.diagnostics[0]?.message === 'Geometry could not be reconstructed.',
     'Blocked imports should return the provider diagnostics to the caller.',
   )
@@ -608,7 +603,7 @@ test('document owner handles import provider lookup, diagnostic failures, and su
   } catch (error: unknown) {
     missingProviderMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(
+  expectTrue(
     missingProviderMessage === 'The selected import provider is no longer registered.',
     'Import commit should fail when the selected provider is no longer registered.',
   )

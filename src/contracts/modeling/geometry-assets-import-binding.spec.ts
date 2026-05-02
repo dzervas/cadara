@@ -1,17 +1,11 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { geometryAssetRecordSchema } from '@/contracts/modeling/geometry-assets.runtime-schema'
 import { IMPORT_CONTRACT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
-test('src/contracts/modeling/geometry-assets-import-binding.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const { asset } = await createDeterministicGeometryAsset()
+test('src/contracts/modeling/geometry-assets-import-binding.spec.ts', async () => {  const { asset } = await createDeterministicGeometryAsset()
   const importedAssetResult = geometryAssetRecordSchema.safeParse({
     ...asset,
     provenance: {
@@ -26,5 +20,5 @@ test('src/contracts/modeling/geometry-assets-import-binding.spec.ts', async () =
     },
   })
 
-  assert(importedAssetResult.success, 'Geometry asset runtime validation should accept persisted import binding metadata.')
+  expectTrue(importedAssetResult.success, 'Geometry asset runtime validation should accept persisted import binding metadata.')
 })

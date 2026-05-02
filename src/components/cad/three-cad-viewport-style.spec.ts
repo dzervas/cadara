@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMeshMaterialConfig,
@@ -14,14 +15,7 @@ import {
   resolveSketchRenderingPalette,
 } from '@/components/cad/sketch-rendering-palette'
 
-test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const palette = {
+test('src/components/cad/three-cad-viewport-style.spec.ts', () => {  const palette = {
     constrained: 0x222222,
     underconstrained: 0x1651b0,
     overconstrained: 0xff5555,
@@ -76,39 +70,39 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     },
   } as const
 
-  assert(
+  expectTrue(
     shouldApplySketchDisplayStyles('sketch', true),
     'Sketch display styling should be enabled while an active sketch session is being edited.',
   )
-  assert(
+  expectTrue(
     !shouldApplySketchDisplayStyles('part', true),
     'Sketch display styling should be disabled in part mode, even if a sketch session object exists.',
   )
 
   const styledLineConfig = getSketchDisplayPolylineMaterialConfig(styledPolylineRenderable, true, palette)
-  assert(styledLineConfig.color === 0x33ffaa, 'Sketch mode should apply stroke color from renderable style metadata.')
-  assert(styledLineConfig.opacity === 0.5, 'Sketch mode should apply stroke opacity from renderable style metadata.')
-  assert(styledLineConfig.lineWidth === 3, 'Sketch mode should apply stroke width from renderable style metadata.')
-  assert(styledLineConfig.linePattern === 'dashed', 'Sketch mode should use dashed materials for authored dash patterns.')
-  assert(styledLineConfig.dashSize === 0.5, 'Sketch mode should apply authored dash size.')
-  assert(styledLineConfig.gapSize === 0.2, 'Sketch mode should apply authored gap size.')
-  assert(styledLineConfig.lineJoin === 'miter', 'Sketch mode should preserve authored line join in material config.')
-  assert(styledLineConfig.miterLimit === 7, 'Sketch mode should preserve authored miter limit in material config.')
+  expectTrue(styledLineConfig.color === 0x33ffaa, 'Sketch mode should apply stroke color from renderable style metadata.')
+  expectTrue(styledLineConfig.opacity === 0.5, 'Sketch mode should apply stroke opacity from renderable style metadata.')
+  expectTrue(styledLineConfig.lineWidth === 3, 'Sketch mode should apply stroke width from renderable style metadata.')
+  expectTrue(styledLineConfig.linePattern === 'dashed', 'Sketch mode should use dashed materials for authored dash patterns.')
+  expectTrue(styledLineConfig.dashSize === 0.5, 'Sketch mode should apply authored dash size.')
+  expectTrue(styledLineConfig.gapSize === 0.2, 'Sketch mode should apply authored gap size.')
+  expectTrue(styledLineConfig.lineJoin === 'miter', 'Sketch mode should preserve authored line join in material config.')
+  expectTrue(styledLineConfig.miterLimit === 7, 'Sketch mode should preserve authored miter limit in material config.')
 
   const partModeLineConfig = getSketchDisplayPolylineMaterialConfig(styledPolylineRenderable, false, palette)
-  assert(
+  expectTrue(
     partModeLineConfig.color !== 0x33ffaa,
     'Part mode should fall back to neutral CAD stroke colors instead of sketch-authored style metadata.',
   )
-  assert(partModeLineConfig.opacity === 0.95, 'Part mode should use the existing neutral solid-line opacity.')
-  assert(partModeLineConfig.lineWidth === 1, 'Part mode should preserve default line-width behavior for picking stability.')
+  expectTrue(partModeLineConfig.opacity === 0.95, 'Part mode should use the existing neutral solid-line opacity.')
+  expectTrue(partModeLineConfig.lineWidth === 1, 'Part mode should preserve default line-width behavior for picking stability.')
 
   const styledMeshConfig = getSketchDisplayMeshMaterialConfig(styledMeshRenderable, true, palette)
-  assert(styledMeshConfig.color === 0xaa33ff, 'Sketch mode should apply paint color from renderable style metadata.')
-  assert(styledMeshConfig.opacity === 0.44, 'Sketch mode should apply paint opacity from renderable style metadata.')
+  expectTrue(styledMeshConfig.color === 0xaa33ff, 'Sketch mode should apply paint color from renderable style metadata.')
+  expectTrue(styledMeshConfig.opacity === 0.44, 'Sketch mode should apply paint opacity from renderable style metadata.')
 
   const partModeMeshConfig = getSketchDisplayMeshMaterialConfig(styledMeshRenderable, false, palette)
-  assert(
+  expectTrue(
     partModeMeshConfig.color !== 0xaa33ff,
     'Part mode should not apply sketch paint styles to display mesh renderables.',
   )
@@ -117,20 +111,20 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     ...styledMeshRenderable,
     semanticClass: 'region',
   }, false, palette)
-  assert(regionMeshConfig.polygonOffset, 'Sketch-owned region fills should use polygon offset.')
-  assert(
+  expectTrue(regionMeshConfig.polygonOffset, 'Sketch-owned region fills should use polygon offset.')
+  expectTrue(
     regionMeshConfig.polygonOffsetFactor < 0 && regionMeshConfig.polygonOffsetUnits < 0,
     'Sketch-owned region fills should be biased toward the camera to avoid coplanar flicker.',
   )
 
-  assert(
+  expectTrue(
     getSketchRenderingPaletteToken('constrained') === '--workbench-tooltip-description'
       && getSketchRenderingPaletteToken('underconstrained') === '--mantine-color-blue-9'
       && getSketchRenderingPaletteToken('overconstrained') === '--workbench-shell-danger-text'
       && getSketchRenderingPaletteToken('regionFill') === '--workbench-shell-border',
     'Sketch palette roles should map to exact existing theme tokens.',
   )
-  assert(
+  expectTrue(
     Object.values(SKETCH_RENDERING_PALETTE_TOKENS).every((token) =>
       [
         '--workbench-tooltip-description',
@@ -151,14 +145,14 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     }
     return values[token] ?? ''
   })
-  assert(resolvedPalette.underconstrained === 0x1651b0, 'Palette resolver should convert theme CSS values for Three materials.')
+  expectTrue(resolvedPalette.underconstrained === 0x1651b0, 'Palette resolver should convert theme CSS values for Three materials.')
 
   const constrainedLineConfig = getSketchDisplayPolylineMaterialConfig({
     ...styledPolylineRenderable,
     strokeStyle: undefined,
     constraintDisplay: { state: 'constrained', isAffectedOverconstraint: false },
   }, true, palette)
-  assert(
+  expectTrue(
     constrainedLineConfig.color === palette.constrained,
     'Fully constrained sketch lines should default to the constrained theme color.',
   )
@@ -168,9 +162,9 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     diagnosticStyle: { kind: 'overconstraint' },
     constraintDisplay: { state: 'overconstrained', isAffectedOverconstraint: true },
   }, true, palette)
-  assert(diagnosticLineConfig.color === palette.overconstrained, 'Affected overconstrained edge diagnostics should use the error color.')
-  assert(diagnosticLineConfig.lineWidth === 1, 'Affected overconstrained edge diagnostics should stay thin.')
-  assert(
+  expectTrue(diagnosticLineConfig.color === palette.overconstrained, 'Affected overconstrained edge diagnostics should use the error color.')
+  expectTrue(diagnosticLineConfig.lineWidth === 1, 'Affected overconstrained edge diagnostics should stay thin.')
+  expectTrue(
     diagnosticLineConfig.color !== styledPolylineRenderable.strokeStyle.color,
     'Diagnostic edge overlays may override authored stroke color without replacing the base authored stroke.',
   )
@@ -181,7 +175,7 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     strokeStyle: undefined,
     constraintDisplay: { state: 'overconstrained', isAffectedOverconstraint: true },
   }, true, palette)
-  assert(
+  expectTrue(
     affectedMarkerConfig.color === palette.overconstrained,
     'Affected overconstrained sketch vertices should use the error color family.',
   )
@@ -191,11 +185,11 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {
     geometry: { kind: 'marker', position: [0, 0, 0], displayRadius: 0.4 },
     markerLayer: 'overlay' as const,
   }
-  assert(
+  expectTrue(
     !shouldDepthTestSketchDisplayMarker(overlayMarkerRenderable),
     'Overlay sketch markers should ignore depth so image-bound anchors remain visible above reference-image quads.',
   )
-  assert(
+  expectTrue(
     getSketchDisplayMarkerRenderOrder(overlayMarkerRenderable) > getSketchDisplayMarkerRenderOrder({
       ...overlayMarkerRenderable,
       markerLayer: 'default' as const,

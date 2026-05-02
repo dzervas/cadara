@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   createNewWorkbenchDocument,
   exportWorkbenchDocument,
@@ -8,12 +9,6 @@ import {
   saveWorkbenchLocalFile,
 } from '@/app/workbench/document/workbench-document-actions'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function createCallbacks() {
   const errors: string[] = []
@@ -68,7 +63,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     } as never,
     ...newCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     newCallbacks.replacements[0]?.message === 'Created a new document.',
     'New document creation should replace the workbench document after a successful create result.',
   )
@@ -85,7 +80,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     } as never,
     ...rejectedNewCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     rejectedNewCallbacks.errors[0] === 'New document could not be created.',
     'Rejected document creation should surface the first diagnostic message.',
   )
@@ -105,7 +100,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...importCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     importCallbacks.replacements[0]?.message === 'Imported fixture.cadara.',
     'Successful document imports should replace the active workbench document.',
   )
@@ -121,7 +116,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...zipImportCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     zipImportCallbacks.errors[0]?.includes('ZIP-backed .cadara packages are no longer supported'),
     'ZIP-backed import failures should surface the explicit unsupported-package guidance.',
   )
@@ -136,7 +131,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...unsupportedOpenCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     unsupportedOpenCallbacks.errors[0]?.includes('Local file sync requires the File System Access API.'),
     'Unsupported local-open environments should surface the File System Access API guidance.',
   )
@@ -168,7 +163,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...openCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     boundHandles[0] === 'workspace.cadara'
       && openCallbacks.replacements[0]?.message === 'Opened workspace.cadara. Local file sync is active.',
     'Successful local-open actions should import the file, bind it for sync, and replace the workbench document.',
@@ -201,7 +196,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...saveCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     writes[0] === '{"documentId":"doc_workspace"}'
       && saveCallbacks.infos[0] === 'Saved saved.cadara. Local file sync is active.',
     'Successful local-save actions should write the exported payload, bind the handle, and announce sync activation.',
@@ -231,7 +226,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...deniedSaveCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     deniedSaveCallbacks.errors[0] === 'Local file write permission was denied.',
     'Permission-denied saves should surface the user-facing write-permission error.',
   )
@@ -251,7 +246,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
     },
     ...exportCallbacks.callbacks,
   })
-  assert(
+  expectTrue(
     downloaded[0] === 'exported.cadara'
       && exportCallbacks.infos[0] === 'Exported exported.cadara.',
     'Document export should delegate to the download helper and surface the exported filename.',

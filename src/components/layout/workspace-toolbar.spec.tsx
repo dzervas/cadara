@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -22,19 +23,12 @@ import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import { WorkbenchCommandProvider } from '@/hooks/workbench-command-provider'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
-test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function getToolMarkup(markup: string, toolId: string) {
+test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function getToolMarkup(markup: string, toolId: string) {
     const toolIdIndex = markup.indexOf(`data-tool-id="${toolId}"`)
-    assert(toolIdIndex >= 0, `Expected ${toolId} tool markup to exist.`)
+    expectTrue(toolIdIndex >= 0, `Expected ${toolId} tool markup to exist.`)
 
     const start = markup.lastIndexOf('<button', toolIdIndex)
-    assert(start >= 0, `Expected ${toolId} tool button markup to exist.`)
+    expectTrue(start >= 0, `Expected ${toolId} tool button markup to exist.`)
 
     const end = markup.indexOf('</button>', toolIdIndex)
     return end >= 0 ? markup.slice(start, end) : markup.slice(start)
@@ -42,10 +36,10 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
 
   function getDropdownTriggerMarkup(markup: string, toolId: string) {
     const triggerIndex = markup.indexOf(`data-tool-dropdown-trigger="${toolId}"`)
-    assert(triggerIndex >= 0, `Expected ${toolId} dropdown trigger markup to exist.`)
+    expectTrue(triggerIndex >= 0, `Expected ${toolId} dropdown trigger markup to exist.`)
 
     const start = markup.lastIndexOf('<button', triggerIndex)
-    assert(start >= 0, `Expected ${toolId} dropdown trigger button markup to exist.`)
+    expectTrue(start >= 0, `Expected ${toolId} dropdown trigger button markup to exist.`)
 
     const end = markup.indexOf('</button>', triggerIndex)
     return end >= 0 ? markup.slice(start, end) : markup.slice(start)
@@ -91,37 +85,37 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
 
   const toolbarMarkup = renderToolbar()
 
-  assert(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')
-  assert(
+  expectTrue(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')
+  expectTrue(
     toolbarMarkup.includes('aria-label="File"')
       && toolbarMarkup.indexOf('aria-label="File"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
     'Toolbar should render the document file menu before the CAD tool sections.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('overflow-x-auto')
       && toolbarMarkup.includes('w-max')
       && toolbarMarkup.includes('shrink-0'),
     'Toolbar tools should scroll inside the header instead of widening the workbench shell.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('/icons/extrude.svg'),
     'Toolbar should render standard tool buttons with local SVG assets.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('data-tool-id="import"')
       && toolbarMarkup.includes('aria-label="Import"')
       && toolbarMarkup.includes('/icons/import-part.svg'),
     'Toolbar should expose import as a real icon-only tool in part mode.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('/icons/linear-pattern.svg'),
     'Toolbar should render dropdown-backed tool triggers with local SVG assets.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('aria-label="Extrude"'),
     'Toolbar buttons should expose concise accessibility labels based on the tool name.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('href="https://github.com/dzervas/cadara"')
       && toolbarMarkup.includes('target="_blank"')
       && toolbarMarkup.includes('rel="noreferrer"')
@@ -134,27 +128,27 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     onReportBug: () => undefined,
   })
 
-  assert(
+  expectTrue(
     reportBugToolbarMarkup.includes('aria-label="Report bug"')
       && reportBugToolbarMarkup.includes('type="button"')
       && reportBugToolbarMarkup.includes('/icons/bug.svg'),
     'Toolbar should render the report-bug action as an icon-only button with local asset and accessible label.',
   )
-  assert(
+  expectTrue(
     toolbarMarkup.includes('data-tool-id="undo"')
       && toolbarMarkup.includes('data-tool-id="redo"')
       && getToolMarkup(toolbarMarkup, 'undo').includes('data-disabled="true"')
       && getToolMarkup(toolbarMarkup, 'redo').includes('data-disabled="true"'),
     'Undo and redo should render disabled when no history step is available.',
   )
-  assert(
+  expectTrue(
     getToolMarkup(toolbarMarkup, 'undo').includes('opacity:0.46')
       && getToolMarkup(toolbarMarkup, 'redo').includes('opacity:0.46'),
     'Disabled undo and redo buttons should render with a visibly muted toolbar treatment.',
   )
-  assert(!toolbarMarkup.includes('Filter:'), 'Toolbar should not duplicate the selection filter debugger readout.')
-  assert(!toolbarMarkup.includes('Requirement:'), 'Toolbar should not duplicate the requirement debugger readout.')
-  assert(!toolbarMarkup.includes('Slots:'), 'Toolbar should not duplicate the slot-count debugger readout.')
+  expectTrue(!toolbarMarkup.includes('Filter:'), 'Toolbar should not duplicate the selection filter debugger readout.')
+  expectTrue(!toolbarMarkup.includes('Requirement:'), 'Toolbar should not duplicate the requirement debugger readout.')
+  expectTrue(!toolbarMarkup.includes('Slots:'), 'Toolbar should not duplicate the slot-count debugger readout.')
 
   const sketchToolbarMarkup = renderToolbar({
     state: {
@@ -168,11 +162,11 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     },
   })
 
-  assert(
+  expectTrue(
     sketchToolbarMarkup.includes('aria-label="Finish Sketch"'),
     'Toolbar should render Finish Sketch while a sketch session is active.',
   )
-  assert(
+  expectTrue(
     sketchToolbarMarkup.includes('/icons/sketch-line-segment.svg')
       && sketchToolbarMarkup.includes('/icons/sketch-dimension.svg')
       && sketchToolbarMarkup.includes('/icons/sketch-construction.svg')
@@ -181,7 +175,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
       && sketchToolbarMarkup.includes('/icons/svg-stroke.svg'),
     'Sketch toolbar buttons and dropdown triggers should keep local SVG icons.',
   )
-  assert(
+  expectTrue(
     sketchToolbarMarkup.includes('data-tool-id="svgRendering"')
       && sketchToolbarMarkup.includes('data-tool-id="fill"')
       && sketchToolbarMarkup.includes('data-tool-id="stroke"')
@@ -189,16 +183,16 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
       && !sketchToolbarMarkup.includes('data-tool-id="strokeOptions"'),
     'Sketch toolbar should include the SVG rendering toggle and only Fill/Stroke SVG style tools.',
   )
-  assert(
+  expectTrue(
     !getDropdownTriggerMarkup(sketchToolbarMarkup, 'line').includes('border-left'),
     'Sketch dropdown tools should not render a divider between the tool icon and dropdown affordance.',
   )
-  assert(
+  expectTrue(
     !getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"')
       && !getToolMarkup(sketchToolbarMarkup, 'stroke').includes('data-disabled="true"'),
     'SVG style toolbar controls should stay available without a target so activation can show target guidance.',
   )
-  assert(
+  expectTrue(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)')
       && sketchToolbarMarkup.includes('var(--workbench-shell-success-border)'),
     'Finish Sketch should use the semantic success treatment from the shared workbench theme.',
@@ -209,7 +203,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
   styledSession = startSketchDraw(styledSession, [0, 0])
   styledSession = acceptSketchDraw(styledSession, [4, 0])
   const styleTarget = styledSession.definition.entities[0]?.target
-  assert(styleTarget, 'Toolbar style availability fixture should create a local sketch entity.')
+  expectTrue(styleTarget, 'Toolbar style availability fixture should create a local sketch entity.')
   styledSession = focusSketchStyleTool(styledSession, [styleTarget], 'stroke')
 
   const styleTargetToolbarMarkup = renderToolbar({
@@ -225,7 +219,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     },
   })
 
-  assert(
+  expectTrue(
     !getToolMarkup(styleTargetToolbarMarkup, 'fill').includes('data-disabled="true"')
       && !getToolMarkup(styleTargetToolbarMarkup, 'stroke').includes('data-disabled="true"')
       && getToolMarkup(styleTargetToolbarMarkup, 'stroke').includes('aria-pressed="true"'),
@@ -256,7 +250,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     },
   })
 
-  assert(
+  expectTrue(
     getToolMarkup(svgDisabledToolbarMarkup, 'fill').includes('data-disabled="true"')
       && getToolMarkup(svgDisabledToolbarMarkup, 'stroke').includes('data-disabled="true"')
       && !getToolMarkup(svgDisabledToolbarMarkup, 'svgRendering').includes('aria-pressed="true"'),
@@ -279,7 +273,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     },
   })
 
-  assert(
+  expectTrue(
     constructionToolbarMarkup.includes('aria-label="Construction"')
       && constructionToolbarMarkup.includes('aria-pressed="true"'),
     'Construction should render selected while acting as a sketch modifier.',
@@ -294,11 +288,11 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {
     },
   })
 
-  assert(
+  expectTrue(
     getToolMarkup(historyToolbarMarkup, 'redo').includes('data-disabled="true"'),
     'Redo should render disabled when no redo step is available.',
   )
-  assert(
+  expectTrue(
     !getToolMarkup(historyToolbarMarkup, 'undo').includes('data-disabled="true"'),
     'Undo should render enabled when an undo step is available.',
   )

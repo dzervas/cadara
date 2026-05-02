@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { IMPORT_CONTRACT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import {
   importBindingSchema,
@@ -8,19 +9,12 @@ import {
   resolvedImportSourceSchema,
 } from '@/contracts/import/validation'
 
-test('src/contracts/import/validation.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const importSourceResult = importSourceSchema.safeParse({
+test('src/contracts/import/validation.spec.ts', async () => {  const importSourceResult = importSourceSchema.safeParse({
     kind: 'localFile',
     fileName: 'bracket.step',
     pathHint: '/workspace/bracket.step',
   })
-  assert(importSourceResult.success, 'Import source schema should accept local file sources.')
+  expectTrue(importSourceResult.success, 'Import source schema should accept local file sources.')
 
   const resolvedSourceResult = resolvedImportSourceSchema.safeParse({
     name: 'bracket.step',
@@ -32,7 +26,7 @@ test('src/contracts/import/validation.spec.ts', async () => {
     bytes: new Uint8Array([1, 2, 3, 4]),
     fingerprint: `sha256:${'a'.repeat(64)}`,
   })
-  assert(resolvedSourceResult.success, 'Resolved import source schema should accept fetched byte payloads.')
+  expectTrue(resolvedSourceResult.success, 'Resolved import source schema should accept fetched byte payloads.')
 
   const bindingResult = importBindingSchema.safeParse({
     schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
@@ -43,7 +37,7 @@ test('src/contracts/import/validation.spec.ts', async () => {
     fingerprint: `sha256:${'b'.repeat(64)}`,
     refreshPolicy: 'manual',
   })
-  assert(bindingResult.success, 'Import binding schema should accept portable cloud object bindings.')
+  expectTrue(bindingResult.success, 'Import binding schema should accept portable cloud object bindings.')
 
   const preparedActionsResult = importPreparedActionsSchema.safeParse({
     addDocumentVariables: [
@@ -71,5 +65,5 @@ test('src/contracts/import/validation.spec.ts', async () => {
       },
     ],
   })
-  assert(preparedActionsResult.success, 'Prepared action schema should accept adapter request payloads and import diagnostics.')
+  expectTrue(preparedActionsResult.success, 'Prepared action schema should accept adapter request payloads and import diagnostics.')
 })

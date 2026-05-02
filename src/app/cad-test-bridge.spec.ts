@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   dispatchCadTestSelection,
   resolveCadTestTarget,
@@ -10,14 +11,7 @@ import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { EditorEvent } from '@/domain/editor/state-machine'
 import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 
-test('src/app/cad-test-bridge.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const state: WorkbenchStateDebuggerModel = {
+test('src/app/cad-test-bridge.spec.ts', () => {  const state: WorkbenchStateDebuggerModel = {
     activeMode: 'part',
     machineState: 'idle',
     command: 'none',
@@ -54,7 +48,7 @@ test('src/app/cad-test-bridge.spec.ts', () => {
   }
   const targetWindow: { __cadTestState?: WorkbenchStateDebuggerModel } = {}
   syncCadTestState(state, targetWindow)
-  assert(targetWindow.__cadTestState?.revision === 'rev_1', 'State bridge should populate the window model.')
+  expectTrue(targetWindow.__cadTestState?.revision === 'rev_1', 'State bridge should populate the window model.')
 
   const snapshot = {
     presentation: {
@@ -84,10 +78,10 @@ test('src/app/cad-test-bridge.spec.ts', () => {
   }
   syncCadTestState(nextState, targetWindow)
 
-  assert(resolveCadTestTarget(snapshot, 'body_feature_extrude-1')?.kind === 'body', 'Bridge should resolve target labels.')
-  assert(selected === true, 'Programmatic selection bridge should accept selectable targets.')
-  assert(events[0]?.type === 'viewport.selectionRequested', 'Programmatic selection should dispatch through the editor event contract.')
-  assert(
+  expectTrue(resolveCadTestTarget(snapshot, 'body_feature_extrude-1')?.kind === 'body', 'Bridge should resolve target labels.')
+  expectTrue(selected === true, 'Programmatic selection bridge should accept selectable targets.')
+  expectTrue(events[0]?.type === 'viewport.selectionRequested', 'Programmatic selection should dispatch through the editor event contract.')
+  expectTrue(
     targetWindow.__cadTestState.selectionTargets.includes('body_feature_extrude-1'),
     'Programmatic selection should be reflected in the structured state bridge.',
   )

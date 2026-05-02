@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
 import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import {
@@ -9,14 +10,7 @@ import {
 } from '@/core/shortcuts/keymap'
 import { serializeShortcut } from '@/core/shortcuts/shortcut-grammar'
 
-test('src/domain/shortcuts/keymap.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const commands = [
+test('src/domain/shortcuts/keymap.spec.ts', () => {  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',
@@ -45,7 +39,7 @@ test('src/domain/shortcuts/keymap.spec.ts', () => {
   const registry = createShortcutCommandRegistry(commands)
   const defaults = createEffectiveKeymap(registry)
 
-  assert(
+  expectTrue(
     serializeShortcut(getPrimaryShortcut(defaults, 'editor.undo')!) === 'mod+z',
     'Effective keymaps should use default shortcuts without profile overrides.',
   )
@@ -54,11 +48,11 @@ test('src/domain/shortcuts/keymap.spec.ts', () => {
     'editor.undo': { shortcuts: ['u'] },
     'editor.cancel': { shortcuts: [] },
   })
-  assert(
+  expectTrue(
     serializeShortcut(getPrimaryShortcut(remapped, 'editor.undo')!) === 'u',
     'Profile overrides should replace default shortcuts.',
   )
-  assert(
+  expectTrue(
     getPrimaryShortcut(remapped, 'editor.cancel') === null,
     'An empty profile shortcut list should disable a command shortcut.',
   )
@@ -66,7 +60,7 @@ test('src/domain/shortcuts/keymap.spec.ts', () => {
   const duplicate = createEffectiveKeymap(registry, {
     'editor.redo': { shortcuts: ['mod+z'] },
   })
-  assert(
+  expectTrue(
     detectShortcutConflicts(registry, duplicate).some((conflict) => conflict.kind === 'duplicate'),
     'Duplicate shortcuts in overlapping scopes should be reported.',
   )
@@ -75,7 +69,7 @@ test('src/domain/shortcuts/keymap.spec.ts', () => {
     'editor.cancel': { shortcuts: ['g'] },
     'editor.redo': { shortcuts: ['g>f'] },
   })
-  assert(
+  expectTrue(
     detectShortcutConflicts(registry, prefix).some((conflict) => conflict.kind === 'prefix'),
     'Same-scope prefix sequence ambiguity should be reported.',
   )

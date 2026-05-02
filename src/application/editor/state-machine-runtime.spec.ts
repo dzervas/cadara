@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createModelingServiceEditorEffectRuntime, runEditorEffect } from '@/application/editor/effect-registry'
 import { createAppError, err, ok, type AppErrorContextEntry } from '@/contracts/errors'
 import type { EditorEffect, EditorEffectRuntime } from '@/core/editor/state-machine'
@@ -7,12 +8,6 @@ import { createFeatureEditSession } from '@/domain/editor/feature-editing'
 import { hydrateFeatureSessionFromSnapshot } from '@/core/editor/state-machine'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 test('editor effect runtime covers snapshot, sketch-open, and feature-hydration contracts', async () => {
   const snapshot = await createSeedDocumentSnapshot()
@@ -32,8 +27,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       return snapshot
     },
   } as EditorEffectRuntime)
-  assert(loaded.type === 'effect.snapshotLoaded', 'Snapshot fetch effects should resolve through the snapshot-loaded event seam.')
-  assert(
+  expectTrue(loaded.type === 'effect.snapshotLoaded', 'Snapshot fetch effects should resolve through the snapshot-loaded event seam.')
+  expectTrue(
     loaded.type === 'effect.snapshotLoaded'
       && loaded.payload.snapshot === snapshot
       && loaded.payload.documentId === snapshot.document.documentId
@@ -48,8 +43,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       throw new Error('Repository offline.')
     },
   } as EditorEffectRuntime)
-  assert(failed.type === 'effect.snapshotFailed', 'Snapshot fetch failures should re-enter the state machine as typed failure events.')
-  assert(
+  expectTrue(failed.type === 'effect.snapshotFailed', 'Snapshot fetch failures should re-enter the state machine as typed failure events.')
+  expectTrue(
     failed.type === 'effect.snapshotFailed'
       && failed.requestId === snapshotEffect.requestId
       && failed.documentId === snapshotEffect.documentId
@@ -70,8 +65,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       return snapshot
     },
   } as EditorEffectRuntime)
-  assert(opened.type === 'effect.sketchSessionOpened', 'Supported sketch-open selections should create a sketch session event.')
-  assert(
+  expectTrue(opened.type === 'effect.sketchSessionOpened', 'Supported sketch-open selections should create a sketch session event.')
+  expectTrue(
     opened.type === 'effect.sketchSessionOpened'
       && opened.session.sketchId === sketch.sketchId,
     'Sketch-open success should return the reopened sketch session.',
@@ -85,7 +80,7 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       return snapshot
     },
   } as EditorEffectRuntime)
-  assert(
+  expectTrue(
     unsupportedSelection.type === 'effect.sketchSessionOpenFailed'
       && unsupportedSelection.message.includes('existing sketch, construction plane, or planar face'),
     'Unsupported sketch-open selections should surface the user-facing guidance message.',
@@ -104,8 +99,8 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       return snapshot
     },
   } as EditorEffectRuntime)
-  assert(hydrated.type === 'effect.featureSessionHydrated', 'Editable features should hydrate into feature sessions.')
-  assert(
+  expectTrue(hydrated.type === 'effect.featureSessionHydrated', 'Editable features should hydrate into feature sessions.')
+  expectTrue(
     hydrated.type === 'effect.featureSessionHydrated'
       && hydrated.session.featureId === feature.featureId,
     'Feature hydration should return the selected feature session.',
@@ -119,7 +114,7 @@ test('editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       return snapshot
     },
   } as EditorEffectRuntime)
-  assert(
+  expectTrue(
     hydrateMissing.type === 'effect.featureSessionHydrationFailed'
       && hydrateMissing.message === 'Feature feature_missing cannot be edited in the current feature session flow.',
     'Missing feature hydration should fail with the feature-specific message.',
@@ -134,8 +129,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
     snapshot,
   )
 
-  assert(featureSession, 'Seed snapshot should expose an editable feature for preview and commit coverage.')
-  assert(sketchSession, 'Seed snapshot should expose a sketch session for sketch effect coverage.')
+  expectTrue(featureSession, 'Seed snapshot should expose an editable feature for preview and commit coverage.')
+  expectTrue(sketchSession, 'Seed snapshot should expose a sketch session for sketch effect coverage.')
 
   const previewEffect: EditorEffect = {
     type: 'feature.evaluatePreview',
@@ -155,8 +150,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
       }
     },
   } as EditorEffectRuntime)
-  assert(preview.type === 'effect.featurePreviewCompleted', 'Feature preview should complete through the preview-completed event seam.')
-  assert(
+  expectTrue(preview.type === 'effect.featurePreviewCompleted', 'Feature preview should complete through the preview-completed event seam.')
+  expectTrue(
     preview.type === 'effect.featurePreviewCompleted'
       && preview.revisionId === 'rev_preview'
       && preview.baseRevisionId === snapshot.document.revisionId
@@ -169,7 +164,7 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
       throw new Error('Preview kernel unavailable.')
     },
   } as EditorEffectRuntime)
-  assert(
+  expectTrue(
     previewFailure.type === 'effect.featurePreviewFailed'
       && previewFailure.message === 'Preview kernel unavailable.',
     'Feature preview failures should normalize into preview-failed events.',
@@ -197,8 +192,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
       }
     },
   } as EditorEffectRuntime)
-  assert(committed.type === 'effect.featureCommitted', 'Feature commit should complete through the feature-committed event seam.')
-  assert(
+  expectTrue(committed.type === 'effect.featureCommitted', 'Feature commit should complete through the feature-committed event seam.')
+  expectTrue(
     committed.type === 'effect.featureCommitted'
       && committed.accepted === false
       && committed.actualRevisionId === 'rev_feature_actual'
@@ -220,8 +215,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
       return null
     },
   } as EditorEffectRuntime)
-  assert(noopSketchCommit.type === 'effect.sketchCommitted', 'Sketch commit should still complete when the runtime reports no mutation.')
-  assert(
+  expectTrue(noopSketchCommit.type === 'effect.sketchCommitted', 'Sketch commit should still complete when the runtime reports no mutation.')
+  expectTrue(
     noopSketchCommit.type === 'effect.sketchCommitted'
       && noopSketchCommit.revisionId === snapshot.document.revisionId
       && noopSketchCommit.accepted === true
@@ -244,8 +239,8 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
       }
     },
   } as EditorEffectRuntime)
-  assert(projected.type === 'effect.sketchReferencesProjected', 'Sketch reference projection should complete through the projected event seam.')
-  assert(
+  expectTrue(projected.type === 'effect.sketchReferencesProjected', 'Sketch reference projection should complete through the projected event seam.')
+  expectTrue(
     projected.type === 'effect.sketchReferencesProjected'
       && projected.projectedReferences.length === 0
       && projected.baseRevisionId === snapshot.document.revisionId,
@@ -260,7 +255,7 @@ test('editor effect runtime covers reference-image import, special modes, and hi
     snapshot,
   )
 
-  assert(sketchSession, 'Seed snapshot should expose a sketch session for import and cursor coverage.')
+  expectTrue(sketchSession, 'Seed snapshot should expose a sketch session for import and cursor coverage.')
 
   const importEffect: EditorEffect = {
     type: 'sketch.importReferenceImages',
@@ -274,7 +269,7 @@ test('editor effect runtime covers reference-image import, special modes, and hi
   }
 
   const missingImportRuntime = await runEditorEffect(importEffect, {} as EditorEffectRuntime)
-  assert(
+  expectTrue(
     missingImportRuntime.type === 'effect.sketchReferenceImageImportFailed'
       && missingImportRuntime.message === 'Sketch reference-image import runtime is not available.',
     'Reference-image import should fail explicitly when the runtime capability is unavailable.',
@@ -297,8 +292,8 @@ test('editor effect runtime covers reference-image import, special modes, and hi
       }
     },
   } as EditorEffectRuntime)
-  assert(imported.type === 'effect.sketchReferenceImageImportCompleted', 'Reference-image import should complete through the import-completed event seam.')
-  assert(
+  expectTrue(imported.type === 'effect.sketchReferenceImageImportCompleted', 'Reference-image import should complete through the import-completed event seam.')
+  expectTrue(
     imported.type === 'effect.sketchReferenceImageImportCompleted'
       && imported.status === 'committed'
       && imported.importedCount === 2
@@ -325,8 +320,8 @@ test('editor effect runtime covers reference-image import, special modes, and hi
       }
     },
   } as EditorEffectRuntime)
-  assert(specialMode.type === 'effect.sketchSpecialModeEffectCompleted', 'Special sketch mode effects should map to completed events.')
-  assert(
+  expectTrue(specialMode.type === 'effect.sketchSpecialModeEffectCompleted', 'Special sketch mode effects should map to completed events.')
+  expectTrue(
     specialMode.type === 'effect.sketchSpecialModeEffectCompleted'
       && specialMode.payload.measuredLength === 42,
     'Special sketch mode success should preserve the returned payload.',
@@ -353,8 +348,8 @@ test('editor effect runtime covers reference-image import, special modes, and hi
       }
     },
   } as EditorEffectRuntime)
-  assert(moved.type === 'effect.documentCursorMoved', 'History cursor moves should complete through the cursor-moved event seam.')
-  assert(
+  expectTrue(moved.type === 'effect.documentCursorMoved', 'History cursor moves should complete through the cursor-moved event seam.')
+  expectTrue(
     moved.type === 'effect.documentCursorMoved'
       && moved.accepted === true
       && moved.snapshot === snapshot,
@@ -371,7 +366,7 @@ test('editor effect runtime covers reference-image import, special modes, and hi
       }
     },
   } as EditorEffectRuntime)
-  assert(
+  expectTrue(
     rejectedMove.type === 'effect.documentCursorMoved'
       && rejectedMove.accepted === false
       && rejectedMove.snapshot === undefined
@@ -393,8 +388,8 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     snapshot,
   )
 
-  assert(hydratedFeatureSession, 'Seed snapshot should expose an editable feature for runtime adapter coverage.')
-  assert(sketchSession, 'Seed snapshot should expose a sketch session for runtime adapter coverage.')
+  expectTrue(hydratedFeatureSession, 'Seed snapshot should expose an editable feature for runtime adapter coverage.')
+  expectTrue(sketchSession, 'Seed snapshot should expose a sketch session for runtime adapter coverage.')
 
   const commitCalls: Array<{ sketchLabel: string; sketchId: string | null; planeKind: string; baseRepositoryHeads?: readonly string[] }> = []
   const createFeatureCalls: Array<{ definitionKind: string; baseRepositoryHeads?: readonly string[] }> = []
@@ -474,7 +469,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     baseRepositoryHeads: ['head_runtime_sketch'],
     session: sketchSession,
   })
-  assert(
+  expectTrue(
     committedSketch?.accepted === true
       && committedSketch.revisionId === 'rev_runtime_sketch'
       && commitCalls[0]?.sketchId === sketchSession.sketchId
@@ -497,7 +492,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
       },
     },
   })
-  assert(
+  expectTrue(
     noReferenceProjection.projectedReferences.length === 0 && projectionCalls.length === 0,
     'Sketch projection should short-circuit when the sketch has no external references.',
   )
@@ -508,7 +503,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     baseRevisionId: snapshot.document.revisionId,
     session: sketchSession,
   })
-  assert(
+  expectTrue(
     projected.projectedReferences.length === 0
       && projectionCalls[0]?.sketchId === sketchSession.sketchId
       && projectionCalls[0]?.referenceCount === sketchSession.definition.references.length,
@@ -519,7 +514,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     baseRevisionId: snapshot.document.revisionId,
     featureSession: hydratedFeatureSession,
   })
-  assert(
+  expectTrue(
     preview.revisionId === `${hydratedFeatureSession.previewId}_rev` && preview.stale === true,
     'Preview adaptation should forward the built definition and map the preview payload.',
   )
@@ -534,14 +529,14 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     baseRepositoryHeads: ['head_feature_edit'],
     featureSession: hydratedFeatureSession,
   })
-  assert(
+  expectTrue(
     createdFeature.accepted === true
       && createdFeature.featureId === 'feature_plane_created'
       && createFeatureCalls[0]?.definitionKind === 'plane'
       && createFeatureCalls[0]?.baseRepositoryHeads?.[0] === 'head_feature_create',
     'Create-mode feature commits should route through createFeature with the built definition.',
   )
-  assert(
+  expectTrue(
     updatedFeature.accepted === true
       && updatedFeature.featureId === hydratedFeatureSession.featureId
       && updateFeatureCalls[0]?.featureId === hydratedFeatureSession.featureId
@@ -555,7 +550,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     cursor: snapshot.document.cursor,
     transient: true,
   })
-  assert(
+  expectTrue(
     movedCursor.accepted === true
       && movedCursor.revisionId === 'rev_cursor_runtime'
       && cursorCalls[0]?.persistHistory === false,
@@ -577,7 +572,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   } catch (error: unknown) {
     specialModeMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(
+  expectTrue(
     specialModeMessage === 'No sketch special mode runtime has been registered.',
     'Runtime adapter should surface the default special-mode registration error.',
   )
@@ -642,7 +637,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   } catch (error: unknown) {
     incompletePreviewMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(
+  expectTrue(
     incompletePreviewMessage === 'Feature preview failed because the draft is incomplete.',
     'Preview adaptation should reject incomplete drafts before reaching the modeling service.',
   )
@@ -656,7 +651,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
   } catch (error: unknown) {
     incompleteCommitMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(
+  expectTrue(
     incompleteCommitMessage === 'Feature commit failed because the draft is incomplete.',
     'Feature commit adaptation should reject incomplete drafts before reaching the modeling service.',
   )
@@ -719,13 +714,13 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     baseRevisionId: snapshot.document.revisionId,
     cursor: snapshot.document.cursor,
   })
-  assert(
+  expectTrue(
     rejectedFeature.accepted === false
       && rejectedFeature.actualRevisionId === 'rev_feature_actual'
       && rejectedFeature.diagnostics[0]?.message === 'Feature conflict.',
     'Feature commit adapter should map modeling mutation errors into rejected feature results.',
   )
-  assert(
+  expectTrue(
     rejectedCursor.accepted === false
       && rejectedCursor.actualRevisionId === 'rev_cursor_actual'
       && rejectedCursor.diagnostics[0]?.message === 'Cursor conflict.',

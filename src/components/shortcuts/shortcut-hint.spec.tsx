@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -11,14 +12,7 @@ import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
 import { ShortcutContext } from '@/hooks/shortcut-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
-test('src/components/shortcuts/shortcut-hint.spec.tsx', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const commands = [
+test('src/components/shortcuts/shortcut-hint.spec.tsx', () => {  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',
@@ -69,7 +63,7 @@ test('src/components/shortcuts/shortcut-hint.spec.tsx', () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   )
-  assert(assignedMarkup.includes('Ctrl+Z'), 'Shortcut hints should render assigned shortcut labels.')
+  expectTrue(assignedMarkup.includes('Ctrl+Z'), 'Shortcut hints should render assigned shortcut labels.')
 
   const sequenceMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -78,7 +72,7 @@ test('src/components/shortcuts/shortcut-hint.spec.tsx', () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   )
-  assert(sequenceMarkup.includes('G &gt; F'), 'Shortcut hints should render sequence shortcut labels.')
+  expectTrue(sequenceMarkup.includes('G &gt; F'), 'Shortcut hints should render sequence shortcut labels.')
 
   const unassignedMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -87,7 +81,7 @@ test('src/components/shortcuts/shortcut-hint.spec.tsx', () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   )
-  assert(!unassignedMarkup.includes('data-shortcut-hint'), 'Unassigned shortcut hints should render nothing.')
+  expectTrue(!unassignedMarkup.includes('data-shortcut-hint'), 'Unassigned shortcut hints should render nothing.')
 
   const settingsMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -96,21 +90,21 @@ test('src/components/shortcuts/shortcut-hint.spec.tsx', () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   )
-  assert(settingsMarkup.includes('History'), 'Shortcut settings should group commands by registry category.')
-  assert(settingsMarkup.includes('Unassigned'), 'Shortcut settings should show disabled shortcuts as unassigned.')
-  assert(
+  expectTrue(settingsMarkup.includes('History'), 'Shortcut settings should group commands by registry category.')
+  expectTrue(settingsMarkup.includes('Unassigned'), 'Shortcut settings should show disabled shortcuts as unassigned.')
+  expectTrue(
     getRecordedShortcutStep({ key: 'Control', ctrlKey: true }) === null,
     'Shortcut recording should ignore modifier-only keydown events.',
   )
-  assert(
+  expectTrue(
     getRecordedShortcutStep({ key: 'Z', ctrlKey: true }) === 'mod+z',
     'Shortcut recording should still capture modified non-modifier keys.',
   )
-  assert(
+  expectTrue(
     getRecordedShortcutStep({ key: '+' }) === null,
     'Shortcut recording should ignore the plus separator key.',
   )
-  assert(
+  expectTrue(
     getRecordedShortcutStep({ key: '>' }) === null,
     'Shortcut recording should ignore the sequence separator key.',
   )

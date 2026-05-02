@@ -1,5 +1,4 @@
-import { test } from 'bun:test'
-import { strict as assert } from 'node:assert'
+import { expect, test } from 'bun:test'
 
 import * as THREE from 'three'
 
@@ -29,7 +28,7 @@ test('src/infrastructure/viewport/viewport-camera-transition.spec.ts', () => {
   }
 
   function approx(actual: number, expected: number, epsilon = 1e-6) {
-    assert(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`)
+    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(epsilon)
   }
 
   {
@@ -44,15 +43,15 @@ test('src/infrastructure/viewport/viewport-camera-transition.spec.ts', () => {
     })
 
     const firstStep = controller.advance(100)
-    assert(firstStep, 'Advancing an active transition should return an interpolated frame.')
-    assert(firstStep.completed === false, 'Halfway through the duration the transition should still be active.')
-    assert(firstStep.frame.position.x > 0, 'Interpolation should move the camera toward the target frame.')
-    assert(firstStep.frame.orthographicZoom > 1, 'Interpolation should blend projection-specific state.')
+    expect(firstStep).toBeTruthy()
+    expect(firstStep.completed === false).toBeTruthy()
+    expect(firstStep.frame.position.x > 0).toBeTruthy()
+    expect(firstStep.frame.orthographicZoom > 1).toBeTruthy()
 
     const finalStep = controller.advance(100)
-    assert(finalStep?.completed === true, 'Advancing to the full duration should complete the transition.')
+    expect(finalStep?.completed === true).toBeTruthy()
     approx(finalStep?.frame.position.x ?? 0, 10)
-    assert(controller.isActive() === false, 'Completed transitions should clear active controller state.')
+    expect(controller.isActive() === false).toBeTruthy()
   }
 
   {
@@ -70,7 +69,7 @@ test('src/infrastructure/viewport/viewport-camera-transition.spec.ts', () => {
       durationMs: 300,
     })
     const inFlight = controller.advance(120)
-    assert(inFlight, 'In-flight transitions should yield an intermediate frame.')
+    expect(inFlight).toBeTruthy()
 
     controller.start({
       fromFrame: inFlight.frame,
@@ -78,9 +77,9 @@ test('src/infrastructure/viewport/viewport-camera-transition.spec.ts', () => {
       durationMs: 180,
     })
 
-    assert.equal(controller.getTargetFrame()?.projectionMode, 'perspective')
+    expect(controller.getTargetFrame()?.projectionMode).toBe('perspective')
     const completed = controller.advance(180)
-    assert(completed?.completed === true, 'Retargeting should let the latest request win.')
+    expect(completed?.completed === true).toBeTruthy()
     approx(completed?.frame.position.x ?? 0, 12)
   }
 
@@ -93,7 +92,7 @@ test('src/infrastructure/viewport/viewport-camera-transition.spec.ts', () => {
     })
 
     controller.cancel()
-    assert(controller.advance(16) === null, 'Cancelling should drop any pending transition work.')
-    assert(controller.isActive() === false, 'Cancelling should clear active controller state.')
+    expect(controller.advance(16) === null).toBeTruthy()
+    expect(controller.isActive() === false).toBeTruthy()
   }
 })

@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ExportCapabilities } from '@/contracts/export/capabilities'
 import type { ExportProvider } from '@/contracts/export/provider'
 import type { DurableRef } from '@/contracts/shared/references'
@@ -19,9 +20,9 @@ test('orchestrateGeometryExport returns an unsupported-format diagnostic when no
     makeRegistry(),
   )
 
-  assert(result.ok === false, 'Missing providers should return a failure result.')
-  assert(result.format === 'step', 'Failure results should preserve the requested format.')
-  assert(
+  expectTrue(result.ok === false, 'Missing providers should return a failure result.')
+  expectTrue(result.format === 'step', 'Failure results should preserve the requested format.')
+  expectTrue(
     result.diagnostics[0]?.code === 'export-unsupported-format'
       && result.diagnostics[0].target === target,
     'Unsupported-format failures should point back to the requested target.',
@@ -52,8 +53,8 @@ test('orchestrateGeometryExport preserves provider failures without rewriting di
     makeRegistry(provider),
   )
 
-  assert(result.ok === false, 'Provider export failures should remain failures at the orchestrator seam.')
-  assert(
+  expectTrue(result.ok === false, 'Provider export failures should remain failures at the orchestrator seam.')
+  expectTrue(
     result.diagnostics[0] === diagnostic,
     'Provider diagnostics should pass through untouched so callers see the original export failure.',
   )
@@ -84,12 +85,12 @@ test('orchestrateGeometryExport slugs filenames and maps provider success metada
     makeRegistry(provider),
   )
 
-  assert(result.ok === true, 'Successful provider exports should produce a success result.')
-  assert(
+  expectTrue(result.ok === true, 'Successful provider exports should produce a success result.')
+  expectTrue(
     result.filename === 'rotor-housing-rev-b.stl',
     'Success results should expose a slugged download filename derived from the target label.',
   )
-  assert(
+  expectTrue(
     result.extension === 'stl'
       && result.mimeType === 'model/stl'
       && result.payload instanceof Uint8Array,
@@ -119,15 +120,9 @@ test('orchestrateGeometryExport falls back to cadara-export when the target labe
     makeRegistry(provider),
   )
 
-  assert(result.ok === true, 'Labels that slug to empty should still export successfully.')
-  assert(result.filename === 'cadara-export.step', 'Empty slugs should fall back to the default export filename.')
+  expectTrue(result.ok === true, 'Labels that slug to empty should still export successfully.')
+  expectTrue(result.filename === 'cadara-export.step', 'Empty slugs should fall back to the default export filename.')
 })
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function makeTarget(): DurableRef {
   return {

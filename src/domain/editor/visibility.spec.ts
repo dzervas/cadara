@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   getAutoHiddenSketchTargetKeys,
   getWorkbenchVisibilityState,
@@ -9,14 +10,7 @@ import {
 import { getPrimitiveRefKey } from '@/core/editor/schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/domain/editor/visibility.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const adapter = new MockKernelAdapter()
+test('src/domain/editor/visibility.spec.ts', async () => {  const adapter = new MockKernelAdapter()
   const response = await adapter.getDocumentSnapshot({
     contractVersion: 'modeling-contract/v1alpha1',
     documentId: 'doc_workspace',
@@ -26,12 +20,12 @@ test('src/domain/editor/visibility.spec.ts', async () => {
     (item) => item.target.kind === 'sketch' && item.target.sketchId === 'sketch_primary',
   )?.target
 
-  assert(sketchTarget?.kind === 'sketch', 'Visibility fixture should expose the consumed primary sketch row.')
+  expectTrue(sketchTarget?.kind === 'sketch', 'Visibility fixture should expose the consumed primary sketch row.')
 
   const sketchKey = getPrimitiveRefKey(sketchTarget)
   const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot)
 
-  assert(
+  expectTrue(
     autoHiddenSketchTargetKeys[sketchKey] === true,
     'Consumed sketch rows should derive auto-hidden state from snapshot consumption metadata.',
   )
@@ -42,7 +36,7 @@ test('src/domain/editor/visibility.spec.ts', async () => {
     explicitlyShownAutoHiddenTargetKeys: {},
   })
 
-  assert(
+  expectTrue(
     initialVisibility.effectiveHiddenTargetKeys[sketchKey] === true,
     'Consumed sketch rows should start hidden when no explicit show override exists.',
   )
@@ -60,7 +54,7 @@ test('src/domain/editor/visibility.spec.ts', async () => {
     explicitlyShownAutoHiddenTargetKeys: shownOverride.explicitlyShownAutoHiddenTargetKeys,
   })
 
-  assert(
+  expectTrue(
     shownVisibility.effectiveHiddenTargetKeys[sketchKey] !== true,
     'Toggling an auto-hidden sketch should create a session-local show override.',
   )
@@ -78,7 +72,7 @@ test('src/domain/editor/visibility.spec.ts', async () => {
     explicitlyShownAutoHiddenTargetKeys: hiddenAgain.explicitlyShownAutoHiddenTargetKeys,
   })
 
-  assert(
+  expectTrue(
     hiddenAgainVisibility.effectiveHiddenTargetKeys[sketchKey] === true,
     'Toggling a shown consumed sketch again should fall back to the derived auto-hidden state.',
   )
@@ -91,7 +85,7 @@ test('src/domain/editor/visibility.spec.ts', async () => {
     new Set([sketchKey]),
   )
 
-  assert(
+  expectTrue(
     reconciled[sketchKey] === true && reconciled['sketch:stale'] !== true,
     'Visibility intent reconciliation should drop stale target keys after snapshot updates.',
   )

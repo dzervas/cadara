@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { createSeedAuthoredModelDocument } from '@/domain/modeling/modeling-test-fixtures'
 import type { DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from '@/domain/modeling/document-sync-worker-protocol'
@@ -8,14 +9,7 @@ import { createWorkerBackedDocumentRepository } from '@/infrastructure/modeling/
 import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
 import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/infrastructure/workers/document-sync-worker-client'
 
-test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function testLoadMutatePeerUpdateAndDiagnostics() {
+test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', async () => {  async function testLoadMutatePeerUpdateAndDiagnostics() {
     const seed = await createSeedAuthoredModelDocument()
     const worker = new FakeDocumentSyncWorker()
     const client = new DocumentSyncWorkerClient({ worker })
@@ -25,7 +19,7 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
 
     const load = repository.load({ documentId: seed.documentId, seedDocument: seed })
     const loadRequest = worker.takePosted('load')
-    assert(loadRequest.storageKey === 'automerge:stored-url', 'Worker-backed loads should pass the stored Automerge URL to the worker.')
+    expectTrue(loadRequest.storageKey === 'automerge:stored-url', 'Worker-backed loads should pass the stored Automerge URL to the worker.')
     const repositoryDiagnostics: ModelingDiagnostic[] = [{
       code: 'geometry-asset-missing',
       severity: 'error',
@@ -76,12 +70,12 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
       },
     })
     const loaded = await load
-    assert(loaded.ok, 'Worker-backed repository load should resolve with worker-normalized documents.')
-    assert(
+    expectTrue(loaded.ok, 'Worker-backed repository load should resolve with worker-normalized documents.')
+    expectTrue(
       loaded.ok && loaded.diagnostics?.map((diagnostic) => diagnostic.code).join(',') === 'geometry-asset-missing,normalized-order',
       'Worker-backed loads should preserve repository diagnostics and worker normalization diagnostics.',
     )
-    assert(urlStore.get(seed.documentId) === 'automerge:worker-url', 'Worker-returned Automerge URLs should be persisted by the main-thread URL store.')
+    expectTrue(urlStore.get(seed.documentId) === 'automerge:worker-url', 'Worker-returned Automerge URLs should be persisted by the main-thread URL store.')
 
     const mutation = repository.mutate({ documentId: seed.documentId, document: seed })
     const mutateRequest = worker.takePosted('mutate')
@@ -107,7 +101,7 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
       },
     })
     const mutated = await mutation
-    assert(mutated.ok && mutated.metadata.source === 'local', 'Worker-backed mutations should preserve repository metadata.')
+    expectTrue(mutated.ok && mutated.metadata.source === 'local', 'Worker-backed mutations should preserve repository metadata.')
 
     const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [seed.features[0]!.featureId] })
     const documentWithAsset = {
@@ -123,7 +117,7 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
       assets: [asset],
     })
     const assetMutateRequest = worker.takePosted('mutate')
-    assert(
+    expectTrue(
       assetMutateRequest.assets?.[0]?.bytes.byteLength === asset.bytes.byteLength,
       'Worker-backed asset mutations should send package blobs to the document sync worker.',
     )
@@ -156,22 +150,22 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
       },
     })
     const assetMutated = await assetMutation
-    assert(
+    expectTrue(
       assetMutated.ok && assetMutated.assetAvailability?.[0]?.available,
       'Worker-backed asset mutations should preserve asset availability metadata.',
     )
 
     const recordBytes = repository.getGeometryAssetRecord(asset.asset)
     const recordRequest = worker.takePosted('getGeometryAssetRecord')
-    assert(recordRequest.asset.hash === asset.asset.hash, 'Worker-backed asset record reads should proxy through the worker.')
+    expectTrue(recordRequest.asset.hash === asset.asset.hash, 'Worker-backed asset record reads should proxy through the worker.')
     worker.emit({ kind: 'geometryAssetRecord', requestId: recordRequest.requestId, bytes: asset.bytes })
-    assert((await recordBytes)?.byteLength === asset.bytes.byteLength, 'Worker-backed asset record reads should return worker bytes.')
+    expectTrue((await recordBytes)?.byteLength === asset.bytes.byteLength, 'Worker-backed asset record reads should return worker bytes.')
 
     const hashBytes = repository.getGeometryAssetBytes(asset.asset.hash)
     const hashRequest = worker.takePosted('getGeometryAssetBytes')
-    assert(hashRequest.hash === asset.asset.hash, 'Worker-backed asset hash reads should proxy through the worker.')
+    expectTrue(hashRequest.hash === asset.asset.hash, 'Worker-backed asset hash reads should proxy through the worker.')
     worker.emit({ kind: 'geometryAssetBytes', requestId: hashRequest.requestId, bytes: asset.bytes })
-    assert((await hashBytes)?.byteLength === asset.bytes.byteLength, 'Worker-backed asset hash reads should return worker bytes.')
+    expectTrue((await hashBytes)?.byteLength === asset.bytes.byteLength, 'Worker-backed asset hash reads should return worker bytes.')
 
     const observed: string[] = []
     const unsubscribe = repository.subscribe(seed.documentId, (event) => {
@@ -212,7 +206,7 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
       },
     })
     await flushAsync()
-    assert(observed.join(',') === 'peer:2', 'Peer updates should keep repository diagnostics after worker normalization.')
+    expectTrue(observed.join(',') === 'peer:2', 'Peer updates should keep repository diagnostics after worker normalization.')
     unsubscribe()
     client.dispose()
   }

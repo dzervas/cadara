@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -6,25 +7,18 @@ import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
 import { getToolIconSrc, toolIconAssetFileNames } from '@/core/tools/tool-icons'
 
-test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
+test('src/components/layout/toolbar-presentation.spec.tsx', async () => {  const iconMarkup = renderToStaticMarkup(<ToolbarToolIcon icon="extrude" />)
 
-  const iconMarkup = renderToStaticMarkup(<ToolbarToolIcon icon="extrude" />)
-
-  assert(iconMarkup.includes('/icons/extrude.svg'), 'Toolbar icons should resolve to local SVG assets.')
-  assert(!iconMarkup.includes('lucide'), 'Toolbar icons should not render Lucide glyph markup.')
-  assert(!iconMarkup.includes('filter:'), 'Toolbar icons should preserve their authored SVG colors.')
+  expectTrue(iconMarkup.includes('/icons/extrude.svg'), 'Toolbar icons should resolve to local SVG assets.')
+  expectTrue(!iconMarkup.includes('lucide'), 'Toolbar icons should not render Lucide glyph markup.')
+  expectTrue(!iconMarkup.includes('filter:'), 'Toolbar icons should preserve their authored SVG colors.')
 
   const sketchLineAsset = readFileSync('public/icons/sketch-line-segment.svg', 'utf8')
-  assert(
+  expectTrue(
     sketchLineAsset.includes('#CDCDCD') && sketchLineAsset.includes('#1651B0'),
     'Sketch toolbar assets should use light neutral strokes while preserving blue highlights.',
   )
-  assert(!sketchLineAsset.includes('#333333'), 'Sketch toolbar assets should not use dark neutral strokes.')
+  expectTrue(!sketchLineAsset.includes('#333333'), 'Sketch toolbar assets should not use dark neutral strokes.')
 
   for (const iconPath of [
     'public/icons/undo.svg',
@@ -33,8 +27,8 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
     'public/icons/SectionView-Linked.svg',
   ]) {
     const asset = readFileSync(iconPath, 'utf8')
-    assert(asset.includes('#CDCDCD'), `${iconPath} should use a light neutral toolbar stroke.`)
-    assert(!asset.includes('#333333'), `${iconPath} should not use dark neutral toolbar strokes.`)
+    expectTrue(asset.includes('#CDCDCD'), `${iconPath} should use a light neutral toolbar stroke.`)
+    expectTrue(!asset.includes('#333333'), `${iconPath} should not use dark neutral toolbar strokes.`)
   }
 
   const runtimeGlobal = globalThis as typeof globalThis & {
@@ -49,7 +43,7 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
       },
     }
 
-    assert(
+    expectTrue(
       getToolIconSrc('extrude') === 'data:image/svg+xml;base64,PHN2Zy8+',
       'Toolbar icons should use injected single-file SVG assets when present.',
     )
@@ -61,30 +55,23 @@ test('src/components/layout/toolbar-presentation.spec.tsx', async () => {
     <ToolbarTooltipContent title="Pattern" description="Choose a pattern tool." />,
   )
 
-  assert(tooltipMarkup.includes('Pattern'), 'Tooltips should show the tool name as the heading.')
-  assert(
+  expectTrue(tooltipMarkup.includes('Pattern'), 'Tooltips should show the tool name as the heading.')
+  expectTrue(
     tooltipMarkup.includes('Choose a pattern tool.'),
     'Tooltips should show descriptive copy beneath the heading.',
   )
-  assert(
+  expectTrue(
     tooltipMarkup.includes('--workbench-tooltip-title') &&
       tooltipMarkup.includes('--workbench-tooltip-description'),
     'Toolbar tooltip copy should derive its contrast treatment from shared workbench theme variables.',
   )
-  assert(
+  expectTrue(
     tooltipMarkup.includes('whitespace-normal') && tooltipMarkup.includes('break-words'),
     'Toolbar tooltip copy should wrap instead of forcing long text onto one line.',
   )
 })
 
-test('tool icon assets stay centralized outside toolbar, sidebar, and history components', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const expectedCurrentToolbarAssets: typeof toolIconAssetFileNames = {
+test('tool icon assets stay centralized outside toolbar, sidebar, and history components', () => {  const expectedCurrentToolbarAssets: typeof toolIconAssetFileNames = {
     undo: 'undo.svg',
     redo: 'redo.svg',
     sketch: 'new-sketch.svg',
@@ -152,7 +139,7 @@ test('tool icon assets stay centralized outside toolbar, sidebar, and history co
     svgGradient: 'svg-gradient.svg',
   }
 
-  assert(
+  expectTrue(
     JSON.stringify(toolIconAssetFileNames) === JSON.stringify(expectedCurrentToolbarAssets),
     'The shared tool icon source should preserve every current toolbar SVG filename.',
   )
@@ -164,8 +151,8 @@ test('tool icon assets stay centralized outside toolbar, sidebar, and history co
     'src/components/layout/feature-sidebar.tsx',
   ]) {
     const source = readFileSync(componentPath, 'utf8')
-    assert(!source.includes('Record<ToolIconId, string>'), `${componentPath} should not define a tool icon asset filename map.`)
-    assert(!source.includes('toolbarToolIconAssetMap'), `${componentPath} should not import the old toolbar-local icon map.`)
-    assert(!source.includes('getToolbarToolIconSrc'), `${componentPath} should not import the old toolbar-local icon helper.`)
+    expectTrue(!source.includes('Record<ToolIconId, string>'), `${componentPath} should not define a tool icon asset filename map.`)
+    expectTrue(!source.includes('toolbarToolIconAssetMap'), `${componentPath} should not import the old toolbar-local icon map.`)
+    expectTrue(!source.includes('getToolbarToolIconSrc'), `${componentPath} should not import the old toolbar-local icon helper.`)
   }
 })

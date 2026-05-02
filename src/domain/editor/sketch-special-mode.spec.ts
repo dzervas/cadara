@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   initialEditorState,
   runEditorEffect,
@@ -21,14 +22,7 @@ import type { SketchSpecialModeDefinition } from '@/core/sketch-special-modes/sc
 import { sketchSpecialModeDefinitions } from '@/domain/sketch-special-modes/registry'
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from '@/domain/extensions/test-registry-composition'
 
-test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const fixtureMode: SketchSpecialModeDefinition<{
+test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fixtureMode: SketchSpecialModeDefinition<{
     clicks: number
     lastPayload: string | null
   }> = {
@@ -208,13 +202,13 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       point: [4, 6],
       target: operationTarget,
     })
-    assert(entered.state.kind === 'editingSketch', 'Special mode entry should preserve sketch editing.')
-    assert(entered.effects[0]?.type === 'sketch.specialModeEffect', 'Entry should emit the mode effect contract.')
-    assert(
+    expectTrue(entered.state.kind === 'editingSketch', 'Special mode entry should preserve sketch editing.')
+    expectTrue(entered.effects[0]?.type === 'sketch.specialModeEffect', 'Entry should emit the mode effect contract.')
+    expectTrue(
       entered.state.kind === 'editingSketch' && entered.state.session.activeSpecialMode?.modeId === fixtureMode.id,
       'Entry should activate the registered sketch special mode.',
     )
-    assert(
+    expectTrue(
       entered.state.selectionFilter?.label === 'Fixture selection'
         && entered.state.selectionFilter.allowedKinds.length === 1
         && entered.state.selectionFilter.allowedKinds[0] === 'sketchOperation',
@@ -250,7 +244,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
 
     const enteredEffectEvent = await runEditorEffect(entered.effects[0]!, runtime)
     const enteredResolved = transitionWithFixtureModes(entered.state, enteredEffectEvent)
-    assert(
+    expectTrue(
       enteredResolved.state.kind === 'editingSketch'
         && enteredResolved.state.session.activeSpecialMode?.state.lastPayload === operationTarget.operationId,
       'Effect completion should re-enter the reducer through the registered mode definition.',
@@ -260,7 +254,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       type: 'viewport.hovered',
       target: rejectedTarget,
     })
-    assert(
+    expectTrue(
       rejectedHover.state.kind === 'editingSketch'
         && rejectedHover.state.hoverTarget === null
         && rejectedHover.state.session.activeSpecialMode?.hoverTarget === null,
@@ -271,7 +265,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       type: 'viewport.hovered',
       target: operationTarget,
     })
-    assert(
+    expectTrue(
       hovered.state.kind === 'editingSketch'
         && hovered.state.session.activeSpecialMode?.hoverTarget?.targetId === 'sketch_special_target_resolved',
       'Viewport hover should route through the active special-mode adapter.',
@@ -282,7 +276,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       point: [4, 6],
       target: operationTarget,
     })
-    assert(
+    expectTrue(
       clicked.state.kind === 'editingSketch'
         && clicked.state.session.activeSpecialMode?.state.clicks === 1
         && clicked.state.session.activeSpecialMode?.selectedTarget?.targetId === 'sketch_special_target_resolved',
@@ -305,7 +299,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       handle,
       point: [10, 12],
     })
-    assert(
+    expectTrue(
       draggedEnd.state.kind === 'editingSketch'
         && draggedEnd.state.session.activeSpecialMode?.state.lastPayload === `${handle.handleId}:10,12`,
       'Special-mode handle drags should flow through the dedicated drag channel with durable handle ids.',
@@ -319,13 +313,13 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
         value: 'panel-value',
       },
     })
-    assert(invoked.effects[0]?.type === 'sketch.specialModeEffect', 'Panel actions should be able to emit async mode effects.')
+    expectTrue(invoked.effects[0]?.type === 'sketch.specialModeEffect', 'Panel actions should be able to emit async mode effects.')
 
     const committed = transitionWithFixtureModes(invoked.state, {
       type: 'command.commitRequested',
       commandSessionId: 'command_sketch-1',
     })
-    assert(
+    expectTrue(
       committed.effects[0]?.type === 'sketch.specialModeEffect'
         && committed.state.kind === 'editingSketch'
         && committed.state.session.activeSpecialMode !== null,
@@ -336,7 +330,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       committed.state,
       await runEditorEffect(committed.effects[0]!, runtime),
     )
-    assert(
+    expectTrue(
       committedResolved.state.kind === 'editingSketch'
         && committedResolved.state.session.activeSpecialMode === null
         && committedResolved.state.selectionFilter?.kind === 'sketchSession',
@@ -357,7 +351,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
       type: 'command.cancelled',
       commandSessionId: 'command_sketch-1',
     })
-    assert(
+    expectTrue(
       cancelled.effects[0]?.type === 'sketch.specialModeEffect'
         && cancelled.state.kind === 'editingSketch'
         && cancelled.state.session.activeSpecialMode !== null,
@@ -366,13 +360,13 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
 
     const cancelledEffectEvent = await runEditorEffect(cancelled.effects[0]!, runtime)
     const cancelledResolved = transitionWithFixtureModes(cancelled.state, cancelledEffectEvent)
-    assert(
+    expectTrue(
       cancelledResolved.state.kind === 'editingSketch' && cancelledResolved.state.session.activeSpecialMode === null,
       'Cancelling an active special mode should exit after the lifecycle effect resolves.',
     )
 
     const staleIgnored = transitionWithFixtureModes(cancelledResolved.state, cancelledEffectEvent)
-    assert(
+    expectTrue(
       staleIgnored.state.kind === 'editingSketch' && staleIgnored.state.session.activeSpecialMode === null,
       'Stale async mode results should be ignored after mode cancellation.',
     )
@@ -422,7 +416,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {
     },
   )
 
-  assert(
+  expectTrue(
     builtinOpened.state.kind === 'editingSketch' && builtinOpened.state.session.activeSpecialMode !== null,
     'Scoped built-in special-mode compositions should preserve the existing reference-image mode behavior.',
   )

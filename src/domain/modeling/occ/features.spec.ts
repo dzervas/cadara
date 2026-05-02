@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   ConstructionSnapshotRecord,
   ExtrudeFeatureParameters,
@@ -53,14 +54,7 @@ import {
 import { extractPlanarFaceData, toGpPnt } from '@/domain/modeling/occ/planes'
 import { buildAxisFromLineEdge } from '@/domain/modeling/occ/sketch-profile'
 
-test('src/domain/modeling/occ/features.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
+test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
     if (Math.abs(actual - expected) > tolerance) {
       throw new Error(`${message}: expected ${expected}, got ${actual}.`)
     }
@@ -314,7 +308,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       dz,
     )
     box.Build(new oc.Message_ProgressRange_1())
-    assert(box.IsDone(), 'Expected test box to build successfully.')
+    expectTrue(box.IsDone(), 'Expected test box to build successfully.')
 
     return trackNewSolidBody(oc, {
       bodyId,
@@ -377,7 +371,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       }
 
       const body = result.bodies.find((entry) => entry.bodyId === target.bodyId)
-      assert(body != null, 'Produced body target should resolve to a tracked body.')
+      expectTrue(body != null, 'Produced body target should resolve to a tracked body.')
       total += await bodyVolume(context.oc, body.shape)
     }
 
@@ -441,20 +435,20 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.producedTargets.length === 1, 'Plane feature should produce one construction target.')
+    expectTrue(result.producedTargets.length === 1, 'Plane feature should produce one construction target.')
     const target = result.producedTargets[0]
-    assert(target?.kind === 'construction', 'Plane feature must produce a construction durable ref.')
+    expectTrue(target?.kind === 'construction', 'Plane feature must produce a construction durable ref.')
     const duplicatedPlane = result.constructionPlanes.get(target.constructionId)
-    assert(duplicatedPlane != null, 'Plane feature must store an internal construction plane definition.')
+    expectTrue(duplicatedPlane != null, 'Plane feature must store an internal construction plane definition.')
     assertClose(duplicatedPlane.frame.origin[2], 0, 1e-9, 'Copied XY plane should preserve origin.')
-    assert(result.entities.length === 1, 'Plane feature should emit one construction entity row.')
-    assert(result.renderRecords.length === 1, 'Plane feature should emit one construction render record.')
+    expectTrue(result.entities.length === 1, 'Plane feature should emit one construction entity row.')
+    expectTrue(result.renderRecords.length === 1, 'Plane feature should emit one construction render record.')
 
     const construction = result.constructions.find((entry) => entry.constructionId === target.constructionId)
-    assert(construction != null, 'Plane feature must append a public construction snapshot row.')
+    expectTrue(construction != null, 'Plane feature must append a public construction snapshot row.')
     const artifacts = createConstructionPresentationArtifacts(context, construction, duplicatedPlane)
-    assert(artifacts.entities[0]?.selectionSemantics.includes('constructionPlane'), 'Construction entity should advertise construction-plane semantics.')
-    assert(artifacts.renderRecords[0]?.binding.semanticClass === 'construction', 'Construction render record should bind as construction geometry.')
+    expectTrue(artifacts.entities[0]?.selectionSemantics.includes('constructionPlane'), 'Construction entity should advertise construction-plane semantics.')
+    expectTrue(artifacts.renderRecords[0]?.binding.semanticClass === 'construction', 'Construction render record should bind as construction geometry.')
   }
 
   async function testPlaneFeatureBuildsFaceBackedConstructionPlane() {
@@ -468,7 +462,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       'feature_phase4_source' as FeatureId,
     )
     const faceId = findFaceIdByDirection(oc, sourceBody, [1, 0, 0])
-    assert(faceId != null, 'Expected tracked solid body to expose a YZ-aligned planar face.')
+    expectTrue(faceId != null, 'Expected tracked solid body to expose a YZ-aligned planar face.')
 
     const makeContext = createContext({ bodies: [sourceBody] })
     const context = await makeContext()
@@ -488,9 +482,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const target = result.producedTargets[0]
-    assert(target?.kind === 'construction', 'Face-backed plane feature must produce a construction target.')
+    expectTrue(target?.kind === 'construction', 'Face-backed plane feature must produce a construction target.')
     const plane = result.constructionPlanes.get(target.constructionId)
-    assert(plane != null, 'Face-backed plane should expose internal plane geometry.')
+    expectTrue(plane != null, 'Face-backed plane should expose internal plane geometry.')
     assertClose(Math.abs(plane.frame.normal[0]), 1, 1e-9, 'YZ-backed plane should preserve the face normal.')
   }
 
@@ -517,9 +511,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       parameters,
     })
     const bodyTarget = result.producedTargets[0]
-    assert(bodyTarget?.kind === 'body', 'Standalone extrude must produce a new body target.')
+    expectTrue(bodyTarget?.kind === 'body', 'Standalone extrude must produce a new body target.')
     const producedBody = result.bodies.find((entry) => entry.bodyId === bodyTarget.bodyId)
-    assert(producedBody != null, 'Standalone extrude must append the produced body.')
+    expectTrue(producedBody != null, 'Standalone extrude must append the produced body.')
     assertClose(await bodyVolume(context.oc, producedBody.shape), 60, 1e-6, '4x3 rectangle extruded by 5 should produce the expected prism volume.')
   }
 
@@ -542,7 +536,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       const normal = getExtrusionNormalForPlanarFace(oc, face, 'positive')
       return Math.abs(facePlane.frame.origin[2]) < 0.001 && dot(normal, [0, 0, 1]) > 0.999
     })
-    assert(startFaceId != null, 'Expected the source box to expose a lower face whose positive normal points into the body.')
+    expectTrue(startFaceId != null, 'Expected the source box to expose a lower face whose positive normal points into the body.')
     const context = await createContext({ bodies: [sourceBody] })()
 
     const result = executeOccFeature(context, 'feature_phase4_extrude_up_to_next_face' as FeatureId, {
@@ -560,9 +554,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const producedTarget = result.producedTargets[0]
-    assert(producedTarget?.kind === 'body', 'Up-to-next extrude from a face should produce a body.')
+    expectTrue(producedTarget?.kind === 'body', 'Up-to-next extrude from a face should produce a body.')
     const producedBody = result.bodies.find((body) => body.bodyId === producedTarget.bodyId)
-    assert(producedBody != null, 'Up-to-next extrude should append the produced body.')
+    expectTrue(producedBody != null, 'Up-to-next extrude should append the produced body.')
     assertClose(
       await bodyVolume(context.oc, producedBody.shape),
       60,
@@ -620,9 +614,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(await producedBodyVolume(context, oneSide) > 0, 'One-side drafted extrude should produce solid volume.')
-    assert(await producedBodyVolume(context, symmetric) > 0, 'Symmetric drafted extrude should produce solid volume.')
-    assert(await producedBodyVolume(context, twoSide) > 0, 'Two-side drafted extrude should produce solid volume.')
+    expectTrue(await producedBodyVolume(context, oneSide) > 0, 'One-side drafted extrude should produce solid volume.')
+    expectTrue(await producedBodyVolume(context, symmetric) > 0, 'Symmetric drafted extrude should produce solid volume.')
+    expectTrue(await producedBodyVolume(context, twoSide) > 0, 'Two-side drafted extrude should produce solid volume.')
   }
 
   async function testExtrudeFeatureCreatesBodiesFromMultipleRegions() {
@@ -653,9 +647,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.producedTargets.length === 2, 'Multi-profile standalone extrude must report every produced body target.')
-    assert(result.producedTargets.every((target) => target.kind === 'body'), 'Multi-profile extrude targets must be bodies.')
-    assert(result.bodies.length === 2, 'Multi-profile standalone extrude must append one body per disjoint profile result.')
+    expectTrue(result.producedTargets.length === 2, 'Multi-profile standalone extrude must report every produced body target.')
+    expectTrue(result.producedTargets.every((target) => target.kind === 'body'), 'Multi-profile extrude targets must be bodies.')
+    expectTrue(result.bodies.length === 2, 'Multi-profile standalone extrude must append one body per disjoint profile result.')
     assertClose(await bodyVolume(context.oc, result.bodies[0]!.shape), 60, 1e-6, 'First extruded profile should preserve its prism volume.')
     assertClose(await bodyVolume(context.oc, result.bodies[1]!.shape), 30, 1e-6, 'Second extruded profile should preserve its prism volume.')
   }
@@ -683,9 +677,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.bodies.length === 1, 'Sequential join should collapse ordered target bodies into the first target body.')
-    assert(result.bodies[0]?.bodyId === bodyA.bodyId, 'Sequential join should preserve the first target body id.')
-    assert(
+    expectTrue(result.bodies.length === 1, 'Sequential join should collapse ordered target bodies into the first target body.')
+    expectTrue(result.bodies[0]?.bodyId === bodyA.bodyId, 'Sequential join should preserve the first target body id.')
+    expectTrue(
       result.historyInvalidations.get(getOccDurableRefKey({ kind: 'body', bodyId: bodyB.bodyId }))?.reason
         === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
       'Sequential join should invalidate consumed target bodies as deleted topology.',
@@ -715,10 +709,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     })
     const [joinedBody] = result.bodies
 
-    assert(joinedBody?.bodyId === baseBody.bodyId, 'Join refinement should preserve the target body id.')
-    assert(joinedBody.topology.faceIds.length === 6, `Joined rectangular extension should have only the six end/side faces, got ${joinedBody.topology.faceIds.length}.`)
-    assert(joinedBody.topology.edgeIds.length === 12, `Joined rectangular extension should not keep middle seam edges, got ${joinedBody.topology.edgeIds.length}.`)
-    assert(joinedBody.topology.vertexIds.length === 8, `Joined rectangular extension should not keep middle seam vertices, got ${joinedBody.topology.vertexIds.length}.`)
+    expectTrue(joinedBody?.bodyId === baseBody.bodyId, 'Join refinement should preserve the target body id.')
+    expectTrue(joinedBody.topology.faceIds.length === 6, `Joined rectangular extension should have only the six end/side faces, got ${joinedBody.topology.faceIds.length}.`)
+    expectTrue(joinedBody.topology.edgeIds.length === 12, `Joined rectangular extension should not keep middle seam edges, got ${joinedBody.topology.edgeIds.length}.`)
+    expectTrue(joinedBody.topology.vertexIds.length === 8, `Joined rectangular extension should not keep middle seam vertices, got ${joinedBody.topology.vertexIds.length}.`)
     assertClose(await bodyVolume(context.oc, joinedBody.shape), 96, 1e-6, 'Joined rectangular extension should preserve the full extended prism volume.')
   }
 
@@ -751,7 +745,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       thrownMessage = error instanceof Error ? error.message : String(error)
     }
 
-    assert(
+    expectTrue(
       thrownMessage?.includes('Phase 4') === true && thrownMessage.includes('single-body replacement'),
       'Disjoint sequential joins should reject multi-solid replacement results explicitly.',
     )
@@ -822,9 +816,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       invalidNewBodyScope = error instanceof Error ? error.message : String(error)
     }
 
-    assert(invalidDistance === 'Extrude blind distance must be positive.', 'Extrude should reject non-positive blind distances.')
-    assert(invalidScope === 'Boolean operation join requires explicit target bodies.', 'Extrude should reject standalone scope for boolean operations that need explicit participants.')
-    assert(invalidNewBodyScope === 'Boolean operation newBody requires standalone scope.', 'Extrude should reject non-standalone scope for new-body operations.')
+    expectTrue(invalidDistance === 'Extrude blind distance must be positive.', 'Extrude should reject non-positive blind distances.')
+    expectTrue(invalidScope === 'Boolean operation join requires explicit target bodies.', 'Extrude should reject standalone scope for boolean operations that need explicit participants.')
+    expectTrue(invalidNewBodyScope === 'Boolean operation newBody requires standalone scope.', 'Extrude should reject non-standalone scope for new-body operations.')
   }
 
   async function testAdvancedEndConditionDiagnostics() {
@@ -876,8 +870,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       missingExtrudeTarget = error instanceof Error ? error.message : String(error)
     }
 
-    assert(ambiguousExtrude?.includes('advanced-feature-unsupported-kernel-case') === true && ambiguousExtrude.includes('ambiguous'), 'Extrude up-to-next should diagnose ambiguous nearest bodies.')
-    assert(missingExtrudeTarget?.includes('advanced-feature-unsupported-kernel-case') === true && missingExtrudeTarget.includes('no terminating geometry'), 'Extrude up-to-next should diagnose missing termination.')
+    expectTrue(ambiguousExtrude?.includes('advanced-feature-unsupported-kernel-case') === true && ambiguousExtrude.includes('ambiguous'), 'Extrude up-to-next should diagnose ambiguous nearest bodies.')
+    expectTrue(missingExtrudeTarget?.includes('advanced-feature-unsupported-kernel-case') === true && missingExtrudeTarget.includes('no terminating geometry'), 'Extrude up-to-next should diagnose missing termination.')
   }
 
   async function testCutAndIntersectApplyPerTargetPolicy() {
@@ -907,9 +901,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(cutResult.bodies.length === 2, 'Per-target cut should preserve each target body row independently.')
-    assert(cutResult.bodies.some((body) => body.bodyId === bodyA.bodyId), 'Per-target cut should preserve the first target body id.')
-    assert(cutResult.bodies.some((body) => body.bodyId === bodyB.bodyId), 'Per-target cut should preserve unaffected target bodies.')
+    expectTrue(cutResult.bodies.length === 2, 'Per-target cut should preserve each target body row independently.')
+    expectTrue(cutResult.bodies.some((body) => body.bodyId === bodyA.bodyId), 'Per-target cut should preserve the first target body id.')
+    expectTrue(cutResult.bodies.some((body) => body.bodyId === bodyB.bodyId), 'Per-target cut should preserve unaffected target bodies.')
 
     const intersectResult = executeOccFeature(context, 'feature_phase4_intersect' as FeatureId, {
       kind: 'extrude',
@@ -926,8 +920,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(intersectResult.bodies.length === 1, 'Per-target intersect should drop target bodies whose solid result is empty.')
-    assert(intersectResult.bodies[0]?.bodyId === bodyA.bodyId, 'Per-target intersect should preserve the remaining target body id when only one body overlaps.')
+    expectTrue(intersectResult.bodies.length === 1, 'Per-target intersect should drop target bodies whose solid result is empty.')
+    expectTrue(intersectResult.bodies[0]?.bodyId === bodyA.bodyId, 'Per-target intersect should preserve the remaining target body id when only one body overlaps.')
   }
 
   async function testCombineExecutesBodyBooleansAndConsumesTools() {
@@ -953,10 +947,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const addBody = addResult.bodies.find((body) => body.bodyId === add.target.bodyId)
-    assert(addResult.bodies.length === 1, 'Combine add should consume the tool body into the target output.')
-    assert(addBody != null, 'Combine add should preserve the primary target body identity.')
+    expectTrue(addResult.bodies.length === 1, 'Combine add should consume the tool body into the target output.')
+    expectTrue(addBody != null, 'Combine add should preserve the primary target body identity.')
     assertClose(await bodyVolume(add.context.oc, addBody.shape), 96, 1e-6, 'Combine add should fuse overlapping target and tool volumes.')
-    assert(addResult.producedTargets[0]?.kind === 'body' && addResult.producedTargets[0].bodyId === add.target.bodyId, 'Combine add should report the preserved target as produced output.')
+    expectTrue(addResult.producedTargets[0]?.kind === 'body' && addResult.producedTargets[0].bodyId === add.target.bodyId, 'Combine add should report the preserved target as produced output.')
 
     const subtract = await makeOverlappingContext('subtract')
     const subtractResult = executeOccFeature(subtract.context, 'feature_phase4_combine_subtract' as FeatureId, {
@@ -971,10 +965,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const subtractBody = subtractResult.bodies.find((body) => body.bodyId === subtract.target.bodyId)
-    assert(subtractResult.bodies.length === 1, 'Combine subtract should remove the consumed tool body from the body list.')
-    assert(subtractBody != null, 'Combine subtract should preserve the target body identity.')
+    expectTrue(subtractResult.bodies.length === 1, 'Combine subtract should remove the consumed tool body from the body list.')
+    expectTrue(subtractBody != null, 'Combine subtract should preserve the target body identity.')
     assertClose(await bodyVolume(subtract.context.oc, subtractBody.shape), 32, 1e-6, 'Combine subtract should cut the overlapping tool volume from the target.')
-    assert(subtractResult.historyInvalidations.size > 0, 'Combine subtract should report topology invalidation history.')
+    expectTrue(subtractResult.historyInvalidations.size > 0, 'Combine subtract should report topology invalidation history.')
 
     const intersect = await makeOverlappingContext('intersect')
     const intersectResult = executeOccFeature(intersect.context, 'feature_phase4_combine_intersect' as FeatureId, {
@@ -989,8 +983,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const intersectBody = intersectResult.bodies.find((body) => body.bodyId === intersect.target.bodyId)
-    assert(intersectResult.bodies.length === 1, 'Combine intersect should consume the tool body and keep the common target output.')
-    assert(intersectBody != null, 'Combine intersect should preserve the target body identity for non-empty common volume.')
+    expectTrue(intersectResult.bodies.length === 1, 'Combine intersect should consume the tool body and keep the common target output.')
+    expectTrue(intersectBody != null, 'Combine intersect should preserve the target body identity for non-empty common volume.')
     assertClose(await bodyVolume(intersect.context.oc, intersectBody.shape), 32, 1e-6, 'Combine intersect should keep only the common overlapping volume.')
   }
 
@@ -1034,8 +1028,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       duplicateRole = error instanceof Error ? error.message : String(error)
     }
 
-    assert(emptyIntersection?.includes('OCC combine produced no solid result bodies') === true, 'Combine empty intersections should reject with an explicit empty-result diagnostic message.')
-    assert(duplicateRole?.includes('target and tool bodies must be distinct') === true, 'Combine should reject duplicate target/tool body roles explicitly.')
+    expectTrue(emptyIntersection?.includes('OCC combine produced no solid result bodies') === true, 'Combine empty intersections should reject with an explicit empty-result diagnostic message.')
+    expectTrue(duplicateRole?.includes('target and tool bodies must be distinct') === true, 'Combine should reject duplicate target/tool body roles explicitly.')
   }
 
   async function testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid() {
@@ -1051,15 +1045,15 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       [0, 0, 0],
     )
     const axisFaceId = findFaceIdByDirection(oc, axisBody, [1, 0, 0])
-    assert(axisFaceId != null, 'Expected tracked axis body to expose a planar face id.')
+    expectTrue(axisFaceId != null, 'Expected tracked axis body to expose a planar face id.')
     const axisFace = axisBody.facesById.get(axisFaceId)
-    assert(axisFace != null, 'Expected tracked axis body to expose a planar face shape.')
+    expectTrue(axisFace != null, 'Expected tracked axis body to expose a planar face shape.')
     const axisPlane = buildConstructionPlaneFromPlanarFace(oc, axisFace, axisFaceId, {
       kind: 'construction',
       constructionId: 'construction_axis_seed' as ConstructionId,
     })
     const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    assert(axisEdgeId != null, 'Expected tracked axis body to expose a linear Z-axis edge.')
+    expectTrue(axisEdgeId != null, 'Expected tracked axis body to expose a linear Z-axis edge.')
     const { sketch, region } = createRectangleSketch('sketch_phase4_revolve' as SketchId, profilePlane)
     const axisConstruction = requireConstructionSupport(axisPlane)
     const context = await createContext({ sketches: [sketch], bodies: [axisBody], constructionPlanes: new Map([[axisConstruction.constructionId, axisPlane]]) })()
@@ -1101,8 +1095,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(constructionAxisError?.includes('occ-contract-gap-revolve-construction-axis') === true, 'Construction-backed revolve axes must reject explicitly with the contract-gap code.')
-    assert(result.producedTargets[0]?.kind === 'body', 'Edge-backed revolve should produce a solid body.')
+    expectTrue(constructionAxisError?.includes('occ-contract-gap-revolve-construction-axis') === true, 'Construction-backed revolve axes must reject explicitly with the contract-gap code.')
+    expectTrue(result.producedTargets[0]?.kind === 'body', 'Edge-backed revolve should produce a solid body.')
   }
 
   async function testRevolveBuildsFullAndUpToPartWithOffsets() {
@@ -1127,7 +1121,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       [2, 8, 0],
     )
     const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    assert(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
+    expectTrue(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
     const { sketch, region } = createRectangleSketch('sketch_phase4_revolve_advanced' as SketchId, profilePlane, {
       origin: [1.25, 0.25],
       width: 1,
@@ -1185,9 +1179,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     const fullVolume = await producedBodyVolume(context, full)
     const upToVolume = await producedBodyVolume(context, upToPart)
     const shortenedVolume = await producedBodyVolume(context, shortened)
-    assert(fullVolume > 0, 'Full revolve should produce solid volume.')
-    assert(upToVolume > 0 && upToVolume < fullVolume, 'Up-to-part revolve should terminate before a full turn.')
-    assert(shortenedVolume > 0 && shortenedVolume < upToVolume, 'Shortened up-to-part revolve should reduce the swept volume.')
+    expectTrue(fullVolume > 0, 'Full revolve should produce solid volume.')
+    expectTrue(upToVolume > 0 && upToVolume < fullVolume, 'Up-to-part revolve should terminate before a full turn.')
+    expectTrue(shortenedVolume > 0 && shortenedVolume < upToVolume, 'Shortened up-to-part revolve should reduce the swept volume.')
   }
 
   async function testRevolveRejectsImpossibleUpToOffset() {
@@ -1211,7 +1205,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       [2, 8, 0],
     )
     const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    assert(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
+    expectTrue(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
     const { sketch, region } = createRectangleSketch('sketch_phase4_revolve_offset' as SketchId, profilePlane, {
       origin: [1.25, 0.25],
       width: 1,
@@ -1245,14 +1239,14 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       thrownMessage = error instanceof Error ? error.message : String(error)
     }
 
-    assert(thrownMessage?.includes('advanced-feature-unsupported-kernel-case') === true && thrownMessage.includes('impossible'), 'Revolve up-to offsets that pass the target should reject explicitly.')
+    expectTrue(thrownMessage?.includes('advanced-feature-unsupported-kernel-case') === true && thrownMessage.includes('impossible'), 'Revolve up-to offsets that pass the target should reject explicitly.')
   }
 
   async function testRevolveRejectsNonPlanarFaceProfilesExplicitly() {
     const oc = await getDefaultOpenCascadeInstance()
     const cylinder = new oc.BRepPrimAPI_MakeCylinder_1(2, 5)
     cylinder.Build(new oc.Message_ProgressRange_1())
-    assert(cylinder.IsDone(), 'Expected cylindrical body seed to build successfully.')
+    expectTrue(cylinder.IsDone(), 'Expected cylindrical body seed to build successfully.')
     const body = trackNewSolidBody(oc, {
       bodyId: 'body_phase4_revolve_non_planar' as BodyId,
       label: 'non-planar',
@@ -1275,10 +1269,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
         return true
       }
     })
-    assert(nonPlanarFaceId != null, 'Expected cylindrical body to expose a non-planar face.')
+    expectTrue(nonPlanarFaceId != null, 'Expected cylindrical body to expose a non-planar face.')
     const axisBody = await makeBoxBody(oc, 'body_phase4_revolve_axis_planar_check' as BodyId, 1, 1, 4, 'feature_phase4_axis_planar_check' as FeatureId)
     const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    assert(axisEdgeId != null, 'Expected axis body to expose a linear edge for revolve.')
+    expectTrue(axisEdgeId != null, 'Expected axis body to expose a linear edge for revolve.')
     const context = await createContext({ bodies: [body, axisBody] })()
 
     let thrownMessage: string | null = null
@@ -1302,7 +1296,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       thrownMessage = error instanceof Error ? error.message : String(error)
     }
 
-    assert(
+    expectTrue(
       thrownMessage === 'Face-backed profile requires a planar face.',
       'Face-backed revolve profiles should reject non-planar faces before invoking OCC revolve.',
     )
@@ -1320,7 +1314,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       [0, 0, 0],
     )
     const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
-    assert(pathEdgeId != null, 'Expected path body to expose a linear Z edge for sweep.')
+    expectTrue(pathEdgeId != null, 'Expected path body to expose a linear Z edge for sweep.')
     const plane = createStandardPlaneDefinition('xy')
     const { sketch, region } = createRectangleSketch('sketch_phase4_sweep' as SketchId, plane, {
       origin: [-0.2, -0.2],
@@ -1341,10 +1335,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const bodyTarget = result.producedTargets[0]
-    assert(bodyTarget?.kind === 'body', 'Standalone sweep must produce a new body target.')
+    expectTrue(bodyTarget?.kind === 'body', 'Standalone sweep must produce a new body target.')
     const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
-    assert(producedBody != null, 'Standalone sweep must append the produced body.')
-    assert(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone sweep should produce non-empty solid geometry.')
+    expectTrue(producedBody != null, 'Standalone sweep must append the produced body.')
+    expectTrue(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone sweep should produce non-empty solid geometry.')
   }
 
   async function testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies() {
@@ -1359,9 +1353,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       [0, 0, 0],
     )
     const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
-    assert(pathEdgeId != null, 'Expected path body to expose a linear Z edge for advanced sweep.')
+    expectTrue(pathEdgeId != null, 'Expected path body to expose a linear Z edge for advanced sweep.')
     const lockFaceId = findFaceIdByDirection(oc, pathBody, [0, 0, 1])
-    assert(lockFaceId != null, 'Expected path body to expose a planar face for lock-profile-faces coverage.')
+    expectTrue(lockFaceId != null, 'Expected path body to expose a planar face for lock-profile-faces coverage.')
     const plane = createStandardPlaneDefinition('xy')
     const { sketch, region } = createRectangleSketch('sketch_phase4_sweep_advanced' as SketchId, plane, {
       origin: [-0.2, -0.2],
@@ -1417,10 +1411,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
         },
       })
       const bodyTarget = result.producedTargets[0]
-      assert(bodyTarget?.kind === 'body', `Advanced sweep ${sweepCase.suffix} must produce a new body target.`)
+      expectTrue(bodyTarget?.kind === 'body', `Advanced sweep ${sweepCase.suffix} must produce a new body target.`)
       const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
-      assert(producedBody != null, `Advanced sweep ${sweepCase.suffix} must append a body.`)
-      assert(await bodyVolume(context.oc, producedBody.shape) > 0, `Advanced sweep ${sweepCase.suffix} should produce non-empty solid geometry.`)
+      expectTrue(producedBody != null, `Advanced sweep ${sweepCase.suffix} must append a body.`)
+      expectTrue(await bodyVolume(context.oc, producedBody.shape) > 0, `Advanced sweep ${sweepCase.suffix} should produce non-empty solid geometry.`)
     }
 
     let unsupportedCombinationError: string | null = null
@@ -1441,7 +1435,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       unsupportedCombinationError = error instanceof Error ? error.message : String(error)
     }
 
-    assert(
+    expectTrue(
       unsupportedCombinationError?.includes('advanced-feature-unsupported-kernel-case') === true,
       'OCC sweep should reject profile-control plus twist combinations explicitly instead of ignoring profile control.',
     )
@@ -1458,9 +1452,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       'feature_phase4_sweep_reject_path_seed' as FeatureId,
     )
     const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
-    assert(pathEdgeId != null, 'Expected path body to expose a linear Z edge for sweep rejection coverage.')
+    expectTrue(pathEdgeId != null, 'Expected path body to expose a linear Z edge for sweep rejection coverage.')
     const guideEdgeId = pathBody.topology.edgeIds.find((edgeId) => edgeId !== pathEdgeId)
-    assert(guideEdgeId != null, 'Expected path body to expose a second edge for guide curve coverage.')
+    expectTrue(guideEdgeId != null, 'Expected path body to expose a second edge for guide curve coverage.')
     const plane = createStandardPlaneDefinition('xy')
     const { sketch, region } = createRectangleSketch('sketch_phase4_sweep_reject' as SketchId, plane, {
       origin: [-0.2, -0.2],
@@ -1507,8 +1501,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       booleanError = error instanceof Error ? error.message : String(error)
     }
 
-    assert(guideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Guide-curve sweeps must reject with an explicit unsupported-case code.')
-    assert(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean sweeps must reject with an explicit unsupported-case code.')
+    expectTrue(guideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Guide-curve sweeps must reject with an explicit unsupported-case code.')
+    expectTrue(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean sweeps must reject with an explicit unsupported-case code.')
   }
 
   async function testLoftBuildsStandaloneBodyFromOrderedProfiles() {
@@ -1530,8 +1524,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     )
     const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1])
     const pathEdgeId = findEdgeIdByDirection(oc, faceBody, [0, 0, 1])
-    assert(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
-    assert(pathEdgeId != null, 'Expected loft support body to expose a linear path edge.')
+    expectTrue(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
+    expectTrue(pathEdgeId != null, 'Expected loft support body to expose a linear path edge.')
     const context = await createContext({ sketches: [sketch], bodies: [faceBody] })()
 
     const result = executeOccFeature(context, 'feature_phase4_loft' as FeatureId, {
@@ -1551,10 +1545,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const bodyTarget = result.producedTargets[0]
-    assert(bodyTarget?.kind === 'body', 'Standalone loft must produce a new body target.')
+    expectTrue(bodyTarget?.kind === 'body', 'Standalone loft must produce a new body target.')
     const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
-    assert(producedBody != null, 'Standalone loft must append the produced body.')
-    assert(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone loft should produce non-empty solid geometry.')
+    expectTrue(producedBody != null, 'Standalone loft must append the produced body.')
+    expectTrue(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone loft should produce non-empty solid geometry.')
 
     const pathResult = executeOccFeature(context, 'feature_phase4_loft_path' as FeatureId, {
       kind: 'loft',
@@ -1575,9 +1569,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
     const pathBodyTarget = pathResult.producedTargets[0]
-    assert(pathBodyTarget?.kind === 'body', 'Path loft must produce a new body target.')
+    expectTrue(pathBodyTarget?.kind === 'body', 'Path loft must produce a new body target.')
     const pathBody = pathResult.bodies.find((body) => body.bodyId === pathBodyTarget.bodyId)
-    assert(pathBody != null && await bodyVolume(context.oc, pathBody.shape) > 0, 'Path loft should produce non-empty solid geometry.')
+    expectTrue(pathBody != null && await bodyVolume(context.oc, pathBody.shape) > 0, 'Path loft should produce non-empty solid geometry.')
   }
 
   async function testLoftAdvancedControlsAndUnsupportedCombinations() {
@@ -1599,8 +1593,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     )
     const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1])
     const guideEdgeId = findEdgeIdByDirection(oc, faceBody, [1, 0, 0]) ?? faceBody.topology.edgeIds[0]
-    assert(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
-    assert(guideEdgeId != null, 'Expected loft support body to expose a durable guide edge.')
+    expectTrue(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
+    expectTrue(guideEdgeId != null, 'Expected loft support body to expose a durable guide edge.')
     const context = await createContext({ sketches: [sketch], bodies: [faceBody] })()
 
     const advancedResult = executeOccFeature(context, 'feature_phase4_loft_advanced' as FeatureId, {
@@ -1636,7 +1630,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(advancedResult.producedTargets[0]?.kind === 'body', 'Guide continuity, profile conditions, and one match connection should execute for loft.')
+    expectTrue(advancedResult.producedTargets[0]?.kind === 'body', 'Guide continuity, profile conditions, and one match connection should execute for loft.')
 
     let pathGuideError: string | null = null
     try {
@@ -1686,15 +1680,15 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       booleanError = error instanceof Error ? error.message : String(error)
     }
 
-    assert(pathGuideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Path plus guide-curve lofts must reject with an explicit unsupported-case code.')
-    assert(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean lofts must reject with an explicit unsupported-case code.')
+    expectTrue(pathGuideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Path plus guide-curve lofts must reject with an explicit unsupported-case code.')
+    expectTrue(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean lofts must reject with an explicit unsupported-case code.')
   }
 
   async function testFilletReplacesAffectedBody() {
     const oc = await getDefaultOpenCascadeInstance()
     const boxBody = await makeBoxBody(oc, 'body_phase4_fillet' as BodyId, 2, 2, 2, 'feature_phase4_box' as FeatureId)
     const edgeId = boxBody.topology.edgeIds[0]
-    assert(edgeId != null, 'Expected tracked box body to expose edge ids for fillet targets.')
+    expectTrue(edgeId != null, 'Expected tracked box body to expose edge ids for fillet targets.')
     const context = await createContext({ bodies: [boxBody] })()
 
     const result = executeOccFeature(context, 'feature_phase4_fillet' as FeatureId, {
@@ -1706,9 +1700,9 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.bodies.length === 1, 'Fillet should replace the affected body in place.')
-    assert(result.bodies[0]?.bodyId === boxBody.bodyId, 'Fillet should preserve the owning body id when replacing the body result.')
-    assert(result.producedTargets[0]?.kind === 'body', 'Fillet should report the mutated body as its produced target.')
+    expectTrue(result.bodies.length === 1, 'Fillet should replace the affected body in place.')
+    expectTrue(result.bodies[0]?.bodyId === boxBody.bodyId, 'Fillet should preserve the owning body id when replacing the body result.')
+    expectTrue(result.producedTargets[0]?.kind === 'body', 'Fillet should report the mutated body as its produced target.')
   }
 
   async function testFilletRejectsEmptyEdgeTargetList() {
@@ -1728,7 +1722,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       thrownMessage = error instanceof Error ? error.message : String(error)
     }
 
-    assert(thrownMessage === 'Fillet requires at least one target edge.', 'Fillet should reject empty target-edge lists explicitly.')
+    expectTrue(thrownMessage === 'Fillet requires at least one target edge.', 'Fillet should reject empty target-edge lists explicitly.')
   }
 
   async function testSplitReplacesTargetBodyWithExplicitResultBodies() {
@@ -1748,10 +1742,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.bodies.every((body) => body.bodyId !== targetBody.bodyId), 'Split should remove the original target body from the next state.')
-    assert(result.bodies.some((body) => body.bodyId === toolBody.bodyId), 'Split should preserve the tool body in the next state.')
-    assert(result.producedTargets.length >= 2, 'Split should report the produced replacement body targets.')
-    assert(
+    expectTrue(result.bodies.every((body) => body.bodyId !== targetBody.bodyId), 'Split should remove the original target body from the next state.')
+    expectTrue(result.bodies.some((body) => body.bodyId === toolBody.bodyId), 'Split should preserve the tool body in the next state.')
+    expectTrue(result.producedTargets.length >= 2, 'Split should report the produced replacement body targets.')
+    expectTrue(
       result.bodies.filter((body) => body.bodyId.startsWith('body_feature_phase4_split_')).length >= 2,
       'Split should append replacement split result bodies.',
     )
@@ -1773,10 +1767,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.producedTargets.length === 0, 'Delete-solid should not report new produced bodies.')
-    assert(result.bodies.every((body) => body.bodyId !== bodyA.bodyId), 'Delete-solid should remove the selected body from the next state.')
-    assert(result.bodies.some((body) => body.bodyId === bodyB.bodyId), 'Delete-solid should preserve unselected bodies.')
-    assert(result.historyInvalidations.size > 0, 'Delete-solid should preserve invalidation history for removed body topology.')
+    expectTrue(result.producedTargets.length === 0, 'Delete-solid should not report new produced bodies.')
+    expectTrue(result.bodies.every((body) => body.bodyId !== bodyA.bodyId), 'Delete-solid should remove the selected body from the next state.')
+    expectTrue(result.bodies.some((body) => body.bodyId === bodyB.bodyId), 'Delete-solid should preserve unselected bodies.')
+    expectTrue(result.historyInvalidations.size > 0, 'Delete-solid should preserve invalidation history for removed body topology.')
   }
 
   async function testMirrorCopiesBodiesAcrossExplicitPlanarReferences() {
@@ -1796,10 +1790,10 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.bodies.length === 2, 'Mirror copy should preserve the source body and append one mirrored result body.')
-    assert(result.bodies.some((entry) => entry.bodyId === body.bodyId), 'Mirror copy should preserve the source body id.')
-    assert(result.bodies.some((entry) => entry.bodyId !== body.bodyId), 'Mirror copy should append at least one new mirrored body.')
-    assert(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body', 'Mirror copy should report the new mirrored body as its produced target.')
+    expectTrue(result.bodies.length === 2, 'Mirror copy should preserve the source body and append one mirrored result body.')
+    expectTrue(result.bodies.some((entry) => entry.bodyId === body.bodyId), 'Mirror copy should preserve the source body id.')
+    expectTrue(result.bodies.some((entry) => entry.bodyId !== body.bodyId), 'Mirror copy should append at least one new mirrored body.')
+    expectTrue(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body', 'Mirror copy should report the new mirrored body as its produced target.')
   }
 
   async function testTransformReplacesBodyWithTranslatedResult() {
@@ -1819,17 +1813,17 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.bodies.length === 1, 'Transform should replace the selected body in place.')
-    assert(result.bodies[0]?.bodyId === body.bodyId, 'Transform should preserve the selected body id when replacing the translated result.')
-    assert(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body' && result.producedTargets[0].bodyId === body.bodyId, 'Transform should report the replaced body target.')
-    assert(result.bodies[0]?.topology.faceIds.includes(body.topology.faceIds[0]!), 'Transform should preserve uniquely resolved topology ids for the replaced body.')
+    expectTrue(result.bodies.length === 1, 'Transform should replace the selected body in place.')
+    expectTrue(result.bodies[0]?.bodyId === body.bodyId, 'Transform should preserve the selected body id when replacing the translated result.')
+    expectTrue(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body' && result.producedTargets[0].bodyId === body.bodyId, 'Transform should report the replaced body target.')
+    expectTrue(result.bodies[0]?.topology.faceIds.includes(body.topology.faceIds[0]!), 'Transform should preserve uniquely resolved topology ids for the replaced body.')
   }
 
   async function testShellBuildsPreviewableSolidFromExplicitBodyAndFaces() {
     const oc = await getDefaultOpenCascadeInstance()
     const boxBody = await makeBoxBody(oc, 'body_phase4_shell' as BodyId, 4, 4, 4, 'feature_phase4_shell_seed' as FeatureId)
     const removableFaceId = findFaceIdByDirection(oc, boxBody, [0, 0, 1])
-    assert(removableFaceId != null, 'Expected box body to expose a removable top face for shell.')
+    expectTrue(removableFaceId != null, 'Expected box body to expose a removable top face for shell.')
     const context = await createContext({ bodies: [boxBody] })()
 
     const result = executeOccFeature(context, 'feature_phase4_shell' as FeatureId, {
@@ -1844,8 +1838,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     })
 
-    assert(result.producedTargets[0]?.kind === 'body', 'Shell should report its produced body target.')
-    assert(result.bodies.length === 2, 'Standalone shell should preserve the source body and append the shelled result body.')
+    expectTrue(result.producedTargets[0]?.kind === 'body', 'Shell should report its produced body target.')
+    expectTrue(result.bodies.length === 2, 'Standalone shell should preserve the source body and append the shelled result body.')
   }
 
   async function testOccAuthoringStateRebuildUsesFeatureExecutionFlow() {
@@ -1890,11 +1884,11 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
       },
     ])
 
-    assert(rebuilt.features.length === 2, 'Authoring-state rebuild should append every applied feature to the live OCC state.')
-    assert(rebuilt.constructions.some((construction) => construction.constructionId === 'construction_feature_phase4_rebuild_plane'), 'Authoring-state rebuild should persist plane-feature construction state.')
-    assert(rebuilt.bodies.some((body) => body.bodyId === 'body_feature_phase4_rebuild_extrude'), 'Authoring-state rebuild should persist feature-produced bodies.')
-    assert(rebuilt.entities.length === 1, 'Authoring-state rebuild should accumulate construction entity artifacts from executed features.')
-    assert(rebuilt.renderRecords.length === 1, 'Authoring-state rebuild should accumulate construction render artifacts from executed features.')
+    expectTrue(rebuilt.features.length === 2, 'Authoring-state rebuild should append every applied feature to the live OCC state.')
+    expectTrue(rebuilt.constructions.some((construction) => construction.constructionId === 'construction_feature_phase4_rebuild_plane'), 'Authoring-state rebuild should persist plane-feature construction state.')
+    expectTrue(rebuilt.bodies.some((body) => body.bodyId === 'body_feature_phase4_rebuild_extrude'), 'Authoring-state rebuild should persist feature-produced bodies.')
+    expectTrue(rebuilt.entities.length === 1, 'Authoring-state rebuild should accumulate construction entity artifacts from executed features.')
+    expectTrue(rebuilt.renderRecords.length === 1, 'Authoring-state rebuild should accumulate construction render artifacts from executed features.')
   }
 
   async function testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns() {
@@ -1941,11 +1935,11 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {
     const first = rebuildOccAuthoringState(initialState, features)
     const second = rebuildOccAuthoringState(first, features)
 
-    assert(first.features.length === second.features.length, 'Repeated rebuilds with the same feature list should not duplicate feature rows.')
-    assert(first.bodies.length === second.bodies.length, 'Repeated rebuilds with the same feature list should produce the same body count.')
-    assert(first.constructions.length === second.constructions.length, 'Repeated rebuilds with the same feature list should not duplicate construction rows.')
-    assert(first.entities.length === second.entities.length, 'Repeated rebuilds with the same feature list should not duplicate entity artifacts.')
-    assert(first.renderRecords.length === second.renderRecords.length, 'Repeated rebuilds with the same feature list should not duplicate render artifacts.')
+    expectTrue(first.features.length === second.features.length, 'Repeated rebuilds with the same feature list should not duplicate feature rows.')
+    expectTrue(first.bodies.length === second.bodies.length, 'Repeated rebuilds with the same feature list should produce the same body count.')
+    expectTrue(first.constructions.length === second.constructions.length, 'Repeated rebuilds with the same feature list should not duplicate construction rows.')
+    expectTrue(first.entities.length === second.entities.length, 'Repeated rebuilds with the same feature list should not duplicate entity artifacts.')
+    expectTrue(first.renderRecords.length === second.renderRecords.length, 'Repeated rebuilds with the same feature list should not duplicate render artifacts.')
   }
 
   await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts()

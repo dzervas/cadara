@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { readFileSync } from 'node:fs'
 
 import {
@@ -19,14 +20,7 @@ import { getRegisteredFeatureAuthoringDefinitions } from '@/core/feature-authori
 import type { FeatureAuthoringDefinition } from '@/core/feature-authoring/definition'
 import type { FeatureEditorFormField } from '@/core/feature-authoring/form-schema'
 
-test('src/domain/feature-authoring/registry.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function findFormField(fields: readonly FeatureEditorFormField[], fieldId: string): FeatureEditorFormField | undefined {
+test('src/domain/feature-authoring/registry.spec.ts', async () => {  function findFormField(fields: readonly FeatureEditorFormField[], fieldId: string): FeatureEditorFormField | undefined {
     for (const field of fields) {
       if (field.id === fieldId) {
         return field
@@ -64,7 +58,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .map((definition) => definition.metadata.kind)
       .sort()
 
-    assert(
+    expectTrue(
       JSON.stringify(registeredKinds) === JSON.stringify(['chamfer', 'combine', 'deleteSolid', 'extrude', 'fillet', 'loft', 'mirror', 'plane', 'revolve', 'shell', 'split', 'sweep', 'thicken', 'transform']),
       'The feature authoring registry should contain every current authored feature kind.',
     )
@@ -76,8 +70,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: { kind: 'region', sketchId: 'sketch_a', regionId: 'region_a' },
     })
 
-    assert(initialSession.featureType === 'revolve', 'Revolve activation should create a revolve authoring session.')
-    assert(buildFeatureDefinition(initialSession) === null, 'Revolve drafts without an axis should not build a modeling definition.')
+    expectTrue(initialSession.featureType === 'revolve', 'Revolve activation should create a revolve authoring session.')
+    expectTrue(buildFeatureDefinition(initialSession) === null, 'Revolve drafts without an axis should not build a modeling definition.')
 
     const completedSession = applySelectionToFeatureEditSession(initialSession, {
       kind: 'edge',
@@ -86,8 +80,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     })
     const definition = buildFeatureDefinition(completedSession)
 
-    assert(definition?.kind === 'revolve', 'Completed revolve drafts should build a revolve modeling definition.')
-    assert(definition.parameters.axis.kind === 'edge', 'The selected edge should become the revolve axis.')
+    expectTrue(definition?.kind === 'revolve', 'Completed revolve drafts should build a revolve modeling definition.')
+    expectTrue(definition.parameters.axis.kind === 'edge', 'The selected edge should become the revolve axis.')
   }
 
   function testExtrudeBooleanTargetSelectorVisibilityAndScope() {
@@ -101,17 +95,17 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const operationField = getFormField(initialSession, 'extrude-operation')
     const hiddenTargetField = getFormField(initialSession, 'extrude-target-bodies')
 
-    assert(operationField?.kind === 'enum', 'Extrude schema should expose operation as a generic enum field.')
-    assert(hiddenTargetField?.kind === 'referenceCollection', 'Extrude schema should expose boolean target bodies as a reference collection.')
-    assert(hiddenTargetField.hidden === true, 'Extrude should hide boolean target bodies for newBody operation.')
+    expectTrue(operationField?.kind === 'enum', 'Extrude schema should expose operation as a generic enum field.')
+    expectTrue(hiddenTargetField?.kind === 'referenceCollection', 'Extrude schema should expose boolean target bodies as a reference collection.')
+    expectTrue(hiddenTargetField.hidden === true, 'Extrude should hide boolean target bodies for newBody operation.')
 
     const joinSession = patchFeatureEditSession(initialSession, createFeatureEditorFieldPatch(operationField, 'join'))
     const visibleTargetField = getFormField(joinSession, 'extrude-target-bodies')
 
-    assert(visibleTargetField?.kind === 'referenceCollection', 'Extrude target bodies field should remain a reference collection.')
-    assert(visibleTargetField.hidden !== true, 'Extrude should show boolean target bodies for join operation.')
-    assert(visibleTargetField.error?.message === 'Select at least one target body.', 'Extrude should mark missing boolean target bodies as invalid.')
-    assert(buildFeatureDefinition(joinSession) === null, 'Extrude boolean drafts without target bodies should not build a definition.')
+    expectTrue(visibleTargetField?.kind === 'referenceCollection', 'Extrude target bodies field should remain a reference collection.')
+    expectTrue(visibleTargetField.hidden !== true, 'Extrude should show boolean target bodies for join operation.')
+    expectTrue(visibleTargetField.error?.message === 'Select at least one target body.', 'Extrude should mark missing boolean target bodies as invalid.')
+    expectTrue(buildFeatureDefinition(joinSession) === null, 'Extrude boolean drafts without target bodies should not build a definition.')
 
     const oneTargetSession = patchFeatureEditSession(
       joinSession,
@@ -119,7 +113,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const oneTargetDefinition = buildFeatureDefinition(oneTargetSession)
 
-    assert(
+    expectTrue(
       oneTargetDefinition?.kind === 'extrude' &&
         oneTargetDefinition.parameters.operation === 'join' &&
         oneTargetDefinition.parameters.booleanScope.kind === 'targetBody' &&
@@ -128,7 +122,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
 
     const twoTargetField = getFormField(oneTargetSession, 'extrude-target-bodies')
-    assert(twoTargetField?.kind === 'referenceCollection', 'Extrude target bodies field should hydrate selected target bodies.')
+    expectTrue(twoTargetField?.kind === 'referenceCollection', 'Extrude target bodies field should hydrate selected target bodies.')
 
     const twoTargetSession = patchFeatureEditSession(
       oneTargetSession,
@@ -136,7 +130,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const twoTargetDefinition = buildFeatureDefinition(twoTargetSession)
 
-    assert(
+    expectTrue(
       twoTargetDefinition?.kind === 'extrude' &&
         twoTargetDefinition.parameters.booleanScope.kind === 'targetBodies' &&
         twoTargetDefinition.parameters.booleanScope.bodyIds.length === 2,
@@ -144,7 +138,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
 
     const resetOperationField = getFormField(twoTargetSession, 'extrude-operation')
-    assert(resetOperationField?.kind === 'enum', 'Extrude operation field should remain available after target body selection.')
+    expectTrue(resetOperationField?.kind === 'enum', 'Extrude operation field should remain available after target body selection.')
 
     const resetSession = patchFeatureEditSession(
       twoTargetSession,
@@ -152,11 +146,11 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const resetDefinition = buildFeatureDefinition(resetSession)
 
-    assert(
+    expectTrue(
       resetDefinition?.kind === 'extrude' && resetDefinition.parameters.booleanScope.kind === 'standalone',
       'Extrude should reset boolean scope to standalone when switching back to newBody.',
     )
-    assert(getFormField(resetSession, 'extrude-target-bodies')?.hidden === true, 'Extrude should hide target bodies after switching back to newBody.')
+    expectTrue(getFormField(resetSession, 'extrude-target-bodies')?.hidden === true, 'Extrude should hide target bodies after switching back to newBody.')
   }
 
   function testRevolveBooleanTargetSelectorVisibilityAndScope() {
@@ -173,16 +167,16 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const operationField = getFormField(initialSession, 'revolve-operation')
     const hiddenTargetField = getFormField(initialSession, 'revolve-target-bodies')
 
-    assert(operationField?.kind === 'enum', 'Revolve schema should expose operation as a generic enum field.')
-    assert(hiddenTargetField?.kind === 'referenceCollection', 'Revolve schema should expose boolean target bodies as a reference collection.')
-    assert(hiddenTargetField.hidden === true, 'Revolve should hide boolean target bodies for newBody operation.')
+    expectTrue(operationField?.kind === 'enum', 'Revolve schema should expose operation as a generic enum field.')
+    expectTrue(hiddenTargetField?.kind === 'referenceCollection', 'Revolve schema should expose boolean target bodies as a reference collection.')
+    expectTrue(hiddenTargetField.hidden === true, 'Revolve should hide boolean target bodies for newBody operation.')
 
     const cutSession = patchFeatureEditSession(initialSession, createFeatureEditorFieldPatch(operationField, 'cut'))
     const visibleTargetField = getFormField(cutSession, 'revolve-target-bodies')
 
-    assert(visibleTargetField?.kind === 'referenceCollection', 'Revolve target bodies field should remain a reference collection.')
-    assert(visibleTargetField.hidden !== true, 'Revolve should show boolean target bodies for cut operation.')
-    assert(buildFeatureDefinition(cutSession) === null, 'Revolve boolean drafts without target bodies should not build a definition.')
+    expectTrue(visibleTargetField?.kind === 'referenceCollection', 'Revolve target bodies field should remain a reference collection.')
+    expectTrue(visibleTargetField.hidden !== true, 'Revolve should show boolean target bodies for cut operation.')
+    expectTrue(buildFeatureDefinition(cutSession) === null, 'Revolve boolean drafts without target bodies should not build a definition.')
 
     const targetSession = patchFeatureEditSession(
       cutSession,
@@ -190,7 +184,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(targetSession)
 
-    assert(
+    expectTrue(
       definition?.kind === 'revolve' &&
         definition.parameters.operation === 'cut' &&
         definition.parameters.booleanScope.kind === 'targetBody' &&
@@ -210,22 +204,22 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: profile,
     })
 
-    assert(initialSession.featureType === 'sweep', 'Sweep activation should create a sweep authoring session.')
-    assert(buildFeatureDefinition(initialSession) === null, 'Sweep drafts without a path should not build a modeling definition.')
+    expectTrue(initialSession.featureType === 'sweep', 'Sweep activation should create a sweep authoring session.')
+    expectTrue(buildFeatureDefinition(initialSession) === null, 'Sweep drafts without a path should not build a modeling definition.')
 
     const completedSession = applySelectionToFeatureEditSession(initialSession, path)
     const definition = buildFeatureDefinition(completedSession)
 
-    assert(definition?.kind === 'sweep', 'Completed sweep drafts should build a sweep modeling definition.')
-    assert(
+    expectTrue(definition?.kind === 'sweep', 'Completed sweep drafts should build a sweep modeling definition.')
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'profile' && participant.targets[0] === profile),
       'Sweep definitions should preserve the selected profile participant role.',
     )
-    assert(
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'path' && participant.targets[0] === path),
       'Sweep definitions should preserve the selected path participant role.',
     )
-    assert(
+    expectTrue(
       definition.parameters.options?.profileControl === 'none' &&
         definition.parameters.options.twist &&
         typeof definition.parameters.options.twist === 'object' &&
@@ -237,25 +231,25 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
     const schema = getFeatureEditorFormSchema(completedSession)
     const operationField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'sweep-operation-intent')
-    assert(operationField?.kind === 'enum', 'Sweep form schema should expose operation intent as a generic enum field.')
+    expectTrue(operationField?.kind === 'enum', 'Sweep form schema should expose operation intent as a generic enum field.')
     const profileControlField = getFormField(completedSession, 'sweep-profile-control')
-    assert(profileControlField?.kind === 'enum', 'Sweep form schema should expose profile control as an enum field.')
+    expectTrue(profileControlField?.kind === 'enum', 'Sweep form schema should expose profile control as an enum field.')
     const twistTypeField = getFormField(completedSession, 'sweep-twist-type')
-    assert(twistTypeField?.kind === 'enum', 'Sweep form schema should expose twist type as a discriminant enum.')
+    expectTrue(twistTypeField?.kind === 'enum', 'Sweep form schema should expose twist type as a discriminant enum.')
     const twistTurnsField = getFormField(completedSession, 'sweep-twist-turns')
-    assert(twistTurnsField?.kind === 'numeric', 'Sweep form schema should expose turns twist as a numeric field.')
+    expectTrue(twistTurnsField?.kind === 'numeric', 'Sweep form schema should expose turns twist as a numeric field.')
     const endScaleField = getFormField(completedSession, 'sweep-end-scale')
-    assert(endScaleField?.kind === 'numeric', 'Sweep form schema should expose end scale as a numeric field.')
+    expectTrue(endScaleField?.kind === 'numeric', 'Sweep form schema should expose end scale as a numeric field.')
     const hiddenTargetBodiesField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'sweep-target-bodies')
-    assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
-    assert(hiddenTargetBodiesField.hidden === true, 'Sweep should hide target bodies for create operation.')
+    expectTrue(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
+    expectTrue(hiddenTargetBodiesField.hidden === true, 'Sweep should hide target bodies for create operation.')
 
     const keepOrientationSession = patchFeatureEditSession(
       completedSession,
       createFeatureEditorFieldPatch(profileControlField, 'keepProfileOrientation'),
     )
     const keepOrientationDefinition = buildFeatureDefinition(keepOrientationSession)
-    assert(
+    expectTrue(
       keepOrientationDefinition?.kind === 'sweep' &&
         keepOrientationDefinition.parameters.options?.profileControl === 'keepProfileOrientation',
       'Sweep authoring should preserve keep profile orientation control.',
@@ -265,15 +259,15 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       completedSession,
       createFeatureEditorFieldPatch(profileControlField, 'lockProfileFaces'),
     )
-    assert(buildFeatureDefinition(lockFacesSession) === null, 'Lock profile faces should require at least one face target.')
+    expectTrue(buildFeatureDefinition(lockFacesSession) === null, 'Lock profile faces should require at least one face target.')
     const lockFacesField = getFormField(lockFacesSession, 'sweep-lock-profile-faces')
-    assert(lockFacesField?.kind === 'referenceCollection' && lockFacesField.hidden !== true, 'Lock face picker should be visible for lockProfileFaces.')
+    expectTrue(lockFacesField?.kind === 'referenceCollection' && lockFacesField.hidden !== true, 'Lock face picker should be visible for lockProfileFaces.')
     const lockFacesCompletedSession = patchFeatureEditSession(
       lockFacesSession,
       createFeatureEditorReferenceSelectionPatch(lockFacesField, lockFace),
     )
     const lockFacesDefinition = buildFeatureDefinition(lockFacesCompletedSession)
-    assert(
+    expectTrue(
       lockFacesDefinition?.kind === 'sweep' &&
         lockFacesDefinition.parameters.options?.profileControl === 'lockProfileFaces' &&
         lockFacesDefinition.parameters.participants.some((participant) => participant.role === 'lockProfileFace'),
@@ -284,15 +278,15 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       completedSession,
       createFeatureEditorFieldPatch(profileControlField, 'lockProfileDirection'),
     )
-    assert(buildFeatureDefinition(lockDirectionSession) === null, 'Lock profile direction should require one direction target.')
+    expectTrue(buildFeatureDefinition(lockDirectionSession) === null, 'Lock profile direction should require one direction target.')
     const lockDirectionField = getFormField(lockDirectionSession, 'sweep-lock-profile-direction')
-    assert(lockDirectionField?.kind === 'referencePicker' && lockDirectionField.hidden !== true, 'Lock direction picker should be visible for lockProfileDirection.')
+    expectTrue(lockDirectionField?.kind === 'referencePicker' && lockDirectionField.hidden !== true, 'Lock direction picker should be visible for lockProfileDirection.')
     const lockDirectionCompletedSession = patchFeatureEditSession(
       lockDirectionSession,
       createFeatureEditorReferenceSelectionPatch(lockDirectionField, lockDirection),
     )
     const lockDirectionDefinition = buildFeatureDefinition(lockDirectionCompletedSession)
-    assert(
+    expectTrue(
       lockDirectionDefinition?.kind === 'sweep' &&
         lockDirectionDefinition.parameters.options?.profileControl === 'lockProfileDirection' &&
         lockDirectionDefinition.parameters.participants.some((participant) => participant.role === 'lockProfileDirection'),
@@ -304,7 +298,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       createFeatureEditorFieldPatch(twistTurnsField, 2),
     )
     const twistTurnsDefinition = buildFeatureDefinition(twistTurnsSession)
-    assert(
+    expectTrue(
       twistTurnsDefinition?.kind === 'sweep' &&
         twistTurnsDefinition.parameters.options?.twist &&
         typeof twistTurnsDefinition.parameters.options.twist === 'object' &&
@@ -319,13 +313,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       completedSession,
       createFeatureEditorFieldPatch(operationField, 'subtract'),
     )
-    assert(buildFeatureDefinition(subtractSession) === null, 'Boolean sweep drafts should require explicit target bodies.')
+    expectTrue(buildFeatureDefinition(subtractSession) === null, 'Boolean sweep drafts should require explicit target bodies.')
 
     const targetBodiesField = getFeatureEditorFormSchema(subtractSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'sweep-target-bodies')
-    assert(targetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
-    assert(targetBodiesField.hidden !== true, 'Sweep should show target bodies for subtract operation.')
+    expectTrue(targetBodiesField?.kind === 'referenceCollection', 'Sweep form schema should expose target bodies as a reference collection.')
+    expectTrue(targetBodiesField.hidden !== true, 'Sweep should show target bodies for subtract operation.')
 
     const booleanSession = patchFeatureEditSession(
       subtractSession,
@@ -333,7 +327,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const booleanDefinition = buildFeatureDefinition(booleanSession)
 
-    assert(
+    expectTrue(
       booleanSession.featureType === 'sweep' &&
         booleanDefinition?.kind === 'sweep' &&
         booleanDefinition.parameters.operationIntent === 'subtract' &&
@@ -371,16 +365,16 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       producedTargets: [{ kind: 'body', bodyId: 'body_sweep-1' }],
     })
 
-    assert(hydrated?.featureType === 'sweep', 'Sweep snapshots should hydrate into sweep edit sessions.')
+    expectTrue(hydrated?.featureType === 'sweep', 'Sweep snapshots should hydrate into sweep edit sessions.')
 
     const profileControlField = getFormField(hydrated, 'sweep-profile-control')
-    assert(
+    expectTrue(
       profileControlField?.kind === 'enum' && profileControlField.value === 'lockProfileDirection',
       'Sweep hydration should unwrap authored profile control values for editing.',
     )
 
     const lockDirectionField = getFormField(hydrated, 'sweep-lock-profile-direction')
-    assert(
+    expectTrue(
       lockDirectionField?.kind === 'referencePicker' &&
         lockDirectionField.hidden !== true &&
         lockDirectionField.value?.kind === 'construction',
@@ -388,19 +382,19 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
 
     const twistTypeField = getFormField(hydrated, 'sweep-twist-type')
-    assert(
+    expectTrue(
       twistTypeField?.kind === 'enum' && twistTypeField.value === 'angle',
       'Sweep hydration should preserve authored twist variants for editing.',
     )
 
     const twistAngleField = getFormField(hydrated, 'sweep-twist-angle')
-    assert(
+    expectTrue(
       twistAngleField?.kind === 'numeric' && Math.abs(Number(twistAngleField.value) - 60) < 0.000001,
       'Sweep hydration should display authored angle twist values in degrees.',
     )
 
     const definition = buildFeatureDefinition(hydrated)
-    assert(
+    expectTrue(
       definition?.kind === 'sweep' &&
         definition.parameters.options?.profileControl === 'lockProfileDirection' &&
         definition.parameters.options.twist &&
@@ -422,13 +416,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: edgeA,
     })
 
-    assert(initialSession.featureType === 'chamfer', 'Chamfer activation should create a chamfer authoring session.')
+    expectTrue(initialSession.featureType === 'chamfer', 'Chamfer activation should create a chamfer authoring session.')
 
     const edgesField = getFeatureEditorFormSchema(initialSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'chamfer-edges')
-    assert(edgesField?.kind === 'referenceCollection', 'Chamfer form schema should expose selected edges as a reference collection.')
-    assert(edgesField.advancedParticipant?.role === 'edge', 'Chamfer edge field should expose the edge participant role.')
+    expectTrue(edgesField?.kind === 'referenceCollection', 'Chamfer form schema should expose selected edges as a reference collection.')
+    expectTrue(edgesField.advancedParticipant?.role === 'edge', 'Chamfer edge field should expose the edge participant role.')
 
     const multiEdgeSession = patchFeatureEditSession(
       initialSession,
@@ -437,7 +431,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const distanceField = getFeatureEditorFormSchema(multiEdgeSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'chamfer-distance')
-    assert(distanceField?.kind === 'numeric', 'Chamfer form schema should expose distance as a numeric field.')
+    expectTrue(distanceField?.kind === 'numeric', 'Chamfer form schema should expose distance as a numeric field.')
 
     const completedSession = patchFeatureEditSession(
       multiEdgeSession,
@@ -445,18 +439,18 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(completedSession)
 
-    assert(definition?.kind === 'chamfer', 'Completed chamfer drafts should build a chamfer advanced-solid definition.')
-    assert(
+    expectTrue(definition?.kind === 'chamfer', 'Completed chamfer drafts should build a chamfer advanced-solid definition.')
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'edge' && participant.targets.length === 2),
       'Chamfer definitions should preserve explicit edge participants.',
     )
-    assert(definition.parameters.options?.distance === 0.75, 'Chamfer definitions should preserve the constant distance option.')
+    expectTrue(definition.parameters.options?.distance === 0.75, 'Chamfer definitions should preserve the constant distance option.')
 
     const invalidDistanceSession = patchFeatureEditSession(
       completedSession,
       createFeatureEditorFieldPatch(distanceField, 0),
     )
-    assert(buildFeatureDefinition(invalidDistanceSession) === null, 'Chamfer drafts with non-positive distance should not build a definition.')
+    expectTrue(buildFeatureDefinition(invalidDistanceSession) === null, 'Chamfer drafts with non-positive distance should not build a definition.')
   }
 
   function testLoftDraftSelectionReorderingAndDefinitionBuilder() {
@@ -470,8 +464,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: profileA,
     })
 
-    assert(initialSession.featureType === 'loft', 'Loft activation should create a loft authoring session.')
-    assert(buildFeatureDefinition(initialSession) === null, 'Loft drafts with fewer than two profiles should not build a modeling definition.')
+    expectTrue(initialSession.featureType === 'loft', 'Loft activation should create a loft authoring session.')
+    expectTrue(buildFeatureDefinition(initialSession) === null, 'Loft drafts with fewer than two profiles should not build a modeling definition.')
 
     const twoProfileSession = patchFeatureEditSession(
       initialSession,
@@ -481,8 +475,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'loft-profiles')
 
-    assert(profilesField?.kind === 'referenceCollection', 'Loft form schema should expose ordered profiles as a reference collection.')
-    assert(profilesField.ordering?.moveUpPatchKey === 'moveProfileTargetEarlier', 'Loft profiles should expose explicit reordering controls.')
+    expectTrue(profilesField?.kind === 'referenceCollection', 'Loft form schema should expose ordered profiles as a reference collection.')
+    expectTrue(profilesField.ordering?.moveUpPatchKey === 'moveProfileTargetEarlier', 'Loft profiles should expose explicit reordering controls.')
 
     const reorderedSession = patchFeatureEditSession(twoProfileSession, {
       moveProfileTargetEarlier: profileC,
@@ -490,28 +484,28 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const guideField = getFeatureEditorFormSchema(reorderedSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'loft-guide-curves')
-    assert(guideField?.kind === 'referenceCollection', 'Loft form schema should expose guide curves as a reference collection.')
+    expectTrue(guideField?.kind === 'referenceCollection', 'Loft form schema should expose guide curves as a reference collection.')
     const pathField = getFormField(reorderedSession, 'loft-path')
-    assert(pathField?.kind === 'referencePicker', 'Loft form schema should expose path as a single reference picker.')
+    expectTrue(pathField?.kind === 'referencePicker', 'Loft form schema should expose path as a single reference picker.')
     const pathSession = patchFeatureEditSession(
       reorderedSession,
       createFeatureEditorReferenceSelectionPatch(pathField, path),
     )
     const pathDefinition = buildFeatureDefinition(pathSession)
-    assert(
+    expectTrue(
       pathDefinition?.kind === 'loft' &&
         pathDefinition.parameters.participants.some((participant) => participant.role === 'path' && participant.targets[0] === path) &&
         (pathDefinition.parameters.options?.path as { sectionCount?: unknown } | undefined)?.sectionCount === 5,
       'Loft definitions should preserve path separately from guide curves and default path section count to 5.',
     )
     const sectionCountField = getFormField(pathSession, 'loft-section-count')
-    assert(sectionCountField?.kind === 'numeric', 'Loft path options should expose section count as a numeric field.')
+    expectTrue(sectionCountField?.kind === 'numeric', 'Loft path options should expose section count as a numeric field.')
     const explicitSectionSession = patchFeatureEditSession(
       pathSession,
       createFeatureEditorFieldPatch(sectionCountField, 7),
     )
     const explicitSectionDefinition = buildFeatureDefinition(explicitSectionSession)
-    assert(
+    expectTrue(
       explicitSectionDefinition?.kind === 'loft' &&
         (explicitSectionDefinition.parameters.options?.path as { sectionCount?: unknown } | undefined)?.sectionCount === 7,
       'Loft definitions should preserve explicit path section count.',
@@ -523,45 +517,45 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(guideSession)
 
-    assert(definition?.kind === 'loft', 'Completed loft drafts should build a loft modeling definition.')
-    assert(
+    expectTrue(definition?.kind === 'loft', 'Completed loft drafts should build a loft modeling definition.')
+    expectTrue(
       definition.parameters.participants.find((participant) => participant.role === 'profile')?.targets[1] === profileC,
       'Loft definitions should preserve the explicit reordered profile sequence.',
     )
-    assert(
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'guideCurve' && participant.targets[0] === guideCurve),
       'Loft definitions should preserve optional guide-curve participants.',
     )
     const guideContinuityField = getFormField(guideSession, 'loft-guide-continuity')
-    assert(guideContinuityField?.kind === 'enum', 'Loft guide options should expose guide continuity as an enum field.')
+    expectTrue(guideContinuityField?.kind === 'enum', 'Loft guide options should expose guide continuity as an enum field.')
     const guideContinuitySession = patchFeatureEditSession(
       guideSession,
       createFeatureEditorFieldPatch(guideContinuityField, 'normalToGuide'),
     )
     const guideContinuityDefinition = buildFeatureDefinition(guideContinuitySession)
-    assert(
+    expectTrue(
       guideContinuityDefinition?.kind === 'loft' &&
         guideContinuityDefinition.parameters.options?.guideContinuity === 'normalToGuide',
       'Loft definitions should preserve guide continuity controls.',
     )
     const startConditionField = getFormField(guideSession, 'loft-start-condition')
-    assert(startConditionField?.kind === 'enum', 'Loft profile options should expose start condition as an enum field.')
+    expectTrue(startConditionField?.kind === 'enum', 'Loft profile options should expose start condition as an enum field.')
     const startMagnitudeField = getFormField(
       patchFeatureEditSession(guideSession, createFeatureEditorFieldPatch(startConditionField, 'normal')),
       'loft-start-condition-magnitude',
     )
-    assert(startMagnitudeField?.kind === 'numeric' && startMagnitudeField.hidden !== true, 'Loft normal start condition should expose magnitude.')
+    expectTrue(startMagnitudeField?.kind === 'numeric' && startMagnitudeField.hidden !== true, 'Loft normal start condition should expose magnitude.')
 
     const createOperationField = getFormField(guideSession, 'loft-operation-intent')
     const hiddenTargetBodiesField = getFormField(guideSession, 'loft-target-bodies')
-    assert(createOperationField?.kind === 'enum', 'Loft schema should expose operation intent as a generic enum field.')
-    assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Loft form schema should expose target bodies as a reference collection.')
-    assert(hiddenTargetBodiesField.hidden === true, 'Loft should hide target bodies for create operation.')
+    expectTrue(createOperationField?.kind === 'enum', 'Loft schema should expose operation intent as a generic enum field.')
+    expectTrue(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Loft form schema should expose target bodies as a reference collection.')
+    expectTrue(hiddenTargetBodiesField.hidden === true, 'Loft should hide target bodies for create operation.')
 
     const addSession = patchFeatureEditSession(guideSession, createFeatureEditorFieldPatch(createOperationField, 'add'))
     const visibleTargetBodiesField = getFormField(addSession, 'loft-target-bodies')
-    assert(visibleTargetBodiesField?.kind === 'referenceCollection', 'Loft target bodies field should remain a reference collection.')
-    assert(visibleTargetBodiesField.hidden !== true, 'Loft should show target bodies for add operation.')
+    expectTrue(visibleTargetBodiesField?.kind === 'referenceCollection', 'Loft target bodies field should remain a reference collection.')
+    expectTrue(visibleTargetBodiesField.hidden !== true, 'Loft should show target bodies for add operation.')
   }
 
   function testLoftHydrationPreservesOrderedProfilesForEditing() {
@@ -604,16 +598,16 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       producedTargets: [{ kind: 'body', bodyId: 'body_loft-1' }],
     })
 
-    assert(hydrated?.featureType === 'loft', 'Loft snapshots should hydrate into loft edit sessions.')
-    assert(
+    expectTrue(hydrated?.featureType === 'loft', 'Loft snapshots should hydrate into loft edit sessions.')
+    expectTrue(
       hydrated?.draft.profileTargets[0]?.kind === 'face' && hydrated.draft.profileTargets[1]?.kind === 'region',
       'Loft hydration should preserve ordered profile targets for edit sessions.',
     )
-    assert(
+    expectTrue(
       hydrated?.draft.guideCurveTargets[0]?.kind === 'edge',
       'Loft hydration should preserve guide-curve participants for edit sessions.',
     )
-    assert(
+    expectTrue(
       hydrated?.draft.pathTarget?.kind === 'edge' &&
         hydrated.draft.options.path?.sectionCount === 8 &&
         hydrated.draft.options.guideContinuity === 'normalToGuide',
@@ -630,13 +624,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: faceA,
     })
 
-    assert(initialSession.featureType === 'thicken', 'Thicken activation should create a thicken authoring session.')
+    expectTrue(initialSession.featureType === 'thicken', 'Thicken activation should create a thicken authoring session.')
 
     const facesField = getFeatureEditorFormSchema(initialSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'thicken-faces')
-    assert(facesField?.kind === 'referenceCollection', 'Thicken form schema should expose selected faces as a reference collection.')
-    assert(facesField.advancedParticipant?.role === 'face', 'Thicken face field should expose the face participant role.')
+    expectTrue(facesField?.kind === 'referenceCollection', 'Thicken form schema should expose selected faces as a reference collection.')
+    expectTrue(facesField.advancedParticipant?.role === 'face', 'Thicken face field should expose the face participant role.')
 
     const multiFaceSession = patchFeatureEditSession(
       initialSession,
@@ -649,11 +643,11 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'thicken-operation-intent')
 
-    assert(thicknessField?.kind === 'numeric', 'Thicken form schema should expose thickness as a numeric field.')
-    assert(operationField?.kind === 'enum', 'Thicken form schema should expose operation intent as a generic enum field.')
+    expectTrue(thicknessField?.kind === 'numeric', 'Thicken form schema should expose thickness as a numeric field.')
+    expectTrue(operationField?.kind === 'enum', 'Thicken form schema should expose operation intent as a generic enum field.')
     const hiddenTargetBodiesField = getFormField(multiFaceSession, 'thicken-target-bodies')
-    assert(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Thicken form schema should expose target bodies as a reference collection.')
-    assert(hiddenTargetBodiesField.hidden === true, 'Thicken should hide target bodies for create operation.')
+    expectTrue(hiddenTargetBodiesField?.kind === 'referenceCollection', 'Thicken form schema should expose target bodies as a reference collection.')
+    expectTrue(hiddenTargetBodiesField.hidden === true, 'Thicken should hide target bodies for create operation.')
 
     const subtractSession = patchFeatureEditSession(
       patchFeatureEditSession(
@@ -662,13 +656,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       ),
       { side: 'symmetric' },
     )
-    assert(buildFeatureDefinition(subtractSession) === null, 'Boolean thicken drafts should require explicit target bodies.')
+    expectTrue(buildFeatureDefinition(subtractSession) === null, 'Boolean thicken drafts should require explicit target bodies.')
 
     const targetBodiesField = getFeatureEditorFormSchema(subtractSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'thicken-target-bodies')
-    assert(targetBodiesField?.kind === 'referenceCollection', 'Thicken form schema should expose target bodies as a reference collection.')
-    assert(targetBodiesField.hidden !== true, 'Thicken should show target bodies for subtract operation.')
+    expectTrue(targetBodiesField?.kind === 'referenceCollection', 'Thicken form schema should expose target bodies as a reference collection.')
+    expectTrue(targetBodiesField.hidden !== true, 'Thicken should show target bodies for subtract operation.')
 
     const completeSession = patchFeatureEditSession(
       subtractSession,
@@ -676,14 +670,14 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(completeSession)
 
-    assert(definition?.kind === 'thicken', 'Completed thicken drafts should build a thicken advanced-solid definition.')
-    assert(
+    expectTrue(definition?.kind === 'thicken', 'Completed thicken drafts should build a thicken advanced-solid definition.')
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'face' && participant.targets.length === 2),
       'Thicken definitions should preserve explicit face participants.',
     )
-    assert(definition.parameters.options?.thickness === 1.25, 'Thicken definitions should preserve the thickness option.')
-    assert(definition.parameters.options?.side === 'symmetric', 'Thicken definitions should preserve the side option.')
-    assert(
+    expectTrue(definition.parameters.options?.thickness === 1.25, 'Thicken definitions should preserve the thickness option.')
+    expectTrue(definition.parameters.options?.side === 'symmetric', 'Thicken definitions should preserve the side option.')
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'targetBody'),
       'Thicken boolean authoring should build explicit targetBody participants.',
     )
@@ -718,10 +712,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       producedTargets: [{ kind: 'body', bodyId: 'body_thicken-1' }],
     })
 
-    assert(hydrated?.featureType === 'thicken', 'Thicken snapshots should hydrate into thicken edit sessions.')
-    assert(hydrated?.draft.faceTargets.length === 2, 'Thicken hydration should preserve face participants for edit sessions.')
-    assert(hydrated?.draft.options.thickness === 2, 'Thicken hydration should preserve thickness.')
-    assert(hydrated?.draft.options.side === 'symmetric', 'Thicken hydration should preserve side.')
+    expectTrue(hydrated?.featureType === 'thicken', 'Thicken snapshots should hydrate into thicken edit sessions.')
+    expectTrue(hydrated?.draft.faceTargets.length === 2, 'Thicken hydration should preserve face participants for edit sessions.')
+    expectTrue(hydrated?.draft.options.thickness === 2, 'Thicken hydration should preserve thickness.')
+    expectTrue(hydrated?.draft.options.side === 'symmetric', 'Thicken hydration should preserve side.')
   }
 
   function testSplitDraftSelectionAndDefinitionBuilder() {
@@ -732,8 +726,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: targetBody,
     })
 
-    assert(initialSession.featureType === 'split', 'Split activation should create a split authoring session.')
-    assert(buildFeatureDefinition(initialSession) === null, 'Split drafts without a tool body should not build a modeling definition.')
+    expectTrue(initialSession.featureType === 'split', 'Split activation should create a split authoring session.')
+    expectTrue(buildFeatureDefinition(initialSession) === null, 'Split drafts without a tool body should not build a modeling definition.')
 
     const targetField = getFeatureEditorFormSchema(initialSession)
       .sections.flatMap((section) => section.fields)
@@ -742,10 +736,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'split-tool-body')
 
-    assert(targetField?.kind === 'referencePicker', 'Split form schema should expose the target body as a reference picker.')
-    assert(toolField?.kind === 'referencePicker', 'Split form schema should expose the tool body as a reference picker.')
-    assert(targetField.advancedParticipant?.role === 'targetBody', 'Split target field should expose the targetBody participant role.')
-    assert(toolField.advancedParticipant?.role === 'toolBody', 'Split tool field should expose the toolBody participant role.')
+    expectTrue(targetField?.kind === 'referencePicker', 'Split form schema should expose the target body as a reference picker.')
+    expectTrue(toolField?.kind === 'referencePicker', 'Split form schema should expose the tool body as a reference picker.')
+    expectTrue(targetField.advancedParticipant?.role === 'targetBody', 'Split target field should expose the targetBody participant role.')
+    expectTrue(toolField.advancedParticipant?.role === 'toolBody', 'Split tool field should expose the toolBody participant role.')
 
     const completedSession = patchFeatureEditSession(
       initialSession,
@@ -753,12 +747,12 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(completedSession)
 
-    assert(definition?.kind === 'split', 'Completed split drafts should build a split advanced-solid definition.')
-    assert(
+    expectTrue(definition?.kind === 'split', 'Completed split drafts should build a split advanced-solid definition.')
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'targetBody' && participant.targets[0] === targetBody),
       'Split definitions should preserve the explicit target body participant.',
     )
-    assert(
+    expectTrue(
       definition.parameters.participants.some((participant) => participant.role === 'toolBody' && participant.targets[0] === toolBody),
       'Split definitions should preserve the explicit tool body participant.',
     )
@@ -773,16 +767,16 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: targetBody,
     })
 
-    assert(initialSession.featureType === 'combine', 'Combine activation should create a combine authoring session.')
-    assert(buildFeatureDefinition(initialSession) === null, 'Combine drafts without tool bodies should not build a modeling definition.')
+    expectTrue(initialSession.featureType === 'combine', 'Combine activation should create a combine authoring session.')
+    expectTrue(buildFeatureDefinition(initialSession) === null, 'Combine drafts without tool bodies should not build a modeling definition.')
 
     const targetField = getFormField(initialSession, 'combine-target-bodies')
     const toolField = getFormField(initialSession, 'combine-tool-bodies')
     const operationField = getFormField(initialSession, 'combine-operation-intent')
 
-    assert(targetField?.kind === 'referenceCollection', 'Combine should expose target bodies as a reference collection.')
-    assert(toolField?.kind === 'referenceCollection', 'Combine should expose tool bodies as a reference collection.')
-    assert(operationField?.kind === 'enum', 'Combine should expose operation intent as a generic enum field.')
+    expectTrue(targetField?.kind === 'referenceCollection', 'Combine should expose target bodies as a reference collection.')
+    expectTrue(toolField?.kind === 'referenceCollection', 'Combine should expose tool bodies as a reference collection.')
+    expectTrue(operationField?.kind === 'enum', 'Combine should expose operation intent as a generic enum field.')
 
     const withTool = patchFeatureEditSession(
       initialSession,
@@ -798,13 +792,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(withSecondTool)
 
-    assert(definition?.kind === 'combine', 'Completed Combine drafts should build a combine advanced-solid definition.')
-    assert(definition.parameters.operationIntent === 'intersect', 'Combine definitions should preserve the explicit operation intent.')
-    assert(
+    expectTrue(definition?.kind === 'combine', 'Completed Combine drafts should build a combine advanced-solid definition.')
+    expectTrue(definition.parameters.operationIntent === 'intersect', 'Combine definitions should preserve the explicit operation intent.')
+    expectTrue(
       definition.parameters.participants.find((participant) => participant.role === 'targetBody')?.targets[0] === targetBody,
       'Combine definitions should preserve explicit targetBody participants.',
     )
-    assert(
+    expectTrue(
       definition.parameters.participants.find((participant) => participant.role === 'toolBody')?.targets.length === 2,
       'Combine definitions should preserve explicit toolBody collections.',
     )
@@ -821,10 +815,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       producedTargets: [{ kind: 'body', bodyId: 'body_target' }],
     })
 
-    assert(hydrated?.featureType === 'combine', 'Combine snapshots should hydrate into combine edit sessions.')
-    assert(hydrated.draft.targetBodyTargets.length === 1, 'Combine hydration should preserve target bodies.')
-    assert(hydrated.draft.toolBodyTargets.length === 2, 'Combine hydration should preserve tool bodies.')
-    assert(hydrated.draft.operationIntent === 'intersect', 'Combine hydration should preserve operation intent.')
+    expectTrue(hydrated?.featureType === 'combine', 'Combine snapshots should hydrate into combine edit sessions.')
+    expectTrue(hydrated.draft.targetBodyTargets.length === 1, 'Combine hydration should preserve target bodies.')
+    expectTrue(hydrated.draft.toolBodyTargets.length === 2, 'Combine hydration should preserve tool bodies.')
+    expectTrue(hydrated.draft.operationIntent === 'intersect', 'Combine hydration should preserve operation intent.')
   }
 
   function testDeleteSolidDraftSelectionAndHydration() {
@@ -835,13 +829,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: bodyA,
     })
 
-    assert(initialSession.featureType === 'deleteSolid', 'Delete-solid activation should create a delete-solid authoring session.')
+    expectTrue(initialSession.featureType === 'deleteSolid', 'Delete-solid activation should create a delete-solid authoring session.')
 
     const bodiesField = getFeatureEditorFormSchema(initialSession)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'delete-solid-bodies')
-    assert(bodiesField?.kind === 'referenceCollection', 'Delete-solid form schema should expose the body targets as a reference collection.')
-    assert(bodiesField.advancedParticipant?.role === 'body', 'Delete-solid body field should expose the body participant role.')
+    expectTrue(bodiesField?.kind === 'referenceCollection', 'Delete-solid form schema should expose the body targets as a reference collection.')
+    expectTrue(bodiesField.advancedParticipant?.role === 'body', 'Delete-solid body field should expose the body participant role.')
 
     const completeSession = patchFeatureEditSession(
       initialSession,
@@ -849,8 +843,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(completeSession)
 
-    assert(definition?.kind === 'deleteSolid', 'Completed delete-solid drafts should build a delete-solid advanced-solid definition.')
-    assert(definition.parameters.participants[0]?.targets.length === 2, 'Delete-solid definitions should preserve the selected body collection.')
+    expectTrue(definition?.kind === 'deleteSolid', 'Completed delete-solid drafts should build a delete-solid advanced-solid definition.')
+    expectTrue(definition.parameters.participants[0]?.targets.length === 2, 'Delete-solid definitions should preserve the selected body collection.')
 
     const hydrated = hydrateFeatureEditSession({
       ownerDocumentId: 'doc_workspace',
@@ -875,8 +869,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       producedTargets: [],
     })
 
-    assert(hydrated?.featureType === 'deleteSolid', 'Delete-solid snapshots should hydrate into delete-solid edit sessions.')
-    assert(hydrated?.draft.bodyTargets.length === 2, 'Delete-solid hydration should preserve explicit body targets.')
+    expectTrue(hydrated?.featureType === 'deleteSolid', 'Delete-solid snapshots should hydrate into delete-solid edit sessions.')
+    expectTrue(hydrated?.draft.bodyTargets.length === 2, 'Delete-solid hydration should preserve explicit body targets.')
   }
 
   function testMirrorDraftSelectionOptionHandlingAndHydration() {
@@ -888,16 +882,16 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: bodyA,
     })
 
-    assert(initialSession.featureType === 'mirror', 'Mirror activation should create a mirror authoring session.')
+    expectTrue(initialSession.featureType === 'mirror', 'Mirror activation should create a mirror authoring session.')
 
     const schema = getFeatureEditorFormSchema(initialSession)
     const bodiesField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'mirror-bodies')
     const planeField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'mirror-plane')
     const modeField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'mirror-copy-mode')
 
-    assert(bodiesField?.kind === 'referenceCollection', 'Mirror should expose body targets as a reference collection.')
-    assert(planeField?.kind === 'referencePicker', 'Mirror should expose the mirror plane as a reference picker.')
-    assert(modeField?.kind === 'enum', 'Mirror should expose the copy policy as a generic enum field.')
+    expectTrue(bodiesField?.kind === 'referenceCollection', 'Mirror should expose body targets as a reference collection.')
+    expectTrue(planeField?.kind === 'referencePicker', 'Mirror should expose the mirror plane as a reference picker.')
+    expectTrue(modeField?.kind === 'enum', 'Mirror should expose the copy policy as a generic enum field.')
 
     const withSecondBody = patchFeatureEditSession(
       initialSession,
@@ -919,10 +913,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(completed)
 
-    assert(definition?.kind === 'mirror', 'Completed mirror drafts should build a mirror advanced-solid definition.')
-    assert(definition.parameters.participants.find((participant) => participant.role === 'body')?.targets.length === 2, 'Mirror definitions should preserve explicit body targets.')
-    assert(definition.parameters.participants.find((participant) => participant.role === 'plane')?.targets[0] === plane, 'Mirror definitions should preserve the explicit mirror plane.')
-    assert(definition.parameters.options?.copy === true, 'Mirror definitions should preserve the copy policy option.')
+    expectTrue(definition?.kind === 'mirror', 'Completed mirror drafts should build a mirror advanced-solid definition.')
+    expectTrue(definition.parameters.participants.find((participant) => participant.role === 'body')?.targets.length === 2, 'Mirror definitions should preserve explicit body targets.')
+    expectTrue(definition.parameters.participants.find((participant) => participant.role === 'plane')?.targets[0] === plane, 'Mirror definitions should preserve the explicit mirror plane.')
+    expectTrue(definition.parameters.options?.copy === true, 'Mirror definitions should preserve the copy policy option.')
 
     const hydrated = hydrateFeatureEditSession({
       ownerDocumentId: 'doc_workspace',
@@ -946,9 +940,9 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       producedTargets: [{ kind: 'body', bodyId: 'body_mirror-1' }],
     })
 
-    assert(hydrated?.featureType === 'mirror', 'Mirror snapshots should hydrate into mirror edit sessions.')
-    assert(hydrated?.draft.bodyTargets.length === 2, 'Mirror hydration should preserve explicit body targets.')
-    assert(hydrated?.draft.planeTarget?.kind === 'construction', 'Mirror hydration should preserve the explicit plane reference.')
+    expectTrue(hydrated?.featureType === 'mirror', 'Mirror snapshots should hydrate into mirror edit sessions.')
+    expectTrue(hydrated?.draft.bodyTargets.length === 2, 'Mirror hydration should preserve explicit body targets.')
+    expectTrue(hydrated?.draft.planeTarget?.kind === 'construction', 'Mirror hydration should preserve the explicit plane reference.')
   }
 
   function testTransformDraftSelectionAndDefinitionBuilder() {
@@ -960,17 +954,17 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: bodyA,
     })
 
-    assert(initialSession.featureType === 'transform', 'Transform activation should create a transform authoring session.')
-    assert(buildFeatureDefinition(initialSession) === null, 'Transform drafts without an explicit reference should not build a modeling definition.')
+    expectTrue(initialSession.featureType === 'transform', 'Transform activation should create a transform authoring session.')
+    expectTrue(buildFeatureDefinition(initialSession) === null, 'Transform drafts without an explicit reference should not build a modeling definition.')
 
     const schema = getFeatureEditorFormSchema(initialSession)
     const bodiesField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'transform-bodies')
     const referenceField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'transform-reference')
     const distanceField = schema.sections.flatMap((section) => section.fields).find((field) => field.id === 'transform-distance')
 
-    assert(bodiesField?.kind === 'referenceCollection', 'Transform should expose body targets as a reference collection.')
-    assert(referenceField?.kind === 'referencePicker', 'Transform should expose the transform reference as a reference picker.')
-    assert(distanceField?.kind === 'numeric', 'Transform should expose the translation distance as a numeric field.')
+    expectTrue(bodiesField?.kind === 'referenceCollection', 'Transform should expose body targets as a reference collection.')
+    expectTrue(referenceField?.kind === 'referencePicker', 'Transform should expose the transform reference as a reference picker.')
+    expectTrue(distanceField?.kind === 'numeric', 'Transform should expose the translation distance as a numeric field.')
 
     const withSecondBody = patchFeatureEditSession(
       initialSession,
@@ -992,10 +986,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(completed)
 
-    assert(definition?.kind === 'transform', 'Completed transform drafts should build a transform advanced-solid definition.')
-    assert(definition.parameters.participants.find((participant) => participant.role === 'body')?.targets.length === 2, 'Transform definitions should preserve explicit body targets.')
-    assert(definition.parameters.participants.find((participant) => participant.role === 'transformReference')?.targets[0] === plane, 'Transform definitions should preserve the explicit transform reference.')
-    assert(definition.parameters.options?.distance === 2.5, 'Transform definitions should preserve the typed distance option.')
+    expectTrue(definition?.kind === 'transform', 'Completed transform drafts should build a transform advanced-solid definition.')
+    expectTrue(definition.parameters.participants.find((participant) => participant.role === 'body')?.targets.length === 2, 'Transform definitions should preserve explicit body targets.')
+    expectTrue(definition.parameters.participants.find((participant) => participant.role === 'transformReference')?.targets[0] === plane, 'Transform definitions should preserve the explicit transform reference.')
+    expectTrue(definition.parameters.options?.distance === 2.5, 'Transform definitions should preserve the typed distance option.')
   }
 
   function testProfileBasedAuthoringUsesReferenceCollections() {
@@ -1009,8 +1003,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'extrude-profile')
 
-    assert(extrudeProfileField?.kind === 'referenceCollection', 'Extrude schema should expose profiles as a reference collection.')
-    assert(extrudeProfileField.picker.allowsMultiple, 'Extrude profile picker should allow multiple profile references.')
+    expectTrue(extrudeProfileField?.kind === 'referenceCollection', 'Extrude schema should expose profiles as a reference collection.')
+    expectTrue(extrudeProfileField.picker.allowsMultiple, 'Extrude profile picker should allow multiple profile references.')
 
     const extrudeMulti = patchFeatureEditSession(
       extrudeSession,
@@ -1018,7 +1012,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const extrudeDefinition = buildFeatureDefinition(extrudeMulti)
 
-    assert(
+    expectTrue(
       extrudeMulti.featureType === 'extrude' && extrudeDefinition?.kind === 'extrude' && extrudeDefinition.parameters.profiles.length === 2,
       'Extrude authoring should build multi-profile contract payloads from collection fields.',
     )
@@ -1031,8 +1025,8 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'revolve-profile')
 
-    assert(revolveProfileField?.kind === 'referenceCollection', 'Revolve schema should expose profiles as a reference collection.')
-    assert(revolveProfileField.picker.allowsMultiple, 'Revolve profile picker should allow multiple profile references.')
+    expectTrue(revolveProfileField?.kind === 'referenceCollection', 'Revolve schema should expose profiles as a reference collection.')
+    expectTrue(revolveProfileField.picker.allowsMultiple, 'Revolve profile picker should allow multiple profile references.')
 
     const revolveMulti = patchFeatureEditSession(
       revolveSession,
@@ -1045,7 +1039,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     })
     const revolveDefinition = buildFeatureDefinition(revolveComplete)
 
-    assert(
+    expectTrue(
       revolveComplete.featureType === 'revolve' && revolveDefinition?.kind === 'revolve' && revolveDefinition.parameters.profiles.length === 2,
       'Revolve authoring should build multi-profile contract payloads while keeping the axis separate.',
     )
@@ -1058,11 +1052,11 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedTarget: selectedFace,
     })
 
-    assert(session.featureType === 'shell', 'Shell activation should create a shell authoring session.')
-    assert(session.draft.bodyTarget?.bodyId === 'body_a', 'Shell should infer the source body from the selected removable face.')
-    assert(session.draft.faceTargets.length === 1, 'Shell should seed removable faces from the selected face.')
-    assert(session.draft.operation === 'intersect', 'Shell should default to intersect instead of creating a new body.')
-    assert(
+    expectTrue(session.featureType === 'shell', 'Shell activation should create a shell authoring session.')
+    expectTrue(session.draft.bodyTarget?.bodyId === 'body_a', 'Shell should infer the source body from the selected removable face.')
+    expectTrue(session.draft.faceTargets.length === 1, 'Shell should seed removable faces from the selected face.')
+    expectTrue(session.draft.operation === 'intersect', 'Shell should default to intersect instead of creating a new body.')
+    expectTrue(
       session.draft.booleanScope.kind === 'targetBody' && session.draft.booleanScope.bodyId === 'body_a',
       'Shell should default the boolean target to the selected source body.',
     )
@@ -1072,7 +1066,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       selectedFace,
     )
 
-    assert(
+    expectTrue(
       selectionAfterActivationSession.featureType === 'shell' &&
         selectionAfterActivationSession.draft.booleanScope.kind === 'targetBody' &&
         selectionAfterActivationSession.draft.booleanScope.bodyId === 'body_a',
@@ -1082,9 +1076,9 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const schema = getFeatureEditorFormSchema(session)
     const fieldIds = schema.sections.flatMap((section) => section.fields.map((field) => field.id))
 
-    assert(fieldIds.includes('shell-thickness'), 'Shell form schema should describe its thickness numeric field.')
-    assert(fieldIds.includes('shell-operation'), 'Shell form schema should describe its operation choice field.')
-    assert(fieldIds.includes('shell-faces'), 'Shell form schema should describe its removable-face collection.')
+    expectTrue(fieldIds.includes('shell-thickness'), 'Shell form schema should describe its thickness numeric field.')
+    expectTrue(fieldIds.includes('shell-operation'), 'Shell form schema should describe its operation choice field.')
+    expectTrue(fieldIds.includes('shell-faces'), 'Shell form schema should describe its removable-face collection.')
   }
 
   function testShellBooleanTargetSelectorVisibilityAndScope() {
@@ -1097,11 +1091,11 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const visibleTargetField = getFormField(initialSession, 'shell-target-bodies')
     const initialDefinition = buildFeatureDefinition(initialSession)
 
-    assert(operationField?.kind === 'enum', 'Shell schema should expose operation as a generic enum field.')
-    assert(operationField.value === 'intersect', 'Shell operation should default to intersect.')
-    assert(visibleTargetField?.kind === 'referenceCollection', 'Shell schema should expose boolean target bodies as a reference collection.')
-    assert(visibleTargetField.hidden !== true, 'Shell should show boolean target bodies for its default intersect operation.')
-    assert(
+    expectTrue(operationField?.kind === 'enum', 'Shell schema should expose operation as a generic enum field.')
+    expectTrue(operationField.value === 'intersect', 'Shell operation should default to intersect.')
+    expectTrue(visibleTargetField?.kind === 'referenceCollection', 'Shell schema should expose boolean target bodies as a reference collection.')
+    expectTrue(visibleTargetField.hidden !== true, 'Shell should show boolean target bodies for its default intersect operation.')
+    expectTrue(
       initialDefinition?.kind === 'shell' &&
         initialDefinition.parameters.operation === 'intersect' &&
         initialDefinition.parameters.booleanScope.kind === 'targetBody' &&
@@ -1110,10 +1104,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
 
     const emptyTargetSession = patchFeatureEditSession(initialSession, createFeatureEditorClearReferencePatch(visibleTargetField))
-    assert(buildFeatureDefinition(emptyTargetSession) === null, 'Shell boolean drafts without target bodies should not build a definition.')
+    expectTrue(buildFeatureDefinition(emptyTargetSession) === null, 'Shell boolean drafts without target bodies should not build a definition.')
 
     const emptyTargetField = getFormField(emptyTargetSession, 'shell-target-bodies')
-    assert(emptyTargetField?.kind === 'referenceCollection', 'Shell target bodies field should remain a reference collection.')
+    expectTrue(emptyTargetField?.kind === 'referenceCollection', 'Shell target bodies field should remain a reference collection.')
 
     const targetSession = patchFeatureEditSession(
       emptyTargetSession,
@@ -1121,7 +1115,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     )
     const definition = buildFeatureDefinition(targetSession)
 
-    assert(
+    expectTrue(
       definition?.kind === 'shell' &&
         definition.parameters.operation === 'intersect' &&
         definition.parameters.booleanScope.kind === 'targetBody' &&
@@ -1138,10 +1132,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
     const extrudeSession = createFeatureEditSession({ featureType: 'extrude', selectedTarget: profile })
     const extrudeDepthField = getFormField(extrudeSession, 'extrude-depth')
-    assert(extrudeDepthField?.kind === 'numeric' && extrudeDepthField.directionToggle, 'Extrude depth should expose a direction flip toggle.')
+    expectTrue(extrudeDepthField?.kind === 'numeric' && extrudeDepthField.directionToggle, 'Extrude depth should expose a direction flip toggle.')
     const flippedExtrude = patchFeatureEditSession(extrudeSession, { [extrudeDepthField.directionToggle.patch.patchKey]: extrudeDepthField.directionToggle.reverseValue })
     const extrudeDefinition = buildFeatureDefinition(flippedExtrude)
-    assert(
+    expectTrue(
       extrudeDefinition?.kind === 'extrude' &&
         extrudeDefinition.parameters.extent?.mode === 'oneSide' &&
         extrudeDefinition.parameters.extent.end.kind === 'blind' &&
@@ -1154,10 +1148,10 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       axis,
     )
     const revolveAngleField = getFormField(revolveSession, 'revolve-angle')
-    assert(revolveAngleField?.kind === 'numeric' && revolveAngleField.directionToggle, 'Revolve angle should expose a sweep direction flip toggle.')
+    expectTrue(revolveAngleField?.kind === 'numeric' && revolveAngleField.directionToggle, 'Revolve angle should expose a sweep direction flip toggle.')
     const flippedRevolve = patchFeatureEditSession(revolveSession, { [revolveAngleField.directionToggle.patch.patchKey]: revolveAngleField.directionToggle.reverseValue })
     const revolveDefinition = buildFeatureDefinition(flippedRevolve)
-    assert(
+    expectTrue(
       revolveDefinition?.kind === 'revolve' &&
         revolveDefinition.parameters.extent.kind !== 'angle' &&
         revolveDefinition.parameters.extent.mode === 'oneSide' &&
@@ -1168,35 +1162,35 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
     const shellSession = createFeatureEditSession({ featureType: 'shell', selectedTarget: face })
     const shellThicknessField = getFormField(shellSession, 'shell-thickness')
-    assert(shellThicknessField?.kind === 'numeric' && shellThicknessField.directionToggle, 'Shell thickness should expose a wall direction flip toggle.')
+    expectTrue(shellThicknessField?.kind === 'numeric' && shellThicknessField.directionToggle, 'Shell thickness should expose a wall direction flip toggle.')
     const flippedShell = patchFeatureEditSession(shellSession, { [shellThicknessField.directionToggle.patch.patchKey]: shellThicknessField.directionToggle.reverseValue })
     const shellDefinition = buildFeatureDefinition(flippedShell)
-    assert(shellDefinition?.kind === 'shell' && shellDefinition.parameters.direction === 'outside', 'Shell direction flip should preserve an outside wall direction.')
+    expectTrue(shellDefinition?.kind === 'shell' && shellDefinition.parameters.direction === 'outside', 'Shell direction flip should preserve an outside wall direction.')
 
     const thickenSession = createFeatureEditSession({ featureType: 'thicken', selectedTarget: face })
     const thickenThicknessField = getFormField(thickenSession, 'thicken-thickness')
-    assert(thickenThicknessField?.kind === 'numeric' && thickenThicknessField.directionToggle, 'Thicken thickness should expose a normal direction flip toggle.')
+    expectTrue(thickenThicknessField?.kind === 'numeric' && thickenThicknessField.directionToggle, 'Thicken thickness should expose a normal direction flip toggle.')
     const flippedThicken = patchFeatureEditSession(thickenSession, { [thickenThicknessField.directionToggle.patch.patchKey]: thickenThicknessField.directionToggle.reverseValue })
     const thickenDefinition = buildFeatureDefinition(flippedThicken)
-    assert(thickenDefinition?.kind === 'thicken' && thickenDefinition.parameters.options?.direction === 'negative', 'Thicken direction flip should persist the negative normal direction.')
+    expectTrue(thickenDefinition?.kind === 'thicken' && thickenDefinition.parameters.options?.direction === 'negative', 'Thicken direction flip should persist the negative normal direction.')
 
     const transformSession = applySelectionToFeatureEditSession(
       createFeatureEditSession({ featureType: 'transform', selectedTarget: body }),
       face,
     )
     const transformDistanceField = getFormField(transformSession, 'transform-distance')
-    assert(transformDistanceField?.kind === 'numeric' && transformDistanceField.directionToggle, 'Transform distance should expose a normal direction flip toggle.')
+    expectTrue(transformDistanceField?.kind === 'numeric' && transformDistanceField.directionToggle, 'Transform distance should expose a normal direction flip toggle.')
     const flippedTransform = patchFeatureEditSession(transformSession, { [transformDistanceField.directionToggle.patch.patchKey]: transformDistanceField.directionToggle.reverseValue })
     const transformDefinition = buildFeatureDefinition(flippedTransform)
-    assert(transformDefinition?.kind === 'transform' && transformDefinition.parameters.options?.direction === 'negative', 'Transform direction flip should persist the negative normal direction.')
+    expectTrue(transformDefinition?.kind === 'transform' && transformDefinition.parameters.options?.direction === 'negative', 'Transform direction flip should persist the negative normal direction.')
 
     const filletSession = createFeatureEditSession({ featureType: 'fillet', selectedTarget: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } })
     const filletRadiusField = getFormField(filletSession, 'fillet-radius')
-    assert(filletRadiusField?.kind === 'numeric' && !filletRadiusField.directionToggle, 'Fillet radius should not expose an ambiguous direction toggle.')
+    expectTrue(filletRadiusField?.kind === 'numeric' && !filletRadiusField.directionToggle, 'Fillet radius should not expose an ambiguous direction toggle.')
 
     const chamferSession = createFeatureEditSession({ featureType: 'chamfer', selectedTarget: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_a' } })
     const chamferDistanceField = getFormField(chamferSession, 'chamfer-distance')
-    assert(chamferDistanceField?.kind === 'numeric' && !chamferDistanceField.directionToggle, 'Chamfer distance should not expose an ambiguous direction toggle.')
+    expectTrue(chamferDistanceField?.kind === 'numeric' && !chamferDistanceField.directionToggle, 'Chamfer distance should not expose an ambiguous direction toggle.')
   }
 
   function testAdvancedExtrudeAndRevolveExtentAuthoring() {
@@ -1209,7 +1203,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
         { extentMode: 'symmetric', depth: 8, draftAngle: Math.PI / 18 },
       ),
     )
-    assert(
+    expectTrue(
       symmetricExtrude?.kind === 'extrude' &&
         symmetricExtrude.parameters.extent?.mode === 'symmetric' &&
         symmetricExtrude.parameters.extent.end.kind === 'blind' &&
@@ -1223,7 +1217,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
         { extentMode: 'twoSide', depth: 6, secondDepth: 3, secondDirection: 'negative' },
       ),
     )
-    assert(
+    expectTrue(
       twoSideExtrude?.kind === 'extrude' &&
         twoSideExtrude.parameters.extent?.mode === 'twoSide' &&
         twoSideExtrude.parameters.extent.firstEnd.kind === 'blind' &&
@@ -1234,7 +1228,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const hydratedTwoSideExtrude = twoSideExtrude
       ? hydrateFeatureEditSession({ featureId: 'feature_two_side_extrude', definition: twoSideExtrude })
       : null
-    assert(
+    expectTrue(
       hydratedTwoSideExtrude?.featureType === 'extrude' &&
         hydratedTwoSideExtrude.draft.extentMode === 'twoSide' &&
         hydratedTwoSideExtrude.draft.secondEnd.kind === 'blind' &&
@@ -1248,7 +1242,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
         { endCondition: 'upToNext', upToOffsetDistance: 0.25, upToOffsetDirection: 'shorten' },
       ),
     )
-    assert(
+    expectTrue(
       upToNextExtrude?.kind === 'extrude' &&
         upToNextExtrude.parameters.extent?.mode === 'oneSide' &&
         upToNextExtrude.parameters.extent.end.kind === 'upToNext' &&
@@ -1262,7 +1256,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
         { endCondition: 'throughAll' },
       ),
     )
-    assert(
+    expectTrue(
       throughAllExtrude?.kind === 'extrude' &&
         throughAllExtrude.parameters.extent?.mode === 'oneSide' &&
         throughAllExtrude.parameters.extent.end.kind === 'throughAll',
@@ -1278,7 +1272,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
         axis,
       ),
     )
-    assert(
+    expectTrue(
       fullRevolve?.kind === 'revolve' &&
         fullRevolve.parameters.extent.kind !== 'angle' &&
         fullRevolve.parameters.extent.mode === 'oneSide' &&
@@ -1293,13 +1287,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const extrudeTargetField = getFeatureEditorFormSchema(missingTargetExtrude)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'extrude-up-to-target')
-    assert(
+    expectTrue(
       extrudeTargetField?.kind === 'referencePicker' &&
         extrudeTargetField.picker.selectionFilter.allowedKinds.length === 1 &&
         extrudeTargetField.picker.selectionFilter.allowedKinds[0] === 'face',
       'Up-to-face extrude target picker should only accept face targets.',
     )
-    assert(buildFeatureDefinition(missingTargetExtrude) === null, 'Targeted up-to extrudes should not build without a required target.')
+    expectTrue(buildFeatureDefinition(missingTargetExtrude) === null, 'Targeted up-to extrudes should not build without a required target.')
 
     const upToVertexRevolve = patchFeatureEditSession(
       createFeatureEditSession({ featureType: 'revolve', selectedTarget: profile }),
@@ -1308,7 +1302,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const revolveTargetField = getFeatureEditorFormSchema(upToVertexRevolve)
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'revolve-up-to-target')
-    assert(
+    expectTrue(
       revolveTargetField?.kind === 'referencePicker' &&
         revolveTargetField.picker.selectionFilter.allowedKinds.length === 1 &&
         revolveTargetField.picker.selectionFilter.allowedKinds[0] === 'vertex',
@@ -1331,19 +1325,19 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
     const mirror = definitions.find((definition) => definition.metadata.kind === 'mirror')
     const transform = definitions.find((definition) => definition.metadata.kind === 'transform')
 
-    assert(extrude?.advancedParticipants?.some((participant) => participant.role === 'profile'), 'Extrude should declare profile participants for profile/path substrate coverage.')
-    assert(fillet?.advancedParticipants?.some((participant) => participant.role === 'edge'), 'Fillet should declare edge participants for topology modifier substrate coverage.')
-    assert(shell?.advancedParticipants?.some((participant) => participant.role === 'body'), 'Shell should declare body participants for body-operation substrate coverage.')
-    assert(sweep?.advancedParticipants?.some((participant) => participant.role === 'path'), 'Sweep should declare path participants for profile/path substrate coverage.')
-    assert(loft?.advancedParticipants?.some((participant) => participant.role === 'profile'), 'Loft should declare ordered profile participants for profile-family coverage.')
-    assert(chamfer?.advancedParticipants?.some((participant) => participant.role === 'edge'), 'Chamfer should declare edge participants for topology modifier substrate coverage.')
-    assert(thicken?.advancedParticipants?.some((participant) => participant.role === 'face'), 'Thicken should declare face participants for face-driven advanced solid coverage.')
-    assert(combine?.advancedParticipants?.some((participant) => participant.role === 'targetBody'), 'Combine should declare explicit targetBody participants for body boolean coverage.')
-    assert(combine?.advancedParticipants?.some((participant) => participant.role === 'toolBody'), 'Combine should declare explicit toolBody participants for body boolean coverage.')
-    assert(split?.advancedParticipants?.some((participant) => participant.role === 'toolBody'), 'Split should declare explicit toolBody participants for body split coverage.')
-    assert(deleteSolid?.advancedParticipants?.some((participant) => participant.role === 'body'), 'Delete-solid should declare explicit body participants for body removal coverage.')
-    assert(mirror?.advancedParticipants?.some((participant) => participant.role === 'plane'), 'Mirror should declare an explicit mirror plane participant.')
-    assert(transform?.advancedParticipants?.some((participant) => participant.role === 'transformReference'), 'Transform should declare an explicit transform reference participant.')
+    expectTrue(extrude?.advancedParticipants?.some((participant) => participant.role === 'profile'), 'Extrude should declare profile participants for profile/path substrate coverage.')
+    expectTrue(fillet?.advancedParticipants?.some((participant) => participant.role === 'edge'), 'Fillet should declare edge participants for topology modifier substrate coverage.')
+    expectTrue(shell?.advancedParticipants?.some((participant) => participant.role === 'body'), 'Shell should declare body participants for body-operation substrate coverage.')
+    expectTrue(sweep?.advancedParticipants?.some((participant) => participant.role === 'path'), 'Sweep should declare path participants for profile/path substrate coverage.')
+    expectTrue(loft?.advancedParticipants?.some((participant) => participant.role === 'profile'), 'Loft should declare ordered profile participants for profile-family coverage.')
+    expectTrue(chamfer?.advancedParticipants?.some((participant) => participant.role === 'edge'), 'Chamfer should declare edge participants for topology modifier substrate coverage.')
+    expectTrue(thicken?.advancedParticipants?.some((participant) => participant.role === 'face'), 'Thicken should declare face participants for face-driven advanced solid coverage.')
+    expectTrue(combine?.advancedParticipants?.some((participant) => participant.role === 'targetBody'), 'Combine should declare explicit targetBody participants for body boolean coverage.')
+    expectTrue(combine?.advancedParticipants?.some((participant) => participant.role === 'toolBody'), 'Combine should declare explicit toolBody participants for body boolean coverage.')
+    expectTrue(split?.advancedParticipants?.some((participant) => participant.role === 'toolBody'), 'Split should declare explicit toolBody participants for body split coverage.')
+    expectTrue(deleteSolid?.advancedParticipants?.some((participant) => participant.role === 'body'), 'Delete-solid should declare explicit body participants for body removal coverage.')
+    expectTrue(mirror?.advancedParticipants?.some((participant) => participant.role === 'plane'), 'Mirror should declare an explicit mirror plane participant.')
+    expectTrue(transform?.advancedParticipants?.some((participant) => participant.role === 'transformReference'), 'Transform should declare an explicit transform reference participant.')
 
     const shellSession = createFeatureEditSession({
       featureType: 'shell',
@@ -1353,15 +1347,15 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'shell-faces')
 
-    assert(shellFacesField?.kind === 'referenceCollection', 'Shell form should expose removable faces as a reference collection.')
-    assert(shellFacesField.advancedParticipant?.role === 'face', 'Shell form should expose the face participant role on the generic field.')
+    expectTrue(shellFacesField?.kind === 'referenceCollection', 'Shell form should expose removable faces as a reference collection.')
+    expectTrue(shellFacesField.advancedParticipant?.role === 'face', 'Shell form should expose the face participant role on the generic field.')
 
     const patch = createFeatureEditorReferenceSelectionPatch(shellFacesField, {
       kind: 'face',
       bodyId: 'body_a',
       faceId: 'face_side',
     })
-    assert(patch.participantRole === 'face', 'Generic reference selection patches should preserve the participant role.')
+    expectTrue(patch.participantRole === 'face', 'Generic reference selection patches should preserve the participant role.')
   }
 
   function testAdvancedAuthoringAndInspectorDoNotImportKernelModules() {
@@ -1383,7 +1377,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
 
     for (const file of files) {
       const source = readFileSync(file, 'utf8')
-      assert(!source.includes('/occ/') && !source.includes('opencascade'), `${file} should not import kernel-specific modules.`)
+      expectTrue(!source.includes('/occ/') && !source.includes('opencascade'), `${file} should not import kernel-specific modules.`)
     }
   }
 
@@ -1396,14 +1390,14 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'revolve-angle')
 
-    assert(revolveAngleField?.kind === 'numeric', 'Revolve schema should expose the angle as a generic numeric field.')
+    expectTrue(revolveAngleField?.kind === 'numeric', 'Revolve schema should expose the angle as a generic numeric field.')
 
     const patchedRevolve = patchFeatureEditSession(
       revolveSession,
       createFeatureEditorFieldPatch(revolveAngleField, 180),
     )
 
-    assert(
+    expectTrue(
       patchedRevolve.featureType === 'revolve' &&
         patchedRevolve.draft.firstEnd.kind === 'blind' &&
         Math.abs(patchedRevolve.draft.firstEnd.angle - Math.PI) < 0.000001,
@@ -1418,14 +1412,14 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'shell-operation')
 
-    assert(shellOperationField?.kind === 'enum', 'Shell schema should expose operation as a generic enum field.')
+    expectTrue(shellOperationField?.kind === 'enum', 'Shell schema should expose operation as a generic enum field.')
 
     const patchedShell = patchFeatureEditSession(
       shellSession,
       createFeatureEditorFieldPatch(shellOperationField, 'cut'),
     )
 
-    assert(
+    expectTrue(
       patchedShell.featureType === 'shell' && patchedShell.draft.operation === 'cut',
       'Generic enum form events should patch shell operation without feature-specific inspector logic.',
     )
@@ -1440,7 +1434,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'revolve-axis')
 
-    assert(revolveAxisField?.kind === 'referencePicker', 'Revolve schema should expose an axis reference picker.')
+    expectTrue(revolveAxisField?.kind === 'referencePicker', 'Revolve schema should expose an axis reference picker.')
 
     const axisTarget = { kind: 'edge' as const, bodyId: 'body_a' as const, edgeId: 'edge_axis' as const }
     const selectedRevolve = patchFeatureEditSession(
@@ -1452,13 +1446,13 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       createFeatureEditorClearReferencePatch(revolveAxisField),
     )
 
-    assert(
+    expectTrue(
       selectedRevolve.featureType === 'revolve' &&
         selectedRevolve.draft.axisTarget?.kind === 'edge' &&
         selectedRevolve.draft.axisTarget.edgeId === 'edge_axis',
       'Generic single-reference selection events should patch the selected field.',
     )
-    assert(
+    expectTrue(
       clearedRevolve.featureType === 'revolve' && clearedRevolve.draft.axisTarget === null,
       'Generic single-reference clear events should set the bound reference to null.',
     )
@@ -1471,7 +1465,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       .sections.flatMap((section) => section.fields)
       .find((field) => field.id === 'shell-faces')
 
-    assert(shellFacesField?.kind === 'referenceCollection', 'Shell schema should expose removable faces as a reference collection.')
+    expectTrue(shellFacesField?.kind === 'referenceCollection', 'Shell schema should expose removable faces as a reference collection.')
 
     const sideFace = { kind: 'face' as const, bodyId: 'body_a' as const, faceId: 'face_side' as const }
     const appendedShell = patchFeatureEditSession(
@@ -1499,19 +1493,19 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
       ),
     )
 
-    assert(
+    expectTrue(
       appendedShell.featureType === 'shell' && appendedShell.draft.faceTargets.length === 2,
       'Generic multi-reference selection events should append unique selected instances.',
     )
-    assert(
+    expectTrue(
       duplicateShell.featureType === 'shell' && duplicateShell.draft.faceTargets.length === 2,
       'Generic multi-reference selection events should ignore duplicate selected instances.',
     )
-    assert(
+    expectTrue(
       removedShell.featureType === 'shell' && removedShell.draft.faceTargets.length === 1 && removedShell.draft.faceTargets[0]?.faceId === 'face_top',
       'Generic multi-reference remove events should remove only the requested selected instance.',
     )
-    assert(
+    expectTrue(
       clearedShell.featureType === 'shell' && clearedShell.draft.faceTargets.length === 0,
       'Generic multi-reference clear events should remove all selected instances.',
     )
@@ -1544,14 +1538,7 @@ test('src/domain/feature-authoring/registry.spec.ts', async () => {
   testGenericReferenceFormEventsPatchSingleAndMultiReferences()
 })
 
-test('feature authoring preserves multiple selected profile references in order', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const profileA = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
+test('feature authoring preserves multiple selected profile references in order', () => {  const profileA = { kind: 'region' as const, sketchId: 'sketch_a' as const, regionId: 'region_a' as const }
   const profileB = { kind: 'face' as const, bodyId: 'body_b' as const, faceId: 'face_b' as const }
   const path = { kind: 'edge' as const, bodyId: 'body_path' as const, edgeId: 'edge_path' as const }
   const axis = { kind: 'edge' as const, bodyId: 'body_axis' as const, edgeId: 'edge_axis' as const }
@@ -1563,17 +1550,17 @@ test('feature authoring preserves multiple selected profile references in order'
   const extrudeProfileField = getFeatureEditorFormSchema(extrudeSession)
     .sections.flatMap((section) => section.fields)
     .find((field) => field.id === 'extrude-profile')
-  assert(extrudeProfileField?.kind === 'referenceCollection', 'Extrude profiles should be collection-backed.')
-  assert(extrudeProfileField.picker.allowsMultiple, 'Extrude profile picker should accept multiple profiles.')
+  expectTrue(extrudeProfileField?.kind === 'referenceCollection', 'Extrude profiles should be collection-backed.')
+  expectTrue(extrudeProfileField.picker.allowsMultiple, 'Extrude profile picker should accept multiple profiles.')
 
   const extrudeMultiProfile = patchFeatureEditSession(
     extrudeSession,
     createFeatureEditorReferenceSelectionPatch(extrudeProfileField, profileB),
   )
   const extrudeDefinition = buildFeatureDefinition(extrudeMultiProfile)
-  assert(extrudeDefinition?.kind === 'extrude', 'Multi-profile extrude drafts should build an extrude definition.')
-  assert(extrudeDefinition.parameters.profiles[0] === profileA, 'Extrude definitions should preserve the first selected profile.')
-  assert(extrudeDefinition.parameters.profiles[1] === profileB, 'Extrude definitions should preserve the appended selected profile.')
+  expectTrue(extrudeDefinition?.kind === 'extrude', 'Multi-profile extrude drafts should build an extrude definition.')
+  expectTrue(extrudeDefinition.parameters.profiles[0] === profileA, 'Extrude definitions should preserve the first selected profile.')
+  expectTrue(extrudeDefinition.parameters.profiles[1] === profileB, 'Extrude definitions should preserve the appended selected profile.')
 
   const revolveSession = createFeatureEditSession({
     featureType: 'revolve',
@@ -1582,8 +1569,8 @@ test('feature authoring preserves multiple selected profile references in order'
   const revolveProfileField = getFeatureEditorFormSchema(revolveSession)
     .sections.flatMap((section) => section.fields)
     .find((field) => field.id === 'revolve-profile')
-  assert(revolveProfileField?.kind === 'referenceCollection', 'Revolve profiles should be collection-backed.')
-  assert(revolveProfileField.picker.allowsMultiple, 'Revolve profile picker should accept multiple profiles.')
+  expectTrue(revolveProfileField?.kind === 'referenceCollection', 'Revolve profiles should be collection-backed.')
+  expectTrue(revolveProfileField.picker.allowsMultiple, 'Revolve profile picker should accept multiple profiles.')
 
   const revolveMultiProfile = applySelectionToFeatureEditSession(
     patchFeatureEditSession(
@@ -1593,10 +1580,10 @@ test('feature authoring preserves multiple selected profile references in order'
     axis,
   )
   const revolveDefinition = buildFeatureDefinition(revolveMultiProfile)
-  assert(revolveDefinition?.kind === 'revolve', 'Multi-profile revolve drafts should build a revolve definition.')
-  assert(revolveDefinition.parameters.profiles[0] === profileA, 'Revolve definitions should preserve the first selected profile.')
-  assert(revolveDefinition.parameters.profiles[1] === profileB, 'Revolve definitions should preserve the appended selected profile.')
-  assert(revolveDefinition.parameters.axis === axis, 'Revolve definitions should keep the axis separate from profiles.')
+  expectTrue(revolveDefinition?.kind === 'revolve', 'Multi-profile revolve drafts should build a revolve definition.')
+  expectTrue(revolveDefinition.parameters.profiles[0] === profileA, 'Revolve definitions should preserve the first selected profile.')
+  expectTrue(revolveDefinition.parameters.profiles[1] === profileB, 'Revolve definitions should preserve the appended selected profile.')
+  expectTrue(revolveDefinition.parameters.axis === axis, 'Revolve definitions should keep the axis separate from profiles.')
 
   const sweepSession = createFeatureEditSession({
     featureType: 'sweep',
@@ -1605,8 +1592,8 @@ test('feature authoring preserves multiple selected profile references in order'
   const sweepProfileField = getFeatureEditorFormSchema(sweepSession)
     .sections.flatMap((section) => section.fields)
     .find((field) => field.id === 'sweep-profile')
-  assert(sweepProfileField?.kind === 'referenceCollection', 'Sweep profiles should be collection-backed.')
-  assert(sweepProfileField.picker.allowsMultiple, 'Sweep profile picker should accept multiple profile participants.')
+  expectTrue(sweepProfileField?.kind === 'referenceCollection', 'Sweep profiles should be collection-backed.')
+  expectTrue(sweepProfileField.picker.allowsMultiple, 'Sweep profile picker should accept multiple profile participants.')
 
   const sweepMultiProfile = applySelectionToFeatureEditSession(
     patchFeatureEditSession(
@@ -1619,18 +1606,11 @@ test('feature authoring preserves multiple selected profile references in order'
   const sweepProfiles = sweepDefinition?.kind === 'sweep'
     ? sweepDefinition.parameters.participants.find((participant) => participant.role === 'profile')?.targets
     : null
-  assert(sweepProfiles?.[0] === profileA, 'Sweep profile participants should preserve the first selected profile.')
-  assert(sweepProfiles?.[1] === profileB, 'Sweep profile participants should preserve the appended selected profile.')
+  expectTrue(sweepProfiles?.[0] === profileA, 'Sweep profile participants should preserve the first selected profile.')
+  expectTrue(sweepProfiles?.[1] === profileB, 'Sweep profile participants should preserve the appended selected profile.')
 })
 
-test('feature session creation replays ordered activation-time selections', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const targetBody = { kind: 'body' as const, bodyId: 'body_target' as const }
+test('feature session creation replays ordered activation-time selections', () => {  const targetBody = { kind: 'body' as const, bodyId: 'body_target' as const }
   const toolBody = { kind: 'body' as const, bodyId: 'body_tool' as const }
   const planeTarget = { kind: 'construction' as const, constructionId: 'construction_plane-xy' as const }
 
@@ -1639,11 +1619,11 @@ test('feature session creation replays ordered activation-time selections', () =
     selectedTargets: [targetBody, toolBody],
   })
 
-  assert(
+  expectTrue(
     combineSession.draft.targetBodyTargets[0]?.bodyId === targetBody.bodyId,
     'Feature session creation should seed the first adopted selection into the initial draft.',
   )
-  assert(
+  expectTrue(
     combineSession.draft.toolBodyTargets[0]?.bodyId === toolBody.bodyId,
     'Feature session creation should replay later adopted selections through feature authoring applySelection.',
   )
@@ -1653,11 +1633,11 @@ test('feature session creation replays ordered activation-time selections', () =
     selectedTargets: [targetBody, planeTarget],
   })
 
-  assert(
+  expectTrue(
     mirrorSession.draft.bodyTargets[0]?.bodyId === targetBody.bodyId,
     'Mirror activation should preserve the first adopted body target.',
   )
-  assert(
+  expectTrue(
     mirrorSession.draft.planeTarget?.constructionId === planeTarget.constructionId,
     'Mirror activation should replay later adopted targets in order so the mirror plane is seeded.',
   )

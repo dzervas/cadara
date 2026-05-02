@@ -1,16 +1,11 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import { createAppEditorEffectRuntime } from './create-app-editor-effect-runtime'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 async function expectRejects(
   action: () => Promise<unknown>,
@@ -20,7 +15,7 @@ async function expectRejects(
   try {
     await action()
   } catch (error) {
-    assert(error instanceof Error && pattern.test(error.message), message)
+    expectTrue(error instanceof Error && pattern.test(error.message), message)
     return
   }
 
@@ -44,7 +39,7 @@ test('create-app-editor-effect-runtime.ts maps cancelled sketch image imports ba
     snapshot,
   )
 
-  assert(session, 'Seed snapshot should expose a sketch session for image-import runtime coverage.')
+  expectTrue(session, 'Seed snapshot should expose a sketch session for image-import runtime coverage.')
 
   const runtime = createAppEditorEffectRuntime(
     makeModelingService(snapshot),
@@ -70,7 +65,7 @@ test('create-app-editor-effect-runtime.ts maps cancelled sketch image imports ba
     }],
   })
 
-  assert(
+  expectTrue(
     result?.status === 'cancelled' && result.revisionId === snapshot.document.revisionId,
     'Cancelled reference-image imports should resolve through the cancelled result seam pinned to the original base revision.',
   )
@@ -83,7 +78,7 @@ test('create-app-editor-effect-runtime.ts rethrows failed import-flow results an
     snapshot,
   )
 
-  assert(session, 'Seed snapshot should expose a sketch session for image-import runtime failure coverage.')
+  expectTrue(session, 'Seed snapshot should expose a sketch session for image-import runtime failure coverage.')
 
   const failingRuntime = createAppEditorEffectRuntime(
     makeModelingService(snapshot),
@@ -185,7 +180,7 @@ test('create-app-editor-effect-runtime.ts routes reference-image replacement spe
     payload: {},
   })
 
-  assert(
+  expectTrue(
     result?.effectId === 'replace-image' && result.payload.image === pickedImage,
     'Reference-image replacement special-mode effects should resolve by attaching the picked image payload to the effect result.',
   )

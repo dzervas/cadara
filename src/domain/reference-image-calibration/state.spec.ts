@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 import {
   createReferenceImageCalibrationAnchor,
@@ -7,14 +8,7 @@ import {
   solveReferenceImageOperationState,
 } from '@/domain/reference-image-calibration/state'
 
-test('src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs and point bindings when replacing the image payload', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operation = createReferenceImageOperation({
+test('src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs and point bindings when replacing the image payload', () => {  const operation = createReferenceImageOperation({
     sequence: 1,
     sketchId: 'sketch_primary',
     payload: {
@@ -63,24 +57,17 @@ test('src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs 
     pointPositionsById,
   })
 
-  assert(
+  expectTrue(
     JSON.stringify(replaced.calibration?.anchors.map((anchor) => anchor.uv)) === JSON.stringify([[0.2, 0.8], [0.8, 0.2]]),
     'Replacing the inline image payload should preserve anchor UV coordinates.',
   )
-  assert(
+  expectTrue(
     JSON.stringify(replaced.calibration?.anchors.map((anchor) => anchor.pointId)) === JSON.stringify(['sketch_point_anchor_a', 'sketch_point_anchor_b']),
     'Replacing the inline image payload should preserve the local point bindings.',
   )
 })
 
-test('src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when bound anchors are insufficient', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operation = createReferenceImageOperation({
+test('src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when bound anchors are insufficient', () => {  const operation = createReferenceImageOperation({
     sequence: 1,
     sketchId: 'sketch_primary',
     payload: {
@@ -113,11 +100,11 @@ test('src/domain/reference-image-calibration/state.spec.ts preserves the last st
     ]),
   })
 
-  assert(
+  expectTrue(
     solved.calibration.solveResult.diagnostics.some((diagnostic) => diagnostic.code === 'underconstrained-calibration'),
     'A single bound anchor should leave the independent fit underconstrained.',
   )
-  assert(
+  expectTrue(
     JSON.stringify(solved.placement) === JSON.stringify(initialPlacement),
     'Ambiguous calibration should not overwrite the last stable reference-image placement.',
   )

@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   SketchDefinition,
   SketchRecord,
@@ -18,14 +19,7 @@ import { buildOccRenderExport } from '@/domain/modeling/occ/snapshot'
 import { createOccAuthoringState } from '@/domain/modeling/occ/authoring-state'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
 
-test('src/contracts/sketch/advanced-entities.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const sketchId = 'sketch_advanced' as const
+test('src/contracts/sketch/advanced-entities.spec.ts', () => {  const sketchId = 'sketch_advanced' as const
   const plane = createStandardPlaneDefinition('xy')
   const tolerances = {
     coincidence: 1e-6,
@@ -150,7 +144,7 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
   }
 
   const parsed = sketchDefinitionSchema.safeParse(definition)
-  assert(parsed.success, 'Runtime schema should accept advanced sketch entity payloads.')
+  expectTrue(parsed.success, 'Runtime schema should accept advanced sketch entity payloads.')
 
   const invalid = sketchDefinitionSchema.safeParse({
     ...definition,
@@ -161,10 +155,10 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
       },
     ],
   })
-  assert(!invalid.success, 'Runtime schema should reject invalid advanced entity payloads.')
+  expectTrue(!invalid.success, 'Runtime schema should reject invalid advanced entity payloads.')
 
   const validation = validateSketchDefinitionCore({ definition, tolerances })
-  assert(validation.isValid, 'Advanced entities with valid defining data should pass sketch validation.')
+  expectTrue(validation.isValid, 'Advanced entities with valid defining data should pass sketch validation.')
 
   const solved = solveSketchDefinitionCore({
     definition,
@@ -172,12 +166,12 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
     partialSolvePolicy: 'bestEffort',
   })
   const solvedKinds = new Set(solved.solvedSnapshot.solvedEntities.map((entity) => entity.kind))
-  assert(solvedKinds.has('ellipse'), 'Solved snapshot should preserve ellipse geometry.')
-  assert(solvedKinds.has('ellipticalArc'), 'Solved snapshot should preserve elliptical arc geometry.')
-  assert(solvedKinds.has('conic'), 'Solved snapshot should preserve conic geometry.')
-  assert(solvedKinds.has('bezierCurve'), 'Solved snapshot should preserve Bezier geometry.')
-  assert(solvedKinds.has('profileText'), 'Solved snapshot should preserve profile text geometry.')
-  assert(solvedSketchSnapshotSchema.safeParse(solved.solvedSnapshot).success, 'Solved snapshot runtime schema should validate advanced entities.')
+  expectTrue(solvedKinds.has('ellipse'), 'Solved snapshot should preserve ellipse geometry.')
+  expectTrue(solvedKinds.has('ellipticalArc'), 'Solved snapshot should preserve elliptical arc geometry.')
+  expectTrue(solvedKinds.has('conic'), 'Solved snapshot should preserve conic geometry.')
+  expectTrue(solvedKinds.has('bezierCurve'), 'Solved snapshot should preserve Bezier geometry.')
+  expectTrue(solvedKinds.has('profileText'), 'Solved snapshot should preserve profile text geometry.')
+  expectTrue(solvedSketchSnapshotSchema.safeParse(solved.solvedSnapshot).success, 'Solved snapshot runtime schema should validate advanced entities.')
 
   const unsupportedConstraintValidation = validateSketchDefinitionCore({
     definition: {
@@ -193,7 +187,7 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
     },
     tolerances,
   })
-  assert(
+  expectTrue(
     unsupportedConstraintValidation.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-solver-entity-constraint'),
     'Solver validation should emit an explicit unsupported advanced-constraint diagnostic.',
   )
@@ -205,8 +199,8 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
     definition,
     solvedSnapshot: solved.solvedSnapshot,
   })
-  assert(derived.regions.length >= 2, 'Ellipse and profile text should derive selectable closed regions.')
-  assert(
+  expectTrue(derived.regions.length >= 2, 'Ellipse and profile text should derive selectable closed regions.')
+  expectTrue(
     derived.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-profile-entity'),
     'Unsupported advanced profile conversion should produce a structured diagnostic.',
   )
@@ -218,7 +212,7 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
     fullDefinition: definition,
   }
   const sessionRenderables = getSketchSessionDisplayRenderables(session)
-  assert(
+  expectTrue(
     sessionRenderables.some((renderable) =>
       renderable.target?.kind === 'sketchEntity' && renderable.target.entityId === 'sketch_entity_ellipse' && renderable.geometry.kind === 'polyline',
     ),
@@ -252,7 +246,7 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
     sketch: sketchRecord,
   }
   const renderExport = buildOccRenderExport(createOccAuthoringState({} as never, { sketches: [sketchSnapshot] }))
-  assert(
+  expectTrue(
     renderExport.records.some((record) =>
       record.binding.semanticClass === 'sketchCurve'
       && record.binding.target.kind === 'sketchEntity'
@@ -278,5 +272,5 @@ test('src/contracts/sketch/advanced-entities.spec.ts', () => {
       },
     }],
   })
-  assert(operationHistory.ok, 'Operation history should persist advanced sketch entity definitions.')
+  expectTrue(operationHistory.ok, 'Operation history should persist advanced sketch entity definitions.')
 })

@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { SolvedSketchSnapshot } from '@/contracts/sketch/schema'
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
@@ -13,14 +14,7 @@ import {
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
-test('src/domain/editor/sketch-session-style.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const definition = {
+test('src/domain/editor/sketch-session-style.spec.ts', () => {  const definition = {
     schemaVersion: 'sketch-definition/v1alpha1',
     referenceIds: [],
     references: [],
@@ -110,16 +104,16 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
   } satisfies SketchSnapshotRecord)
 
   const lineRenderable = getSketchSessionDisplayRenderables(session).find((entry) => entry.id.includes('line'))
-  assert(lineRenderable, 'Sketch line display renderable should exist.')
-  assert(lineRenderable.target?.kind === 'sketchEntity', 'Styled renderables should preserve selection/picking target bindings.')
-  assert(lineRenderable.linePattern === 'solid', 'Style metadata should not alter construction/line-pattern state.')
-  assert(lineRenderable.paintStyle?.color === 0x3366ff, 'Paint style color should resolve from persisted style records.')
-  assert(lineRenderable.paintStyle?.opacity === 0.42, 'Paint style opacity should resolve from persisted style records.')
-  assert(lineRenderable.strokeStyle?.color === 0xff8844, 'Stroke style color should resolve from persisted style records.')
-  assert(lineRenderable.strokeStyle?.opacity === 0.63, 'Stroke style opacity should resolve from persisted style records.')
-  assert(lineRenderable.strokeStyle?.width === 2.5, 'Stroke style width should resolve from persisted style records.')
-  assert(lineRenderable.strokeStyle?.dashSize === 0.8, 'Stroke dash size should resolve from persisted style records.')
-  assert(lineRenderable.strokeStyle?.gapSize === 0.3, 'Stroke gap size should resolve from persisted style records.')
+  expectTrue(lineRenderable, 'Sketch line display renderable should exist.')
+  expectTrue(lineRenderable.target?.kind === 'sketchEntity', 'Styled renderables should preserve selection/picking target bindings.')
+  expectTrue(lineRenderable.linePattern === 'solid', 'Style metadata should not alter construction/line-pattern state.')
+  expectTrue(lineRenderable.paintStyle?.color === 0x3366ff, 'Paint style color should resolve from persisted style records.')
+  expectTrue(lineRenderable.paintStyle?.opacity === 0.42, 'Paint style opacity should resolve from persisted style records.')
+  expectTrue(lineRenderable.strokeStyle?.color === 0xff8844, 'Stroke style color should resolve from persisted style records.')
+  expectTrue(lineRenderable.strokeStyle?.opacity === 0.63, 'Stroke style opacity should resolve from persisted style records.')
+  expectTrue(lineRenderable.strokeStyle?.width === 2.5, 'Stroke style width should resolve from persisted style records.')
+  expectTrue(lineRenderable.strokeStyle?.dashSize === 0.8, 'Stroke dash size should resolve from persisted style records.')
+  expectTrue(lineRenderable.strokeStyle?.gapSize === 0.3, 'Stroke gap size should resolve from persisted style records.')
 
   const localDefinition = {
     ...definition,
@@ -183,13 +177,13 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
   } satisfies SketchSnapshotRecord)
 
   const localLineRenderable = getSketchSessionDisplayRenderables(localSession).find((entry) => entry.id.includes('line'))
-  assert(localLineRenderable?.paintStyle?.color === 0x111111, 'Local gradient fill should render with the documented fill-color fallback.')
-  assert(localLineRenderable.strokeStyle?.color === 0x33ffaa, 'Local stroke color should render from inline style metadata.')
-  assert(localLineRenderable.strokeStyle?.lineCap === 'square', 'Local stroke cap should remain available to display helpers.')
-  assert(localLineRenderable.strokeStyle?.lineJoin === 'miter', 'Local stroke join should remain available to display helpers.')
-  assert(localLineRenderable.strokeStyle?.miterLimit === 7, 'Local stroke miter limit should remain available to display helpers.')
-  assert(localLineRenderable.strokeStyle?.dashSize === 0.45, 'Local stroke dash size should render from inline style metadata.')
-  assert(localLineRenderable.strokeStyle?.gapSize === 0.15, 'Local stroke gap size should render from inline style metadata.')
+  expectTrue(localLineRenderable?.paintStyle?.color === 0x111111, 'Local gradient fill should render with the documented fill-color fallback.')
+  expectTrue(localLineRenderable.strokeStyle?.color === 0x33ffaa, 'Local stroke color should render from inline style metadata.')
+  expectTrue(localLineRenderable.strokeStyle?.lineCap === 'square', 'Local stroke cap should remain available to display helpers.')
+  expectTrue(localLineRenderable.strokeStyle?.lineJoin === 'miter', 'Local stroke join should remain available to display helpers.')
+  expectTrue(localLineRenderable.strokeStyle?.miterLimit === 7, 'Local stroke miter limit should remain available to display helpers.')
+  expectTrue(localLineRenderable.strokeStyle?.dashSize === 0.45, 'Local stroke dash size should render from inline style metadata.')
+  expectTrue(localLineRenderable.strokeStyle?.gapSize === 0.15, 'Local stroke gap size should render from inline style metadata.')
 
   const disabledStrokeDefinition = {
     ...localDefinition,
@@ -238,7 +232,7 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
     },
   } satisfies SketchSnapshotRecord)
   const disabledStrokeLineRenderable = getSketchSessionDisplayRenderables(disabledStrokeSession).find((entry) => entry.id.includes('line'))
-  assert(
+  expectTrue(
     disabledStrokeLineRenderable?.strokeStyle === undefined,
     'Local stroke fields should not render unless stroke styling is explicitly enabled.',
   )
@@ -294,21 +288,21 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
   const pointRenderable = getSketchSessionDisplayRenderables(pointStyledSession).find((entry) =>
     entry.target?.kind === 'sketchPoint' && entry.target.pointId === 'sketch_point_a',
   )
-  assert(pointRenderable?.strokeStyle?.color === 0xdd44aa, 'Point marker renderables should resolve enabled local stroke style.')
+  expectTrue(pointRenderable?.strokeStyle?.color === 0xdd44aa, 'Point marker renderables should resolve enabled local stroke style.')
 
-  assert(
+  expectTrue(
     normalizeSketchConstraintDisplayState({ solveState: 'solved', constraintState: 'wellConstrained' }, 0) === 'constrained',
     'Well constrained solver status should normalize to constrained display state.',
   )
-  assert(
+  expectTrue(
     normalizeSketchConstraintDisplayState({ solveState: 'solved', constraintState: 'unknown' }, 0) === 'underconstrained',
     'Unknown solver constrainedness should normalize to underconstrained display state.',
   )
-  assert(
+  expectTrue(
     normalizeSketchConstraintDisplayState({ solveState: 'solved', constraintState: 'inconsistent' }, 0) === 'overconstrained',
     'Inconsistent solver constrainedness should normalize to overconstrained display state.',
   )
-  assert(
+  expectTrue(
     normalizeSketchConstraintDisplayState({ solveState: 'partiallySolved', constraintState: 'underConstrained' }, 1) === 'overconstrained',
     'Partial solves with known affected geometry should normalize to overconstrained display state.',
   )
@@ -337,15 +331,15 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {
     definition: constrainedDefinition,
     solvedSnapshot: unsatisfiedSnapshot,
   })
-  assert(displaySummary.state === 'overconstrained', 'Unsatisfied partial solve display summary should be overconstrained.')
-  assert(
+  expectTrue(displaySummary.state === 'overconstrained', 'Unsatisfied partial solve display summary should be overconstrained.')
+  expectTrue(
     getSketchConstraintDisplayForTarget(
       { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_ab' },
       displaySummary,
     ).isAffectedOverconstraint,
     'Unsatisfied constraints should mark only their affected sketch geometry targets.',
   )
-  assert(
+  expectTrue(
     !getSketchConstraintDisplayForTarget(
       { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_b' },
       displaySummary,

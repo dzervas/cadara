@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   AddDocumentVariableResponse,
   CreateFeatureResponse,
@@ -7,14 +8,7 @@ import type {
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/domain/modeling/modeling-service-boundary.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  class MalformedDualSchemaResponseAdapter extends MockKernelAdapter {
+test('src/domain/modeling/modeling-service-boundary.spec.ts', async () => {  class MalformedDualSchemaResponseAdapter extends MockKernelAdapter {
     override async createFeature(): Promise<CreateFeatureResponse> {
       return {
         contractVersion: 'modeling-contract/v1alpha1',
@@ -45,17 +39,17 @@ test('src/domain/modeling/modeling-service-boundary.spec.ts', async () => {
   })
   const snapshot = await service.getCurrentDocumentSnapshot()
   const seedFeature = snapshot.document.features.find((feature) => feature.definition.kind === 'extrude')
-  assert(seedFeature?.definition.kind === 'extrude', 'Seed extrude feature must exist.')
+  expectTrue(seedFeature?.definition.kind === 'extrude', 'Seed extrude feature must exist.')
 
   const featureResult = await service.createFeature({
     baseRevisionId: snapshot.document.revisionId,
     definition: seedFeature.definition,
   })
 
-  assert(featureResult.isErr(), 'Malformed feature mutation responses should return a boundary error.')
-  assert(featureResult.error.message.includes('CreateFeatureResponse'), 'Feature response errors should name the first schema.')
-  assert(featureResult.error.message.includes('UpdateFeatureResponse'), 'Feature response errors should name the fallback schema.')
-  assert(featureResult.error.message.includes('featureId'), 'Feature response errors should include actionable schema issue paths.')
+  expectTrue(featureResult.isErr(), 'Malformed feature mutation responses should return a boundary error.')
+  expectTrue(featureResult.error.message.includes('CreateFeatureResponse'), 'Feature response errors should name the first schema.')
+  expectTrue(featureResult.error.message.includes('UpdateFeatureResponse'), 'Feature response errors should name the fallback schema.')
+  expectTrue(featureResult.error.message.includes('featureId'), 'Feature response errors should include actionable schema issue paths.')
 
   const variableResult = await service.addDocumentVariable({
     baseRevisionId: snapshot.document.revisionId,
@@ -64,8 +58,8 @@ test('src/domain/modeling/modeling-service-boundary.spec.ts', async () => {
     valueText: '10',
   })
 
-  assert(variableResult.isErr(), 'Malformed document variable mutation responses should return a boundary error.')
-  assert(variableResult.error.message.includes('AddDocumentVariableResponse'), 'Variable response errors should name the first schema.')
-  assert(variableResult.error.message.includes('UpdateDocumentVariableResponse'), 'Variable response errors should name the fallback schema.')
-  assert(variableResult.error.message.includes('variableId'), 'Variable response errors should include actionable schema issue paths.')
+  expectTrue(variableResult.isErr(), 'Malformed document variable mutation responses should return a boundary error.')
+  expectTrue(variableResult.error.message.includes('AddDocumentVariableResponse'), 'Variable response errors should name the first schema.')
+  expectTrue(variableResult.error.message.includes('UpdateDocumentVariableResponse'), 'Variable response errors should name the fallback schema.')
+  expectTrue(variableResult.error.message.includes('variableId'), 'Variable response errors should include actionable schema issue paths.')
 })

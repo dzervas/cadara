@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   FeatureDefinition,
   SketchSnapshotRecord,
@@ -44,12 +45,6 @@ import {
   resolveOccReference,
   type OccTrackedBody,
 } from '@/domain/modeling/occ/topology'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function pointId(name: string) {
   return `sketch_point_${name}` as SketchPointId
@@ -373,7 +368,7 @@ function applyFeature(state: OccAuthoringState, feature: OccAuthoringFeatureReco
 
 function requireBody(state: OccAuthoringState, bodyId: BodyId) {
   const body = state.bodies.find((entry) => entry.bodyId === bodyId)
-  assert(body, `Expected body ${bodyId} to exist.`)
+  expectTrue(body, `Expected body ${bodyId} to exist.`)
   return body
 }
 
@@ -397,7 +392,7 @@ function findPlanarFaceAtZ(
       && Math.abs(plane.frame.origin[2] - z) < 0.001
   })
 
-  assert(faceId, `Expected body ${body.bodyId} to expose a horizontal planar face at z=${z}.`)
+  expectTrue(faceId, `Expected body ${body.bodyId} to expose a horizontal planar face at z=${z}.`)
   return faceId
 }
 
@@ -422,7 +417,7 @@ function findLinearEdgeByDirection(
     return Math.abs(dot(edgeDirection, direction)) > 0.999
   })
 
-  assert(edgeId, `Expected body ${body.bodyId} to expose a linear edge in direction ${direction.join(',')}.`)
+  expectTrue(edgeId, `Expected body ${body.bodyId} to expose a linear edge in direction ${direction.join(',')}.`)
   return edgeId
 }
 
@@ -464,7 +459,7 @@ function findEdgeByEndpoints(
     return edge ? edgeHasEndpoints(oc, edge, first, second) : false
   })
 
-  assert(edgeId, `Expected body ${body.bodyId} to expose an edge from ${first.join(',')} to ${second.join(',')}.`)
+  expectTrue(edgeId, `Expected body ${body.bodyId} to expose an edge from ${first.join(',')} to ${second.join(',')}.`)
   return edgeId
 }
 
@@ -478,7 +473,7 @@ function findVertexAt(
     return vertex ? pointNear(pointCoordinates(oc.BRep_Tool.Pnt(vertex)), position) : false
   })
 
-  assert(vertexId, `Expected body ${body.bodyId} to expose a vertex at ${position.join(',')}.`)
+  expectTrue(vertexId, `Expected body ${body.bodyId} to expose a vertex at ${position.join(',')}.`)
   return vertexId
 }
 
@@ -633,7 +628,7 @@ test('proper naming should keep an untouched bottom face live after joined boss 
     faceId: fixture.bottomFaceId,
   })
 
-  assert(
+  expectTrue(
     resolved.resolution.invalidation === null,
     `Expected the untouched bottom face to stay live after top-side joins; current result is ${formatInvalidation(fixture.afterRib, {
       kind: 'face',
@@ -656,7 +651,7 @@ test('proper naming should allow a downstream plane to reference a pre-join unaf
     thrownMessage = error instanceof Error ? error.message : String(error)
   }
 
-  assert(
+  expectTrue(
     thrownMessage === null,
     `Expected a face-backed plane to resolve through boolean history, but the current adapter rejected it: ${thrownMessage}.`,
   )
@@ -675,7 +670,7 @@ test('proper naming should carry a selected vertical edge through same-domain si
     thrownMessage = error instanceof Error ? error.message : String(error)
   }
 
-  assert(
+  expectTrue(
     thrownMessage === null,
     `Expected the selected vertical edge to survive the simplified join for downstream fillet selection, but the current adapter rejected it: ${thrownMessage}.`,
   )
@@ -730,11 +725,11 @@ test('proper naming should carry untouched edge and vertex references through ch
     vertexId: stableVertexId,
   })
 
-  assert(
+  expectTrue(
     edgeResolved.resolution.invalidation === null,
     `Expected untouched edge to stay live through chained fillet/chamfer operations, got ${edgeResolved.resolution.invalidation?.reason}.`,
   )
-  assert(
+  expectTrue(
     vertexResolved.resolution.invalidation === null,
     `Expected untouched vertex to stay live through chained fillet/chamfer operations, got ${vertexResolved.resolution.invalidation?.reason}.`,
   )
@@ -780,7 +775,7 @@ test('proper naming should allow an old edge id to drive a downstream fillet aft
     thrownMessage = error instanceof Error ? error.message : String(error)
   }
 
-  assert(
+  expectTrue(
     thrownMessage === null,
     `Expected old edge id to resolve for downstream fillet after chained fillet/chamfer operations, got ${thrownMessage}.`,
   )
@@ -830,11 +825,11 @@ test('proper naming should keep untouched edge and vertex references live throug
     vertexId: stableVertexId,
   })
 
-  assert(
+  expectTrue(
     edgeResolved.resolution.invalidation === null,
     `Expected untouched edge to stay live through shell replacement, got ${edgeResolved.resolution.invalidation?.reason}.`,
   )
-  assert(
+  expectTrue(
     vertexResolved.resolution.invalidation === null,
     `Expected untouched vertex to stay live through shell replacement, got ${vertexResolved.resolution.invalidation?.reason}.`,
   )
@@ -896,11 +891,11 @@ test('proper naming should carry thicken-produced topology through chained fille
     vertexId: stableVertexId,
   })
 
-  assert(
+  expectTrue(
     edgeResolved.resolution.invalidation === null,
     `Expected thicken-produced edge to stay live through chained edits, got ${edgeResolved.resolution.invalidation?.reason}.`,
   )
-  assert(
+  expectTrue(
     vertexResolved.resolution.invalidation === null,
     `Expected thicken-produced vertex to stay live through chained edits, got ${vertexResolved.resolution.invalidation?.reason}.`,
   )
@@ -919,7 +914,7 @@ test('proper naming should keep stable references live after an authored rebuild
     faceId: fixture.bottomFaceId,
   })
 
-  assert(
+  expectTrue(
     resolved.resolution.invalidation === null,
     `Expected rebuilt authored history to preserve the bottom face reference, got ${resolved.resolution.invalidation?.reason}.`,
   )
@@ -960,11 +955,11 @@ test('proper naming should report a deleted-topology diagnostic for a cut-away f
     faceId: removedFaceId,
   })
 
-  assert(
+  expectTrue(
     resolved.resolution.invalidation?.reason === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
     `Expected cut-away face to be invalidated as deleted topology, got ${resolved.resolution.invalidation?.reason}.`,
   )
-  assert(
+  expectTrue(
     resolved.diagnostics[0]?.detail?.kind === 'invalidReference',
     'Deleted topology must surface a structured invalid-reference diagnostic.',
   )
@@ -1016,7 +1011,7 @@ test('proper naming should report an ambiguous-topology diagnostic for split suc
     faceId: selectedFaceId,
   })
 
-  assert(
+  expectTrue(
     resolved.resolution.invalidation?.reason === OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
     `Expected split face reference to be invalidated as ambiguous topology, got ${resolved.resolution.invalidation?.reason}.`,
   )
@@ -1054,7 +1049,7 @@ test('proper naming should invalidate consumed Combine tool-body topology', asyn
     }),
   })
   const toolFaceId = requireBody(afterTool, toolBodyId).topology.faceIds[0]
-  assert(toolFaceId, 'Tool body must expose a face before Combine.')
+  expectTrue(toolFaceId, 'Tool body must expose a face before Combine.')
   const afterCombine = applyFeature(afterTool, {
     featureId: featureId('combine_add'),
     definition: createCombineDefinition(targetBodyId, toolBodyId),
@@ -1069,11 +1064,11 @@ test('proper naming should invalidate consumed Combine tool-body topology', asyn
     faceId: toolFaceId,
   })
 
-  assert(
+  expectTrue(
     resolved.resolution.invalidation?.reason === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
     `Expected consumed tool-body face to be invalidated as deleted topology, got ${resolved.resolution.invalidation?.reason}.`,
   )
-  assert(
+  expectTrue(
     !afterCombine.bodies.some((body) => body.bodyId === toolBodyId),
     'Consumed Combine tool body must not remain live after add.',
   )

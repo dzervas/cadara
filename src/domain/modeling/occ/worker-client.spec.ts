@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { GetDocumentSnapshotResponse } from '@/contracts/modeling/schema'
 import { packWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
@@ -29,22 +30,15 @@ class FakeOccWorker implements OccWorkerLike {
   }
 }
 
-test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function testWarmupInvokesWorkerOperation() {
+test('src/domain/modeling/occ/worker-client.spec.ts', async () => {  async function testWarmupInvokesWorkerOperation() {
     const worker = new FakeOccWorker()
     const client = new OccWorkerClient({ worker })
 
     const promise = client.warmup({ mainWasm: '/assets/opencascade.full.wasm' })
     const request = worker.posted[0]
 
-    assert(request?.kind === 'invoke', 'Warmup should post an invoke request to the OCC worker.')
-    assert(request.operation.kind === 'warmup', 'Warmup should use the worker warmup operation.')
+    expectTrue(request?.kind === 'invoke', 'Warmup should post an invoke request to the OCC worker.')
+    expectTrue(request.operation.kind === 'warmup', 'Warmup should use the worker warmup operation.')
 
     worker.emit({
       kind: 'invoked',
@@ -98,7 +92,7 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
       documentId: 'doc_1',
     }, 'startup')
     const request = worker.posted[0]
-    assert(
+    expectTrue(
       request?.kind === 'invoke' && request.operation.kind === 'getDocumentSnapshot',
       'Snapshot queries should use the worker getDocumentSnapshot operation.',
     )
@@ -117,7 +111,7 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
     const response = await promise
     const geometry = response.snapshot.document.render.records[0]?.geometry
 
-    assert(geometry?.kind === 'mesh', 'Worker snapshot responses should be unpacked back into public mesh records.')
+    expectTrue(geometry?.kind === 'mesh', 'Worker snapshot responses should be unpacked back into public mesh records.')
   }
 
   async function testWarmupFailuresSurfaceToCaller() {
@@ -126,7 +120,7 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
     const promise = client.warmup()
     const request = worker.posted[0]
 
-    assert(request?.kind === 'invoke', 'Warmup failure tests should still use invoke requests.')
+    expectTrue(request?.kind === 'invoke', 'Warmup failure tests should still use invoke requests.')
 
     worker.emit({
       kind: 'failure',
@@ -144,7 +138,7 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {
       failed = error instanceof Error && error.message === 'warmup failed'
     }
 
-    assert(failed, 'Worker warmup failures must surface to the caller.')
+    expectTrue(failed, 'Worker warmup failures must surface to the caller.')
   }
 
   await testWarmupInvokesWorkerOperation()

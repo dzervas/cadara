@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { SketchPoint } from '@/contracts/modeling/schema'
 import type { SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
@@ -12,14 +13,7 @@ import {
   type SketchEditOperationFactories,
 } from '@/domain/sketch-editing/operations'
 
-test('src/domain/sketch-editing/operations.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function makePoint(pointId: string, label: string, position: SketchPoint) {
+test('src/domain/sketch-editing/operations.spec.ts', () => {  function makePoint(pointId: string, label: string, position: SketchPoint) {
     return {
       pointId: pointId as SketchPointId,
       label,
@@ -174,9 +168,9 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(fillet.valid && fillet.definition, 'Fillet should accept adjacent line segments.')
-    assert(fillet.definition.entities.some((entity) => entity.kind === 'arc'), 'Fillet should add a durable arc.')
-    assert(fillet.previewEntities.length > 0, 'Fillet should expose preview geometry.')
+    expectTrue(fillet.valid && fillet.definition, 'Fillet should accept adjacent line segments.')
+    expectTrue(fillet.definition.entities.some((entity) => entity.kind === 'arc'), 'Fillet should add a durable arc.')
+    expectTrue(fillet.previewEntities.length > 0, 'Fillet should expose preview geometry.')
 
     const chamfer = createSketchChamferMutation({
       definition: createCornerDefinition(),
@@ -185,8 +179,8 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(chamfer.valid && chamfer.definition, 'Chamfer should accept adjacent line segments.')
-    assert(chamfer.definition.entities.length === 3, 'Chamfer should preserve source lines and add one chamfer line.')
+    expectTrue(chamfer.valid && chamfer.definition, 'Chamfer should accept adjacent line segments.')
+    expectTrue(chamfer.definition.entities.length === 3, 'Chamfer should preserve source lines and add one chamfer line.')
   }
 
   function testExtendAndSplitMutateOnlySelectedLine() {
@@ -205,9 +199,9 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(extended.valid && extended.definition, 'Extend should accept a target line and boundary line.')
-    assert(extended.definition.entities.length === extendDefinition.entities.length, 'Extend should not add unrelated entities.')
-    assert(extended.definition.points.some((point) => point.position[0] === 3 && point.position[1] === 0), 'Extend should add an endpoint at the boundary intersection.')
+    expectTrue(extended.valid && extended.definition, 'Extend should accept a target line and boundary line.')
+    expectTrue(extended.definition.entities.length === extendDefinition.entities.length, 'Extend should not add unrelated entities.')
+    expectTrue(extended.definition.points.some((point) => point.position[0] === 3 && point.position[1] === 0), 'Extend should add an endpoint at the boundary intersection.')
 
     const split = createSketchSplitMutation({
       definition: createCrossingDefinition(),
@@ -215,8 +209,8 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(split.valid && split.definition, 'Split should accept a target line and crossing boundary.')
-    assert(split.definition.entities.length === 3, 'Split should divide the selected line into two line entities.')
+    expectTrue(split.valid && split.definition, 'Split should accept a target line and crossing boundary.')
+    expectTrue(split.definition.entities.length === 3, 'Split should divide the selected line into two line entities.')
   }
 
   function testSlotCreatesDurableGeometryForSupportedReferences() {
@@ -233,8 +227,8 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(lineSlot.valid && lineSlot.contribution, 'Slot should accept a line reference.')
-    assert(lineSlot.contribution.entities.filter((entity) => entity.kind === 'arc').length === 2, 'Line slot should add rounded end arcs.')
+    expectTrue(lineSlot.valid && lineSlot.contribution, 'Slot should accept a line reference.')
+    expectTrue(lineSlot.contribution.entities.filter((entity) => entity.kind === 'arc').length === 2, 'Line slot should add rounded end arcs.')
 
     const curveDefinition = makeDefinition([
       makePoint('sketch_point_center', 'Center', [0, 0]),
@@ -254,8 +248,8 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(arcSlot.valid && arcSlot.contribution, 'Slot should accept an arc reference.')
-    assert(arcSlot.contribution.entities.some((entity) => entity.kind === 'arc'), 'Arc slot should create arc boundary geometry.')
+    expectTrue(arcSlot.valid && arcSlot.contribution, 'Slot should accept an arc reference.')
+    expectTrue(arcSlot.contribution.entities.some((entity) => entity.kind === 'arc'), 'Arc slot should create arc boundary geometry.')
 
     const splineSlot = createSketchSlotContribution({
       definition: curveDefinition,
@@ -264,8 +258,8 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       sequence: 10,
       factories: createFactories(),
     })
-    assert(splineSlot.valid && splineSlot.contribution, 'Slot should accept a spline reference.')
-    assert(splineSlot.contribution.entities.some((entity) => entity.kind === 'spline'), 'Spline slot should create spline boundary geometry.')
+    expectTrue(splineSlot.valid && splineSlot.contribution, 'Slot should accept a spline reference.')
+    expectTrue(splineSlot.contribution.entities.some((entity) => entity.kind === 'spline'), 'Spline slot should create spline boundary geometry.')
   }
 
   function testSlotCreatesProfileOffsetsForClosedLineLoops() {
@@ -288,8 +282,8 @@ test('src/domain/sketch-editing/operations.spec.ts', () => {
       factories: createFactories(),
     })
 
-    assert(slot.valid && slot.contribution, 'Slot should accept a closed line profile.')
-    assert(slot.contribution.entities.length === 8, 'Closed profile slot should create outer and inner line loops.')
+    expectTrue(slot.valid && slot.contribution, 'Slot should accept a closed line profile.')
+    expectTrue(slot.contribution.entities.length === 8, 'Closed profile slot should create outer and inner line loops.')
   }
 
   testFilletAndChamferMutateAdjacentLines()

@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import * as THREE from 'three'
 
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
@@ -11,14 +12,7 @@ import {
 } from '@/domain/section-view/rendering'
 import type { SectionViewSession } from '@/core/section-view/session'
 
-test('src/domain/section-view/rendering.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createSection(retainedSide: SectionViewSession['retainedSide']): SectionViewSession {
+test('src/domain/section-view/rendering.spec.ts', () => {  function createSection(retainedSide: SectionViewSession['retainedSide']): SectionViewSession {
     return {
       seed: { kind: 'construction', constructionId: 'construction_plane-xy' },
       plane: createStandardPlaneDefinition('xy'),
@@ -57,9 +51,9 @@ test('src/domain/section-view/rendering.spec.ts', () => {
     const positive = createSectionClippingPlane(createSection('positive'))
     const negative = createSectionClippingPlane(createSection('negative'))
 
-    assert(positive.distanceToPoint(new THREE.Vector3(0, 0, 1)) > 0, 'Positive retained side should keep positive-Z points.')
-    assert(positive.distanceToPoint(new THREE.Vector3(0, 0, -1)) < 0, 'Positive retained side should clip negative-Z points.')
-    assert(negative.distanceToPoint(new THREE.Vector3(0, 0, -1)) > 0, 'Negative retained side should keep negative-Z points.')
+    expectTrue(positive.distanceToPoint(new THREE.Vector3(0, 0, 1)) > 0, 'Positive retained side should keep positive-Z points.')
+    expectTrue(positive.distanceToPoint(new THREE.Vector3(0, 0, -1)) < 0, 'Positive retained side should clip negative-Z points.')
+    expectTrue(negative.distanceToPoint(new THREE.Vector3(0, 0, -1)) > 0, 'Negative retained side should keep negative-Z points.')
   }
 
   {
@@ -91,8 +85,8 @@ test('src/domain/section-view/rendering.spec.ts', () => {
     ]
     const caps = createSectionCapRenderables(boxFaces, createSection('positive'))
 
-    assert(caps.length > 0, 'Intersecting the visible box faces should derive at least one transient section cap.')
-    assert(
+    expectTrue(caps.length > 0, 'Intersecting the visible box faces should derive at least one transient section cap.')
+    expectTrue(
       caps.every((cap) =>
         cap.vertexPositions.length === cap.vertexNormals.length
         && cap.vertexPositions.length === cap.textureCoordinates.length
@@ -112,7 +106,7 @@ test('src/domain/section-view/rendering.spec.ts', () => {
       },
     })
 
-    assert(offset !== null, 'Section drag should resolve an offset from a non-parallel pointer ray.')
-    assert(Math.abs(offset - 4) < 0.05, 'Section drag should stay constrained to the section normal axis.')
+    expectTrue(offset !== null, 'Section drag should resolve an offset from a non-parallel pointer ray.')
+    expectTrue(Math.abs(offset - 4) < 0.05, 'Section drag should stay constrained to the section normal axis.')
   }
 })

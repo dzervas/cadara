@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import { composeViewportRenderables, isTargetHidden } from '@/app/workbench/shell/viewport-renderables'
@@ -10,14 +11,7 @@ import {
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
-test('src/app/viewport-renderables.spec.ts', async () => {
-  function assert(condition: unknown, message = 'Assertion failed'): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertEqual<T>(actual: T, expected: T, message = 'Expected values to match') {
+test('src/app/viewport-renderables.spec.ts', async () => {  function assertEqual<T>(actual: T, expected: T, message = 'Expected values to match') {
     if (actual !== expected) {
       throw new Error(`${message}: expected ${String(expected)}, received ${String(actual)}`)
     }
@@ -161,7 +155,7 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     })
 
     assertEqual(composed.documentRenderables.length, 2)
-    assert(composed.documentRenderables.every(({ origin }) => origin === 'document'))
+    expectTrue(composed.documentRenderables.every(({ origin }) => origin === 'document'))
   }
 
   {
@@ -178,7 +172,7 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     assertEqual(composed.documentRenderables[0]?.renderable.id, committedFace.id)
     assertEqual(composed.documentRenderables[1]?.renderable.id, committedEdge.id)
     assertEqual(composed.documentRenderables[2]?.renderable.id, previewFace.id)
-    assert(
+    expectTrue(
       isTargetHidden(
         { kind: 'sketchPoint', sketchId: 'sketch_a', pointId: 'sketch_point_a' },
         { 'sketch:sketch_a': true },
@@ -203,15 +197,15 @@ test('src/app/viewport-renderables.spec.ts', async () => {
     })
 
     assertEqual(composed.documentRenderables.length, 2)
-    assert(
+    expectTrue(
       composed.documentRenderables.every(({ renderable }) => renderable.id !== activeSketchRegion.id),
       'Committed regions from the actively edited sketch should be hidden.',
     )
-    assert(
+    expectTrue(
       composed.documentRenderables.every(({ renderable }) => renderable.id !== committedSketchCurve.id),
       'Committed sketch curves from the actively edited sketch should be hidden.',
     )
-    assert(
+    expectTrue(
       composed.documentRenderables.some(({ renderable }) => renderable.id === otherSketchRegion.id),
       'Committed regions from inactive sketches should remain visible.',
     )
@@ -278,7 +272,7 @@ test('src/app/viewport-renderables.spec.ts', async () => {
       hiddenTargetKeys: {},
     })
 
-    assert(
+    expectTrue(
       composed.documentRenderables[0]?.sketchConstraintDisplay?.isAffectedOverconstraint,
       'Committed sketch renderables should carry solved constraint display diagnostics from their sketch snapshot.',
     )
@@ -299,7 +293,7 @@ test('src/app/viewport-renderables.spec.ts', async () => {
       hiddenTargetKeys: {},
     })
 
-    assert(
+    expectTrue(
       previewComposed.sketchDisplayRenderables.some((renderable) =>
         renderable.label === 'Spline preview'
         && renderable.geometry.kind === 'polyline'
@@ -316,7 +310,7 @@ test('src/app/viewport-renderables.spec.ts', async () => {
       hiddenTargetKeys: {},
     })
 
-    assert(
+    expectTrue(
       committedComposed.sketchDisplayRenderables.some((renderable) =>
         renderable.target?.kind === 'sketchEntity'
         && renderable.geometry.kind === 'polyline'

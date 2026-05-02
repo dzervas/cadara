@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   OCC_ASSET_CACHE_NAME,
   OCC_SERVICE_WORKER_PATH,
@@ -11,26 +12,19 @@ import {
   isOpenCascadeAssetUrl,
 } from '@/infrastructure/occ/asset-cache'
 
-test('src/infrastructure/occ/asset-cache.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  assert(
+test('src/infrastructure/occ/asset-cache.spec.ts', () => {  expectTrue(
     isOpenCascadeAssetUrl('/cadara-occ.wasm'),
     'OCC wasm URL audit should recognize the custom app-served OpenCascade wasm asset.',
   )
-  assert(
+  expectTrue(
     isOpenCascadeAssetUrl('/cadara-occ.js'),
     'OCC asset URL audit should recognize the custom app-served OpenCascade bootstrap module.',
   )
-  assert(
+  expectTrue(
     getOpenCascadeServiceWorkerRegistrationOptions().scope === '/',
     'OCC asset service worker registration scope should cover the custom app-served OCC requests from the shell.',
   )
-  assert(
+  expectTrue(
     getOpenCascadeServiceWorkerVersion({
       querySelector(selector) {
         return selector === 'script[type="module"][src]'
@@ -44,7 +38,7 @@ test('src/infrastructure/occ/asset-cache.spec.ts', () => {
     }) === '/assets/index-live-build.js',
     'OCC asset cache registration should derive its cache version from the current build module script URL.',
   )
-  assert(
+  expectTrue(
     getOpenCascadeServiceWorkerUrl({
       querySelector() {
         return {
@@ -58,7 +52,7 @@ test('src/infrastructure/occ/asset-cache.spec.ts', () => {
   )
 
   const serviceWorkerSource = readFileSync(join(process.cwd(), 'public/occ-asset-cache-sw.js'), 'utf8')
-  assert(
+  expectTrue(
     OCC_SERVICE_WORKER_PATH === '/occ-asset-cache-sw.js' &&
       serviceWorkerSource.includes(OCC_ASSET_CACHE_NAME) &&
       serviceWorkerSource.includes("searchParams.get('v')"),

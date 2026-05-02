@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   createCreateFeatureHistoryEntry,
   createDeleteTargetHistoryEntry,
@@ -27,16 +28,9 @@ import { createModelingService } from '@/domain/modeling/modeling-service'
 import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
 import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 
-test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
+test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', async () => {  async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
     const resolved = await result
-    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    expectTrue(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
     return resolved.value
   }
 
@@ -202,7 +196,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       solvedSnapshot: solved.solvedSnapshot,
     }).regions
     const regionId = regions[0]?.regionId
-    assert(regionId, 'Draft sketch should derive a region for persisted feature replay.')
+    expectTrue(regionId, 'Draft sketch should derive a region for persisted feature replay.')
     return regionId
   }
 
@@ -704,22 +698,22 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       definition: createDraftSketchDefinition('sketch_draft'),
     }))
 
-    assert(result.revisionState.kind === 'accepted', 'Sketch commit should be accepted.')
+    expectTrue(result.revisionState.kind === 'accepted', 'Sketch commit should be accepted.')
 
     const savedHistory = store.savedPayloads.at(-1)
-    assert(savedHistory, 'Accepted commitSketch mutations should persist history.')
+    expectTrue(savedHistory, 'Accepted commitSketch mutations should persist history.')
     const persistedEntry = savedHistory.entries[0]
-    assert(persistedEntry?.kind === 'commitSketch', 'Persisted history entry must remain commitSketch.')
-    assert(
+    expectTrue(persistedEntry?.kind === 'commitSketch', 'Persisted history entry must remain commitSketch.')
+    expectTrue(
       persistedEntry?.kind === 'commitSketch' && persistedEntry.payload.sketchId === result.sketchId,
       'Persisted commitSketch entries must store the committed sketch id.',
     )
-    assert(
+    expectTrue(
       persistedEntry?.kind === 'commitSketch'
         && persistedEntry.payload.definition.points.every((point) => point.target.sketchId === result.sketchId),
       'Persisted commitSketch point targets must be normalized to the committed sketch id.',
     )
-    assert(
+    expectTrue(
       persistedEntry?.kind === 'commitSketch'
         && persistedEntry.payload.definition.entities.every((entity) => entity.target.sketchId === result.sketchId),
       'Persisted commitSketch entity targets must be normalized to the committed sketch id.',
@@ -727,7 +721,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
 
     const reloadedStore = createMemoryOperationHistoryStore(savedHistory)
     const loadResult = reloadedStore.load()
-    assert(loadResult.ok, 'Persisted commitSketch history should remain loadable after save.')
+    expectTrue(loadResult.ok, 'Persisted commitSketch history should remain loadable after save.')
   }
 
   async function testLegacyCommitSketchHistoryRestores() {
@@ -737,19 +731,19 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
     })
 
     const restoreState = await service.getHistoryRestoreState()
-    assert(restoreState.kind === 'restored', 'Legacy commitSketch history should still restore successfully.')
-    assert(restoreState.entriesReplayed === 1, 'Legacy commitSketch history should replay its single entry.')
+    expectTrue(restoreState.kind === 'restored', 'Legacy commitSketch history should still restore successfully.')
+    expectTrue(restoreState.entriesReplayed === 1, 'Legacy commitSketch history should replay its single entry.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
-    assert(
+    expectTrue(
       snapshot.document.sketches.some((entry) => entry.label === 'Legacy Draft Sketch' && entry.sketchId === 'sketch_legacy_replayed'),
       'Legacy commitSketch history should rebuild the committed sketch snapshot.',
     )
-    assert(
+    expectTrue(
       snapshot.document.sketches[0]?.sketch.definition.points.every((point) => point.target.sketchId === 'sketch_legacy_replayed'),
       'Legacy commitSketch replay should normalize point targets to the committed sketch id.',
     )
-    assert(
+    expectTrue(
       snapshot.document.sketches[0]?.sketch.definition.entities.every((entity) => entity.target.sketchId === 'sketch_legacy_replayed'),
       'Legacy commitSketch replay should normalize entity targets to the committed sketch id.',
     )
@@ -826,19 +820,19 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
 
     const restoreState = await service.getHistoryRestoreState()
 
-    assert(
+    expectTrue(
       restoreState.kind === 'restored',
       'Allocator-compatible explicit sketch ids should restore successfully on an empty strict adapter.',
     )
-    assert(restoreState.entriesReplayed === 2, 'Replay should apply both the sketch and feature entries.')
+    expectTrue(restoreState.entriesReplayed === 2, 'Replay should apply both the sketch and feature entries.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
 
-    assert(
+    expectTrue(
       snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
       'Replay should recreate the expected primary sketch id.',
     )
-    assert(
+    expectTrue(
       snapshot.document.features.some((entry) => entry.featureId === 'feature_extrude-1' && entry.definition.kind === 'extrude'),
       'Replay should continue into downstream feature history after recreating the sketch.',
     )
@@ -947,21 +941,21 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
 
     const restoreState = await service.getHistoryRestoreState()
 
-    assert(
+    expectTrue(
       restoreState.kind === 'restored',
       'Sketch delete replay should remove deleted sketches from the cursor before resolving reused sketch ids.',
     )
-    assert(restoreState.entriesReplayed === 4, 'Replay should apply create, secondary create, delete, and recreated sketch entries.')
+    expectTrue(restoreState.entriesReplayed === 4, 'Replay should apply create, secondary create, delete, and recreated sketch entries.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
 
-    assert(
+    expectTrue(
       snapshot.document.sketches.length === 2
         && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_2')
         && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_primary'),
       'Replay should recreate the allocator-compatible sketch id after deletion.',
     )
-    assert(
+    expectTrue(
       snapshot.document.sketches.find((entry) => entry.sketchId === 'sketch_primary')?.label === 'Reused Replay Sketch',
       'Replay should preserve the final reused sketch entry.',
     )
@@ -1040,15 +1034,15 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
 
     const restoreState = await service.getHistoryRestoreState()
 
-    assert(
+    expectTrue(
       restoreState.kind === 'restored',
       'Sketch delete replay should resolve allocator-compatible ids from the max remaining sketch ordinal.',
     )
-    assert(restoreState.entriesReplayed === 5, 'Replay should apply all entries across the middle sketch delete.')
+    expectTrue(restoreState.entriesReplayed === 5, 'Replay should apply all entries across the middle sketch delete.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
 
-    assert(
+    expectTrue(
       !snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_2')
         && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_3')
         && snapshot.document.sketches.some((entry) => entry.sketchId === 'sketch_4'),

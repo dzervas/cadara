@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   CreateFeatureResponse,
   CreateFeatureRequest,
@@ -38,14 +39,7 @@ import {
   transformAdvancedFeatureExample,
 } from '@/contracts/modeling/advanced-solid'
 
-test('src/contracts/shared/contract-examples.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const sketchDefinition: SketchDefinition = {
+test('src/contracts/shared/contract-examples.spec.ts', async () => {  const sketchDefinition: SketchDefinition = {
     schemaVersion: SKETCH_SCHEMA_VERSION,
     referenceIds: [],
     references: [],
@@ -561,49 +555,49 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
   }
 
   function testSolveSketchExampleIsFullyTyped() {
-    assert(solveSketchProjectionRequest.contractVersion === CONTRACT_VERSION, 'Solve-sketch example must declare the shared contract version.')
-    assert(solveSketchRequest.definition.schemaVersion === SKETCH_SCHEMA_VERSION, 'Solve-sketch example must use the authored sketch schema version.')
-    assert(solveSketchRequest.partialSolvePolicy === 'bestEffort', 'Solve-sketch example must use an explicit partial-solve policy.')
-    assert(solveSketchResponse.requestId === solveSketchRequest.requestId, 'Solve-sketch response must echo the request correlation ID.')
-    assert(solveSketchResponse.derivedRegions[0]?.ownerRevisionId === solveSketchResponse.revisionId, 'Solve-sketch derived regions must carry explicit ownership at the solved revision.')
+    expectTrue(solveSketchProjectionRequest.contractVersion === CONTRACT_VERSION, 'Solve-sketch example must declare the shared contract version.')
+    expectTrue(solveSketchRequest.definition.schemaVersion === SKETCH_SCHEMA_VERSION, 'Solve-sketch example must use the authored sketch schema version.')
+    expectTrue(solveSketchRequest.partialSolvePolicy === 'bestEffort', 'Solve-sketch example must use an explicit partial-solve policy.')
+    expectTrue(solveSketchResponse.requestId === solveSketchRequest.requestId, 'Solve-sketch response must echo the request correlation ID.')
+    expectTrue(solveSketchResponse.derivedRegions[0]?.ownerRevisionId === solveSketchResponse.revisionId, 'Solve-sketch derived regions must carry explicit ownership at the solved revision.')
   }
 
   function testCreateExtrudeExampleUsesTypedProfileRef() {
-    assert(createExtrudeRequest.definition.kind === 'extrude', 'Create-extrude example must use the extrude feature family.')
-    assert(createExtrudeRequest.definition.parameters.profiles[0]?.kind === 'region', 'Create-extrude example must use an explicit derived region reference.')
-    assert(createExtrudeRequest.definition.parameters.extent.end.distance > 0, 'Create-extrude example must use a positive blind extent distance.')
-    assert(createExtrudeResponse.revisionState.kind === 'accepted', 'Create-extrude response must report explicit revision acceptance.')
-    assert(createExtrudeResponse.rebuildResult.kind === 'rebuilt', 'Create-extrude response must report explicit rebuild success.')
+    expectTrue(createExtrudeRequest.definition.kind === 'extrude', 'Create-extrude example must use the extrude feature family.')
+    expectTrue(createExtrudeRequest.definition.parameters.profiles[0]?.kind === 'region', 'Create-extrude example must use an explicit derived region reference.')
+    expectTrue(createExtrudeRequest.definition.parameters.extent.end.distance > 0, 'Create-extrude example must use a positive blind extent distance.')
+    expectTrue(createExtrudeResponse.revisionState.kind === 'accepted', 'Create-extrude response must report explicit revision acceptance.')
+    expectTrue(createExtrudeResponse.rebuildResult.kind === 'rebuilt', 'Create-extrude response must report explicit rebuild success.')
   }
 
   function testPreviewExtrudeExampleReusesFeatureDefinition() {
-    assert(previewExtrudeRequest.definition === createExtrudeRequest.definition, 'Preview example must reuse the same typed definition family as create/update.')
-    assert(previewExtrudeRequest.previewId === 'preview_extrude_1', 'Preview example must carry an explicit preview correlation ID.')
-    assert(previewExtrudeResponse.freshness.kind === 'stale', 'Preview example must document stale-result handling explicitly.')
-    assert(previewExtrudeResponse.diagnostics[0]?.detail?.kind === 'stalePreview', 'Preview example must encode stale previews as machine-readable diagnostics.')
+    expectTrue(previewExtrudeRequest.definition === createExtrudeRequest.definition, 'Preview example must reuse the same typed definition family as create/update.')
+    expectTrue(previewExtrudeRequest.previewId === 'preview_extrude_1', 'Preview example must carry an explicit preview correlation ID.')
+    expectTrue(previewExtrudeResponse.freshness.kind === 'stale', 'Preview example must document stale-result handling explicitly.')
+    expectTrue(previewExtrudeResponse.diagnostics[0]?.detail?.kind === 'stalePreview', 'Preview example must encode stale previews as machine-readable diagnostics.')
   }
 
   function testCreateShellExampleUsesTypedBodyAndFaceRefs() {
-    assert(createShellRequest.definition.kind === 'shell', 'Create-shell example must use the shell feature family.')
-    assert(createShellRequest.definition.parameters.bodyTarget.kind === 'body', 'Create-shell example must keep the source body explicit.')
-    assert(createShellRequest.definition.parameters.faceTargets[0]?.kind === 'face', 'Create-shell example must keep removable faces explicit.')
-    assert(createShellRequest.definition.parameters.thickness > 0, 'Create-shell example must use a positive thickness.')
+    expectTrue(createShellRequest.definition.kind === 'shell', 'Create-shell example must use the shell feature family.')
+    expectTrue(createShellRequest.definition.parameters.bodyTarget.kind === 'body', 'Create-shell example must keep the source body explicit.')
+    expectTrue(createShellRequest.definition.parameters.faceTargets[0]?.kind === 'face', 'Create-shell example must keep removable faces explicit.')
+    expectTrue(createShellRequest.definition.parameters.thickness > 0, 'Create-shell example must use a positive thickness.')
   }
 
   function testResolveDeadReferenceExampleIsExplicit() {
-    assert(resolveDeadReferenceRequest.target.kind === 'face', 'Dead-reference example must use an explicit durable target.')
-    assert(resolveDeadReferenceRequest.target.faceId === 'face_deleted', 'Dead-reference example must name the exact dead durable target.')
-    assert(resolveDeadReferenceResponse.resolution.invalidation?.reason === 'deletedByRebuild', 'Dead-reference response must surface explicit invalidation semantics.')
-    assert(resolveDeadReferenceResponse.resolution.ownerRevisionId === 'rev_8', 'Dead-reference response must carry explicit ownership context.')
+    expectTrue(resolveDeadReferenceRequest.target.kind === 'face', 'Dead-reference example must use an explicit durable target.')
+    expectTrue(resolveDeadReferenceRequest.target.faceId === 'face_deleted', 'Dead-reference example must name the exact dead durable target.')
+    expectTrue(resolveDeadReferenceResponse.resolution.invalidation?.reason === 'deletedByRebuild', 'Dead-reference response must surface explicit invalidation semantics.')
+    expectTrue(resolveDeadReferenceResponse.resolution.ownerRevisionId === 'rev_8', 'Dead-reference response must carry explicit ownership context.')
   }
 
   function testTopologyChangingRebuildExampleSeparatesPreservedAndInvalidatedTargets() {
-    assert(topologyChangingRebuildRequest.baseRevisionId === 'rev_8', 'Topology-changing rebuild example must declare the exact base revision.')
-    assert(topologyChangingRebuildResponse.revisionState.kind === 'accepted', 'Topology-changing rebuild example must report explicit revision acceptance.')
-    assert(topologyChangingRebuildResponse.rebuildResult.kind === 'rebuilt', 'Topology-changing rebuild example must report a rebuilt result.')
-    assert(topologyChangingRebuildResponse.rebuildResult.invalidatedTargets.length === 1, 'Topology-changing rebuild example must surface invalidated durable targets explicitly.')
-    assert(topologyChangingRebuildResponse.rebuildResult.invalidatedTargets[0]?.kind === 'face', 'Topology-changing rebuild example must invalidate the exact durable face that died in the rebuild.')
-    assert(
+    expectTrue(topologyChangingRebuildRequest.baseRevisionId === 'rev_8', 'Topology-changing rebuild example must declare the exact base revision.')
+    expectTrue(topologyChangingRebuildResponse.revisionState.kind === 'accepted', 'Topology-changing rebuild example must report explicit revision acceptance.')
+    expectTrue(topologyChangingRebuildResponse.rebuildResult.kind === 'rebuilt', 'Topology-changing rebuild example must report a rebuilt result.')
+    expectTrue(topologyChangingRebuildResponse.rebuildResult.invalidatedTargets.length === 1, 'Topology-changing rebuild example must surface invalidated durable targets explicitly.')
+    expectTrue(topologyChangingRebuildResponse.rebuildResult.invalidatedTargets[0]?.kind === 'face', 'Topology-changing rebuild example must invalidate the exact durable face that died in the rebuild.')
+    expectTrue(
       topologyChangingRebuildResponse.changedTargets.some(
         (target) => target.kind === 'face' && target.faceId === 'face_top',
       ),
@@ -614,31 +608,31 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {
   function testRenderMeshWithBindingsExampleIsSelectionCapable() {
     const record = renderMeshWithBindingsExample.records[0]
 
-    assert(record !== undefined, 'Render example must include at least one render record.')
-    assert(record.binding.target.kind === 'face', 'Render example binding must map back to a durable face reference.')
-    assert(record.geometry.kind === 'mesh', 'Render example must use mesh geometry for tessellated faces.')
+    expectTrue(record !== undefined, 'Render example must include at least one render record.')
+    expectTrue(record.binding.target.kind === 'face', 'Render example binding must map back to a durable face reference.')
+    expectTrue(record.geometry.kind === 'mesh', 'Render example must use mesh geometry for tessellated faces.')
   }
 
   function testSolvedSketchVersionLiteralRemainsDocumented() {
-    assert(SOLVED_SKETCH_SCHEMA_VERSION === 'solved-sketch/v1alpha1', 'Solved sketch schema version literal must remain explicit in examples.')
+    expectTrue(SOLVED_SKETCH_SCHEMA_VERSION === 'solved-sketch/v1alpha1', 'Solved sketch schema version literal must remain explicit in examples.')
   }
 
   function testAdvancedSolidExamplesUseRoleSpecificParticipants() {
-    assert(sweepAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'profile'), 'Sweep example must preserve a profile participant role.')
-    assert(sweepAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'path'), 'Sweep example must preserve a path participant role.')
-    assert(loftAdvancedFeatureExample.parameters.participants[0]?.role === 'profile', 'Loft example must preserve ordered profile participants.')
-    assert(loftAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'path'), 'Loft example must preserve optional path participants.')
-    assert(loftAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'guideCurve'), 'Loft example must preserve optional guide-curve participants.')
-    assert(chamferAdvancedFeatureExample.parameters.participants[0]?.role === 'edge', 'Chamfer example must preserve topology modifier edge participants.')
-    assert(thickenAdvancedFeatureExample.parameters.participants[0]?.role === 'face', 'Thicken example must preserve explicit face participants.')
-    assert(thickenAdvancedFeatureExample.parameters.options?.thickness === 1.5, 'Thicken example must preserve positive thickness options.')
-    assert(splitAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'targetBody'), 'Split example must preserve explicit target-body participants.')
-    assert(splitAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'toolBody'), 'Split example must preserve body-operation tool participants.')
-    assert(deleteSolidAdvancedFeatureExample.parameters.participants[0]?.role === 'body', 'Delete-solid example must preserve explicit body participants.')
-    assert(mirrorAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'plane'), 'Mirror example must preserve an explicit plane participant.')
-    assert(mirrorAdvancedFeatureExample.parameters.options?.copy === true, 'Mirror example must preserve an explicit copy option.')
-    assert(transformAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'transformReference'), 'Transform example must preserve an explicit transform-reference participant.')
-    assert(transformAdvancedFeatureExample.parameters.options?.distance === 5, 'Transform example must preserve a typed distance option.')
+    expectTrue(sweepAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'profile'), 'Sweep example must preserve a profile participant role.')
+    expectTrue(sweepAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'path'), 'Sweep example must preserve a path participant role.')
+    expectTrue(loftAdvancedFeatureExample.parameters.participants[0]?.role === 'profile', 'Loft example must preserve ordered profile participants.')
+    expectTrue(loftAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'path'), 'Loft example must preserve optional path participants.')
+    expectTrue(loftAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'guideCurve'), 'Loft example must preserve optional guide-curve participants.')
+    expectTrue(chamferAdvancedFeatureExample.parameters.participants[0]?.role === 'edge', 'Chamfer example must preserve topology modifier edge participants.')
+    expectTrue(thickenAdvancedFeatureExample.parameters.participants[0]?.role === 'face', 'Thicken example must preserve explicit face participants.')
+    expectTrue(thickenAdvancedFeatureExample.parameters.options?.thickness === 1.5, 'Thicken example must preserve positive thickness options.')
+    expectTrue(splitAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'targetBody'), 'Split example must preserve explicit target-body participants.')
+    expectTrue(splitAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'toolBody'), 'Split example must preserve body-operation tool participants.')
+    expectTrue(deleteSolidAdvancedFeatureExample.parameters.participants[0]?.role === 'body', 'Delete-solid example must preserve explicit body participants.')
+    expectTrue(mirrorAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'plane'), 'Mirror example must preserve an explicit plane participant.')
+    expectTrue(mirrorAdvancedFeatureExample.parameters.options?.copy === true, 'Mirror example must preserve an explicit copy option.')
+    expectTrue(transformAdvancedFeatureExample.parameters.participants.some((participant) => participant.role === 'transformReference'), 'Transform example must preserve an explicit transform-reference participant.')
+    expectTrue(transformAdvancedFeatureExample.parameters.options?.distance === 5, 'Transform example must preserve a typed distance option.')
   }
 
   testSolveSketchExampleIsFullyTyped()

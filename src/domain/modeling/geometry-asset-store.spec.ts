@@ -1,29 +1,23 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   createIndexedDbGeometryAssetStore,
   createMemoryGeometryAssetStore,
 } from '@/domain/modeling/geometry-asset-store'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
-test('src/domain/modeling/geometry-asset-store.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const asset = await createDeterministicGeometryAsset({ byteLength: 96 * 1024 })
+test('src/domain/modeling/geometry-asset-store.spec.ts', async () => {  const asset = await createDeterministicGeometryAsset({ byteLength: 96 * 1024 })
   const store = createMemoryGeometryAssetStore()
   const firstPut = await store.put(asset)
   const secondPut = await store.put(asset)
 
-  assert(firstPut.ok && !firstPut.deduped, 'First geometry asset write should store the blob.')
-  assert(secondPut.ok && secondPut.deduped, 'Repeated geometry asset writes should dedupe by content hash.')
+  expectTrue(firstPut.ok && !firstPut.deduped, 'First geometry asset write should store the blob.')
+  expectTrue(secondPut.ok && secondPut.deduped, 'Repeated geometry asset writes should dedupe by content hash.')
 
   const loaded = await store.get(asset.asset)
-  assert(loaded.ok, 'Stored geometry asset blobs should be readable by manifest record.')
-  assert(loaded.ok && loaded.bytes.byteLength === asset.bytes.byteLength, 'Loaded geometry asset bytes should preserve byte length.')
+  expectTrue(loaded.ok, 'Stored geometry asset blobs should be readable by manifest record.')
+  expectTrue(loaded.ok && loaded.bytes.byteLength === asset.bytes.byteLength, 'Loaded geometry asset bytes should preserve byte length.')
 
   const missing = await store.get({
     ...asset.asset,
@@ -31,12 +25,12 @@ test('src/domain/modeling/geometry-asset-store.spec.ts', async () => {
     assetId: 'asset_missing_geometry',
     hash: `sha256:${'1'.repeat(64)}`,
   })
-  assert(!missing.ok && missing.diagnostic.code === 'geometry-asset-missing', 'Missing asset lookup should return a structured diagnostic.')
+  expectTrue(!missing.ok && missing.diagnostic.code === 'geometry-asset-missing', 'Missing asset lookup should return a structured diagnostic.')
 
   const corruptBytes = asset.bytes.slice()
   corruptBytes[0] = (corruptBytes[0]! + 1) % 255
   const corrupt = await store.put({ asset: asset.asset, bytes: corruptBytes })
-  assert(!corrupt.ok && corrupt.diagnostic.code === 'geometry-asset-corrupt', 'Corrupt asset bytes should be rejected before storage.')
+  expectTrue(!corrupt.ok && corrupt.diagnostic.code === 'geometry-asset-corrupt', 'Corrupt asset bytes should be rejected before storage.')
 
   const repairStore = createMemoryGeometryAssetStore()
   await repairStore.put(asset)
@@ -44,12 +38,12 @@ test('src/domain/modeling/geometry-asset-store.spec.ts', async () => {
   internalBlobs.set(asset.asset.hash, corruptBytes)
   const repaired = await repairStore.put(asset)
   const repairedLoaded = await repairStore.get(asset.asset)
-  assert(repaired.ok && !repaired.deduped, 'Putting valid bytes over a corrupt stored blob should repair the content-addressed entry.')
-  assert(repairedLoaded.ok, 'Repaired geometry asset entries should load after integrity verification.')
+  expectTrue(repaired.ok && !repaired.deduped, 'Putting valid bytes over a corrupt stored blob should repair the content-addressed entry.')
+  expectTrue(repairedLoaded.ok, 'Repaired geometry asset entries should load after integrity verification.')
 
   const unavailableStore = createIndexedDbGeometryAssetStore({ indexedDB: undefined })
   const storageFailure = await unavailableStore.put(asset)
-  assert(
+  expectTrue(
     !storageFailure.ok && storageFailure.diagnostic.code === 'geometry-asset-storage-failed',
     'IndexedDB storage failures should be reported as geometry asset diagnostics.',
   )

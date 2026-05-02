@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   cancelCoalescedSketchGeometryDragMove,
   getViewportPickTuning,
@@ -24,14 +25,7 @@ import type { ViewportCameraControls } from '@/domain/workspace/viewport-camera-
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import * as THREE from 'three'
 
-test('src/components/cad/three-cad-viewport.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createControls(target: THREE.Vector3): ViewportCameraControls {
+test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createControls(target: THREE.Vector3): ViewportCameraControls {
     return {
       target,
       update: () => undefined,
@@ -65,11 +59,11 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     schedule([2, 2])
     schedule([3, 3])
 
-    assert(frameCallbacks.size === 1, 'Drag scheduler should request one frame for multiple pending moves.')
+    expectTrue(frameCallbacks.size === 1, 'Drag scheduler should request one frame for multiple pending moves.')
     frameCallbacks.get(1)?.(0)
 
-    assert(movedPoints.length === 1, 'Drag scheduler should dispatch once per frame.')
-    assert(movedPoints[0]?.[0] === 3 && movedPoints[0]?.[1] === 3, 'Drag scheduler should dispatch the latest point.')
+    expectTrue(movedPoints.length === 1, 'Drag scheduler should dispatch once per frame.')
+    expectTrue(movedPoints[0]?.[0] === 3 && movedPoints[0]?.[1] === 3, 'Drag scheduler should dispatch the latest point.')
   }
 
   function testDragMoveCancellationDropsPendingFrame() {
@@ -97,10 +91,10 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     })
     frameCallbacks.get(7)?.(0)
 
-    assert(cancelledFrames[0] === 7, 'Drag cancellation should cancel the pending frame.')
-    assert(pendingFrameIdRef.current === null, 'Drag cancellation should clear the pending frame id.')
-    assert(pendingPointRef.current === null, 'Drag cancellation should clear the pending point.')
-    assert(movedPoints.length === 0, 'Cancelled drag frame should not dispatch a stale move.')
+    expectTrue(cancelledFrames[0] === 7, 'Drag cancellation should cancel the pending frame.')
+    expectTrue(pendingFrameIdRef.current === null, 'Drag cancellation should clear the pending frame id.')
+    expectTrue(pendingPointRef.current === null, 'Drag cancellation should clear the pending point.')
+    expectTrue(movedPoints.length === 0, 'Cancelled drag frame should not dispatch a stale move.')
   }
 
   function testSketchBvhKeyIgnoresPositionalPolylineUpdates() {
@@ -134,11 +128,11 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       linePattern: 'dashed',
     } as const
 
-    assert(
+    expectTrue(
       createViewportBvhSceneKey([], [renderable]) === createViewportBvhSceneKey([], [movedRenderable]),
       'Sketch BVH key should stay stable for positional-only polyline updates.',
     )
-    assert(
+    expectTrue(
       createViewportBvhSceneKey([], [movedRenderable]) !== createViewportBvhSceneKey([], [dashedRenderable]),
       'Sketch BVH key should change when structural line styling changes.',
     )
@@ -190,7 +184,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       },
     } as const
 
-    assert(
+    expectTrue(
       createViewportBvhSceneKey([], [renderable]) === createViewportBvhSceneKey([], [changedPayloadRenderable]),
       'Sketch BVH keys should stay independent from inline image payload bytes.',
     )
@@ -226,10 +220,10 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       viewport: { width: 200, height: 100 },
     })
 
-    assert(point !== null, 'Projection bridge should return coordinates for a known target.')
-    assert(Math.abs(point.x - 100) < 0.001, 'Projected target should be centered horizontally.')
-    assert(Math.abs(point.y - 50) < 0.001, 'Projected target should be centered vertically.')
-    assert(missingPoint === null, 'Projection bridge should return null for unknown targets.')
+    expectTrue(point !== null, 'Projection bridge should return coordinates for a known target.')
+    expectTrue(Math.abs(point.x - 100) < 0.001, 'Projected target should be centered horizontally.')
+    expectTrue(Math.abs(point.y - 50) < 0.001, 'Projected target should be centered vertically.')
+    expectTrue(missingPoint === null, 'Projection bridge should return null for unknown targets.')
 
     mesh.geometry.dispose()
     if (mesh.material instanceof THREE.Material) {
@@ -259,11 +253,11 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       viewport: { width: 240, height: 120 },
     })
 
-    assert(centeredPoint !== null, 'World-point projection should resolve visible points.')
-    assert(Math.abs(centeredPoint.x - 120) < 0.001, 'Projection should center the world origin horizontally.')
-    assert(Math.abs(centeredPoint.y - 60) < 0.001, 'Projection should center the world origin vertically.')
-    assert(offsetPoint !== null && offsetPoint.x > centeredPoint.x, 'Projection should preserve horizontal ordering for visible points.')
-    assert(hiddenPoint === null, 'Projection should reject points that fall behind the active camera.')
+    expectTrue(centeredPoint !== null, 'World-point projection should resolve visible points.')
+    expectTrue(Math.abs(centeredPoint.x - 120) < 0.001, 'Projection should center the world origin horizontally.')
+    expectTrue(Math.abs(centeredPoint.y - 60) < 0.001, 'Projection should center the world origin vertically.')
+    expectTrue(offsetPoint !== null && offsetPoint.x > centeredPoint.x, 'Projection should preserve horizontal ordering for visible points.')
+    expectTrue(hiddenPoint === null, 'Projection should reject points that fall behind the active camera.')
   }
 
   function testSectionScreenDragOffsetTracksProjectedNormalMotion() {
@@ -290,7 +284,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       viewport: { width: 200, height: 200 },
     })
 
-    assert(center !== null && normalPoint !== null, 'Section drag projection should be testable with visible handle points.')
+    expectTrue(center !== null && normalPoint !== null, 'Section drag projection should be testable with visible handle points.')
 
     const axisDelta = {
       x: normalPoint.x - center.x,
@@ -309,8 +303,8 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       },
     })
 
-    assert(offset !== null, 'Section drag projection should resolve a numeric offset for visible axis motion.')
-    assert(Math.abs(offset - 2) < 0.05, 'Section drag projection should convert two projected world units into offset motion along the section normal.')
+    expectTrue(offset !== null, 'Section drag projection should resolve a numeric offset for visible axis motion.')
+    expectTrue(Math.abs(offset - 2) < 0.05, 'Section drag projection should convert two projected world units into offset motion along the section normal.')
   }
 
   function testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint() {
@@ -332,8 +326,8 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       currentClientPoint: { x: 100, y: 80 },
     })
 
-    assert(offset !== null, 'Section drag projection should still resolve an offset when the section normal is view-aligned.')
-    assert(Math.abs(offset) > 0.001, 'Section drag projection fallback should produce visible motion for aligned views.')
+    expectTrue(offset !== null, 'Section drag projection should still resolve an offset when the section normal is view-aligned.')
+    expectTrue(Math.abs(offset) > 0.001, 'Section drag projection fallback should produce visible motion for aligned views.')
   }
 
   function testRenderIdleTrackerRequiresStableIdleFrames() {
@@ -359,10 +353,10 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       sceneKey: 'scene-b',
     })
 
-    assert(active === false, 'Render idle should stay false while the editor is active.')
-    assert(firstIdle === false, 'Render idle should require consecutive stable frames.')
-    assert(secondIdle === true, 'Render idle should become true after enough stable idle frames.')
-    assert(sceneChanged === false, 'Render idle should clear when the scene changes.')
+    expectTrue(active === false, 'Render idle should stay false while the editor is active.')
+    expectTrue(firstIdle === false, 'Render idle should require consecutive stable frames.')
+    expectTrue(secondIdle === true, 'Render idle should become true after enough stable idle frames.')
+    expectTrue(sceneChanged === false, 'Render idle should clear when the scene changes.')
   }
 
   function testViewCubeResizeUpdatesCanvasCssSize() {
@@ -376,11 +370,11 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       },
     })
 
-    assert(cubeSize === 96, 'View cube renderer should fit within the smaller cube container dimension.')
-    assert(setSizeCalls.length === 1, 'View cube resize should issue one renderer size update.')
-    assert(setSizeCalls[0]?.width === 96, 'View cube renderer width should match the computed CSS size.')
-    assert(setSizeCalls[0]?.height === 96, 'View cube renderer height should match the computed CSS size.')
-    assert(
+    expectTrue(cubeSize === 96, 'View cube renderer should fit within the smaller cube container dimension.')
+    expectTrue(setSizeCalls.length === 1, 'View cube resize should issue one renderer size update.')
+    expectTrue(setSizeCalls[0]?.width === 96, 'View cube renderer width should match the computed CSS size.')
+    expectTrue(setSizeCalls[0]?.height === 96, 'View cube renderer height should match the computed CSS size.')
+    expectTrue(
       setSizeCalls[0]?.updateStyle === true,
       'View cube renderer should update canvas CSS size so devicePixelRatio does not enlarge the visible overlay.',
     )
@@ -394,9 +388,9 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       ...(Array.isArray(axes.material) ? axes.material : [axes.material]),
     ]
 
-    assert(grid.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Grid should render before model and sketch wires.')
-    assert(axes.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Axes should render before model and sketch wires.')
-    assert(
+    expectTrue(grid.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Grid should render before model and sketch wires.')
+    expectTrue(axes.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Axes should render before model and sketch wires.')
+    expectTrue(
       materials.every((material) => material.depthTest && !material.depthWrite),
       'Scaffold wire materials should depth-test without writing depth.',
     )
@@ -410,15 +404,15 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
     const defaultTuning = getViewportPickTuning(null)
     const measureTuning = getViewportPickTuning(measureSelectionFilter)
 
-    assert(
+    expectTrue(
       defaultTuning.linePickThreshold > measureTuning.linePickThreshold,
       'Measure picking should reduce the line threshold to avoid selecting hidden wires through faces.',
     )
-    assert(
+    expectTrue(
       (measureTuning.resolutionOptions.wireOcclusionTolerance ?? Number.POSITIVE_INFINITY) < Number.POSITIVE_INFINITY,
       'Measure picking should install an explicit wire occlusion tolerance override.',
     )
-    assert(
+    expectTrue(
       (measureTuning.resolutionOptions.wireOcclusionTolerance ?? 0)
         < (defaultTuning.resolutionOptions.wireOcclusionTolerance ?? Number.POSITIVE_INFINITY),
       'Measure picking should use a tighter face-over-wire occlusion tolerance than the default picker.',
@@ -431,7 +425,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       [8, 3],
     )
 
-    assert(
+    expectTrue(
       patch.intent === 'setDimensionAnnotationPlacement'
         && patch.handleId === 'dimension_1-annotation-drag'
         && patch.dimensionId === 'dimension_1'
@@ -459,9 +453,9 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       },
     })
 
-    assert(result !== null, 'View cube clicks should produce a camera transition request when the viewport is ready.')
-    assert(requests.length === 1, 'View cube navigation should request one shared animated transition.')
-    assert(
+    expectTrue(result !== null, 'View cube clicks should produce a camera transition request when the viewport is ready.')
+    expectTrue(requests.length === 1, 'View cube navigation should request one shared animated transition.')
+    expectTrue(
       requests[0]?.fromFrameProjectionMode === 'orthographic' && requests[0]?.targetFrameProjectionMode === 'orthographic',
       'View cube navigation should preserve the active projection when requesting the transition.',
     )
@@ -498,9 +492,9 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       },
     })
 
-    assert(resolution.targetFrame !== null, 'Entering sketch mode should request a transition into the sketch frame.')
-    assert(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch entry should capture the pre-entry camera pose.')
-    assert(resolution.state.activeSessionToken !== null, 'Sketch entry should scope the saved camera pose to the active session token.')
+    expectTrue(resolution.targetFrame !== null, 'Entering sketch mode should request a transition into the sketch frame.')
+    expectTrue(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch entry should capture the pre-entry camera pose.')
+    expectTrue(resolution.state.activeSessionToken !== null, 'Sketch entry should scope the saved camera pose to the active session token.')
   }
 
   function testSketchExitRequestsRestoreTransition() {
@@ -527,9 +521,9 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {
       },
     })
 
-    assert(resolution.targetFrame?.projectionMode === 'orthographic', 'Sketch exit should restore the captured pre-entry projection.')
-    assert(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch exit should animate back from the current sketch camera pose.')
-    assert(
+    expectTrue(resolution.targetFrame?.projectionMode === 'orthographic', 'Sketch exit should restore the captured pre-entry projection.')
+    expectTrue(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch exit should animate back from the current sketch camera pose.')
+    expectTrue(
       resolution.state.activeSessionToken === null && resolution.state.preSketchFrame === null,
       'Sketch exit should clear the active session-scoped camera snapshot after requesting restoration.',
     )

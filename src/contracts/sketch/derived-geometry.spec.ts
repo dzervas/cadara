@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   SketchDefinition,
   SketchDerivationDefinition,
@@ -55,11 +56,11 @@ test('evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
   assertPoint(center, [-2, 0], 'Mirror relationships should reflect arc centers across the mirror axis.')
   assertPoint(start, [-3, 0], 'Mirror relationships should reflect arc start points across the mirror axis.')
   assertPoint(end, [-2, 1], 'Mirror relationships should reflect arc end points across the mirror axis.')
-  assert(
+  expectTrue(
     mirroredArc.kind === 'arc' && mirroredArc.sweepDirection === 'counterClockwise',
     'Mirrored arcs should reverse sweep direction so the mirrored geometry remains consistent.',
   )
-  assert(result.diagnostics.length === 0, 'Valid mirror relationships should not emit diagnostics.')
+  expectTrue(result.diagnostics.length === 0, 'Valid mirror relationships should not emit diagnostics.')
 })
 
 test('evaluateSketchDerivations applies linear, circular, and transform relationships through the exported seam', () => {
@@ -173,7 +174,7 @@ test('evaluateSketchDerivations applies linear, circular, and transform relation
   assertPoint(pointPosition(result.definition, 'line_out_start'), [4, -1], 'Linear patterns should offset the first line endpoint by the pattern vector.')
   assertPoint(pointPosition(result.definition, 'line_out_end'), [5, -1], 'Linear patterns should offset the second line endpoint by the pattern vector.')
   assertPoint(pointPosition(result.definition, 'circle_out_center'), [8, 0], 'Transform relationships should rotate, scale, then translate circle centers.')
-  assert(
+  expectTrue(
     scaledCircle.kind === 'circle' && scaledCircle.radius === 4,
     'Transform relationships should scale circle radii by the absolute value of the transform scale.',
   )
@@ -181,7 +182,7 @@ test('evaluateSketchDerivations applies linear, circular, and transform relation
   assertPoint(pointPosition(result.definition, 'spline_out_a'), [0, 1], 'Transforms should rotate and translate spline control points.')
   assertPoint(pointPosition(result.definition, 'spline_out_b'), [0, 2], 'Transforms should preserve spline point order while moving each point.')
   assertPoint(pointPosition(result.definition, 'spline_out_c'), [-1, 2], 'Transforms should apply consistently across every spline point in the output map.')
-  assert(result.diagnostics.length === 0, 'Valid derived relationships should not emit diagnostics.')
+  expectTrue(result.diagnostics.length === 0, 'Valid derived relationships should not emit diagnostics.')
 })
 
 test('evaluateSketchDerivations emits diagnostics for missing seed, missing output, and missing mirror axis seams', () => {
@@ -251,31 +252,25 @@ test('evaluateSketchDerivations emits diagnostics for missing seed, missing outp
   const result = evaluateSketchDerivations(definition)
   const codes = result.diagnostics.map((diagnostic) => diagnostic.code)
 
-  assert(codes.includes('derived-transform-missing-seed'), 'Missing seed entities should emit a missing-seed diagnostic.')
-  assert(codes.includes('derived-transform-missing-output'), 'Missing output entities should emit a missing-output diagnostic.')
-  assert(codes.includes('derived-transform-missing-mirror-axis'), 'Missing mirror axes should emit a missing-axis diagnostic.')
+  expectTrue(codes.includes('derived-transform-missing-seed'), 'Missing seed entities should emit a missing-seed diagnostic.')
+  expectTrue(codes.includes('derived-transform-missing-output'), 'Missing output entities should emit a missing-output diagnostic.')
+  expectTrue(codes.includes('derived-transform-missing-mirror-axis'), 'Missing mirror axes should emit a missing-axis diagnostic.')
 })
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function assertPoint(actual: SketchPoint2D, expected: SketchPoint2D, message: string) {
   const close = Math.abs(actual[0] - expected[0]) < 1e-9 && Math.abs(actual[1] - expected[1]) < 1e-9
-  assert(close, `${message} Expected [${expected.join(', ')}], received [${actual.join(', ')}].`)
+  expectTrue(close, `${message} Expected [${expected.join(', ')}], received [${actual.join(', ')}].`)
 }
 
 function pointPosition(definition: SketchDefinition, pointId: string) {
   const point = definition.points.find((candidate) => candidate.pointId === pointId)
-  assert(point, `Expected point ${pointId} to exist in the evaluated sketch definition.`)
+  expectTrue(point, `Expected point ${pointId} to exist in the evaluated sketch definition.`)
   return point.position
 }
 
 function entity(definition: SketchDefinition, entityId: string): SketchEntityDefinition {
   const candidate = definition.entities.find((entry) => entry.entityId === entityId)
-  assert(candidate, `Expected entity ${entityId} to exist in the evaluated sketch definition.`)
+  expectTrue(candidate, `Expected entity ${entityId} to exist in the evaluated sketch definition.`)
   return candidate
 }
 

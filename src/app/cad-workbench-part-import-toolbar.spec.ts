@@ -1,15 +1,10 @@
 import { beforeEach, mock, test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createImportProviderRegistry } from '@/domain/import/provider-registry'
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from '@/domain/extensions/test-registry-composition'
 
 import { createHookTestHarness } from './workbench/controllers/controller-test-harness'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 const hookHarness = createHookTestHarness()
 const actualReactModule = await import('react')
@@ -126,7 +121,7 @@ test('useWorkbenchPartImport starts an import session for a matching provider', 
           return { files: [file], ok: true as const }
         },
         async resolveImportSource(selectedFile) {
-          assert(selectedFile === file, 'The selected file should be passed to source resolution.')
+          expectTrue(selectedFile === file, 'The selected file should be passed to source resolution.')
           return {
             bytes: new Uint8Array([1, 2, 3]),
             fingerprint: 'sha256:test',
@@ -152,10 +147,10 @@ test('useWorkbenchPartImport starts an import session for a matching provider', 
 
   await controller.requestPartImport()
 
-  assert(errors.length === 0, 'A successful import selection should not surface an error.')
-  assert(createCapabilitiesCalls.length === 1, 'Import review should build capabilities once from the controller seam.')
-  assert(createSessionCalls.length === 1, 'Import review should create exactly one import session.')
-  assert(
+  expectTrue(errors.length === 0, 'A successful import selection should not surface an error.')
+  expectTrue(createCapabilitiesCalls.length === 1, 'Import review should build capabilities once from the controller seam.')
+  expectTrue(createSessionCalls.length === 1, 'Import review should create exactly one import session.')
+  expectTrue(
     JSON.stringify(events) === JSON.stringify([{ type: 'import.fileSelected', session }]),
     'Successful file selection should dispatch the selected import session.',
   )
@@ -192,7 +187,7 @@ test('useWorkbenchPartImport blocks invalid request states and reports the visib
   )
 
   await blockedByEdit.requestPartImport()
-  assert(pickerCalls === 0, 'Active editing should block part import before the file picker opens.')
+  expectTrue(pickerCalls === 0, 'Active editing should block part import before the file picker opens.')
 
   const missingSnapshot = hookHarness.render(() =>
     useWorkbenchPartImport({
@@ -278,7 +273,7 @@ test('useWorkbenchPartImport blocks invalid request states and reports the visib
 
   await unmatched.requestPartImport()
 
-  assert(
+  expectTrue(
     JSON.stringify(errors) === JSON.stringify([
       'The current document is still loading.',
       'No part importers are currently registered.',
@@ -349,11 +344,11 @@ test('useWorkbenchPartImport lets the user choose among multiple matching provid
 
   await controller.requestPartImport()
 
-  assert(
+  expectTrue(
     JSON.stringify(selectedProviders) === JSON.stringify(['step-b']),
     'Prompt selection should choose the requested matching provider.',
   )
-  assert(events.length === 1, 'Provider selection should still dispatch a single import session event.')
+  expectTrue(events.length === 1, 'Provider selection should still dispatch a single import session event.')
 })
 
 test('useWorkbenchPartImport commits the active session, reopens a created sketch, and reports failures', async () => {
@@ -404,8 +399,8 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
 
   await successful.commitImportSession()
 
-  assert(errors.length === 0, 'A successful commit should not surface an error.')
-  assert(
+  expectTrue(errors.length === 0, 'A successful commit should not surface an error.')
+  expectTrue(
     JSON.stringify(events) === JSON.stringify([
       { type: 'import.commitRequested' },
       { type: 'import.committed' },
@@ -417,7 +412,7 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
     ]),
     'A successful sketch import should commit, then reopen the created sketch.',
   )
-  assert(
+  expectTrue(
     JSON.stringify(infos) === JSON.stringify(['Imported housing.step.']),
     'A successful commit should surface a user-facing confirmation with the imported file name.',
   )
@@ -489,7 +484,7 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
 
   await thrownController.commitImportSession()
 
-  assert(
+  expectTrue(
     JSON.stringify(failedEvents) === JSON.stringify([
       { type: 'import.commitRequested' },
       {
@@ -505,18 +500,18 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
     ]),
     'Rejected import commits should dispatch the returned diagnostics through the controller seam.',
   )
-  assert(thrownEvents.length === 2, 'Thrown commit failures should still dispatch the commit request and normalized failure.')
-  assert(
+  expectTrue(thrownEvents.length === 2, 'Thrown commit failures should still dispatch the commit request and normalized failure.')
+  expectTrue(
     (thrownEvents[0] as { type: string }).type === 'import.commitRequested',
     'Thrown commit failures should preserve the initial commit request event.',
   )
-  assert(
+  expectTrue(
     (thrownEvents[1] as { type: string }).type === 'import.failed'
       && (thrownEvents[1] as { diagnostics: Array<{ code: string; message: string }> }).diagnostics[0]?.code === 'import-commit-failed'
       && (thrownEvents[1] as { diagnostics: Array<{ code: string; message: string }> }).diagnostics[0]?.message === 'Import transaction rolled back.',
     'Thrown commit failures should be normalized into an import.failed event.',
   )
-  assert(
+  expectTrue(
     JSON.stringify(errors.slice(-2)) === JSON.stringify([
       'Import surface is self-intersecting.',
       'Import transaction rolled back.',

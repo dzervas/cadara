@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   deriveSketchRegionsCore,
   findSketchRings,
@@ -10,14 +11,7 @@ import type {
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { ReferenceId } from '@/contracts/shared/ids'
 
-test('src/contracts/sketch/region-extraction.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertNear(actual: number, expected: number, message: string) {
+test('src/contracts/sketch/region-extraction.spec.ts', async () => {  function assertNear(actual: number, expected: number, message: string) {
     if (Math.abs(actual - expected) > 1e-9) {
       throw new Error(`${message}: expected ${expected}, received ${actual}`)
     }
@@ -192,8 +186,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     }
 
     const found = findSketchRings(definition, makeSolvedSnapshot(definition))
-    assert(found.rings.length === 0, 'Open chains should not produce rings.')
-    assert(found.unusedSegments.length === 2, 'All open segments should remain unused.')
+    expectTrue(found.rings.length === 0, 'Open chains should not produce rings.')
+    expectTrue(found.unusedSegments.length === 2, 'All open segments should remain unused.')
   }
 
   async function testFindRingsOne() {
@@ -222,9 +216,9 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
     }
 
     const found = findSketchRings(definition, makeSolvedSnapshot(definition))
-    assert(found.rings.length === 1, 'One rectangle should produce one ring.')
-    assert(found.unusedSegments.length === 0, 'Closed rectangle should consume all segments.')
-    assert(found.rings[0]?.boundaryEntityIds.length === 4, 'The ring should contain four edges.')
+    expectTrue(found.rings.length === 1, 'One rectangle should produce one ring.')
+    expectTrue(found.unusedSegments.length === 0, 'Closed rectangle should consume all segments.')
+    expectTrue(found.rings[0]?.boundaryEntityIds.length === 4, 'The ring should contain four edges.')
   }
 
   async function testJiggledRectangleRegionsStayStableAndPositioned() {
@@ -275,8 +269,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
         solvedSnapshot,
       })
 
-      assert(found.rings.length === 1, 'Jiggled rectangle should keep producing exactly one ring.')
-      assert(derived.regions.length === 1, 'Jiggled rectangle should keep producing exactly one region.')
+      expectTrue(found.rings.length === 1, 'Jiggled rectangle should keep producing exactly one ring.')
+      expectTrue(derived.regions.length === 1, 'Jiggled rectangle should keep producing exactly one region.')
 
       const ring = found.rings[0]!
       const region = derived.regions[0]!
@@ -289,8 +283,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       expectedRegionId ??= region.regionId
       expectedLoopSignature ??= loopSignature
 
-      assert(region.regionId === expectedRegionId, 'Region id should remain stable while the profile is jiggled.')
-      assert(loopSignature === expectedLoopSignature, 'Region boundary sources should remain stable while the profile is jiggled.')
+      expectTrue(region.regionId === expectedRegionId, 'Region id should remain stable while the profile is jiggled.')
+      expectTrue(loopSignature === expectedLoopSignature, 'Region boundary sources should remain stable while the profile is jiggled.')
       assertNear(Math.min(...xs), dx, 'Jiggled region should keep the translated minimum x.')
       assertNear(Math.max(...xs), dx + 4, 'Jiggled region should keep the translated maximum x.')
       assertNear(Math.min(...ys), dy, 'Jiggled region should keep the translated minimum y.')
@@ -354,8 +348,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
 
     const solvedSnapshot = makeSolvedSnapshot(definition)
     const found = findSketchRings(definition, solvedSnapshot)
-    assert(found.rings.length === 2, 'Endpoint selections with floating-point residuals should produce both adjacent rings.')
-    assert(found.unusedSegments.length === 0, 'Endpoint-selection residuals should not leave profile segments unused.')
+    expectTrue(found.rings.length === 2, 'Endpoint selections with floating-point residuals should produce both adjacent rings.')
+    expectTrue(found.unusedSegments.length === 0, 'Endpoint-selection residuals should not leave profile segments unused.')
 
     const derived = deriveSketchRegionsCore({
       documentId: 'doc_workspace',
@@ -365,8 +359,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(derived.regions.length === 2, 'Endpoint selections from existing vertices should derive both selectable profiles.')
-    assert(
+    expectTrue(derived.regions.length === 2, 'Endpoint selections from existing vertices should derive both selectable profiles.')
+    expectTrue(
       derived.regions.some((region) =>
         region.loops[0]?.segments.some((segment) =>
           segment.source.kind === 'entity' && segment.source.entityId === 'sketch_entity_2_line',
@@ -426,14 +420,14 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
           segment.source.kind === 'entity' && segment.source.entityId === entityId,
         ),
       )
-      assert(region, `Expected a region containing ${entityId}.`)
+      expectTrue(region, `Expected a region containing ${entityId}.`)
       return region.regionId
     }
 
     const stableRegionId = regionIdForEntity(makeDefinition(1), 'sketch_entity_a_bottom')
     const resortedRegionId = regionIdForEntity(makeDefinition(4), 'sketch_entity_a_bottom')
 
-    assert(stableRegionId === resortedRegionId, 'Region ids should be based on boundary content, not sorted position.')
+    expectTrue(stableRegionId === resortedRegionId, 'Region ids should be based on boundary content, not sorted position.')
   }
 
   async function testFindRingsMultipleAndDeriveRegions() {
@@ -489,7 +483,7 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
 
     const solvedSnapshot = makeSolvedSnapshot(definition)
     const found = findSketchRings(definition, solvedSnapshot)
-    assert(found.rings.length === 2, 'Nested rectangles should produce two rings.')
+    expectTrue(found.rings.length === 2, 'Nested rectangles should produce two rings.')
 
     const derived = deriveSketchRegionsCore({
       documentId: 'doc_workspace',
@@ -499,11 +493,11 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(derived.diagnostics.length === 0, 'Region derivation should not emit diagnostics for solved nested rectangles.')
-    assert(derived.regions.length === 1, 'Nested rectangles should derive one even-parity solid region.')
-    assert(derived.regions[0]?.loops.length === 2, 'Derived region should contain outer and inner loops.')
-    assert(derived.regions[0]?.loops[0]?.role === 'outer', 'First loop should be outer.')
-    assert(derived.regions[0]?.loops[1]?.role === 'inner', 'Second loop should be inner.')
+    expectTrue(derived.diagnostics.length === 0, 'Region derivation should not emit diagnostics for solved nested rectangles.')
+    expectTrue(derived.regions.length === 1, 'Nested rectangles should derive one even-parity solid region.')
+    expectTrue(derived.regions[0]?.loops.length === 2, 'Derived region should contain outer and inner loops.')
+    expectTrue(derived.regions[0]?.loops[0]?.role === 'outer', 'First loop should be outer.')
+    expectTrue(derived.regions[0]?.loops[1]?.role === 'inner', 'Second loop should be inner.')
   }
 
   async function testThreeLevelNestingKeepsIslandSolid() {
@@ -582,10 +576,10 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(derived.regions.length === 2, 'Outer/hole/island nesting should derive the outer solid and island solid.')
-    assert(derived.regions[0]?.loops.length === 2, 'Outer solid should use the middle loop as a hole.')
-    assert(derived.regions[1]?.loops.length === 1, 'Island solid should not be treated as an inner loop of the hole.')
-    assert(
+    expectTrue(derived.regions.length === 2, 'Outer/hole/island nesting should derive the outer solid and island solid.')
+    expectTrue(derived.regions[0]?.loops.length === 2, 'Outer solid should use the middle loop as a hole.')
+    expectTrue(derived.regions[1]?.loops.length === 1, 'Island solid should not be treated as an inner loop of the hole.')
+    expectTrue(
       derived.regions[1]?.loops[0]?.segments.some((segment) =>
         segment.source.kind === 'entity' && segment.source.entityId === 'sketch_entity_ij',
       ),
@@ -635,13 +629,13 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       projectedReferences,
     })
 
-    assert(derived.regions.length === 1, 'Mixed local/projected edges should close one region.')
+    expectTrue(derived.regions.length === 1, 'Mixed local/projected edges should close one region.')
     const loop = derived.regions[0]!.loops[0]!
     const projectedSegment = loop.segments.find((segment) => segment.source.kind === 'projectedGeometry')
-    assert(projectedSegment?.source.kind === 'projectedGeometry', 'Loop should include projected boundary identity.')
-    assert(projectedSegment.source.reference.referenceId === 'ref_projected_profile', 'Projected segment must preserve authored reference ID.')
-    assert(projectedSegment.source.reference.geometryId === 'projected_geometry_left', 'Projected segment must preserve projected geometry ID.')
-    assert(definition.entityIds.length === 3, 'Projected boundaries must not be copied into sketch-owned entity IDs.')
+    expectTrue(projectedSegment?.source.kind === 'projectedGeometry', 'Loop should include projected boundary identity.')
+    expectTrue(projectedSegment.source.reference.referenceId === 'ref_projected_profile', 'Projected segment must preserve authored reference ID.')
+    expectTrue(projectedSegment.source.reference.geometryId === 'projected_geometry_left', 'Projected segment must preserve projected geometry ID.')
+    expectTrue(definition.entityIds.length === 3, 'Projected boundaries must not be copied into sketch-owned entity IDs.')
   }
 
   async function testProjectedOnlyCircleLoopPreservesProjectedIdentity() {
@@ -676,11 +670,11 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       projectedReferences,
     })
 
-    assert(derived.regions.length === 1, 'Projected-only circles should derive profile regions.')
+    expectTrue(derived.regions.length === 1, 'Projected-only circles should derive profile regions.')
     const segment = derived.regions[0]!.loops[0]!.segments[0]
-    assert(segment?.source.kind === 'projectedGeometry', 'Projected-only loop should stay projected-sourced.')
-    assert(segment.source.reference.geometryId === 'projected_geometry_circle', 'Projected circle identity should survive region derivation.')
-    assert(definition.points.length === 0 && definition.entities.length === 0, 'Projected-only regions must not author copied sketch geometry.')
+    expectTrue(segment?.source.kind === 'projectedGeometry', 'Projected-only loop should stay projected-sourced.')
+    expectTrue(segment.source.reference.geometryId === 'projected_geometry_circle', 'Projected circle identity should survive region derivation.')
+    expectTrue(definition.points.length === 0 && definition.entities.length === 0, 'Projected-only regions must not author copied sketch geometry.')
   }
 
   async function testMissingProjectedReferencesReportDiagnosticsWithoutInventingGeometry() {
@@ -707,8 +701,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       projectedReferences: [],
     })
 
-    assert(derived.regions.length === 0, 'Missing projected data must not invent profile regions.')
-    assert(
+    expectTrue(derived.regions.length === 0, 'Missing projected data must not invent profile regions.')
+    expectTrue(
       derived.diagnostics.some((diagnostic) => diagnostic.code === 'projected-region-reference-unresolved'),
       'Missing projected data should report a machine-readable diagnostic.',
     )
@@ -746,12 +740,12 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       projectedReferences,
     })
 
-    assert(derived.regions.length === 0, 'Unauthored projected data must not create profile regions.')
-    assert(
+    expectTrue(derived.regions.length === 0, 'Unauthored projected data must not create profile regions.')
+    expectTrue(
       derived.diagnostics.some((diagnostic) => diagnostic.code === 'projected-region-reference-unauthored'),
       'Unauthored projected data should report a machine-readable diagnostic.',
     )
-    assert(definition.points.length === 0 && definition.entities.length === 0, 'Rejected projected regions must not copy geometry into the sketch.')
+    expectTrue(definition.points.length === 0 && definition.entities.length === 0, 'Rejected projected regions must not copy geometry into the sketch.')
   }
 
   async function testProjectedReferenceMissingAuthoredRecordIsRejected() {
@@ -786,8 +780,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       projectedReferences,
     })
 
-    assert(derived.regions.length === 0, 'Projection data without an authored reference record must not create profile regions.')
-    assert(
+    expectTrue(derived.regions.length === 0, 'Projection data without an authored reference record must not create profile regions.')
+    expectTrue(
       derived.diagnostics.some((diagnostic) => diagnostic.code === 'projected-region-reference-unauthored'),
       'Missing authored reference records should report a machine-readable diagnostic.',
     )
@@ -814,7 +808,7 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
 
     const solvedSnapshot = makeSolvedSnapshot(definition)
     const found = findSketchRings(definition, solvedSnapshot)
-    assert(found.rings.length === 1, 'A standalone circle should produce one ring.')
+    expectTrue(found.rings.length === 1, 'A standalone circle should produce one ring.')
 
     const derived = deriveSketchRegionsCore({
       documentId: 'doc_workspace',
@@ -824,9 +818,9 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(derived.regions.length === 1, 'A standalone circle should derive one selectable region.')
-    assert(derived.regions[0]?.loops[0]?.segments.length === 1, 'Circle regions should use the circle entity as one closed segment.')
-    assert(derived.regions[0]?.loops[0]?.segments[0]?.startPointId === null, 'Circle region segments should not invent boundary points.')
+    expectTrue(derived.regions.length === 1, 'A standalone circle should derive one selectable region.')
+    expectTrue(derived.regions[0]?.loops[0]?.segments.length === 1, 'Circle regions should use the circle entity as one closed segment.')
+    expectTrue(derived.regions[0]?.loops[0]?.segments[0]?.startPointId === null, 'Circle region segments should not invent boundary points.')
   }
 
   async function testSquareWithInnerCircleDerivesAllBoundedCells() {
@@ -877,9 +871,9 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(derived.regions.length === 1, 'A square with an inner circle should derive one even-parity solid region.')
-    assert(derived.regions[0]?.loops.length === 2, 'Outer cell should include the circle as an inner loop.')
-    assert(
+    expectTrue(derived.regions.length === 1, 'A square with an inner circle should derive one even-parity solid region.')
+    expectTrue(derived.regions[0]?.loops.length === 2, 'Outer cell should include the circle as an inner loop.')
+    expectTrue(
       derived.regions[0]?.loops[1]?.segments[0]?.source.kind === 'entity'
       && derived.regions[0]?.loops[1]?.segments[0]?.source.entityId === 'sketch_entity_circle',
       'The inner loop should be bounded by the circle entity.',
@@ -950,8 +944,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     })
 
-    assert(derived.regions.length === 1, 'Construction line, arc, and circle geometry must not split or remove a normal profile.')
-    assert(
+    expectTrue(derived.regions.length === 1, 'Construction line, arc, and circle geometry must not split or remove a normal profile.')
+    expectTrue(
       derived.regions[0]?.loops[0]?.segments.every((segment) =>
         segment.source.kind === 'entity'
           && segment.source.entityId !== 'sketch_entity_cross'
@@ -993,8 +987,8 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     })
 
-    assert(found.rings.length === 0, 'Closed construction circles should not produce sketch rings.')
-    assert(derived.regions.length === 0, 'Closed construction circles should not create selectable profile regions.')
+    expectTrue(found.rings.length === 0, 'Closed construction circles should not produce sketch rings.')
+    expectTrue(derived.regions.length === 0, 'Closed construction circles should not create selectable profile regions.')
   }
 
   async function testSelfIntersectingProfileIsRejectedWithDiagnostic() {
@@ -1032,9 +1026,9 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot,
     })
 
-    assert(found.rings.length === 0, 'Self-intersecting profile loops should not produce valid rings.')
-    assert(derived.regions.length === 0, 'Self-intersecting profile loops should not become selectable regions.')
-    assert(
+    expectTrue(found.rings.length === 0, 'Self-intersecting profile loops should not produce valid rings.')
+    expectTrue(derived.regions.length === 0, 'Self-intersecting profile loops should not become selectable regions.')
+    expectTrue(
       derived.diagnostics.some((diagnostic) => diagnostic.code === 'profile-invalid-ring'),
       'Rejected self-intersections should emit a diagnostic before reaching OCC.',
     )
@@ -1070,12 +1064,12 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     })
 
-    assert(derived.regions.length === 0, 'Open and degenerate profile segments should not create regions.')
-    assert(
+    expectTrue(derived.regions.length === 0, 'Open and degenerate profile segments should not create regions.')
+    expectTrue(
       derived.diagnostics.some((diagnostic) => diagnostic.code === 'profile-open-segment'),
       'Open profile segments should be reported as diagnostics.',
     )
-    assert(
+    expectTrue(
       derived.diagnostics.some((diagnostic) => diagnostic.code === 'profile-degenerate-segment'),
       'Degenerate profile segments should be reported as diagnostics.',
     )

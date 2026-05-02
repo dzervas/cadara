@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import {
   buildReferenceImageAnchorProjectedReferences,
@@ -7,14 +8,7 @@ import {
 } from '@/domain/reference-image-calibration/export/references'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 
-test('src/domain/reference-image-calibration/export/references.spec.ts does not synthesize exported anchor references into the sketch definition', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operation = createReferenceImageOperation({
+test('src/domain/reference-image-calibration/export/references.spec.ts does not synthesize exported anchor references into the sketch definition', () => {  const operation = createReferenceImageOperation({
     sequence: 1,
     sketchId: 'sketch_primary',
     payload: {
@@ -45,20 +39,13 @@ test('src/domain/reference-image-calibration/export/references.spec.ts does not 
 
   const merged = mergeReferenceImageAnchorReferences(definition, 'sketch_primary')
 
-  assert(
+  expectTrue(
     merged.references.length === 0 && merged.referenceIds.length === 0,
     'Reference-image calibration should no longer synthesize fixed exported anchor references.',
   )
 })
 
-test('src/domain/reference-image-calibration/export/references.spec.ts does not emit projected anchor geometry records', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operation = createReferenceImageOperation({
+test('src/domain/reference-image-calibration/export/references.spec.ts does not emit projected anchor geometry records', () => {  const operation = createReferenceImageOperation({
     sequence: 1,
     sketchId: 'sketch_primary',
     payload: {
@@ -87,7 +74,7 @@ test('src/domain/reference-image-calibration/export/references.spec.ts does not 
     authoringOperations: [operation],
   } satisfies SketchDefinition)
 
-  assert(
+  expectTrue(
     projectedReferences.length === 0,
     'Reference-image calibration should no longer export projected anchor geometry into the main sketch solve.',
   )

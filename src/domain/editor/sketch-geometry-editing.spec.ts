@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
@@ -28,21 +29,14 @@ import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
 import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
 import { toolDefinitions } from '@/core/tools/tool-registry'
 
-test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClosePoint(
+test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function assertClosePoint(
     actual: readonly [number, number] | undefined,
     expected: readonly [number, number],
     message: string,
   ) {
-    assert(actual, `${message} Missing point.`)
+    expectTrue(actual, `${message} Missing point.`)
     const distance = Math.hypot(actual[0] - expected[0], actual[1] - expected[1])
-    assert(distance < 1e-4, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
+    expectTrue(distance < 1e-4, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
   }
 
   function assertIncludesPoint(
@@ -50,7 +44,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     expected: readonly [number, number],
     message: string,
   ) {
-    assert(
+    expectTrue(
       points.some((point) => Math.hypot(point.position[0] - expected[0], point.position[1] - expected[1]) < 1e-4),
       `${message} Missing ${expected.join(', ')}.`,
     )
@@ -284,8 +278,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const regionRenderable = getSketchSessionDisplayRenderables(session).find((renderable) =>
       renderable.target?.kind === 'region',
     )
-    assert(regionRenderable, 'Expected live region renderable.')
-    assert(regionRenderable.geometry.kind === 'mesh', 'Live region renderable should use mesh geometry.')
+    expectTrue(regionRenderable, 'Expected live region renderable.')
+    expectTrue(regionRenderable.geometry.kind === 'mesh', 'Live region renderable should use mesh geometry.')
 
     const xs = regionRenderable.geometry.vertexPositions.map((point) => point[0])
     const ys = regionRenderable.geometry.vertexPositions.map((point) => point[1])
@@ -301,8 +295,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const regionRenderable = getSketchSessionDisplayRenderables(session).find((renderable) =>
       renderable.target?.kind === 'region',
     )
-    assert(regionRenderable, 'Expected live region renderable.')
-    assert(regionRenderable.geometry.kind === 'mesh', 'Live region renderable should use mesh geometry.')
+    expectTrue(regionRenderable, 'Expected live region renderable.')
+    expectTrue(regionRenderable.geometry.kind === 'mesh', 'Live region renderable should use mesh geometry.')
     return regionRenderable.geometry
   }
 
@@ -344,7 +338,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
     const selectedEntityIds = getConnectedEntityIds(createSessionFromDefinition(definition), 'sketch_entity_ab')
 
-    assert(
+    expectTrue(
       selectedEntityIds.join(',') === 'sketch_entity_ab,sketch_entity_bc',
       'Connected selection should select the two local entities joined by a shared endpoint.',
     )
@@ -355,7 +349,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const expected = 'sketch_entity_ab,sketch_entity_bc,sketch_entity_cd,sketch_entity_da'
 
     for (const entityId of session.definition.entityIds) {
-      assert(
+      expectTrue(
         getConnectedEntityIds(session, entityId).join(',') === expected,
         `Connected rectangle selection from ${entityId} should select all four edges.`,
       )
@@ -374,11 +368,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       entityId: 'sketch_entity_ab',
     }).map((selectedTarget) => selectedTarget.entityId)
 
-    assert(
+    expectTrue(
       selectedEntityIds.join(',') === 'sketch_entity_ab,sketch_entity_bc,sketch_entity_cd,sketch_entity_da',
       'Connected selection should follow the local entity target sketch id even when the session sketch id differs.',
     )
-    assert(
+    expectTrue(
       getConnectedSketchEntitySelectionTargets(session, {
         kind: 'sketchEntity',
         sketchId: 'sketch_other' as const,
@@ -415,12 +409,12 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
     const session = createSessionFromDefinition(definition)
 
-    assert(
+    expectTrue(
       getConnectedEntityIds(session, 'sketch_entity_right').join(',') ===
         'sketch_entity_left,sketch_entity_right,sketch_entity_top',
       'Connected selection should select every entity in a branching component.',
     )
-    assert(
+    expectTrue(
       getConnectedSketchEntitySelectionTargets(session, {
         kind: 'projectedReferenceGeometry',
         referenceId: 'ref_projected' as const,
@@ -429,7 +423,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       }).length === 0,
       'Projected reference geometry should not expand through connected local geometry selection.',
     )
-    assert(
+    expectTrue(
       getConnectedSketchEntitySelectionTargets(session, {
         kind: 'sketchPoint',
         sketchId: 'sketch_primary',
@@ -437,7 +431,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       }).length === 0,
       'Sketch points should not expand through connected local geometry selection.',
     )
-    assert(
+    expectTrue(
       getConnectedEntityIds(session, 'sketch_entity_point').length === 0,
       'Point entities should not expand through connected local geometry selection.',
     )
@@ -450,20 +444,20 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     session = acceptSketchDraw(session, [1, 0])
 
     const point = session.definition.points[0]
-    assert(point, 'Expected authored point from line creation.')
+    expectTrue(point, 'Expected authored point from line creation.')
     session = beginSketchGeometryDrag(session, point.target, point.position)
-    assert(session.activeTool === null, 'Dragging an existing point should clear an idle drawing tool.')
+    expectTrue(session.activeTool === null, 'Dragging an existing point should clear an idle drawing tool.')
     session = finishSketchGeometryDrag(session, [2, 3])
 
     const movedPoint = session.definition.points.find((entry) => entry.pointId === point.pointId)
     assertClosePoint(movedPoint?.position, [2, 3], 'Unconstrained drag should update the authored point.')
     const movedDisplayLine = deriveSketchDisplayEntities(session).find((entity) => entity.kind === 'line')
-    assert(movedDisplayLine?.kind === 'line', 'Edited line should remain visible as a display line.')
+    expectTrue(movedDisplayLine?.kind === 'line', 'Edited line should remain visible as a display line.')
     const movedDisplayEndpoint = [movedDisplayLine.start, movedDisplayLine.end].find((endpoint) =>
       Math.hypot(endpoint[0] - 2, endpoint[1] - 3) < 1e-4,
     )
     assertClosePoint(movedDisplayEndpoint, [2, 3], 'Edited line display should derive from the updated sketch definition.')
-    assert(
+    expectTrue(
       !(movedDisplayLine.start[0] === 0 && movedDisplayLine.start[1] === 0)
         && !(movedDisplayLine.end[0] === 0 && movedDisplayLine.end[1] === 0),
       'Edited line display should not include stale pre-drag point geometry.',
@@ -478,7 +472,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
   function testConstrainedSquareDragTranslatesSolvedShape() {
     let session = createSessionFromDefinition(createSquareDefinition(false))
     const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
-    assert(target, 'Expected square vertex B.')
+    expectTrue(target, 'Expected square vertex B.')
 
     session = beginSketchGeometryDrag(session, target, [1, 0])
     session = finishSketchGeometryDrag(session, [4, 3])
@@ -488,7 +482,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     assertClosePoint(points.get('sketch_point_b'), [4, 3], 'Dragging free square vertex should honor B target.')
     assertClosePoint(points.get('sketch_point_c'), [4, 4], 'Dragging free square vertex should translate C.')
     assertClosePoint(points.get('sketch_point_d'), [3, 4], 'Dragging free square vertex should translate D.')
-    assert(session.validationMessage === null, 'Valid constrained drag should not leave blocked feedback.')
+    expectTrue(session.validationMessage === null, 'Valid constrained drag should not leave blocked feedback.')
   }
 
   function testLiveRegionRenderableTracksJiggledSketchDrag() {
@@ -498,19 +492,19 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       solvedRegions: deriveRegionsForDefinition(session.definition),
     }
     const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
-    assert(target, 'Expected square vertex B.')
+    expectTrue(target, 'Expected square vertex B.')
 
     const initialBounds = getRegionRenderableBounds(session)
     const initialRegionId = session.solvedRegions[0]?.regionId
-    assert(initialRegionId, 'Initial square should derive a live region id.')
+    expectTrue(initialRegionId, 'Initial square should derive a live region id.')
     assertClosePoint([initialBounds.minX, initialBounds.minY], [0, 0], 'Initial live region should start at the square origin.')
     assertClosePoint([initialBounds.maxX, initialBounds.maxY], [1, 1], 'Initial live region should match the square extents.')
 
     session = beginSketchGeometryDrag(session, target, [1, 0])
     session = finishSketchGeometryDrag(session, [4, 3])
 
-    assert(session.solvedRegions.length === 1, 'Dragging the square should keep one live derived region.')
-    assert(
+    expectTrue(session.solvedRegions.length === 1, 'Dragging the square should keep one live derived region.')
+    expectTrue(
       session.solvedRegions[0]?.regionId === initialRegionId,
       'Dragging the square should keep the live region identity stable.',
     )
@@ -570,8 +564,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     }
 
     const geometry = getLiveRegionMesh(session)
-    assert(geometry.triangleIndices.length > 0, 'Holed live region should render a triangulated mesh.')
-    assert(Math.abs(getMeshArea(geometry) - 48) < 1e-6, 'Holed live region mesh should subtract the inner loop area.')
+    expectTrue(geometry.triangleIndices.length > 0, 'Holed live region should render a triangulated mesh.')
+    expectTrue(Math.abs(getMeshArea(geometry) - 48) < 1e-6, 'Holed live region mesh should subtract the inner loop area.')
   }
 
   function testLiveRegionRenderableTriangulatesConcaveRegion() {
@@ -616,8 +610,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     }
 
     const geometry = getLiveRegionMesh(session)
-    assert(geometry.triangleIndices.length === 4, 'Six-point concave live region should triangulate into four triangles.')
-    assert(Math.abs(getMeshArea(geometry) - 7) < 1e-6, 'Concave live region mesh should preserve polygon area without fan overlap.')
+    expectTrue(geometry.triangleIndices.length === 4, 'Six-point concave live region should triangulate into four triangles.')
+    expectTrue(Math.abs(getMeshArea(geometry) - 7) < 1e-6, 'Concave live region mesh should preserve polygon area without fan overlap.')
   }
 
   function testLiveRegionDiagnosticsAreAvailableDuringEditing() {
@@ -634,11 +628,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
     let session = createSessionFromDefinition(definition)
     const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
-    assert(target, 'Expected open segment endpoint.')
+    expectTrue(target, 'Expected open segment endpoint.')
     session = beginSketchGeometryDrag(session, target, [2, 0])
     session = updateSketchGeometryDrag(session, [2.25, 0])
 
-    assert(
+    expectTrue(
       getSketchSessionRegionDiagnostics(session).some((diagnostic) => diagnostic.code === 'profile-open-segment'),
       'Live region diagnostics should be available to viewport feedback while editing.',
     )
@@ -652,7 +646,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       solvedRegions: deriveRegionsForDefinition(session.definition),
     }
     const target = session.definition.points.find((point) => point.pointId === 'sketch_point_b')?.target
-    assert(target, 'Expected square vertex B.')
+    expectTrue(target, 'Expected square vertex B.')
 
     session = beginSketchGeometryDrag(session, target, [1, 0])
     const frameCount = 30
@@ -660,10 +654,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     for (let index = 0; index < frameCount; index += 1) {
       const t = index / (frameCount - 1)
       session = updateSketchGeometryDrag(session, [1 + t * 3, t * 2])
-      assert(session.solvedRegions.length === 1, 'Drag-frame region derivation should keep the constrained square profile live.')
+      expectTrue(session.solvedRegions.length === 1, 'Drag-frame region derivation should keep the constrained square profile live.')
     }
     const elapsed = performance.now() - startedAt
-    assert(
+    expectTrue(
       elapsed < 1_500,
       `Constrained drag live-region benchmark should stay responsive; ${frameCount} frames took ${elapsed.toFixed(1)}ms.`,
     )
@@ -678,7 +672,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const target = session.definition.points.find((point) =>
       point.pointId === 'sketch_point_1_rect-bottom-left',
     )?.target
-    assert(target, 'Expected rectangle bottom-left vertex.')
+    expectTrue(target, 'Expected rectangle bottom-left vertex.')
 
     session = beginSketchGeometryDrag(session, target, [0, 0])
     session = finishSketchGeometryDrag(session, [2, 2])
@@ -688,14 +682,14 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     assertClosePoint(points.get('sketch_point_1_rect-bottom-right'), [6, 2], 'Dragging rectangle corner should translate bottom right.')
     assertClosePoint(points.get('sketch_point_1_rect-top-right'), [6, 5], 'Dragging rectangle corner should translate top right.')
     assertClosePoint(points.get('sketch_point_1_rect-top-left'), [2, 5], 'Dragging rectangle corner should translate top left.')
-    assert(session.validationMessage === null, 'Translatable rectangle drag should not leave blocked feedback.')
+    expectTrue(session.validationMessage === null, 'Translatable rectangle drag should not leave blocked feedback.')
   }
 
   function testImmovableConstrainedDragBlocksWithoutChangingDraft() {
     let session = createSessionFromDefinition(createSquareDefinition(true))
     const before = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
     const target = session.definition.points.find((point) => point.pointId === 'sketch_point_a')?.target
-    assert(target, 'Expected fixed square vertex A.')
+    expectTrue(target, 'Expected fixed square vertex A.')
 
     session = beginSketchGeometryDrag(session, target, [0, 0])
     session = finishSketchGeometryDrag(session, [2, 2])
@@ -703,7 +697,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const after = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
     assertClosePoint(after.get('sketch_point_a'), before.get('sketch_point_a')!, 'Blocked drag should leave A unchanged.')
     assertClosePoint(after.get('sketch_point_b'), before.get('sketch_point_b')!, 'Blocked drag should leave B unchanged.')
-    assert(
+    expectTrue(
       session.validationMessage === 'Geometry is constrained and cannot move to that position.',
       'Blocked drag should leave visible constrained-movement feedback.',
     )
@@ -755,24 +749,24 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       entityId: 'sketch_entity_circle',
     }])
 
-    assert(!deleted.definition.entityIds.includes('sketch_entity_circle'), 'Entity deletion should remove the selected entity.')
-    assert(
+    expectTrue(!deleted.definition.entityIds.includes('sketch_entity_circle'), 'Entity deletion should remove the selected entity.')
+    expectTrue(
       deleted.definition.constraintIds.includes('constraint_horizontal_ab'),
       'Entity deletion should preserve unrelated entity constraints.',
     )
-    assert(
+    expectTrue(
       !deleted.definition.dimensionIds.includes('dimension_radius'),
       'Entity deletion should remove dimensions that reference the deleted entity.',
     )
-    assert(
+    expectTrue(
       deleted.definition.dimensionIds.includes('dimension_width'),
       'Entity deletion should preserve unrelated dimensions.',
     )
-    assert(
+    expectTrue(
       deleted.commitRequest?.definition.entityIds.includes('sketch_entity_circle') === false,
       'Entity deletion should rebuild the commit request without deleted geometry.',
     )
-    assert(
+    expectTrue(
       !deriveSketchDisplayEntities(deleted).some((entity) => entity.entityId === 'sketch_entity_circle'),
       'Entity deletion should remove deleted accepted geometry from derived display entities.',
     )
@@ -786,25 +780,25 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       pointId: 'sketch_point_a',
     }])
 
-    assert(!deleted.definition.pointIds.includes('sketch_point_a'), 'Point deletion should remove the selected point.')
-    assert(
+    expectTrue(!deleted.definition.pointIds.includes('sketch_point_a'), 'Point deletion should remove the selected point.')
+    expectTrue(
       !deleted.definition.entityIds.includes('sketch_entity_ab') && !deleted.definition.entityIds.includes('sketch_entity_da'),
       'Point deletion should remove local entities that reference the deleted point.',
     )
-    assert(
+    expectTrue(
       !deleted.definition.constraintIds.includes('constraint_fix_a'),
       'Point deletion should remove point constraints that reference the deleted point.',
     )
-    assert(
+    expectTrue(
       deleted.definition.constraintIds.includes('constraint_vertical_bc'),
       'Point deletion should preserve unrelated constraints.',
     )
-    assert(
+    expectTrue(
       !deleted.definition.dimensionIds.includes('dimension_width') && !deleted.definition.dimensionIds.includes('dimension_height'),
       'Point deletion should remove dimensions that reference deleted point ids.',
     )
     const remainingPointIds = new Set(deleted.definition.pointIds)
-    assert(
+    expectTrue(
       deleted.definition.entities.every((entity) =>
         entity.kind === 'spline'
           ? entity.fitPointIds.every((pointId) => remainingPointIds.has(pointId))
@@ -820,7 +814,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       ),
       'Point deletion should not leave entities with dangling point references.',
     )
-    assert(
+    expectTrue(
       !deriveSketchDisplayEntities(deleted).some((entity) => entity.entityId === 'sketch_entity_ab' || entity.entityId === 'sketch_entity_da'),
       'Point deletion should remove dependent accepted geometry from derived display entities.',
     )
@@ -835,7 +829,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const entityTarget = session.definition.entities[0]?.target
     const pointTarget = session.definition.points[0]?.target
     const regionTarget = session.solvedRegions[0]?.target
-    assert(entityTarget && pointTarget && regionTarget, 'Style patch fixture should create local edge, point, and region targets.')
+    expectTrue(entityTarget && pointTarget && regionTarget, 'Style patch fixture should create local edge, point, and region targets.')
     const before = structuredClone(session.commitRequest?.definition)
 
     session = patchSketchStyleValue(
@@ -844,7 +838,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       { intent: 'patchSketchStyle', field: 'fillColor', value: '#00ffff' },
     )
 
-    assert(
+    expectTrue(
       JSON.stringify(session.commitRequest?.definition) === JSON.stringify(before),
       'Style patch should ignore non-local targets such as external model geometry refs.',
     )
@@ -854,7 +848,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       [entityTarget],
       { intent: 'patchSketchStyle', field: 'fillMode', value: 'solid' },
     )
-    assert(
+    expectTrue(
       (session.definition.styles?.length ?? 0) === 0,
       'Fill style patch should reject sketch edge/entity targets without mutating style records.',
     )
@@ -872,7 +866,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const regionStyle = session.definition.styles?.find((style) =>
       style.target.kind === 'region' && style.target.regionId === regionTarget.regionId,
     )
-    assert(
+    expectTrue(
       regionStyle?.fill.kind === 'gradient' &&
         regionStyle.fill.gradient.startColor === '#00ffff',
       'Fill style patch should author a region-scoped style record for selected live regions.',
@@ -883,7 +877,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       [regionTarget],
       { intent: 'patchSketchStyle', field: 'strokeWidth', value: 4 },
     )
-    assert(
+    expectTrue(
       session.definition.entities[0]?.style === undefined,
       'Stroke style patch should reject region targets without mutating entity stroke fields.',
     )
@@ -893,7 +887,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       [pointTarget],
       { intent: 'patchSketchStyle', field: 'strokeWidth', value: 4 },
     )
-    assert(
+    expectTrue(
       session.definition.entities[0]?.style === undefined,
       'Stroke style patch should reject point targets without mutating entity stroke fields.',
     )
@@ -903,7 +897,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       [entityTarget],
       { intent: 'patchSketchStyle', field: 'strokeWidth', value: 2.5 },
     )
-    assert(
+    expectTrue(
       getSketchSessionDisplayRenderables(session).find((entry) =>
         entry.target?.kind === 'sketchEntity' && entry.target.entityId === entityTarget.entityId,
       )?.strokeStyle === undefined,
@@ -930,17 +924,17 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       { intent: 'patchSketchStyle', field: 'strokeGapSize', value: 0.25 },
     )
 
-    assert(
+    expectTrue(
       session.definition.entities[0]?.style?.strokeWidth === 2.5,
       'Local style patch should update the selected sketch entity style in session definition.',
     )
-    assert(
+    expectTrue(
       getSketchSessionDisplayRenderables(session).find((entry) =>
         entry.target?.kind === 'sketchEntity' && entry.target.entityId === entityTarget.entityId,
       )?.strokeStyle?.width === 2.5,
       'Explicitly enabled local stroke fields should render through sketch display metadata.',
     )
-    assert(
+    expectTrue(
       session.commitRequest?.definition.styles?.some((style) =>
         style.target.kind === 'region' &&
           style.target.regionId === regionTarget.regionId &&
@@ -948,16 +942,16 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       ),
       'Region fill style patch should rebuild the durable commit request payload.',
     )
-    assert(
+    expectTrue(
       session.definition.entities[0]?.style?.strokeMiterLimit === 7,
       'Local style patch should update miter limit in session definition.',
     )
-    assert(
+    expectTrue(
       session.definition.entities[0]?.style?.strokeDashSize === 0.6 &&
         session.definition.entities[0]?.style?.strokeGapSize === 0.25,
       'Local style patch should update dash fields in session definition.',
     )
-    assert(
+    expectTrue(
       session.commitRequest?.definition.entities[0]?.style?.strokeWidth === 2.5 &&
         session.commitRequest.definition.entities[0]?.style?.strokeEnabled === true &&
         session.commitRequest.definition.entities[0]?.style?.strokeDashSize === 0.6,
@@ -973,7 +967,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     }
     const entityTarget = session.definition.entities[0]?.target
     const regionTarget = session.solvedRegions[0]?.target
-    assert(entityTarget && regionTarget, 'SVG rendering fixture should expose edge and region targets.')
+    expectTrue(entityTarget && regionTarget, 'SVG rendering fixture should expose edge and region targets.')
 
     session = patchSketchStyleValue(session, [regionTarget], {
       intent: 'patchSketchStyle',
@@ -997,27 +991,27 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
 
     const styledRenderables = getSketchSessionDisplayRenderables(session)
-    assert(
+    expectTrue(
       styledRenderables.some((entry) => entry.target?.kind === 'region' && entry.paintStyle) &&
         styledRenderables.some((entry) => entry.target?.kind === 'sketchEntity' && entry.strokeStyle?.width === 2),
       'SVG rendering enabled should expose authored fill and stroke display metadata.',
     )
 
     const disabled = toggleSketchSvgRendering(session)
-    assert(!isSketchSvgRenderingEnabled(disabled), 'SVG rendering toggle should persist disabled state on the sketch.')
-    assert(
+    expectTrue(!isSketchSvgRenderingEnabled(disabled), 'SVG rendering toggle should persist disabled state on the sketch.')
+    expectTrue(
       disabled.definition.styles?.length === session.definition.styles?.length &&
         disabled.definition.entities[0]?.style?.strokeWidth === 2,
       'Disabling SVG rendering should not delete authored region or edge style data.',
     )
-    assert(
+    expectTrue(
       getSketchSessionDisplayRenderables(disabled).every((entry) => !entry.paintStyle && !entry.strokeStyle),
       'SVG rendering disabled should suppress authored fill and stroke display metadata.',
     )
 
     const restored = toggleSketchSvgRendering(disabled)
     const restoredRenderables = getSketchSessionDisplayRenderables(restored)
-    assert(
+    expectTrue(
       restoredRenderables.some((entry) => entry.target?.kind === 'region' && entry.paintStyle) &&
         restoredRenderables.some((entry) => entry.target?.kind === 'sketchEntity' && entry.strokeStyle?.width === 2),
       'Re-enabling SVG rendering should restore visuals from persisted style data.',
@@ -1056,10 +1050,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       entityId: 'sketch_entity_ab',
     })
 
-    assert(session.validationMessage === null, 'Accepted trim should not leave validation feedback.')
-    assert(session.definition.entityIds.includes('sketch_entity_ab'), 'Trim should preserve the selected line entity id.')
-    assert(session.definition.entityIds.length === 4, 'Trim should add one split segment for the remaining geometry.')
-    assert(session.commitRequest?.definition.entityIds.length === 4, 'Trim should rebuild the sketch commit request.')
+    expectTrue(session.validationMessage === null, 'Accepted trim should not leave validation feedback.')
+    expectTrue(session.definition.entityIds.includes('sketch_entity_ab'), 'Trim should preserve the selected line entity id.')
+    expectTrue(session.definition.entityIds.length === 4, 'Trim should add one split segment for the remaining geometry.')
+    expectTrue(session.commitRequest?.definition.entityIds.length === 4, 'Trim should rebuild the sketch commit request.')
   }
 
   function testTrimHandlesCircleArcAndSplineTargets() {
@@ -1087,8 +1081,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
 
     const trimmedCircle = circleSession.definition.entities.find((entity) => entity.entityId === 'sketch_entity_circle')
-    assert(trimmedCircle?.kind === 'arc', 'Trimming a circle should preserve the selected id as an authored arc.')
-    assert(circleSession.validationMessage === null, 'Circle trim should not leave validation feedback.')
+    expectTrue(trimmedCircle?.kind === 'arc', 'Trimming a circle should preserve the selected id as an authored arc.')
+    expectTrue(circleSession.validationMessage === null, 'Circle trim should not leave validation feedback.')
 
     const arcDefinition = makeDefinition({
       pointIds: [
@@ -1123,8 +1117,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       entityId: 'sketch_entity_arc',
     })
 
-    assert(arcSession.validationMessage === null, 'Arc trim should not leave validation feedback.')
-    assert(
+    expectTrue(arcSession.validationMessage === null, 'Arc trim should not leave validation feedback.')
+    expectTrue(
       arcSession.definition.entities.filter((entity) => entity.kind === 'arc').length === 2,
       'Trimming an arc should split the remaining geometry into two arcs.',
     )
@@ -1154,8 +1148,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       entityId: 'sketch_entity_spline',
     })
 
-    assert(splineSession.validationMessage === null, 'Spline trim should not leave validation feedback.')
-    assert(
+    expectTrue(splineSession.validationMessage === null, 'Spline trim should not leave validation feedback.')
+    expectTrue(
       splineSession.definition.entities.filter((entity) => entity.kind === 'spline').length === 2,
       'Trimming a spline should split the remaining geometry into two spline entities.',
     )
@@ -1167,12 +1161,12 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     session = startSketchDraw(session, [0, 0])
     session = acceptSketchDraw(session, [2, 0])
     const lineTarget = session.definition.entities[0]?.target
-    assert(lineTarget, 'Offset fixture should create a line target.')
+    expectTrue(lineTarget, 'Offset fixture should create a line target.')
 
     session = beginSketchTool(session, 'offset')
     session = selectSketchEditToolTarget(session, lineTarget)
-    assert(session.toolStagedEntities.some((entity) => entity.status === 'preview'), 'Offset selection should stage preview geometry.')
-    assert(
+    expectTrue(session.toolStagedEntities.some((entity) => entity.status === 'preview'), 'Offset selection should stage preview geometry.')
+    expectTrue(
       deriveSketchDisplayEntities(session).some((entity) => entity.status === 'preview'),
       'Offset preview should appear in derived display entities while staged.',
     )
@@ -1181,16 +1175,16 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const beforeInvalidCommit = session.definition.entityIds.length
     session = patchSketchEditToolValue(session, { intent: 'commitOffset' })
 
-    assert(session.definition.entityIds.length === beforeInvalidCommit, 'Invalid offset should not mutate the sketch draft.')
-    assert(session.validationMessage === 'Offset distance must be greater than zero.', 'Invalid offset should report validation feedback.')
+    expectTrue(session.definition.entityIds.length === beforeInvalidCommit, 'Invalid offset should not mutate the sketch draft.')
+    expectTrue(session.validationMessage === 'Offset distance must be greater than zero.', 'Invalid offset should report validation feedback.')
 
     session = patchSketchEditToolValue(session, { value: 1 })
     session = patchSketchEditToolValue(session, { intent: 'commitOffset' })
 
-    assert(session.definition.entityIds.length === 2, 'Valid offset should add one offset line.')
-    assert(session.commitRequest?.definition.entityIds.length === 2, 'Valid offset should rebuild the sketch commit request.')
-    assert(session.toolStagedEntities.length === 0, 'Committed offset should clear staged preview geometry.')
-    assert(
+    expectTrue(session.definition.entityIds.length === 2, 'Valid offset should add one offset line.')
+    expectTrue(session.commitRequest?.definition.entityIds.length === 2, 'Valid offset should rebuild the sketch commit request.')
+    expectTrue(session.toolStagedEntities.length === 0, 'Committed offset should clear staged preview geometry.')
+    expectTrue(
       deriveSketchDisplayEntities(session).every((entity) => entity.status === 'accepted'),
       'Committed offset display entities should be accepted definition-derived geometry only.',
     )
@@ -1201,12 +1195,12 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const selectedTargets = definition.entities.slice(0, 2).map((entity) => entity.target)
     const activated = beginSketchTool(createSessionFromDefinition(definition), 'offset', selectedTargets)
 
-    assert(activated.activeEditTool?.toolId === 'offset', 'Offset activation should open the offset edit tool.')
-    assert(
+    expectTrue(activated.activeEditTool?.toolId === 'offset', 'Offset activation should open the offset edit tool.')
+    expectTrue(
       activated.activeEditTool?.selectedTargets.length === selectedTargets.length,
       'Offset activation should seed compatible preselected targets into the edit tool state.',
     )
-    assert(
+    expectTrue(
       activated.toolStagedEntities.some((entity) => entity.status === 'preview'),
       'Offset activation should build preview geometry from compatible preselection.',
     )
@@ -1215,11 +1209,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       definition.points[0]!.target,
     ])
 
-    assert(
+    expectTrue(
       cleared.activeEditTool?.selectedTargets.length === 0,
       'Offset activation should clear incompatible preselected targets instead of carrying them into the edit tool.',
     )
-    assert(cleared.toolStagedEntities.length === 0, 'Cleared offset activation should not leave preview geometry behind.')
+    expectTrue(cleared.toolStagedEntities.length === 0, 'Cleared offset activation should not leave preview geometry behind.')
   }
 
   function testOffsetCreatesContinuousOuterAndInnerSquares() {
@@ -1230,8 +1224,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       outerSession = selectSketchEditToolTarget(outerSession, entity.target)
     }
 
-    assert(outerSession.activeEditTool?.selectedTargets.length === 4, 'Offset should collect multiple selected square edges.')
-    assert(
+    expectTrue(outerSession.activeEditTool?.selectedTargets.length === 4, 'Offset should collect multiple selected square edges.')
+    expectTrue(
       outerSession.toolStagedEntities.filter((entity) => entity.status === 'preview' && entity.kind === 'line').length === 4,
       'Continuous square offset should preview one joined line per selected edge.',
     )
@@ -1244,8 +1238,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
     const outerPoints = outerSession.definition.points.filter((point) => !definition.pointIds.includes(point.pointId))
 
-    assert(outerLines.length === 4, 'Outer square offset should create four joined line entities.')
-    assert(outerPoints.length === 4, 'Outer square offset should create four joined corner points.')
+    expectTrue(outerLines.length === 4, 'Outer square offset should create four joined line entities.')
+    expectTrue(outerPoints.length === 4, 'Outer square offset should create four joined corner points.')
     assertIncludesPoint(outerPoints, [-1, -1], 'Outer square offset should extend the bottom-left corner.')
     assertIncludesPoint(outerPoints, [2, -1], 'Outer square offset should extend the bottom-right corner.')
     assertIncludesPoint(outerPoints, [2, 2], 'Outer square offset should extend the top-right corner.')
@@ -1294,8 +1288,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     )
     const offsetPoints = session.definition.points.filter((point) => !definition.pointIds.includes(point.pointId))
 
-    assert(offsetLines.length === 2, 'Open angle offset should create one joined line per selected edge.')
-    assert(offsetPoints.length === 3, 'Open angle offset should share the mitered corner point.')
+    expectTrue(offsetLines.length === 2, 'Open angle offset should create one joined line per selected edge.')
+    expectTrue(offsetPoints.length === 3, 'Open angle offset should share the mitered corner point.')
     assertIncludesPoint(offsetPoints, [0, 1], 'Open angle offset should keep the first open endpoint offset.')
     assertIncludesPoint(offsetPoints, [1, 1], 'Open angle offset should intersect adjacent offset lines at the corner.')
     assertIncludesPoint(offsetPoints, [1, 2], 'Open angle offset should keep the last open endpoint offset.')
@@ -1338,7 +1332,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const offsetCircle = circleSession.definition.entities.find((entity) =>
       entity.entityId !== 'sketch_entity_circle' && entity.kind === 'circle',
     )
-    assert(offsetCircle?.kind === 'circle' && offsetCircle.radius === 3, 'Circle offset should add a copied circle at the requested radius.')
+    expectTrue(offsetCircle?.kind === 'circle' && offsetCircle.radius === 3, 'Circle offset should add a copied circle at the requested radius.')
 
     let arcSession = beginSketchTool(createSessionFromDefinition(definition), 'offset')
     arcSession = selectSketchEditToolTarget(arcSession, {
@@ -1348,7 +1342,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
     arcSession = patchSketchEditToolValue(arcSession, { value: 1 })
     arcSession = patchSketchEditToolValue(arcSession, { intent: 'commitOffset' })
-    assert(
+    expectTrue(
       arcSession.definition.entities.some((entity) => entity.entityId !== 'sketch_entity_arc' && entity.kind === 'arc'),
       'Arc offset should add a copied arc entity.',
     )
@@ -1361,7 +1355,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
     splineSession = patchSketchEditToolValue(splineSession, { value: 1 })
     splineSession = patchSketchEditToolValue(splineSession, { intent: 'commitOffset' })
-    assert(
+    expectTrue(
       splineSession.definition.entities.some((entity) => entity.entityId !== 'sketch_entity_spline' && entity.kind === 'spline'),
       'Spline offset should add a copied spline entity.',
     )
@@ -1399,11 +1393,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       geometryId: 'projected_geometry_circle',
       geometryKind: 'circle',
     })
-    assert(circleSession.toolStagedEntities.some((entity) => entity.status === 'preview' && entity.kind === 'circle'), 'Projected circle offset should preview a circle.')
+    expectTrue(circleSession.toolStagedEntities.some((entity) => entity.status === 'preview' && entity.kind === 'circle'), 'Projected circle offset should preview a circle.')
     circleSession = patchSketchEditToolValue(circleSession, { value: 1 })
     circleSession = patchSketchEditToolValue(circleSession, { intent: 'commitOffset' })
     const offsetCircle = circleSession.definition.entities.find((entity) => entity.kind === 'circle')
-    assert(offsetCircle?.kind === 'circle' && offsetCircle.radius === 3, 'Projected circle offset should create a sketch-owned circle.')
+    expectTrue(offsetCircle?.kind === 'circle' && offsetCircle.radius === 3, 'Projected circle offset should create a sketch-owned circle.')
 
     let splineSession = beginSketchTool({
       ...createSessionFromDefinition(makeDefinition({ pointIds: [], points: [], entityIds: [], entities: [] })),
@@ -1415,10 +1409,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       geometryId: 'projected_geometry_spline',
       geometryKind: 'spline',
     })
-    assert(splineSession.toolStagedEntities.some((entity) => entity.status === 'preview' && entity.kind === 'spline'), 'Projected spline offset should preview a spline.')
+    expectTrue(splineSession.toolStagedEntities.some((entity) => entity.status === 'preview' && entity.kind === 'spline'), 'Projected spline offset should preview a spline.')
     splineSession = patchSketchEditToolValue(splineSession, { value: 1 })
     splineSession = patchSketchEditToolValue(splineSession, { intent: 'commitOffset' })
-    assert(
+    expectTrue(
       splineSession.definition.entities.some((entity) => entity.kind === 'spline'),
       'Projected spline offset should create a sketch-owned spline.',
     )
@@ -1442,21 +1436,21 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     let filletSession = beginSketchTool(createSessionFromDefinition(cornerDefinition), 'sketchFillet')
     filletSession = selectSketchEditToolTarget(filletSession, cornerDefinition.entities[0]!.target)
     filletSession = selectSketchEditToolTarget(filletSession, cornerDefinition.entities[1]!.target)
-    assert(filletSession.toolStagedEntities.length > 0, 'Sketch fillet should preview supported adjacent line edits.')
+    expectTrue(filletSession.toolStagedEntities.length > 0, 'Sketch fillet should preview supported adjacent line edits.')
     filletSession = patchSketchEditToolValue(filletSession, { value: 1 })
     filletSession = patchSketchEditToolValue(filletSession, { intent: 'commitSketchEditOperator' })
-    assert(
+    expectTrue(
       filletSession.definition.entities.some((entity) => entity.kind === 'arc'),
       'Sketch fillet should commit durable arc geometry through the session.',
     )
-    assert(filletSession.activeTool === 'sketchFillet', 'Sketch fillet should keep the active sketch session open.')
+    expectTrue(filletSession.activeTool === 'sketchFillet', 'Sketch fillet should keep the active sketch session open.')
 
     let chamferSession = beginSketchTool(createSessionFromDefinition(cornerDefinition), 'sketchChamfer')
     chamferSession = selectSketchEditToolTarget(chamferSession, cornerDefinition.entities[0]!.target)
     chamferSession = selectSketchEditToolTarget(chamferSession, cornerDefinition.entities[1]!.target)
     chamferSession = patchSketchEditToolValue(chamferSession, { value: 1 })
     chamferSession = patchSketchEditToolValue(chamferSession, { intent: 'commitSketchEditOperator' })
-    assert(chamferSession.definition.entities.length === 3, 'Sketch chamfer should add one durable chamfer segment.')
+    expectTrue(chamferSession.definition.entities.length === 3, 'Sketch chamfer should add one durable chamfer segment.')
 
     const lineDefinition = makeDefinition({
       pointIds: ['sketch_point_a', 'sketch_point_b'],
@@ -1469,10 +1463,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
     let slotSession = beginSketchTool(createSessionFromDefinition(lineDefinition), 'sketchSlot')
     slotSession = selectSketchEditToolTarget(slotSession, lineDefinition.entities[0]!.target)
-    assert(slotSession.toolStagedEntities.length > 0, 'Sketch slot should preview slot boundary geometry.')
+    expectTrue(slotSession.toolStagedEntities.length > 0, 'Sketch slot should preview slot boundary geometry.')
     slotSession = patchSketchEditToolValue(slotSession, { value: 2 })
     slotSession = patchSketchEditToolValue(slotSession, { intent: 'commitSketchEditOperator' })
-    assert(
+    expectTrue(
       slotSession.definition.entities.filter((entity) => entity.kind === 'arc').length === 2,
       'Sketch slot around a line should commit rounded end arcs.',
     )
@@ -1497,7 +1491,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     extendSession = selectSketchEditToolTarget(extendSession, extendDefinition.entities[0]!.target)
     extendSession = selectSketchEditToolTarget(extendSession, extendDefinition.entities[1]!.target)
     assertIncludesPoint(extendSession.definition.points, [3, 0], 'Sketch extend should update the selected line endpoint at the boundary.')
-    assert(extendSession.definition.entities.length === 2, 'Sketch extend should preserve unrelated boundary geometry.')
+    expectTrue(extendSession.definition.entities.length === 2, 'Sketch extend should preserve unrelated boundary geometry.')
 
     const splitDefinition = makeDefinition({
       pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
@@ -1516,17 +1510,17 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     let splitSession = beginSketchTool(createSessionFromDefinition(splitDefinition), 'sketchSplit')
     splitSession = selectSketchEditToolTarget(splitSession, splitDefinition.entities[0]!.target)
     splitSession = selectSketchEditToolTarget(splitSession, splitDefinition.entities[1]!.target)
-    assert(splitSession.definition.entities.length === 3, 'Sketch split should divide the selected line in session state.')
+    expectTrue(splitSession.definition.entities.length === 3, 'Sketch split should divide the selected line in session state.')
     assertIncludesPoint(splitSession.definition.points, [2, 0], 'Sketch split should add the split point at the crossing boundary.')
 
     let unsupportedSession = beginSketchTool(createSessionFromDefinition(splitDefinition), 'sketchFillet')
     unsupportedSession = selectSketchEditToolTarget(unsupportedSession, splitDefinition.entities[0]!.target)
     unsupportedSession = selectSketchEditToolTarget(unsupportedSession, splitDefinition.entities[1]!.target)
-    assert(
+    expectTrue(
       unsupportedSession.validationMessage === 'Sketch fillet needs two lines that share a corner.',
       'Sketch edit operators should report unsupported valid combinations without mutating.',
     )
-    assert(unsupportedSession.definition.entities.length === splitDefinition.entities.length, 'Unsupported fillet should not change the sketch definition.')
+    expectTrue(unsupportedSession.definition.entities.length === splitDefinition.entities.length, 'Unsupported fillet should not change the sketch definition.')
   }
 
   function testSketchDerivedTransformOperatorsCreateDurableRelationships() {
@@ -1546,13 +1540,13 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     })
 
     let mirrorSession = beginSketchTool(createSessionFromDefinition(definition), 'sketchMirror')
-    assert(mirrorSession.activeTool === 'sketchMirror', 'Sketch mirror should activate a sketch-local edit workflow.')
+    expectTrue(mirrorSession.activeTool === 'sketchMirror', 'Sketch mirror should activate a sketch-local edit workflow.')
     mirrorSession = selectSketchEditToolTarget(mirrorSession, definition.entities[0]!.target)
     mirrorSession = selectSketchEditToolTarget(mirrorSession, definition.entities[1]!.target)
 
     const mirrorRelationship = mirrorSession.definition.derivedRelationships?.[0]
-    assert(mirrorRelationship?.kind === 'mirror', 'Sketch mirror should persist a mirror relationship.')
-    assert(mirrorRelationship.seedEntityIds[0] === 'sketch_entity_ab', 'Mirror relationship should keep the selected seed entity.')
+    expectTrue(mirrorRelationship?.kind === 'mirror', 'Sketch mirror should persist a mirror relationship.')
+    expectTrue(mirrorRelationship.seedEntityIds[0] === 'sketch_entity_ab', 'Mirror relationship should keep the selected seed entity.')
     const mirroredPointId = mirrorRelationship.outputs[0]?.outputPointIds[0]
     const mirroredPoint = mirrorSession.definition.points.find((point) => point.pointId === mirroredPointId)
     assertClosePoint(mirroredPoint?.position, [1, -1], 'Mirror relationship should evaluate output points from the mirror axis.')
@@ -1578,7 +1572,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const renderable = getSketchSessionDisplayRenderables(mirrorSession).find((entry) =>
       entry.target?.kind === 'sketchEntity' && entry.target.entityId === mirrorRelationship.outputs[0]?.outputEntityId
     )
-    assert(renderable, 'Derived sketch geometry should render with a stable sketch entity target.')
+    expectTrue(renderable, 'Derived sketch geometry should render with a stable sketch entity target.')
   }
 
   function testSketchPatternAndTransformOperatorsCommitWithoutPartFeatureSessions() {
@@ -1586,17 +1580,17 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
     const sketchToolIds = ['sketchLinearPattern', 'sketchCircularPattern', 'sketchTransform'] as const
 
     for (const toolId of sketchToolIds) {
-      assert(
+      expectTrue(
         toolDefinitions.some((tool) => tool.id === toolId && tool.modes.includes('sketch')),
         `${toolId} should be registered as a sketch-mode toolbar tool.`,
       )
-      assert(
+      expectTrue(
         !toolDefinitions.some((tool) => tool.id === toolId && tool.modes.includes('part')),
         `${toolId} should remain distinct from part-mode feature tools.`,
       )
 
       let session = beginSketchTool(createSessionFromDefinition(definition), toolId)
-      assert(session.activeTool === toolId, `${toolId} should keep the active sketch session open.`)
+      expectTrue(session.activeTool === toolId, `${toolId} should keep the active sketch session open.`)
       for (const entity of definition.entities) {
         session = selectSketchEditToolTarget(session, entity.target)
       }
@@ -1604,9 +1598,9 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       session = patchSketchEditToolValue(session, { intent: 'commitSketchEditOperator' })
 
       const relationship = session.definition.derivedRelationships?.[0]
-      assert(relationship, `${toolId} should persist a derived relationship.`)
-      assert(session.definition.entities.length === definition.entities.length * 2, `${toolId} should add addressable derived output entities.`)
-      assert(session.commitRequest?.definition.derivedRelationships?.length === 1, `${toolId} commit payload should persist the relationship.`)
+      expectTrue(relationship, `${toolId} should persist a derived relationship.`)
+      expectTrue(session.definition.entities.length === definition.entities.length * 2, `${toolId} should add addressable derived output entities.`)
+      expectTrue(session.commitRequest?.definition.derivedRelationships?.length === 1, `${toolId} commit payload should persist the relationship.`)
     }
   }
 
@@ -1636,8 +1630,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {
       solvedSnapshot: solved.solvedSnapshot,
     })
 
-    assert(regions.regions.length >= 2, 'Derived pattern output should participate in profile extraction when it forms a closed loop.')
-    assert(
+    expectTrue(regions.regions.length >= 2, 'Derived pattern output should participate in profile extraction when it forms a closed loop.')
+    expectTrue(
       regions.regions.some((region) =>
         region.loops.some((loop) =>
           loop.segments.some((segment) =>

@@ -1,25 +1,19 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import {
   solveSketchDefinitionWithDraggedPointTarget,
 } from '@/contracts/sketch/solver-core'
 
-test('src/contracts/sketch/solver-drag-target.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClosePoint(
+test('src/contracts/sketch/solver-drag-target.spec.ts', () => {  function assertClosePoint(
     actual: readonly [number, number] | undefined,
     expected: readonly [number, number],
     message: string,
   ) {
-    assert(actual, `${message} Missing point.`)
+    expectTrue(actual, `${message} Missing point.`)
     const distance = Math.hypot(actual[0] - expected[0], actual[1] - expected[1])
-    assert(distance < 1e-4, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
+    expectTrue(distance < 1e-4, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
   }
 
   function makePoint(pointId: string, label: string, x: number, y: number) {
@@ -223,7 +217,7 @@ test('src/contracts/sketch/solver-drag-target.spec.ts', () => {
       targetTolerance: 1e-4,
     })
 
-    assert(result.kind === 'solved', 'Dragged-point solver should accept a free square translation.')
+    expectTrue(result.kind === 'solved', 'Dragged-point solver should accept a free square translation.')
     const points = new Map(result.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
     assertClosePoint(points.get('sketch_point_a'), [3, 3], 'Dragged-point solve should translate A.')
     assertClosePoint(points.get('sketch_point_b'), [4, 3], 'Dragged-point solve should honor the target point.')
@@ -248,7 +242,7 @@ test('src/contracts/sketch/solver-drag-target.spec.ts', () => {
         targetTolerance: 1e-4,
       })
 
-      assert(result.kind === 'solved', `Dragged-point solver should translate rectangle when dragging ${point.pointId}.`)
+      expectTrue(result.kind === 'solved', `Dragged-point solver should translate rectangle when dragging ${point.pointId}.`)
       const points = new Map(result.solvedSnapshot.solvedPoints.map((entry) => [entry.pointId, entry.solvedPosition]))
       assertClosePoint(points.get('sketch_point_rect_bottom_left'), [2, 2], 'Rectangle translation should move bottom left.')
       assertClosePoint(points.get('sketch_point_rect_bottom_right'), [6, 2], 'Rectangle translation should move bottom right.')
@@ -270,8 +264,8 @@ test('src/contracts/sketch/solver-drag-target.spec.ts', () => {
       targetTolerance: 1e-4,
     })
 
-    assert(result.kind === 'blocked', 'Dragged-point solver should block an unsatisfied fixed-point drag.')
-    assert(
+    expectTrue(result.kind === 'blocked', 'Dragged-point solver should block an unsatisfied fixed-point drag.')
+    expectTrue(
       result.diagnostics.some((diagnostic) => diagnostic.code === 'drag-target-unsatisfied'),
       'Blocked dragged-point solve should report a machine-readable diagnostic.',
     )

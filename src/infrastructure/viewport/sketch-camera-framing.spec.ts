@@ -1,5 +1,4 @@
-import { test } from 'bun:test'
-import { strict as assert } from 'node:assert'
+import { expect, test } from 'bun:test'
 
 import * as THREE from 'three'
 
@@ -45,7 +44,7 @@ test('src/infrastructure/viewport/sketch-camera-framing.spec.ts', async () => {
   }
 
   function approx(actual: number, expected: number, epsilon = 1e-6) {
-    assert(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`)
+    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(epsilon)
   }
 
   function approxVector(actual: THREE.Vector3, expected: THREE.Vector3, epsilon = 1e-6) {
@@ -87,7 +86,7 @@ test('src/infrastructure/viewport/sketch-camera-framing.spec.ts', async () => {
 
     approxVector(frame.target, new THREE.Vector3(5, 2.5, 0))
     approxVector(frame.up, new THREE.Vector3(0, 1, 0))
-    assert(frame.position.z > frame.target.z, 'Camera should sit on the sketch-plane normal when framing XY sketches.')
+    expect(frame.position.z > frame.target.z).toBeTruthy()
     approx(frame.position.x, frame.target.x)
     approx(frame.position.y, frame.target.y)
   }
@@ -102,7 +101,7 @@ test('src/infrastructure/viewport/sketch-camera-framing.spec.ts', async () => {
     })
 
     approxVector(frame.target, new THREE.Vector3(0, 0, 0))
-    assert(frame.position.z > 20, 'Default empty-sketch framing should place the camera far enough to view a plane-centered extent.')
+    expect(frame.position.z > 20).toBeTruthy()
   }
 
   function testNonXyPlaneUsesStoredAxesForOrientation() {
@@ -116,7 +115,7 @@ test('src/infrastructure/viewport/sketch-camera-framing.spec.ts', async () => {
     })
 
     approxVector(frame.up, new THREE.Vector3(0, 0, 1))
-    assert(frame.position.x > frame.target.x, 'YZ framing should offset along +X from the sketch target based on plane normal.')
+    expect(frame.position.x > frame.target.x).toBeTruthy()
     approx(frame.position.y, frame.target.y)
     approx(frame.position.z, frame.target.z)
   }
@@ -139,9 +138,9 @@ test('src/infrastructure/viewport/sketch-camera-framing.spec.ts', async () => {
     })
 
     approxVector(frame.target, new THREE.Vector3(0, 0, 0))
-    assert(frame.orthographicZoom !== undefined, 'Orthographic sketch framing should return a zoom value.')
+    expect(frame.orthographicZoom !== undefined).toBeTruthy()
     approx(frame.orthographicZoom, 16 / 23)
-    assert(frame.position.z > frame.target.z, 'Orthographic framing should keep a plane-normal camera position.')
+    expect(frame.position.z > frame.target.z).toBeTruthy()
   }
 
   testExistingSketchFitsBoundsAndKeepsPlaneParallelView()

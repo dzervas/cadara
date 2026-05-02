@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { defaultSelectionFilter } from '@/core/editor/schema'
 import type {
   FeatureEditorFormField,
@@ -19,12 +20,6 @@ import {
   getActiveReferencePickerField,
   getDefaultImportSelectionField,
 } from './form-traversal'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function makeReferencePickerField(
   id: string,
@@ -140,7 +135,7 @@ test('form-traversal.ts finds nested form fields in option groups and discrimina
   const nestedInVariant = findFormFieldById(schema, 'variant-target')
   const nestedDiscriminant = findNestedFormFieldById(schema.sections[0]!.fields[1]!, 'variant-switch')
 
-  assert(
+  expectTrue(
     nestedInOptionGroup?.id === 'nested-target'
       && nestedInVariant?.id === 'variant-target'
       && nestedDiscriminant?.id === 'variant-switch',
@@ -154,8 +149,8 @@ test('form-traversal.ts resolves the active feature reference picker only for to
   const referenceField = findFirstTopLevelFieldOfKind(schema, ['referencePicker', 'referenceCollection'])
   const nonReferenceField = findFirstTopLevelFieldOfKind(schema, ['numeric', 'enum', 'summary', 'custom', 'diagnostics'])
 
-  assert(referenceField, 'Extrude form schema should expose a top-level reference field for picker coverage.')
-  assert(nonReferenceField, 'Extrude form schema should expose a non-reference top-level field for negative picker coverage.')
+  expectTrue(referenceField, 'Extrude form schema should expose a top-level reference field for picker coverage.')
+  expectTrue(nonReferenceField, 'Extrude form schema should expose a non-reference top-level field for negative picker coverage.')
 
   const active = getActiveReferencePickerField({
     activeReferencePickerFieldId: referenceField.id,
@@ -166,7 +161,7 @@ test('form-traversal.ts resolves the active feature reference picker only for to
     session,
   } as FeatureEditorState)
 
-  assert(
+  expectTrue(
     active?.id === referenceField.id && inactive === null,
     'Feature picker resolution should return only active top-level reference fields and ignore other field kinds.',
   )
@@ -197,7 +192,7 @@ test('form-traversal.ts chooses a default import selection field only when exact
   const defaultField = getDefaultImportSelectionField(makeImportSession(schemaWithHiddenCompanion))
   const ambiguousField = getDefaultImportSelectionField(makeImportSession(schemaWithTwoVisible))
 
-  assert(
+  expectTrue(
     defaultField?.id === 'visible-target' && ambiguousField === null,
     'Import default selection should auto-activate the single visible reference field and stay idle when multiple visible targets exist.',
   )
@@ -229,11 +224,11 @@ test('form-traversal.ts resolves active import picker fields and patches viewpor
     { kind: 'face', bodyId: 'body_fixture', faceId: 'face_fixture' },
   )
 
-  assert(
+  expectTrue(
     activeField?.id === pickerField.id,
     'Import picker resolution should return the active reference field from the import-session schema.',
   )
-  assert(
+  expectTrue(
     pickerPatch !== null
       && 'selectionPatch' in pickerPatch
       && typeof pickerPatch.selectionPatch === 'object'
@@ -243,7 +238,7 @@ test('form-traversal.ts resolves active import picker fields and patches viewpor
       && pickerPatch.selectionPatch.plane !== null,
     'Viewport selection patches should reopen the selected sketch from the snapshot and attach its plane for reference-picker imports.',
   )
-  assert(
+  expectTrue(
     collectionPatch !== null
       && Array.isArray(collectionPatch.collectionPatch)
       && collectionPatch.collectionPatch[0]?.kind === 'face',

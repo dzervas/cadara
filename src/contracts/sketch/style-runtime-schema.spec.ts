@@ -1,16 +1,10 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 
-test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const baseDefinition: SketchDefinition = {
+test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {  const baseDefinition: SketchDefinition = {
     schemaVersion: 'sketch-definition/v1alpha1',
     referenceIds: [],
     references: [],
@@ -55,12 +49,12 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
   }
 
   const migrated = sketchDefinitionSchema.safeParse(baseDefinition)
-  assert(migrated.success, 'Runtime schema should accept older definitions without authored styles.')
-  assert(Array.isArray(migrated.data.styleIds), 'Older payloads should migrate with styleIds present.')
-  assert(Array.isArray(migrated.data.styles), 'Older payloads should migrate with styles present.')
-  assert(migrated.data.styleIds.length === 0, 'Older payloads should default styleIds to an empty list.')
-  assert(migrated.data.styles.length === 0, 'Older payloads should default styles to an empty list.')
-  assert(migrated.data.svgRenderingEnabled === true, 'Older payloads should default SVG rendering to enabled.')
+  expectTrue(migrated.success, 'Runtime schema should accept older definitions without authored styles.')
+  expectTrue(Array.isArray(migrated.data.styleIds), 'Older payloads should migrate with styleIds present.')
+  expectTrue(Array.isArray(migrated.data.styles), 'Older payloads should migrate with styles present.')
+  expectTrue(migrated.data.styleIds.length === 0, 'Older payloads should default styleIds to an empty list.')
+  expectTrue(migrated.data.styles.length === 0, 'Older payloads should default styles to an empty list.')
+  expectTrue(migrated.data.svgRenderingEnabled === true, 'Older payloads should default SVG rendering to enabled.')
 
   const withStyles: SketchDefinition = {
     ...baseDefinition,
@@ -111,16 +105,16 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {
   }
 
   const parsed = sketchDefinitionSchema.safeParse(withStyles)
-  assert(parsed.success, 'Runtime schema should accept authored entity/region style records.')
+  expectTrue(parsed.success, 'Runtime schema should accept authored entity/region style records.')
 
   const serialized = JSON.parse(JSON.stringify(parsed.data)) as unknown
   const roundTrip = sketchDefinitionSchema.safeParse(serialized)
-  assert(roundTrip.success, 'Style payloads should survive serialize/parse round-trips.')
-  assert(roundTrip.data.svgRenderingEnabled === false, 'Round-tripped definitions should preserve SVG rendering state.')
-  assert(roundTrip.data.styles?.length === 2, 'Round-tripped style records should be preserved.')
-  assert(roundTrip.data.styles?.[1]?.fill.kind === 'gradient', 'Round-tripped gradient fill should be preserved.')
-  assert(roundTrip.data.styles?.[0]?.stroke.dashSize === 0.6, 'Round-tripped style records should preserve dash size.')
-  assert(
+  expectTrue(roundTrip.success, 'Style payloads should survive serialize/parse round-trips.')
+  expectTrue(roundTrip.data.svgRenderingEnabled === false, 'Round-tripped definitions should preserve SVG rendering state.')
+  expectTrue(roundTrip.data.styles?.length === 2, 'Round-tripped style records should be preserved.')
+  expectTrue(roundTrip.data.styles?.[1]?.fill.kind === 'gradient', 'Round-tripped gradient fill should be preserved.')
+  expectTrue(roundTrip.data.styles?.[0]?.stroke.dashSize === 0.6, 'Round-tripped style records should preserve dash size.')
+  expectTrue(
     roundTrip.data.entities[0]?.style?.strokeMiterLimit === 5,
     'Round-tripped local style records should preserve miter limits.',
   )

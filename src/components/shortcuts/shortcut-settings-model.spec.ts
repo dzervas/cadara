@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   appendShortcutRecordingStep,
   completeShortcutRecording,
@@ -25,14 +26,7 @@ import {
 import { createShortcutReferenceGroups } from '@/core/shortcuts/reference'
 import { validateShortcutOverrideUpdate } from '@/hooks/shortcut-validation'
 
-test('src/components/shortcuts/shortcut-settings-model.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const commands = [
+test('src/components/shortcuts/shortcut-settings-model.spec.ts', () => {  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',
@@ -58,7 +52,7 @@ test('src/components/shortcuts/shortcut-settings-model.spec.ts', () => {
   state = appendShortcutRecordingStep(state, 'g')
   state = appendShortcutRecordingStep(state, 'f')
 
-  assert(
+  expectTrue(
     getShortcutSettingsDisplayLabel({
       isRecording: state.recordingCommandId === 'editor.focusSearch',
       recordingSteps: state.recordingSteps,
@@ -68,18 +62,18 @@ test('src/components/shortcuts/shortcut-settings-model.spec.ts', () => {
   )
 
   const recordedShortcut = getPendingRecordedShortcut(state)
-  assert(recordedShortcut === 'g>f', 'Recorded steps should serialize to the profile override format.')
+  expectTrue(recordedShortcut === 'g>f', 'Recorded steps should serialize to the profile override format.')
 
   const editValidation = validateShortcutOverrideUpdate(
     registry,
     setCommandShortcutOverride(overrides, 'editor.focusSearch', [recordedShortcut]),
   )
-  assert(editValidation.nextOverrides !== null, 'Valid edited shortcuts should be accepted.')
+  expectTrue(editValidation.nextOverrides !== null, 'Valid edited shortcuts should be accepted.')
   overrides = editValidation.nextOverrides
   state = completeShortcutRecording(state, editValidation.conflicts)
 
-  assert(state.recordingCommandId === null, 'Saving a valid shortcut should exit recording mode.')
-  assert(getReferenceShortcutLabel(registry, overrides, 'editor.focusSearch') === 'G > F', 'Reference display should use the edited shortcut immediately.')
+  expectTrue(state.recordingCommandId === null, 'Saving a valid shortcut should exit recording mode.')
+  expectTrue(getReferenceShortcutLabel(registry, overrides, 'editor.focusSearch') === 'G > F', 'Reference display should use the edited shortcut immediately.')
 
   state = startShortcutRecording(state, 'editor.focusSearch')
   state = appendShortcutRecordingStep(state, 'mod+z')
@@ -88,28 +82,28 @@ test('src/components/shortcuts/shortcut-settings-model.spec.ts', () => {
     registry,
     setCommandShortcutOverride(overrides, 'editor.focusSearch', [getPendingRecordedShortcut(state)!]),
   )
-  assert(conflictValidation.nextOverrides === null, 'Conflicting shortcuts should not produce savable overrides.')
+  expectTrue(conflictValidation.nextOverrides === null, 'Conflicting shortcuts should not produce savable overrides.')
   state = completeShortcutRecording(state, conflictValidation.conflicts)
 
-  assert(
+  expectTrue(
     state.conflictMessage === 'Conflict with editor.undo, editor.focusSearch.',
     'Conflicting edits should expose the ambiguous commands.',
   )
-  assert(
+  expectTrue(
     state.recordingCommandId === 'editor.focusSearch',
     'Conflicting edits should keep recording active so the user can correct the shortcut.',
   )
-  assert(
+  expectTrue(
     getReferenceShortcutLabel(registry, overrides, 'editor.focusSearch') === 'G > F',
     'Invalid conflicting edits should not replace the current display shortcut.',
   )
 
   overrides = disableCommandShortcut(overrides, 'editor.focusSearch')
-  assert(
+  expectTrue(
     getPrimaryShortcut(createEffectiveKeymap(registry, overrides), 'editor.focusSearch') === null,
     'Disabling should remove the effective shortcut.',
   )
-  assert(
+  expectTrue(
     getShortcutSettingsDisplayLabel({
       isRecording: false,
       recordingSteps: [],

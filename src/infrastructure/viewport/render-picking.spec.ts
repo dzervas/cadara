@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import * as THREE from 'three'
 
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
@@ -24,14 +25,7 @@ import {
   updateWorkspaceHighlight,
 } from '@/infrastructure/viewport/render-picking'
 
-test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
-  function assert(condition: unknown, message = 'Assertion failed'): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertEqual<T>(actual: T, expected: T, message = 'Expected values to be equal') {
+test('src/infrastructure/viewport/render-picking.spec.ts', async () => {  function assertEqual<T>(actual: T, expected: T, message = 'Expected values to be equal') {
     if (actual !== expected) {
       throw new Error(`${message}: expected ${String(expected)}, received ${String(actual)}`)
     }
@@ -573,7 +567,7 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
     bindRenderableObject(sketchLine, null, sketchTarget, 'sketchCurve', 'document')
 
     const bindings = collectBindings(root)
-    assert(bindings !== null)
+    expectTrue(bindings !== null)
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], sketchTarget)
     assertEqual(material.color.getHex(), GEOMETRY_HIGHLIGHT_COLORS.hover, 'Hovered styled sketch lines should still receive hover highlight.')
@@ -608,12 +602,12 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
     root.add(facePerimeter)
 
     const bindings = collectBindings(root)
-    assert(bindings !== null)
+    expectTrue(bindings !== null)
 
-    assert(!bindings.pickables.includes(facePerimeter), 'Face hover perimeter overlays must not be pickable.')
+    expectTrue(!bindings.pickables.includes(facePerimeter), 'Face hover perimeter overlays must not be pickable.')
 
-    assert(faceMesh.material instanceof THREE.MeshStandardMaterial)
-    assert(facePerimeter.material instanceof THREE.LineBasicMaterial)
+    expectTrue(faceMesh.material instanceof THREE.MeshStandardMaterial)
+    expectTrue(facePerimeter.material instanceof THREE.LineBasicMaterial)
     const baselineFaceColor = faceMesh.material.color.getHex()
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], faceRenderable.binding.target)
@@ -648,17 +642,17 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
     root.add(edgeLine)
 
     const bindings = collectBindings(root)
-    assert(bindings !== null)
+    expectTrue(bindings !== null)
 
     updateWorkspaceHighlight(bindings.targetToObjects, [{ kind: 'body', bodyId: 'body_a' }], null)
 
-    assert(faceMesh.material instanceof THREE.MeshStandardMaterial)
+    expectTrue(faceMesh.material instanceof THREE.MeshStandardMaterial)
     assertEqual(
       faceMesh.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.selected,
       'Selected body targets must highlight owned face renderables.',
     )
-    assert(edgeLine.material instanceof THREE.LineBasicMaterial)
+    expectTrue(edgeLine.material instanceof THREE.LineBasicMaterial)
     assertEqual(
       edgeLine.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.selected,
@@ -672,8 +666,8 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
     root.add(marker.group)
 
     const bindings = collectBindings(root)
-    assert(bindings !== null, 'collectBindings must return a result for populated roots.')
-    assert(
+    expectTrue(bindings !== null, 'collectBindings must return a result for populated roots.')
+    expectTrue(
       bindings.pickables.includes(marker.group),
       'collectBindings must include marker group roots as pickables.',
     )
@@ -689,17 +683,17 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
     root.add(marker.group)
 
     const bindings = collectBindings(root)
-    assert(bindings !== null)
+    expectTrue(bindings !== null)
 
     updateWorkspaceHighlight(bindings.targetToObjects, [vertexRenderable.binding.target], null)
 
-    assert(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
+    expectTrue(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
     assertEqual(
       marker.visibleMesh.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.selected,
       'Selected marker mesh must receive the selected wire color.',
     )
-    assert(marker.pickProxy.material instanceof THREE.MeshBasicMaterial)
+    expectTrue(marker.pickProxy.material instanceof THREE.MeshBasicMaterial)
     assertEqual(marker.pickProxy.material.opacity, 0, 'Marker pick proxy must remain invisible.')
   }
 
@@ -709,11 +703,11 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
     root.add(marker.group)
 
     const bindings = collectBindings(root)
-    assert(bindings !== null)
+    expectTrue(bindings !== null)
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], null, [vertexRenderable.binding.target])
 
-    assert(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
+    expectTrue(marker.visibleMesh.material instanceof THREE.MeshStandardMaterial)
     assertEqual(
       marker.visibleMesh.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.hover,
@@ -733,7 +727,7 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
       segmentKeys.add(start < end ? `${start}|${end}` : `${end}|${start}`)
     }
 
-    assert(!segmentKeys.has('0,0,0|1,1,0'), 'Face perimeter extraction must exclude internal triangulation diagonals.')
+    expectTrue(!segmentKeys.has('0,0,0|1,1,0'), 'Face perimeter extraction must exclude internal triangulation diagonals.')
     boundaryGeometry.dispose()
   }
 
@@ -768,7 +762,7 @@ test('src/infrastructure/viewport/render-picking.spec.ts', async () => {
       },
     }
     const material = createRenderableMeshMaterial(regionRenderable, 'document')
-    assert(
+    expectTrue(
       material.polygonOffsetFactor < 0 && material.polygonOffsetUnits < 0,
       'Committed sketch regions should be biased toward the camera to avoid coplanar depth flicker.',
     )

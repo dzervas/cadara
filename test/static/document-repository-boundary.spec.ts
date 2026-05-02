@@ -2,14 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { test } from 'bun:test'
 
-test('test/static/document-repository-boundary.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const sourceRoot = join(process.cwd(), 'src')
+import { expectTrue } from '@/testing/expect.spec'
+test('test/static/document-repository-boundary.spec.ts', () => {  const sourceRoot = join(process.cwd(), 'src')
   const offenders: string[] = []
 
   for (const file of walkTypescriptFiles(sourceRoot)) {
@@ -24,7 +18,7 @@ test('test/static/document-repository-boundary.spec.ts', () => {
     }
   }
 
-  assert(
+  expectTrue(
     offenders.length === 0,
     `Automerge imports must stay inside the repository implementation layer: ${offenders.join(', ')}`,
   )

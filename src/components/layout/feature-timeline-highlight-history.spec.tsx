@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -43,14 +44,7 @@ import { getPrimitiveRefKey, type PrimitiveRef } from '@/core/editor/schema'
 import { EditorContext } from '@/hooks/editor-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
-test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function pointId(name: string) {
+test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async () => {  function pointId(name: string) {
     return `sketch_point_${name}` as SketchPointId
   }
 
@@ -237,7 +231,7 @@ test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async 
         && Math.abs(plane.frame.origin[axisIndex] - coordinate) < 0.001
     })
 
-    assert(faceId, `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`)
+    expectTrue(faceId, `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`)
     return faceId
   }
 
@@ -269,7 +263,7 @@ test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async 
   }])
   const extrudeBody = extrudeState.bodies[0]
 
-  assert(extrudeBody, 'Timeline highlight coverage requires the extrude body to exist.')
+  expectTrue(extrudeBody, 'Timeline highlight coverage requires the extrude body to exist.')
 
   const removableFaceId = findPlanarFaceByAxis(oc, extrudeBody, 'z', 6)
   const shellDefinition: FeatureDefinition = {
@@ -298,7 +292,7 @@ test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async 
   const shelledState = rebuildOccAuthoringState(initialState, authoredFeatures)
   const shelledBody = shelledState.bodies.find((body) => body.ownerFeatureId === shellFeatureId)
 
-  assert(shelledBody, 'Timeline highlight coverage requires the shelled body to exist.')
+  expectTrue(shelledBody, 'Timeline highlight coverage requires the shelled body to exist.')
 
   const innerShellFaceTarget: PrimitiveRef = {
     kind: 'face',
@@ -359,23 +353,23 @@ test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async 
   const hasHighlightedFeature = (markup: string, featureId: FeatureId) =>
     new RegExp(`data-derived-highlighted="true"[^>]*data-history-feature-id="${featureId}"|data-history-feature-id="${featureId}"[^>]*data-derived-highlighted="true"`).test(markup)
 
-  assert(
+  expectTrue(
     hasHighlightedFeature(innerFaceMarkup, extrudeFeatureId),
     'Selecting an inner shell face should highlight the upstream extrude history item.',
   )
-  assert(
+  expectTrue(
     hasHighlightedFeature(innerFaceMarkup, shellFeatureId),
     'Selecting an inner shell face should highlight the downstream shell history item.',
   )
-  assert(
+  expectTrue(
     hasHighlightedFeature(preservedFaceMarkup, extrudeFeatureId),
     'Selecting a preserved back face should keep the extrude history item highlighted.',
   )
-  assert(
+  expectTrue(
     !hasHighlightedFeature(preservedFaceMarkup, shellFeatureId),
     'Selecting a preserved back face should not highlight the unrelated shell history item.',
   )
-  assert(
+  expectTrue(
     !deselectedMarkup.includes('data-derived-highlighted="true"'),
     'Clearing selection should remove every derived history highlight.',
   )

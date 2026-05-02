@@ -1,5 +1,4 @@
-import { test } from 'bun:test'
-import { strict as assert } from 'node:assert'
+import { expect, test } from 'bun:test'
 
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
@@ -22,17 +21,14 @@ test('src/core/workspace/sketch-plane-mapping.spec.ts', () => {
   }
 
   const worldPoint = mapSketchPointToWorkspaceWorld(yzPlane, [4, 5])
-  assert.deepEqual(worldPoint, [10, 24, 35])
-  assert.deepEqual(mapWorldPointToWorkspaceSketch(yzPlane, worldPoint), [4, 5])
+  expect(worldPoint).toEqual([10, 24, 35])
+  expect(mapWorldPointToWorkspaceSketch(yzPlane, worldPoint)).toEqual([4, 5])
 
-  assert.throws(
-    () => mapSketchPointToWorkspaceWorld({
+  expect(() => mapSketchPointToWorkspaceWorld({
       ...yzPlane,
       frame: {
         ...yzPlane.frame,
         normal: [-1, 0, 0],
       },
-    }, [4, 5]),
-    /right-handed/,
-  )
+    }, [4, 5])).toThrow(/right-handed/)
 })

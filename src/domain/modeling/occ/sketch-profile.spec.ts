@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
@@ -22,14 +23,7 @@ import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import { buildRegionProfileFace } from '@/domain/modeling/occ/sketch-profile'
 import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 
-test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
+test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
     if (Math.abs(actual - expected) > tolerance) {
       throw new Error(`${message}: expected ${expected}, got ${actual}.`)
     }
@@ -709,7 +703,7 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region)
     assertClose(await faceArea(profile.face), 12, 1e-5, 'Projected line boundary should build from live projection data')
-    assert(sketch.definition.entities.length === 3, 'Projected profile reconstruction must not create copied sketch entities.')
+    expectTrue(sketch.definition.entities.length === 3, 'Projected profile reconstruction must not create copied sketch entities.')
   }
 
   async function testProjectedCircleProfileBuildsFromLiveProjection() {
@@ -747,7 +741,7 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region)
     assertClose(await faceArea(profile.face), Math.PI * 4, 1e-5, 'Projected circle profile should build from live projection data')
-    assert(sketch.definition.points.length === 0 && sketch.definition.entities.length === 0, 'Projected circle profiles must not create sketch-owned geometry.')
+    expectTrue(sketch.definition.points.length === 0 && sketch.definition.entities.length === 0, 'Projected circle profiles must not create sketch-owned geometry.')
   }
 
   async function testProjectedBoundaryInvalidationReportsStructuredCode() {
@@ -780,8 +774,8 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
       thrown = error as Error & { code?: string }
     }
 
-    assert(thrown?.code === 'occ-contract-gap-projected-region-loop', 'Missing live projection should report a machine-readable code.')
-    assert(thrown.message.includes('cannot be resolved from live projection data'), 'Missing live projection should report explicit invalidation.')
+    expectTrue(thrown?.code === 'occ-contract-gap-projected-region-loop', 'Missing live projection should report a machine-readable code.')
+    expectTrue(thrown.message.includes('cannot be resolved from live projection data'), 'Missing live projection should report explicit invalidation.')
   }
 
   async function testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData() {
@@ -824,9 +818,9 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
       thrown = error as Error & { code?: string }
     }
 
-    assert(thrown?.code === 'occ-contract-gap-projected-region-loop', 'Unauthored projected boundaries should report a machine-readable invalidation code.')
-    assert(thrown.message.includes('not backed by the current authored sketch references'), 'Stale projection data must not be treated as live authored geometry.')
-    assert(definition.points.length === 0 && definition.entities.length === 0, 'Rejected stale projection data must not be copied into sketch geometry.')
+    expectTrue(thrown?.code === 'occ-contract-gap-projected-region-loop', 'Unauthored projected boundaries should report a machine-readable invalidation code.')
+    expectTrue(thrown.message.includes('not backed by the current authored sketch references'), 'Stale projection data must not be treated as live authored geometry.')
+    expectTrue(definition.points.length === 0 && definition.entities.length === 0, 'Rejected stale projection data must not be copied into sketch geometry.')
   }
 
   async function testRejectsMultipleOuterLoops() {
@@ -853,7 +847,7 @@ test('src/domain/modeling/occ/sketch-profile.spec.ts', async () => {
       thrownMessage = error instanceof Error ? error.message : String(error)
     }
 
-    assert(
+    expectTrue(
       thrownMessage === `Region ${region.regionId} must contain exactly one outer loop.`,
       'Malformed regions with multiple outer loops must be rejected explicitly.',
     )

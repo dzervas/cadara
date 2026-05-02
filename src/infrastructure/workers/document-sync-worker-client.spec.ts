@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { createSeedAuthoredModelDocument } from '@/domain/modeling/modeling-test-fixtures'
 import type {
@@ -15,14 +16,7 @@ import { createDocumentSyncWorkerMessageHandler } from '@/infrastructure/workers
 import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
-test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function testRequestOrderingAndStructuredFailures() {
+test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () => {  async function testRequestOrderingAndStructuredFailures() {
     const worker = new FakeDocumentSyncWorker()
     const client = new DocumentSyncWorkerClient({ worker })
     const seed = await createSeedAuthoredModelDocument()
@@ -43,8 +37,8 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       status: { kind: 'idle', documentId: seed.documentId, sequence: 1 },
     })
 
-    assert((await first).sequence === 1, 'First request should resolve from its own response even when responses arrive out of order.')
-    assert((await second).sequence === 2, 'Second request should resolve from its own response even when it arrives first.')
+    expectTrue((await first).sequence === 1, 'First request should resolve from its own response even when responses arrive out of order.')
+    expectTrue((await second).sequence === 2, 'Second request should resolve from its own response even when it arrives first.')
 
     const failed = client.getWriteStatus({ documentId: seed.documentId })
     const failedRequest = worker.posted[2]!
@@ -63,7 +57,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
     } catch (error: unknown) {
       rejected = error instanceof Error && error.message === 'worker exploded'
     }
-    assert(rejected, 'Structured worker failures should reject the matching request with the worker message.')
+    expectTrue(rejected, 'Structured worker failures should reject the matching request with the worker message.')
     client.dispose()
   }
 
@@ -77,7 +71,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       observedDocuments.push(event.document)
     })
     const subscribeRequest = worker.posted[0]!
-    assert(subscribeRequest.kind === 'subscribe', 'Client should post a subscribe request.')
+    expectTrue(subscribeRequest.kind === 'subscribe', 'Client should post a subscribe request.')
     worker.emit({
       kind: 'subscribed',
       requestId: subscribeRequest.requestId,
@@ -94,10 +88,10 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         metadata: { documentId: seed.documentId, heads: ['head_1'], source: 'peer' },
       },
     })
-    assert(observedDocuments.length === 1, 'Active subscriptions should receive worker document change events.')
+    expectTrue(observedDocuments.length === 1, 'Active subscriptions should receive worker document change events.')
 
     unsubscribe()
-    assert(worker.posted[1]?.kind === 'unsubscribe', 'Disposing a subscription should post an unsubscribe request.')
+    expectTrue(worker.posted[1]?.kind === 'unsubscribe', 'Disposing a subscription should post an unsubscribe request.')
     worker.emit({
       kind: 'documentChanged',
       subscriptionId: subscribeRequest.subscriptionId,
@@ -107,14 +101,14 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         metadata: { documentId: seed.documentId, heads: ['head_2'], source: 'peer' },
       },
     })
-    assert(observedDocuments.length === 1, 'Disposed subscriptions should ignore later worker change events.')
+    expectTrue(observedDocuments.length === 1, 'Disposed subscriptions should ignore later worker change events.')
 
     const statuses: DocumentSyncWriteStatus[] = []
     client.subscribeToWriteStatus((status) => statuses.push(status))
     worker.emit({ kind: 'writeStatusChanged', status: { kind: 'idle', documentId: seed.documentId, sequence: 2 } })
     worker.emit({ kind: 'writeStatusChanged', status: { kind: 'idle', documentId: seed.documentId, sequence: 1 } })
     worker.emit({ kind: 'writeStatusChanged', status: { kind: 'idle', documentId: seed.documentId, sequence: 3 } })
-    assert(
+    expectTrue(
       statuses.map((status) => status.sequence).join(',') === '2,3',
       'Stale write status messages should be ignored by document id and sequence.',
     )
@@ -133,7 +127,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       documentId: seed.documentId,
       seedDocument: seed,
     })
-    assert(posted[0]?.kind === 'loaded', 'Worker shell should route repository load requests.')
+    expectTrue(posted[0]?.kind === 'loaded', 'Worker shell should route repository load requests.')
 
     await handle({
       kind: 'subscribe',
@@ -141,14 +135,14 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       subscriptionId: 'subscription_document_sync_test',
       documentId: seed.documentId,
     })
-    assert(posted[1]?.kind === 'subscribed', 'Worker shell should acknowledge repository subscriptions.')
+    expectTrue(posted[1]?.kind === 'subscribed', 'Worker shell should acknowledge repository subscriptions.')
 
     await handle({
       kind: 'unsubscribe',
       requestId: 'request_document_sync_unsubscribe' as DocumentSyncWorkerRequest['requestId'],
       subscriptionId: 'subscription_document_sync_test',
     })
-    assert(posted[2]?.kind === 'unsubscribed', 'Worker shell should acknowledge repository unsubscriptions.')
+    expectTrue(posted[2]?.kind === 'unsubscribed', 'Worker shell should acknowledge repository unsubscriptions.')
 
     await handle({
       kind: 'mutate',
@@ -162,8 +156,8 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         })),
       },
     })
-    assert(!posted.some((message) => message.kind === 'documentChanged'), 'Unsubscribed listeners should not receive later repository change events.')
-    assert(posted.some((message) => message.kind === 'mutated'), 'Worker shell should respond to repository mutations.')
+    expectTrue(!posted.some((message) => message.kind === 'documentChanged'), 'Unsubscribed listeners should not receive later repository change events.')
+    expectTrue(posted.some((message) => message.kind === 'mutated'), 'Worker shell should respond to repository mutations.')
 
     await handle({
       kind: 'normalize',
@@ -171,7 +165,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       document: seed,
       metadata: { documentId: seed.documentId, heads: ['head_normalized'], source: 'restore' },
     })
-    assert(posted.some((message) => message.kind === 'normalized'), 'Worker shell should own authored document normalization requests.')
+    expectTrue(posted.some((message) => message.kind === 'normalized'), 'Worker shell should own authored document normalization requests.')
 
     const asset = await createDeterministicGeometryAsset({ ownerFeatureIds: [seed.features[0]!.featureId] })
     const documentWithAsset = {
@@ -187,7 +181,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       documentId: seed.documentId,
       document: documentWithAsset,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'mutated' && message.requestId === 'request_document_sync_asset_mutate' && message.result.ok),
       'Worker shell should mutate documents with embedded geometry asset data.',
     )
@@ -197,7 +191,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_asset_record' as DocumentSyncWorkerRequest['requestId'],
       asset: asset.asset,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'geometryAssetRecord' && message.bytes?.byteLength === asset.bytes.byteLength),
       'Worker shell should proxy verified embedded asset bytes from the repository.',
     )
@@ -221,7 +215,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       storageKey: 'automerge:stored-url',
       seedDocument: seed,
     })
-    assert(
+    expectTrue(
       urlStore.values.get(seed.documentId) === 'automerge:stored-url'
         && posted[0]?.kind === 'loaded',
       'Load should persist the provided repository storage key before delegating to the repository.',
@@ -232,7 +226,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_idle_status' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'writeStatus' && message.status.kind === 'idle' && message.status.sequence === 0),
       'Write-status requests should default to an idle status before any sync activity has occurred.',
     )
@@ -242,7 +236,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_asset_bytes_missing' as DocumentSyncWorkerRequest['requestId'],
       hash: 'sha256:missing' as DocumentSyncWorkerRequest['kind'] extends never ? never : never,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'geometryAssetBytes' && message.bytes === null),
       'Repositories without geometry-asset support should return null asset bytes cleanly.',
     )
@@ -252,7 +246,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_restore_failure' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'failure' && message.error.message === 'Persistent local file binding storage is unavailable.'),
       'Unsupported persistent binding storage should surface a structured worker failure during binding restore.',
     )
@@ -273,7 +267,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         storedAt: '2026-04-23T00:00:00.000Z',
       },
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'fileHandleBound')
         && posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'persistent-binding-unavailable')
         && posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'synced'),
@@ -292,7 +286,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         storedAt: '2026-04-23T00:01:00.000Z',
       },
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'failure' && message.error.message === 'Local file binding could not be persisted.'),
       'Persisted binding failures should surface a structured worker failure.',
     )
@@ -302,7 +296,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_storage_reset' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
     })
-    assert(
+    expectTrue(
       urlStore.deleted.includes(seed.documentId)
         && posted.some((message) => message.kind === 'reset' && message.status.kind === 'reset'),
       'Reset should clear the stored repository url and return the repository reset status.',
@@ -343,8 +337,8 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
         storedAt: '2026-04-22T00:00:00.000Z',
       },
     })
-    assert(bindingStore.saved.length === 1, 'Binding file handles should be persisted outside the authored document.')
-    assert(posted.some((message) => message.kind === 'fileHandleBound'), 'Binding a file handle should acknowledge the active sync target.')
+    expectTrue(bindingStore.saved.length === 1, 'Binding file handles should be persisted outside the authored document.')
+    expectTrue(posted.some((message) => message.kind === 'fileHandleBound'), 'Binding a file handle should acknowledge the active sync target.')
 
     await handle({
       kind: 'mutate',
@@ -368,10 +362,10 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
     writeGate.resolve()
     await flushAsync()
 
-    assert(writableHandle.writes.length === 2, 'Rapid accepted changes should coalesce while a direct write is in flight.')
-    assert(writableHandle.writes[0]?.includes('Autosync One'), 'The in-flight write should complete the first accepted state.')
-    assert(writableHandle.writes[1]?.includes('Autosync Three'), 'The coalesced follow-up write should persist the latest accepted state.')
-    assert(
+    expectTrue(writableHandle.writes.length === 2, 'Rapid accepted changes should coalesce while a direct write is in flight.')
+    expectTrue(writableHandle.writes[0]?.includes('Autosync One'), 'The in-flight write should complete the first accepted state.')
+    expectTrue(writableHandle.writes[1]?.includes('Autosync Three'), 'The coalesced follow-up write should persist the latest accepted state.')
+    expectTrue(
       posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'syncing')
         && posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'synced'),
       'Autosync writes should publish visible syncing and synced statuses.',
@@ -400,7 +394,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       document: withBodyLabel(seed, 'Permission Denied'),
     })
     await flushAsync()
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'permission-denied'),
       'Denied write permission should publish a permission-denied sync status without clearing repository state.',
     )
@@ -424,7 +418,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       document: withBodyLabel(seed, 'Write Failed'),
     })
     await flushAsync()
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'failed'),
       'Direct write failures should publish a failed sync status without clearing repository state.',
     )
@@ -434,7 +428,7 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_file_restore' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'binding-restored')
         && posted.some((message) => message.kind === 'bindingRestored' && message.record?.metadata.fileName === 'failed.cadara'),
       'Restoring a persisted binding should publish binding-restored status before returning the restored record.',
@@ -445,11 +439,11 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
       requestId: 'request_document_sync_file_status_after_restore' as DocumentSyncWorkerRequest['requestId'],
       documentId: seed.documentId,
     })
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'writeStatus' && message.status.kind === 'binding-restored'),
       'The latest write status should report the restored binding after a successful binding restore.',
     )
-    assert(
+    expectTrue(
       posted.some((message) => message.kind === 'bindingRestored' && message.record?.metadata.fileName === 'failed.cadara'),
       'Persisted local file bindings should restore through the worker binding store.',
     )

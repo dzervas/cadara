@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import * as THREE from 'three'
 
 import type { SketchDefinition } from '@/contracts/sketch/schema'
@@ -24,14 +25,7 @@ import {
   updateWorkspaceHighlight,
 } from '@/domain/workspace/render-picking'
 
-test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createDefinition(): SketchDefinition {
+test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {  function createDefinition(): SketchDefinition {
     return {
       schemaVersion: 'sketch-definition/v1alpha1',
       referenceIds: [],
@@ -119,15 +113,15 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       edgeId: 'edge_seed',
     })
 
-    assert(session.definition.referenceIds.length === 1, 'Accepted edge references should be authored on the sketch definition.')
-    assert(session.definition.references[0]?.kind === 'modelReference', 'Model topology should create a model reference record.')
-    assert(
+    expectTrue(session.definition.referenceIds.length === 1, 'Accepted edge references should be authored on the sketch definition.')
+    expectTrue(session.definition.references[0]?.kind === 'modelReference', 'Model topology should create a model reference record.')
+    expectTrue(
       session.commitRequest?.definition.references[0]?.referenceId === session.definition.references[0]?.referenceId,
       'Reference additions should flow into the sketch commit payload.',
     )
 
     const reopened = createSession(session.commitRequest!.definition)
-    assert(reopened.definition.references.length === 1, 'Reopened sketch sessions should preserve authored references.')
+    expectTrue(reopened.definition.references.length === 1, 'Reopened sketch sessions should preserve authored references.')
   }
 
   function testFaceBackedReopenPreservesNullPlaneKeyInCommitRequest() {
@@ -173,8 +167,8 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       },
     } satisfies SketchSnapshotRecord)
 
-    assert(session.plane.key === null, 'Face-backed reopened sketches should preserve a null authored plane key.')
-    assert(session.commitRequest?.plane.key === null, 'Face-backed reopened sketch commits should not default planeKey to XY.')
+    expectTrue(session.plane.key === null, 'Face-backed reopened sketches should preserve a null authored plane key.')
+    expectTrue(session.commitRequest?.plane.key === null, 'Face-backed reopened sketch commits should not default planeKey to XY.')
   }
 
   function testDuplicateReferencesAreRejected() {
@@ -189,8 +183,8 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
     session = beginSketchTool(session, 'projectReference')
     session = selectSketchReferenceTarget(session, target)
 
-    assert(session.definition.references.length === 1, 'Duplicate external references should not be appended.')
-    assert(session.validationMessage?.includes('already authored'), 'Duplicate rejection should surface explicit feedback.')
+    expectTrue(session.definition.references.length === 1, 'Duplicate external references should not be appended.')
+    expectTrue(session.validationMessage?.includes('already authored'), 'Duplicate rejection should surface explicit feedback.')
   }
 
   function testInvalidReferenceDiagnosticsStayExplicit() {
@@ -208,8 +202,8 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       },
     })
 
-    assert(!validation.isValid, 'Invalid reference order should fail validation.')
-    assert(
+    expectTrue(!validation.isValid, 'Invalid reference order should fail validation.')
+    expectTrue(
       validation.diagnostics.some((diagnostic) => diagnostic.code === 'reference-missing-from-records'),
       'Invalid references should report a stable diagnostic code.',
     )
@@ -236,8 +230,8 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       },
     })
 
-    assert(!validation.isValid, 'Duplicate reference records should fail validation.')
-    assert(
+    expectTrue(!validation.isValid, 'Duplicate reference records should fail validation.')
+    expectTrue(
       validation.diagnostics.some((diagnostic) => diagnostic.code === 'duplicate-reference-record'),
       'Duplicate reference records should report a stable diagnostic code.',
     )
@@ -262,14 +256,14 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       entry.target?.kind === 'projectedReferenceGeometry'
     )
 
-    assert(renderable, 'Projected reference geometry should produce a viewport renderable.')
-    assert(renderable.role === 'reference', 'Projected reference renderables should use read-only reference styling.')
+    expectTrue(renderable, 'Projected reference geometry should produce a viewport renderable.')
+    expectTrue(renderable.role === 'reference', 'Projected reference renderables should use read-only reference styling.')
 
     session = beginSketchGeometryDrag(session, renderable.target!, [0, 0])
-    assert(session.activeDrag === null, 'Projected reference geometry should not start direct sketch dragging.')
+    expectTrue(session.activeDrag === null, 'Projected reference geometry should not start direct sketch dragging.')
 
     const toggled = toggleSketchConstructionTarget(beginSketchTool(session, 'construction'), renderable.target!)
-    assert(
+    expectTrue(
       toggled.definition.references.length === session.definition.references.length,
       'Projected reference geometry should not be toggled into sketch-owned construction geometry.',
     )
@@ -302,12 +296,12 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
       entry.target?.kind === 'sketchExternalReference'
     )
 
-    assert(marker, 'Failed or empty reference projections should produce a selectable reference marker.')
-    assert(marker.role === 'reference', 'Reference markers should use read-only reference styling.')
+    expectTrue(marker, 'Failed or empty reference projections should produce a selectable reference marker.')
+    expectTrue(marker.role === 'reference', 'Reference markers should use read-only reference styling.')
 
     const deleted = deleteSketchReferenceTarget(session, marker.target!)
-    assert(deleted.definition.references.length === 0, 'Deleting a reference marker should remove the authored reference.')
-    assert(
+    expectTrue(deleted.definition.references.length === 0, 'Deleting a reference marker should remove the authored reference.')
+    expectTrue(
       deleted.commitRequest?.definition.references.length === 0,
       'Reference marker deletion should flow into the sketch commit payload.',
     )
@@ -330,14 +324,14 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
     bindRenderableObject(line, null, target, 'sketchReference', 'document')
 
     const bindings = collectBindings(root)
-    assert(bindings, 'Reference style test should collect the bound line.')
+    expectTrue(bindings, 'Reference style test should collect the bound line.')
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], target)
     updateWorkspaceHighlight(bindings.targetToObjects, [], null)
 
     const material = line.material
-    assert(!Array.isArray(material), 'Reference style test line should have one material.')
-    assert(
+    expectTrue(!Array.isArray(material), 'Reference style test line should have one material.')
+    expectTrue(
       material.color.getHex() === SURFACE_COLORS.sketchReference,
       'Reference geometry should keep its distinct inactive color after highlight refresh.',
     )
@@ -353,14 +347,14 @@ test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {
     const xAxis = renderables.find((entry) => entry.target?.kind === 'sketchDatumReference' && entry.target.datumId === 'xAxis')
     const yAxis = renderables.find((entry) => entry.target?.kind === 'sketchDatumReference' && entry.target.datumId === 'yAxis')
 
-    assert(origin && xAxis && yAxis, 'Active sketch sessions should expose origin, X-axis, and Y-axis datum renderables.')
-    assert(origin.role === 'reference' && xAxis.role === 'reference' && yAxis.role === 'reference', 'Sketch datum renderables should use read-only reference styling.')
+    expectTrue(origin && xAxis && yAxis, 'Active sketch sessions should expose origin, X-axis, and Y-axis datum renderables.')
+    expectTrue(origin.role === 'reference' && xAxis.role === 'reference' && yAxis.role === 'reference', 'Sketch datum renderables should use read-only reference styling.')
 
     const dragged = beginSketchGeometryDrag(session, origin.target!, [0, 0])
-    assert(dragged.activeDrag === null, 'Sketch datum origin should not start direct sketch dragging.')
+    expectTrue(dragged.activeDrag === null, 'Sketch datum origin should not start direct sketch dragging.')
 
     const toggled = toggleSketchConstructionTarget(beginSketchTool(session, 'construction'), xAxis.target!)
-    assert(
+    expectTrue(
       toggled.definition.entities.length === session.definition.entities.length,
       'Sketch datum axes should not toggle into authored construction geometry.',
     )

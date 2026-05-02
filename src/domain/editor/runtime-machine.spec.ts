@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { EditorEffectRuntime, EditorState } from '@/domain/editor/state-machine'
 import {
   createEditorEventLoop,
@@ -8,14 +9,7 @@ import {
 import { createTestErrorReporter } from '@/contracts/errors'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/domain/editor/runtime-machine.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function waitForState(
+test('src/domain/editor/runtime-machine.spec.ts', async () => {  function waitForState(
     actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
@@ -81,34 +75,27 @@ test('src/domain/editor/runtime-machine.spec.ts', async () => {
     actor.dispatch({ type: 'sketch.pointerReleased', point: [1, 0.3] })
 
     const beforeDrag = actor.getState()
-    assert(beforeDrag.kind === 'editingSketch', 'Expected active sketch session before drag.')
+    expectTrue(beforeDrag.kind === 'editingSketch', 'Expected active sketch session before drag.')
     const point = beforeDrag.session.definition.points[0]
-    assert(point, 'Expected a point to drag after drawing a line.')
+    expectTrue(point, 'Expected a point to drag after drawing a line.')
 
     actor.dispatch({ type: 'sketch.geometryDragStarted', target: point.target, point: point.position })
     actor.dispatch({ type: 'sketch.geometryDragMoved', point: [2, 3] })
     actor.dispatch({ type: 'sketch.geometryDragEnded', point: [2, 3] })
 
     const afterDrag = actor.getState()
-    assert(afterDrag.kind === 'editingSketch', 'Expected sketch session to remain active after drag.')
+    expectTrue(afterDrag.kind === 'editingSketch', 'Expected sketch session to remain active after drag.')
 
     const movedPoint = afterDrag.session.definition.points.find((entry) => entry.pointId === point.pointId)
-    assert(movedPoint, 'Expected dragged point to remain in the sketch definition.')
-    assert(movedPoint.position[0] === 2, 'Runtime should forward geometry drag move events to the editor reducer.')
-    assert(movedPoint.position[1] === 3, 'Runtime should forward geometry drag end events to the editor reducer.')
+    expectTrue(movedPoint, 'Expected dragged point to remain in the sketch definition.')
+    expectTrue(movedPoint.position[0] === 2, 'Runtime should forward geometry drag move events to the editor reducer.')
+    expectTrue(movedPoint.position[1] === 3, 'Runtime should forward geometry drag end events to the editor reducer.')
   } finally {
     actor.stop()
   }
 })
 
-test('src/domain/editor/runtime-machine.spec.ts reports escaped effect invocation failures', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function waitForState(
+test('src/domain/editor/runtime-machine.spec.ts reports escaped effect invocation failures', async () => {  function waitForState(
     actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
@@ -165,23 +152,16 @@ test('src/domain/editor/runtime-machine.spec.ts reports escaped effect invocatio
   try {
     const state = await waitForState(actor, (candidate) => candidate.pendingSnapshotRequestId === null)
 
-    assert(reporter.reports.length === 1, 'Escaped invocation failures should be reported.')
-    assert(reporter.reports[0]?.error.code === 'editor/invocation-failed', 'Escaped failures should use invocation failure codes.')
-    assert(reporter.reports[0]?.metadata.source === 'editor-runtime', 'Escaped failures should identify the runtime source.')
-    assert(state.preview?.kind === 'selection', 'Escaped failures should become UI-visible editor failure state.')
+    expectTrue(reporter.reports.length === 1, 'Escaped invocation failures should be reported.')
+    expectTrue(reporter.reports[0]?.error.code === 'editor/invocation-failed', 'Escaped failures should use invocation failure codes.')
+    expectTrue(reporter.reports[0]?.metadata.source === 'editor-runtime', 'Escaped failures should identify the runtime source.')
+    expectTrue(state.preview?.kind === 'selection', 'Escaped failures should become UI-visible editor failure state.')
   } finally {
     actor.stop()
   }
 })
 
-test('src/domain/editor/runtime-machine.spec.ts forwards selection clear events', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function waitForState(
+test('src/domain/editor/runtime-machine.spec.ts forwards selection clear events', async () => {  function waitForState(
     actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
@@ -244,20 +224,13 @@ test('src/domain/editor/runtime-machine.spec.ts forwards selection clear events'
     actor.dispatch({ type: 'selection.cleared' })
     const cleared = await waitForState(actor, (state) => state.selection.length === 0)
 
-    assert(cleared.hoverTarget === null, 'Runtime should forward selection clear events to the editor reducer.')
+    expectTrue(cleared.hoverTarget === null, 'Runtime should forward selection clear events to the editor reducer.')
   } finally {
     actor.stop()
   }
 })
 
-test('src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load events', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function waitForState(
+test('src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load events', async () => {  function waitForState(
     actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
@@ -318,21 +291,14 @@ test('src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load ev
     actor.dispatch({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
     const loaded = await waitForState(actor, (state) => state.document.revisionId === 'rev_imported')
 
-    assert(loaded.snapshot?.document.revisionId === 'rev_imported', 'Runtime should forward direct snapshot loads to the editor reducer.')
-    assert(loaded.selectionCatalog !== null, 'Direct snapshot loads should rebuild the selection catalog.')
+    expectTrue(loaded.snapshot?.document.revisionId === 'rev_imported', 'Runtime should forward direct snapshot loads to the editor reducer.')
+    expectTrue(loaded.selectionCatalog !== null, 'Direct snapshot loads should rebuild the selection catalog.')
   } finally {
     actor.stop()
   }
 })
 
-test('src/domain/editor/runtime-machine.spec.ts forwards connected sketch selection events', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function waitForState(
+test('src/domain/editor/runtime-machine.spec.ts forwards connected sketch selection events', async () => {  function waitForState(
     actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
@@ -401,14 +367,14 @@ test('src/domain/editor/runtime-machine.spec.ts forwards connected sketch select
       actor,
       (state) => state.kind === 'editingSketch' && state.session.definition.entities.length === 4,
     )
-    assert(rectangleState.kind === 'editingSketch', 'Expected sketch session after rectangle creation.')
+    expectTrue(rectangleState.kind === 'editingSketch', 'Expected sketch session after rectangle creation.')
     const rectangleEdge = rectangleState.session.definition.entities[0]?.target
-    assert(rectangleEdge?.kind === 'sketchEntity', 'Expected a selectable rectangle edge.')
+    expectTrue(rectangleEdge?.kind === 'sketchEntity', 'Expected a selectable rectangle edge.')
 
     actor.dispatch({ type: 'sketch.connectedSelectionRequested', target: rectangleEdge })
     const connected = await waitForState(actor, (state) => state.selection.length === 4)
 
-    assert(
+    expectTrue(
       connected.selection.every((target) => target.kind === 'sketchEntity'),
       'Runtime should forward connected sketch selection events to the editor reducer.',
     )
@@ -417,14 +383,7 @@ test('src/domain/editor/runtime-machine.spec.ts forwards connected sketch select
   }
 })
 
-test('src/domain/editor/runtime-machine.spec.ts forwards active section offset updates', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function waitForState(
+test('src/domain/editor/runtime-machine.spec.ts forwards active section offset updates', async () => {  function waitForState(
     actor: EditorEventLoop,
     predicate: (state: EditorState) => boolean,
   ): Promise<EditorState> {
@@ -486,7 +445,7 @@ test('src/domain/editor/runtime-machine.spec.ts forwards active section offset u
     })
 
     const selected = await waitForState(actor, (state) => state.kind === 'inspectingSection')
-    assert(selected.kind === 'inspectingSection', 'Expected an active section after picking a valid section seed.')
+    expectTrue(selected.kind === 'inspectingSection', 'Expected an active section after picking a valid section seed.')
 
     actor.dispatch({
       type: 'section.offsetUpdated',
@@ -499,8 +458,8 @@ test('src/domain/editor/runtime-machine.spec.ts forwards active section offset u
       (state) => state.kind === 'inspectingSection' && state.section.offset === 6,
     )
 
-    assert(moved.kind === 'inspectingSection', 'Section offset forwarding should keep the section workflow active.')
-    assert(moved.section.offset === 6, 'Runtime should forward section offset updates to the editor reducer.')
+    expectTrue(moved.kind === 'inspectingSection', 'Section offset forwarding should keep the section workflow active.')
+    expectTrue(moved.section.offset === 6, 'Runtime should forward section offset updates to the editor reducer.')
   } finally {
     actor.stop()
   }

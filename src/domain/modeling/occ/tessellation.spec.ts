@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   degreesToOccAngularDeflectionRadians,
   getOccTessellationTier,
@@ -8,37 +9,30 @@ import {
 } from '@/domain/modeling/occ/tessellation'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 
-test('src/domain/modeling/occ/tessellation.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const startup = getOccTessellationTier('startup')
+test('src/domain/modeling/occ/tessellation.spec.ts', () => {  const startup = getOccTessellationTier('startup')
   const fine = getOccTessellationTier('fine')
 
-  assert(
+  expectTrue(
     degreesToOccAngularDeflectionRadians(180) === Math.PI,
     'OCC angular deflection unit audit should convert degree-equivalent settings to radians.',
   )
-  assert(
+  expectTrue(
     startup.linearDeflectionModelUnits >= 0.5 && startup.linearDeflectionModelUnits <= 1.0,
     'Startup tessellation should use coarse 0.5 to 1.0 model-unit linear deflection.',
   )
-  assert(
+  expectTrue(
     startup.angularDeflectionRadians === 0.5 && startup.angularDeflectionDegreeEquivalent > 2,
     'Startup tessellation should keep the existing angular value because it is already coarser than 1-2 degrees.',
   )
-  assert(
+  expectTrue(
     fine.linearDeflectionModelUnits < startup.linearDeflectionModelUnits,
     'Fine tessellation should refine geometry without changing topology bindings.',
   )
-  assert(
+  expectTrue(
     selectBodyLodTier({ bodyRadiusModelUnits: 1, cameraDistanceModelUnits: 40 }) === 'startup',
     'Far bodies should select coarse startup LOD.',
   )
-  assert(
+  expectTrue(
     selectBodyLodTier({ bodyRadiusModelUnits: 4, cameraDistanceModelUnits: 10 }) === 'fine',
     'Close bodies should select fine LOD refinement.',
   )
@@ -64,21 +58,21 @@ test('src/domain/modeling/occ/tessellation.spec.ts', () => {
     },
   } as RenderableEntityRecord
 
-  assert(
+  expectTrue(
     selectViewportLodTierForRenderables({
       cameraPosition: [0, 0, 50],
       renderables: [bodyRenderable],
     }) === 'startup',
     'Camera-driven LOD should keep far body renderables on the coarse tier.',
   )
-  assert(
+  expectTrue(
     selectViewportLodTierForRenderables({
       cameraPosition: [0, 0, 4],
       renderables: [bodyRenderable],
     }) === 'fine',
     'Camera-driven LOD should request fine meshes when zoomed close to a body.',
   )
-  assert(
+  expectTrue(
     bodyRenderable.binding.target.kind === 'face' &&
       bodyRenderable.binding.target.bodyId === 'body_1' &&
       bodyRenderable.binding.target.faceId === 'face_1',

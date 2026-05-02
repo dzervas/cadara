@@ -1,5 +1,4 @@
-import { test } from 'bun:test'
-import { strict as assert } from 'node:assert'
+import { expect, test } from 'bun:test'
 
 import * as THREE from 'three'
 
@@ -18,7 +17,7 @@ import type { RenderableEntityRecord } from '@/contracts/render/schema'
 
 test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
   function approx(actual: number, expected: number, epsilon = 1e-6) {
-    assert(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`)
+    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(epsilon)
   }
 
   function approxVector(actual: THREE.Vector3, expected: THREE.Vector3, epsilon = 1e-6) {
@@ -61,8 +60,8 @@ test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
   {
     const camera = createViewportCamera(DEFAULT_VIEWPORT_PROJECTION_MODE, 16 / 9)
 
-    assert(camera instanceof THREE.OrthographicCamera, 'Viewport projection should default to orthographic.')
-    assert.equal(getViewportCameraProjectionMode(camera), 'orthographic')
+    expect(camera instanceof THREE.OrthographicCamera).toBeTruthy()
+    expect(getViewportCameraProjectionMode(camera)).toBe('orthographic')
     approxVector(camera.position, new THREE.Vector3(14, -16, 28))
   }
 
@@ -81,10 +80,10 @@ test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
     applyViewportCameraFrame(perspectiveCamera, controls, frame)
     const expectedPerspectiveDistance = (32 / 2.5) / (2 * Math.tan(THREE.MathUtils.degToRad(45) / 2))
 
-    assert.equal(getViewportCameraProjectionMode(perspectiveCamera), 'perspective')
+    expect(getViewportCameraProjectionMode(perspectiveCamera)).toBe('perspective')
     approxVector(controls.target, new THREE.Vector3(-2, 3, 5))
     approxVector(perspectiveCamera.up, new THREE.Vector3(0, 0, 1))
-    assert(frame.orthographicZoom === 2.5, 'Captured orthographic frames should preserve zoom for later restoration.')
+    expect(frame.orthographicZoom === 2.5).toBeTruthy()
     approx(perspectiveCamera.position.distanceTo(controls.target), expectedPerspectiveDistance)
   }
 
@@ -102,7 +101,7 @@ test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
       2 * perspectiveCamera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(45) / 2)
     )
 
-    assert.equal(frame.projectionMode, 'perspective')
+    expect(frame.projectionMode).toBe('perspective')
     approx(orthographicCamera.zoom, expectedOrthographicZoom)
     approxVector(controls.target, new THREE.Vector3(4, -1, 2))
   }
@@ -112,8 +111,8 @@ test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
 
     approxVector(frame.target, new THREE.Vector3(0, 0, 4))
     approxVector(frame.up, new THREE.Vector3(0, 0, 1))
-    assert.equal(frame.projectionMode, 'orthographic')
-    assert.equal(frame.orthographicZoom, 1)
+    expect(frame.projectionMode).toBe('orthographic')
+    expect(frame.orthographicZoom).toBe(1)
   }
 
   {
@@ -129,13 +128,13 @@ test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
     ]
     const frame = computeViewportRenderableFitFrame({ camera, controls, renderables })
 
-    assert(frame, 'Body renderable fit should produce a camera frame.')
+    expect(frame).toBeTruthy()
     approxVector(frame.target, new THREE.Vector3(1500, 2500, 480))
-    assert(frame.orthographicZoom < 1, 'Large off-origin imported bodies should reduce orthographic zoom to fit.')
+    expect(frame.orthographicZoom < 1).toBeTruthy()
 
     const applied = applyViewportRenderableFitFrame({ camera, controls, renderables })
-    assert(applied, 'Applying a body renderable fit should report success.')
+    expect(applied).toBeTruthy()
     approxVector(controls.target, new THREE.Vector3(1500, 2500, 480))
-    assert(camera.far > 1000, 'Fitting a large/off-origin body should expand the camera far plane.')
+    expect(camera.far > 1000).toBeTruthy()
   }
 })

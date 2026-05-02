@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -9,14 +10,7 @@ import {
   SketchSpecialModeViewportFeedback,
 } from '@/components/cad/sketch-special-mode-viewport-feedback'
 
-test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const panelMarkup = renderToStaticMarkup(
+test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {  const panelMarkup = renderToStaticMarkup(
     <MantineProvider>
       <SketchSpecialModePanel
         schema={{
@@ -73,10 +67,10 @@ test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {
     </MantineProvider>,
   )
 
-  assert(panelMarkup.includes('Fixture mode'), 'The generic special-mode panel should render the mode title.')
-  assert(panelMarkup.includes('Geometry'), 'The generic special-mode panel should render section titles.')
-  assert(panelMarkup.includes('Review the selected target.'), 'The generic special-mode panel should render diagnostics.')
-  assert(panelMarkup.includes('Cancel'), 'The generic special-mode panel should render footer actions.')
+  expectTrue(panelMarkup.includes('Fixture mode'), 'The generic special-mode panel should render the mode title.')
+  expectTrue(panelMarkup.includes('Geometry'), 'The generic special-mode panel should render section titles.')
+  expectTrue(panelMarkup.includes('Review the selected target.'), 'The generic special-mode panel should render diagnostics.')
+  expectTrue(panelMarkup.includes('Cancel'), 'The generic special-mode panel should render footer actions.')
 
   const feedbackMarkup = renderToStaticMarkup(
     <SketchSpecialModeViewportFeedback
@@ -119,17 +113,17 @@ test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {
     />,
   )
 
-  assert(feedbackMarkup.includes('Pick a handle.'), 'The generic special-mode feedback shell should render prompts.')
-  assert(feedbackMarkup.includes('Constraint is unresolved.'), 'The generic special-mode feedback shell should render diagnostics.')
-  assert(feedbackMarkup.includes('Anchor'), 'The generic special-mode feedback shell should render badge labels.')
-  assert(feedbackMarkup.includes('Corner'), 'The generic special-mode feedback shell should render handle labels.')
+  expectTrue(feedbackMarkup.includes('Pick a handle.'), 'The generic special-mode feedback shell should render prompts.')
+  expectTrue(feedbackMarkup.includes('Constraint is unresolved.'), 'The generic special-mode feedback shell should render diagnostics.')
+  expectTrue(feedbackMarkup.includes('Anchor'), 'The generic special-mode feedback shell should render badge labels.')
+  expectTrue(feedbackMarkup.includes('Corner'), 'The generic special-mode feedback shell should render handle labels.')
 
   const panelSource = await Bun.file(new URL('./sketch-special-mode-panel.tsx', import.meta.url)).text()
   const viewportSource = await Bun.file(new URL('./sketch-special-mode-viewport-feedback.tsx', import.meta.url)).text()
 
-  assert(!panelSource.includes('referenceImage'), 'The generic panel shell should not import or branch on reference-image business logic.')
-  assert(!viewportSource.includes('referenceImage'), 'The generic viewport shell should not import or branch on reference-image business logic.')
-  assert(!panelSource.includes('modeId ==='), 'The generic panel shell should render from schema data, not mode-id branches.')
-  assert(!viewportSource.includes('modeId ==='), 'The generic viewport shell should render from schema data, not mode-id branches.')
-  assert(viewportSource.includes('right-4 top-4'), 'Viewport status prompts should avoid the panel shell slot.')
+  expectTrue(!panelSource.includes('referenceImage'), 'The generic panel shell should not import or branch on reference-image business logic.')
+  expectTrue(!viewportSource.includes('referenceImage'), 'The generic viewport shell should not import or branch on reference-image business logic.')
+  expectTrue(!panelSource.includes('modeId ==='), 'The generic panel shell should render from schema data, not mode-id branches.')
+  expectTrue(!viewportSource.includes('modeId ==='), 'The generic viewport shell should render from schema data, not mode-id branches.')
+  expectTrue(viewportSource.includes('right-4 top-4'), 'Viewport status prompts should avoid the panel shell slot.')
 })

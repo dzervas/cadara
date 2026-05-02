@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { getEditorViewState, initialEditorState } from '@/domain/editor/state-machine'
 import { createNewSketchSession } from '@/domain/editor/sketch-session'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
@@ -14,14 +15,7 @@ import {
   shouldViewportStartSketchGeometryDrag,
 } from './workbench-interactions'
 
-test('src/domain/editor/workbench-interactions.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const adapter = new MockKernelAdapter()
+test('src/domain/editor/workbench-interactions.spec.ts', async () => {  const adapter = new MockKernelAdapter()
   const response = await adapter.getDocumentSnapshot({
     contractVersion: 'modeling-contract/v1alpha1',
     documentId: 'doc_workspace',
@@ -34,8 +28,8 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       featureId: 'feature_extrude-1',
     })
 
-    assert(event?.type === 'authoring.reopenRequested', 'Feature double-click should emit a reopen event.')
-    assert(event.toolId === 'extrude', 'Feature double-click should reopen through the committed feature tool.')
+    expectTrue(event?.type === 'authoring.reopenRequested', 'Feature double-click should emit a reopen event.')
+    expectTrue(event.toolId === 'extrude', 'Feature double-click should reopen through the committed feature tool.')
   }
 
   function testSketchReopenIntentUsesSketchFlow() {
@@ -44,8 +38,8 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       sketchId: 'sketch_primary',
     })
 
-    assert(event?.type === 'authoring.reopenRequested', 'Sketch double-click should emit a reopen event.')
-    assert(event.toolId === 'sketch', 'Sketch double-click should reopen through the sketch flow.')
+    expectTrue(event?.type === 'authoring.reopenRequested', 'Sketch double-click should emit a reopen event.')
+    expectTrue(event.toolId === 'sketch', 'Sketch double-click should reopen through the sketch flow.')
   }
 
   function testEscapePrefersReferencePickerCancellation() {
@@ -64,7 +58,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       },
     })
 
-    assert(event?.type === 'form.referencePickerCancelled', 'Escape should cancel reference pickers before any broader authoring state.')
+    expectTrue(event?.type === 'form.referencePickerCancelled', 'Escape should cancel reference pickers before any broader authoring state.')
   }
 
   function testEscapeClearsActiveSketchToolBeforeExitingSketch() {
@@ -82,7 +76,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       },
     })
 
-    assert(event?.type === 'sketch.activeToolCleared', 'Escape should clear the active sketch tool before exiting sketch mode.')
+    expectTrue(event?.type === 'sketch.activeToolCleared', 'Escape should clear the active sketch tool before exiting sketch mode.')
   }
 
   function testEscapeClearsActiveSketchStyleFocus() {
@@ -112,7 +106,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       },
     })
 
-    assert(event?.type === 'sketch.activeToolCleared', 'Escape should clear active sketch style focus before clearing selection.')
+    expectTrue(event?.type === 'sketch.activeToolCleared', 'Escape should clear active sketch style focus before clearing selection.')
   }
 
   function testEscapeDoesNothingWhenSketchIsIdle() {
@@ -130,7 +124,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       },
     })
 
-    assert(event === null, 'Escape should not finish an idle sketch session.')
+    expectTrue(event === null, 'Escape should not finish an idle sketch session.')
   }
 
   function testEscapeClearsSelectionWhenNoInteractionHandlesIt() {
@@ -141,7 +135,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       sketchSession: null,
     })
 
-    assert(event?.type === 'selection.cleared', 'Escape should clear selection when no active interaction handles it.')
+    expectTrue(event?.type === 'selection.cleared', 'Escape should clear selection when no active interaction handles it.')
   }
 
   function testViewportDoubleClickConnectedSelectionRoutingOnlyUsesIdleSketchEntities() {
@@ -151,7 +145,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       entityId: 'sketch_entity_ab',
     } as const
 
-    assert(
+    expectTrue(
       shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: null,
         sketchStatus: 'idle',
@@ -159,7 +153,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }),
       'Idle sketch entity double-clicks should route to connected selection.',
     )
-    assert(
+    expectTrue(
       shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: 'rectangle',
         sketchStatus: 'idle',
@@ -167,7 +161,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }),
       'Idle drawing tools should allow connected selection after accepting a shape.',
     )
-    assert(
+    expectTrue(
       !shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: 'line',
         sketchStatus: 'drawing',
@@ -175,7 +169,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }),
       'In-progress drawing tools should keep their existing click routing.',
     )
-    assert(
+    expectTrue(
       !shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: 'dimensionDistance',
         sketchStatus: 'collectingTargets',
@@ -183,7 +177,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }),
       'Active constraint tools should keep target routing instead of connected selection.',
     )
-    assert(
+    expectTrue(
       !shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: null,
         sketchStatus: 'idle',
@@ -196,7 +190,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }),
       'Projected reference geometry should not route to connected local selection.',
     )
-    assert(
+    expectTrue(
       !shouldViewportClickEventRequestConnectedSketchSelection({
         activeSketchTool: null,
         clickDetail: 1,
@@ -205,7 +199,7 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }),
       'Ordinary click events should not route to connected selection.',
     )
-    assert(
+    expectTrue(
       shouldViewportClickEventRequestConnectedSketchSelection({
         activeSketchTool: null,
         clickDetail: 2,
@@ -217,42 +211,42 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
   }
 
   function testViewportClickSelectionRoutingAllowsConstraintsOnly() {
-    assert(
+    expectTrue(
       shouldViewportClickRequestSelection(null),
       'Viewport clicks should request selection when no sketch tool is active.',
     )
-    assert(
+    expectTrue(
       shouldViewportClickRequestSelection('constraintCoincident'),
       'Viewport clicks should request selection while a constraint tool is active.',
     )
-    assert(
+    expectTrue(
       shouldViewportClickRequestSelection('construction'),
       'Viewport clicks should request selection while Construction is picking an existing sketch target.',
     )
-    assert(
+    expectTrue(
       shouldViewportClickRequestSelection('trim'),
       'Viewport clicks should request selection while Trim is picking an existing sketch target.',
     )
-    assert(
+    expectTrue(
       shouldViewportClickRequestSelection('offset'),
       'Viewport clicks should request selection while Offset is picking an existing sketch target.',
     )
-    assert(
+    expectTrue(
       !shouldViewportClickRequestSelection('line'),
       'Viewport clicks should keep drawing tools on the pointer construction path.',
     )
   }
 
   function testViewportCanvasClickIntentClearsOnlyEmptyClicks() {
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({ activeSketchTool: null, hasResolvedTarget: false }) === 'clearSelection',
       'Empty viewport clicks should clear selection when no sketch tool is active.',
     )
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({ activeSketchTool: 'line', hasResolvedTarget: false }) === 'clearSelection',
       'Empty viewport clicks should clear selection even while a drawing tool is active.',
     )
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({
         activeSketchTool: 'line',
         hasResolvedTarget: true,
@@ -261,11 +255,11 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }) === 'clearSelection',
       'Background datum plane hits should behave like empty clicks while drawing tools are active.',
     )
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({ activeSketchTool: null, hasResolvedTarget: true }) === 'selectTarget',
       'Target clicks should continue through normal selection routing when selection clicks are allowed.',
     )
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({
         activeSketchTool: null,
         hasResolvedTarget: true,
@@ -274,34 +268,34 @@ test('src/domain/editor/workbench-interactions.spec.ts', async () => {
       }) === 'selectTarget',
       'Sketch-start selection should still allow selecting background datum planes.',
     )
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({ activeSketchTool: 'line', hasResolvedTarget: true }) === 'ignore',
       'Target clicks should preserve drawing-tool routing when selection clicks are not allowed.',
     )
-    assert(
+    expectTrue(
       getViewportCanvasClickIntent({ activeSketchTool: 'trim', hasResolvedTarget: true }) === 'selectTarget',
       'Trim target clicks should route through selection so sketch entities can be edited.',
     )
   }
 
   function testViewportSketchGeometryDragCanInterruptIdleDrawingTools() {
-    assert(
+    expectTrue(
       shouldViewportStartSketchGeometryDrag(null, 'idle'),
       'Viewport sketch geometry drags should start when no sketch tool is active.',
     )
-    assert(
+    expectTrue(
       shouldViewportStartSketchGeometryDrag('line', 'idle'),
       'Idle drawing tools should allow dragged sketch vertices to interrupt placement.',
     )
-    assert(
+    expectTrue(
       !shouldViewportStartSketchGeometryDrag('line', 'drawing'),
       'Viewport sketch geometry drags should not interrupt an in-progress drawing gesture.',
     )
-    assert(
+    expectTrue(
       !shouldViewportStartSketchGeometryDrag('constraintCoincident', 'collectingTargets'),
       'Viewport sketch geometry drags should not interrupt constraint target collection.',
     )
-    assert(
+    expectTrue(
       !shouldViewportStartSketchGeometryDrag('construction', 'collectingTargets'),
       'Viewport sketch geometry drags should not interrupt Construction target-picking.',
     )

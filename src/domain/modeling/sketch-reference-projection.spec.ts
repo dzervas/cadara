@@ -1,14 +1,9 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION, RENDER_EXPORT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import { projectSketchExternalReferencesFromSnapshot } from './sketch-reference-projection'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function createSnapshotWithEdge(points: readonly (readonly [number, number, number])[], isClosed: boolean): WorkspaceSnapshot {
   const document = {
@@ -127,7 +122,7 @@ test('model edge projection classifies supported projected geometry generically'
     [0, 0, 0],
     [2, 0, 0],
   ], false).projectedReferences[0]?.geometry[0]
-  assert(line?.kind === 'lineSegment', 'Open collinear model edges should project as line segments.')
+  expectTrue(line?.kind === 'lineSegment', 'Open collinear model edges should project as line segments.')
 
   const circle = projectEdge([
     [1, 0, 0],
@@ -135,16 +130,16 @@ test('model edge projection classifies supported projected geometry generically'
     [-1, 0, 0],
     [0, -1, 0],
   ], true).projectedReferences[0]?.geometry[0]
-  assert(circle?.kind === 'circle', 'Closed circular model edges should project as circles.')
-  assert(Math.abs(circle.radius - 1) < 1e-6, 'Projected circle should preserve the source radius.')
+  expectTrue(circle?.kind === 'circle', 'Closed circular model edges should project as circles.')
+  expectTrue(Math.abs(circle.radius - 1) < 1e-6, 'Projected circle should preserve the source radius.')
 
   const arc = projectEdge([
     [1, 0, 0],
     [Math.SQRT1_2, Math.SQRT1_2, 0],
     [0, 1, 0],
   ], false).projectedReferences[0]?.geometry[0]
-  assert(arc?.kind === 'arc', 'Open circular model edges should project as arcs.')
-  assert(arc.sweepDirection === 'counterClockwise', 'Projected arc should preserve sweep direction.')
+  expectTrue(arc?.kind === 'arc', 'Open circular model edges should project as arcs.')
+  expectTrue(arc.sweepDirection === 'counterClockwise', 'Projected arc should preserve sweep direction.')
 })
 
 test('model edge projection handles closed edge sampling variants without misclassifying unsupported curves', () => {
@@ -155,8 +150,8 @@ test('model edge projection handles closed edge sampling variants without miscla
     [0, -1, 0],
     [1, 0, 0],
   ], true).projectedReferences[0]
-  assert(repeatedEndpointCircle?.status === 'projected', 'Closed circular model edges with repeated endpoints should project.')
-  assert(repeatedEndpointCircle.geometry[0]?.kind === 'circle', 'Repeated endpoint circles should project as circles.')
+  expectTrue(repeatedEndpointCircle?.status === 'projected', 'Closed circular model edges with repeated endpoints should project.')
+  expectTrue(repeatedEndpointCircle.geometry[0]?.kind === 'circle', 'Repeated endpoint circles should project as circles.')
 
   const inferredClosedCircle = projectEdge([
     [2, 0, 0],
@@ -165,7 +160,7 @@ test('model edge projection handles closed edge sampling variants without miscla
     [0, -2, 0],
     [2, 0, 0],
   ], false).projectedReferences[0]?.geometry[0]
-  assert(inferredClosedCircle?.kind === 'circle', 'Repeated endpoints should infer closed circular model edges.')
+  expectTrue(inferredClosedCircle?.kind === 'circle', 'Repeated endpoints should infer closed circular model edges.')
 
   const spline = projectEdge([
     [0, 0, 0],
@@ -175,7 +170,7 @@ test('model edge projection handles closed edge sampling variants without miscla
     [0, 0, 0],
   ], true).projectedReferences[0]
   const splineGeometry = spline?.geometry[0]
-  assert(spline?.status === 'projected', 'Non-line and non-circular model edges should still project as freeform curves.')
-  assert(splineGeometry?.kind === 'spline', 'Freeform model edges should project as splines.')
-  assert(splineGeometry.isClosed, 'Projected freeform curves should preserve closed sampling.')
+  expectTrue(spline?.status === 'projected', 'Non-line and non-circular model edges should still project as freeform curves.')
+  expectTrue(splineGeometry?.kind === 'spline', 'Freeform model edges should project as splines.')
+  expectTrue(splineGeometry.isClosed, 'Projected freeform curves should preserve closed sampling.')
 })

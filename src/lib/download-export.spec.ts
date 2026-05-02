@@ -1,16 +1,10 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { DocumentExportSuccessResult } from '@/contracts/modeling/export'
 import { downloadDocumentExportResult, type BrowserDownloadEnvironment } from '@/lib/download-export'
 
-test('src/lib/download-export.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const clicked: string[] = []
+test('src/lib/download-export.spec.ts', () => {  const clicked: string[] = []
   const appended: string[] = []
   const revoked: string[] = []
   let capturedBlob: Blob | null = null
@@ -56,9 +50,9 @@ test('src/lib/download-export.spec.ts', () => {
 
   downloadDocumentExportResult(result, environment)
 
-  assert(clicked.length === 1, 'Successful exports should trigger one download click.')
-  assert(clicked[0] === 'part-1.step', 'Download should use the returned filename.')
-  assert(capturedBlob?.type === 'model/step', 'Download should use the returned MIME type.')
-  assert(appended.includes('part-1.step'), 'Download anchor should be attached before clicking.')
-  assert(revoked[0] === 'blob:export', 'Download object URL should be revoked after clicking.')
+  expectTrue(clicked.length === 1, 'Successful exports should trigger one download click.')
+  expectTrue(clicked[0] === 'part-1.step', 'Download should use the returned filename.')
+  expectTrue(capturedBlob?.type === 'model/step', 'Download should use the returned MIME type.')
+  expectTrue(appended.includes('part-1.step'), 'Download anchor should be attached before clicking.')
+  expectTrue(revoked[0] === 'blob:export', 'Download object URL should be revoked after clicking.')
 })

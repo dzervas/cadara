@@ -1,16 +1,10 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { parseWorkspaceSnapshot } from '@/contracts/modeling/runtime-schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/contracts/modeling/document-variables.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const adapter = new MockKernelAdapter()
+test('src/contracts/modeling/document-variables.spec.ts', async () => {  const adapter = new MockKernelAdapter()
   const response = await adapter.getDocumentSnapshot({
     contractVersion: 'modeling-contract/v1alpha1',
     documentId: 'doc_workspace',
@@ -38,11 +32,11 @@ test('src/contracts/modeling/document-variables.spec.ts', async () => {
 
   const parsed = parseWorkspaceSnapshot(snapshot)
 
-  assert(parsed.document.variables[0]?.variableId === 'variable_width', 'Snapshot validation should preserve variable ids.')
-  assert(parsed.document.variables[0]?.name === 'width', 'Snapshot validation should preserve variable names.')
-  assert(parsed.document.variables[0]?.valueText === '10 + 2', 'Snapshot validation should preserve raw variable value text.')
-  assert(!('calculatedValue' in parsed.document.variables[0]!), 'Snapshot validation should not add calculated variable values.')
-  assert(
+  expectTrue(parsed.document.variables[0]?.variableId === 'variable_width', 'Snapshot validation should preserve variable ids.')
+  expectTrue(parsed.document.variables[0]?.name === 'width', 'Snapshot validation should preserve variable names.')
+  expectTrue(parsed.document.variables[0]?.valueText === '10 + 2', 'Snapshot validation should preserve raw variable value text.')
+  expectTrue(!('calculatedValue' in parsed.document.variables[0]!), 'Snapshot validation should not add calculated variable values.')
+  expectTrue(
     parsed.document.references.length === response.snapshot.document.references.length,
     'Snapshot validation should not change snapshot reference records.',
   )
@@ -62,8 +56,8 @@ test('src/contracts/modeling/document-variables.spec.ts', async () => {
         ],
       },
     })
-    assert(false, 'Snapshot validation should reject persisted variable runtime calculation state.')
+    expectTrue(false, 'Snapshot validation should reject persisted variable runtime calculation state.')
   } catch (error) {
-    assert(error instanceof Error, 'Snapshot validation should report invalid variable records.')
+    expectTrue(error instanceof Error, 'Snapshot validation should report invalid variable records.')
   }
 })

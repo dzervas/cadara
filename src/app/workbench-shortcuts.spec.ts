@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { EditorEvent, EditorViewState } from '@/domain/editor/state-machine'
 import type { PrimitiveRef } from '@/core/editor/schema'
 import { createWorkbenchShortcutCommandHandlers, getWorkbenchShortcutActiveScopes } from '@/app/workbench/commands/workbench-shortcuts'
@@ -10,22 +11,15 @@ import { createToolActionBus } from '@/core/tools/tool-action-bus'
 import type { ToolId } from '@/core/tools/tool-registry'
 import { isTextEditingTarget } from '@/hooks/shortcut-targets'
 
-test('src/app/workbench-shortcuts.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const deleteFixture = createFixture({
+test('src/app/workbench-shortcuts.spec.ts', () => {  const deleteFixture = createFixture({
     mode: 'sketch',
     selection: [{ kind: 'dimension', sketchId: 'sketch_a', dimensionId: 'dimension_a' } as PrimitiveRef],
     sketchSession: createSketchSession(),
   })
 
   const deleteResult = deleteFixture.press({ key: 'Delete' })
-  assert(deleteResult.commandId === 'editor.deleteSelection', 'Delete should resolve the annotation delete command.')
-  assert(
+  expectTrue(deleteResult.commandId === 'editor.deleteSelection', 'Delete should resolve the annotation delete command.')
+  expectTrue(
     deleteFixture.dispatchedEvents.at(-1)?.type === 'sketch.annotationDeleteRequested',
     'Delete shortcut should dispatch the annotation delete event.',
   )
@@ -37,8 +31,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const backspaceResult = backspaceFixture.press({ key: 'Backspace' })
-  assert(backspaceResult.commandId === 'editor.deleteSelection', 'Backspace should resolve the annotation delete command.')
-  assert(
+  expectTrue(backspaceResult.commandId === 'editor.deleteSelection', 'Backspace should resolve the annotation delete command.')
+  expectTrue(
     backspaceFixture.dispatchedEvents.at(-1)?.type === 'sketch.annotationDeleteRequested',
     'Backspace shortcut should dispatch the annotation delete event.',
   )
@@ -50,8 +44,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const deleteGeometryResult = deleteGeometryFixture.press({ key: 'Delete' })
-  assert(deleteGeometryResult.commandId === 'editor.deleteSelection', 'Delete should resolve for selected sketch geometry.')
-  assert(
+  expectTrue(deleteGeometryResult.commandId === 'editor.deleteSelection', 'Delete should resolve for selected sketch geometry.')
+  expectTrue(
     deleteGeometryFixture.dispatchedEvents.at(-1)?.type === 'sketch.annotationDeleteRequested',
     'Delete shortcut should dispatch the shared delete-selection event for sketch geometry.',
   )
@@ -63,8 +57,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const backspacePointResult = backspacePointFixture.press({ key: 'Backspace' })
-  assert(backspacePointResult.commandId === 'editor.deleteSelection', 'Backspace should resolve for selected sketch points.')
-  assert(
+  expectTrue(backspacePointResult.commandId === 'editor.deleteSelection', 'Backspace should resolve for selected sketch points.')
+  expectTrue(
     backspacePointFixture.dispatchedEvents.at(-1)?.type === 'sketch.annotationDeleteRequested',
     'Backspace shortcut should dispatch the shared delete-selection event for sketch points.',
   )
@@ -75,9 +69,9 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const lineResult = sketchFixture.press({ key: 'l' })
-  assert(lineResult.commandId === 'tool.line', 'Line shortcut should resolve to the Line tool command in sketch mode.')
-  assert(sketchFixture.triggeredToolIds.at(-1) === 'line', 'Line shortcut should trigger the Line tool.')
-  assert(sketchFixture.observedLineSource === 'shortcut', 'Line shortcut should route shortcut source metadata.')
+  expectTrue(lineResult.commandId === 'tool.line', 'Line shortcut should resolve to the Line tool command in sketch mode.')
+  expectTrue(sketchFixture.triggeredToolIds.at(-1) === 'line', 'Line shortcut should trigger the Line tool.')
+  expectTrue(sketchFixture.observedLineSource === 'shortcut', 'Line shortcut should route shortcut source metadata.')
 
   const escapeFixture = createFixture({
     mode: 'sketch',
@@ -85,8 +79,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const escapeResult = escapeFixture.press({ key: 'Escape' })
-  assert(escapeResult.commandId === 'editor.cancel', 'Escape should resolve to the workbench cancel command.')
-  assert(
+  expectTrue(escapeResult.commandId === 'editor.cancel', 'Escape should resolve to the workbench cancel command.')
+  expectTrue(
     escapeFixture.dispatchedEvents.at(-1)?.type === 'sketch.activeToolCleared',
     'Escape should dispatch the sketch active-tool clear event when a sketch tool is active.',
   )
@@ -98,8 +92,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const escapeStyleFocusResult = escapeStyleFocusFixture.press({ key: 'Escape' })
-  assert(escapeStyleFocusResult.commandId === 'editor.cancel', 'Escape should resolve to cancel while a sketch style tool is focused.')
-  assert(
+  expectTrue(escapeStyleFocusResult.commandId === 'editor.cancel', 'Escape should resolve to cancel while a sketch style tool is focused.')
+  expectTrue(
     escapeStyleFocusFixture.dispatchedEvents.at(-1)?.type === 'sketch.activeToolCleared',
     'Escape should dispatch sketch active-tool clear before clearing selection while a style tool is focused.',
   )
@@ -110,8 +104,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const escapeSelectionResult = escapeSelectionFixture.press({ key: 'Escape' })
-  assert(escapeSelectionResult.commandId === 'editor.cancel', 'Escape should resolve to cancel for selection clearing.')
-  assert(
+  expectTrue(escapeSelectionResult.commandId === 'editor.cancel', 'Escape should resolve to cancel for selection clearing.')
+  expectTrue(
     escapeSelectionFixture.dispatchedEvents.at(-1)?.type === 'selection.cleared',
     'Escape should dispatch selection clearing when no higher-priority interaction handles it.',
   )
@@ -122,21 +116,21 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
   })
 
   const finishSketchResult = finishSketchFixture.press({ key: 'Enter', shiftKey: true })
-  assert(finishSketchResult.commandId === 'tool.finishSketch', 'Shift+Enter should resolve to Finish Sketch.')
-  assert(
+  expectTrue(finishSketchResult.commandId === 'tool.finishSketch', 'Shift+Enter should resolve to Finish Sketch.')
+  expectTrue(
     finishSketchFixture.triggeredToolIds.at(-1) === 'finishSketch',
     'Finish Sketch shortcut should trigger the finishSketch tool.',
   )
 
   const undoFixture = createFixture({ canUndo: true, mode: 'part' })
   const undoResult = undoFixture.press({ ctrlKey: true, key: 'z' })
-  assert(undoResult.commandId === 'editor.undo', 'Ctrl+Z should resolve to Undo.')
-  assert(undoFixture.undoRequests === 1, 'Undo shortcut should reuse the shared history entrypoint.')
+  expectTrue(undoResult.commandId === 'editor.undo', 'Ctrl+Z should resolve to Undo.')
+  expectTrue(undoFixture.undoRequests === 1, 'Undo shortcut should reuse the shared history entrypoint.')
 
   const redoFixture = createFixture({ canRedo: true, mode: 'part' })
   const redoResult = redoFixture.press({ ctrlKey: true, key: 'y' })
-  assert(redoResult.commandId === 'editor.redo', 'Ctrl+Y should resolve to Redo.')
-  assert(redoFixture.redoRequests === 1, 'Redo shortcut should reuse the shared history entrypoint.')
+  expectTrue(redoResult.commandId === 'editor.redo', 'Ctrl+Y should resolve to Redo.')
+  expectTrue(redoFixture.redoRequests === 1, 'Redo shortcut should reuse the shared history entrypoint.')
 
   const guardedInputFixture = createFixture({
     mode: 'sketch',
@@ -150,8 +144,8 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
       inputPrevented = true
     },
   })
-  assert(!inputResult.handled && !inputPrevented, 'Printable tool shortcuts should not be handled from inputs.')
-  assert(guardedInputFixture.triggeredToolIds.length === 0, 'Input guard should prevent Line activation.')
+  expectTrue(!inputResult.handled && !inputPrevented, 'Printable tool shortcuts should not be handled from inputs.')
+  expectTrue(guardedInputFixture.triggeredToolIds.length === 0, 'Input guard should prevent Line activation.')
 
   const guardedContentEditableFixture = createFixture({
     mode: 'sketch',
@@ -161,27 +155,27 @@ test('src/app/workbench-shortcuts.spec.ts', () => {
     key: 'l',
     target: createTextTarget({ isContentEditable: true }),
   })
-  assert(
+  expectTrue(
     !contentEditableResult.handled,
     'Printable tool shortcuts should not be handled from contenteditable targets.',
   )
-  assert(
+  expectTrue(
     guardedContentEditableFixture.triggeredToolIds.length === 0,
     'Contenteditable guard should prevent Line activation.',
   )
 
   const partModeFixture = createFixture({ mode: 'part' })
   const partLineResult = partModeFixture.press({ key: 'l' })
-  assert(partLineResult.commandId === null, 'Sketch tool shortcuts should not resolve in part mode.')
-  assert(partModeFixture.triggeredToolIds.length === 0, 'Part mode should not trigger sketch-only tools.')
+  expectTrue(partLineResult.commandId === null, 'Sketch tool shortcuts should not resolve in part mode.')
+  expectTrue(partModeFixture.triggeredToolIds.length === 0, 'Part mode should not trigger sketch-only tools.')
 
   const sketchModeFixture = createFixture({
     mode: 'sketch',
     sketchSession: createSketchSession(),
   })
   const sketchExtrudeResult = sketchModeFixture.press({ key: 'e' })
-  assert(sketchExtrudeResult.commandId === null, 'Part tool shortcuts should not resolve in sketch mode.')
-  assert(sketchModeFixture.triggeredToolIds.length === 0, 'Sketch mode should not trigger part-only tools.')
+  expectTrue(sketchExtrudeResult.commandId === null, 'Part tool shortcuts should not resolve in sketch mode.')
+  expectTrue(sketchModeFixture.triggeredToolIds.length === 0, 'Sketch mode should not trigger part-only tools.')
 })
 
 interface FixtureOptions {

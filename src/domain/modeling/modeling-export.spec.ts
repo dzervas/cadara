@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { getDefaultCadaraExportOptions } from '@/contracts/modeling/export.runtime-schema'
 import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from '@/contracts/shared/versioning'
@@ -10,14 +11,7 @@ import { createBuiltinExportProviderRegistry } from '@/domain/export/builtin-pro
 import { stepExportProvider } from '@/domain/export/providers/step-export-provider'
 import { stlExportProvider } from '@/domain/export/providers/stl-export-provider'
 
-test('src/domain/modeling/modeling-export.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function testCadaraExportsDurableDocumentJson() {
+test('src/domain/modeling/modeling-export.spec.ts', async () => {  async function testCadaraExportsDurableDocumentJson() {
     const service = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
     })
@@ -31,15 +25,15 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       options: getDefaultCadaraExportOptions(),
     })
 
-    assert(result.ok, 'cadara export should succeed for the current document revision.')
-    assert(result.filename === 'part-1.cadara', 'cadara export should use the selected row label for the filename.')
-    assert(result.mimeType === 'application/vnd.cadara+json', 'cadara export should advertise a JSON MIME type.')
-    assert(typeof result.payload === 'string', 'cadara export should return text JSON.')
+    expectTrue(result.ok, 'cadara export should succeed for the current document revision.')
+    expectTrue(result.filename === 'part-1.cadara', 'cadara export should use the selected row label for the filename.')
+    expectTrue(result.mimeType === 'application/vnd.cadara+json', 'cadara export should advertise a JSON MIME type.')
+    expectTrue(typeof result.payload === 'string', 'cadara export should return text JSON.')
 
     const payload = JSON.parse(result.payload) as Record<string, unknown>
-    assert(payload.contractVersion === snapshot.document.contractVersion, 'cadara export should preserve contract version.')
-    assert(payload.schemaVersion === snapshot.document.schemaVersion, 'cadara export should preserve schema version.')
-    assert(!('presentation' in payload), 'cadara export should not include presentation-only workspace state.')
+    expectTrue(payload.contractVersion === snapshot.document.contractVersion, 'cadara export should preserve contract version.')
+    expectTrue(payload.schemaVersion === snapshot.document.schemaVersion, 'cadara export should preserve schema version.')
+    expectTrue(!('presentation' in payload), 'cadara export should not include presentation-only workspace state.')
   }
 
   async function testGeometryExportPayloadMetadata() {
@@ -57,12 +51,12 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       options: stepExportProvider.getDefaultOptions(),
     })
 
-    assert(result.ok, 'Mock STEP export should succeed for a body target.')
-    assert(result.filename === 'part-1.step', 'Geometry export should include the returned filename.')
-    assert(result.extension === 'step', 'Geometry export should include the returned extension.')
-    assert(result.mimeType === 'model/step', 'Geometry export should include the returned MIME type.')
-    assert(typeof result.payload === 'string', 'Mock STEP export should return a text payload.')
-    assert(result.payload.includes('cadara mock step export'), 'Mock geometry export should identify the format.')
+    expectTrue(result.ok, 'Mock STEP export should succeed for a body target.')
+    expectTrue(result.filename === 'part-1.step', 'Geometry export should include the returned filename.')
+    expectTrue(result.extension === 'step', 'Geometry export should include the returned extension.')
+    expectTrue(result.mimeType === 'model/step', 'Geometry export should include the returned MIME type.')
+    expectTrue(typeof result.payload === 'string', 'Mock STEP export should return a text payload.')
+    expectTrue(result.payload.includes('cadara mock step export'), 'Mock geometry export should identify the format.')
   }
 
   async function testUnexportableGeometryTargetReportsDiagnostic() {
@@ -80,8 +74,8 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       options: stlExportProvider.getDefaultOptions(),
     })
 
-    assert(!result.ok, 'Geometry export should reject non-body targets.')
-    assert(
+    expectTrue(!result.ok, 'Geometry export should reject non-body targets.')
+    expectTrue(
       result.diagnostics.some((diagnostic) => diagnostic.code === 'mock-export-unexportable-target'),
       'Unexportable targets should report a structured diagnostic.',
     )
@@ -94,16 +88,16 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
     })
     const exportResult = await service.exportCurrentDocument()
 
-    assert(exportResult.filename === 'document.cadara', 'Current document export should use a document-level cadara filename.')
-    assert(exportResult.mimeType === 'application/vnd.cadara+json', 'Current document export should use the cadara JSON MIME type.')
-    assert(typeof exportResult.payload === 'string', 'Current document export should return authored JSON text.')
+    expectTrue(exportResult.filename === 'document.cadara', 'Current document export should use a document-level cadara filename.')
+    expectTrue(exportResult.mimeType === 'application/vnd.cadara+json', 'Current document export should use the cadara JSON MIME type.')
+    expectTrue(typeof exportResult.payload === 'string', 'Current document export should return authored JSON text.')
 
     const exported = JSON.parse(exportResult.payload) as AuthoredModelDocument
-    assert(
+    expectTrue(
       exported.schemaVersion === AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
       'Current document export should use the authored document schema.',
     )
-    assert(!('presentation' in exported), 'Current document export should exclude presentation-only state.')
+    expectTrue(!('presentation' in exported), 'Current document export should exclude presentation-only state.')
 
     const importedDocument: AuthoredModelDocument = {
       ...exported,
@@ -113,18 +107,18 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       })),
     }
     const importResult = await service.importDocument({ document: importedDocument })
-    assert(importResult.ok, 'Valid authored document import should succeed.')
+    expectTrue(importResult.ok, 'Valid authored document import should succeed.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
-    assert(
+    expectTrue(
       snapshot.document.bodies.some((body) => body.label === 'Imported Body'),
       'Imported authored body labels should appear in the refreshed snapshot.',
     )
 
     const newResult = await service.createNewDocument()
-    assert(newResult.ok, 'New document reset should restore the seeded authored document.')
+    expectTrue(newResult.ok, 'New document reset should restore the seeded authored document.')
     const resetSnapshot = await service.getCurrentDocumentSnapshot()
-    assert(
+    expectTrue(
       resetSnapshot.document.bodies.every((body) => body.label !== 'Imported Body'),
       'New document reset should remove imported authored body labels.',
     )
@@ -142,8 +136,8 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       },
     })
 
-    assert(!result.ok, 'Invalid authored document import should be rejected.')
-    assert(
+    expectTrue(!result.ok, 'Invalid authored document import should be rejected.')
+    expectTrue(
       result.diagnostics.some((diagnostic) => diagnostic.code === 'document-import-unsupported-schema-version'),
       'Invalid import should report a structured schema diagnostic.',
     )
@@ -163,8 +157,8 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {
       options: stepExportProvider.getDefaultOptions(),
     })
 
-    assert(!result.ok, 'Geometry export without an explicit export-provider composition should fail.')
-    assert(
+    expectTrue(!result.ok, 'Geometry export without an explicit export-provider composition should fail.')
+    expectTrue(
       result.diagnostics.some((diagnostic) => diagnostic.code === 'export-unsupported-format'),
       'Missing explicit export-provider composition should surface an unsupported-format diagnostic.',
     )

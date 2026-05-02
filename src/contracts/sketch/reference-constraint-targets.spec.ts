@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { sketchDefinitionSchema } from '@/contracts/sketch/runtime-schema'
 import {
   solveSketchDefinitionCore,
@@ -8,14 +9,7 @@ import {
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 
-test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const tolerances = {
+test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {  const tolerances = {
     coincidence: 1e-6,
     angleRadians: 1e-6,
     minimumSegmentLength: 1e-6,
@@ -118,7 +112,7 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
   })
 
   const parsed = sketchDefinitionSchema.safeParse(pointOnProjectedLine)
-  assert(parsed.success, 'Runtime schema should accept reference-targeted constraint payloads.')
+  expectTrue(parsed.success, 'Runtime schema should accept reference-targeted constraint payloads.')
 
   const solved = solveSketchDefinitionCore({
     definition: pointOnProjectedLine,
@@ -127,9 +121,9 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     partialSolvePolicy: 'bestEffort',
   })
   const solvedPoint = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_a')
-  assert(solvedPoint, 'Reference-targeted solve should return the local point.')
-  assert(Math.abs(solvedPoint.solvedPosition[1]) < 1e-4, 'Point-on-projected-line should solve local point onto projected line.')
-  assert(
+  expectTrue(solvedPoint, 'Reference-targeted solve should return the local point.')
+  expectTrue(Math.abs(solvedPoint.solvedPosition[1]) < 1e-4, 'Point-on-projected-line should solve local point onto projected line.')
+  expectTrue(
     solved.solvedSnapshot.constraintStatuses[0]?.status === 'satisfied',
     'Satisfied reference-targeted constraints should report satisfied status.',
   )
@@ -139,8 +133,8 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     projectedReferences: [],
     tolerances,
   })
-  assert(!invalid.isValid, 'Missing projected target should invalidate the solve request.')
-  assert(
+  expectTrue(!invalid.isValid, 'Missing projected target should invalidate the solve request.')
+  expectTrue(
     invalid.diagnostics.some((diagnostic) => diagnostic.code === 'missing-projected-constraint-target'),
     'Missing projected target should produce a machine-readable diagnostic.',
   )
@@ -184,15 +178,15 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     partialSolvePolicy: 'bestEffort',
   })
   const arcPoint = solvedArcPoint.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_a')
-  assert(arcPoint, 'Point-on-projected-arc solve should return the local point.')
-  assert(
+  expectTrue(arcPoint, 'Point-on-projected-arc solve should return the local point.')
+  expectTrue(
     Math.min(
       Math.hypot(arcPoint.solvedPosition[0] - 5, arcPoint.solvedPosition[1]),
       Math.hypot(arcPoint.solvedPosition[0], arcPoint.solvedPosition[1] - 5),
     ) < 1e-3,
     'Point-on-projected-arc should solve to the finite arc sweep instead of the full parent circle.',
   )
-  assert(
+  expectTrue(
     solvedArcPoint.solvedSnapshot.constraintStatuses[0]?.status === 'satisfied',
     'Point-on-projected-arc should report satisfied when solved onto the finite arc.',
   )
@@ -217,8 +211,8 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     partialSolvePolicy: 'bestEffort',
   })
   const solvedLine = perpendicular.solvedSnapshot.solvedEntities.find((entity) => entity.entityId === 'sketch_entity_line')
-  assert(solvedLine?.kind === 'lineSegment', 'Projected perpendicular solve should return local solved line.')
-  assert(
+  expectTrue(solvedLine?.kind === 'lineSegment', 'Projected perpendicular solve should return local solved line.')
+  expectTrue(
     Math.abs(solvedLine.endPosition[0] - solvedLine.startPosition[0]) < 1e-3,
     'Perpendicular-to-projected-line should solve the local line vertical against a horizontal projected line.',
   )
@@ -257,14 +251,14 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     ],
   } satisfies SketchDefinition
   const parsedNormal = sketchDefinitionSchema.safeParse(normalProjectedCircle)
-  assert(parsedNormal.success, 'Runtime schema should accept projected normal constraint payloads.')
+  expectTrue(parsedNormal.success, 'Runtime schema should accept projected normal constraint payloads.')
   const solvedNormal = solveSketchDefinitionCore({
     definition: normalProjectedCircle,
     projectedReferences: [projectedCircle],
     tolerances,
     partialSolvePolicy: 'bestEffort',
   })
-  assert(
+  expectTrue(
     solvedNormal.solvedSnapshot.constraintStatuses[0]?.status === 'satisfied',
     'Projected normal should report satisfied when line, contact point, and projected circle are aligned.',
   )
@@ -302,14 +296,14 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     ],
   } satisfies SketchDefinition
   const parsedSymmetric = sketchDefinitionSchema.safeParse(symmetricProjectedLine)
-  assert(parsedSymmetric.success, 'Runtime schema should accept projected symmetric constraint payloads.')
+  expectTrue(parsedSymmetric.success, 'Runtime schema should accept projected symmetric constraint payloads.')
   const solvedSymmetric = solveSketchDefinitionCore({
     definition: symmetricProjectedLine,
     projectedReferences: [projectedLine],
     tolerances,
     partialSolvePolicy: 'bestEffort',
   })
-  assert(
+  expectTrue(
     solvedSymmetric.solvedSnapshot.constraintStatuses[0]?.status === 'satisfied',
     'Projected symmetric should report satisfied when points are mirrored about the projected line.',
   )
@@ -391,7 +385,7 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
   const tangentStatus = tangentOutsideArc.solvedSnapshot.constraintStatuses.find(
     (status) => status.constraintId === 'constraint_tangent_projected_geometry_arc',
   )
-  assert(
+  expectTrue(
     tangentStatus?.status === 'unsatisfied',
     'Tangent-to-projected-arc should reject tangency points outside the finite arc sweep.',
   )
@@ -409,7 +403,7 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     partialSolvePolicy: 'bestEffort',
   })
   const datumCoincidentPoint = datumCoincident.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_a')
-  assert(
+  expectTrue(
     datumCoincidentPoint && Math.hypot(datumCoincidentPoint.solvedPosition[0], datumCoincidentPoint.solvedPosition[1]) < 1e-4,
     'Coincident-to-origin should solve the local point onto the sketch origin datum.',
   )
@@ -427,7 +421,7 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
     partialSolvePolicy: 'bestEffort',
   })
   const datumParallelLine = datumParallel.solvedSnapshot.solvedEntities.find((entity) => entity.entityId === 'sketch_entity_line')
-  assert(
+  expectTrue(
     datumParallelLine?.kind === 'lineSegment' && Math.abs(datumParallelLine.endPosition[1] - datumParallelLine.startPosition[1]) < 1e-3,
     'Parallel-to-axis should solve the local line onto the sketch-local axis direction.',
   )
@@ -461,7 +455,7 @@ test('src/contracts/sketch/reference-constraint-targets.spec.ts', async () => {
   const datumPointDistanceStatus = datumPointDistance.solvedSnapshot.dimensionStatuses.find(
     (status) => status.dimensionId === 'dimension_point_datum_distance',
   )
-  assert(
+  expectTrue(
     datumPointDistanceStatus?.status === 'driving'
       && datumPointDistanceStatus.solvedValue !== null
       && Math.abs(datumPointDistanceStatus.solvedValue - Math.hypot(4, 5)) < 1e-4,

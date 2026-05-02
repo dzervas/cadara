@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   SOLVER_SCHEMA_VERSION,
   type ProjectSketchExternalReferencesRequest,
@@ -15,14 +16,7 @@ import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 
-test('src/contracts/solver/solver-contract.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const sketchDefinition: SketchDefinition = {
+test('src/contracts/solver/solver-contract.spec.ts', async () => {  const sketchDefinition: SketchDefinition = {
     schemaVersion: 'sketch-definition/v1alpha1',
     referenceIds: ['ref_model_edge_1'],
     references: [
@@ -189,9 +183,9 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
     const adapter = new SketchConstraintSolverAdapter()
     const projection = await adapter.projectExternalReferences(createProjectRequest())
 
-    assert(projection.requestId === 'request_project_1', 'Projection must echo the originating request ID.')
-    assert(projection.projectedReferences.length === sketchDefinition.references.length, 'Projection should return one record per authored external reference.')
-    assert(
+    expectTrue(projection.requestId === 'request_project_1', 'Projection must echo the originating request ID.')
+    expectTrue(projection.projectedReferences.length === sketchDefinition.references.length, 'Projection should return one record per authored external reference.')
+    expectTrue(
       projection.projectedReferences.every((reference) =>
         reference.status === 'unsupportedSource'
         && reference.geometry.length === 0
@@ -204,14 +198,14 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       ...createValidateRequest(),
       projectedReferences: projection.projectedReferences,
     })
-    assert(validation.isValid, 'Well-formed sketch definition should validate successfully.')
+    expectTrue(validation.isValid, 'Well-formed sketch definition should validate successfully.')
 
     const solved = await adapter.solveSketch(createSolveRequest(projection.projectedReferences))
-    assert(
+    expectTrue(
       solved.status.solveState === 'solved' && solved.status.constraintState === 'wellConstrained',
       'Solve should return a machine-readable solved and constrained status.',
     )
-    assert(solved.solvedSnapshot.solvedEntities.length === 4, 'Solve should return solved entity geometry.')
+    expectTrue(solved.solvedSnapshot.solvedEntities.length === 4, 'Solve should return solved entity geometry.')
 
     const regions = await adapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
@@ -225,7 +219,7 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       projectedReferences: projection.projectedReferences,
     })
 
-    assert(regions.regions.length === 1, 'Region derivation should return an explicit derived region.')
+    expectTrue(regions.regions.length === 1, 'Region derivation should return an explicit derived region.')
 
     const resolutionRequest: ResolveSketchReferenceRequest = {
       contractVersion: CONTRACT_VERSION,
@@ -241,8 +235,8 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
     }
 
     const resolution = await adapter.resolveSketchReference(resolutionRequest)
-    assert('kind' in resolution.resolution.target && resolution.resolution.target.kind === 'region', 'Solver reference resolution should be explicit for derived regions.')
-    assert(resolution.resolution.isValid, 'Derived regions returned by the solver should resolve as valid.')
+    expectTrue('kind' in resolution.resolution.target && resolution.resolution.target.kind === 'region', 'Solver reference resolution should be explicit for derived regions.')
+    expectTrue(resolution.resolution.isValid, 'Derived regions returned by the solver should resolve as valid.')
 
     const projectedResolution = await adapter.resolveSketchReference({
       contractVersion: CONTRACT_VERSION,
@@ -260,11 +254,11 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       regions: regions.regions,
     })
 
-    assert(
+    expectTrue(
       'geometryId' in projectedResolution.resolution.target,
       'Projected-geometry resolution should preserve the explicit projected target.',
     )
-    assert(
+    expectTrue(
       projectedResolution.resolution.isValid,
       'Projected geometry targets should resolve when their authored reference still exists.',
     )
@@ -284,14 +278,14 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       didThrow = error instanceof Error && error.message.includes('rev_stale')
     }
 
-    assert(didThrow, 'Stale revision validation must reject the request instead of returning authoritative output.')
+    expectTrue(didThrow, 'Stale revision validation must reject the request instead of returning authoritative output.')
   }
 
   async function testMockProjectionDoesNotFabricateExternalGeometry() {
     const adapter = new MockSketchSolverAdapter()
     const projection = await adapter.projectExternalReferences(createProjectRequest())
 
-    assert(
+    expectTrue(
       projection.projectedReferences.every((reference) =>
         reference.status === 'unsupportedSource'
         && reference.geometry.length === 0
@@ -314,7 +308,7 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       versionRejected = error instanceof Error && error.message.includes('Unsupported solver schema version')
     }
 
-    assert(versionRejected, 'Solver must reject unsupported solver schema versions.')
+    expectTrue(versionRejected, 'Solver must reject unsupported solver schema versions.')
 
     const projected = await adapter.projectExternalReferences(createProjectRequest())
     const invalid = await adapter.validateSketch({
@@ -326,7 +320,7 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {
       },
     })
 
-    assert(
+    expectTrue(
       invalid.diagnostics.some((diagnostic) => diagnostic.code === 'point-missing-from-records'),
       'Validation must reject ID arrays that reference records that do not exist.',
     )

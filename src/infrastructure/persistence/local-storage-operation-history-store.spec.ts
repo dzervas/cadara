@@ -1,16 +1,10 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createEmptyOperationHistory } from '@/contracts/modeling/operation-history'
 import { createLocalStorageOperationHistoryStore } from '@/infrastructure/persistence/local-storage-operation-history-store'
 
-test('src/infrastructure/persistence/local-storage-operation-history-store.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const persisted = new Map<string, string>()
+test('src/infrastructure/persistence/local-storage-operation-history-store.spec.ts', () => {  const persisted = new Map<string, string>()
   const removed: string[] = []
   const storage = {
     getItem(key: string) {
@@ -27,14 +21,14 @@ test('src/infrastructure/persistence/local-storage-operation-history-store.spec.
 
   const store = createLocalStorageOperationHistoryStore(storage)
   const empty = store.load()
-  assert(
+  expectTrue(
     empty.ok && empty.payload === null,
     'Operation history stores should treat missing storage as an empty history payload.',
   )
 
   persisted.set('cad.modeling.operationHistory.v1', '{"broken"')
   const invalid = store.load()
-  assert(
+  expectTrue(
     !invalid.ok && invalid.reasonCode === 'invalid-json',
     'Operation history stores should return an explicit invalid-json failure for malformed persisted payloads.',
   )
@@ -42,7 +36,7 @@ test('src/infrastructure/persistence/local-storage-operation-history-store.spec.
   const payload = createEmptyOperationHistory('doc_workspace', ['head_1'])
   store.save(payload)
   const loaded = store.load()
-  assert(
+  expectTrue(
     loaded.ok
       && loaded.payload?.documentId === 'doc_workspace'
       && loaded.payload.baseRepositoryHeads?.[0] === 'head_1',
@@ -50,7 +44,7 @@ test('src/infrastructure/persistence/local-storage-operation-history-store.spec.
   )
 
   store.clear()
-  assert(
+  expectTrue(
     removed.includes('cad.modeling.operationHistory.v1'),
     'Operation history stores should remove the persisted key when the history is cleared.',
   )

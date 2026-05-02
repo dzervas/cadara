@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
@@ -13,14 +14,7 @@ import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-ass
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/domain/modeling/document-repository.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function createSeedDocument() {
+test('src/domain/modeling/document-repository.spec.ts', async () => {  async function createSeedDocument() {
     const adapter = new MockKernelAdapter()
     const snapshot = (await adapter.getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
@@ -33,8 +27,8 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     const seed = await createSeedDocument()
     const repository = createMemoryDocumentRepository()
     const loaded = await repository.load({ documentId: seed.documentId, seedDocument: seed })
-    assert(loaded.ok, 'Memory repository should create a missing document from the seed document.')
-    assert(loaded.status.kind === 'seeded', 'Missing memory documents should report seeded status.')
+    expectTrue(loaded.ok, 'Memory repository should create a missing document from the seed document.')
+    expectTrue(loaded.status.kind === 'seeded', 'Missing memory documents should report seeded status.')
 
     let observed: AuthoredModelDocument | null = null
     let observedHeads: readonly string[] = []
@@ -51,18 +45,18 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
         ),
       },
     })
-    assert(mutated.ok, 'Memory repository should accept plain authored document mutations.')
-    assert(observed?.bodyLabels.some((label) => label.label === 'Repository Body'), 'Subscribers should receive plain authored documents.')
-    assert(observedHeads[0] === `memory:${mutated.document.revisionId}`, 'Memory repository changes should include head metadata.')
+    expectTrue(mutated.ok, 'Memory repository should accept plain authored document mutations.')
+    expectTrue(observed?.bodyLabels.some((label) => label.label === 'Repository Body'), 'Subscribers should receive plain authored documents.')
+    expectTrue(observedHeads[0] === `memory:${mutated.document.revisionId}`, 'Memory repository changes should include head metadata.')
     unsubscribe()
     observed = null
     await repository.mutate({ documentId: seed.documentId, document: seed })
-    assert(observed === null, 'Unsubscribed memory repository listeners should not receive later changes.')
+    expectTrue(observed === null, 'Unsubscribed memory repository listeners should not receive later changes.')
 
     const reset = await repository.reset(seed.documentId)
-    assert(reset.kind === 'reset', 'Repository reset should report reset status.')
+    expectTrue(reset.kind === 'reset', 'Repository reset should report reset status.')
     const reloaded = await repository.load({ documentId: seed.documentId, seedDocument: seed })
-    assert(reloaded.ok && reloaded.status.kind === 'seeded', 'Repository should recreate a seeded document after reset.')
+    expectTrue(reloaded.ok && reloaded.status.kind === 'seeded', 'Repository should recreate a seeded document after reset.')
   }
 
   async function testRepositoryAssetMutationsAreAtomic() {
@@ -88,22 +82,22 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
       document: documentWithAsset,
       assets: [asset, unrelatedAsset],
     })
-    assert(!invalidAssetBatch.ok, 'Asset mutations with blobs outside the authored manifest should fail.')
+    expectTrue(!invalidAssetBatch.ok, 'Asset mutations with blobs outside the authored manifest should fail.')
 
     const embeddedAsset = await repository.mutate({ documentId: seed.documentId, document: documentWithAsset })
-    assert(embeddedAsset.ok, 'Asset-referencing mutations should commit when required bytes are embedded in JSON.')
+    expectTrue(embeddedAsset.ok, 'Asset-referencing mutations should commit when required bytes are embedded in JSON.')
 
     const storedAsset = await repository.mutate({
       documentId: seed.documentId,
       document: documentWithAsset,
       assets: [asset],
     })
-    assert(storedAsset.ok, 'Asset-referencing mutations should commit after required blobs are stored.')
-    assert(
+    expectTrue(storedAsset.ok, 'Asset-referencing mutations should commit after required blobs are stored.')
+    expectTrue(
       storedAsset.ok && storedAsset.assetAvailability?.every((entry) => entry.available),
       'Committed asset mutations should report asset availability metadata.',
     )
-    assert(
+    expectTrue(
       await repository.getGeometryAssetRecord(asset.asset) !== null,
       'Repository asset resolver should return stored immutable blob bytes.',
     )
@@ -140,9 +134,9 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
       assets: [asset],
     })
 
-    assert(observed.includes('peer:true'), 'Peer asset transfer should notify with available verified blob metadata.')
-    assert(await peer.getGeometryAssetRecord(asset.asset) !== null, 'Peer asset transfer should store received blob bytes.')
-    assert(await peer.getGeometryAssetBytes(asset.asset.hash) !== null, 'Peer asset transfer should make blobs resolvable by hash for restore paths.')
+    expectTrue(observed.includes('peer:true'), 'Peer asset transfer should notify with available verified blob metadata.')
+    expectTrue(await peer.getGeometryAssetRecord(asset.asset) !== null, 'Peer asset transfer should store received blob bytes.')
+    expectTrue(await peer.getGeometryAssetBytes(asset.asset.hash) !== null, 'Peer asset transfer should make blobs resolvable by hash for restore paths.')
   }
 
   async function testIndexedDbRepositoryUsesInternalHandleAndReportsFailures() {
@@ -156,11 +150,11 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
       seedEvents.push(event.metadata.source)
     })
     const loaded = await repository.load({ documentId: seed.documentId, seedDocument: seed })
-    assert(loaded.ok && loaded.status.kind === 'seeded', 'IndexedDB repository should seed missing Automerge documents.')
-    assert(loaded.ok && loaded.metadata.heads.length > 0, 'Seeded Automerge documents should expose causal heads.')
-    assert(seedEvents.every((source) => source !== 'peer'), 'Seeded Automerge documents should not emit peer-originated changes.')
-    assert(repo.createdCount === 1, 'IndexedDB repository should create an internal Automerge handle for missing documents.')
-    assert(urlStore.get(seed.documentId) !== null, 'IndexedDB repository should persist the app document to Automerge URL mapping.')
+    expectTrue(loaded.ok && loaded.status.kind === 'seeded', 'IndexedDB repository should seed missing Automerge documents.')
+    expectTrue(loaded.ok && loaded.metadata.heads.length > 0, 'Seeded Automerge documents should expose causal heads.')
+    expectTrue(seedEvents.every((source) => source !== 'peer'), 'Seeded Automerge documents should not emit peer-originated changes.')
+    expectTrue(repo.createdCount === 1, 'IndexedDB repository should create an internal Automerge handle for missing documents.')
+    expectTrue(urlStore.get(seed.documentId) !== null, 'IndexedDB repository should persist the app document to Automerge URL mapping.')
 
     const restored = await new IndexedDbAutomergeDocumentRepository({ repo, urlStore }).load({
       documentId: seed.documentId,
@@ -169,9 +163,9 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
         bodyLabels: [],
       },
     })
-    assert(restored.ok && restored.status.kind === 'restored', 'A new repository instance should restore through the stored Automerge URL.')
-    assert(restored.ok && restored.metadata.source === 'restore', 'Restored Automerge documents should identify restore as the change source.')
-    assert(restored.ok && restored.document.bodyLabels.length === seed.bodyLabels.length, 'Refresh restore should use the stored authored document.')
+    expectTrue(restored.ok && restored.status.kind === 'restored', 'A new repository instance should restore through the stored Automerge URL.')
+    expectTrue(restored.ok && restored.metadata.source === 'restore', 'Restored Automerge documents should identify restore as the change source.')
+    expectTrue(restored.ok && restored.document.bodyLabels.length === seed.bodyLabels.length, 'Refresh restore should use the stored authored document.')
 
     const events: string[] = []
     const unsubscribe = repository.subscribe(seed.documentId, (event) => {
@@ -186,12 +180,12 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
       },
     })
     await Promise.resolve()
-    assert(events.some((event) => event.startsWith('peer:')), 'Peer-originated handle changes should notify subscribers.')
+    expectTrue(events.some((event) => event.startsWith('peer:')), 'Peer-originated handle changes should notify subscribers.')
     unsubscribe()
     const eventCount = events.length
     repo.pushPeerChange(urlStore.get(seed.documentId)!, { authoredDocument: seed })
     await Promise.resolve()
-    assert(events.length === eventCount, 'Unsubscribed Automerge repository listeners should not receive later peer changes.')
+    expectTrue(events.length === eventCount, 'Unsubscribed Automerge repository listeners should not receive later peer changes.')
 
     const unsupported = await repository.mutate({
       documentId: seed.documentId,
@@ -200,28 +194,28 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
         schemaVersion: 'authored-model-document/v9' as AuthoredModelDocument['schemaVersion'],
       },
     })
-    assert(!unsupported.ok, 'Unsupported authored schemas should fail without replacing existing data.')
-    assert(unsupported.status.diagnostic.reasonCode === 'unsupported-schema-version', 'Unsupported schema failures should be explicit.')
+    expectTrue(!unsupported.ok, 'Unsupported authored schemas should fail without replacing existing data.')
+    expectTrue(unsupported.status.diagnostic.reasonCode === 'unsupported-schema-version', 'Unsupported schema failures should be explicit.')
 
     repo.failNextFind = true
     const findFailed = await new IndexedDbAutomergeDocumentRepository({ repo, urlStore }).load({
       documentId: seed.documentId,
       seedDocument: seed,
     })
-    assert(!findFailed.ok, 'DocHandle load failures should be reported.')
-    assert(findFailed.status.diagnostic.reasonCode === 'automerge-load-failed', 'DocHandle load failures should keep a repository diagnostic.')
+    expectTrue(!findFailed.ok, 'DocHandle load failures should be reported.')
+    expectTrue(findFailed.status.diagnostic.reasonCode === 'automerge-load-failed', 'DocHandle load failures should keep a repository diagnostic.')
 
     repo.failNextChange = true
     const writeFailed = await repository.mutate({
       documentId: seed.documentId,
       document: seed,
     })
-    assert(!writeFailed.ok, 'DocHandle write failures should be reported.')
-    assert(writeFailed.status.diagnostic.reasonCode === 'automerge-write-failed', 'Write failures should keep a repository diagnostic.')
+    expectTrue(!writeFailed.ok, 'DocHandle write failures should be reported.')
+    expectTrue(writeFailed.status.diagnostic.reasonCode === 'automerge-write-failed', 'Write failures should keep a repository diagnostic.')
 
     const reset = await repository.reset(seed.documentId)
-    assert(reset.kind === 'reset', 'IndexedDB repository reset should clear the mapped document.')
-    assert(urlStore.get(seed.documentId) === null, 'Reset should remove the stored Automerge URL mapping.')
+    expectTrue(reset.kind === 'reset', 'IndexedDB repository reset should clear the mapped document.')
+    expectTrue(urlStore.get(seed.documentId) === null, 'Reset should remove the stored Automerge URL mapping.')
   }
 
   function testLocalStorageUrlStoreValidatesPersistedPayloads() {
@@ -230,28 +224,28 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {
     const validUrl = 'automerge:4NMNnkMhL8jXrdJ9jamS58PAVdXu' as Parameters<DocumentRepositoryUrlStore['set']>[1]
 
     urlStore.set('doc_workspace', validUrl)
-    assert(urlStore.get('doc_workspace') === validUrl, 'Valid Automerge URLs should round-trip through localStorage.')
+    expectTrue(urlStore.get('doc_workspace') === validUrl, 'Valid Automerge URLs should round-trip through localStorage.')
 
     storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify({
       doc_workspace: 'https://not-automerge',
     }))
-    assert(urlStore.get('doc_workspace') === null, 'Malformed persisted URLs should be rejected by runtime validation.')
+    expectTrue(urlStore.get('doc_workspace') === null, 'Malformed persisted URLs should be rejected by runtime validation.')
 
     storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify({
       doc_workspace: 'automerge:invalidid',
     }))
-    assert(urlStore.get('doc_workspace') === null, 'Semantically invalid Automerge URLs should be rejected.')
+    expectTrue(urlStore.get('doc_workspace') === null, 'Semantically invalid Automerge URLs should be rejected.')
 
     storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify({
       doc_workspace: 42,
     }))
-    assert(urlStore.get('doc_workspace') === null, 'Non-string persisted URLs should be rejected by runtime validation.')
+    expectTrue(urlStore.get('doc_workspace') === null, 'Non-string persisted URLs should be rejected by runtime validation.')
 
     storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify(null))
-    assert(urlStore.get('doc_workspace') === null, 'Null persisted payloads should be rejected by runtime validation.')
+    expectTrue(urlStore.get('doc_workspace') === null, 'Null persisted payloads should be rejected by runtime validation.')
 
     storage.setItem('cad.documentRepository.automergeUrls.v1', JSON.stringify([validUrl]))
-    assert(urlStore.get('doc_workspace') === null, 'Array persisted payloads should be rejected by runtime validation.')
+    expectTrue(urlStore.get('doc_workspace') === null, 'Array persisted payloads should be rejected by runtime validation.')
   }
 
   await testMemoryRepositoryLoadsMutatesSubscribesAndResets()

@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -9,14 +10,7 @@ import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
 import { ShortcutContext } from '@/hooks/shortcut-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 
-test('src/components/layout/workbench-context-menu.spec.tsx', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const items: WorkbenchContextMenuEntry[] = [
+test('src/components/layout/workbench-context-menu.spec.tsx', async () => {  const items: WorkbenchContextMenuEntry[] = [
     {
       kind: 'item',
       id: 'rename',
@@ -85,28 +79,28 @@ test('src/components/layout/workbench-context-menu.spec.tsx', async () => {
     </MantineProvider>,
   )
 
-  assert(markup.includes('aria-haspopup="menu"'), 'Wrapped target should expose a menu popup affordance.')
-  assert(markup.includes('aria-label="Body actions"'), 'Menu dropdown should expose the provided accessible label.')
-  assert(markup.includes('Rename'), 'Menu should render rename item labels.')
-  assert(markup.includes('Delete'), 'Menu should render regular or danger item labels.')
-  assert(markup.includes('Export'), 'Menu should render disabled item labels.')
-  assert(markup.includes('Ctrl+Z'), 'Menu should render right-aligned shortcut hints for command entries.')
-  assert(markup.includes('disabled'), 'Disabled menu items should render as disabled controls.')
+  expectTrue(markup.includes('aria-haspopup="menu"'), 'Wrapped target should expose a menu popup affordance.')
+  expectTrue(markup.includes('aria-label="Body actions"'), 'Menu dropdown should expose the provided accessible label.')
+  expectTrue(markup.includes('Rename'), 'Menu should render rename item labels.')
+  expectTrue(markup.includes('Delete'), 'Menu should render regular or danger item labels.')
+  expectTrue(markup.includes('Export'), 'Menu should render disabled item labels.')
+  expectTrue(markup.includes('Ctrl+Z'), 'Menu should render right-aligned shortcut hints for command entries.')
+  expectTrue(markup.includes('disabled'), 'Disabled menu items should render as disabled controls.')
 
   const source = await Bun.file(new URL('./workbench-context-menu.tsx', import.meta.url)).text()
-  assert(
+  expectTrue(
     source.includes('onPointerDown: handlePointerDown') && source.includes('event.button !== 2'),
     'Context menus should support right-button pointer opening in addition to contextmenu events.',
   )
-  assert(
+  expectTrue(
     source.includes("transitionProps={{ duration: 0 }}"),
     'Context menus should open without transition delay for pointer-triggered placement.',
   )
-  assert(
+  expectTrue(
     source.includes('floatingStrategy="fixed"'),
     'Context menus should position the Mantine dropdown with fixed strategy to match the fixed anchor trigger.',
   )
-  assert(
+  expectTrue(
     source.includes('createPortal(') && source.includes('document.body'),
     'Context menu anchor targets should portal to the document body so dropdown positioning stays in the viewport coordinate space.',
   )

@@ -1,18 +1,12 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ImportProvider } from '@/contracts/import/provider'
 import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createScopedImportProviderRegistryForTest } from '@/domain/extensions/test-registry-composition'
 
-test('src/domain/import/provider-registry.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const pngProvider: ImportProvider<{ name: string }, { planeKey: string | null }> = {
+test('src/domain/import/provider-registry.spec.ts', async () => {  const pngProvider: ImportProvider<{ name: string }, { planeKey: string | null }> = {
     id: 'png-import',
     label: 'PNG Import',
     acceptedFileTypes: [{ extension: 'png', mediaType: 'image/png' }],
@@ -56,13 +50,13 @@ test('src/domain/import/provider-registry.spec.ts', async () => {
     stepProvider,
   ])
 
-  assert(registry.getAll().length === 2, 'Import registry should dedupe providers by id.')
-  assert(registry.getById('png-import') === pngProvider, 'Import registry should resolve providers by id.')
-  assert(
+  expectTrue(registry.getAll().length === 2, 'Import registry should dedupe providers by id.')
+  expectTrue(registry.getById('png-import') === pngProvider, 'Import registry should resolve providers by id.')
+  expectTrue(
     registry.getAcceptedFileTypes().some((entry) => entry.extension === 'png' && entry.mediaType === 'image/png'),
     'Import registry should expose accepted file types from its explicit composition.',
   )
-  assert(
+  expectTrue(
     registry.matchProviders({
       name: 'fixture.png',
       origin: { kind: 'localFile', fileName: 'fixture.png' },
@@ -76,8 +70,8 @@ test('src/domain/import/provider-registry.spec.ts', async () => {
   const isolatedA = createScopedImportProviderRegistryForTest([pngProvider])
   const isolatedB = createScopedImportProviderRegistryForTest([stepProvider])
 
-  assert(isolatedA.getById('step-import') === null, 'Scoped import registries should not leak between tests.')
-  assert(isolatedB.getById('png-import') === null, 'Scoped import registries should remain isolated.')
+  expectTrue(isolatedA.getById('step-import') === null, 'Scoped import registries should not leak between tests.')
+  expectTrue(isolatedB.getById('png-import') === null, 'Scoped import registries should remain isolated.')
 
   const review = await pngProvider.review({
     source: {
@@ -122,5 +116,5 @@ test('src/domain/import/provider-registry.spec.ts', async () => {
     },
   })
 
-  assert(review.providerReview.name === 'fixture.png', 'Provider behavior should remain unchanged after registry composition refactor.')
+  expectTrue(review.providerReview.name === 'fixture.png', 'Provider behavior should remain unchanged after registry composition refactor.')
 })

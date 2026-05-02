@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 const ROOT = process.cwd()
 
 function walk(directory: string): string[] {
@@ -33,14 +34,7 @@ function getLayerFiles(layerRoot: string) {
   )
 }
 
-test('src/layer-architecture-boundary.spec.ts core stays framework and browser free', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const offenders: string[] = []
+test('src/layer-architecture-boundary.spec.ts core stays framework and browser free', () => {  const offenders: string[] = []
   const browserDocumentPattern = /\bdocument\.(createElement|documentElement|querySelector|getElementById|body|head)\b/
 
   for (const filePath of getLayerFiles('src/core')) {
@@ -73,20 +67,13 @@ test('src/layer-architecture-boundary.spec.ts core stays framework and browser f
     }
   }
 
-  assert(
+  expectTrue(
     offenders.length === 0,
     `Core modules must remain framework-, browser-, and adapter-free.\n${offenders.join('\n')}`,
   )
 })
 
-test('src/layer-architecture-boundary.spec.ts application stays React free', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const offenders: string[] = []
+test('src/layer-architecture-boundary.spec.ts application stays React free', () => {  const offenders: string[] = []
 
   for (const filePath of getLayerFiles('src/application')) {
     const source = readFileSync(filePath, 'utf8')
@@ -102,20 +89,13 @@ test('src/layer-architecture-boundary.spec.ts application stays React free', () 
     }
   }
 
-  assert(
+  expectTrue(
     offenders.length === 0,
     `Application modules must not depend on React hooks or UI components.\n${offenders.join('\n')}`,
   )
 })
 
-test('src/layer-architecture-boundary.spec.ts infrastructure stays outside UI composition', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const offenders: string[] = []
+test('src/layer-architecture-boundary.spec.ts infrastructure stays outside UI composition', () => {  const offenders: string[] = []
 
   for (const filePath of getLayerFiles('src/infrastructure')) {
     const source = readFileSync(filePath, 'utf8')
@@ -131,7 +111,7 @@ test('src/layer-architecture-boundary.spec.ts infrastructure stays outside UI co
     }
   }
 
-  assert(
+  expectTrue(
     offenders.length === 0,
     `Infrastructure modules must not depend on UI composition layers.\n${offenders.join('\n')}`,
   )

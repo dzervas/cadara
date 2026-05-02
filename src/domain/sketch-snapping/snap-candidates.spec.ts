@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import {
@@ -8,21 +9,14 @@ import {
   type SketchSnapGeometry,
 } from '@/domain/sketch-snapping/snap-candidates'
 
-test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClosePoint(
+test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {  function assertClosePoint(
     actual: readonly [number, number] | undefined,
     expected: readonly [number, number],
     message: string,
   ) {
-    assert(actual, `${message} Missing point.`)
+    expectTrue(actual, `${message} Missing point.`)
     const distance = Math.hypot(actual[0] - expected[0], actual[1] - expected[1])
-    assert(distance < 1e-6, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
+    expectTrue(distance < 1e-6, `${message} Expected ${expected.join(', ')}, received ${actual.join(', ')}.`)
   }
 
   const definition: SketchDefinition = {
@@ -144,16 +138,16 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
   const localGeometries = collectSketchSnapGeometries({ definition })
   const geometries = collectSketchSnapGeometries({ definition, projectedReferences })
 
-  function testCenterCandidates() {
+function testCenterCandidates() {
     const circleCenter = resolveSketchSnap({
       pointer: [4, 0.03],
       geometries: localGeometries,
       tolerance: 0.2,
       activeTool: 'line',
     })
-    assert(circleCenter.activeCandidate?.kind === 'center', 'Pointer near a circle center should prefer a center snap.')
-    assert(circleCenter.activeCandidate.preview.label === 'Center', 'Circle center snap should expose center preview metadata.')
-    assert(circleCenter.activeCandidate.preview.glyph === 'center', 'Circle center snap should expose the center glyph.')
+    expectTrue(circleCenter.activeCandidate?.kind === 'center', 'Pointer near a circle center should prefer a center snap.')
+    expectTrue(circleCenter.activeCandidate.preview.label === 'Center', 'Circle center snap should expose center preview metadata.')
+    expectTrue(circleCenter.activeCandidate.preview.glyph === 'center', 'Circle center snap should expose the center glyph.')
     assertClosePoint(circleCenter.snappedPoint, [4, 0], 'Circle center snap should use the exact center point.')
 
     const arcCenter = resolveSketchSnap({
@@ -162,7 +156,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       tolerance: 0.2,
       activeTool: 'line',
     })
-    assert(arcCenter.activeCandidate?.kind === 'center', 'Pointer near an arc center should prefer a center snap.')
+    expectTrue(arcCenter.activeCandidate?.kind === 'center', 'Pointer near an arc center should prefer a center snap.')
     assertClosePoint(arcCenter.snappedPoint, [8, 0], 'Arc center snap should use the exact center point.')
   }
 
@@ -174,9 +168,9 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
     })
 
-    assert(result.activeCandidate?.kind === 'midpoint', 'Pointer near a line midpoint should prefer midpoint snap.')
+    expectTrue(result.activeCandidate?.kind === 'midpoint', 'Pointer near a line midpoint should prefer midpoint snap.')
     assertClosePoint(result.snappedPoint, [1, 0], 'Midpoint snap should return the exact line midpoint.')
-    assert(
+    expectTrue(
       result.activeCandidate.sources.some((source) => source.kind === 'localEntity'),
       'Midpoint snap should carry the source line reference.',
     )
@@ -190,9 +184,9 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
     })
 
-    assert(result.activeCandidate?.kind === 'nearestOnLine', 'Pointer near a projected line should snap onto it.')
+    expectTrue(result.activeCandidate?.kind === 'nearestOnLine', 'Pointer near a projected line should snap onto it.')
     assertClosePoint(result.snappedPoint, [1, 0.5], 'Projected line snap should use derived projected coordinates.')
-    assert(
+    expectTrue(
       result.activeCandidate.sources.some((source) => source.kind === 'projectedGeometry'),
       'Projected snap should reference projected geometry without creating local geometry.',
     )
@@ -205,7 +199,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       tolerance: 0.2,
       activeTool: 'line',
     })
-    assert(circle.activeCandidate?.kind === 'nearestOnCircle', 'Pointer near a circle should snap onto the circle.')
+    expectTrue(circle.activeCandidate?.kind === 'nearestOnCircle', 'Pointer near a circle should snap onto the circle.')
     assertClosePoint(
       circle.snappedPoint,
       [4.044598829122584, 0.9990057739466971],
@@ -218,7 +212,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       tolerance: 0.2,
       activeTool: 'line',
     })
-    assert(arc.activeCandidate?.kind === 'nearestOnArc', 'Pointer near an arc should snap onto the finite arc.')
+    expectTrue(arc.activeCandidate?.kind === 'nearestOnArc', 'Pointer near an arc should snap onto the finite arc.')
     assertClosePoint(
       arc.snappedPoint,
       [6.707106781186548, 0.7071067811865475],
@@ -234,7 +228,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
       tolerance: 0.2,
     })
-    assert(horizontal.activeCandidate?.kind === 'horizontalAlignment', 'Line drawing should infer horizontal alignment from the active start.')
+    expectTrue(horizontal.activeCandidate?.kind === 'horizontalAlignment', 'Line drawing should infer horizontal alignment from the active start.')
     assertClosePoint(horizontal.snappedPoint, [2.5, 0], 'Horizontal alignment should lock the pointer y coordinate.')
 
     const vertical = resolveSketchSnap({
@@ -244,7 +238,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
       tolerance: 0.2,
     })
-    assert(vertical.activeCandidate?.kind === 'verticalAlignment', 'Line drawing should infer vertical alignment from the active start.')
+    expectTrue(vertical.activeCandidate?.kind === 'verticalAlignment', 'Line drawing should infer vertical alignment from the active start.')
     assertClosePoint(vertical.snappedPoint, [0, 2.5], 'Vertical alignment should lock the pointer x coordinate.')
 
     const tangent = resolveSketchSnap({
@@ -254,7 +248,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
       tolerance: 0.2,
     })
-    assert(tangent.activeCandidate?.kind === 'tangent', 'Line drawing should expose deterministic circle tangent candidates.')
+    expectTrue(tangent.activeCandidate?.kind === 'tangent', 'Line drawing should expose deterministic circle tangent candidates.')
     assertClosePoint(tangent.snappedPoint, [3.5, 0.8660254037844387], 'Tangent snap should use the nearest tangent point.')
   }
 
@@ -277,7 +271,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
       tolerance: 0.2,
     })
-    assert(valid.activeCandidate?.kind === 'perpendicularFoot', 'True finite-segment perpendicular foot should be emitted.')
+    expectTrue(valid.activeCandidate?.kind === 'perpendicularFoot', 'True finite-segment perpendicular foot should be emitted.')
     assertClosePoint(valid.snappedPoint, [1, 1], 'Perpendicular foot should use the unclamped projection point.')
 
     const outside = resolveSketchSnap({
@@ -287,7 +281,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
       tolerance: 0.2,
     })
-    assert(
+    expectTrue(
       outside.candidates.every((candidate) => candidate.kind !== 'perpendicularFoot'),
       'Out-of-segment perpendicular projections should not be labeled as perpendicular-foot snaps.',
     )
@@ -300,7 +294,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       tolerance: 0.2,
       activeTool: 'line',
     })
-    assert(
+    expectTrue(
       intersections.candidates.some((candidate) => candidate.kind === 'intersection'),
       'Candidate list should include curve intersections within tolerance.',
     )
@@ -336,7 +330,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
     assertClosePoint(baseline.snappedPoint, [0, 0], 'Baseline snap should choose the closest point without hysteresis.')
 
     const previous = baseline.candidates.find((candidate) => candidate.point[0] === 0.1)
-    assert(previous, 'Expected a nearby previous candidate for hysteresis.')
+    expectTrue(previous, 'Expected a nearby previous candidate for hysteresis.')
 
     const hysteresis = resolveSketchSnap({
       pointer: [0.04, 0],
@@ -345,7 +339,7 @@ test('src/domain/sketch-snapping/snap-candidates.spec.ts', () => {
       activeTool: 'line',
       activeCandidateKey: previous.key,
     })
-    assert(
+    expectTrue(
       hysteresis.activeCandidate?.key === previous.key,
       'Active candidate hysteresis should keep a nearby previous candidate stable.',
     )

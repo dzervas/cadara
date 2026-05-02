@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   evaluateSketchScalarConstraintForTest,
   getSketchSolveInitialValuesForTest,
@@ -9,14 +10,7 @@ import {
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { ConstraintId, DimensionId } from '@/contracts/shared/ids'
 
-test('src/contracts/sketch/solver-core.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
+test('src/contracts/sketch/solver-core.spec.ts', async () => {  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
     if (Math.abs(actual - expected) > tolerance) {
       throw new Error(`${message} Expected ${expected}, received ${actual}.`)
     }
@@ -124,7 +118,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
       squaredError += delta * delta
     }
     const error = Math.sqrt(squaredError)
-    assert(
+    expectTrue(
       error < tolerance,
       `Gradient mismatch for ${constraintId}. Error ${error} exceeds tolerance ${tolerance}.`,
     )
@@ -141,38 +135,38 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const c = coords.get('sketch_point_c')
     const d = coords.get('sketch_point_d')
     const reference = coords.get('sketch_point_reference')
-    assert(a && b && c && d && reference, `Expected solved rotated-rectangle anchors for ${strategy}.`)
+    expectTrue(a && b && c && d && reference, `Expected solved rotated-rectangle anchors for ${strategy}.`)
 
     const sqrt2 = Math.sqrt(2)
     const halfSqrt2 = sqrt2 / 2
     const matches = (point: readonly [number, number], expected: readonly [number, number]) =>
       Math.hypot(point[0] - expected[0], point[1] - expected[1]) < tolerance
 
-    assert(matches(reference, [1, 0]), `Reference point should remain fixed for ${strategy}.`)
-    assert(matches(a, [0, 0]), `A should remain at origin for ${strategy}.`)
+    expectTrue(matches(reference, [1, 0]), `Reference point should remain fixed for ${strategy}.`)
+    expectTrue(matches(a, [0, 0]), `A should remain at origin for ${strategy}.`)
 
     if (b[1] < 0) {
-      assert(matches(b, [sqrt2, -sqrt2]), `B should match isotope below-axis branch for ${strategy}.`)
+      expectTrue(matches(b, [sqrt2, -sqrt2]), `B should match isotope below-axis branch for ${strategy}.`)
       if (c[1] < b[1]) {
-        assert(matches(c, [-halfSqrt2, -5 * halfSqrt2]), `C should match isotope down-left branch for ${strategy}.`)
-        assert(matches(d, [-3 * halfSqrt2, -3 * halfSqrt2]), `D should match isotope down-left branch for ${strategy}.`)
+        expectTrue(matches(c, [-halfSqrt2, -5 * halfSqrt2]), `C should match isotope down-left branch for ${strategy}.`)
+        expectTrue(matches(d, [-3 * halfSqrt2, -3 * halfSqrt2]), `D should match isotope down-left branch for ${strategy}.`)
         return
       }
 
-      assert(matches(c, [5 * halfSqrt2, halfSqrt2]), `C should match isotope up-right branch for ${strategy}.`)
-      assert(matches(d, [3 * halfSqrt2, 3 * halfSqrt2]), `D should match isotope up-right branch for ${strategy}.`)
+      expectTrue(matches(c, [5 * halfSqrt2, halfSqrt2]), `C should match isotope up-right branch for ${strategy}.`)
+      expectTrue(matches(d, [3 * halfSqrt2, 3 * halfSqrt2]), `D should match isotope up-right branch for ${strategy}.`)
       return
     }
 
-    assert(matches(b, [sqrt2, sqrt2]), `B should match isotope above-axis branch for ${strategy}.`)
+    expectTrue(matches(b, [sqrt2, sqrt2]), `B should match isotope above-axis branch for ${strategy}.`)
     if (c[1] > b[1]) {
-      assert(matches(c, [-halfSqrt2, 5 * halfSqrt2]), `C should match isotope up-left branch for ${strategy}.`)
-      assert(matches(d, [-3 * halfSqrt2, 3 * halfSqrt2]), `D should match isotope up-left branch for ${strategy}.`)
+      expectTrue(matches(c, [-halfSqrt2, 5 * halfSqrt2]), `C should match isotope up-left branch for ${strategy}.`)
+      expectTrue(matches(d, [-3 * halfSqrt2, 3 * halfSqrt2]), `D should match isotope up-left branch for ${strategy}.`)
       return
     }
 
-    assert(matches(c, [5 * halfSqrt2, -halfSqrt2]), `C should match isotope down-right branch for ${strategy}.`)
-    assert(matches(d, [3 * halfSqrt2, -3 * halfSqrt2]), `D should match isotope down-right branch for ${strategy}.`)
+    expectTrue(matches(c, [5 * halfSqrt2, -halfSqrt2]), `C should match isotope down-right branch for ${strategy}.`)
+    expectTrue(matches(d, [3 * halfSqrt2, -3 * halfSqrt2]), `D should match isotope down-right branch for ${strategy}.`)
   }
 
   async function testFixPoint() {
@@ -203,9 +197,9 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     })
 
     const point = solved.solvedSnapshot.solvedPoints[0]
-    assert(point !== undefined, 'Expected one solved point.')
-    assert(Math.abs(point.solvedPosition[0] - 1) < 1e-6, 'Fix point should preserve x.')
-    assert(Math.abs(point.solvedPosition[1] - 1) < 1e-6, 'Fix point should solve y to 1.')
+    expectTrue(point !== undefined, 'Expected one solved point.')
+    expectTrue(Math.abs(point.solvedPosition[0] - 1) < 1e-6, 'Fix point should preserve x.')
+    expectTrue(Math.abs(point.solvedPosition[1] - 1) < 1e-6, 'Fix point should solve y to 1.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_fix_a', 1e-6)
   }
 
@@ -241,12 +235,12 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     })
 
     const [a, b] = solved.solvedSnapshot.solvedPoints
-    assert(a !== undefined && b !== undefined, 'Expected solved point pair.')
+    expectTrue(a !== undefined && b !== undefined, 'Expected solved point pair.')
     const distance = Math.hypot(
       a.solvedPosition[0] - b.solvedPosition[0],
       a.solvedPosition[1] - b.solvedPosition[1],
     )
-    assert(Math.abs(distance - 3) < 1e-4, 'Aligned distance should solve to 3.')
+    expectTrue(Math.abs(distance - 3) < 1e-4, 'Aligned distance should solve to 3.')
     assertGradientMatchesFiniteDifference(definition, 'dimension_distance', 1e-6)
   }
 
@@ -281,8 +275,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     })
 
     const [a, b] = solved.solvedSnapshot.solvedPoints
-    assert(a !== undefined && b !== undefined, 'Expected solved point pair.')
-    assert(Math.abs((b.solvedPosition[0] - a.solvedPosition[0]) + 3) < 1e-4, 'Horizontal distance should solve to -3.')
+    expectTrue(a !== undefined && b !== undefined, 'Expected solved point pair.')
+    expectTrue(Math.abs((b.solvedPosition[0] - a.solvedPosition[0]) + 3) < 1e-4, 'Horizontal distance should solve to -3.')
     assertGradientMatchesFiniteDifference(definition, 'dimension_horizontal_distance', 1e-6)
   }
 
@@ -317,8 +311,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     })
 
     const [a, b] = solved.solvedSnapshot.solvedPoints
-    assert(a !== undefined && b !== undefined, 'Expected solved point pair.')
-    assert(Math.abs((b.solvedPosition[1] - a.solvedPosition[1]) - 3) < 1e-4, 'Vertical distance should solve to 3.')
+    expectTrue(a !== undefined && b !== undefined, 'Expected solved point pair.')
+    expectTrue(Math.abs((b.solvedPosition[1] - a.solvedPosition[1]) - 3) < 1e-4, 'Vertical distance should solve to 3.')
     assertGradientMatchesFiniteDifference(definition, 'dimension_vertical_distance', 1e-6)
   }
 
@@ -440,7 +434,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     assertClose(statusById.get('dimension_line_distance')?.solvedValue ?? 0, 4, 1e-4, 'Line distance should report perpendicular distance.')
     assertClose(statusById.get('dimension_line_point')?.solvedValue ?? 0, 3, 1e-4, 'Line-point dimension should report perpendicular distance.')
     assertClose(statusById.get('dimension_line_angle')?.solvedValue ?? 0, Math.PI / 2, 1e-4, 'Line angle should report enclosed angle.')
-    assert(
+    expectTrue(
       statusById.get('dimension_invalid_line_distance')?.status === 'unsatisfied',
       'A line distance dimension between non-parallel lines should remain unsatisfied instead of becoming an angle dimension.',
     )
@@ -489,7 +483,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
       partialSolvePolicy: 'bestEffort',
     })
     const [horizontalA, horizontalB] = solvedHorizontal.solvedSnapshot.solvedPoints
-    assert(horizontalA !== undefined && horizontalB !== undefined, 'Expected solved horizontal point pair.')
+    expectTrue(horizontalA !== undefined && horizontalB !== undefined, 'Expected solved horizontal point pair.')
     assertClose(
       horizontalB.solvedPosition[0] - horizontalA.solvedPosition[0],
       3,
@@ -504,7 +498,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
       partialSolvePolicy: 'bestEffort',
     })
     const [verticalA, verticalB] = solvedVertical.solvedSnapshot.solvedPoints
-    assert(verticalA !== undefined && verticalB !== undefined, 'Expected solved vertical point pair.')
+    expectTrue(verticalA !== undefined && verticalB !== undefined, 'Expected solved vertical point pair.')
     assertClose(
       verticalB.solvedPosition[1] - verticalA.solvedPosition[1],
       4,
@@ -573,9 +567,9 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const pointC = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_c')
     const angleStatus = solved.solvedSnapshot.dimensionStatuses.find((status) => status.dimensionId === 'dimension_obtuse_angle')
 
-    assert(solved.status.solveState === 'solved', 'Obtuse line-angle dimensions should remain solvable.')
-    assert(solved.status.constraintState !== 'overConstrained', 'Obtuse line-angle dimensions should not be classified as over-constrained.')
-    assert(pointC, 'Expected solved endpoint for the obtuse-angle fixture.')
+    expectTrue(solved.status.solveState === 'solved', 'Obtuse line-angle dimensions should remain solvable.')
+    expectTrue(solved.status.constraintState !== 'overConstrained', 'Obtuse line-angle dimensions should not be classified as over-constrained.')
+    expectTrue(pointC, 'Expected solved endpoint for the obtuse-angle fixture.')
     assertClose(pointC.solvedPosition[0], 8.660254037844387, 1e-4, 'Obtuse line-angle solve should place the free endpoint on the expected branch.')
     assertClose(pointC.solvedPosition[1], 15, 1e-4, 'Obtuse line-angle solve should preserve the requested line length.')
     assertClose(angleStatus?.solvedValue ?? 0, (120 * Math.PI) / 180, 1e-4, 'Obtuse line-angle dimensions should report their solved angle in radians.')
@@ -606,8 +600,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
 
     const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
     const [a, b] = solved.solvedSnapshot.solvedPoints
-    assert(a !== undefined && b !== undefined, 'Expected solved line endpoints.')
-    assert(Math.abs(b.solvedPosition[1] - a.solvedPosition[1]) < 1e-6, 'Horizontal line should end with zero y delta.')
+    expectTrue(a !== undefined && b !== undefined, 'Expected solved line endpoints.')
+    expectTrue(Math.abs(b.solvedPosition[1] - a.solvedPosition[1]) < 1e-6, 'Horizontal line should end with zero y delta.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_horizontal', 1e-6)
   }
 
@@ -636,8 +630,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
 
     const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
     const [a, b] = solved.solvedSnapshot.solvedPoints
-    assert(a !== undefined && b !== undefined, 'Expected solved line endpoints.')
-    assert(Math.abs(b.solvedPosition[0] - a.solvedPosition[0]) < 1e-6, 'Vertical line should end with zero x delta.')
+    expectTrue(a !== undefined && b !== undefined, 'Expected solved line endpoints.')
+    expectTrue(Math.abs(b.solvedPosition[0] - a.solvedPosition[0]) < 1e-6, 'Vertical line should end with zero x delta.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_vertical', 1e-6)
   }
 
@@ -670,7 +664,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const pointA = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_a')
     const pointB = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_b')
     const pointM = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_m')
-    assert(pointA && pointB && pointM, 'Expected solved angle points.')
+    expectTrue(pointA && pointB && pointM, 'Expected solved angle points.')
     const d1x = pointA.solvedPosition[0] - pointM.solvedPosition[0]
     const d1y = pointA.solvedPosition[1] - pointM.solvedPosition[1]
     const d2x = pointB.solvedPosition[0] - pointM.solvedPosition[0]
@@ -678,7 +672,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const angle = Math.acos(
       Math.max(-1, Math.min(1, (d1x * d2x + d1y * d2y) / (Math.hypot(d1x, d1y) * Math.hypot(d2x, d2y)))),
     )
-    assert(Math.abs(angle - Math.PI / 4) < 1e-4, 'Angle should solve to PI/4.')
+    expectTrue(Math.abs(angle - Math.PI / 4) < 1e-4, 'Angle should solve to PI/4.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_angle', 1e-6)
   }
 
@@ -711,7 +705,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const pointA = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_a')
     const pointB = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_b')
     const pointM = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === 'sketch_point_m')
-    assert(pointA && pointB && pointM, 'Expected solved points for specific angle case.')
+    expectTrue(pointA && pointB && pointM, 'Expected solved points for specific angle case.')
     const d1x = pointA.solvedPosition[0] - pointM.solvedPosition[0]
     const d1y = pointA.solvedPosition[1] - pointM.solvedPosition[1]
     const d2x = pointB.solvedPosition[0] - pointM.solvedPosition[0]
@@ -719,7 +713,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const angle = Math.acos(
       Math.max(-1, Math.min(1, (d1x * d2x + d1y * d2y) / (Math.hypot(d1x, d1y) * Math.hypot(d2x, d2y)))),
     )
-    assert(Math.abs(angle - Math.PI / 2) < 1e-3, 'Specific angle case should solve to PI/2.')
+    expectTrue(Math.abs(angle - Math.PI / 2) < 1e-3, 'Specific angle case should solve to PI/2.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_angle_specific', 1e-4)
   }
 
@@ -766,7 +760,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
       points.get('sketch_point_b2')![0] - points.get('sketch_point_b1')![0],
       points.get('sketch_point_b2')![1] - points.get('sketch_point_b1')![1],
     )
-    assert(Math.abs(lenA - lenB) < 1e-4, 'Equal-length constraint should equalize solved line lengths.')
+    expectTrue(Math.abs(lenA - lenB) < 1e-4, 'Equal-length constraint should equalize solved line lengths.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_equal_length', 1e-6)
   }
 
@@ -810,7 +804,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const bx = points.get('sketch_point_b2')![0] - points.get('sketch_point_b1')![0]
     const by = points.get('sketch_point_b2')![1] - points.get('sketch_point_b1')![1]
     const cross = ax * by - ay * bx
-    assert(Math.abs(cross) < 1e-4, 'Parallel constraint should drive the line cross product to zero.')
+    expectTrue(Math.abs(cross) < 1e-4, 'Parallel constraint should drive the line cross product to zero.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_parallel', 1e-6)
   }
 
@@ -854,7 +848,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const bx = points.get('sketch_point_b2')![0] - points.get('sketch_point_b1')![0]
     const by = points.get('sketch_point_b2')![1] - points.get('sketch_point_b1')![1]
     const dot = ax * bx + ay * by
-    assert(Math.abs(dot) < 1e-2, 'Perpendicular constraint should drive the line dot product near zero.')
+    expectTrue(Math.abs(dot) < 1e-2, 'Perpendicular constraint should drive the line dot product near zero.')
     assertGradientMatchesFiniteDifference(definition, 'constraint_perpendicular', 1e-6)
   }
 
@@ -903,8 +897,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
     const arc = solved.solvedSnapshot.solvedEntities.find((entity) => entity.entityId === 'sketch_entity_arc')
     const point = solved.solvedSnapshot.solvedPoints.find((entry) => entry.pointId === 'sketch_point_line_end')
-    assert(arc?.kind === 'arc' && point, 'Expected solved arc and endpoint point.')
-    assert(
+    expectTrue(arc?.kind === 'arc' && point, 'Expected solved arc and endpoint point.')
+    expectTrue(
       Math.hypot(arc.startPosition[0] - point.solvedPosition[0], arc.startPosition[1] - point.solvedPosition[1]) < 1e-4,
       'Arc start coincidence should match the referenced point.',
     )
@@ -956,8 +950,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
     const arc = solved.solvedSnapshot.solvedEntities.find((entity) => entity.entityId === 'sketch_entity_arc')
     const point = solved.solvedSnapshot.solvedPoints.find((entry) => entry.pointId === 'sketch_point_line_start')
-    assert(arc?.kind === 'arc' && point, 'Expected solved arc and endpoint point.')
-    assert(
+    expectTrue(arc?.kind === 'arc' && point, 'Expected solved arc and endpoint point.')
+    expectTrue(
       Math.hypot(arc.endPosition[0] - point.solvedPosition[0], arc.endPosition[1] - point.solvedPosition[1]) < 1e-4,
       'Arc end coincidence should match the referenced point.',
     )
@@ -1049,18 +1043,18 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
 
     const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
     const coords = new Map(solved.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
-    assert(coords.has('sketch_point_a'), 'Expected A.')
-    assert(coords.has('sketch_point_b'), 'Expected B.')
-    assert(coords.has('sketch_point_c'), 'Expected C.')
-    assert(coords.has('sketch_point_d'), 'Expected D.')
+    expectTrue(coords.has('sketch_point_a'), 'Expected A.')
+    expectTrue(coords.has('sketch_point_b'), 'Expected B.')
+    expectTrue(coords.has('sketch_point_c'), 'Expected C.')
+    expectTrue(coords.has('sketch_point_d'), 'Expected D.')
     const a = coords.get('sketch_point_a')!
     const b = coords.get('sketch_point_b')!
     const c = coords.get('sketch_point_c')!
     const d = coords.get('sketch_point_d')!
-    assert(Math.hypot(a[0] - 0, a[1] - 0) < 1e-5, 'A should solve to origin.')
-    assert(Math.hypot(b[0] - 2, b[1] - 0) < 1e-4, 'B should solve to (2,0).')
-    assert(Math.hypot(c[0] - 2, c[1] - 3) < 1e-4, 'C should solve to (2,3).')
-    assert(Math.hypot(d[0] - 0, d[1] - 3) < 1e-4, 'D should solve to (0,3).')
+    expectTrue(Math.hypot(a[0] - 0, a[1] - 0) < 1e-5, 'A should solve to origin.')
+    expectTrue(Math.hypot(b[0] - 2, b[1] - 0) < 1e-4, 'B should solve to (2,0).')
+    expectTrue(Math.hypot(c[0] - 2, c[1] - 3) < 1e-4, 'C should solve to (2,3).')
+    expectTrue(Math.hypot(d[0] - 0, d[1] - 3) < 1e-4, 'D should solve to (0,3).')
   }
 
   async function testRotatedRectangle() {
@@ -1190,8 +1184,8 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const b = coords.get('sketch_point_b')
     const d = coords.get('sketch_point_d')
     const reference = coords.get('sketch_point_reference')
-    assert(a && b && d && reference, `Expected solved rotated-rectangle anchors for ${strategy}.`)
-    assert(
+    expectTrue(a && b && d && reference, `Expected solved rotated-rectangle anchors for ${strategy}.`)
+    expectTrue(
       solved.status.solveState === options.expectedSolveState,
       `Rotated rectangle should report ${options.expectedSolveState} for ${strategy}.`,
     )
@@ -1304,12 +1298,12 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     const b = coords.get('sketch_point_b')
     const c = coords.get('sketch_point_c')
     const d = coords.get('sketch_point_d')
-    assert(a && b && c && d, 'Expected solved axis-aligned rectangle anchors for gradient descent.')
-    assert(solved.status.solveState === 'solved', 'Gradient descent should solve the axis-aligned rectangle fixture.')
-    assert(Math.hypot(a[0] - 0, a[1] - 0) < 1e-5, 'Gradient descent should keep A at the origin.')
-    assert(Math.hypot(b[0] - 2, b[1] - 0) < 1e-4, 'Gradient descent should solve B to (2,0).')
-    assert(Math.hypot(c[0] - 2, c[1] - 3) < 1e-4, 'Gradient descent should solve C to (2,3).')
-    assert(Math.hypot(d[0] - 0, d[1] - 3) < 1e-4, 'Gradient descent should solve D to (0,3).')
+    expectTrue(a && b && c && d, 'Expected solved axis-aligned rectangle anchors for gradient descent.')
+    expectTrue(solved.status.solveState === 'solved', 'Gradient descent should solve the axis-aligned rectangle fixture.')
+    expectTrue(Math.hypot(a[0] - 0, a[1] - 0) < 1e-5, 'Gradient descent should keep A at the origin.')
+    expectTrue(Math.hypot(b[0] - 2, b[1] - 0) < 1e-4, 'Gradient descent should solve B to (2,0).')
+    expectTrue(Math.hypot(c[0] - 2, c[1] - 3) < 1e-4, 'Gradient descent should solve C to (2,3).')
+    expectTrue(Math.hypot(d[0] - 0, d[1] - 3) < 1e-4, 'Gradient descent should solve D to (0,3).')
   }
 
   async function testRotatedRectangleGaussNewton() {
@@ -1347,7 +1341,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     }
 
     const validation = validateSketchDefinitionCore({ definition, tolerances })
-    assert(!validation.isValid, 'Degenerate line should fail validation.')
+    expectTrue(!validation.isValid, 'Degenerate line should fail validation.')
   }
 
   async function testValidationRejectsPointIdsWithoutRecords() {
@@ -1366,7 +1360,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     }
 
     const validation = validateSketchDefinitionCore({ definition, tolerances })
-    assert(
+    expectTrue(
       validation.diagnostics.some((diagnostic) => diagnostic.code === 'point-missing-from-records'),
       'Validation should reject point ids that do not have backing records.',
     )
@@ -1394,7 +1388,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {
     }
 
     const validation = validateSketchDefinitionCore({ definition, tolerances })
-    assert(
+    expectTrue(
       validation.diagnostics.some((diagnostic) => diagnostic.code === 'missing-fix-point'),
       'Validation should reject constraints that reference missing points.',
     )

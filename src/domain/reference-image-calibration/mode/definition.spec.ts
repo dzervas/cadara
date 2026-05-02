@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   initialEditorState,
   transitionEditorState,
@@ -77,14 +78,7 @@ function getModeState(state: SketchEditorState) {
   return modeState
 }
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts only places anchors on the active image', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const baseState = createEditingSketchState()
+test('src/domain/reference-image-calibration/mode/definition.spec.ts only places anchors on the active image', () => {  const baseState = createEditingSketchState()
   const operationTarget = getOperationTarget(baseState)
 
   const entered = transitionEditorState(baseState, {
@@ -105,7 +99,7 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts only places
     point: [200, 200],
     target: operationTarget,
   })
-  assert(
+  expectTrue(
     getModeState(outsideBounds.state).draftState.calibration.anchors.length === 0,
     'Clicking outside the image bounds should not create a calibration anchor.',
   )
@@ -116,19 +110,12 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts only places
     target: operationTarget,
   })
   const modeState = getModeState(placed.state)
-  assert(modeState.draftState.calibration.anchors.length === 1, 'Clicking the active image within bounds should create a calibration anchor.')
-  assert(modeState.draftPoints.length === 1, 'Creating an anchor should stage a bound construction point for commit.')
-  assert(modeState.draftState.calibration.anchors[0]?.pointId === modeState.draftPoints[0]?.pointId, 'The authored anchor should bind to the staged sketch point.')
+  expectTrue(modeState.draftState.calibration.anchors.length === 1, 'Clicking the active image within bounds should create a calibration anchor.')
+  expectTrue(modeState.draftPoints.length === 1, 'Creating an anchor should stage a bound construction point for commit.')
+  expectTrue(modeState.draftState.calibration.anchors[0]?.pointId === modeState.draftPoints[0]?.pointId, 'The authored anchor should bind to the staged sketch point.')
 })
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts lists authored anchors in the panel and removes the selected one', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operationTarget = getOperationTarget(createEditingSketchState())
+test('src/domain/reference-image-calibration/mode/definition.spec.ts lists authored anchors in the panel and removes the selected one', () => {  const operationTarget = getOperationTarget(createEditingSketchState())
   let state = transitionEditorState(createEditingSketchState(), {
     type: 'sketch.specialModeEntered',
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
@@ -152,8 +139,8 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   const panel = state.session.activeSpecialMode
     ? state.session.activeSpecialMode
     : null
-  assert(anchorIds.length === 2, 'Fixture should create two bound anchors.')
-  assert(panel !== null, 'Calibration mode should remain active while editing anchors.')
+  expectTrue(anchorIds.length === 2, 'Fixture should create two bound anchors.')
+  expectTrue(panel !== null, 'Calibration mode should remain active while editing anchors.')
 
   state = transitionEditorState(state, {
     type: 'sketch.specialModePanelActionInvoked',
@@ -171,18 +158,11 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   }).state
 
   const remainingAnchors = getModeState(state).draftState.calibration.anchors
-  assert(remainingAnchors.length === 1, 'Removing a panel-selected anchor should update the authored anchor list.')
-  assert(remainingAnchors[0]?.anchorId === anchorIds[1], 'Removing a panel-selected anchor should remove the chosen anchor instead of a different one.')
+  expectTrue(remainingAnchors.length === 1, 'Removing a panel-selected anchor should update the authored anchor list.')
+  expectTrue(remainingAnchors[0]?.anchorId === anchorIds[1], 'Removing a panel-selected anchor should remove the chosen anchor instead of a different one.')
 })
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts allocates a fresh anchor id after removing an earlier anchor', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const operationTarget = getOperationTarget(createEditingSketchState())
+test('src/domain/reference-image-calibration/mode/definition.spec.ts allocates a fresh anchor id after removing an earlier anchor', () => {  const operationTarget = getOperationTarget(createEditingSketchState())
   let state = transitionEditorState(createEditingSketchState(), {
     type: 'sketch.specialModeEntered',
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
@@ -227,20 +207,13 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts allocates a
   }).state
 
   const nextAnchorIds = getModeState(state).draftState.calibration.anchors.map((anchor) => anchor.anchorId)
-  assert(nextAnchorIds.length === 2, 'The replacement fixture should still contain two anchors after remove-and-add.')
-  assert(new Set(nextAnchorIds).size === nextAnchorIds.length, 'Remove-and-add should not reuse an anchor id that is still present.')
-  assert(nextAnchorIds.includes(originalAnchorIds[1]!), 'Remove-and-add should preserve the untouched anchor id.')
-  assert(!nextAnchorIds.includes(originalAnchorIds[0]!), 'Remove-and-add should not resurrect the removed anchor id when a newer anchor already exists.')
+  expectTrue(nextAnchorIds.length === 2, 'The replacement fixture should still contain two anchors after remove-and-add.')
+  expectTrue(new Set(nextAnchorIds).size === nextAnchorIds.length, 'Remove-and-add should not reuse an anchor id that is still present.')
+  expectTrue(nextAnchorIds.includes(originalAnchorIds[1]!), 'Remove-and-add should preserve the untouched anchor id.')
+  expectTrue(!nextAnchorIds.includes(originalAnchorIds[0]!), 'Remove-and-add should not resurrect the removed anchor id when a newer anchor already exists.')
 })
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const baseState = createEditingSketchState()
+test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point', () => {  const baseState = createEditingSketchState()
   const stateWithPoint: SketchEditorState = {
     ...baseState,
     session: {
@@ -319,18 +292,11 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
   }).state
 
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
-  assert(reboundAnchor?.pointId === 'sketch_point_anchor', 'Rebinding should target the explicitly selected sketch point.')
-  assert(reboundAnchor?.pointId !== initialBinding, 'Rebinding should replace the previous construction-point binding.')
+  expectTrue(reboundAnchor?.pointId === 'sketch_point_anchor', 'Rebinding should target the explicitly selected sketch point.')
+  expectTrue(reboundAnchor?.pointId !== initialBinding, 'Rebinding should replace the previous construction-point binding.')
 })
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode prioritizes the clicked sketch point over anchor hit-testing', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const baseState = createEditingSketchState()
+test('src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode prioritizes the clicked sketch point over anchor hit-testing', () => {  const baseState = createEditingSketchState()
   const stateWithOverlappingPoint: SketchEditorState = {
     ...baseState,
     session: {
@@ -407,5 +373,5 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
   }).state
 
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
-  assert(reboundAnchor?.pointId === 'sketch_point_overlap', 'Rebind mode should honor the clicked sketch point even when it overlaps the anchor handle.')
+  expectTrue(reboundAnchor?.pointId === 'sketch_point_overlap', 'Rebind mode should honor the clicked sketch point even when it overlaps the anchor handle.')
 })

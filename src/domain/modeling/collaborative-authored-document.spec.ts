@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { FeatureDefinition } from '@/contracts/modeling/schema'
 import { CONTRACT_VERSION, EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
@@ -9,14 +10,7 @@ import {
 } from '@/domain/modeling/collaborative-authored-document'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
-test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function createSeedDocument() {
+test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => {  async function createSeedDocument() {
     const snapshot = (await new MockKernelAdapter().getDocumentSnapshot({
       contractVersion: CONTRACT_VERSION,
       documentId: 'doc_workspace',
@@ -26,7 +20,7 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
 
   function cloneExtrude(seed: AuthoredModelDocument, suffix: string): AuthoredModelDocument['features'][number] {
     const extrude = seed.features.find((feature) => feature.featureId === 'feature_extrude-1')
-    assert(extrude, 'Seed extrude feature should exist.')
+    expectTrue(extrude, 'Seed extrude feature should exist.')
     return {
       featureId: `feature_extrude-${suffix}` as AuthoredModelDocument['features'][number]['featureId'],
       label: `Extrude ${suffix}`,
@@ -47,7 +41,7 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
   const concurrentInsert = normalizeCollaborativeAuthoredModelDocument(concurrentInsertDocument)
   const concurrentAIndex = concurrentInsert.document.featureOrder.indexOf('feature_extrude-a' as AuthoredModelDocument['featureOrder'][number])
   const concurrentBIndex = concurrentInsert.document.featureOrder.indexOf('feature_extrude-b' as AuthoredModelDocument['featureOrder'][number])
-  assert(
+  expectTrue(
     concurrentAIndex >= 0 && concurrentBIndex > concurrentAIndex,
     'Concurrent feature insertions missing from order should append deterministically by durable ID.',
   )
@@ -56,11 +50,11 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
     ...seed,
     featureOrder: ['feature_extrude-missing', ...seed.featureOrder] as AuthoredModelDocument['featureOrder'],
   })
-  assert(
+  expectTrue(
     !movedAndDeleted.document.featureOrder.includes('feature_extrude-missing' as AuthoredModelDocument['featureOrder'][number]),
     'Move/delete races should not keep order entries for missing features.',
   )
-  assert(
+  expectTrue(
     movedAndDeleted.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder),
     'Move/delete races should emit explicit feature-order diagnostics.',
   )
@@ -70,7 +64,7 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
     features: concurrentInsertDocument.features.map((feature) => ({ ...feature, label: 'Shared Label' })),
     featureOrder: concurrentInsert.document.featureOrder,
   })
-  assert(
+  expectTrue(
     renameConflict.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.concurrentLabelConflict),
     'Concurrent scalar label conflicts should be explicit diagnostics.',
   )
@@ -79,8 +73,8 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
     ...seed,
     cursor: { kind: 'feature', featureId: 'feature_deleted' as AuthoredModelDocument['features'][number]['featureId'] },
   } as AuthoredModelDocument)
-  assert(missingCursor.document.cursor.kind === 'empty', 'Missing cursor targets should normalize to an empty cursor.')
-  assert(
+  expectTrue(missingCursor.document.cursor.kind === 'empty', 'Missing cursor targets should normalize to an empty cursor.')
+  expectTrue(
     missingCursor.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget),
     'Missing cursor targets should emit stable merge diagnostics.',
   )
@@ -92,7 +86,7 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
       { variableId: 'variable_b', name: 'b', valueText: 'a + 1' },
     ],
   } as AuthoredModelDocument)
-  assert(
+  expectTrue(
     variableConflict.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.unresolvedVariableCycle),
     'Variable cycles introduced by merge should have stable diagnostics.',
   )
@@ -116,11 +110,11 @@ test('src/domain/modeling/collaborative-authored-document.spec.ts', async () => 
     features: [{ featureId: 'feature_invalid-ref', label: 'Invalid Ref', definition: invalidReferenceDefinition }],
     featureOrder: ['feature_invalid-ref'],
   } as AuthoredModelDocument)
-  assert(
+  expectTrue(
     invalidReference.document.features[0]?.featureId === 'feature_invalid-ref',
     'Merge diagnostics should not delete authored records to hide invalid references.',
   )
-  assert(
+  expectTrue(
     invalidReference.diagnostics.some((diagnostic) => diagnostic.code === COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference),
     'Invalid durable references caused by merge should be explicit diagnostics.',
   )

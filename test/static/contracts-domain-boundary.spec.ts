@@ -2,17 +2,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 const ROOT = process.cwd()
 const CONTRACTS_ROOT = join(ROOT, 'src/contracts')
 
-test('src/contracts/contracts-domain-boundary.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const offenders: string[] = []
+test('src/contracts/contracts-domain-boundary.spec.ts', () => {  const offenders: string[] = []
 
   for (const filePath of walk(CONTRACTS_ROOT)) {
     if (!/\.(ts|tsx)$/.test(filePath) || /\.spec\.(ts|tsx)$/.test(filePath)) {
@@ -34,7 +28,7 @@ test('src/contracts/contracts-domain-boundary.spec.ts', () => {
     }
   }
 
-  assert(
+  expectTrue(
     offenders.length === 0,
     `Contracts modules must not import implementation-layer modules.\n${offenders.join('\n')}`,
   )

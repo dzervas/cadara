@@ -1,17 +1,12 @@
 import { beforeEach, mock, test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createAppError, createTestErrorReporter, err, ok } from '@/contracts/errors'
 
 import {
   createHookTestHarness,
   flushMicrotasks,
 } from './workbench/controllers/controller-test-harness'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 const hookHarness = createHookTestHarness()
 const actualReactModule = await import('react')
@@ -114,7 +109,7 @@ test('useWorkbenchHistory gives sketch sessions undo and redo priority', () => {
   controller.requestUndo()
   controller.requestRedo()
 
-  assert(
+  expectTrue(
     JSON.stringify(dispatched) === JSON.stringify([
       { type: 'history.undoRequested' },
       { type: 'history.redoRequested' },
@@ -165,14 +160,14 @@ test('useWorkbenchHistory falls back to document history cursors when local stac
   controller.requestUndo()
   controller.requestRedo()
 
-  assert(dispatched.length === 2, 'Cursor fallback should dispatch one undo cursor request and one redo cursor request.')
-  assert(
+  expectTrue(dispatched.length === 2, 'Cursor fallback should dispatch one undo cursor request and one redo cursor request.')
+  expectTrue(
     (dispatched[0] as { type: string; cursor: { kind: string; sketchId?: string } }).type === 'document.historyCursorRequested'
       && (dispatched[0] as { type: string; cursor: { kind: string; sketchId?: string } }).cursor.kind === 'sketch'
       && (dispatched[0] as { type: string; cursor: { kind: string; sketchId?: string } }).cursor.sketchId === 'sketch_a',
     'Undo cursor fallback should target the previous document-history row.',
   )
-  assert(
+  expectTrue(
     (dispatched[1] as { type: string; cursor: { kind: string; featureId?: string } }).type === 'document.historyCursorRequested'
       && (dispatched[1] as { type: string; cursor: { kind: string; featureId?: string } }).cursor.kind === 'feature'
       && (dispatched[1] as { type: string; cursor: { kind: string; featureId?: string } }).cursor.featureId === 'feature_c',
@@ -270,16 +265,16 @@ test('useWorkbenchHistory updates variables through the document owner and track
   )
   await hookHarness.flushEffects()
 
-  assert(ownerCalls.length === 1, 'Variable updates should route through the document owner exactly once.')
-  assert(
+  expectTrue(ownerCalls.length === 1, 'Variable updates should route through the document owner exactly once.')
+  expectTrue(
     ownerCalls[0] && (ownerCalls[0] as { options: { operation: string } }).options.operation === 'Update Width',
     'Variable updates should preserve the user-facing operation label when calling the document owner.',
   )
-  assert(
+  expectTrue(
     Object.keys(invalidVariableMessages).length === 0,
     'Successful variable updates should clear any prior invalid-value message for that variable.',
   )
-  assert(
+  expectTrue(
     controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
     'Successful variable updates should create a local undo entry and clear any redo history.',
   )
@@ -321,12 +316,12 @@ test('useWorkbenchHistory updates variables through the document owner and track
   )
   await hookHarness.flushEffects()
 
-  assert(
+  expectTrue(
     ownerCalls[1] && (ownerCalls[1] as { next: { valueText: string }; options: { operation: string } }).next.valueText === '10 mm'
       && (ownerCalls[1] as { next: { valueText: string }; options: { operation: string } }).options.operation === 'Undo Width',
     'Undo should restore the prior variable value through the document owner seam.',
   )
-  assert(
+  expectTrue(
     !controller.toolbarHistoryAvailability.canUndo && controller.toolbarHistoryAvailability.canRedo,
     'Undoing the local variable edit should move the workbench entry onto the redo stack.',
   )
@@ -368,16 +363,16 @@ test('useWorkbenchHistory updates variables through the document owner and track
   )
   await hookHarness.flushEffects()
 
-  assert(
+  expectTrue(
     ownerCalls[2] && (ownerCalls[2] as { next: { valueText: string }; options: { operation: string } }).next.valueText === '20 mm'
       && (ownerCalls[2] as { next: { valueText: string }; options: { operation: string } }).options.operation === 'Redo Width',
     'Redo should reapply the edited variable value through the document owner seam.',
   )
-  assert(
+  expectTrue(
     controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
     'Redo should move the entry back onto the undo stack.',
   )
-  assert(shownErrors.length === 0, 'Successful variable updates and undo/redo should not show workbench errors.')
+  expectTrue(shownErrors.length === 0, 'Successful variable updates and undo/redo should not show workbench errors.')
 })
 
 test('useWorkbenchHistory surfaces invalid variable updates without creating an undo entry', async () => {
@@ -428,15 +423,15 @@ test('useWorkbenchHistory surfaces invalid variable updates without creating an 
 
   await flushMicrotasks()
 
-  assert(
+  expectTrue(
     invalidVariableMessages.width === 'Width must reference an existing variable.',
     'Rejected variable updates should set the invalid-value message for the edited variable.',
   )
-  assert(
+  expectTrue(
     JSON.stringify(shownErrors) === JSON.stringify(['Width must reference an existing variable.']),
     'Rejected variable updates should surface the same human-readable error in the workbench.',
   )
-  assert(
+  expectTrue(
     !controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
     'Rejected variable updates should not create a local undo or redo entry.',
   )
@@ -526,11 +521,11 @@ test('useWorkbenchHistory reorders document history through the document owner a
   )
   await hookHarness.flushEffects()
 
-  assert(
+  expectTrue(
     reorderCalls[0] && (reorderCalls[0] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).item.featureId === 'feature_b',
     'The initial reorder should be delegated to the document owner with the requested move.',
   )
-  assert(
+  expectTrue(
     controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
     'A successful document history reorder should create a local undo entry.',
   )
@@ -559,13 +554,13 @@ test('useWorkbenchHistory reorders document history through the document owner a
   )
   await hookHarness.flushEffects()
 
-  assert(
+  expectTrue(
     reorderCalls[1]
       && (reorderCalls[1] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).item.featureId === 'feature_a'
       && (reorderCalls[1] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).beforeItem?.featureId === 'feature_b',
     'Undo should restore the previous history order through the document owner seam.',
   )
-  assert(
+  expectTrue(
     !controller.toolbarHistoryAvailability.canUndo && controller.toolbarHistoryAvailability.canRedo,
     'Undoing the reorder should move the entry onto the redo stack.',
   )
@@ -594,15 +589,15 @@ test('useWorkbenchHistory reorders document history through the document owner a
   )
   await hookHarness.flushEffects()
 
-  assert(
+  expectTrue(
     reorderCalls[2]
       && (reorderCalls[2] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).item.featureId === 'feature_b'
       && (reorderCalls[2] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).beforeItem?.featureId === 'feature_a',
     'Redo should reapply the reordered history through the document owner seam.',
   )
-  assert(
+  expectTrue(
     controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
     'Redo should move the history entry back onto the undo stack.',
   )
-  assert(shownErrors.length === 0, 'Accepted history reorders and their undo/redo flow should not surface workbench errors.')
+  expectTrue(shownErrors.length === 0, 'Accepted history reorders and their undo/redo flow should not surface workbench errors.')
 })

@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { WorkspaceSnapshot, SnapshotEntityRecord } from '@/contracts/modeling/schema'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 import type { PrimitiveRef } from '@/core/editor/schema'
@@ -15,14 +16,7 @@ import {
 } from '@/contracts/shared/versioning'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
-test('src/domain/measure/measurement.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createMeasurementSnapshot(): WorkspaceSnapshot {
+test('src/domain/measure/measurement.spec.ts', () => {  function createMeasurementSnapshot(): WorkspaceSnapshot {
     const plane = createStandardPlaneDefinition('xy')
     const entities: SnapshotEntityRecord[] = [
       createEntity('body_measure', 'Body A', { kind: 'body', bodyId: 'body_measure' }, ['body']),
@@ -425,56 +419,56 @@ test('src/domain/measure/measurement.spec.ts', () => {
     selection: [{ kind: 'sketchEntity', sketchId: 'sketch_measure', entityId: 'line_bottom' }],
     snapshot,
   })
-  assert(lineMeasurement?.rows.some((row) => row.label === 'Length' && row.value === '4 mm'), 'Line measurement should expose intrinsic edge length.')
+  expectTrue(lineMeasurement?.rows.some((row) => row.label === 'Length' && row.value === '4 mm'), 'Line measurement should expose intrinsic edge length.')
 
   const circleMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
     selection: [{ kind: 'sketchEntity', sketchId: 'sketch_measure', entityId: 'circle_primary' }],
     snapshot,
   })
-  assert(circleMeasurement?.rows.some((row) => row.label === 'Radius' && row.value === '1.25 mm'), 'Circle measurement should expose radius.')
-  assert(circleMeasurement?.rows.some((row) => row.label === 'Diameter' && row.value === '2.5 mm'), 'Circle measurement should expose diameter.')
-  assert(circleMeasurement?.rows.some((row) => row.label === 'Circumference'), 'Circle measurement should expose circumference.')
+  expectTrue(circleMeasurement?.rows.some((row) => row.label === 'Radius' && row.value === '1.25 mm'), 'Circle measurement should expose radius.')
+  expectTrue(circleMeasurement?.rows.some((row) => row.label === 'Diameter' && row.value === '2.5 mm'), 'Circle measurement should expose diameter.')
+  expectTrue(circleMeasurement?.rows.some((row) => row.label === 'Circumference'), 'Circle measurement should expose circumference.')
 
   const arcMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
     selection: [{ kind: 'sketchEntity', sketchId: 'sketch_measure', entityId: 'arc_primary' }],
     snapshot,
   })
-  assert(arcMeasurement?.rows.some((row) => row.label === 'Sweep' && row.value === '90 deg'), 'Arc measurement should expose sweep angle.')
-  assert(arcMeasurement?.rows.some((row) => row.label === 'Arc Length' && row.value === '1.57 mm'), 'Arc measurement should expose arc length.')
+  expectTrue(arcMeasurement?.rows.some((row) => row.label === 'Sweep' && row.value === '90 deg'), 'Arc measurement should expose sweep angle.')
+  expectTrue(arcMeasurement?.rows.some((row) => row.label === 'Arc Length' && row.value === '1.57 mm'), 'Arc measurement should expose arc length.')
 
   const splineMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
     selection: [{ kind: 'sketchEntity', sketchId: 'sketch_measure', entityId: 'spline_primary' }],
     snapshot,
   })
-  assert(splineMeasurement?.rows.some((row) => row.label === 'Degree' && row.value === '3'), 'Spline measurement should expose degree when available.')
-  assert(splineMeasurement?.rows.some((row) => row.label === 'Fit Points' && row.value === '3'), 'Spline measurement should expose fit-point metadata.')
+  expectTrue(splineMeasurement?.rows.some((row) => row.label === 'Degree' && row.value === '3'), 'Spline measurement should expose degree when available.')
+  expectTrue(splineMeasurement?.rows.some((row) => row.label === 'Fit Points' && row.value === '3'), 'Spline measurement should expose fit-point metadata.')
 
   const regionMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
     selection: [{ kind: 'region', sketchId: 'sketch_measure', regionId: 'region_measure' }],
     snapshot,
   })
-  assert(regionMeasurement?.rows.some((row) => row.label === 'Area' && row.value === '12 mm²'), 'Region measurement should expose profile area.')
-  assert(regionMeasurement?.rows.some((row) => row.label === 'Perimeter' && row.value === '14 mm'), 'Region measurement should expose profile perimeter.')
+  expectTrue(regionMeasurement?.rows.some((row) => row.label === 'Area' && row.value === '12 mm²'), 'Region measurement should expose profile area.')
+  expectTrue(regionMeasurement?.rows.some((row) => row.label === 'Perimeter' && row.value === '14 mm'), 'Region measurement should expose profile perimeter.')
 
   const faceMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
     selection: [{ kind: 'face', bodyId: 'body_measure', faceId: 'face_top' }],
     snapshot,
   })
-  assert(faceMeasurement?.rows.some((row) => row.label === 'Area' && row.value === '12 mm²'), 'Face measurement should expose surface area.')
-  assert(faceMeasurement?.rows.some((row) => row.label === 'Perimeter' && row.value === '14 mm'), 'Face measurement should expose perimeter.')
+  expectTrue(faceMeasurement?.rows.some((row) => row.label === 'Area' && row.value === '12 mm²'), 'Face measurement should expose surface area.')
+  expectTrue(faceMeasurement?.rows.some((row) => row.label === 'Perimeter' && row.value === '14 mm'), 'Face measurement should expose perimeter.')
 
   const bodyMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
     selection: [{ kind: 'body', bodyId: 'body_measure' }],
     snapshot,
   })
-  assert(bodyMeasurement?.rows.some((row) => row.label === 'Surface Area' && row.value === '94 mm²'), 'Body measurement should expose surface area when every face mesh is available.')
-  assert(bodyMeasurement?.rows.some((row) => row.label === 'Volume' && row.value === '60 mm³'), 'Body measurement should expose solid volume when the body shell closes.')
+  expectTrue(bodyMeasurement?.rows.some((row) => row.label === 'Surface Area' && row.value === '94 mm²'), 'Body measurement should expose surface area when every face mesh is available.')
+  expectTrue(bodyMeasurement?.rows.some((row) => row.label === 'Volume' && row.value === '60 mm³'), 'Body measurement should expose solid volume when the body shell closes.')
 
   const pairMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
@@ -484,8 +478,8 @@ test('src/domain/measure/measurement.spec.ts', () => {
     ],
     snapshot,
   })
-  assert(pairMeasurement?.rows.length === 1 && pairMeasurement.rows[0]?.value === '5 mm', 'Supported pairwise measurements should expose minimum distance only.')
-  assert(pairMeasurement?.witnesses.length === 3, 'Pairwise measurements should retain a witness segment with endpoint markers.')
+  expectTrue(pairMeasurement?.rows.length === 1 && pairMeasurement.rows[0]?.value === '5 mm', 'Supported pairwise measurements should expose minimum distance only.')
+  expectTrue(pairMeasurement?.witnesses.length === 3, 'Pairwise measurements should retain a witness segment with endpoint markers.')
 
   const parallelEdgeMeasurement = deriveMeasurementViewModel({
     activeToolId: 'measure',
@@ -495,24 +489,24 @@ test('src/domain/measure/measurement.spec.ts', () => {
     ],
     snapshot,
   })
-  assert(
+  expectTrue(
     parallelEdgeMeasurement?.rows.some((row) => row.label === 'Distance' && row.value === '3 mm'),
     'Parallel edge measurements should expose perpendicular spacing between the two selected edges.',
   )
-  assert(
+  expectTrue(
     parallelEdgeMeasurement?.rows.some((row) => row.label === 'Angle' && row.value === '0 deg'),
     'Parallel edge measurements should expose zero angle for parallel line-like edges.',
   )
-  assert(
+  expectTrue(
     parallelEdgeMeasurement?.witnesses.length === 3,
     'Parallel edge measurements should keep both edge highlights plus a single connector line.',
   )
-  assert(
+  expectTrue(
     parallelEdgeMeasurement?.witnesses.every((witness) => witness.kind !== 'marker'),
     'Curve-to-curve pairwise measurements should not add endpoint markers that read like vertex selection.',
   )
   const parallelConnector = parallelEdgeMeasurement?.witnesses.find((witness) => witness.id.includes(':distance'))
-  assert(
+  expectTrue(
     parallelConnector?.kind === 'polyline'
       && JSON.stringify(parallelConnector.points) === JSON.stringify([[2, 0, 5], [2, 3, 5]]),
     'Parallel edge connectors should anchor at representative mid-span closest points rather than arbitrary segment starts.',
@@ -526,19 +520,19 @@ test('src/domain/measure/measurement.spec.ts', () => {
     ],
     snapshot,
   })
-  assert(
+  expectTrue(
     touchingEdgeMeasurement?.rows.some((row) => row.label === 'Distance' && row.value === '0 mm'),
     'Intersecting edge measurements should still report zero minimum distance.',
   )
-  assert(
+  expectTrue(
     touchingEdgeMeasurement?.rows.some((row) => row.label === 'Angle' && row.value === '90 deg'),
     'Intersecting perpendicular edge measurements should also expose the line-to-line angle.',
   )
-  assert(
+  expectTrue(
     touchingEdgeMeasurement?.witnesses.length === 2,
     'Zero-distance edge measurements should keep only the two selected edge highlights.',
   )
-  assert(
+  expectTrue(
     touchingEdgeMeasurement?.witnesses.every((witness) => witness.kind === 'polyline' && !witness.id.includes(':distance')),
     'Zero-distance edge measurements should omit collapsed connector and marker feedback.',
   )
@@ -553,9 +547,9 @@ test('src/domain/measure/measurement.spec.ts', () => {
     }],
     snapshot,
   })
-  assert(projectedMeasurement?.rows.some((row) => row.label === 'Radius' && row.value === '1 mm'), 'Projected circles should expose single-target circular properties.')
+  expectTrue(projectedMeasurement?.rows.some((row) => row.label === 'Radius' && row.value === '1 mm'), 'Projected circles should expose single-target circular properties.')
 
-  assert(
+  expectTrue(
     isMeasureSelectableTarget(snapshot, { kind: 'sketchEntity', sketchId: 'sketch_measure', entityId: 'arc_primary' }),
     'Supported sketch arcs should be accepted by the measure selection filter.',
   )
@@ -565,14 +559,14 @@ test('src/domain/measure/measurement.spec.ts', () => {
     [{ kind: 'vertex', bodyId: 'body_measure', vertexId: 'vertex_top_front_left' }],
     { kind: 'face', bodyId: 'body_measure', faceId: 'face_bottom' },
   )
-  assert(pairCandidate.accepted && pairCandidate.nextSelection.length === 2, 'Compatible measure targets should build a pair.')
+  expectTrue(pairCandidate.accepted && pairCandidate.nextSelection.length === 2, 'Compatible measure targets should build a pair.')
 
   const replacementCandidate = resolveMeasureSelectionCandidate(
     snapshot,
     [{ kind: 'body', bodyId: 'body_measure' }],
     { kind: 'edge', bodyId: 'body_measure', edgeId: 'edge_top_front' },
   )
-  assert(
+  expectTrue(
     replacementCandidate.accepted
       && replacementCandidate.nextSelection.length === 1
       && replacementCandidate.nextSelection[0]?.kind === 'edge',

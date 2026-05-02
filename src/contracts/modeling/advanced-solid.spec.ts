@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
@@ -9,14 +10,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import { createExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 
-test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const sweepDescriptor = {
+test('src/contracts/modeling/advanced-solid.spec.ts', async () => {  const sweepDescriptor = {
     featureKind: 'sweep',
     participants: [
       {
@@ -309,7 +303,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, sweepDescriptor)
 
-    assert(diagnostics.length === 0, 'Contract-valid advanced participant payloads should validate.')
+    expectTrue(diagnostics.length === 0, 'Contract-valid advanced participant payloads should validate.')
   }
 
   function testAdvancedParticipantValidationRejectsMissingAndWrongKinds() {
@@ -325,11 +319,11 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, sweepDescriptor)
 
-    assert(
+    expectTrue(
       diagnostics.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'profile'),
       'Missing required participant diagnostics should include the participant role.',
     )
-    assert(
+    expectTrue(
       diagnostics.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'path'),
       'Invalid target-kind diagnostics should include the participant role.',
     )
@@ -360,11 +354,11 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, sweepDescriptor)
 
-    assert(
+    expectTrue(
       unsupportedIntentDiagnostics.some((diagnostic) => diagnostic.code === 'advanced-feature-unsupported-operation'),
       'Unsupported operation intent should produce a stable diagnostic code.',
     )
-    assert(
+    expectTrue(
       missingTargetDiagnostics.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'targetBody'),
       'Operation-specific required participants should be validated by role.',
     )
@@ -402,11 +396,11 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, sweepDescriptor)
 
-    assert(
+    expectTrue(
       invalidPathCardinality.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-cardinality' && diagnostic.role === 'path'),
       'Sweep path cardinality validation should reject multiple path targets.',
     )
-    assert(validBoolean.length === 0, 'Boolean sweep validation should accept an explicit targetBody participant.')
+    expectTrue(validBoolean.length === 0, 'Boolean sweep validation should accept an explicit targetBody participant.')
   }
 
   function testSweepAdvancedOptionsValidateActiveTwistAndScale() {
@@ -459,12 +453,12 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, sweepDescriptor)
 
-    assert(valid.length === 0, 'Sweep validation should accept profile control, active twist, and positive end scale options.')
-    assert(
+    expectTrue(valid.length === 0, 'Sweep validation should accept profile control, active twist, and positive end scale options.')
+    expectTrue(
       invalidInactiveTwist.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
       'Sweep validation should reject inactive twist values in durable options.',
     )
-    assert(
+    expectTrue(
       invalidScale.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
       'Sweep validation should reject non-positive end scale.',
     )
@@ -489,7 +483,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, loftDescriptor)
 
-    assert(valid.length === 0, 'Loft validation should accept two or more ordered profiles and optional guide curves.')
+    expectTrue(valid.length === 0, 'Loft validation should accept two or more ordered profiles and optional guide curves.')
   }
 
   function testLoftValidationPreservesPathGuidesProfileConditionsAndConnections() {
@@ -528,7 +522,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, loftDescriptor)
 
-    assert(valid.length === 0, 'Loft validation should accept path, guide continuity, profile conditions, and complete match connections.')
+    expectTrue(valid.length === 0, 'Loft validation should accept path, guide continuity, profile conditions, and complete match connections.')
   }
 
   function testLoftValidationRejectsMissingProfilesAndInvalidBooleanTargets() {
@@ -561,12 +555,12 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, loftDescriptor)
 
-    assert(
+    expectTrue(
       missingProfiles.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'profile')
         && missingProfiles.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-cardinality' && diagnostic.role === 'profile'),
       'Loft validation should require at least two profile targets.',
     )
-    assert(
+    expectTrue(
       invalidBoolean.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'targetBody'),
       'Loft boolean validation should require explicit body targets.',
     )
@@ -597,11 +591,11 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, loftDescriptor)
 
-    assert(
+    expectTrue(
       invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
       'Loft validation should reject invalid path section counts and incomplete connections.',
     )
-    assert(
+    expectTrue(
       invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'guideCurve'),
       'Loft validation should reject invalid guide-curve target kinds.',
     )
@@ -619,7 +613,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, splitDescriptor)
 
-    assert(diagnostics.length === 0, 'Split validation should accept one explicit target body and one tool body.')
+    expectTrue(diagnostics.length === 0, 'Split validation should accept one explicit target body and one tool body.')
   }
 
   function testSplitValidationRejectsMissingBodiesAndUnsupportedToolFamilies() {
@@ -659,15 +653,15 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, splitDescriptor)
 
-    assert(
+    expectTrue(
       missingTool.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'toolBody'),
       'Split validation should require one explicit split tool participant.',
     )
-    assert(
+    expectTrue(
       invalidPlaneKind.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'plane'),
       'Split validation should reject unsupported split-tool target kinds.',
     )
-    assert(
+    expectTrue(
       invalidTargetCardinality.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-cardinality' && diagnostic.role === 'targetBody'),
       'Split validation should enforce the first-slice target-body cardinality.',
     )
@@ -686,7 +680,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, combineDescriptor)
 
-    assert(diagnostics.length === 0, 'Combine validation should accept explicit target bodies, tool bodies, and supported operation intent.')
+    expectTrue(diagnostics.length === 0, 'Combine validation should accept explicit target bodies, tool bodies, and supported operation intent.')
   }
 
   function testCombineValidationRejectsMalformedParticipantsAndUnsupportedIntent() {
@@ -723,15 +717,15 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, combineDescriptor)
 
-    assert(
+    expectTrue(
       missingTool.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'toolBody'),
       'Combine validation should require explicit tool bodies.',
     )
-    assert(
+    expectTrue(
       wrongTargetKind.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'targetBody'),
       'Combine validation should reject non-body target participants.',
     )
-    assert(
+    expectTrue(
       unsupportedIntent.some((diagnostic) => diagnostic.code === 'advanced-feature-unsupported-operation'),
       'Combine validation should reject unsupported operation intents.',
     )
@@ -763,8 +757,8 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, deleteSolidDescriptor)
 
-    assert(valid.length === 0, 'Delete-solid validation should accept one or more explicit body targets.')
-    assert(
+    expectTrue(valid.length === 0, 'Delete-solid validation should accept one or more explicit body targets.')
+    expectTrue(
       invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'body'),
       'Delete-solid validation should reject non-body participants.',
     )
@@ -795,10 +789,10 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, mirrorDescriptor)
 
-    assert(valid.length === 0, 'Mirror validation should accept explicit body targets, a planar reference, and a boolean copy policy.')
-    assert(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'body'), 'Mirror validation should reject non-body target participants.')
-    assert(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'plane'), 'Mirror validation should reject non-planar mirror references.')
-    assert(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'), 'Mirror validation should reject non-boolean copy policies.')
+    expectTrue(valid.length === 0, 'Mirror validation should accept explicit body targets, a planar reference, and a boolean copy policy.')
+    expectTrue(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'body'), 'Mirror validation should reject non-body target participants.')
+    expectTrue(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'plane'), 'Mirror validation should reject non-planar mirror references.')
+    expectTrue(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'), 'Mirror validation should reject non-boolean copy policies.')
   }
 
   function testTransformValidationAcceptsBodyOnlyScopeAndTypedDistance() {
@@ -832,10 +826,10 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, transformDescriptor)
 
-    assert(valid.length === 0, 'Transform validation should accept body-only targets, an explicit transform reference, and a positive distance.')
-    assert(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'body'), 'Transform validation should reject non-body transform targets.')
-    assert(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'transformReference'), 'Transform validation should reject non-planar transform references.')
-    assert(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'), 'Transform validation should reject non-positive transform distances.')
+    expectTrue(valid.length === 0, 'Transform validation should accept body-only targets, an explicit transform reference, and a positive distance.')
+    expectTrue(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'body'), 'Transform validation should reject non-body transform targets.')
+    expectTrue(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'transformReference'), 'Transform validation should reject non-planar transform references.')
+    expectTrue(invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'), 'Transform validation should reject non-positive transform distances.')
   }
 
   testAdvancedParticipantValidationAcceptsRoleSpecificPayloads()
@@ -853,7 +847,7 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
   testMirrorValidationAcceptsExplicitBodiesPlaneAndCopyPolicy()
   testTransformValidationAcceptsBodyOnlyScopeAndTypedDistance()
 
-  function testChamferEdgeParticipantsAndDistanceValidation() {
+function testChamferEdgeParticipantsAndDistanceValidation() {
     const valid = validateAdvancedSolidFeatureDefinition({
       kind: 'chamfer',
       featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
@@ -885,12 +879,12 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, chamferDescriptor)
 
-    assert(valid.length === 0, 'Chamfer validation should accept edge participants and a positive constant distance.')
-    assert(
+    expectTrue(valid.length === 0, 'Chamfer validation should accept edge participants and a positive constant distance.')
+    expectTrue(
       wrongKind.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'edge'),
       'Chamfer validation should reject non-edge participants.',
     )
-    assert(
+    expectTrue(
       invalidDistance.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
       'Chamfer validation should reject non-positive distances.',
     )
@@ -942,16 +936,16 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       },
     }, thickenDescriptor)
 
-    assert(valid.length === 0, 'Thicken validation should accept face participants and positive thickness.')
-    assert(
+    expectTrue(valid.length === 0, 'Thicken validation should accept face participants and positive thickness.')
+    expectTrue(
       wrongKind.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-target-kind' && diagnostic.role === 'face'),
       'Thicken validation should reject non-face participants.',
     )
-    assert(
+    expectTrue(
       invalidThickness.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
       'Thicken validation should reject non-positive thickness values.',
     )
-    assert(
+    expectTrue(
       missingTargetBody.some((diagnostic) => diagnostic.code === 'advanced-feature-missing-participant' && diagnostic.role === 'targetBody'),
       'Thicken boolean validation should require explicit target bodies.',
     )
@@ -990,8 +984,8 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       { key: 'sectionCount', label: 'Section count', required: true, valueKind: 'positiveInteger' },
     ])
 
-    assert(diagnostics.length === 0, 'Advanced option descriptors should validate boolean, enum, angle, numeric, integer, and group values.')
-    assert(
+    expectTrue(diagnostics.length === 0, 'Advanced option descriptors should validate boolean, enum, angle, numeric, integer, and group values.')
+    expectTrue(
       invalid.some((diagnostic) => diagnostic.code === 'advanced-feature-invalid-option'),
       'Positive integer option validation should reject non-integer values.',
     )
@@ -1039,8 +1033,8 @@ test('src/contracts/modeling/advanced-solid.spec.ts', async () => {
       pitch: 10,
     }, descriptors)
 
-    assert(valid.length === 0, 'Expression-authored active variant values should remain valid before expression resolution.')
-    assert(
+    expectTrue(valid.length === 0, 'Expression-authored active variant values should remain valid before expression resolution.')
+    expectTrue(
       invalid.some((diagnostic) => diagnostic.message.includes('inactive turns')),
       'Discriminated option validation should reject stale inactive variant values.',
     )

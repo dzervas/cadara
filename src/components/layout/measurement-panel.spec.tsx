@@ -1,17 +1,11 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { MeasurementPanel } from '@/components/layout/measurement-panel'
 
-test('src/components/layout/measurement-panel.spec.tsx', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const populatedMarkup = renderToStaticMarkup(
+test('src/components/layout/measurement-panel.spec.tsx', () => {  const populatedMarkup = renderToStaticMarkup(
     <MantineProvider>
       <MeasurementPanel
         measurement={{
@@ -27,10 +21,10 @@ test('src/components/layout/measurement-panel.spec.tsx', () => {
       />
     </MantineProvider>,
   )
-  assert(populatedMarkup.includes('Measure'), 'Measurement panel should render its section title.')
-  assert(populatedMarkup.includes('Arc 1'), 'Measurement panel should render the current selection title.')
-  assert(populatedMarkup.includes('Arc Length'), 'Measurement panel should render populated measurement rows.')
-  assert(!populatedMarkup.includes('Diameter'), 'Measurement panel should not invent hidden measurement labels.')
+  expectTrue(populatedMarkup.includes('Measure'), 'Measurement panel should render its section title.')
+  expectTrue(populatedMarkup.includes('Arc 1'), 'Measurement panel should render the current selection title.')
+  expectTrue(populatedMarkup.includes('Arc Length'), 'Measurement panel should render populated measurement rows.')
+  expectTrue(!populatedMarkup.includes('Diameter'), 'Measurement panel should not invent hidden measurement labels.')
 
   const notedMarkup = renderToStaticMarkup(
     <MantineProvider>
@@ -45,7 +39,7 @@ test('src/components/layout/measurement-panel.spec.tsx', () => {
       />
     </MantineProvider>,
   )
-  assert(notedMarkup.includes('Select another measurable target'), 'Measurement panel should render note-only point selections.')
+  expectTrue(notedMarkup.includes('Select another measurable target'), 'Measurement panel should render note-only point selections.')
 
   const emptyMarkup = renderToStaticMarkup(
     <MantineProvider>
@@ -60,7 +54,7 @@ test('src/components/layout/measurement-panel.spec.tsx', () => {
       />
     </MantineProvider>,
   )
-  assert(
+  expectTrue(
     !emptyMarkup.includes('Unused') && !emptyMarkup.includes('Measure'),
     'Measurement panel should stay hidden when no rows or note are available.',
   )

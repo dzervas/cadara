@@ -1,15 +1,10 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ReferenceImagePlacement } from '@/contracts/reference-image/schema'
 import type { SketchPoint2D } from '@/contracts/sketch/schema'
 
 import { solveReferenceImageCalibration } from '@/domain/reference-image-calibration/solver/solve-reference-image-calibration'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function mapAnchorToWorld(
   uv: SketchPoint2D,
@@ -61,12 +56,12 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
       constraints: [],
     })
 
-    assert(result.diagnostics.length === 0, `${scaleMode} rotated exact fit should solve without diagnostics.`)
-    assert(Math.abs(result.placement.center[0] - exactPlacement.center[0]) < 1e-3, `${scaleMode} rotated solve should recover center X.`)
-    assert(Math.abs(result.placement.center[1] - exactPlacement.center[1]) < 1e-3, `${scaleMode} rotated solve should recover center Y.`)
-    assert(Math.abs(result.placement.width - exactPlacement.width) < 1e-3, `${scaleMode} rotated solve should recover width.`)
-    assert(Math.abs(result.placement.height - exactPlacement.height) < 1e-3, `${scaleMode} rotated solve should recover height.`)
-    assert(Math.abs(result.placement.rotationRadians - exactPlacement.rotationRadians) < 1e-3, `${scaleMode} rotated solve should recover rotation.`)
+    expectTrue(result.diagnostics.length === 0, `${scaleMode} rotated exact fit should solve without diagnostics.`)
+    expectTrue(Math.abs(result.placement.center[0] - exactPlacement.center[0]) < 1e-3, `${scaleMode} rotated solve should recover center X.`)
+    expectTrue(Math.abs(result.placement.center[1] - exactPlacement.center[1]) < 1e-3, `${scaleMode} rotated solve should recover center Y.`)
+    expectTrue(Math.abs(result.placement.width - exactPlacement.width) < 1e-3, `${scaleMode} rotated solve should recover width.`)
+    expectTrue(Math.abs(result.placement.height - exactPlacement.height) < 1e-3, `${scaleMode} rotated solve should recover height.`)
+    expectTrue(Math.abs(result.placement.rotationRadians - exactPlacement.rotationRadians) < 1e-3, `${scaleMode} rotated solve should recover rotation.`)
   }
 })
 
@@ -100,11 +95,11 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
     constraints: [],
   })
 
-  assert(
+  expectTrue(
     result.diagnostics.some((diagnostic) => diagnostic.code === 'underconstrained-calibration'),
     'Independent calibration should mark a single-axis target set as underconstrained.',
   )
-  assert(result.placement.height > 1, 'Independent underconstrained solves should not collapse the unconstrained image axis.')
+  expectTrue(result.placement.height > 1, 'Independent underconstrained solves should not collapse the unconstrained image axis.')
 })
 
 test('src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts validates anchor-fit residuals after solving', () => {
@@ -144,11 +139,11 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
     }],
   })
 
-  assert(
+  expectTrue(
     result.diagnostics.some((diagnostic) => diagnostic.code === 'unsatisfied-anchor-target'),
     'Conflicting calibration should surface anchor-fit residual warnings, not only distance warnings.',
   )
-  assert(
+  expectTrue(
     result.diagnostics.some((diagnostic) => diagnostic.code === 'unsatisfied-distance-constraint'),
     'Conflicting calibration should still report unsatisfied distance constraints.',
   )

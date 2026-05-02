@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { runSketchImageImportFlow } from '@/app/sketch-image-import-flow'
 import { ResultAsync, createAppError } from '@/contracts/errors'
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
@@ -13,22 +14,15 @@ import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-a
 import { OCC_KERNEL_DOCUMENT_ID } from '@/domain/modeling/opencascade-kernel-seed'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
 
-test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const seedService = createModelingService(new MockKernelAdapter(), {
+test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {  const seedService = createModelingService(new MockKernelAdapter(), {
     currentDocumentId: 'doc_workspace',
   })
   const snapshot = await seedService.getCurrentDocumentSnapshot()
   const sourceSketch = snapshot.document.sketches[0]
-  assert(sourceSketch, 'Seed sketch should exist for sketch image-import coverage.')
+  expectTrue(sourceSketch, 'Seed sketch should exist for sketch image-import coverage.')
 
   const session = createSketchSessionFromSnapshot(sourceSketch)
-  assert(session.commitRequest, 'Active sketch sessions should expose a commit request.')
+  expectTrue(session.commitRequest, 'Active sketch sessions should expose a commit request.')
 
   const expectedPayload: ReferenceImagePayload = {
     mediaType: 'image/png',
@@ -63,7 +57,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
     },
     getCurrentDocumentSnapshot() {
       callOrder.push('getCurrentDocumentSnapshot')
-      assert(capturedCommitInput, 'Committed sketch input should exist before refreshing the snapshot.')
+      expectTrue(capturedCommitInput, 'Committed sketch input should exist before refreshing the snapshot.')
       const nextSketches = snapshot.document.sketches.map((sketch) =>
         sketch.sketchId === sourceSketch.sketchId
           ? {
@@ -107,7 +101,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
     },
   })
 
-  assert(
+  expectTrue(
     pickerCalls[0]?.multiple === true && pickerCalls[0]?.acceptedFileTypes.length > 0,
     'Sketch image import should open the direct reference-image picker with multi-file support.',
   )
@@ -115,19 +109,19 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
   const readPayloadIndex = callOrder.indexOf('readPayload')
   const commitSketchIndex = callOrder.indexOf('commitSketch')
   const snapshotRefreshIndex = callOrder.indexOf('getCurrentDocumentSnapshot')
-  assert(
+  expectTrue(
     pickFilesIndex === 0
       && readPayloadIndex > pickFilesIndex
       && commitSketchIndex > readPayloadIndex
       && snapshotRefreshIndex > commitSketchIndex,
     'Sketch image import should read inline payloads, commit the sketch, then refresh the snapshot.',
   )
-  assert(result.kind === 'committed', 'Sketch image import should commit accepted inline reference images.')
-  assert(capturedCommitInput, 'Sketch image import should commit through modelingService.commitSketch.')
+  expectTrue(result.kind === 'committed', 'Sketch image import should commit accepted inline reference images.')
+  expectTrue(capturedCommitInput, 'Sketch image import should commit through modelingService.commitSketch.')
   const committedInput = capturedCommitInput
 
   const baselineDefinition = session.commitRequest.definition
-  assert(
+  expectTrue(
     committedInput.definition.pointIds.length === baselineDefinition.pointIds.length
       && committedInput.definition.entityIds.length === baselineDefinition.entityIds.length
       && committedInput.definition.constraintIds.length === baselineDefinition.constraintIds.length
@@ -136,11 +130,11 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
   )
 
   const importedOperation = committedInput.definition.authoringOperations?.find((operation) => operation.kind === 'referenceImage')
-  assert(
+  expectTrue(
     importedOperation?.kind === 'referenceImage',
     'Sketch image import should commit a reference-image authoring operation in the sketch payload.',
   )
-  assert(
+  expectTrue(
     JSON.stringify({
       operationId: importedOperation?.operationId,
       label: 'reference.png',
@@ -174,14 +168,14 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
     }),
     'Sketch image import should commit the full inline reference-image payload and centered placement state.',
   )
-  assert(
+  expectTrue(
     result.reopenRequest.type === 'authoring.reopenRequested'
       && result.reopenRequest.target.kind === 'sketch'
       && result.reopenRequest.target.sketchId === result.sketchId
       && result.reopenRequest.toolId === 'sketch',
     'Sketch image import should return the sketch reopen request needed to keep the editor in sketch mode after commit.',
   )
-  assert(
+  expectTrue(
     result.snapshot.document.sketches.some((sketch) =>
       sketch.sketchId === result.sketchId
         && sketch.sketch.definition.authoringOperations?.some((operation) =>
@@ -194,14 +188,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts', async () => {
   )
 })
 
-test('src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft sketch through the real modeling service', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const service = createModelingService(new MockKernelAdapter(), {
+test('src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft sketch through the real modeling service', async () => {  const service = createModelingService(new MockKernelAdapter(), {
     currentDocumentId: 'doc_workspace',
     sketchSolver: new SketchConstraintSolverAdapter({
       documentId: 'doc_workspace',
@@ -229,8 +216,8 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
     }],
   })
 
-  assert(result.kind === 'committed', 'Importing into a new draft sketch should commit successfully through the modeling service.')
-  assert(
+  expectTrue(result.kind === 'committed', 'Importing into a new draft sketch should commit successfully through the modeling service.')
+  expectTrue(
     result.snapshot.document.sketches.some((sketch) =>
       sketch.sketchId === result.sketchId
         && sketch.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
@@ -239,14 +226,7 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
   )
 })
 
-test('src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft sketches through OpenCascade', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const createSolver = (revisionId: RevisionId | null) => new SketchConstraintSolverAdapter({
+test('src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft sketches through OpenCascade', async () => {  const createSolver = (revisionId: RevisionId | null) => new SketchConstraintSolverAdapter({
     documentId: OCC_KERNEL_DOCUMENT_ID,
     revisionId,
   })
@@ -279,14 +259,14 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
     }],
   })
 
-  assert(result.kind === 'committed', 'OpenCascade should accept reference-image-only sketch commits.')
+  expectTrue(result.kind === 'committed', 'OpenCascade should accept reference-image-only sketch commits.')
   const committedSketch = result.snapshot.document.sketches.find((sketch) => sketch.sketchId === result.sketchId)
-  assert(committedSketch, 'Committed reference-image sketch should exist in the refreshed OpenCascade snapshot.')
-  assert(
+  expectTrue(committedSketch, 'Committed reference-image sketch should exist in the refreshed OpenCascade snapshot.')
+  expectTrue(
     committedSketch.sketch.solvedSnapshot.status.solveState === 'notEvaluated',
     'Reference-image-only sketches should persist without requiring solved sketch geometry.',
   )
-  assert(
+  expectTrue(
     committedSketch.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
     'OpenCascade snapshot should preserve the reference-image authoring operation.',
   )
@@ -298,25 +278,18 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
     documentId: OCC_KERNEL_DOCUMENT_ID,
   })
   const restoredSketch = restoredSnapshot.snapshot.document.sketches.find((sketch) => sketch.sketchId === result.sketchId)
-  assert(
+  expectTrue(
     restoredSketch?.sketch.definition.authoringOperations?.some((operation) => operation.kind === 'referenceImage'),
     'OpenCascade authored-document restore should preserve reference-image-only sketches.',
   )
 })
 
-test('src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision basis and retries one conflict', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const seedService = createModelingService(new MockKernelAdapter(), {
+test('src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision basis and retries one conflict', async () => {  const seedService = createModelingService(new MockKernelAdapter(), {
     currentDocumentId: 'doc_workspace',
   })
   const seedSnapshot = await seedService.getCurrentDocumentSnapshot()
   const sourceSketch = seedSnapshot.document.sketches[0]
-  assert(sourceSketch, 'Seed sketch should exist for stale-basis import coverage.')
+  expectTrue(sourceSketch, 'Seed sketch should exist for stale-basis import coverage.')
 
   const session = createSketchSessionFromSnapshot(sourceSketch)
   const importedPayload: ReferenceImagePayload = {
@@ -429,8 +402,8 @@ test('src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision
     payloads: [importedPayload],
   })
 
-  assert(result.kind === 'committed', 'A stale import basis should refresh and retry to complete the import.')
-  assert(
+  expectTrue(result.kind === 'committed', 'A stale import basis should refresh and retry to complete the import.')
+  expectTrue(
     JSON.stringify(commitBaseRevisionIds) === JSON.stringify(['rev_0002', 'rev_0003']),
     'Sketch image import should commit against the current snapshot revision first, then retry once with the refreshed revision after a conflict.',
   )

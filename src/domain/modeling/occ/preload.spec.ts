@@ -1,15 +1,9 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createOccPreloadController } from '@/domain/modeling/occ/preload'
 
-test('src/domain/modeling/occ/preload.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function testPreloadStartsOnceForRepeatedCalls() {
+test('src/domain/modeling/occ/preload.spec.ts', async () => {  async function testPreloadStartsOnceForRepeatedCalls() {
     let preloadCalls = 0
     const controller = createOccPreloadController({
       preload: async () => {
@@ -19,7 +13,7 @@ test('src/domain/modeling/occ/preload.spec.ts', async () => {
 
     await Promise.all([controller.preload(), controller.preload(), controller.preload()])
 
-    assert(preloadCalls === 1, 'OCC eager preload must not duplicate an in-flight runtime load.')
+    expectTrue(preloadCalls === 1, 'OCC eager preload must not duplicate an in-flight runtime load.')
   }
 
   async function testPreloadRetriesAfterFailure() {
@@ -42,8 +36,8 @@ test('src/domain/modeling/occ/preload.spec.ts', async () => {
 
     await controller.preload()
 
-    assert(failed, 'OCC preload failures must be surfaced to the caller.')
-    assert(preloadCalls === 2, 'OCC preload must retry after a failed load.')
+    expectTrue(failed, 'OCC preload failures must be surfaced to the caller.')
+    expectTrue(preloadCalls === 2, 'OCC preload must retry after a failed load.')
   }
 
   await testPreloadStartsOnceForRepeatedCalls()

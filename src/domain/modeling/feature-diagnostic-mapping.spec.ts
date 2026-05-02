@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { AuthoredFeatureRecord } from '@/contracts/modeling/authored-document'
 import type { FeatureDefinition, ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { BodyId, FeatureId, RegionId, SketchId } from '@/contracts/shared/ids'
@@ -9,14 +10,7 @@ import {
   createFeatureFieldDiagnostic,
 } from '@/domain/modeling/feature-diagnostic-mapping'
 
-test('src/domain/modeling/feature-diagnostic-mapping.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const missingRegion = {
+test('src/domain/modeling/feature-diagnostic-mapping.spec.ts', () => {  const missingRegion = {
     kind: 'region' as const,
     sketchId: 'sketch_deleted' as SketchId,
     regionId: 'region_deleted' as RegionId,
@@ -56,21 +50,21 @@ test('src/domain/modeling/feature-diagnostic-mapping.spec.ts', () => {
     },
   }) satisfies ModelingDiagnostic
 
-  assert(diagnostic.featureId === feature.featureId, 'Feature diagnostics should carry the owning feature id.')
-  assert(diagnostic.fieldId === 'profiles', 'Missing profile references should map to the authored profile field.')
-  assert(
+  expectTrue(diagnostic.featureId === feature.featureId, 'Feature diagnostics should carry the owning feature id.')
+  expectTrue(diagnostic.fieldId === 'profiles', 'Missing profile references should map to the authored profile field.')
+  expectTrue(
     diagnostic.message === 'Merge bodies profile selection is incorrect.',
     'User-facing diagnostics should name the repairable authored field.',
   )
-  assert(
+  expectTrue(
     diagnostic.repairGuidance === 'Edit Merge bodies and choose a valid profile selection.',
     'Feature diagnostics should include direct repair guidance.',
   )
-  assert(
+  expectTrue(
     !diagnostic.message.includes('region_deleted') && !diagnostic.repairGuidance?.includes('region_deleted'),
     'User-facing diagnostic copy should not expose raw durable ids as the primary message.',
   )
-  assert(
+  expectTrue(
     diagnostic.detail?.kind === 'invalidReference'
       && diagnostic.detail.reference.target.kind === 'region'
       && diagnostic.detail.reference.target.regionId === 'region_deleted',
@@ -84,16 +78,16 @@ test('src/domain/modeling/feature-diagnostic-mapping.spec.ts', () => {
     blockingFeatureLabel: feature.label,
   })
 
-  assert(blocked.featureId === 'feature_join-blocked', 'Dependency-blocked diagnostics should identify the blocked feature.')
-  assert(
+  expectTrue(blocked.featureId === 'feature_join-blocked', 'Dependency-blocked diagnostics should identify the blocked feature.')
+  expectTrue(
     blocked.repairGuidance === 'Repair Merge bodies, then rebuild Join boss.',
     'Dependency-blocked repair guidance should use feature labels instead of raw ids.',
   )
-  assert(
+  expectTrue(
     !blocked.message.includes(feature.featureId) && !blocked.repairGuidance?.includes(feature.featureId),
     'Dependency-blocked user-facing copy should keep raw feature ids out of the primary message.',
   )
-  assert(
+  expectTrue(
     blocked.detail?.kind === 'rebuildFailure'
       && blocked.detail.affectedFeatureIds.includes(feature.featureId),
     'Dependency-blocked diagnostics should keep raw blocking feature ids in structured debug context.',

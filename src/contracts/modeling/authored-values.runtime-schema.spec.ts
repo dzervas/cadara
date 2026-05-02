@@ -1,18 +1,12 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { featureDefinitionSchema } from '@/contracts/modeling/runtime-schema'
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
 import { getAuthoredLiteralValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
 
-test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const baseExtrude = {
+test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {  const baseExtrude = {
     kind: 'extrude',
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
@@ -28,7 +22,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
   }
 
   const parsedExtrude = featureDefinitionSchema.parse(baseExtrude)
-  assert(
+  expectTrue(
     parsedExtrude.kind === 'extrude' &&
       getAuthoredLiteralValue(parsedExtrude.parameters.extent.end.kind === 'blind' ? parsedExtrude.parameters.extent.end.distance : null) === 12,
     'Runtime validation should preserve literal authored wrappers on canonical extrude extents.',
@@ -48,7 +42,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
       },
     },
   })
-  assert(
+  expectTrue(
     expression.kind === 'extrude' &&
       expression.parameters.extent.end.kind === 'blind' &&
       isExpressionAuthoredValue(expression.parameters.extent.end.distance) &&
@@ -70,7 +64,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
       },
     },
   })
-  assert(!invalidLiteral.success, 'Runtime validation should reject literal wrappers with the wrong value type.')
+  expectTrue(!invalidLiteral.success, 'Runtime validation should reject literal wrappers with the wrong value type.')
 
   const referenceExpression = featureDefinitionSchema.safeParse({
     ...baseExtrude,
@@ -79,7 +73,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
       profiles: [{ source: 'expression', valueText: 'profileRef' }],
     },
   })
-  assert(!referenceExpression.success, 'Runtime validation should reject expression wrappers on reference fields.')
+  expectTrue(!referenceExpression.success, 'Runtime validation should reject expression wrappers on reference fields.')
 
   const advancedOptionExpression = featureDefinitionSchema.parse({
     kind: 'loft',
@@ -102,7 +96,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
       },
     },
   })
-  assert(
+  expectTrue(
     advancedOptionExpression.kind === 'loft' &&
       !!advancedOptionExpression.parameters.options?.path &&
       typeof advancedOptionExpression.parameters.options.path === 'object' &&
@@ -128,7 +122,7 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
       },
     },
   })
-  assert(
+  expectTrue(
     sweepAdvancedOptions.kind === 'sweep' &&
       sweepAdvancedOptions.parameters.options?.twist &&
       typeof sweepAdvancedOptions.parameters.options.twist === 'object' &&
@@ -152,5 +146,5 @@ test('src/contracts/modeling/authored-values.runtime-schema.spec.ts', () => {
       options: { path: { sectionCount: 2 } },
     },
   })
-  assert(!advancedReferenceExpression.success, 'Runtime validation should reject expression wrappers on advanced participant references.')
+  expectTrue(!advancedReferenceExpression.success, 'Runtime validation should reject expression wrappers on advanced participant references.')
 })

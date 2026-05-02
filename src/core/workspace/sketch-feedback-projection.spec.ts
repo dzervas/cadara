@@ -1,16 +1,10 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { projectSketchFeedbackAnchor, resolveSketchFeedbackAnchorWorldPoint } from '@/core/workspace/sketch-feedback-projection'
 
-test('src/core/workspace/sketch-feedback-projection.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const plane = createStandardPlaneDefinition('xy')
+test('src/core/workspace/sketch-feedback-projection.spec.ts', () => {  const plane = createStandardPlaneDefinition('xy')
   const anchor = {
     kind: 'sketchPoint' as const,
     point: [2, 3] as const,
@@ -18,7 +12,7 @@ test('src/core/workspace/sketch-feedback-projection.spec.ts', () => {
   }
   const worldPoint = resolveSketchFeedbackAnchorWorldPoint(anchor, plane)
 
-  assert(
+  expectTrue(
     JSON.stringify(worldPoint) === JSON.stringify([2, 3, 0]),
     'Sketch feedback anchors should resolve sketch-space points through the active sketch plane.',
   )
@@ -34,7 +28,7 @@ test('src/core/workspace/sketch-feedback-projection.spec.ts', () => {
     }),
   })
 
-  assert(screenPoint, 'Projected feedback anchor should produce a screen point.')
-  assert(screenPoint.x === 125, 'Projected feedback anchors should include horizontal descriptor offsets.')
-  assert(screenPoint.y === 28, 'Projected feedback anchors should include vertical descriptor offsets.')
+  expectTrue(screenPoint, 'Projected feedback anchor should produce a screen point.')
+  expectTrue(screenPoint.x === 125, 'Projected feedback anchors should include horizontal descriptor offsets.')
+  expectTrue(screenPoint.y === 28, 'Projected feedback anchors should include vertical descriptor offsets.')
 })

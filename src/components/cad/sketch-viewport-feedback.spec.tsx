@@ -1,17 +1,11 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { SketchViewportFeedbackLayer } from '@/components/cad/sketch-viewport-feedback'
 import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
 
-test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const schema: SketchToolPresentationSchema = {
+test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {  const schema: SketchToolPresentationSchema = {
     prompts: [],
     overlays: [
       {
@@ -167,59 +161,59 @@ test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {
     />,
   )
 
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-overlay="measurement"'),
     'Viewport feedback should render measurement overlays from generic descriptors.',
   )
-  assert(markup.includes('Width') && markup.includes('4.00 mm'), 'Viewport feedback should render anchored measurement text.')
-  assert(
+  expectTrue(markup.includes('Width') && markup.includes('4.00 mm'), 'Viewport feedback should render anchored measurement text.')
+  expectTrue(
     markup.includes('left:120px') && markup.includes('top:80px'),
     'Viewport feedback should place measurement labels at projected screen positions.',
   )
-  assert(
+  expectTrue(
     markup.includes('pointer-events-none absolute'),
     'Viewport feedback should keep transient overlay labels non-interactive so canvas clicks pass through.',
   )
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-floating-input="distance-value-input"'),
     'Viewport feedback should render floating numeric input from projected anchors.',
   )
-  assert(markup.includes('Distance') && markup.includes('Commit'), 'Viewport feedback should preserve numeric input controls.')
-  assert(
+  expectTrue(markup.includes('Distance') && markup.includes('Commit'), 'Viewport feedback should preserve numeric input controls.')
+  expectTrue(
     markup.includes('data-sketch-viewport-geometry="dimensionLine"') && markup.includes('x1="100"'),
     'Viewport feedback should render dimension preview line geometry from projected endpoints.',
   )
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-geometry="angleArc"')
       && markup.includes('data-sketch-viewport-arc-side="major"')
       && markup.includes('L 200 80')
       && !markup.includes('A 40 40'),
     'Viewport feedback should render major angle arcs as centered sampled paths from projected line references.',
   )
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-drag-handle="distance-preview-drag"')
       && markup.includes('data-sketch-viewport-drag-handle="parallel-angle-preview-drag"'),
     'Viewport feedback should expose declared dimension preview geometry as draggable handles.',
   )
-  assert(
+  expectTrue(
     !markup.includes('Rectangle 1 width'),
     'Committed dimension overlays should leave visible text to the draggable annotation chip.',
   )
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-a"')
       && markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-b"')
       && markup.includes('stroke-dasharray="4 4"'),
     'Viewport feedback should render dashed angular witness lines when the overlay declares them.',
   )
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-angle-witness="committed-angle-overlay-witness-a"'),
     'Viewport feedback should render angular witness lines for committed angle arcs without preview drag handles.',
   )
-  assert(
+  expectTrue(
     !markup.includes('First corner') && !markup.includes('Place corner'),
     'Viewport feedback should suppress non-dimensional anchor and completion tooltips.',
   )
-  assert(
+  expectTrue(
     markup.includes('data-sketch-viewport-geometry="snapIndicator"')
       && markup.includes('data-sketch-snap-kind="midpoint"')
       && markup.includes('Midpoint'),

@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   getEditorHistoryAvailability,
   getEditorViewState,
@@ -72,14 +73,7 @@ import { createAppError, ResultAsync, type AppError } from '@/contracts/errors'
 import { createReferenceImageOperation } from '@/domain/reference-image/operations'
 import { createScopedImportProviderRegistryForTest, createScopedSketchSpecialModeRegistryForTest } from '@/domain/extensions/test-registry-composition'
 
-test('src/contracts/editor/state-machine.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createSelectionCatalog(): SelectionTargetCatalog {
+test('src/contracts/editor/state-machine.spec.ts', async () => {  function createSelectionCatalog(): SelectionTargetCatalog {
     return {
       selectableTargetKeys: [
         'sketch:sketch_a',
@@ -890,9 +884,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(result.state.kind === 'selectionCommand', 'Sketch activation should arm a selection command.')
-    assert(result.state.command.commandSessionId === 'command_sketch-1', 'Sketch command session ID should be deterministic.')
-    assert(result.effects.length === 0, 'Sketch without a selection should not emit an effect yet.')
+    expectTrue(result.state.kind === 'selectionCommand', 'Sketch activation should arm a selection command.')
+    expectTrue(result.state.command.commandSessionId === 'command_sketch-1', 'Sketch command session ID should be deterministic.')
+    expectTrue(result.effects.length === 0, 'Sketch without a selection should not emit an effect yet.')
 
     const openResult = transitionEditorState(
       {
@@ -904,9 +898,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(openResult.effects.length === 1, 'Selecting a valid sketch plane should emit one open-session effect.')
-    assert(openResult.effects[0]?.type === 'sketch.openSession', 'The emitted effect should be sketch.openSession.')
-    assert(
+    expectTrue(openResult.effects.length === 1, 'Selecting a valid sketch plane should emit one open-session effect.')
+    expectTrue(openResult.effects[0]?.type === 'sketch.openSession', 'The emitted effect should be sketch.openSession.')
+    expectTrue(
       openResult.effects[0]?.commandSessionId === 'command_sketch-1',
       'The open-session effect must preserve the originating command session ID.',
     )
@@ -937,7 +931,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         target: { kind: 'construction', constructionId },
       })
 
-      assert(
+      expectTrue(
         openResult.effects[0]?.type === 'sketch.openSession',
         `Primary construction plane ${constructionId} should emit sketch.openSession.`,
       )
@@ -965,9 +959,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(reused.state.kind === 'selectionCommand', 'Sketch activation should still route through the sketch selection command.')
-    assert(reused.state.selection.length === 1, 'Sketch activation should preserve one compatible preselected sketch target.')
-    assert(reused.effects[0]?.type === 'sketch.openSession', 'Sketch activation should immediately open from a compatible preselected target.')
+    expectTrue(reused.state.kind === 'selectionCommand', 'Sketch activation should still route through the sketch selection command.')
+    expectTrue(reused.state.selection.length === 1, 'Sketch activation should preserve one compatible preselected sketch target.')
+    expectTrue(reused.effects[0]?.type === 'sketch.openSession', 'Sketch activation should immediately open from a compatible preselected target.')
 
     const cleared = transitionEditorState(
       {
@@ -989,9 +983,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(cleared.state.kind === 'selectionCommand', 'Sketch activation should remain in selection mode after clearing incompatible preselection.')
-    assert(cleared.state.selection.length === 0, 'Sketch activation should clear incompatible multi-target preselection.')
-    assert(cleared.effects.length === 0, 'Sketch activation should wait for a new pick after clearing incompatible preselection.')
+    expectTrue(cleared.state.kind === 'selectionCommand', 'Sketch activation should remain in selection mode after clearing incompatible preselection.')
+    expectTrue(cleared.state.selection.length === 0, 'Sketch activation should clear incompatible multi-target preselection.')
+    expectTrue(cleared.effects.length === 0, 'Sketch activation should wait for a new pick after clearing incompatible preselection.')
   }
 
   function testSketchActivationAcceptsPlanarFaces() {
@@ -1015,8 +1009,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
     })
 
-    assert(openResult.effects.length === 1, 'Selecting a planar face should emit one open-session effect.')
-    assert(openResult.effects[0]?.type === 'sketch.openSession', 'Planar-face sketch selection should open a sketch session.')
+    expectTrue(openResult.effects.length === 1, 'Selecting a planar face should emit one open-session effect.')
+    expectTrue(openResult.effects[0]?.type === 'sketch.openSession', 'Planar-face sketch selection should open a sketch session.')
   }
 
   function testSectionViewActivationCollectsPlanarSeeds() {
@@ -1037,9 +1031,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activated.state.kind === 'selectionCommand', 'Section View activation should arm a selection command.')
-    assert(activated.state.command.toolId === 'sectionView', 'Section View activation should preserve the tool id.')
-    assert(activated.effects.length === 0, 'Section View activation should stay local until a seed is selected.')
+    expectTrue(activated.state.kind === 'selectionCommand', 'Section View activation should arm a selection command.')
+    expectTrue(activated.state.command.toolId === 'sectionView', 'Section View activation should preserve the tool id.')
+    expectTrue(activated.effects.length === 0, 'Section View activation should stay local until a seed is selected.')
 
     for (const target of [
       { kind: 'construction', constructionId: 'construction_plane-xy' },
@@ -1052,10 +1046,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         cameraPosition: [0, 0, 20],
       })
 
-      assert(selected.state.kind === 'inspectingSection', `Section View should accept ${target.kind} seeds.`)
-      assert(selected.state.section.seed.kind === target.kind, `Section View should store the ${target.kind} seed.`)
-      assert(selected.state.section.offset === 0, 'Accepted section seeds should start from the seed plane.')
-      assert(selected.state.section.retainedSide === 'negative', 'Positive-Z camera should retain the opposite half-space by default.')
+      expectTrue(selected.state.kind === 'inspectingSection', `Section View should accept ${target.kind} seeds.`)
+      expectTrue(selected.state.section.seed.kind === target.kind, `Section View should store the ${target.kind} seed.`)
+      expectTrue(selected.state.section.offset === 0, 'Accepted section seeds should start from the seed plane.')
+      expectTrue(selected.state.section.retainedSide === 'negative', 'Positive-Z camera should retain the opposite half-space by default.')
     }
   }
 
@@ -1083,7 +1077,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       cameraPosition: [0, 0, 20],
     })
 
-    assert(
+    expectTrue(
       invalidTarget.state.kind === 'selectionCommand',
       'Unsupported section seeds should keep the editor in seed-collection mode.',
     )
@@ -1093,11 +1087,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: { kind: 'face', bodyId: 'body_a', faceId: 'face_top' },
     })
 
-    assert(
+    expectTrue(
       missingCamera.state.kind === 'selectionCommand',
       'Section View should require viewport camera context before accepting a seed.',
     )
-    assert(
+    expectTrue(
       missingCamera.state.preview?.label.includes('viewport-picked'),
       'Camera-less section seed attempts should explain that viewport selection context is required.',
     )
@@ -1126,7 +1120,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       cameraPosition: [0, 0, 20],
     })
 
-    assert(selected.state.kind === 'inspectingSection', 'Accepted section seeds should enter active section inspection.')
+    expectTrue(selected.state.kind === 'inspectingSection', 'Accepted section seeds should enter active section inspection.')
     const moved = transitionEditorState(selected.state, {
       type: 'section.offsetUpdated',
       commandSessionId: selected.state.command.commandSessionId,
@@ -1139,16 +1133,16 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         : ('command_unreachable' as CommandSessionId),
     })
 
-    assert(flipped.state.kind === 'inspectingSection', 'Flipping should keep the section active.')
-    assert(flipped.state.section.offset === 7.5, 'Flipping should preserve the current plane position.')
-    assert(flipped.state.section.retainedSide === 'positive', 'Flipping should invert the retained half-space.')
+    expectTrue(flipped.state.kind === 'inspectingSection', 'Flipping should keep the section active.')
+    expectTrue(flipped.state.section.offset === 7.5, 'Flipping should preserve the current plane position.')
+    expectTrue(flipped.state.section.retainedSide === 'positive', 'Flipping should invert the retained half-space.')
 
     const cleared = transitionEditorState(flipped.state, {
       type: 'section.cleared',
       commandSessionId: flipped.state.command.commandSessionId,
     })
 
-    assert(cleared.state.kind === 'idle', 'Clearing an active section should exit the command session.')
+    expectTrue(cleared.state.kind === 'idle', 'Clearing an active section should exit the command session.')
   }
 
   async function testMeasureActivationPairsSelectionsAndCleansUp() {
@@ -1169,34 +1163,34 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activated.state.kind === 'selectionCommand', 'Measure activation should start a transient selection command.')
-    assert(activated.state.mode === 'part', 'Measure activation should force the workbench into part mode.')
-    assert(activated.state.selectionFilter.label === 'Measurement targets', 'Measure activation should install the measurement selection filter.')
+    expectTrue(activated.state.kind === 'selectionCommand', 'Measure activation should start a transient selection command.')
+    expectTrue(activated.state.mode === 'part', 'Measure activation should force the workbench into part mode.')
+    expectTrue(activated.state.selectionFilter.label === 'Measurement targets', 'Measure activation should install the measurement selection filter.')
 
     const firstSelection = transitionEditorState(activated.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'edge', bodyId: 'body_part-1', edgeId: 'edge_outer-0' },
     })
-    assert(firstSelection.state.selection.length === 1, 'Measure should accept a first measurable target.')
+    expectTrue(firstSelection.state.selection.length === 1, 'Measure should accept a first measurable target.')
 
     const pairedSelection = transitionEditorState(firstSelection.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
     })
-    assert(pairedSelection.state.selection.length === 2, 'Measure should pair supported two-target selections.')
+    expectTrue(pairedSelection.state.selection.length === 2, 'Measure should pair supported two-target selections.')
 
     const replacedSelection = transitionEditorState(pairedSelection.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'body', bodyId: 'body_part-1' },
     })
-    assert(
+    expectTrue(
       replacedSelection.state.selection.length === 1
         && replacedSelection.state.selection[0]?.kind === 'body',
       'Selecting a fresh single-target body should replace an existing pairwise measurement.',
     )
 
     const clearedSelection = transitionEditorState(replacedSelection.state, { type: 'selection.cleared' })
-    assert(
+    expectTrue(
       clearedSelection.state.kind === 'selectionCommand' && clearedSelection.state.selection.length === 0,
       'Selection clearing should remove active measurement targets without exiting the command.',
     )
@@ -1205,7 +1199,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'command.cancelled',
       commandSessionId: clearedSelection.state.command.commandSessionId,
     })
-    assert(cancelled.state.kind === 'idle', 'Measure cancellation should return the editor to idle.')
+    expectTrue(cancelled.state.kind === 'idle', 'Measure cancellation should return the editor to idle.')
   }
 
   function testSketchSessionPreservesStoredPlaneDefinition() {
@@ -1273,8 +1267,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     const worldPoint = mapSketchPointToWorld(session.plane, [2, 3])
 
-    assert(session.plane.frame.normal[0] === 1, 'Sketch sessions should retain the stored plane definition.')
-    assert(worldPoint[0] === 0 && worldPoint[1] === 2 && worldPoint[2] === 3, 'Sketch display mapping must use the stored plane definition.')
+    expectTrue(session.plane.frame.normal[0] === 1, 'Sketch sessions should retain the stored plane definition.')
+    expectTrue(worldPoint[0] === 0 && worldPoint[1] === 2 && worldPoint[2] === 3, 'Sketch display mapping must use the stored plane definition.')
   }
 
   function createReopenableYzSketchSnapshot(): WorkspaceSnapshot {
@@ -1419,9 +1413,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Extrude activation should enter feature editing.')
-    assert(activation.effects.length === 1, 'Extrude activation should emit a preview effect.')
-    assert(activation.effects[0]?.type === 'feature.evaluatePreview', 'The emitted effect should be feature.evaluatePreview.')
+    expectTrue(activation.state.kind === 'editingFeature', 'Extrude activation should enter feature editing.')
+    expectTrue(activation.effects.length === 1, 'Extrude activation should emit a preview effect.')
+    expectTrue(activation.effects[0]?.type === 'feature.evaluatePreview', 'The emitted effect should be feature.evaluatePreview.')
 
     const staleIgnored = transitionEditorState(activation.state, {
       type: 'effect.featurePreviewCompleted',
@@ -1435,7 +1429,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       renderables: [],
     })
 
-    assert(
+    expectTrue(
       staleIgnored.state === activation.state,
       'A preview response with the wrong request ID must be ignored.',
     )
@@ -1458,18 +1452,18 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Revolve activation should enter feature editing.')
-    assert(activation.state.session.featureType === 'revolve', 'Revolve activation should create a revolve session.')
-    assert(activation.effects.length === 0, 'Revolve activation without an axis should stay local until the draft is complete.')
+    expectTrue(activation.state.kind === 'editingFeature', 'Revolve activation should enter feature editing.')
+    expectTrue(activation.state.session.featureType === 'revolve', 'Revolve activation should create a revolve session.')
+    expectTrue(activation.effects.length === 0, 'Revolve activation without an axis should stay local until the draft is complete.')
 
     const completed = transitionEditorState(activation.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_axis' },
     })
 
-    assert(completed.state.kind === 'editingFeature', 'Revolve selection updates should remain in feature editing.')
-    assert(completed.effects.length === 1, 'Selecting the missing revolve axis should emit one preview effect.')
-    assert(completed.effects[0]?.type === 'feature.evaluatePreview', 'Completed revolve drafts should request a preview effect.')
+    expectTrue(completed.state.kind === 'editingFeature', 'Revolve selection updates should remain in feature editing.')
+    expectTrue(completed.effects.length === 1, 'Selecting the missing revolve axis should emit one preview effect.')
+    expectTrue(completed.effects[0]?.type === 'feature.evaluatePreview', 'Completed revolve drafts should request a preview effect.')
   }
 
   function testRevolveActivationSupportsFaceThenEdgeSelection() {
@@ -1496,27 +1490,27 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Face-selected revolve activation should enter feature editing.')
-    assert(activation.state.session.featureType === 'revolve', 'Face-selected revolve activation should create a revolve session.')
-    assert(
+    expectTrue(activation.state.kind === 'editingFeature', 'Face-selected revolve activation should enter feature editing.')
+    expectTrue(activation.state.session.featureType === 'revolve', 'Face-selected revolve activation should create a revolve session.')
+    expectTrue(
       activation.state.session.draft.profileTargets[0]?.kind === 'face',
       'Face-selected revolve activation should keep the selected face as the revolve profile.',
     )
-    assert(activation.effects.length === 0, 'Face-selected revolve activation should wait for an axis before previewing.')
+    expectTrue(activation.effects.length === 0, 'Face-selected revolve activation should wait for an axis before previewing.')
 
     const completed = transitionEditorState(activation.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'edge', bodyId: 'body_a', edgeId: 'edge_axis' },
     })
 
-    assert(completed.state.kind === 'editingFeature', 'Revolve face-then-edge flow should remain in feature editing.')
-    assert(completed.state.session.featureType === 'revolve', 'Revolve face-then-edge flow should preserve the revolve session kind.')
-    assert(
+    expectTrue(completed.state.kind === 'editingFeature', 'Revolve face-then-edge flow should remain in feature editing.')
+    expectTrue(completed.state.session.featureType === 'revolve', 'Revolve face-then-edge flow should preserve the revolve session kind.')
+    expectTrue(
       completed.state.session.draft.axisTarget?.kind === 'edge',
       'Revolve face-then-edge flow should preserve the selected edge as the axis target.',
     )
-    assert(completed.effects.length === 1, 'Selecting the axis after a face profile should emit one preview effect.')
-    assert(completed.effects[0]?.type === 'feature.evaluatePreview', 'Completed face-then-edge revolve drafts should request a preview effect.')
+    expectTrue(completed.effects.length === 1, 'Selecting the axis after a face profile should emit one preview effect.')
+    expectTrue(completed.effects[0]?.type === 'feature.evaluatePreview', 'Completed face-then-edge revolve drafts should request a preview effect.')
   }
 
   function testShellActivationSeedsBodyFromSelectedFace() {
@@ -1536,11 +1530,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Shell activation should enter feature editing.')
-    assert(activation.state.session.featureType === 'shell', 'Shell activation should create a shell session.')
-    assert(activation.state.session.draft.bodyTarget?.bodyId === 'body_a', 'Shell activation should infer the source body from a selected face.')
-    assert(activation.effects.length === 1, 'Shell activation with a face target should emit one preview effect.')
-    assert(activation.effects[0]?.type === 'feature.evaluatePreview', 'Shell activation should request a preview effect.')
+    expectTrue(activation.state.kind === 'editingFeature', 'Shell activation should enter feature editing.')
+    expectTrue(activation.state.session.featureType === 'shell', 'Shell activation should create a shell session.')
+    expectTrue(activation.state.session.draft.bodyTarget?.bodyId === 'body_a', 'Shell activation should infer the source body from a selected face.')
+    expectTrue(activation.effects.length === 1, 'Shell activation with a face target should emit one preview effect.')
+    expectTrue(activation.effects[0]?.type === 'feature.evaluatePreview', 'Shell activation should request a preview effect.')
   }
 
   function testThickenActivationSeedsFaceTargetsFromSelection() {
@@ -1560,14 +1554,14 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Thicken activation should enter feature editing.')
-    assert(activation.state.session.featureType === 'thicken', 'Thicken activation should create a thicken session.')
-    assert(
+    expectTrue(activation.state.kind === 'editingFeature', 'Thicken activation should enter feature editing.')
+    expectTrue(activation.state.session.featureType === 'thicken', 'Thicken activation should create a thicken session.')
+    expectTrue(
       activation.state.session.draft.faceTargets[0]?.faceId === 'face_top',
       'Thicken activation should seed the selected face into the draft.',
     )
-    assert(activation.effects.length === 1, 'Thicken activation with a face target should emit one preview effect.')
-    assert(activation.effects[0]?.type === 'feature.evaluatePreview', 'Thicken activation should request a preview effect.')
+    expectTrue(activation.effects.length === 1, 'Thicken activation with a face target should emit one preview effect.')
+    expectTrue(activation.effects[0]?.type === 'feature.evaluatePreview', 'Thicken activation should request a preview effect.')
   }
 
   function testSplitAndDeleteSolidActivationStartFeatureSessions() {
@@ -1591,26 +1585,26 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(combineActivation.state.kind === 'editingFeature', 'Combine activation should enter feature editing.')
-    assert(combineActivation.state.session.featureType === 'combine', 'Combine activation should create a combine session.')
-    assert(
+    expectTrue(combineActivation.state.kind === 'editingFeature', 'Combine activation should enter feature editing.')
+    expectTrue(combineActivation.state.session.featureType === 'combine', 'Combine activation should create a combine session.')
+    expectTrue(
       combineActivation.state.session.draft.targetBodyTargets[0]?.bodyId === 'body_a',
       'Combine activation should seed the selected body as a target body.',
     )
-    assert(combineActivation.effects.length === 0, 'Combine activation should wait for explicit tool bodies before previewing.')
+    expectTrue(combineActivation.effects.length === 0, 'Combine activation should wait for explicit tool bodies before previewing.')
 
     const combineToolSelection = transitionEditorState(combineActivation.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'body', bodyId: 'body_b' },
     })
 
-    assert(
+    expectTrue(
       combineToolSelection.state.kind === 'editingFeature' &&
         combineToolSelection.state.session.featureType === 'combine' &&
         combineToolSelection.state.session.draft.toolBodyTargets[0]?.bodyId === 'body_b',
       'Combine body selection should fill explicit tool bodies after the target role is populated.',
     )
-    assert(combineToolSelection.effects[0]?.type === 'feature.evaluatePreview', 'Complete Combine drafts should request a preview effect.')
+    expectTrue(combineToolSelection.effects[0]?.type === 'feature.evaluatePreview', 'Complete Combine drafts should request a preview effect.')
 
     const splitActivation = transitionEditorState(
       {
@@ -1628,13 +1622,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(splitActivation.state.kind === 'editingFeature', 'Split activation should enter feature editing.')
-    assert(splitActivation.state.session.featureType === 'split', 'Split activation should create a split session.')
-    assert(
+    expectTrue(splitActivation.state.kind === 'editingFeature', 'Split activation should enter feature editing.')
+    expectTrue(splitActivation.state.session.featureType === 'split', 'Split activation should create a split session.')
+    expectTrue(
       splitActivation.state.session.draft.targetBodyTarget?.bodyId === 'body_a',
       'Split activation should seed the selected body as the target body.',
     )
-    assert(splitActivation.effects.length === 0, 'Split activation should wait for the tool body before previewing.')
+    expectTrue(splitActivation.effects.length === 0, 'Split activation should wait for the tool body before previewing.')
 
     const deleteSolidActivation = transitionEditorState(
       {
@@ -1652,14 +1646,14 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(deleteSolidActivation.state.kind === 'editingFeature', 'Delete-solid activation should enter feature editing.')
-    assert(deleteSolidActivation.state.session.featureType === 'deleteSolid', 'Delete-solid activation should create a delete-solid session.')
-    assert(
+    expectTrue(deleteSolidActivation.state.kind === 'editingFeature', 'Delete-solid activation should enter feature editing.')
+    expectTrue(deleteSolidActivation.state.session.featureType === 'deleteSolid', 'Delete-solid activation should create a delete-solid session.')
+    expectTrue(
       deleteSolidActivation.state.session.draft.bodyTargets[0]?.bodyId === 'body_a',
       'Delete-solid activation should seed the selected body into the delete list.',
     )
-    assert(deleteSolidActivation.effects.length === 1, 'Delete-solid activation with a selected body should emit one preview effect.')
-    assert(deleteSolidActivation.effects[0]?.type === 'feature.evaluatePreview', 'Delete-solid activation should request a preview effect.')
+    expectTrue(deleteSolidActivation.effects.length === 1, 'Delete-solid activation with a selected body should emit one preview effect.')
+    expectTrue(deleteSolidActivation.effects[0]?.type === 'feature.evaluatePreview', 'Delete-solid activation should request a preview effect.')
   }
 
   function testFeatureActivationReusesCompatibleSelectionAndClearsInvalidSelection() {
@@ -1690,9 +1684,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(reused.state.kind === 'editingFeature', 'Compatible feature preselection should enter feature editing.')
-    assert(reused.state.selection.length === 2, 'Compatible feature activation should preserve the adopted selection.')
-    assert(
+    expectTrue(reused.state.kind === 'editingFeature', 'Compatible feature preselection should enter feature editing.')
+    expectTrue(reused.state.selection.length === 2, 'Compatible feature activation should preserve the adopted selection.')
+    expectTrue(
       reused.state.session.draft.targetBodyTargets[0]?.bodyId === 'body_a'
         && reused.state.session.draft.toolBodyTargets[0]?.bodyId === 'body_b',
       'Feature activation should seed the first adopted target and replay later adopted targets in order.',
@@ -1709,9 +1703,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(cleared.state.kind === 'editingFeature', 'Incompatible feature preselection should still enter the feature create flow.')
-    assert(cleared.state.selection.length === 0, 'Incompatible feature preselection should be cleared during activation.')
-    assert(cleared.state.session.draft.profileTargets.length === 0, 'Cleared feature activation should not partially seed the draft.')
+    expectTrue(cleared.state.kind === 'editingFeature', 'Incompatible feature preselection should still enter the feature create flow.')
+    expectTrue(cleared.state.selection.length === 0, 'Incompatible feature preselection should be cleared during activation.')
+    expectTrue(cleared.state.session.draft.profileTargets.length === 0, 'Cleared feature activation should not partially seed the draft.')
   }
 
   function testMirrorAndTransformActivationStartFeatureSessions() {
@@ -1731,10 +1725,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(mirrorActivation.state.kind === 'editingFeature', 'Mirror activation should enter feature editing.')
-    assert(mirrorActivation.state.session.featureType === 'mirror', 'Mirror activation should create a mirror session.')
-    assert(mirrorActivation.state.session.draft.bodyTargets[0]?.bodyId === 'body_a', 'Mirror activation should seed the selected body as a mirror target.')
-    assert(mirrorActivation.effects.length === 0, 'Mirror activation should wait for an explicit plane before previewing.')
+    expectTrue(mirrorActivation.state.kind === 'editingFeature', 'Mirror activation should enter feature editing.')
+    expectTrue(mirrorActivation.state.session.featureType === 'mirror', 'Mirror activation should create a mirror session.')
+    expectTrue(mirrorActivation.state.session.draft.bodyTargets[0]?.bodyId === 'body_a', 'Mirror activation should seed the selected body as a mirror target.')
+    expectTrue(mirrorActivation.effects.length === 0, 'Mirror activation should wait for an explicit plane before previewing.')
 
     const transformActivation = transitionEditorState(
       {
@@ -1752,10 +1746,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(transformActivation.state.kind === 'editingFeature', 'Transform activation should enter feature editing.')
-    assert(transformActivation.state.session.featureType === 'transform', 'Transform activation should create a transform session.')
-    assert(transformActivation.state.session.draft.bodyTargets[0]?.bodyId === 'body_a', 'Transform activation should seed the selected body as a transform target.')
-    assert(transformActivation.effects.length === 0, 'Transform activation should wait for an explicit transform reference before previewing.')
+    expectTrue(transformActivation.state.kind === 'editingFeature', 'Transform activation should enter feature editing.')
+    expectTrue(transformActivation.state.session.featureType === 'transform', 'Transform activation should create a transform session.')
+    expectTrue(transformActivation.state.session.draft.bodyTargets[0]?.bodyId === 'body_a', 'Transform activation should seed the selected body as a transform target.')
+    expectTrue(transformActivation.effects.length === 0, 'Transform activation should wait for an explicit transform reference before previewing.')
   }
 
   function testActiveReferencePickerRoutesSingleAndMultiSelections() {
@@ -1783,19 +1777,19 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Shell activation should enter feature editing.')
+    expectTrue(activation.state.kind === 'editingFeature', 'Shell activation should enter feature editing.')
 
     const facesActive = transitionEditorState(activation.state, {
       type: 'form.referencePickerActivated',
       fieldId: 'shell-faces',
     })
 
-    assert(facesActive.state.kind === 'editingFeature', 'Reference picker activation should stay in feature editing.')
-    assert(
+    expectTrue(facesActive.state.kind === 'editingFeature', 'Reference picker activation should stay in feature editing.')
+    expectTrue(
       facesActive.state.activeReferencePickerFieldId === 'shell-faces',
       'Reference picker activation should track the active form field id.',
     )
-    assert(
+    expectTrue(
       facesActive.state.selectionFilter?.label === 'Shell faces',
       'Reference picker activation should switch to the field selection filter.',
     )
@@ -1805,8 +1799,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: { kind: 'face', bodyId: 'body_a', faceId: 'face_side' },
     })
 
-    assert(faceAppended.state.kind === 'editingFeature', 'Multi-reference selection should stay in feature editing.')
-    assert(
+    expectTrue(faceAppended.state.kind === 'editingFeature', 'Multi-reference selection should stay in feature editing.')
+    expectTrue(
       faceAppended.state.session.featureType === 'shell' && faceAppended.state.session.draft.faceTargets.length === 2,
       'Active multi-reference picker selection should append unique selected instances.',
     )
@@ -1816,12 +1810,12 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       fieldId: 'shell-body',
     })
 
-    assert(bodyActive.state.kind === 'editingFeature', 'Switching active picker fields should stay in feature editing.')
-    assert(
+    expectTrue(bodyActive.state.kind === 'editingFeature', 'Switching active picker fields should stay in feature editing.')
+    expectTrue(
       bodyActive.state.activeReferencePickerFieldId === 'shell-body',
       'Switching active picker fields should update the active field id.',
     )
-    assert(
+    expectTrue(
       bodyActive.state.selectionFilter?.label === 'Shell body',
       'Switching active picker fields should update the current selection filter.',
     )
@@ -1831,8 +1825,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: { kind: 'body', bodyId: 'body_b' },
     })
 
-    assert(bodySelected.state.kind === 'editingFeature', 'Single-reference selection should stay in feature editing.')
-    assert(
+    expectTrue(bodySelected.state.kind === 'editingFeature', 'Single-reference selection should stay in feature editing.')
+    expectTrue(
       bodySelected.state.session.featureType === 'shell' && bodySelected.state.session.draft.bodyTarget?.bodyId === 'body_b',
       'Active single-reference picker selection should replace the bound reference.',
     )
@@ -1855,23 +1849,23 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(activation.state.kind === 'editingFeature', 'Shell activation should enter feature editing.')
+    expectTrue(activation.state.kind === 'editingFeature', 'Shell activation should enter feature editing.')
 
     const active = transitionEditorState(activation.state, {
       type: 'form.referencePickerActivated',
       fieldId: 'shell-faces',
     })
 
-    assert(active.state.kind === 'editingFeature', 'Reference picker activation should stay in feature editing.')
+    expectTrue(active.state.kind === 'editingFeature', 'Reference picker activation should stay in feature editing.')
 
     const escaped = transitionEditorState(active.state, {
       type: 'form.referencePickerCancelled',
     })
 
-    assert(escaped.state.kind === 'editingFeature', 'Escape cancellation should not cancel the whole feature session.')
-    assert(escaped.state.activeReferencePickerFieldId === null, 'Escape cancellation should clear the active picker field.')
-    assert(escaped.state.selection.length === 0, 'Escape cancellation should clear picker-specific pending selection.')
-    assert(
+    expectTrue(escaped.state.kind === 'editingFeature', 'Escape cancellation should not cancel the whole feature session.')
+    expectTrue(escaped.state.activeReferencePickerFieldId === null, 'Escape cancellation should clear the active picker field.')
+    expectTrue(escaped.state.selection.length === 0, 'Escape cancellation should clear picker-specific pending selection.')
+    expectTrue(
       escaped.state.selectionFilter?.label === 'Shell references',
       'Escape cancellation should restore the feature-level selection filter.',
     )
@@ -1881,15 +1875,15 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       commandSessionId: active.state.command.commandSessionId,
     })
 
-    assert(cancelled.state.kind === 'idle', 'Feature session cancellation should leave feature editing.')
+    expectTrue(cancelled.state.kind === 'idle', 'Feature session cancellation should leave feature editing.')
 
     const switched = transitionEditorState(active.state, {
       type: 'tool.activated',
       toolId: 'fillet',
     })
 
-    assert(switched.state.kind === 'editingFeature', 'Switching to another feature tool should enter the new feature session.')
-    assert(
+    expectTrue(switched.state.kind === 'editingFeature', 'Switching to another feature tool should enter the new feature session.')
+    expectTrue(
       switched.state.activeReferencePickerFieldId === null,
       'Switching to another feature session should clear active picker state.',
     )
@@ -1914,16 +1908,16 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       importSession.dependencies,
     )
 
-    assert(result.state.kind === 'importing', 'Import file selection should enter the importing state.')
-    assert(
+    expectTrue(result.state.kind === 'importing', 'Import file selection should enter the importing state.')
+    expectTrue(
       result.state.activeReferencePickerFieldId === 'image-plane',
       'A single import plane picker should arm automatically when the import session opens.',
     )
-    assert(
+    expectTrue(
       result.state.selectionFilter?.label === 'Plane references',
       'Auto-armed import plane pickers should switch the editor into plane-selection mode immediately.',
     )
-    assert(
+    expectTrue(
       result.state.command.phase === 'collecting',
       'Auto-armed import plane pickers should keep the import command in selection-collection mode.',
     )
@@ -1948,7 +1942,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       importSession.dependencies,
     )
 
-    assert(opened.state.kind === 'importing', 'Import file selection should enter the importing state.')
+    expectTrue(opened.state.kind === 'importing', 'Import file selection should enter the importing state.')
 
     const selected = transitionEditorState(
       opened.state,
@@ -1959,21 +1953,21 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       importSession.dependencies,
     )
 
-    assert(selected.state.kind === 'importing', 'Plane selection should keep the editor inside the import session.')
-    assert(
+    expectTrue(selected.state.kind === 'importing', 'Plane selection should keep the editor inside the import session.')
+    expectTrue(
       selected.state.session.selections.planeTarget?.kind === 'construction'
         && selected.state.session.selections.planeTarget.constructionId === 'construction_plane-xy',
       'Import plane selection should patch the selected construction plane into import selections.',
     )
-    assert(
+    expectTrue(
       selected.state.activeReferencePickerFieldId === null,
       'Single import plane picks should complete the active picker after a valid selection.',
     )
-    assert(
+    expectTrue(
       selected.state.selectionFilter?.label === getDefaultSelectionFilterForMode('part')?.label,
       'Completing the import plane pick should restore the default part-mode selection filter.',
     )
-    assert(
+    expectTrue(
       selected.state.command.phase === 'editing',
       'Completing the import plane pick should return the import command to editing mode.',
     )
@@ -1996,26 +1990,26 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     const idleCleared = transitionEditorState(selectedState, { type: 'selection.cleared' })
 
-    assert(idleCleared.state.kind === 'idle', 'Selection clearing should keep idle state idle.')
-    assert(idleCleared.state.selection.length === 0, 'Selection clearing should remove idle selection.')
-    assert(idleCleared.state.hoverTarget === null, 'Selection clearing should remove idle hover.')
+    expectTrue(idleCleared.state.kind === 'idle', 'Selection clearing should keep idle state idle.')
+    expectTrue(idleCleared.state.selection.length === 0, 'Selection clearing should remove idle selection.')
+    expectTrue(idleCleared.state.hoverTarget === null, 'Selection clearing should remove idle hover.')
 
     const commandStarted = transitionEditorState(selectedState, {
       type: 'tool.activated',
       toolId: 'sketch',
     })
 
-    assert(commandStarted.state.kind === 'selectionCommand', 'Sketch activation should create a selection command.')
+    expectTrue(commandStarted.state.kind === 'selectionCommand', 'Sketch activation should create a selection command.')
 
     const commandCleared = transitionEditorState(commandStarted.state, { type: 'selection.cleared' })
 
-    assert(commandCleared.state.kind === 'selectionCommand', 'Selection clearing should preserve active command state.')
-    assert(
+    expectTrue(commandCleared.state.kind === 'selectionCommand', 'Selection clearing should preserve active command state.')
+    expectTrue(
       commandCleared.state.command.commandSessionId === commandStarted.state.command.commandSessionId,
       'Selection clearing should preserve the active command session.',
     )
-    assert(commandCleared.state.selection.length === 0, 'Selection clearing should remove active-command selection.')
-    assert(commandCleared.state.hoverTarget === null, 'Selection clearing should remove active-command hover.')
+    expectTrue(commandCleared.state.selection.length === 0, 'Selection clearing should remove active-command selection.')
+    expectTrue(commandCleared.state.hoverTarget === null, 'Selection clearing should remove active-command hover.')
 
     const sketchSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
     const sketchState: SketchEditorState = {
@@ -2041,13 +2035,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     const sketchCleared = transitionEditorState(sketchState, { type: 'selection.cleared' })
 
-    assert(sketchCleared.state.kind === 'editingSketch', 'Selection clearing should preserve sketch editing state.')
-    assert(
+    expectTrue(sketchCleared.state.kind === 'editingSketch', 'Selection clearing should preserve sketch editing state.')
+    expectTrue(
       sketchCleared.state.command.commandSessionId === sketchState.command.commandSessionId,
       'Selection clearing should preserve the sketch command session.',
     )
-    assert(sketchCleared.state.selection.length === 0, 'Selection clearing should remove sketch selection.')
-    assert(sketchCleared.state.hoverTarget === null, 'Selection clearing should remove sketch hover.')
+    expectTrue(sketchCleared.state.selection.length === 0, 'Selection clearing should remove sketch selection.')
+    expectTrue(sketchCleared.state.hoverTarget === null, 'Selection clearing should remove sketch hover.')
   }
 
   function testReplayIsDeterministic() {
@@ -2073,11 +2067,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const first = runEventTrace(events)
     const second = runEventTrace(events)
 
-    assert(
+    expectTrue(
       JSON.stringify(first.state) === JSON.stringify(second.state),
       'Replaying the same event trace should reach the same machine state.',
     )
-    assert(
+    expectTrue(
       JSON.stringify(first.effects) === JSON.stringify(second.effects),
       'Replaying the same event trace should emit the same effect sequence.',
     )
@@ -2103,14 +2097,14 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       snapshot: nextSnapshot,
     })
 
-    assert(loaded.effects.length === 0, 'Direct snapshot loads should not request another snapshot fetch.')
-    assert(loaded.state.snapshot?.document.revisionId === 'rev_2', 'Direct snapshot loads should update visible snapshot state immediately.')
-    assert(loaded.state.document.revisionId === 'rev_2', 'Direct snapshot loads should update the editor document revision.')
+    expectTrue(loaded.effects.length === 0, 'Direct snapshot loads should not request another snapshot fetch.')
+    expectTrue(loaded.state.snapshot?.document.revisionId === 'rev_2', 'Direct snapshot loads should update visible snapshot state immediately.')
+    expectTrue(loaded.state.document.revisionId === 'rev_2', 'Direct snapshot loads should update the editor document revision.')
   }
 
   function testSelectionKeyUsesDurableRefs() {
     const key = getEditorSelectionKey({ kind: 'feature', featureId: 'feature_alpha' })
-    assert(key === 'feature:feature_alpha', 'Selection key derivation should remain deterministic.')
+    expectTrue(key === 'feature:feature_alpha', 'Selection key derivation should remain deterministic.')
   }
 
   async function testRuntimeLoopProcessesSketchOpen() {
@@ -2154,12 +2148,12 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'Runtime loop should enter sketch editing after opening a sketch session.')
-    assert(
+    expectTrue(result.state.kind === 'editingSketch', 'Runtime loop should enter sketch editing after opening a sketch session.')
+    expectTrue(
       result.state.session.planeTarget.kind === 'construction',
       'Opened sketch session should preserve the selected construction plane.',
     )
-    assert(
+    expectTrue(
       result.state.command.commandSessionId === 'command_sketch-1',
       'Runtime loop should preserve the originating command session ID.',
     )
@@ -2171,7 +2165,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       record.binding.target.kind === 'face'
       && record.binding.semanticClass === 'planarFace',
     )?.binding.target
-    assert(planarFace?.kind === 'face', 'Mock runtime snapshot should expose a planar face render target.')
+    expectTrue(planarFace?.kind === 'face', 'Mock runtime snapshot should expose a planar face render target.')
 
     const runtime: EditorEffectRuntime = {
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
@@ -2212,10 +2206,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'Runtime loop should enter sketch editing after selecting a planar face.')
-    assert(result.state.session.planeTarget.kind === 'face', 'Face-backed sketch session should preserve the selected face support.')
-    assert(result.state.session.plane.support.kind === 'face', 'Face-backed sketch session should derive a face-supported plane.')
-    assert(result.state.session.plane.frame.origin[2] === 12, 'Face-backed sketch plane should derive its origin from the selected face mesh.')
+    expectTrue(result.state.kind === 'editingSketch', 'Runtime loop should enter sketch editing after selecting a planar face.')
+    expectTrue(result.state.session.planeTarget.kind === 'face', 'Face-backed sketch session should preserve the selected face support.')
+    expectTrue(result.state.session.plane.support.kind === 'face', 'Face-backed sketch session should derive a face-supported plane.')
+    expectTrue(result.state.session.plane.frame.origin[2] === 12, 'Face-backed sketch plane should derive its origin from the selected face mesh.')
   }
 
   async function testRuntimeLoopOpensSketchFromNonXYConstruction() {
@@ -2343,8 +2337,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'YZ construction plane should also open a sketch session.')
-    assert(result.state.session.plane.key === 'yz', 'Sketch session should preserve the selected YZ plane definition.')
+    expectTrue(result.state.kind === 'editingSketch', 'YZ construction plane should also open a sketch session.')
+    expectTrue(result.state.session.plane.key === 'yz', 'Sketch session should preserve the selected YZ plane definition.')
   }
 
   async function testRuntimeLoopReopensStoredSketchPlane() {
@@ -2392,9 +2386,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'Existing sketches should reopen into the sketch editor.')
-    assert(result.state.session.sketchId === 'sketch_yz', 'Reopened sketch sessions should preserve the sketch identity.')
-    assert(result.state.session.plane.key === 'yz', 'Reopened sketch sessions should preserve the stored sketch plane.')
+    expectTrue(result.state.kind === 'editingSketch', 'Existing sketches should reopen into the sketch editor.')
+    expectTrue(result.state.session.sketchId === 'sketch_yz', 'Reopened sketch sessions should preserve the sketch identity.')
+    expectTrue(result.state.session.plane.key === 'yz', 'Reopened sketch sessions should preserve the stored sketch plane.')
   }
 
   async function testRuntimeLoopReopensCommittedFeatureFromExplicitIntent() {
@@ -2443,9 +2437,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingFeature', 'Committed feature reopen should enter feature editing.')
-    assert(result.state.session.mode === 'edit', 'Committed feature reopen should hydrate an edit session.')
-    assert(result.state.session.featureId === 'feature_extrude-1', 'Committed feature reopen should preserve the feature identity.')
+    expectTrue(result.state.kind === 'editingFeature', 'Committed feature reopen should enter feature editing.')
+    expectTrue(result.state.session.mode === 'edit', 'Committed feature reopen should hydrate an edit session.')
+    expectTrue(result.state.session.featureId === 'feature_extrude-1', 'Committed feature reopen should preserve the feature identity.')
   }
 
   async function testRuntimeLoopReopensSketchFromExplicitIntent() {
@@ -2498,9 +2492,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'Committed sketch reopen should enter sketch editing.')
-    assert(result.state.session.sketchId === 'sketch_yz', 'Committed sketch reopen should preserve the sketch identity.')
-    assert(result.state.session.plane.key === 'yz', 'Committed sketch reopen should preserve the stored sketch plane.')
+    expectTrue(result.state.kind === 'editingSketch', 'Committed sketch reopen should enter sketch editing.')
+    expectTrue(result.state.session.sketchId === 'sketch_yz', 'Committed sketch reopen should preserve the sketch identity.')
+    expectTrue(result.state.session.plane.key === 'yz', 'Committed sketch reopen should preserve the stored sketch plane.')
   }
 
   async function testFeatureEditEntryRollsBackBeforeHydrationFromTail() {
@@ -2519,16 +2513,16 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingFeature', 'Feature reopen should enter editing after rollback.')
-    assert(cursorMoves.length === 1, 'Feature reopen should move the document cursor before hydration.')
-    assert(cursorMoves[0]?.cursor.kind === 'sketch', 'Editing extrude should roll back to the preceding sketch.')
-    assert(cursorMoves[0]?.transient === true, 'Edit-entry rollback should be transient.')
-    assert(
+    expectTrue(result.state.kind === 'editingFeature', 'Feature reopen should enter editing after rollback.')
+    expectTrue(cursorMoves.length === 1, 'Feature reopen should move the document cursor before hydration.')
+    expectTrue(cursorMoves[0]?.cursor.kind === 'sketch', 'Editing extrude should roll back to the preceding sketch.')
+    expectTrue(cursorMoves[0]?.transient === true, 'Edit-entry rollback should be transient.')
+    expectTrue(
       result.state.snapshot?.document.cursor.kind === 'sketch',
       'Feature edit snapshot should be refreshed at the rollback cursor.',
     )
-    assert(previewCalls.length === 1, 'Feature edit preview should run after rollback snapshot refresh.')
-    assert(
+    expectTrue(previewCalls.length === 1, 'Feature edit preview should run after rollback snapshot refresh.')
+    expectTrue(
       previewCalls[0]?.cursor.kind === 'sketch',
       'Feature edit preview should evaluate against the rolled-back document basis.',
     )
@@ -2550,22 +2544,22 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'Committed sketch reopen should enter sketch editing.')
-    assert(cursorMoves.length === 1, 'Sketch reopen should move the document cursor before opening.')
-    assert(
+    expectTrue(result.state.kind === 'editingSketch', 'Committed sketch reopen should enter sketch editing.')
+    expectTrue(cursorMoves.length === 1, 'Sketch reopen should move the document cursor before opening.')
+    expectTrue(
       cursorMoves[0]?.cursor.kind === 'feature' && cursorMoves[0].cursor.featureId === 'feature_extrude-1',
       'Editing sketch2 should roll back to the preceding extrude.',
     )
-    assert(
+    expectTrue(
       result.state.snapshot?.document.cursor.kind === 'feature'
         && result.state.snapshot.document.cursor.featureId === 'feature_extrude-1',
       'Sketch edit snapshot should remain at the document rollback cursor.',
     )
-    assert(
+    expectTrue(
       result.state.session.historyCursor.kind !== 'empty',
       'Reopened sketch editing should preserve sketch-local history while the document is rolled back.',
     )
-    assert(
+    expectTrue(
       getSnapshotReadCount() === 2,
       'Sketch reopen should reuse the rollback snapshot directly instead of forcing an extra document refresh cycle.',
     )
@@ -2587,10 +2581,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'editingSketch', 'Tail sketch reopen should enter sketch editing immediately.')
-    assert(result.state.session.sketchId === 'sketch_yz', 'Tail sketch reopen should preserve the committed sketch id.')
-    assert(cursorMoves.length === 0, 'Tail sketch reopen should not roll the document cursor when the sketch is already current.')
-    assert(getSnapshotReadCount() === 1, 'Tail sketch reopen should reuse the loaded snapshot instead of re-fetching it.')
+    expectTrue(result.state.kind === 'editingSketch', 'Tail sketch reopen should enter sketch editing immediately.')
+    expectTrue(result.state.session.sketchId === 'sketch_yz', 'Tail sketch reopen should preserve the committed sketch id.')
+    expectTrue(cursorMoves.length === 0, 'Tail sketch reopen should not roll the document cursor when the sketch is already current.')
+    expectTrue(getSnapshotReadCount() === 1, 'Tail sketch reopen should reuse the loaded snapshot instead of re-fetching it.')
   }
 
   async function testFeatureEditCancelRestoresTailCursor() {
@@ -2613,9 +2607,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'idle', 'Feature edit cancel should return to idle.')
-    assert(cursorMoves.length === 2, 'Feature edit cancel should restore the captured entry cursor.')
-    assert(
+    expectTrue(result.state.kind === 'idle', 'Feature edit cancel should return to idle.')
+    expectTrue(cursorMoves.length === 2, 'Feature edit cancel should restore the captured entry cursor.')
+    expectTrue(
       cursorMoves[1]?.cursor.kind === 'feature' && cursorMoves[1].cursor.featureId === 'feature_revolve-1',
       'Feature edit cancel should restore the captured tail cursor.',
     )
@@ -2643,10 +2637,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'idle', 'Feature edit commit should return to idle after restore.')
-    assert(featureCommitCalls.length === 1, 'Feature edit commit should submit the hydrated edit session.')
-    assert(cursorMoves.length === 2, 'Feature edit commit should restore the captured entry cursor.')
-    assert(
+    expectTrue(result.state.kind === 'idle', 'Feature edit commit should return to idle after restore.')
+    expectTrue(featureCommitCalls.length === 1, 'Feature edit commit should submit the hydrated edit session.')
+    expectTrue(cursorMoves.length === 2, 'Feature edit commit should restore the captured entry cursor.')
+    expectTrue(
       cursorMoves[1]?.cursor.kind === 'sketch' && cursorMoves[1].cursor.sketchId === 'sketch_second',
       'Feature edit commit should restore the captured non-tail cursor instead of the history tail.',
     )
@@ -2672,9 +2666,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'idle', 'Sketch abort should return to idle.')
-    assert(cursorMoves.length === 2, 'Sketch abort should restore the captured entry cursor.')
-    assert(
+    expectTrue(result.state.kind === 'idle', 'Sketch abort should return to idle.')
+    expectTrue(cursorMoves.length === 2, 'Sketch abort should restore the captured entry cursor.')
+    expectTrue(
       cursorMoves[1]?.cursor.kind === 'feature' && cursorMoves[1].cursor.featureId === 'feature_revolve-1',
       'Sketch abort should restore the captured tail cursor.',
     )
@@ -2702,13 +2696,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'idle', 'Finish sketch should return to idle after commit.')
-    assert(cursorMoves.length === 0, 'Finish sketch should not restore the document cursor when the reopened sketch is already current.')
+    expectTrue(result.state.kind === 'idle', 'Finish sketch should return to idle after commit.')
+    expectTrue(cursorMoves.length === 0, 'Finish sketch should not restore the document cursor when the reopened sketch is already current.')
     const sketchCommitIndex = result.effects.findIndex((effect) => effect.type === 'sketch.commit')
     const refreshIndex = result.effects.findIndex(
       (effect, index) => index > sketchCommitIndex && effect.type === 'document.fetchSnapshot',
     )
-    assert(
+    expectTrue(
       sketchCommitIndex >= 0 && refreshIndex > sketchCommitIndex,
       'Finish sketch should refresh the committed snapshot after commit.',
     )
@@ -2738,13 +2732,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       runtime,
     )
 
-    assert(result.state.kind === 'idle', 'Repository-backed feature edit commit should exit after cursor restore.')
-    assert(
+    expectTrue(result.state.kind === 'idle', 'Repository-backed feature edit commit should exit after cursor restore.')
+    expectTrue(
       result.state.snapshot?.document.cursor.kind === 'feature'
         && result.state.snapshot.document.cursor.featureId === 'feature_fillet-1',
       'Repository-backed feature edit commit should restore the tail cursor captured at edit entry.',
     )
-    assert(
+    expectTrue(
       result.state.preview?.label !== 'The authored document changed after the current snapshot was loaded. Refresh before retrying this mutation.',
       'Edit-exit cursor restore should not run against stale repository provenance.',
     )
@@ -2757,11 +2751,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       repositorySource: 'peer',
     }
     const previousCursor = getPreviousDocumentHistoryCursor(snapshot)
-    assert(previousCursor, 'Repository cursor fixture should expose a previous cursor.')
+    expectTrue(previousCursor, 'Repository cursor fixture should expose a previous cursor.')
 
     const boot = transitionEditorState(initialEditorState, { type: 'session.started' })
     const fetchEffect = boot.effects[0]
-    assert(fetchEffect?.type === 'document.fetchSnapshot', 'Session start should fetch a snapshot.')
+    expectTrue(fetchEffect?.type === 'document.fetchSnapshot', 'Session start should fetch a snapshot.')
     const loaded = transitionEditorState(boot.state, {
       type: 'effect.snapshotLoaded',
       payload: {
@@ -2778,13 +2772,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
     const cursorEffect = requested.effects[0]
 
-    assert(cursorEffect?.type === 'document.moveHistoryCursor', 'Timeline cursor requests should emit the document cursor effect.')
-    assert(
+    expectTrue(cursorEffect?.type === 'document.moveHistoryCursor', 'Timeline cursor requests should emit the document cursor effect.')
+    expectTrue(
       cursorEffect.mutationBasis.baseRevisionId === snapshot.document.revisionId
         && cursorEffect.mutationBasis.baseRepositoryHeads?.[0] === 'head_a',
       'Document cursor effects should carry the loaded snapshot repository basis.',
     )
-    assert(
+    expectTrue(
       !getEditorHistoryAvailability(requested.state).canUndo && !getEditorHistoryAvailability(requested.state).canRedo,
       'Document history actions should be unavailable while the cursor mutation is pending.',
     )
@@ -2806,9 +2800,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }],
     })
 
-    assert(conflicted.effects[0]?.type === 'document.fetchSnapshot', 'Repository cursor conflicts should request a refresh.')
-    assert(conflicted.state.pendingHistoryCursorRequestId === null, 'Repository cursor conflicts should clear the pending cursor request.')
-    assert(conflicted.state.pendingSnapshotRequestId === conflicted.effects[0]?.requestId, 'Conflict refresh should be tracked as pending.')
+    expectTrue(conflicted.effects[0]?.type === 'document.fetchSnapshot', 'Repository cursor conflicts should request a refresh.')
+    expectTrue(conflicted.state.pendingHistoryCursorRequestId === null, 'Repository cursor conflicts should clear the pending cursor request.')
+    expectTrue(conflicted.state.pendingSnapshotRequestId === conflicted.effects[0]?.requestId, 'Conflict refresh should be tracked as pending.')
   }
 
   function testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics() {
@@ -2824,7 +2818,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
     const refresh = transitionEditorState(loaded.state, { type: 'document.refreshRequested' })
     const effect = refresh.effects[0]
-    assert(effect?.type === 'document.fetchSnapshot', 'Refresh should request a document snapshot.')
+    expectTrue(effect?.type === 'document.fetchSnapshot', 'Refresh should request a document snapshot.')
 
     const next = structuredClone(previous)
     next.revisionId = 'rev_2'
@@ -2859,15 +2853,15 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     })
 
-    assert(
+    expectTrue(
       failedRefresh.state.snapshot?.document.render.records[0]?.id === previousRender.id,
       'Feature-scoped failed refreshes should preserve previous viewport render records.',
     )
-    assert(
+    expectTrue(
       failedRefresh.state.snapshot?.document.diagnostics[0]?.featureId === featureId,
       'Feature-scoped failed refreshes should still expose the new repair diagnostic.',
     )
-    assert(
+    expectTrue(
       failedRefresh.state.snapshot?.revisionId === 'rev_2',
       'Render preservation should not roll back the authored snapshot revision.',
     )
@@ -2884,7 +2878,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     fixed.render = fixed.document.render
     const secondRefresh = transitionEditorState(failedRefresh.state, { type: 'document.refreshRequested' })
     const secondEffect = secondRefresh.effects[0]
-    assert(secondEffect?.type === 'document.fetchSnapshot', 'Second refresh should request a document snapshot.')
+    expectTrue(secondEffect?.type === 'document.fetchSnapshot', 'Second refresh should request a document snapshot.')
     const fixedRefresh = transitionEditorState(secondRefresh.state, {
       type: 'effect.snapshotLoaded',
       payload: {
@@ -2897,11 +2891,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     })
 
-    assert(
+    expectTrue(
       fixedRefresh.state.snapshot?.document.render.records[0]?.id === 'render_fixed',
       'Successful corrected refreshes should swap in the new render records.',
     )
-    assert(
+    expectTrue(
       fixedRefresh.state.snapshot?.document.diagnostics.length === 0,
       'Corrected refreshes should clear feature diagnostics.',
     )
@@ -2925,10 +2919,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       snapshot: replacement,
     })
 
-    assert(replaced.state.kind === 'idle', 'Whole-document replacement should reset the editor into idle mode.')
-    assert(replaced.state.mode === 'part', 'Whole-document replacement should return the editor to part mode.')
-    assert(replaced.state.selection.length === 0, 'Whole-document replacement should clear the prior selection.')
-    assert(replaced.state.snapshot?.revisionId === 'rev_replaced', 'Whole-document replacement should load the replacement snapshot.')
+    expectTrue(replaced.state.kind === 'idle', 'Whole-document replacement should reset the editor into idle mode.')
+    expectTrue(replaced.state.mode === 'part', 'Whole-document replacement should return the editor to part mode.')
+    expectTrue(replaced.state.selection.length === 0, 'Whole-document replacement should clear the prior selection.')
+    expectTrue(replaced.state.snapshot?.revisionId === 'rev_replaced', 'Whole-document replacement should load the replacement snapshot.')
   }
 
   async function testEditorEventLoopBootstrapsAndLoadsSnapshot() {
@@ -2961,10 +2955,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     const machineState = actor.getState()
 
-    assert(snapshotCallCount === 1, 'The editor event loop should bootstrap the initial snapshot load itself.')
-    assert(machineState.document.documentId === snapshot.document.documentId, 'Bootstrap should hydrate the document id.')
-    assert(machineState.document.revisionId === snapshot.document.revisionId, 'Bootstrap should hydrate the revision id.')
-    assert(machineState.snapshot?.revisionId === snapshot.document.revisionId, 'Bootstrap should store the loaded snapshot.')
+    expectTrue(snapshotCallCount === 1, 'The editor event loop should bootstrap the initial snapshot load itself.')
+    expectTrue(machineState.document.documentId === snapshot.document.documentId, 'Bootstrap should hydrate the document id.')
+    expectTrue(machineState.document.revisionId === snapshot.document.revisionId, 'Bootstrap should hydrate the revision id.')
+    expectTrue(machineState.snapshot?.revisionId === snapshot.document.revisionId, 'Bootstrap should store the loaded snapshot.')
     actor.stop()
   }
 
@@ -3012,7 +3006,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     await flushAsyncWork()
 
     const selectionState = actor.getState()
-    assert(selectionState.kind === 'selectionCommand', 'Sketch activation should reach the selection workflow before opening.')
+    expectTrue(selectionState.kind === 'selectionCommand', 'Sketch activation should reach the selection workflow before opening.')
 
     actor.dispatch({
       type: 'command.cancelled',
@@ -3028,7 +3022,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     const cancelledState = actor.getState()
 
-    assert(cancelledState.kind === 'idle', 'Cancelling sketch selection should return the runtime to idle.')
+    expectTrue(cancelledState.kind === 'idle', 'Cancelling sketch selection should return the runtime to idle.')
     actor.stop()
   }
 
@@ -3056,7 +3050,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
 
     const openEffect = openRequested.effects[0]
 
-    assert(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
+    expectTrue(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
 
     const opened = transitionEditorState(openRequested.state, {
       type: 'effect.sketchSessionOpened',
@@ -3067,23 +3061,23 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       session: createNewSketchSession(createStandardPlaneDefinition('xy')),
     })
 
-    assert(opened.state.kind === 'editingSketch', 'Sketch open fixture should enter sketch editing.')
+    expectTrue(opened.state.kind === 'editingSketch', 'Sketch open fixture should enter sketch editing.')
 
     const withTool = transitionEditorState(opened.state, {
       type: 'tool.activated',
       toolId: 'line',
     })
 
-    assert(withTool.state.kind === 'editingSketch', 'Sketch tool activation should stay in sketch editing.')
-    assert(withTool.state.session.activeTool === 'line', 'Sketch tool activation should mark the active tool.')
+    expectTrue(withTool.state.kind === 'editingSketch', 'Sketch tool activation should stay in sketch editing.')
+    expectTrue(withTool.state.session.activeTool === 'line', 'Sketch tool activation should mark the active tool.')
 
     const cleared = transitionEditorState(withTool.state, {
       type: 'sketch.activeToolCleared',
     })
 
-    assert(cleared.state.kind === 'editingSketch', 'Clearing an active sketch tool should keep the sketch session open.')
-    assert(cleared.state.session.activeTool === null, 'Clearing an active sketch tool should remove the active tool.')
-    assert(cleared.state.command.toolId === 'sketch', 'Clearing an active sketch tool should restore sketch-session command identity.')
+    expectTrue(cleared.state.kind === 'editingSketch', 'Clearing an active sketch tool should keep the sketch session open.')
+    expectTrue(cleared.state.session.activeTool === null, 'Clearing an active sketch tool should remove the active tool.')
+    expectTrue(cleared.state.command.toolId === 'sketch', 'Clearing an active sketch tool should restore sketch-session command identity.')
   }
 
   function testRemainingSketchToolsActivateWithoutDroppingSketchSession() {
@@ -3109,7 +3103,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
     const openEffect = openRequested.effects[0]
 
-    assert(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
+    expectTrue(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
 
     const opened = transitionEditorState(openRequested.state, {
       type: 'effect.sketchSessionOpened',
@@ -3124,7 +3118,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       toolId: 'line',
     })
 
-    assert(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
+    expectTrue(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
 
     const activeSketchToolIds = [
       ['spline', 'spline'],
@@ -3140,13 +3134,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       })
       const viewState = getEditorViewState(result.state)
 
-      assert(result.effects.length === 0, `${toolId} should not emit effects while editing a sketch.`)
-      assert(result.state.kind === 'editingSketch', `${toolId} should keep the editor in sketch editing.`)
-      assert(result.state.mode === 'sketch', `${toolId} should keep sketch toolbar mode.`)
-      assert(viewState.sketchSession !== null, `${toolId} should keep the sketch session visible to the UI.`)
-      assert(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
-      assert(result.state.command.toolId === toolId, `${toolId} should replace the active sketch command.`)
-      assert(result.state.session.activeTool === expectedActiveTool, `${toolId} should activate its sketch workflow.`)
+      expectTrue(result.effects.length === 0, `${toolId} should not emit effects while editing a sketch.`)
+      expectTrue(result.state.kind === 'editingSketch', `${toolId} should keep the editor in sketch editing.`)
+      expectTrue(result.state.mode === 'sketch', `${toolId} should keep sketch toolbar mode.`)
+      expectTrue(viewState.sketchSession !== null, `${toolId} should keep the sketch session visible to the UI.`)
+      expectTrue(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
+      expectTrue(result.state.command.toolId === toolId, `${toolId} should replace the active sketch command.`)
+      expectTrue(result.state.session.activeTool === expectedActiveTool, `${toolId} should activate its sketch workflow.`)
     }
   }
 
@@ -3192,13 +3186,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       toolId: 'offset',
     })
 
-    assert(reused.state.kind === 'editingSketch', 'Sketch edit-tool activation should remain in sketch editing.')
-    assert(reused.state.selection.length === selectedTargets.length, 'Compatible sketch edit-tool activation should preserve current selection.')
-    assert(
+    expectTrue(reused.state.kind === 'editingSketch', 'Sketch edit-tool activation should remain in sketch editing.')
+    expectTrue(reused.state.selection.length === selectedTargets.length, 'Compatible sketch edit-tool activation should preserve current selection.')
+    expectTrue(
       reused.state.session.activeEditTool?.selectedTargets.length === selectedTargets.length,
       'Compatible sketch edit-tool activation should seed the active edit tool from the adopted selection.',
     )
-    assert(
+    expectTrue(
       reused.state.session.toolStagedEntities.some((entity) => entity.status === 'preview'),
       'Compatible sketch edit-tool activation should derive preview geometry from the adopted selection.',
     )
@@ -3215,9 +3209,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(cleared.state.kind === 'editingSketch', 'Invalid sketch edit-tool activation should stay in sketch editing.')
-    assert(cleared.state.selection.length === 0, 'Invalid sketch edit-tool activation should clear incompatible selection.')
-    assert(
+    expectTrue(cleared.state.kind === 'editingSketch', 'Invalid sketch edit-tool activation should stay in sketch editing.')
+    expectTrue(cleared.state.selection.length === 0, 'Invalid sketch edit-tool activation should clear incompatible selection.')
+    expectTrue(
       cleared.state.session.activeEditTool?.selectedTargets.length === 0,
       'Invalid sketch edit-tool activation should start with an empty edit-tool target set.',
     )
@@ -3246,7 +3240,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
     const openEffect = openRequested.effects[0]
 
-    assert(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
+    expectTrue(openEffect?.type === 'sketch.openSession', 'Sketch fixture should emit an open-session effect.')
 
     const opened = transitionEditorState(openRequested.state, {
       type: 'effect.sketchSessionOpened',
@@ -3261,7 +3255,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       toolId: 'line',
     })
 
-    assert(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
+    expectTrue(withTool.state.kind === 'editingSketch', 'Sketch tool fixture should enter sketch editing.')
 
     const passiveSketchToolIds = [
       'fill',
@@ -3275,16 +3269,16 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       })
       const viewState = getEditorViewState(result.state)
 
-      assert(result.effects.length === 0, `${toolId} should not emit effects while editing a sketch.`)
-      assert(result.state.kind === 'editingSketch', `${toolId} should keep the editor in sketch editing.`)
-      assert(result.state.mode === 'sketch', `${toolId} should keep sketch toolbar mode.`)
-      assert(viewState.sketchSession !== null, `${toolId} should keep the sketch session visible to the UI.`)
-      assert(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
-      assert(result.state.command.toolId === 'line', `${toolId} should not replace the active sketch command.`)
-      assert(result.state.session.activeTool === 'line', `${toolId} should not clear the active sketch tool.`)
-      assert(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should open style focus state.`)
-      assert(result.state.session.activeStyleFocus.target === null, `${toolId} should show target guidance without a selection.`)
-      assert(
+      expectTrue(result.effects.length === 0, `${toolId} should not emit effects while editing a sketch.`)
+      expectTrue(result.state.kind === 'editingSketch', `${toolId} should keep the editor in sketch editing.`)
+      expectTrue(result.state.mode === 'sketch', `${toolId} should keep sketch toolbar mode.`)
+      expectTrue(viewState.sketchSession !== null, `${toolId} should keep the sketch session visible to the UI.`)
+      expectTrue(viewState.mode === 'sketch', `${toolId} should keep sketch view mode.`)
+      expectTrue(result.state.command.toolId === 'line', `${toolId} should not replace the active sketch command.`)
+      expectTrue(result.state.session.activeTool === 'line', `${toolId} should not clear the active sketch tool.`)
+      expectTrue(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should open style focus state.`)
+      expectTrue(result.state.session.activeStyleFocus.target === null, `${toolId} should show target guidance without a selection.`)
+      expectTrue(
         getSketchToolPresentation(result.state.session)?.selectionGuide?.requiredCount === 1,
         `${toolId} should expose style target guidance.`,
       )
@@ -3296,7 +3290,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     styledSession = acceptSketchDraw(styledSession, [8, 0])
 
     const target = styledSession.definition.entities[0]?.target
-    assert(target, 'Style focus fixture should create a selectable local sketch entity.')
+    expectTrue(target, 'Style focus fixture should create a selectable local sketch entity.')
 
     const styledBaseState: SketchEditorState = {
       ...initialEditorState,
@@ -3333,17 +3327,17 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
         toolId,
       })
 
-      assert(result.state.kind === 'editingSketch', `${toolId} with a target should keep sketch editing.`)
-      assert(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should become the active style focus.`)
+      expectTrue(result.state.kind === 'editingSketch', `${toolId} with a target should keep sketch editing.`)
+      expectTrue(result.state.session.activeStyleFocus?.toolId === toolId, `${toolId} should become the active style focus.`)
       if (toolId === 'stroke') {
-        assert(result.state.session.activeStyleFocus.target?.kind === 'sketchEntity', `${toolId} should bind the selected style target.`)
-        assert(
+        expectTrue(result.state.session.activeStyleFocus.target?.kind === 'sketchEntity', `${toolId} should bind the selected style target.`)
+        expectTrue(
           (getSketchToolPresentation(result.state.session)?.controlGroups?.[0]?.controls.length ?? 0) > 0,
           `${toolId} should expose focused style controls for the selected target.`,
         )
       } else {
-        assert(result.state.session.activeStyleFocus.target === null, `${toolId} should reject a non-region style target.`)
-        assert(
+        expectTrue(result.state.session.activeStyleFocus.target === null, `${toolId} should reject a non-region style target.`)
+        expectTrue(
           getSketchToolPresentation(result.state.session)?.selectionGuide?.acceptedKinds.includes('region'),
           `${toolId} should request an enclosed region target.`,
         )
@@ -3367,9 +3361,9 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const secondPointTarget = session.definition.points[1]?.target
     const lineTarget = session.definition.entities[0]?.target
 
-    assert(pointTarget, 'Constraint routing fixture should create a selectable sketch point.')
-    assert(secondPointTarget, 'Constraint routing fixture should create a second selectable sketch point.')
-    assert(lineTarget, 'Constraint routing fixture should create a selectable sketch entity.')
+    expectTrue(pointTarget, 'Constraint routing fixture should create a selectable sketch point.')
+    expectTrue(secondPointTarget, 'Constraint routing fixture should create a second selectable sketch point.')
+    expectTrue(lineTarget, 'Constraint routing fixture should create a selectable sketch entity.')
 
     return {
       pointTarget,
@@ -3412,8 +3406,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: pointTarget,
     })
 
-    assert(hovered.state.kind === 'editingSketch', 'Hover fixture should remain in sketch editing.')
-    assert(
+    expectTrue(hovered.state.kind === 'editingSketch', 'Hover fixture should remain in sketch editing.')
+    expectTrue(
       hovered.state.session.constraintAuthoring?.hoverTarget?.target &&
         primitiveRefEquals(hovered.state.session.constraintAuthoring.hoverTarget.target, pointTarget),
       'Active constraint authoring should record valid viewport hover targets.',
@@ -3424,8 +3418,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: pointTarget,
     })
 
-    assert(selected.state.kind === 'editingSketch', 'Selection fixture should remain in sketch editing.')
-    assert(
+    expectTrue(selected.state.kind === 'editingSketch', 'Selection fixture should remain in sketch editing.')
+    expectTrue(
       selected.state.session.constraintAuthoring?.selectedTargets.length === 1 &&
         primitiveRefEquals(selected.state.session.constraintAuthoring.selectedTargets[0]!.target, pointTarget),
       'Active constraint authoring should record valid viewport click targets.',
@@ -3439,32 +3433,32 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'viewport.selectionRequested',
       target: pointTarget,
     })
-    assert(selectedFirst.state.kind === 'editingSketch', 'First dimension target selection should keep sketch editing.')
+    expectTrue(selectedFirst.state.kind === 'editingSketch', 'First dimension target selection should keep sketch editing.')
 
     const selectedSecond = transitionEditorState(selectedFirst.state, {
       type: 'viewport.selectionRequested',
       target: secondPointTarget,
     })
-    assert(selectedSecond.state.kind === 'editingSketch', 'Second dimension target selection should keep sketch editing.')
+    expectTrue(selectedSecond.state.kind === 'editingSketch', 'Second dimension target selection should keep sketch editing.')
 
     const moved = transitionEditorState(selectedSecond.state, {
       type: 'sketch.pointerMoved',
       point: mapSketchPointToWorld(selectedSecond.state.session.plane, [5, 3]),
     })
-    assert(moved.state.kind === 'editingSketch', 'Pointer movement over ready dimension preview should keep sketch editing.')
+    expectTrue(moved.state.kind === 'editingSketch', 'Pointer movement over ready dimension preview should keep sketch editing.')
 
     const clickedGeometry = transitionEditorState(moved.state, {
       type: 'viewport.selectionRequested',
       target: lineTarget,
     })
 
-    assert(clickedGeometry.state.kind === 'editingSketch', 'Dimension placement click fixture should keep sketch editing.')
-    assert(
+    expectTrue(clickedGeometry.state.kind === 'editingSketch', 'Dimension placement click fixture should keep sketch editing.')
+    expectTrue(
       clickedGeometry.state.session.constraintAuthoring?.isPreviewPinned === true
         && clickedGeometry.state.session.constraintAuthoring.selectedTargets.length === 2,
       'Clicking geometry while a value-backed dimension is ready should pin placement instead of replacing operands.',
     )
-    assert(
+    expectTrue(
       getSketchToolPresentation(clickedGeometry.state.session)?.floatingInput?.label === 'Distance',
       'Pinning placement from a target click should open the floating value-entry input.',
     )
@@ -3481,7 +3475,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = beginSketchTool(session, 'dimensionDistance')
 
     const [firstLineTarget, secondLineTarget] = session.definition.entities.map((entity) => entity.target)
-    assert(firstLineTarget && secondLineTarget, 'Angle dimension release fixture should create two selectable lines.')
+    expectTrue(firstLineTarget && secondLineTarget, 'Angle dimension release fixture should create two selectable lines.')
 
     const state: SketchEditorState = {
       ...initialEditorState,
@@ -3516,15 +3510,15 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'viewport.selectionRequested',
       target: firstLineTarget,
     })
-    assert(selectedFirst.state.kind === 'editingSketch', 'First line selection should keep sketch editing.')
+    expectTrue(selectedFirst.state.kind === 'editingSketch', 'First line selection should keep sketch editing.')
 
     const releaseOverSecond = transitionEditorState(selectedFirst.state, {
       type: 'sketch.pointerReleased',
       point: mapSketchPointToWorld(selectedFirst.state.session.plane, [5, 0]),
       target: secondLineTarget,
     })
-    assert(releaseOverSecond.state.kind === 'editingSketch', 'Release over second line should keep sketch editing.')
-    assert(
+    expectTrue(releaseOverSecond.state.kind === 'editingSketch', 'Release over second line should keep sketch editing.')
+    expectTrue(
       releaseOverSecond.state.session.constraintAuthoring?.isPreviewPinned === false
         && releaseOverSecond.state.session.constraintAuthoring.selectedTargets.length === 1,
       'Pointer release over a selectable second line should not pin the first line length preview before click selection.',
@@ -3534,10 +3528,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'viewport.selectionRequested',
       target: secondLineTarget,
     })
-    assert(selectedSecond.state.kind === 'editingSketch', 'Second line selection should keep sketch editing.')
+    expectTrue(selectedSecond.state.kind === 'editingSketch', 'Second line selection should keep sketch editing.')
 
     let anglePreview = getSketchToolPresentation(selectedSecond.state.session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
-    assert(
+    expectTrue(
       selectedSecond.state.session.constraintAuthoring?.selectedTargets.length === 2
         && anglePreview?.kind === 'angleArc',
       'Selecting the second non-parallel line should preserve the two-line angle preview.',
@@ -3547,12 +3541,12 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'sketch.pointerMoved',
       point: mapSketchPointToWorld(selectedSecond.state.session.plane, [8, 3]),
     })
-    assert(moved.state.kind === 'editingSketch', 'Pointer movement after angle selection should keep sketch editing.')
+    expectTrue(moved.state.kind === 'editingSketch', 'Pointer movement after angle selection should keep sketch editing.')
     anglePreview = getSketchToolPresentation(moved.state.session)?.overlays?.find((overlay) => overlay.kind === 'angleArc')
     const lengthPreview = getSketchToolPresentation(moved.state.session)?.overlays?.find(
       (overlay) => overlay.kind === 'dimensionLine' && overlay.referenceKind === 'lineLength',
     )
-    assert(
+    expectTrue(
       anglePreview?.kind === 'angleArc' && !lengthPreview,
       'Pointer movement after two selected lines should not fall back to the first line length dimension.',
     )
@@ -3562,8 +3556,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       point: mapSketchPointToWorld(moved.state.session.plane, [4, -1]),
       target: null,
     })
-    assert(placed.state.kind === 'editingSketch', 'Angle placement click should keep sketch editing.')
-    assert(
+    expectTrue(placed.state.kind === 'editingSketch', 'Angle placement click should keep sketch editing.')
+    expectTrue(
       placed.state.session.constraintAuthoring?.isPreviewPinned === true
         && getSketchToolPresentation(placed.state.session)?.floatingInput?.label === 'Angle',
       'Clicking the primary viewport after angle preview should pin placement and keep the value entry open.',
@@ -3578,8 +3572,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: lineTarget,
     })
 
-    assert(selected.state.kind === 'editingSketch', 'Invalid constraint selection fixture should remain in sketch editing.')
-    assert(
+    expectTrue(selected.state.kind === 'editingSketch', 'Invalid constraint selection fixture should remain in sketch editing.')
+    expectTrue(
       selected.state.session.constraintAuthoring?.selectedTargets.length === 0,
       'Dimension point authoring should ignore viewport clicks on rejected sketch entity targets.',
     )
@@ -3705,8 +3699,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: localTarget,
     })
 
-    assert(selected.state.kind === 'editingSketch', 'Connected selection should stay in sketch editing.')
-    assert(
+    expectTrue(selected.state.kind === 'editingSketch', 'Connected selection should stay in sketch editing.')
+    expectTrue(
       selected.state.selection.length === 2
         && selected.state.selection.every((target) => target.kind === 'sketchEntity'),
       'Connected selection should update the normal editor selection with the connected sketch entities.',
@@ -3719,7 +3713,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = startSketchDraw(session, [0, 0])
     session = acceptSketchDraw(session, [4, 3])
     const localTarget = session.definition.entities[0]?.target
-    assert(localTarget, 'Rectangle fixture should create a selectable sketch entity.')
+    expectTrue(localTarget, 'Rectangle fixture should create a selectable sketch entity.')
 
     const selected = transitionEditorState({
       ...initialEditorState,
@@ -3753,8 +3747,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: localTarget,
     })
 
-    assert(selected.state.kind === 'editingSketch', 'Connected rectangle selection should stay in sketch editing.')
-    assert(
+    expectTrue(selected.state.kind === 'editingSketch', 'Connected rectangle selection should stay in sketch editing.')
+    expectTrue(
       selected.state.selection.length === 4
         && selected.state.selection.every((target) => target.kind === 'sketchEntity'),
       'Double-clicking one accepted rectangle edge while Rectangle remains active should select all four rectangle edges.',
@@ -3768,8 +3762,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: projectedTarget,
     })
 
-    assert(selected.state.kind === 'editingSketch', 'Unsupported connected selection should stay in sketch editing.')
-    assert(selected.state.selection.length === 0, 'Projected reference geometry should not expand through the connected selection event.')
+    expectTrue(selected.state.kind === 'editingSketch', 'Unsupported connected selection should stay in sketch editing.')
+    expectTrue(selected.state.selection.length === 0, 'Projected reference geometry should not expand through the connected selection event.')
   }
 
   function testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation() {
@@ -3782,7 +3776,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = acceptSketchDraw(session, [10, 6])
 
     const [firstLineId, secondLineId] = session.definition.entityIds
-    assert(firstLineId && secondLineId, 'Annotation deletion fixture should create two sketch lines.')
+    expectTrue(firstLineId && secondLineId, 'Annotation deletion fixture should create two sketch lines.')
 
     session = beginSketchTool(session, 'constraintParallel')
     session = selectSketchConstraintTarget(session, {
@@ -3797,7 +3791,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
 
     const annotation = getSketchAnnotationDescriptors(session)[0]
-    assert(annotation, 'Annotation deletion fixture should create a committed annotation descriptor.')
+    expectTrue(annotation, 'Annotation deletion fixture should create a committed annotation descriptor.')
 
     const selected = transitionEditorState({
       ...initialEditorState,
@@ -3829,25 +3823,25 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: annotation.target,
     })
 
-    assert(selected.state.kind === 'editingSketch', 'Selecting an annotation should stay in sketch editing.')
-    assert(
+    expectTrue(selected.state.kind === 'editingSketch', 'Selecting an annotation should stay in sketch editing.')
+    expectTrue(
       selected.state.session.selectedAnnotation
         && primitiveRefEquals(selected.state.session.selectedAnnotation, annotation.target),
       'Viewport annotation selection should select the durable annotation target.',
     )
-    assert(
+    expectTrue(
       selected.state.session.definition.constraintIds.length === 1,
       'Selecting an annotation should not select or delete affected geometry.',
     )
 
     const deleted = transitionEditorState(selected.state, { type: 'sketch.annotationDeleteRequested' })
 
-    assert(deleted.state.kind === 'editingSketch', 'Deleting an annotation should stay in sketch editing.')
-    assert(
+    expectTrue(deleted.state.kind === 'editingSketch', 'Deleting an annotation should stay in sketch editing.')
+    expectTrue(
       deleted.state.session.definition.constraintIds.length === 0,
       'Annotation deletion should remove the durable constraint record from sketch state.',
     )
-    assert(
+    expectTrue(
       deleted.state.session.commitRequest?.definition.constraintIds.length === 0,
       'Annotation deletion should update the durable sketch commit request.',
     )
@@ -3868,7 +3862,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }),
     ])
     const operationId = baseSession.fullDefinition.authoringOperations?.[0]?.operationId
-    assert(operationId, 'History-delete fixture should create a committed reference-image operation.')
+    expectTrue(operationId, 'History-delete fixture should create a committed reference-image operation.')
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -3909,20 +3903,20 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       type: 'sketch.historyOperationDeleteRequested',
       operationId,
     })
-    assert(deletedFromHistory.state.kind === 'editingSketch', 'History-row deletion should keep the sketch editor active.')
-    assert(
+    expectTrue(deletedFromHistory.state.kind === 'editingSketch', 'History-row deletion should keep the sketch editor active.')
+    expectTrue(
       deletedFromHistory.state.session.fullDefinition.authoringOperations?.length === 0,
       'History-row deletion should remove the targeted authored operation instead of appending a delete row.',
     )
-    assert(deletedFromHistory.state.selection.length === 0, 'History-row deletion should clear live selection state after the rewrite.')
+    expectTrue(deletedFromHistory.state.selection.length === 0, 'History-row deletion should clear live selection state after the rewrite.')
 
     const liveDelete = transitionEditorState(baseState, { type: 'sketch.annotationDeleteRequested' })
-    assert(liveDelete.state.kind === 'editingSketch', 'Live selection deletion should keep the sketch editor active.')
-    assert(
+    expectTrue(liveDelete.state.kind === 'editingSketch', 'Live selection deletion should keep the sketch editor active.')
+    expectTrue(
       liveDelete.state.session.fullDefinition.authoringOperations?.length === 2,
       'Live selection deletion of a reference image should append a durable delete operation.',
     )
-    assert(
+    expectTrue(
       liveDelete.state.session.fullDefinition.authoringOperations?.at(-1)?.kind === 'delete',
       'Live selection deletion should preserve the existing append-delete semantics for viewport-selected reference images.',
     )
@@ -3938,7 +3932,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = acceptSketchDraw(session, [10, 5])
 
     const [firstPointId, , , diagonalPointId] = session.definition.pointIds
-    assert(firstPointId && diagonalPointId, 'Annotation edit fixture should create selectable sketch points.')
+    expectTrue(firstPointId && diagonalPointId, 'Annotation edit fixture should create selectable sketch points.')
 
     session = beginSketchTool(session, 'dimensionDistance')
     session = selectSketchConstraintTarget(session, {
@@ -3955,7 +3949,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = patchSketchConstraintValue(session, { intent: 'commitConstraintValue' })
 
     const annotation = getSketchAnnotationDescriptors(session).find((entry) => entry.target.kind === 'dimension')
-    assert(annotation?.target.kind === 'dimension', 'Annotation edit fixture should create a committed dimension annotation.')
+    expectTrue(annotation?.target.kind === 'dimension', 'Annotation edit fixture should create a committed dimension annotation.')
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -3989,12 +3983,12 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       target: annotation.target,
     })
 
-    assert(opened.state.kind === 'editingSketch', 'Annotation edit request should stay in sketch editing.')
-    assert(
+    expectTrue(opened.state.kind === 'editingSketch', 'Annotation edit request should stay in sketch editing.')
+    expectTrue(
       opened.state.session.activeAnnotationEdit?.target.kind === 'dimension',
       'Annotation edit request should open a committed dimension edit session.',
     )
-    assert(
+    expectTrue(
       opened.state.session.toolPresentation?.floatingInput?.value === 24,
       'Committed dimension edit form should open with the durable dimension value.',
     )
@@ -4008,8 +4002,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       patch: { intent: 'commitAnnotationValue' },
     })
 
-    assert(committed.state.kind === 'editingSketch', 'Committed dimension edit should stay in sketch editing.')
-    assert(
+    expectTrue(committed.state.kind === 'editingSketch', 'Committed dimension edit should stay in sketch editing.')
+    expectTrue(
       committed.state.session.definition.dimensions[0]?.kind === 'distance'
         && committed.state.session.definition.dimensions[0].value === 33,
       'Committed dimension edit should update the existing durable dimension record.',
@@ -4023,7 +4017,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = acceptSketchDraw(session, [8, 0])
 
     const target = session.definition.entities[0]?.target
-    assert(target, 'Style patch routing fixture should create a selectable local sketch entity.')
+    expectTrue(target, 'Style patch routing fixture should create a selectable local sketch entity.')
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -4057,12 +4051,12 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       patch: { intent: 'patchSketchStyle', field: 'strokeColor', value: '#ff00ff' },
     })
 
-    assert(patched.state.kind === 'editingSketch', 'Sketch style patch event should remain in sketch editing.')
-    assert(
+    expectTrue(patched.state.kind === 'editingSketch', 'Sketch style patch event should remain in sketch editing.')
+    expectTrue(
       patched.state.session.definition.entities[0]?.style?.strokeColor === '#ff00ff',
       'Sketch style patch should update the selected local entity style via sketch.toolPatched routing.',
     )
-    assert(
+    expectTrue(
       patched.state.session.commitRequest?.definition.entities[0]?.style?.strokeColor === '#ff00ff',
       'Sketch style patch should rebuild the durable commit request payload.',
     )
@@ -4115,8 +4109,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       diagnostics: [diagnostic],
     })
 
-    assert(rejected.state.kind === 'editingSketch', 'Rejected sketch commit should keep the sketch open.')
-    assert(
+    expectTrue(rejected.state.kind === 'editingSketch', 'Rejected sketch commit should keep the sketch open.')
+    expectTrue(
       rejected.state.session.validationMessage === diagnostic.message,
       'Rejected sketch commit diagnostics should surface in the visible sketch validation message.',
     )
@@ -4127,7 +4121,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     session = beginSketchTool(session, 'line')
     session = startSketchDraw(session, [0, 0])
     session = acceptSketchDraw(session, [8, 0])
-    assert(session.commitRequest, 'Sketch conflict fixture should have a commit payload.')
+    expectTrue(session.commitRequest, 'Sketch conflict fixture should have a commit payload.')
 
     const staleSnapshot = createSnapshot()
     staleSnapshot.document.revisionId = 'rev_0001'
@@ -4183,10 +4177,10 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
 
     const refreshEffect = conflicted.effects[0]
-    assert(refreshEffect?.type === 'document.fetchSnapshot', 'Sketch commit conflicts should request a snapshot refresh.')
-    assert(conflicted.state.kind === 'editingSketch', 'Sketch commit conflicts should keep the sketch open.')
-    assert(conflicted.state.document.revisionId === 'rev_0002', 'Sketch commit conflicts should advance the editor revision.')
-    assert(conflicted.state.pendingSnapshotRequestId === refreshEffect.requestId, 'Conflict refresh should be tracked as pending.')
+    expectTrue(refreshEffect?.type === 'document.fetchSnapshot', 'Sketch commit conflicts should request a snapshot refresh.')
+    expectTrue(conflicted.state.kind === 'editingSketch', 'Sketch commit conflicts should keep the sketch open.')
+    expectTrue(conflicted.state.document.revisionId === 'rev_0002', 'Sketch commit conflicts should advance the editor revision.')
+    expectTrue(conflicted.state.pendingSnapshotRequestId === refreshEffect.requestId, 'Conflict refresh should be tracked as pending.')
 
     const refreshedSnapshot = createSnapshot()
     refreshedSnapshot.document.revisionId = 'rev_0002'
@@ -4207,8 +4201,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     })
     const retryEffect = retry.effects[0]
 
-    assert(retryEffect?.type === 'sketch.commit', 'Retrying Finish Sketch should emit another sketch commit.')
-    assert(retryEffect.baseRevisionId === 'rev_0002', 'Sketch commit retries should use the refreshed revision.')
+    expectTrue(retryEffect?.type === 'sketch.commit', 'Retrying Finish Sketch should emit another sketch commit.')
+    expectTrue(retryEffect.baseRevisionId === 'rev_0002', 'Sketch commit retries should use the refreshed revision.')
   }
 
   async function testModelingServiceRuntimePreservesResultRejections() {
@@ -4248,19 +4242,19 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     })
 
-    assert(runtime.setDocumentCursor, 'Modeling service runtime should expose document cursor mutation.')
+    expectTrue(runtime.setDocumentCursor, 'Modeling service runtime should expose document cursor mutation.')
     const rejected = await runtime.setDocumentCursor({
       baseRevisionId: 'rev_1',
       cursor: { kind: 'feature', featureId: 'feature_a' },
     })
 
-    assert(!rejected.accepted, 'Modeling service Result Errs should become typed rejected mutation results.')
-    assert(rejected.revisionId === 'rev_2', 'Rejected mutation results should retain actual revision ids.')
-    assert(
+    expectTrue(!rejected.accepted, 'Modeling service Result Errs should become typed rejected mutation results.')
+    expectTrue(rejected.revisionId === 'rev_2', 'Rejected mutation results should retain actual revision ids.')
+    expectTrue(
       rejected.diagnostics[0]?.code === 'repository-head-conflict',
       'Rejected mutation diagnostics should retain the modeling diagnostic code.',
     )
-    assert(
+    expectTrue(
       rejected.errorContext?.some((entry) => entry.key === 'diagnosticCodes' && entry.value === 'feature-warning,repository-head-conflict'),
       'Rejected mutation results should retain structured modeling error context.',
     )
@@ -4360,12 +4354,12 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       toolId: 'importImage',
     })
 
-    assert(
+    expectTrue(
       importing.effects.length === 0
         && importing.state.preview?.label === 'Select reference images',
       'Import Image should wait for direct user-gesture file selection before emitting the sketch import effect.',
     )
-    assert(importing.state.kind === 'editingSketch', 'Import Image should preserve sketch editing state while awaiting file selection.')
+    expectTrue(importing.state.kind === 'editingSketch', 'Import Image should preserve sketch editing state while awaiting file selection.')
 
     const selected = transitionEditorState(importing.state, {
       type: 'sketch.referenceImagePayloadsPicked',
@@ -4378,7 +4372,7 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }],
     })
 
-    assert(
+    expectTrue(
       selected.effects[0]?.type === 'sketch.importReferenceImages',
       'Selected reference-image payloads should emit a sketch-owned import effect.',
     )
@@ -4386,13 +4380,13 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
     const completedEvent = await runEditorEffect(selected.effects[0]!, runtime)
     const completed = transitionEditorState(selected.state, completedEvent)
 
-    assert(completed.state.kind === 'editingSketch', 'Successful import should keep the reopened sketch session active.')
-    assert(completed.state.selection[0]?.kind === 'sketch', 'Successful import should select the reopened sketch target.')
-    assert(
+    expectTrue(completed.state.kind === 'editingSketch', 'Successful import should keep the reopened sketch session active.')
+    expectTrue(completed.state.selection[0]?.kind === 'sketch', 'Successful import should select the reopened sketch target.')
+    expectTrue(
       completed.state.selection[0]?.kind === 'sketch' && completed.state.selection[0].sketchId === 'sketch_imported',
       'Successful import should reopen the imported sketch through the editor runtime rather than the workbench shell.',
     )
-    assert(completed.state.pendingImportRequestId === null, 'Import completion should clear the pending import request.')
+    expectTrue(completed.state.pendingImportRequestId === null, 'Import completion should clear the pending import request.')
   }
 
   function testSketchImageImportCanStartFromSketchSelectionCommand() {
@@ -4412,21 +4406,21 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       },
     )
 
-    assert(commandState.state.kind === 'selectionCommand', 'Sketch activation should arm the sketch selection command.')
+    expectTrue(commandState.state.kind === 'selectionCommand', 'Sketch activation should arm the sketch selection command.')
 
     const selected = transitionEditorState(commandState.state, {
       type: 'viewport.selectionRequested',
       target: { kind: 'construction', constructionId: 'construction_plane-xy' },
     })
 
-    assert(selected.state.kind === 'selectionCommand', 'Selecting the sketch plane should keep the sketch command active until the draft opens.')
+    expectTrue(selected.state.kind === 'selectionCommand', 'Selecting the sketch plane should keep the sketch command active until the draft opens.')
 
     const importing = transitionEditorState(selected.state, {
       type: 'tool.activated',
       toolId: 'importImage',
     })
 
-    assert(
+    expectTrue(
       importing.state.kind === 'selectionCommand'
         && importing.state.preview?.label === 'Select reference images',
       'Import Image should arm file selection from the sketch-entry command state.',
@@ -4443,8 +4437,8 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }],
     })
 
-    assert(payloadSelected.state.kind === 'editingSketch', 'Picking reference-image payloads should open a draft sketch session.')
-    assert(
+    expectTrue(payloadSelected.state.kind === 'editingSketch', 'Picking reference-image payloads should open a draft sketch session.')
+    expectTrue(
       payloadSelected.effects[0]?.type === 'sketch.importReferenceImages',
       'Picking reference-image payloads from sketch entry should emit the sketch import effect.',
     )
@@ -4486,11 +4480,11 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {
       }],
     })
 
-    assert(
+    expectTrue(
       payloadSelected.state.kind === 'editingSketch',
       'Import-image-owned sketch selection commands should open a draft sketch session when payloads are picked.',
     )
-    assert(
+    expectTrue(
       payloadSelected.effects[0]?.type === 'sketch.importReferenceImages',
       'Import-image-owned sketch selection commands should emit the sketch import effect.',
     )

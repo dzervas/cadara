@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { EditorEffect, EditorEffectRuntime, EditorEvent, EditorState } from '@/domain/editor/state-machine'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
@@ -72,14 +73,7 @@ function waitForCondition(predicate: () => boolean): Promise<void> {
   })
 }
 
-test('src/application/editor/editor-event-loop.spec.ts bootstraps through start()', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const snapshot = await createSeedDocumentSnapshot()
+test('src/application/editor/editor-event-loop.spec.ts bootstraps through start()', async () => {  const snapshot = await createSeedDocumentSnapshot()
   let snapshotCallCount = 0
   const loop = createEditorEventLoop({
     ...createRuntime(snapshot),
@@ -93,21 +87,14 @@ test('src/application/editor/editor-event-loop.spec.ts bootstraps through start(
 
   const state = await waitForState(loop, (candidate) => candidate.document.revisionId !== null)
 
-  assert(snapshotCallCount === 1, 'Starting the loop should dispatch session.started and fetch the initial snapshot once.')
-  assert(state.document.documentId === snapshot.document.documentId, 'Starting the loop should hydrate the document id.')
-  assert(state.document.revisionId === snapshot.document.revisionId, 'Starting the loop should hydrate the revision id.')
+  expectTrue(snapshotCallCount === 1, 'Starting the loop should dispatch session.started and fetch the initial snapshot once.')
+  expectTrue(state.document.documentId === snapshot.document.documentId, 'Starting the loop should hydrate the document id.')
+  expectTrue(state.document.revisionId === snapshot.document.revisionId, 'Starting the loop should hydrate the revision id.')
 
   loop.stop()
 })
 
-test('src/application/editor/editor-event-loop.spec.ts dispatches synchronous events and supports unsubscribe', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const snapshot = await createSeedDocumentSnapshot()
+test('src/application/editor/editor-event-loop.spec.ts dispatches synchronous events and supports unsubscribe', async () => {  const snapshot = await createSeedDocumentSnapshot()
   const loop = createEditorEventLoop(createRuntime(snapshot))
   let notifications = 0
   const subscription = loop.subscribe(() => {
@@ -123,26 +110,19 @@ test('src/application/editor/editor-event-loop.spec.ts dispatches synchronous ev
 
   loop.dispatch({ type: 'document.snapshotLoaded', snapshot: importedSnapshot })
 
-  assert(loop.getState().document.revisionId === 'rev_imported', 'Dispatch should route direct editor events through the reducer immediately.')
-  assert(notifications > 0, 'Subscribers should be notified after transitions.')
+  expectTrue(loop.getState().document.revisionId === 'rev_imported', 'Dispatch should route direct editor events through the reducer immediately.')
+  expectTrue(notifications > 0, 'Subscribers should be notified after transitions.')
 
   const beforeUnsubscribe = notifications
   subscription.unsubscribe()
   loop.dispatch({ type: 'selection.cleared' })
 
-  assert(notifications === beforeUnsubscribe, 'Unsubscribed listeners should stop receiving state updates.')
+  expectTrue(notifications === beforeUnsubscribe, 'Unsubscribed listeners should stop receiving state updates.')
 
   loop.stop()
 })
 
-test('src/application/editor/editor-event-loop.spec.ts executes effects serially in FIFO order', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const snapshot = await createSeedDocumentSnapshot()
+test('src/application/editor/editor-event-loop.spec.ts executes effects serially in FIFO order', async () => {  const snapshot = await createSeedDocumentSnapshot()
   const startedEffects: EditorEffect[] = []
   const resolvers: Array<(event: EditorEvent) => void> = []
   const loop = createEditorEventLoop(
@@ -160,10 +140,10 @@ test('src/application/editor/editor-event-loop.spec.ts executes effects serially
   loop.start()
   loop.dispatch({ type: 'document.refreshRequested' })
 
-  assert(startedEffects.length === 1, 'Only the first queued effect should start while it is in flight.')
+  expectTrue(startedEffects.length === 1, 'Only the first queued effect should start while it is in flight.')
 
   const firstEffect = startedEffects[0]
-  assert(firstEffect?.type === 'document.fetchSnapshot', 'Session bootstrap should enqueue a snapshot fetch effect.')
+  expectTrue(firstEffect?.type === 'document.fetchSnapshot', 'Session bootstrap should enqueue a snapshot fetch effect.')
   resolvers[0]?.({
     type: 'effect.snapshotLoaded',
     payload: {
@@ -178,8 +158,8 @@ test('src/application/editor/editor-event-loop.spec.ts executes effects serially
 
   await waitForCondition(() => startedEffects.length === 2)
 
-  assert(startedEffects.length === 2, 'The next queued effect should start only after the prior effect completes.')
-  assert(startedEffects[1]?.type === 'document.fetchSnapshot', 'Queued effects should preserve FIFO ordering.')
+  expectTrue(startedEffects.length === 2, 'The next queued effect should start only after the prior effect completes.')
+  expectTrue(startedEffects[1]?.type === 'document.fetchSnapshot', 'Queued effects should preserve FIFO ordering.')
 
   const secondEffect = startedEffects[1]
   if (secondEffect) {
@@ -200,14 +180,7 @@ test('src/application/editor/editor-event-loop.spec.ts executes effects serially
   loop.stop()
 })
 
-test('src/application/editor/editor-event-loop.spec.ts reports escaped effect errors and continues with failure events', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const snapshot = await createSeedDocumentSnapshot()
+test('src/application/editor/editor-event-loop.spec.ts reports escaped effect errors and continues with failure events', async () => {  const snapshot = await createSeedDocumentSnapshot()
   const reporter = createTestErrorReporter()
   const loop = createEditorEventLoop(
     createRuntime(snapshot),
@@ -221,21 +194,14 @@ test('src/application/editor/editor-event-loop.spec.ts reports escaped effect er
 
   const state = await waitForState(loop, (candidate) => candidate.pendingSnapshotRequestId === null)
 
-  assert(reporter.reports.length === 1, 'Escaped effect failures should be reported through the configured error reporter.')
-  assert(reporter.reports[0]?.error.code === 'editor/invocation-failed', 'Escaped effect failures should use the invocation failure code.')
-  assert(state.preview?.kind === 'selection', 'Escaped effect failures should re-enter the reducer as visible failure state.')
+  expectTrue(reporter.reports.length === 1, 'Escaped effect failures should be reported through the configured error reporter.')
+  expectTrue(reporter.reports[0]?.error.code === 'editor/invocation-failed', 'Escaped effect failures should use the invocation failure code.')
+  expectTrue(state.preview?.kind === 'selection', 'Escaped effect failures should re-enter the reducer as visible failure state.')
 
   loop.stop()
 })
 
-test('src/application/editor/editor-event-loop.spec.ts stop() discards queued and in-flight effect results', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const snapshot = await createSeedDocumentSnapshot()
+test('src/application/editor/editor-event-loop.spec.ts stop() discards queued and in-flight effect results', async () => {  const snapshot = await createSeedDocumentSnapshot()
   let resolveEffect: ((event: EditorEvent) => void) | null = null
   let inFlightRequestId: EditorEffect['requestId'] | null = null
   const loop = createEditorEventLoop(
@@ -264,17 +230,10 @@ test('src/application/editor/editor-event-loop.spec.ts stop() discards queued an
   })
   await new Promise((resolve) => setTimeout(resolve, 0))
 
-  assert(loop.getState().document.revisionId === null, 'Stopping the loop should ignore in-flight effect completions.')
+  expectTrue(loop.getState().document.revisionId === null, 'Stopping the loop should ignore in-flight effect completions.')
 })
 
-test('src/application/editor/editor-event-loop.spec.ts restart() resumes draining after stop during an in-flight effect', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const snapshot = await createSeedDocumentSnapshot()
+test('src/application/editor/editor-event-loop.spec.ts restart() resumes draining after stop during an in-flight effect', async () => {  const snapshot = await createSeedDocumentSnapshot()
   const startedEffects: EditorEffect[] = []
   const resolvers: Array<(event: EditorEvent) => void> = []
   const loop = createEditorEventLoop(
@@ -294,7 +253,7 @@ test('src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
   loop.stop()
   loop.start()
 
-  assert(
+  expectTrue(
     startedEffects.length === 1,
     'Restart should queue a new bootstrap effect even while the previous drain is still in flight.',
   )
@@ -314,7 +273,7 @@ test('src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
   await waitForCondition(() => startedEffects.length === 2)
 
   const restartedEffect = startedEffects[1]
-  assert(restartedEffect?.type === 'document.fetchSnapshot', 'Restart should resume draining the new bootstrap snapshot effect.')
+  expectTrue(restartedEffect?.type === 'document.fetchSnapshot', 'Restart should resume draining the new bootstrap snapshot effect.')
 
   resolvers[1]?.({
     type: 'effect.snapshotLoaded',
@@ -330,6 +289,6 @@ test('src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
 
   const state = await waitForState(loop, (candidate) => candidate.document.revisionId !== null)
 
-  assert(state.document.revisionId === snapshot.document.revisionId, 'Restarted drains should still deliver the snapshot into loop state.')
+  expectTrue(state.document.revisionId === snapshot.document.revisionId, 'Restarted drains should still deliver the snapshot into loop state.')
   loop.stop()
 })

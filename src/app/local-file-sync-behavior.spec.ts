@@ -1,17 +1,12 @@
 import { beforeEach, mock, test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
 
 import {
   createHookTestHarness,
   flushMicrotasks,
 } from './workbench/controllers/controller-test-harness'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 const hookHarness = createHookTestHarness()
 const actualReactModule = await import('react')
@@ -85,12 +80,12 @@ test('useWorkbenchLocalFileSync restores a binding on mount and reports restore 
     }),
   )
 
-  assert(
+  expectTrue(
     JSON.stringify(infos) === JSON.stringify(['Restored local file sync for assembly.cadara.']),
     'Restoring a saved local-file binding should surface a user-facing confirmation on mount.',
   )
-  assert(controller.localFileSyncEnabled === false, 'A one-time restore message should not toggle sync-enabled state by itself.')
-  assert(failures.length === 0, 'Successful restore should not report a document-file action failure.')
+  expectTrue(controller.localFileSyncEnabled === false, 'A one-time restore message should not toggle sync-enabled state by itself.')
+  expectTrue(failures.length === 0, 'Successful restore should not report a document-file action failure.')
 
   const restoreFailure = new Error('Local file binding store is unavailable.')
   hookHarness.reset()
@@ -119,7 +114,7 @@ test('useWorkbenchLocalFileSync restores a binding on mount and reports restore 
   await hookHarness.flushEffects()
   await flushMicrotasks()
 
-  assert(
+  expectTrue(
     JSON.stringify(failures) === JSON.stringify([{
       error: restoreFailure,
       message: 'Local file sync restore failed.',
@@ -162,7 +157,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
   )
 
   await hookHarness.flushEffects()
-  assert(statusListener instanceof Function, 'The controller should subscribe to local-file sync status updates on mount.')
+  expectTrue(statusListener instanceof Function, 'The controller should subscribe to local-file sync status updates on mount.')
 
   statusListener?.(makeStatus({
     kind: 'binding-restored',
@@ -182,7 +177,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
       },
     }),
   )
-  assert(controller.localFileSyncEnabled, 'Binding restoration should mark local-file sync as enabled.')
+  expectTrue(controller.localFileSyncEnabled, 'Binding restoration should mark local-file sync as enabled.')
 
   statusListener?.(makeStatus({
     kind: 'syncing',
@@ -212,7 +207,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
     }),
   )
 
-  assert(
+  expectTrue(
     JSON.stringify(infos) === JSON.stringify([
       'Restored local file sync for assembly.cadara.',
       'Syncing assembly.cadara.',
@@ -221,7 +216,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
     ]),
     'Enabled sync states should surface the expected user-facing information messages.',
   )
-  assert(controller.localFileSyncEnabled, 'Persistent-binding warnings should still keep sync marked as enabled.')
+  expectTrue(controller.localFileSyncEnabled, 'Persistent-binding warnings should still keep sync marked as enabled.')
 
   statusListener?.(makeStatus({
     kind: 'permission-required',
@@ -241,7 +236,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
       },
     }),
   )
-  assert(!controller.localFileSyncEnabled, 'Permission-required status should disable local-file sync until access is granted.')
+  expectTrue(!controller.localFileSyncEnabled, 'Permission-required status should disable local-file sync until access is granted.')
 
   statusListener?.(makeStatus({
     kind: 'permission-denied',
@@ -257,7 +252,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
     kind: 'idle',
   }))
 
-  assert(
+  expectTrue(
     JSON.stringify(errors) === JSON.stringify([
       'Local file sync needs write permission for assembly.cadara.',
       'Local file write permission was denied.',

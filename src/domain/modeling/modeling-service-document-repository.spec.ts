@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
@@ -25,24 +26,17 @@ import { createModelingService, type ModelingService } from '@/domain/modeling/m
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
-test('src/domain/modeling/modeling-service-document-repository.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
+test('src/domain/modeling/modeling-service-document-repository.spec.ts', async () => {  type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
 
   async function unwrapModelingResult<T>(result: AppResultAsync<T>): Promise<T> {
     const resolved = await result
-    assert(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
+    expectTrue(resolved.isOk(), resolved.isErr() ? resolved.error.message : 'Modeling result should be ok.')
     return resolved.value
   }
 
   async function expectModelingError<T>(result: AppResultAsync<T>) {
     const resolved = await result
-    assert(resolved.isErr(), 'Modeling result should be an error.')
+    expectTrue(resolved.isErr(), 'Modeling result should be an error.')
     return resolved.error
   }
 
@@ -129,7 +123,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       previewId: 'preview_repository',
       definition,
     })
-    assert(documentRepository.savedDocuments.length === 0, 'Preview evaluations should not persist authored documents.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Preview evaluations should not persist authored documents.')
 
     const rejected = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.document.revisionId,
@@ -144,16 +138,16 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
         },
       },
     }))
-    assert(rejected.code === 'modeling/diagnostic', 'Invalid feature creation should be rejected.')
-    assert(documentRepository.savedDocuments.length === 0, 'Rejected mutations should not persist authored documents.')
+    expectTrue(rejected.code === 'modeling/diagnostic', 'Invalid feature creation should be rejected.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Rejected mutations should not persist authored documents.')
 
     const accepted = await unwrapModelingResult(service.createFeature({
       baseRevisionId: snapshot.document.revisionId,
       definition,
     }))
-    assert(accepted.revisionState.kind === 'accepted', 'Accepted feature creation should commit.')
-    assert(documentRepository.savedDocuments.length === 1, 'Accepted mutations should persist authored documents.')
-    assert(
+    expectTrue(accepted.revisionState.kind === 'accepted', 'Accepted feature creation should commit.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Accepted mutations should persist authored documents.')
+    expectTrue(
       documentRepository.savedDocuments[0]?.features.some((feature) => feature.featureId === accepted.featureId),
       'Persisted authored documents should include the accepted feature rebuild input.',
     )
@@ -194,7 +188,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const initial = await service.getCurrentDocumentSnapshot()
     const sourceSketch = initial.document.sketches[0]
 
-    assert(sourceSketch, 'Seed sketch should exist for repository cursor persistence coverage.')
+    expectTrue(sourceSketch, 'Seed sketch should exist for repository cursor persistence coverage.')
     const secondSketch = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: initial.document.revisionId,
       sketchId: 'sketch_after_tail',
@@ -221,34 +215,34 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
         dimensions: [],
       },
     }))
-    assert(secondSketch.revisionState.kind === 'accepted', 'Second sketch commit should be accepted.')
+    expectTrue(secondSketch.revisionState.kind === 'accepted', 'Second sketch commit should be accepted.')
 
     const rollback = await unwrapModelingResult(service.setFeatureCursor({
       baseRevisionId: secondSketch.revisionId,
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
-    assert(rollback.revisionState.kind === 'accepted', 'Cursor rollback should be accepted.')
+    expectTrue(rollback.revisionState.kind === 'accepted', 'Cursor rollback should be accepted.')
 
     const persisted = documentRepository.savedDocuments.at(-1)
-    assert(persisted, 'Accepted cursor rollback should persist an authored document.')
-    assert(
+    expectTrue(persisted, 'Accepted cursor rollback should persist an authored document.')
+    expectTrue(
       persisted.sketches.some((sketch) => sketch.sketchId === 'sketch_after_tail'),
       'Persisted authored document should include future sketches after the cursor.',
     )
-    assert(
+    expectTrue(
       persisted.features.some((feature) => feature.featureId === 'feature_fillet-1'),
       'Persisted authored document should include future features after the cursor.',
     )
-    assert(
+    expectTrue(
       persisted.featureOrder.join('>') === 'feature_extrude-1>feature_fillet-1',
       'Persisted authored document should keep the complete feature order.',
     )
-    assert(
+    expectTrue(
       persisted.historyOrder?.map((item) => item.kind === 'sketch' ? item.sketchId : item.featureId).join('>') ===
         'sketch_primary>feature_extrude-1>feature_fillet-1>sketch_after_tail',
       'Persisted authored document should keep the complete history order.',
     )
-    assert(
+    expectTrue(
       persisted.cursor.kind === 'feature' && persisted.cursor.featureId === 'feature_extrude-1',
       'Persisted authored document should keep the requested cursor.',
     )
@@ -274,11 +268,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
 
-    assert(rollback.revisionState.kind === 'accepted', 'Repository-backed cursor rollback should be accepted.')
-    assert(forward.revisionState.kind === 'accepted', 'Repository-backed cursor redo should be accepted without a refresh.')
-    assert(rollbackAgain.revisionState.kind === 'accepted', 'Repository-backed repeated cursor rollback should be accepted without a refresh.')
-    assert(documentRepository.savedDocuments.length === 3, 'Each accepted cursor move should persist the authored document.')
-    assert(
+    expectTrue(rollback.revisionState.kind === 'accepted', 'Repository-backed cursor rollback should be accepted.')
+    expectTrue(forward.revisionState.kind === 'accepted', 'Repository-backed cursor redo should be accepted without a refresh.')
+    expectTrue(rollbackAgain.revisionState.kind === 'accepted', 'Repository-backed repeated cursor rollback should be accepted without a refresh.')
+    expectTrue(documentRepository.savedDocuments.length === 3, 'Each accepted cursor move should persist the authored document.')
+    expectTrue(
       documentRepository.savedDocuments.at(-1)?.cursor.kind === 'feature'
         && documentRepository.savedDocuments.at(-1)?.cursor.featureId === 'feature_extrude-1',
       'The final persisted cursor should match the last requested rollback target.',
@@ -310,15 +304,15 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       cursor: { kind: 'feature', featureId: 'feature_extrude-1' },
     }))
 
-    assert(rollback.revisionState.kind === 'accepted', 'First rollback should be accepted against the loaded heads.')
-    assert(redo.revisionState.kind === 'accepted', 'Redo should be accepted against refreshed heads.')
-    assert(rollbackAgain.revisionState.kind === 'accepted', 'Second rollback should be accepted against refreshed heads.')
-    assert(
+    expectTrue(rollback.revisionState.kind === 'accepted', 'First rollback should be accepted against the loaded heads.')
+    expectTrue(redo.revisionState.kind === 'accepted', 'Redo should be accepted against refreshed heads.')
+    expectTrue(rollbackAgain.revisionState.kind === 'accepted', 'Second rollback should be accepted against refreshed heads.')
+    expectTrue(
       [...rollback.diagnostics, ...redo.diagnostics, ...rollbackAgain.diagnostics]
         .every((diagnostic) => diagnostic.code !== 'repository-head-conflict'),
       'Refreshed repository heads should avoid repeated authored-document conflict diagnostics.',
     )
-    assert(
+    expectTrue(
       documentRepository.savedDocuments.at(-1)?.features.some((feature) => feature.featureId === 'feature_fillet-1'),
       'Cursor rollback persistence should preserve future authored history for redo.',
     )
@@ -336,7 +330,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Repository Restored Body',
     }))
-    assert(renamed.revisionState.kind === 'accepted', 'Body rename should be accepted.')
+    expectTrue(renamed.revisionState.kind === 'accepted', 'Body rename should be accepted.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -344,8 +338,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const restoredState = await restoredService.getHistoryRestoreState()
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
-    assert(restoredState.kind === 'restored', 'Existing authored repository documents should restore on startup.')
-    assert(
+    expectTrue(restoredState.kind === 'restored', 'Existing authored repository documents should restore on startup.')
+    expectTrue(
       restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Restored Body',
       'Repository-authored state should hydrate the kernel snapshot before exposure.',
     )
@@ -354,7 +348,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
   async function testRepositoryRestorePreservesRepairableBrokenAuthoredDocument() {
     const repositoryDocument = await createSeedAuthoredDocument()
     const brokenExtrude = repositoryDocument.features.find((feature) => feature.definition.kind === 'extrude')
-    assert(brokenExtrude?.definition.kind === 'extrude', 'Repository restore fixture should include an extrude feature.')
+    expectTrue(brokenExtrude?.definition.kind === 'extrude', 'Repository restore fixture should include an extrude feature.')
     repositoryDocument.features = repositoryDocument.features.map((feature) =>
       feature.featureId === brokenExtrude.featureId && feature.definition.kind === 'extrude'
         ? {
@@ -386,10 +380,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const restoreState = await service.getHistoryRestoreState()
     const restoredSnapshot = await service.getCurrentDocumentSnapshot()
 
-    assert(restoreState.kind === 'restored', 'Repairable broken authored documents should restore as authored state.')
-    assert(resetCount === 0, 'Repairable broken authored documents should not trigger repository reset.')
-    assert(documentRepository.savedDocuments.length === 0, 'Repairable broken restore should not seed an empty replacement document.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Repairable broken authored documents should restore as authored state.')
+    expectTrue(resetCount === 0, 'Repairable broken authored documents should not trigger repository reset.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Repairable broken restore should not seed an empty replacement document.')
+    expectTrue(
       restoredSnapshot.document.features.some((feature) => feature.featureId === brokenExtrude.featureId),
       'Repairable broken features should remain available in restored authored history.',
     )
@@ -407,7 +401,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Stale History Body',
     }))
-    assert(historyRename.revisionState.kind === 'accepted', 'History setup mutation should be accepted.')
+    expectTrue(historyRename.revisionState.kind === 'accepted', 'History setup mutation should be accepted.')
 
     const repositoryDocument = await createSeedAuthoredDocument()
     repositoryDocument.bodyLabels = repositoryDocument.bodyLabels.map((label) =>
@@ -424,10 +418,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const restoreState = await restoredService.getHistoryRestoreState()
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
-    assert(restoreState.kind === 'restored', 'Existing authored repository documents should restore on startup.')
-    assert(restoreState.entriesReplayed === 0, 'Repository restore should not replay stale operation history.')
-    assert(documentRepository.savedDocuments.length === 0, 'Repository restore should not rewrite the restored document.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Existing authored repository documents should restore on startup.')
+    expectTrue(restoreState.entriesReplayed === 0, 'Repository restore should not replay stale operation history.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Repository restore should not rewrite the restored document.')
+    expectTrue(
       restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Wins Body',
       'Repository restore should hydrate the authored document instead of replaying stale operation history.',
     )
@@ -443,10 +437,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
 
     const restoreState = await service.getHistoryRestoreState()
-    assert(restoreState.kind === 'empty', 'Invalid stale operation history should not fail a freshly seeded repository.')
-    assert(restoreState.entriesReplayed === 0, 'Recovered stale history should not replay entries.')
-    assert(getClearCount() === 1, 'Recovery should clear only the stale operation history store.')
-    assert(documentRepository.savedDocuments.length === 0, 'Recovery should keep the seeded repository document without migration writes.')
+    expectTrue(restoreState.kind === 'empty', 'Invalid stale operation history should not fail a freshly seeded repository.')
+    expectTrue(restoreState.entriesReplayed === 0, 'Recovered stale history should not replay entries.')
+    expectTrue(getClearCount() === 1, 'Recovery should clear only the stale operation history store.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Recovery should keep the seeded repository document without migration writes.')
 
     const snapshot = await service.getCurrentDocumentSnapshot()
     const renamed = await unwrapModelingResult(service.renameBody({
@@ -455,10 +449,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyLabel: 'Recovered Body',
     }))
 
-    assert(renamed.revisionState.kind === 'accepted', 'Recovered services should continue accepting mutations.')
-    assert(documentRepository.savedDocuments.length === 1, 'Recovered services should continue persisting authored documents.')
-    assert(historyStore.savedPayloads.length === 1, 'Recovered services should append fresh operation history after clearing stale data.')
-    assert(historyStore.savedPayloads[0]?.entries[0]?.kind === 'renameBody', 'Fresh operation history should start from the next accepted mutation.')
+    expectTrue(renamed.revisionState.kind === 'accepted', 'Recovered services should continue accepting mutations.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Recovered services should continue persisting authored documents.')
+    expectTrue(historyStore.savedPayloads.length === 1, 'Recovered services should append fresh operation history after clearing stale data.')
+    expectTrue(historyStore.savedPayloads[0]?.entries[0]?.kind === 'renameBody', 'Fresh operation history should start from the next accepted mutation.')
   }
 
   async function testRestoredRepositoryLeavesInvalidOperationHistoryAlone() {
@@ -479,10 +473,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const restoreState = await service.getHistoryRestoreState()
     const restoredSnapshot = await service.getCurrentDocumentSnapshot()
 
-    assert(restoreState.kind === 'restored', 'Existing authored repository documents should still ignore invalid stale history.')
-    assert(getClearCount() === 0, 'Existing authored repository restore should not clear ignored operation history.')
-    assert(documentRepository.savedDocuments.length === 0, 'Existing authored repository restore should not rewrite the restored document.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Existing authored repository documents should still ignore invalid stale history.')
+    expectTrue(getClearCount() === 0, 'Existing authored repository restore should not clear ignored operation history.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Existing authored repository restore should not rewrite the restored document.')
+    expectTrue(
       restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Repository Existing Body',
       'Existing authored repository data should remain authoritative over invalid stale history.',
     )
@@ -501,7 +495,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Migrated Body',
     }))
-    assert(renamed.revisionState.kind === 'accepted', 'History seed mutation should be accepted.')
+    expectTrue(renamed.revisionState.kind === 'accepted', 'History seed mutation should be accepted.')
 
     const migratingService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -509,8 +503,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const restoreState = await migratingService.getHistoryRestoreState()
-    assert(restoreState.kind === 'restored', 'Valid operation history should migrate into a missing repository document.')
-    assert(documentRepository.savedDocuments.length === 1, 'Migration should write one authored repository document.')
+    expectTrue(restoreState.kind === 'restored', 'Valid operation history should migrate into a missing repository document.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Migration should write one authored repository document.')
 
     const restoredService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -518,7 +512,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
-    assert(
+    expectTrue(
       restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Migrated Body',
       'Existing authored documents should be preferred over operation history after migration.',
     )
@@ -536,7 +530,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Recovered History Body',
     }))
-    assert(historyRename.revisionState.kind === 'accepted', 'History mutation should prepare a browser fallback payload.')
+    expectTrue(historyRename.revisionState.kind === 'accepted', 'History mutation should prepare a browser fallback payload.')
 
     const seedDocument = await createSeedAuthoredDocument()
     const documentRepository = createMemoryDocumentRepository([seedDocument])
@@ -548,10 +542,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const restoreState = await restoredService.getHistoryRestoreState()
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
-    assert(restoreState.kind === 'restored', 'Seed repository restores should replay valid operation-history fallback entries.')
-    assert(restoreState.entriesReplayed === 1, 'Seed repository restore should replay the browser fallback operation.')
-    assert(documentRepository.savedDocuments.length === 1, 'Recovered browser fallback history should migrate into the repository.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Seed repository restores should replay valid operation-history fallback entries.')
+    expectTrue(restoreState.entriesReplayed === 1, 'Seed repository restore should replay the browser fallback operation.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Recovered browser fallback history should migrate into the repository.')
+    expectTrue(
       restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered History Body',
       'Restored seed repositories should recover the document from operation history before exposing snapshots.',
     )
@@ -583,10 +577,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const restoreState = await restoredService.getHistoryRestoreState()
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
 
-    assert(restoreState.kind === 'restored', 'Repository-based operation-history fallback should restore successfully.')
-    assert(restoreState.entriesReplayed === 1, 'Repository-based operation-history fallback should replay its pending entry.')
-    assert(documentRepository.savedDocuments.length === 1, 'Recovered repository fallback history should migrate into the repository.')
-    assert(
+    expectTrue(restoreState.kind === 'restored', 'Repository-based operation-history fallback should restore successfully.')
+    expectTrue(restoreState.entriesReplayed === 1, 'Repository-based operation-history fallback should replay its pending entry.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Recovered repository fallback history should migrate into the repository.')
+    expectTrue(
       restoredSnapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Recovered Repository Tail Body',
       'Restored repository documents should replay operation-history entries saved against the same repository heads.',
     )
@@ -625,23 +619,23 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       definition,
     }))
 
-    assert(accepted.revisionState.kind === 'accepted', 'Background repository persistence should still accept the mutation.')
-    assert(documentRepository.savedDocuments.length === 0, 'Accepted mutation should return before the repository write finishes.')
+    expectTrue(accepted.revisionState.kind === 'accepted', 'Background repository persistence should still accept the mutation.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Accepted mutation should return before the repository write finishes.')
     const pendingHistory = historyStore.load()
-    assert(pendingHistory.ok && pendingHistory.payload, 'Background persistence should keep a browser fallback until the repository write finishes.')
-    assert(
+    expectTrue(pendingHistory.ok && pendingHistory.payload, 'Background persistence should keep a browser fallback until the repository write finishes.')
+    expectTrue(
       pendingHistory.payload.baseRepositoryHeads?.join('|') === snapshot.provenance?.repositoryHeads.join('|'),
       'Background persistence fallback should record the repository heads it extends.',
     )
 
     await Promise.resolve()
-    assert(mutateStarted, 'Background persistence should enqueue the repository write after accepting the mutation.')
+    expectTrue(mutateStarted, 'Background persistence should enqueue the repository write after accepting the mutation.')
     releaseMutate?.()
     await mutateComplete
     await Promise.resolve()
-    assert(documentRepository.savedDocuments.length === 1, 'Background repository persistence should still write the authored document.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Background repository persistence should still write the authored document.')
     const clearedHistory = historyStore.load()
-    assert(clearedHistory.ok && clearedHistory.payload === null, 'Completed background repository persistence should clear the browser fallback log.')
+    expectTrue(clearedHistory.ok && clearedHistory.payload === null, 'Completed background repository persistence should clear the browser fallback log.')
   }
 
   async function testBackgroundSketchCommitCompactsFallbackAuthoringOperations() {
@@ -663,10 +657,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
     const snapshot = await service.getCurrentDocumentSnapshot()
     const sourceSketch = snapshot.document.sketches[0]
-    assert(sourceSketch, 'Seed sketch should exist for compact background sketch fallback coverage.')
+    expectTrue(sourceSketch, 'Seed sketch should exist for compact background sketch fallback coverage.')
     const firstPointId = sourceSketch.sketch.definition.pointIds[0]
     const firstEntityId = sourceSketch.sketch.definition.entityIds[0]
-    assert(firstPointId && firstEntityId, 'Seed sketch should expose graph members for compact fallback coverage.')
+    expectTrue(firstPointId && firstEntityId, 'Seed sketch should expose graph members for compact fallback coverage.')
 
     const committed = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: snapshot.document.revisionId,
@@ -700,10 +694,10 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       },
     }))
 
-    assert(committed.revisionState.kind === 'accepted', 'Background sketch commit should still accept compact fallback payloads.')
+    expectTrue(committed.revisionState.kind === 'accepted', 'Background sketch commit should still accept compact fallback payloads.')
     const pendingHistory = historyStore.load()
-    assert(pendingHistory.ok && pendingHistory.payload?.entries[0]?.kind === 'commitSketch', 'Background sketch commits should persist a fallback entry.')
-    assert(
+    expectTrue(pendingHistory.ok && pendingHistory.payload?.entries[0]?.kind === 'commitSketch', 'Background sketch commits should persist a fallback entry.')
+    expectTrue(
       pendingHistory.payload.entries[0].payload.definition.authoringOperations?.length === 0,
       'Background sketch commit fallback should omit bulky sketch-local authoring operations.',
     )
@@ -719,7 +713,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const snapshot = await service.getCurrentDocumentSnapshot()
     const sourceSketch = snapshot.document.sketches[0]
 
-    assert(sourceSketch, 'Seed sketch should exist for reference-image persistence coverage.')
+    expectTrue(sourceSketch, 'Seed sketch should exist for reference-image persistence coverage.')
     const committed = await unwrapModelingResult(service.commitSketch({
       baseRevisionId: snapshot.document.revisionId,
       sketchId: 'sketch_reference_image',
@@ -797,7 +791,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       },
     }))
 
-    assert(committed.revisionState.kind === 'accepted', 'Reference-image sketch commits should be accepted.')
+    expectTrue(committed.revisionState.kind === 'accepted', 'Reference-image sketch commits should be accepted.')
     const persisted = documentRepository.savedDocuments.at(-1)
     const persistedSketch = persisted?.sketches.find((sketch) => sketch.sketchId === 'sketch_reference_image')
     const expectedReferenceImageOperations = [
@@ -851,9 +845,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       },
     ]
 
-    assert(persistedSketch, 'Persisted authored documents should include committed reference-image sketches.')
-    assert(persistedSketch.definition.points.length === 0, 'Persisted reference-image sketches should not materialize sketch points.')
-    assert(persistedSketch.definition.entities.length === 0, 'Persisted reference-image sketches should not materialize sketch entities.')
+    expectTrue(persistedSketch, 'Persisted authored documents should include committed reference-image sketches.')
+    expectTrue(persistedSketch.definition.points.length === 0, 'Persisted reference-image sketches should not materialize sketch points.')
+    expectTrue(persistedSketch.definition.entities.length === 0, 'Persisted reference-image sketches should not materialize sketch entities.')
     assertReferenceImageOperationPayloads(
       persistedSketch.definition.authoringOperations,
       expectedReferenceImageOperations,
@@ -868,9 +862,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot()
     const restoredSketch = restoredSnapshot.document.sketches.find((sketch) => sketch.sketchId === 'sketch_reference_image')
 
-    assert(restoredSketch, 'Repository restore should reopen committed reference-image sketches.')
-    assert(restoredSketch.sketch.definition.points.length === 0, 'Restored reference-image sketches should still avoid local points.')
-    assert(restoredSketch.sketch.definition.entities.length === 0, 'Restored reference-image sketches should still avoid local entities.')
+    expectTrue(restoredSketch, 'Repository restore should reopen committed reference-image sketches.')
+    expectTrue(restoredSketch.sketch.definition.points.length === 0, 'Restored reference-image sketches should still avoid local points.')
+    expectTrue(restoredSketch.sketch.definition.entities.length === 0, 'Restored reference-image sketches should still avoid local entities.')
     assertReferenceImageOperationPayloads(
       restoredSketch.sketch.definition.authoringOperations,
       expectedReferenceImageOperations,
@@ -914,7 +908,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'First Background Body',
     }))
-    assert(first.revisionState.kind === 'accepted', 'First background mutation should be accepted.')
+    expectTrue(first.revisionState.kind === 'accepted', 'First background mutation should be accepted.')
     await waitFor(() => mutateCalls.length === 1, 'First background repository write should start.')
 
     const second = await unwrapModelingResult(service.renameBody({
@@ -922,21 +916,21 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Second Background Body',
     }))
-    assert(second.revisionState.kind === 'accepted', 'Second background mutation should be accepted while the first write is pending.')
+    expectTrue(second.revisionState.kind === 'accepted', 'Second background mutation should be accepted while the first write is pending.')
 
     mutateCalls[0]?.release()
     await mutateCalls[0]?.complete
     await waitFor(() => mutateCalls.length === 2, 'Second background repository write should start after the first completes.')
 
     const pendingHistory = historyStore.load()
-    assert(pendingHistory.ok && pendingHistory.payload, 'Partial background writes should keep the unpersisted fallback tail.')
-    assert(pendingHistory.payload.entries.length === 1, 'Partial background writes should trim only the persisted prefix.')
-    assert(
+    expectTrue(pendingHistory.ok && pendingHistory.payload, 'Partial background writes should keep the unpersisted fallback tail.')
+    expectTrue(pendingHistory.payload.entries.length === 1, 'Partial background writes should trim only the persisted prefix.')
+    expectTrue(
       pendingHistory.payload.entries[0]?.kind === 'renameBody'
         && pendingHistory.payload.entries[0].payload.bodyLabel === 'Second Background Body',
       'Partial background writes should keep the newer pending operation.',
     )
-    assert(
+    expectTrue(
       pendingHistory.payload.baseRepositoryHeads?.join('|') === documentRepository.getMetadata('doc_workspace').heads.join('|'),
       'Partial background writes should advance the fallback basis to the repository heads that were written.',
     )
@@ -945,7 +939,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     await mutateCalls[1]?.complete
     await Promise.resolve()
     const clearedHistory = historyStore.load()
-    assert(clearedHistory.ok && clearedHistory.payload === null, 'Final background write should clear the fallback tail.')
+    expectTrue(clearedHistory.ok && clearedHistory.payload === null, 'Final background write should clear the fallback tail.')
   }
 
   async function testLocalRepositoryHeadAdvancesDoNotConflictWithCurrentRevisionMutation() {
@@ -965,7 +959,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Local Background Body',
     }))
-    assert(renamed.revisionState.kind === 'accepted', 'Local setup mutation should be accepted.')
+    expectTrue(renamed.revisionState.kind === 'accepted', 'Local setup mutation should be accepted.')
     await waitFor(() => documentRepository.savedDocuments.length === 1, 'Local background repository write should complete.')
 
     const current = await service.getCurrentDocumentSnapshot()
@@ -976,8 +970,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       definition,
     }))
 
-    assert(committed.revisionState.kind === 'accepted', 'Mutations should not conflict with local background repository head advances.')
-    assert(
+    expectTrue(committed.revisionState.kind === 'accepted', 'Mutations should not conflict with local background repository head advances.')
+    expectTrue(
       committed.diagnostics.every((diagnostic) => diagnostic.code !== 'repository-head-conflict'),
       'Mutations after local background writes should not report repository head conflicts.',
     )
@@ -995,7 +989,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Retry Migrated Body',
     }))
-    assert(renamed.revisionState.kind === 'accepted', 'History mutation should prepare a migration payload.')
+    expectTrue(renamed.revisionState.kind === 'accepted', 'History mutation should prepare a migration payload.')
 
     const documentRepository = createMemoryDocumentRepository()
     const mutate = documentRepository.mutate.bind(documentRepository)
@@ -1032,8 +1026,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const failedRestore = await failedMigrationService.getHistoryRestoreState()
-    assert(failedRestore.kind === 'failed', 'Migration write failures should surface as restore failures.')
-    assert(resetCount === 1, 'Migration write failures should reset the seeded repository document.')
+    expectTrue(failedRestore.kind === 'failed', 'Migration write failures should surface as restore failures.')
+    expectTrue(resetCount === 1, 'Migration write failures should reset the seeded repository document.')
 
     const retriedMigrationService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: 'doc_workspace',
@@ -1041,8 +1035,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       documentRepository,
     })
     const retriedRestore = await retriedMigrationService.getHistoryRestoreState()
-    assert(retriedRestore.kind === 'restored', 'Resetting the seed should let the next startup retry migration.')
-    assert(documentRepository.savedDocuments.length === 1, 'Retried migration should write the authored repository document.')
+    expectTrue(retriedRestore.kind === 'restored', 'Resetting the seed should let the next startup retry migration.')
+    expectTrue(documentRepository.savedDocuments.length === 1, 'Retried migration should write the authored repository document.')
   }
 
   async function testInvalidRepositoryDocumentBlocksFutureWrites() {
@@ -1058,8 +1052,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     })
 
     const restoreState = await service.getHistoryRestoreState()
-    assert(restoreState.kind === 'failed', 'Unsupported repository documents should surface restore failure.')
-    assert(
+    expectTrue(restoreState.kind === 'failed', 'Unsupported repository documents should surface restore failure.')
+    expectTrue(
       restoreState.diagnostics[0]?.reasonCode === 'unsupported-schema-version',
       'Unsupported repository documents should preserve the schema diagnostic.',
     )
@@ -1070,9 +1064,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Must Not Overwrite Unsupported Document',
     }))
-    assert(renamed.revisionState.kind === 'accepted', 'The active seed adapter may still accept local mutations.')
-    assert(documentRepository.savedDocuments.length === 0, 'Restore failures should block later repository writes from the seed adapter.')
-    assert(
+    expectTrue(renamed.revisionState.kind === 'accepted', 'The active seed adapter may still accept local mutations.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Restore failures should block later repository writes from the seed adapter.')
+    expectTrue(
       renamed.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported-schema-version'),
       'Blocked repository writes should keep surfacing the restore diagnostic.',
     )
@@ -1101,15 +1095,15 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       }
     })
     const peerResult = await documentRepository.receivePeerDocument(peerDocument)
-    assert(peerResult.ok, 'Test peer document should be accepted by the repository.')
+    expectTrue(peerResult.ok, 'Test peer document should be accepted by the repository.')
 
     const staleMutation = await expectModelingError(service.createFeature({
       baseRevisionId: snapshot.document.revisionId,
       baseRepositoryHeads: snapshot.provenance?.repositoryHeads,
       definition,
     }))
-    assert(staleMutation.code === 'modeling/diagnostic', 'Mutations against a peer-superseded snapshot should conflict.')
-    assert(
+    expectTrue(staleMutation.code === 'modeling/diagnostic', 'Mutations against a peer-superseded snapshot should conflict.')
+    expectTrue(
       staleMutation.context.some((entry) =>
         entry.key === 'diagnosticCodes'
         && typeof entry.value === 'string'
@@ -1119,9 +1113,9 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     )
 
     const refreshed = await service.getCurrentDocumentSnapshot()
-    assert(peerEventCount === 1, 'Modeling service subscribers should receive peer repository events.')
-    assert(refreshed.provenance?.repositorySource === 'peer', 'Peer-refreshed snapshots should carry peer provenance.')
-    assert(
+    expectTrue(peerEventCount === 1, 'Modeling service subscribers should receive peer repository events.')
+    expectTrue(refreshed.provenance?.repositorySource === 'peer', 'Peer-refreshed snapshots should carry peer provenance.')
+    expectTrue(
       refreshed.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Peer Synced Body',
       'Peer repository changes should hydrate the modeling snapshot through the service.',
     )
@@ -1130,7 +1124,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       baseRepositoryHeads: refreshed.provenance?.repositoryHeads,
       definition,
     }))
-    assert(accepted.revisionState.kind === 'accepted', 'Fresh repository heads should allow the mutation.')
+    expectTrue(accepted.revisionState.kind === 'accepted', 'Fresh repository heads should allow the mutation.')
     unsubscribe()
   }
 
@@ -1162,7 +1156,7 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     publishPeerDocument = async () => {
       publishPeerDocument = async () => {}
       const peerResult = await documentRepository.receivePeerDocument(peerDocument)
-      assert(peerResult.ok, 'In-flight peer document should be accepted by the repository.')
+      expectTrue(peerResult.ok, 'In-flight peer document should be accepted by the repository.')
     }
 
     const result = await expectModelingError(service.createFeature({
@@ -1170,8 +1164,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       baseRepositoryHeads: snapshot.provenance?.repositoryHeads,
       definition,
     }))
-    assert(result.code === 'modeling/diagnostic', 'In-flight repository head changes should convert accepted mutations to conflicts.')
-    assert(
+    expectTrue(result.code === 'modeling/diagnostic', 'In-flight repository head changes should convert accepted mutations to conflicts.')
+    expectTrue(
       result.context.some((entry) =>
         entry.key === 'diagnosticCodes'
         && typeof entry.value === 'string'
@@ -1179,11 +1173,11 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       ),
       'In-flight repository head conflicts should retain a stable diagnostic.',
     )
-    assert(documentRepository.savedDocuments.length === 0, 'Repository head conflicts should not persist stale authored documents.')
-    assert(historyStore.savedPayloads.length === 0, 'Repository head conflicts should not append operation history.')
+    expectTrue(documentRepository.savedDocuments.length === 0, 'Repository head conflicts should not persist stale authored documents.')
+    expectTrue(historyStore.savedPayloads.length === 0, 'Repository head conflicts should not append operation history.')
 
     const refreshed = await service.getCurrentDocumentSnapshot()
-    assert(
+    expectTrue(
       refreshed.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'In-flight Peer Body',
       'Repository head conflict handling should leave the service on the peer-authored snapshot.',
     )
@@ -1191,7 +1185,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
   async function testPackagedAssetImportStoresAssetsBeforeRestore() {
     const documentRepository = createMemoryDocumentRepository()
-    class AssetResolvingRestoreAdapter extends MockKernelAdapter {
+
+class AssetResolvingRestoreAdapter extends MockKernelAdapter {
       sawAssetBytes = false
 
       override async restoreAuthoredModelDocument(
@@ -1223,19 +1218,19 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
 
     const result = await service.importDocument({ document })
 
-    assert(result.ok, 'JSON import should accept authored documents with embedded geometry data.')
-    assert(adapter.sawAssetBytes, 'Imported asset bytes should be stored before adapter restore resolves assets.')
-    assert(
+    expectTrue(result.ok, 'JSON import should accept authored documents with embedded geometry data.')
+    expectTrue(adapter.sawAssetBytes, 'Imported asset bytes should be stored before adapter restore resolves assets.')
+    expectTrue(
       await documentRepository.getGeometryAssetRecord(asset.asset) !== null,
       'Imported asset bytes should remain available from the repository after restore.',
     )
-    assert(
+    expectTrue(
       (await adapter.exportAuthoredModelDocument(document.documentId)).assets.records[0]?.hash === asset.asset.hash,
       'Adapter authored exports should preserve restored geometry asset manifests.',
     )
     const exportResult = await service.exportCurrentDocument()
-    assert(typeof exportResult.payload === 'string', 'Current document export should serialize documents with geometry assets as JSON.')
-    assert(
+    expectTrue(typeof exportResult.payload === 'string', 'Current document export should serialize documents with geometry assets as JSON.')
+    expectTrue(
 	      (JSON.parse(exportResult.payload) as AuthoredModelDocument).assets.records[0]?.data?.kind === 'cadaraBrep',
 	      'Current document export should include translated Cadara B-rep geometry inside the cadara JSON.',
     )
@@ -1246,8 +1241,8 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
       bodyId: 'body_part-1',
       bodyLabel: 'Asset Body',
     }))
-    assert(rename.revisionState.kind === 'accepted', 'Post-import authored mutations should still be accepted.')
-    assert(
+    expectTrue(rename.revisionState.kind === 'accepted', 'Post-import authored mutations should still be accepted.')
+    expectTrue(
       documentRepository.savedDocuments.at(-1)?.assets.records[0]?.hash === asset.asset.hash,
       'Post-import repository mutations should not drop restored geometry asset manifests.',
     )

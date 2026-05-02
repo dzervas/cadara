@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   buildSelectionTargetCatalog,
   getEntityRecordForTarget,
@@ -8,12 +9,6 @@ import {
   getTargetContributingFeatureIds,
 } from '@/domain/modeling/document-snapshot-view'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 test('document snapshot view resolves selection details, contributing features, and selection catalogs', async () => {
   const snapshot = await createSeedDocumentSnapshot()
@@ -24,17 +19,17 @@ test('document snapshot view resolves selection details, contributing features, 
   const missingTarget = { kind: 'feature', featureId: 'feature_missing' as typeof featureTarget.featureId } as const
 
   const featureEntity = getEntityRecordForTarget(snapshot, featureTarget)
-  assert(
+  expectTrue(
     featureEntity?.label === 'Extrude 1',
     'Entity lookup should resolve snapshot presentation entities by durable target key.',
   )
-  assert(
+  expectTrue(
     getEntityRecordForTarget(snapshot, missingTarget) === null,
     'Entity lookup should return null for missing snapshot targets.',
   )
 
   const featureSelection = getSelectionDetail(snapshot, featureTarget)
-  assert(
+  expectTrue(
     featureSelection.label === 'Extrude 1'
       && featureSelection.kindLabel === 'feature'
       && featureSelection.ownerLabel === 'Extrude 1'
@@ -43,19 +38,19 @@ test('document snapshot view resolves selection details, contributing features, 
   )
 
   const sketchSelection = getSelectionDetail(snapshot, sketchTarget)
-  assert(
+  expectTrue(
     sketchSelection.ownerLabel === 'Sketch 1',
     'Sketch-owned selections should surface the owning sketch label.',
   )
 
   const bodySelection = getSelectionDetail(snapshot, bodyTarget)
-  assert(
+  expectTrue(
     bodySelection.ownerLabel === 'Extrude 1',
     'Body-owned selections should surface the owning feature label when available.',
   )
 
   const unresolvedSelection = getSelectionDetail(snapshot, missingTarget)
-  assert(
+  expectTrue(
     unresolvedSelection.label === 'feature_missing'
       && unresolvedSelection.ownerLabel === 'Unresolved selection'
       && unresolvedSelection.relatedLabels.length === 0,
@@ -63,23 +58,23 @@ test('document snapshot view resolves selection details, contributing features, 
   )
 
   const contributing = getTargetContributingFeatureIds(snapshot, faceTarget)
-  assert(
+  expectTrue(
     contributing.length === 1 && contributing[0] === 'feature_extrude-1',
     'Selection detail helpers should expose contributing feature ids from the presentation entity.',
   )
-  assert(
+  expectTrue(
     getTargetContributingFeatureIds(snapshot, null).length === 0,
     'Null targets should produce an empty contributing-feature list.',
   )
 
-  assert(
+  expectTrue(
     getFeatureSnapshot(snapshot, featureTarget.featureId)?.label === 'Extrude 1'
       && getFeatureSnapshot(snapshot, missingTarget.featureId) === null,
     'Feature lookup should resolve existing feature snapshots and return null for missing ids.',
   )
 
   const catalog = buildSelectionTargetCatalog(snapshot)
-  assert(
+  expectTrue(
     catalog.selectableTargetKeys.includes('construction:construction_plane-xy')
       && catalog.existingSketchKeys.includes('sketch:sketch_primary')
       && catalog.constructionPlaneKeys.includes('construction:construction_plane-xy')
@@ -107,7 +102,7 @@ test('document snapshot view resolves selection details, contributing features, 
   } catch (error: unknown) {
     relatedTargetMessage = error instanceof Error ? error.message : String(error)
   }
-  assert(
+  expectTrue(
     relatedTargetMessage === 'Related target feature:feature_missing is missing from snapshot.presentation.entities.',
     'Missing related targets should fail loudly instead of silently dropping broken presentation links.',
   )

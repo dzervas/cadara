@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
@@ -6,14 +7,7 @@ import {
   type WorkbenchStateDebuggerModel,
 } from '@/components/layout/workbench-state-debugger'
 
-test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createDebuggerModel(): WorkbenchStateDebuggerModel {
+test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {  function createDebuggerModel(): WorkbenchStateDebuggerModel {
     return {
       activeMode: 'part',
       machineState: 'editingFeature',
@@ -83,28 +77,28 @@ test('src/components/layout/workbench-state-debugger.spec.tsx', async () => {
   const expandedMarkup = renderToStaticMarkup(
     <WorkbenchStateDebugger state={createDebuggerModel()} defaultExpanded />,
   )
-  assert(expandedMarkup.includes('State Debugger'), 'Debugger should render its title.')
-  assert(expandedMarkup.includes('Active mode'), 'Expanded debugger should render active mode.')
-  assert(expandedMarkup.includes('editingFeature'), 'Expanded debugger should render machine state.')
-  assert(expandedMarkup.includes('Draft extrude profile'), 'Expanded debugger should render preview state.')
-  assert(
+  expectTrue(expandedMarkup.includes('State Debugger'), 'Debugger should render its title.')
+  expectTrue(expandedMarkup.includes('Active mode'), 'Expanded debugger should render active mode.')
+  expectTrue(expandedMarkup.includes('editingFeature'), 'Expanded debugger should render machine state.')
+  expectTrue(expandedMarkup.includes('Draft extrude profile'), 'Expanded debugger should render preview state.')
+  expectTrue(
     expandedMarkup.includes('Extrude profiles, planar faces, or boolean bodies'),
     'Expanded debugger should render selection filter label.',
   )
-  assert(expandedMarkup.includes('sketch_1.region_profile, body_1'), 'Expanded debugger should render selected targets.')
-  assert(
+  expectTrue(expandedMarkup.includes('sketch_1.region_profile, body_1'), 'Expanded debugger should render selected targets.')
+  expectTrue(
     expandedMarkup.includes('Join, cut, and intersect require one explicit target body.'),
     'Expanded debugger should render selection requirement descriptions.',
   )
-  assert(expandedMarkup.includes('(2 slots)'), 'Expanded debugger should render selection requirement slot counts.')
-  assert(expandedMarkup.includes('Profile region'), 'Expanded debugger should render selection detail.')
-  assert(expandedMarkup.includes('Topology naming'), 'Expanded debugger should include the hidden topology debug section.')
-  assert(expandedMarkup.includes('occ-topology-ambiguous'), 'Topology debug section should render invalidation reasons.')
+  expectTrue(expandedMarkup.includes('(2 slots)'), 'Expanded debugger should render selection requirement slot counts.')
+  expectTrue(expandedMarkup.includes('Profile region'), 'Expanded debugger should render selection detail.')
+  expectTrue(expandedMarkup.includes('Topology naming'), 'Expanded debugger should include the hidden topology debug section.')
+  expectTrue(expandedMarkup.includes('occ-topology-ambiguous'), 'Topology debug section should render invalidation reasons.')
 
   const collapsedMarkup = renderToStaticMarkup(<WorkbenchStateDebugger state={createDebuggerModel()} />)
-  assert(collapsedMarkup.includes('aria-expanded="false"'), 'Collapsed debugger should expose collapsed state.')
-  assert(collapsedMarkup.includes('State Debugger'), 'Collapsed debugger should retain an expand affordance.')
-  assert(!collapsedMarkup.includes('Active mode'), 'Collapsed debugger should hide detailed rows.')
-  assert(!collapsedMarkup.includes('Boolean target'), 'Collapsed debugger should hide requirement rows.')
-  assert(!collapsedMarkup.includes('Topology naming'), 'Collapsed debugger should hide topology debug rows.')
+  expectTrue(collapsedMarkup.includes('aria-expanded="false"'), 'Collapsed debugger should expose collapsed state.')
+  expectTrue(collapsedMarkup.includes('State Debugger'), 'Collapsed debugger should retain an expand affordance.')
+  expectTrue(!collapsedMarkup.includes('Active mode'), 'Collapsed debugger should hide detailed rows.')
+  expectTrue(!collapsedMarkup.includes('Boolean target'), 'Collapsed debugger should hide requirement rows.')
+  expectTrue(!collapsedMarkup.includes('Topology naming'), 'Collapsed debugger should hide topology debug rows.')
 })

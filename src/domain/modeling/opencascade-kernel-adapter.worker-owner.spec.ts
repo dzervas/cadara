@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type {
   CommitSketchResponse,
   GetDocumentSnapshotResponse,
@@ -12,14 +13,7 @@ import {
 } from '@/domain/modeling/opencascade-kernel-seed'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
 
-test('src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  async function testWorkerOwnedWarmupAndMutationsBypassLocalOcc() {
+test('src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts', async () => {  async function testWorkerOwnedWarmupAndMutationsBypassLocalOcc() {
     let localOccLoads = 0
     let warmupCalls = 0
     let commitSketchCalls = 0
@@ -226,11 +220,11 @@ test('src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts', asyn
       solverCorrelation: null,
     })
 
-    assert(warmupCalls === 1, 'Worker-owned preload should warm the shared worker runtime.')
-    assert(restoreCalls === 1, 'Worker-owned restores should delegate to the worker runtime.')
-    assert(snapshotCalls === 1, 'Worker-owned snapshots after restore should delegate to the retained worker runtime.')
-    assert(commitSketchCalls === 1, 'Worker-owned commitSketch should delegate to the worker runtime.')
-    assert(localOccLoads === 0, 'Worker-owned browser mutations should not initialize a local OCC runtime.')
+    expectTrue(warmupCalls === 1, 'Worker-owned preload should warm the shared worker runtime.')
+    expectTrue(restoreCalls === 1, 'Worker-owned restores should delegate to the worker runtime.')
+    expectTrue(snapshotCalls === 1, 'Worker-owned snapshots after restore should delegate to the retained worker runtime.')
+    expectTrue(commitSketchCalls === 1, 'Worker-owned commitSketch should delegate to the worker runtime.')
+    expectTrue(localOccLoads === 0, 'Worker-owned browser mutations should not initialize a local OCC runtime.')
   }
 
   await testWorkerOwnedWarmupAndMutationsBypassLocalOcc()

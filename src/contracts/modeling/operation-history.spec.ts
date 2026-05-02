@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import {
   createAddDocumentVariableHistoryEntry,
   createCommitSketchHistoryEntry,
@@ -36,14 +37,7 @@ import {
 } from '@/contracts/modeling/advanced-solid'
 import { createExpressionAuthoredValue, getAuthoredLiteralValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
 
-test('src/contracts/modeling/operation-history.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const sketchDefinition = {
+test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sketchDefinition = {
     schemaVersion: SKETCH_SCHEMA_VERSION,
     referenceIds: [],
     references: [],
@@ -283,23 +277,23 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Representative sketch and feature operation history should validate.')
-    assert(result.payload.entries[0]?.kind === 'commitSketch', 'Commit sketch entry kind must be preserved.')
-    assert(
+    expectTrue(result.ok, 'Representative sketch and feature operation history should validate.')
+    expectTrue(result.payload.entries[0]?.kind === 'commitSketch', 'Commit sketch entry kind must be preserved.')
+    expectTrue(
       !('solverCorrelation' in result.payload.entries[0]!.payload),
       'Persisted sketch entries must omit solver request correlation metadata.',
     )
-    assert(
+    expectTrue(
       !('baseRevisionId' in result.payload.entries[1]!.payload),
       'Persisted feature entries must omit replay-derived base revision metadata.',
     )
-    assert(result.payload.entries[2]?.kind === 'deleteTarget', 'Generic delete entry kind must be preserved.')
-    assert(
+    expectTrue(result.payload.entries[2]?.kind === 'deleteTarget', 'Generic delete entry kind must be preserved.')
+    expectTrue(
       result.payload.entries[2]?.kind === 'deleteTarget'
         && result.payload.entries[2].payload.target.kind === 'feature',
       'Generic delete entries should preserve the accepted durable target.',
     )
-    assert(
+    expectTrue(
       result.payload.entries[4]?.kind === 'reorderDocumentHistory'
         && result.payload.entries[4].payload.item.kind === 'sketch'
         && result.payload.entries[4].payload.beforeItem?.kind === 'feature',
@@ -329,8 +323,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       }],
     })
 
-    assert(!missingItem.ok, 'Document history reorder entries missing the moved item should be rejected.')
-    assert(!missingAnchorShape.ok, 'Document history reorder entries with malformed anchors should be rejected.')
+    expectTrue(!missingItem.ok, 'Document history reorder entries missing the moved item should be rejected.')
+    expectTrue(!missingAnchorShape.ok, 'Document history reorder entries with malformed anchors should be rejected.')
   }
 
   function testRejectsInvalidGenericDeleteEntries() {
@@ -342,7 +336,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       }],
     })
 
-    assert(!result.ok, 'Generic delete entries with malformed targets should be rejected.')
+    expectTrue(!result.ok, 'Generic delete entries with malformed targets should be rejected.')
   }
 
   function testNormalizesCommittedCommitSketchTargets() {
@@ -354,13 +348,13 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       definition: draftDefinition,
     }, committedSketchId)
 
-    assert(entry.kind === 'commitSketch', 'Commit sketch history entry should preserve its kind.')
-    assert(entry.payload.sketchId === committedSketchId, 'Persisted commitSketch entries must store the committed sketch id.')
-    assert(
+    expectTrue(entry.kind === 'commitSketch', 'Commit sketch history entry should preserve its kind.')
+    expectTrue(entry.payload.sketchId === committedSketchId, 'Persisted commitSketch entries must store the committed sketch id.')
+    expectTrue(
       entry.payload.definition.points.every((point) => point.target.sketchId === committedSketchId),
       'Persisted commitSketch point targets must be normalized to the committed sketch id.',
     )
-    assert(
+    expectTrue(
       entry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
       'Persisted commitSketch entity targets must be normalized to the committed sketch id.',
     )
@@ -400,10 +394,10 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       definition: definitionWithOperations,
     }, committedSketchId, { includeAuthoringOperations: false })
 
-    assert(fullEntry.kind === 'commitSketch' && fullEntry.payload.definition.authoringOperations?.length === 1, 'Full commit history should preserve authoring operations by default.')
-    assert(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve the commitSketch entry kind.')
-    assert(compactEntry.payload.definition.authoringOperations === undefined, 'Compact commit history should omit sketch-local authoring operations.')
-    assert(
+    expectTrue(fullEntry.kind === 'commitSketch' && fullEntry.payload.definition.authoringOperations?.length === 1, 'Full commit history should preserve authoring operations by default.')
+    expectTrue(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve the commitSketch entry kind.')
+    expectTrue(compactEntry.payload.definition.authoringOperations === undefined, 'Compact commit history should omit sketch-local authoring operations.')
+    expectTrue(
       compactEntry.payload.definition.points.every((point) => point.target.sketchId === committedSketchId)
         && compactEntry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
       'Compact commit history should still normalize the live sketch graph targets.',
@@ -457,9 +451,9 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       definition: definitionWithReferenceImage,
     }, committedSketchId, { includeAuthoringOperations: false })
 
-    assert(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve reference-image commit entries.')
-    assert(compactEntry.payload.definition.authoringOperations?.length === 2, 'Compact commit history should retain reference-image operations and their deletes.')
-    assert(
+    expectTrue(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve reference-image commit entries.')
+    expectTrue(compactEntry.payload.definition.authoringOperations?.length === 2, 'Compact commit history should retain reference-image operations and their deletes.')
+    expectTrue(
       compactEntry.payload.definition.authoringOperations?.[0]?.kind === 'referenceImage'
         && compactEntry.payload.definition.authoringOperations?.[1]?.targets.removed?.[0]?.kind === 'operation',
       'Compact commit history should preserve operation-owned image state and operation-target deletes.',
@@ -482,7 +476,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       ],
     })
 
-    assert(result.ok, 'Legacy commitSketch histories with draft sketch ids should remain loadable.')
+    expectTrue(result.ok, 'Legacy commitSketch histories with draft sketch ids should remain loadable.')
   }
 
   function testRejectsUnsupportedVersion() {
@@ -491,8 +485,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       schemaVersion: 'modeling-operation-history/v0',
     })
 
-    assert(!result.ok, 'Unsupported history schema versions must fail validation.')
-    assert(
+    expectTrue(!result.ok, 'Unsupported history schema versions must fail validation.')
+    expectTrue(
       !result.ok && result.reasonCode === 'unsupported-schema-version',
       'Unsupported history schema versions must report a stable reason code.',
     )
@@ -512,8 +506,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       ],
     })
 
-    assert(!result.ok, 'Operation entries with transport metadata must fail validation.')
-    assert(
+    expectTrue(!result.ok, 'Operation entries with transport metadata must fail validation.')
+    expectTrue(
       !result.ok && result.reasonCode === 'transport-field-leak',
       'Transport metadata leaks must report a stable reason code.',
     )
@@ -548,8 +542,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       ],
     })
 
-    assert(!result.ok, 'Inconsistent commitSketch target sketch ids must fail validation.')
-    assert(
+    expectTrue(!result.ok, 'Inconsistent commitSketch target sketch ids must fail validation.')
+    expectTrue(
       !result.ok && result.reasonCode === 'inconsistent-commit-sketch-targets',
       'Inconsistent commitSketch target sketch ids must report a stable reason code.',
     )
@@ -577,7 +571,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(multiProfilePayload)
 
-    assert(result.ok, 'One-profile and multi-profile extrude history payloads should validate.')
+    expectTrue(result.ok, 'One-profile and multi-profile extrude history payloads should validate.')
   }
 
   function testPreservesFeatureExpressionAuthoredValues() {
@@ -604,15 +598,15 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       entries: [entry],
     })
 
-    assert(result.ok, 'Feature expression-authored history payloads should validate.')
-    assert(result.payload.entries[0]?.kind === 'createFeature', 'Feature expression history entry kind should be preserved.')
+    expectTrue(result.ok, 'Feature expression-authored history payloads should validate.')
+    expectTrue(result.payload.entries[0]?.kind === 'createFeature', 'Feature expression history entry kind should be preserved.')
     const definition = result.payload.entries[0].payload.definition
-    assert(definition.kind === 'extrude', 'Feature expression history entry should preserve the extrude definition.')
+    expectTrue(definition.kind === 'extrude', 'Feature expression history entry should preserve the extrude definition.')
     const distance = definition.parameters.extent.end.kind === 'blind'
       ? definition.parameters.extent.end.distance
       : null
-    assert(isExpressionAuthoredValue(distance), 'Feature expression history should preserve authored expression text.')
-    assert(distance.valueText === 'depth + 3', 'Feature expression history should not persist resolved runtime values.')
+    expectTrue(isExpressionAuthoredValue(distance), 'Feature expression history should preserve authored expression text.')
+    expectTrue(distance.valueText === 'depth + 3', 'Feature expression history should not persist resolved runtime values.')
   }
 
   function testRejectsLegacyAndInvalidProfileCollections() {
@@ -667,9 +661,9 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       }],
     })
 
-    assert(!legacyPayload.ok && legacyPayload.reasonCode === 'legacy-profile-parameter', 'Legacy singular profile history payloads should be rejected.')
-    assert(!emptyPayload.ok && emptyPayload.reasonCode === 'invalid-profile-collection', 'Empty profile collection history payloads should be rejected.')
-    assert(!duplicatePayload.ok && duplicatePayload.reasonCode === 'duplicate-profile-reference', 'Duplicate profile collection history payloads should be rejected.')
+    expectTrue(!legacyPayload.ok && legacyPayload.reasonCode === 'legacy-profile-parameter', 'Legacy singular profile history payloads should be rejected.')
+    expectTrue(!emptyPayload.ok && emptyPayload.reasonCode === 'invalid-profile-collection', 'Empty profile collection history payloads should be rejected.')
+    expectTrue(!duplicatePayload.ok && duplicatePayload.reasonCode === 'duplicate-profile-reference', 'Duplicate profile collection history payloads should be rejected.')
   }
 
   function testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes() {
@@ -696,7 +690,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         }),
       ],
     })
-    assert(advancedExtrudeResult.ok, 'Operation history should preserve advanced two-side extrude extent contracts.')
+    expectTrue(advancedExtrudeResult.ok, 'Operation history should preserve advanced two-side extrude extent contracts.')
 
     const invalidSymmetricExtrude = validateOperationHistoryPayload({
       ...createEmptyOperationHistory('doc_workspace'),
@@ -717,7 +711,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         }),
       ],
     })
-    assert(!invalidSymmetricExtrude.ok, 'Symmetric extrudes should reject non-blind/non-throughAll end conditions.')
+    expectTrue(!invalidSymmetricExtrude.ok, 'Symmetric extrudes should reject non-blind/non-throughAll end conditions.')
 
     const invalidSymmetricRevolve = validateOperationHistoryPayload({
       ...createEmptyOperationHistory('doc_workspace'),
@@ -739,7 +733,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
         }),
       ],
     })
-    assert(!invalidSymmetricRevolve.ok, 'Symmetric revolve should reject full and up-to end conditions.')
+    expectTrue(!invalidSymmetricRevolve.ok, 'Symmetric revolve should reject full and up-to end conditions.')
   }
 
   function testPreservesAdvancedParticipantsAndOperationIntent() {
@@ -773,8 +767,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Advanced solid feature history payloads should validate.')
+    expectTrue(
         result.ok &&
         result.payload.entries[0]?.kind === 'createFeature' &&
         result.payload.entries[0].payload.definition.kind === 'sweep' &&
@@ -812,8 +806,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Chamfer advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Chamfer advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok &&
         result.payload.entries[0]?.kind === 'createFeature' &&
         result.payload.entries[0].payload.definition.kind === 'chamfer' &&
@@ -853,8 +847,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Split advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Split advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'createFeature'
         && result.payload.entries[0].payload.definition.kind === 'split'
@@ -899,8 +893,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Delete-solid advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Delete-solid advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'createFeature'
         && result.payload.entries[0].payload.definition.kind === 'deleteSolid'
@@ -957,8 +951,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Loft advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Loft advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok &&
         result.payload.entries[1]?.kind === 'updateFeature' &&
         result.payload.entries[1].payload.definition.kind === 'loft' &&
@@ -987,7 +981,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       }],
     })
 
-    assert(!result.ok && result.reasonCode === 'invalid-advanced-participant', 'Invalid advanced participants should report a stable reason code.')
+    expectTrue(!result.ok && result.reasonCode === 'invalid-advanced-participant', 'Invalid advanced participants should report a stable reason code.')
   }
 
   function testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries() {
@@ -1020,8 +1014,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Combine advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Combine advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'createFeature'
         && result.payload.entries[0].payload.definition.kind === 'combine'
@@ -1061,8 +1055,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Thicken advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Thicken advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok &&
         result.payload.entries[0]?.kind === 'createFeature' &&
         result.payload.entries[0].payload.definition.kind === 'thicken' &&
@@ -1101,8 +1095,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Mirror advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Mirror advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'createFeature'
         && result.payload.entries[0].payload.definition.kind === 'mirror'
@@ -1140,8 +1134,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Transform advanced solid feature history payloads should validate.')
-    assert(
+    expectTrue(result.ok, 'Transform advanced solid feature history payloads should validate.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'createFeature'
         && result.payload.entries[0].payload.definition.kind === 'transform'
@@ -1179,8 +1173,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
 
     const result = validateOperationHistoryPayload(payload)
 
-    assert(result.ok, 'Document variable add/update history entries should validate.')
-    assert(
+    expectTrue(result.ok, 'Document variable add/update history entries should validate.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'addDocumentVariable'
         && result.payload.entries[0].payload.variableId === 'variable_width'
@@ -1205,7 +1199,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       ],
     })
 
-    assert(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime calculation state.')
+    expectTrue(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime calculation state.')
   }
 
   function testPreservesDerivedSketchRelationshipsInCommitHistory() {
@@ -1288,8 +1282,8 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {
       entries: [derivedCommit],
     })
 
-    assert(result.ok, 'Operation history should validate commitSketch entries with derived sketch relationships.')
-    assert(
+    expectTrue(result.ok, 'Operation history should validate commitSketch entries with derived sketch relationships.')
+    expectTrue(
       result.ok
         && result.payload.entries[0]?.kind === 'commitSketch'
         && result.payload.entries[0].payload.definition.derivedRelationships?.[0]?.kind === 'linearPattern',

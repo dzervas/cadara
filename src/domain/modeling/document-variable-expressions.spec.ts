@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { DocumentVariableRecord } from '@/contracts/modeling/schema'
 import {
   evaluateDocumentVariableExpressions,
@@ -7,14 +8,7 @@ import {
   type DocumentVariableExpressionDiagnosticCode,
 } from '@/domain/modeling/document-variable-expressions'
 
-test('src/domain/modeling/document-variable-expressions.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function variable(name: string, valueText: string, ordinal = name): DocumentVariableRecord {
+test('src/domain/modeling/document-variable-expressions.spec.ts', () => {  function variable(name: string, valueText: string, ordinal = name): DocumentVariableRecord {
     return {
       variableId: `variable_${ordinal}` as const,
       name,
@@ -25,7 +19,7 @@ test('src/domain/modeling/document-variable-expressions.spec.ts', () => {
   function evaluate(variables: readonly DocumentVariableRecord[]) {
     const result = evaluateDocumentVariableExpressions(variables)
 
-    assert(result.ok, result.ok ? 'Expected expression evaluation to pass.' : result.diagnostics[0]?.message ?? 'Expected expression evaluation to pass.')
+    expectTrue(result.ok, result.ok ? 'Expected expression evaluation to pass.' : result.diagnostics[0]?.message ?? 'Expected expression evaluation to pass.')
 
     return result
   }
@@ -37,25 +31,25 @@ test('src/domain/modeling/document-variable-expressions.spec.ts', () => {
   ) {
     const result = evaluateDocumentVariableExpressions(variables)
 
-    assert(!result.ok, message)
-    assert(result.diagnostics.some((diagnostic) => diagnostic.code === code), message)
+    expectTrue(!result.ok, message)
+    expectTrue(result.diagnostics.some((diagnostic) => diagnostic.code === code), message)
   }
 
-  assert(isValidDocumentVariableName('width_1'), 'Identifier-style variable names should be valid.')
-  assert(!isValidDocumentVariableName('1_width'), 'Names that cannot parse as math identifiers should be invalid.')
+  expectTrue(isValidDocumentVariableName('width_1'), 'Identifier-style variable names should be valid.')
+  expectTrue(!isValidDocumentVariableName('1_width'), 'Names that cannot parse as math identifiers should be invalid.')
 
   const literals = evaluate([variable('x', '50')])
-  assert(literals.valuesByName.get('x') === 50, 'Simple numeric literals should evaluate.')
+  expectTrue(literals.valuesByName.get('x') === 50, 'Simple numeric literals should evaluate.')
 
   const complex = evaluate([variable('area', '(10 + 5) * 2 ^ 3')])
-  assert(complex.valuesByName.get('area') === 120, 'Complex expressions should use math.js precedence.')
+  expectTrue(complex.valuesByName.get('area') === 120, 'Complex expressions should use math.js precedence.')
 
   const builtin = evaluate([variable('height', 'sqrt(81) + sin(pi / 2)')])
-  assert(builtin.valuesByName.get('height') === 10, 'Built-in math.js functions and constants should evaluate.')
+  expectTrue(builtin.valuesByName.get('height') === 10, 'Built-in math.js functions and constants should evaluate.')
 
   const dependent = evaluate([variable('x', '50'), variable('y', 'x + 50')])
-  assert(dependent.valuesByName.get('y') === 100, 'Dependent expressions should evaluate from document variables.')
-  assert(
+  expectTrue(dependent.valuesByName.get('y') === 100, 'Dependent expressions should evaluate from document variables.')
+  expectTrue(
     dependent.dependenciesByName.get('y')?.includes('x'),
     'Document-variable references should be collected as dependencies.',
   )
@@ -65,7 +59,7 @@ test('src/domain/modeling/document-variable-expressions.spec.ts', () => {
     variable('width', 'base * 2'),
     variable('area', 'width ^ 2'),
   ])
-  assert(chained.valuesByName.get('area') === 2500, 'Chained dependencies should evaluate in dependency order.')
+  expectTrue(chained.valuesByName.get('area') === 2500, 'Chained dependencies should evaluate in dependency order.')
 
   assertRejectsWith([variable('bad', '1 +')], 'document-variable-invalid-expression', 'Invalid syntax should be rejected.')
   assertRejectsWith([variable('bad', 'x = 1')], 'document-variable-invalid-expression', 'Assignment expressions should be rejected.')

@@ -1,17 +1,12 @@
 import { beforeEach, mock, test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { createTestErrorReporter } from '@/contracts/errors'
 
 import {
   createHookTestHarness,
   flushMicrotasks,
 } from './workbench/controllers/controller-test-harness'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 const hookHarness = createHookTestHarness()
 const actualReactModule = await import('react')
@@ -47,8 +42,8 @@ test('useWorkbenchNotifications maps info and error status messages to notificat
     }),
   )
 
-  assert(controller.workbenchStatusNotification?.type === 'info', 'Info notifications should use the info presentation.')
-  assert(
+  expectTrue(controller.workbenchStatusNotification?.type === 'info', 'Info notifications should use the info presentation.')
+  expectTrue(
     controller.workbenchStatusNotification?.title === 'Workbench action'
       && controller.workbenchStatusNotification.message === 'Imported bracket.step.',
     'Info notifications should keep the shared workbench title and the supplied message.',
@@ -62,8 +57,8 @@ test('useWorkbenchNotifications maps info and error status messages to notificat
     }),
   )
 
-  assert(controller.workbenchStatusNotification?.type === 'error', 'Error notifications should use the error presentation.')
-  assert(
+  expectTrue(controller.workbenchStatusNotification?.type === 'error', 'Error notifications should use the error presentation.')
+  expectTrue(
     controller.workbenchStatusNotification?.title === 'Workbench action failed'
       && controller.workbenchStatusNotification.message === 'Import failed.',
     'Error notifications should keep the shared failure title and the supplied message.',
@@ -104,7 +99,7 @@ test('useWorkbenchNotifications exposes restore failures through restoreMessage'
     }),
   )
 
-  assert(
+  expectTrue(
     controller.restoreMessage === 'History restore could not decode the saved timeline.',
     'Failed history restore state should surface the first diagnostic message through restoreMessage.',
   )
@@ -139,19 +134,19 @@ test('useWorkbenchNotifications reports document file action failures and mirror
     }),
   )
 
-  assert(
+  expectTrue(
     controller.workbenchStatusNotification?.type === 'error'
       && controller.workbenchStatusNotification.title === 'Workbench action failed'
       && controller.workbenchStatusNotification.message === 'Local file sync restore failed.',
     'Document file action failures should surface the same visible error through the notification seam.',
   )
-  assert(reporter.reports.length === 1, 'Document file action failures should be forwarded to the error reporter once.')
-  assert(
+  expectTrue(reporter.reports.length === 1, 'Document file action failures should be forwarded to the error reporter once.')
+  expectTrue(
     reporter.reports[0]?.metadata.source === 'workbench.file.restoreLocalBinding'
       && reporter.reports[0]?.metadata.visibility === 'user',
     'Document file action failures should be reported with the original source and user visibility.',
   )
-  assert(
+  expectTrue(
     reporter.reports[0]?.error.message === 'Local file sync restore failed.'
       && reporter.reports[0]?.error.context[0]?.key === 'reason'
       && reporter.reports[0]?.error.context[0]?.value === 'IndexedDB quota exceeded.',

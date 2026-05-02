@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type { BodyId, ConstructionId, FaceId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
@@ -17,14 +18,7 @@ import {
 } from '@/domain/modeling/occ/planes'
 import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 
-test('src/domain/modeling/occ/planes.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
+test('src/domain/modeling/occ/planes.spec.ts', async () => {  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
     if (Math.abs(actual - expected) > tolerance) {
       throw new Error(`${message}: expected ${expected}, got ${actual}.`)
     }
@@ -77,14 +71,14 @@ test('src/domain/modeling/occ/planes.spec.ts', async () => {
     }
 
     polygon.Close()
-    assert(polygon.IsDone(), 'Expected test polygon to build successfully.')
+    expectTrue(polygon.IsDone(), 'Expected test polygon to build successfully.')
 
     const faceBuilder = new oc.BRepBuilderAPI_MakeFace_16(
       toGpPlane(oc, plane),
       polygon.Wire(),
       true,
     )
-    assert(faceBuilder.IsDone(), 'Expected test planar face to build successfully.')
+    expectTrue(faceBuilder.IsDone(), 'Expected test planar face to build successfully.')
 
     return faceBuilder.Face()
   }
@@ -151,15 +145,15 @@ test('src/domain/modeling/occ/planes.spec.ts', async () => {
       distanceError = error instanceof Error ? error.message : String(error)
     }
 
-    assert(
+    expectTrue(
       worldMappingError === 'Sketch plane frame xAxis must be unit length.',
       'World-space mapping must reject invalid sketch-plane frames before producing coordinates.',
     )
-    assert(
+    expectTrue(
       sketchMappingError === 'Sketch plane frame xAxis must be unit length.',
       'Sketch-space mapping must reject invalid sketch-plane frames before projecting coordinates.',
     )
-    assert(
+    expectTrue(
       distanceError === 'Sketch plane frame xAxis must be unit length.',
       'Signed-distance evaluation must reject invalid sketch-plane frames before returning distances.',
     )
@@ -268,7 +262,7 @@ test('src/domain/modeling/occ/planes.spec.ts', async () => {
       0,
       5,
     )
-    assert(pipeFaceBuilder.IsDone(), 'Expected test cylindrical face to build successfully.')
+    expectTrue(pipeFaceBuilder.IsDone(), 'Expected test cylindrical face to build successfully.')
 
     let thrownMessage: string | null = null
 
@@ -278,7 +272,7 @@ test('src/domain/modeling/occ/planes.spec.ts', async () => {
       thrownMessage = error instanceof Error ? error.message : String(error)
     }
 
-    assert(
+    expectTrue(
       thrownMessage === 'Expected non-planar rejection.',
       'Planar-face extraction must reject non-planar faces with the supplied error message.',
     )

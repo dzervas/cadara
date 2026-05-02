@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   CADARA_OPEN_FILE_PICKER_OPTIONS,
   CADARA_SAVE_FILE_PICKER_OPTIONS,
@@ -22,14 +23,7 @@ import { serializeAuthoredDocumentJson } from '@/contracts/modeling/authored-doc
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 
-test('src/lib/local-file-system-access.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function createHandle(name = 'part.cadara'): LocalFileSystemFileHandle {
+test('src/lib/local-file-system-access.spec.ts', async () => {  function createHandle(name = 'part.cadara'): LocalFileSystemFileHandle {
     return {
       name,
       async getFile() {
@@ -60,10 +54,10 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
         return [openHandle]
       },
     })
-    assert(openResult.ok && openResult.handle === openHandle, 'Open picker should return the selected local file handle.')
-    assert(openOptions?.types[0]?.accept['application/json']?.includes('.cadara'), 'Open picker should accept .cadara JSON files.')
-    assert(openOptions?.types[0]?.accept['application/json']?.includes('.json'), 'Open picker should accept JSON files.')
-    assert(openOptions?.multiple === false, 'Open picker should select a single document.')
+    expectTrue(openResult.ok && openResult.handle === openHandle, 'Open picker should return the selected local file handle.')
+    expectTrue(openOptions?.types[0]?.accept['application/json']?.includes('.cadara'), 'Open picker should accept .cadara JSON files.')
+    expectTrue(openOptions?.types[0]?.accept['application/json']?.includes('.json'), 'Open picker should accept JSON files.')
+    expectTrue(openOptions?.multiple === false, 'Open picker should select a single document.')
 
     const saveHandle = createHandle('saved.cadara')
     let saveOptions: LocalFileSystemSavePickerOptions | null = null
@@ -74,16 +68,16 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
         return saveHandle
       },
     })
-    assert(saveResult.ok && saveResult.handle === saveHandle, 'Save picker should return the selected destination handle.')
-    assert(saveOptions?.suggestedName.endsWith('.cadara'), 'Save picker should suggest a cadara filename.')
-    assert(saveOptions?.types[0]?.accept['application/json']?.includes('.cadara'), 'Save picker should accept .cadara JSON files.')
+    expectTrue(saveResult.ok && saveResult.handle === saveHandle, 'Save picker should return the selected destination handle.')
+    expectTrue(saveOptions?.suggestedName.endsWith('.cadara'), 'Save picker should suggest a cadara filename.')
+    expectTrue(saveOptions?.types[0]?.accept['application/json']?.includes('.cadara'), 'Save picker should accept .cadara JSON files.')
   }
 
   async function testUnsupportedAndCancelledPickers() {
     const unsupportedOpen = getLocalFileSystemOpenSupport({ isSecureContext: true })
-    assert(!unsupportedOpen.supported && unsupportedOpen.reason === 'missing-open-picker', 'Missing open picker should be reported explicitly.')
+    expectTrue(!unsupportedOpen.supported && unsupportedOpen.reason === 'missing-open-picker', 'Missing open picker should be reported explicitly.')
     const unsupportedSave = getLocalFileSystemSaveSupport({ isSecureContext: false })
-    assert(!unsupportedSave.supported && unsupportedSave.reason === 'insecure-context', 'Insecure save context should be reported explicitly.')
+    expectTrue(!unsupportedSave.supported && unsupportedSave.reason === 'insecure-context', 'Insecure save context should be reported explicitly.')
 
     const cancelledOpen = await showOpenLocalDocumentPicker({
       isSecureContext: true,
@@ -91,7 +85,7 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
         throw new DOMException('Selection cancelled.', 'AbortError')
       },
     })
-    assert(!cancelledOpen.ok && cancelledOpen.reason === 'cancelled', 'Open picker AbortError should be normalized to cancellation.')
+    expectTrue(!cancelledOpen.ok && cancelledOpen.reason === 'cancelled', 'Open picker AbortError should be normalized to cancellation.')
 
     const cancelledSave = await showSaveLocalDocumentPicker({
       isSecureContext: true,
@@ -99,7 +93,7 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
         throw new DOMException('Selection cancelled.', 'AbortError')
       },
     })
-    assert(!cancelledSave.ok && cancelledSave.reason === 'cancelled', 'Save picker AbortError should be normalized to cancellation.')
+    expectTrue(!cancelledSave.ok && cancelledSave.reason === 'cancelled', 'Save picker AbortError should be normalized to cancellation.')
   }
 
   async function testWritePermissionAndPersistentBindingSupport() {
@@ -128,18 +122,18 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
     }
 
     const writeResult = await writeTextToLocalFileHandle(handle, 'payload')
-    assert(writeResult.ok, 'Writable handles should be written after permission is granted.')
-    assert(requestedMode === 'readwrite', 'Write permission should be requested in readwrite mode.')
-    assert(written === 'payload', 'Direct write should use the selected file handle stream.')
+    expectTrue(writeResult.ok, 'Writable handles should be written after permission is granted.')
+    expectTrue(requestedMode === 'readwrite', 'Write permission should be requested in readwrite mode.')
+    expectTrue(written === 'payload', 'Direct write should use the selected file handle stream.')
 
     const metadata = createLocalFileBindingMetadata('doc_workspace', handle, new Date('2026-04-22T00:00:00.000Z'))
-    assert(metadata.fileName === 'bound.cadara', 'Binding metadata should retain the local file name.')
-    assert(metadata.storedAt === '2026-04-22T00:00:00.000Z', 'Binding metadata should store a deterministic timestamp value.')
+    expectTrue(metadata.fileName === 'bound.cadara', 'Binding metadata should retain the local file name.')
+    expectTrue(metadata.storedAt === '2026-04-22T00:00:00.000Z', 'Binding metadata should store a deterministic timestamp value.')
 
     const bindingStore = createIndexedDbLocalFileBindingStore({ indexedDB: undefined })
     const loadResult = await bindingStore.load('doc_workspace')
-    assert(!bindingStore.isSupported(), 'Binding store should report unsupported storage when IndexedDB is unavailable.')
-    assert(!loadResult.ok && loadResult.reason === 'unsupported-storage', 'Binding store operations should return explicit unsupported-storage results.')
+    expectTrue(!bindingStore.isSupported(), 'Binding store should report unsupported storage when IndexedDB is unavailable.')
+    expectTrue(!loadResult.ok && loadResult.reason === 'unsupported-storage', 'Binding store operations should return explicit unsupported-storage results.')
   }
 
   function testStableSerialization() {
@@ -151,11 +145,11 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
       },
     })
 
-    assert(
+    expectTrue(
       serialized.indexOf('"a"') < serialized.indexOf('"z"'),
       'Authored document serialization should sort object keys deterministically.',
     )
-    assert(
+    expectTrue(
       serialized.indexOf('"a": "first"') < serialized.indexOf('"c": "third"'),
       'Nested object keys should also be sorted deterministically.',
     )
@@ -187,11 +181,11 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
     } as AuthoredModelDocument
 
     const payload = createLocalAuthoredDocumentPayload(document)
-    assert(typeof payload === 'string', 'Documents with geometry assets should serialize as single JSON cadara payloads.')
-    assert(!payload.startsWith('PK'), 'Cadara JSON payloads should not be ZIP-backed packages.')
+    expectTrue(typeof payload === 'string', 'Documents with geometry assets should serialize as single JSON cadara payloads.')
+    expectTrue(!payload.startsWith('PK'), 'Cadara JSON payloads should not be ZIP-backed packages.')
 
     const parsed = await readCadaraDocumentFile(new File([payload], 'asset.cadara'))
-    assert(
+    expectTrue(
       (parsed as AuthoredModelDocument).assets.records[0]?.hash === asset.asset.hash,
       'Cadara JSON reads should restore authored asset records directly.',
     )
@@ -202,14 +196,14 @@ test('src/lib/local-file-system-access.spec.ts', async () => {
     } catch (error: unknown) {
       zipRejected = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
     }
-    assert(zipRejected, 'Cadara reads should reject ZIP-backed packages without backwards-compatible extraction.')
+    expectTrue(zipRejected, 'Cadara reads should reject ZIP-backed packages without backwards-compatible extraction.')
   }
 
-  assert(
+  expectTrue(
     CADARA_OPEN_FILE_PICKER_OPTIONS.types[0]?.accept['application/json']?.includes('.cadara'),
     'Open picker constants should advertise cadara JSON documents.',
   )
-  assert(
+  expectTrue(
     CADARA_SAVE_FILE_PICKER_OPTIONS.types[0]?.accept['application/json']?.includes('.cadara'),
     'Save picker constants should advertise cadara JSON documents.',
   )

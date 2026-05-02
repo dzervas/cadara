@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import {
   geometryAssetManifestSchema,
   geometryAssetRecordSchema,
@@ -13,9 +14,9 @@ test('geometry asset schema entrypoints accept structured Cadara B-rep and baked
   const cadaraParsed = geometryAssetRecordSchema.safeParse(cadaraRecord)
   const bakedMeshParsed = geometryAssetRecordSchema.safeParse(bakedMeshRecord)
 
-  assert(cadaraParsed.success, `Expected structured Cadara B-rep record to parse: ${formatIssues(cadaraParsed)}`)
-  assert(bakedMeshParsed.success, `Expected structured baked mesh record to parse: ${formatIssues(bakedMeshParsed)}`)
-  assert(
+  expectTrue(cadaraParsed.success, `Expected structured Cadara B-rep record to parse: ${formatIssues(cadaraParsed)}`)
+  expectTrue(bakedMeshParsed.success, `Expected structured baked mesh record to parse: ${formatIssues(bakedMeshParsed)}`)
+  expectTrue(
     cadaraParsed.data.data?.kind === 'cadaraBrep'
       && bakedMeshParsed.data.data?.kind === 'bakedMeshGeometry',
     'Record entrypoints should preserve the structured asset data discriminants.',
@@ -34,9 +35,9 @@ test('legacy geometry asset manifests normalize duplicate records with merged ow
 
   const parsed = legacyGeometryAssetManifestSchema.safeParse([first, second])
 
-  assert(parsed.success, `Expected legacy manifest normalization to succeed: ${formatIssues(parsed)}`)
-  assert(parsed.data.records.length === 1, 'Legacy manifests should normalize duplicate compatible records into one asset record.')
-  assert(
+  expectTrue(parsed.success, `Expected legacy manifest normalization to succeed: ${formatIssues(parsed)}`)
+  expectTrue(parsed.data.records.length === 1, 'Legacy manifests should normalize duplicate compatible records into one asset record.')
+  expectTrue(
     parsed.data.records[0]?.ownerFeatureIds.join(',') === 'feature_a,feature_b,feature_z',
     'Legacy manifest normalization should merge and sort owner feature ids.',
   )
@@ -45,8 +46,8 @@ test('legacy geometry asset manifests normalize duplicate records with merged ow
     schemaVersion: 'geometry-asset-manifest/v1alpha1',
     records: [second, first],
   })
-  assert(manifestParsed.success, `Expected manifest normalization to succeed: ${formatIssues(manifestParsed)}`)
-  assert(
+  expectTrue(manifestParsed.success, `Expected manifest normalization to succeed: ${formatIssues(manifestParsed)}`)
+  expectTrue(
     manifestParsed.data.records[0]?.assetId === 'asset_shared',
     'Versioned manifests should normalize records through the same entrypoint behavior.',
   )
@@ -66,12 +67,12 @@ test('geometry asset record schema rejects retained non-structured formats and m
     data: makeCadaraBrepRecord().data,
   })
 
-  assert(!unsupportedFormat.success, 'Retained STEP records should be rejected at the schema entrypoint.')
-  assert(hasIssue(unsupportedFormat, 'Only translated Cadara B-rep geometry and structured baked mesh geometry may be retained in authored documents.'), 'Unsupported retained formats should explain why authored documents only allow structured retained geometry.')
-  assert(!mismatchedCadaraPayload.success, 'Cadara B-rep records should reject baked mesh payloads.')
-  assert(hasIssue(mismatchedCadaraPayload, 'STEP-imported geometry must be stored as translated Cadara B-rep JSON data.'), 'Cadara B-rep records should require the Cadara B-rep data discriminant.')
-  assert(!mismatchedMeshPayload.success, 'Baked mesh records should reject Cadara B-rep payloads.')
-  assert(hasIssue(mismatchedMeshPayload, 'Baked mesh geometry must be stored as structured JSON data.'), 'Baked mesh records should require the baked mesh data discriminant.')
+  expectTrue(!unsupportedFormat.success, 'Retained STEP records should be rejected at the schema entrypoint.')
+  expectTrue(hasIssue(unsupportedFormat, 'Only translated Cadara B-rep geometry and structured baked mesh geometry may be retained in authored documents.'), 'Unsupported retained formats should explain why authored documents only allow structured retained geometry.')
+  expectTrue(!mismatchedCadaraPayload.success, 'Cadara B-rep records should reject baked mesh payloads.')
+  expectTrue(hasIssue(mismatchedCadaraPayload, 'STEP-imported geometry must be stored as translated Cadara B-rep JSON data.'), 'Cadara B-rep records should require the Cadara B-rep data discriminant.')
+  expectTrue(!mismatchedMeshPayload.success, 'Baked mesh records should reject Cadara B-rep payloads.')
+  expectTrue(hasIssue(mismatchedMeshPayload, 'Baked mesh geometry must be stored as structured JSON data.'), 'Baked mesh records should require the baked mesh data discriminant.')
 })
 
 test('geometry asset record schema reports weighted-curve refinement failures at the record entrypoint', () => {
@@ -118,9 +119,9 @@ test('geometry asset record schema reports weighted-curve refinement failures at
 
   const parsed = geometryAssetRecordSchema.safeParse(invalidEdgeWeights)
 
-  assert(!parsed.success, 'Weighted curve invariants should fail when weights or multiplicities do not align.')
-  assert(hasIssue(parsed, 'Cadara B-rep spline weights must align 1:1 with poles.'), 'Curve weight-count mismatches should report a seam-level refinement error.')
-  assert(hasIssue(parsed, 'Cadara B-rep spline multiplicities must align 1:1 with knots.'), 'Curve knot/multiplicity mismatches should report a seam-level refinement error.')
+  expectTrue(!parsed.success, 'Weighted curve invariants should fail when weights or multiplicities do not align.')
+  expectTrue(hasIssue(parsed, 'Cadara B-rep spline weights must align 1:1 with poles.'), 'Curve weight-count mismatches should report a seam-level refinement error.')
+  expectTrue(hasIssue(parsed, 'Cadara B-rep spline multiplicities must align 1:1 with knots.'), 'Curve knot/multiplicity mismatches should report a seam-level refinement error.')
 })
 
 test('geometry asset record schema reports weighted-surface and topology reference failures at the record entrypoint', () => {
@@ -183,19 +184,13 @@ test('geometry asset record schema reports weighted-surface and topology referen
     },
   })
 
-  assert(!invalidSurface.success, 'Surface and topology entrypoint refinements should reject invalid structured B-rep payloads.')
-  assert(hasIssue(invalidSurface, 'Cadara B-rep edge references a missing vertex.'), 'Topology reference mismatches should surface at the record entrypoint.')
-  assert(hasIssue(invalidSurface, 'Cadara B-rep surface poles must match the declared U/V pole counts.'), 'Surface pole-count mismatches should be reported by the schema entrypoint.')
-  assert(hasIssue(invalidSurface, 'Cadara B-rep surface weights must align 1:1 with poles.'), 'Surface weight-count mismatches should be reported by the schema entrypoint.')
-  assert(hasIssue(invalidSurface, 'Cadara B-rep V multiplicities must align 1:1 with V knots.'), 'Surface knot/multiplicity mismatches should be reported by the schema entrypoint.')
-  assert(hasIssue(invalidSurface, 'Cadara B-rep spline weights must align 1:1 with poles.'), 'Weighted basis curves on extruded/revolved surfaces should also be validated at the record entrypoint.')
+  expectTrue(!invalidSurface.success, 'Surface and topology entrypoint refinements should reject invalid structured B-rep payloads.')
+  expectTrue(hasIssue(invalidSurface, 'Cadara B-rep edge references a missing vertex.'), 'Topology reference mismatches should surface at the record entrypoint.')
+  expectTrue(hasIssue(invalidSurface, 'Cadara B-rep surface poles must match the declared U/V pole counts.'), 'Surface pole-count mismatches should be reported by the schema entrypoint.')
+  expectTrue(hasIssue(invalidSurface, 'Cadara B-rep surface weights must align 1:1 with poles.'), 'Surface weight-count mismatches should be reported by the schema entrypoint.')
+  expectTrue(hasIssue(invalidSurface, 'Cadara B-rep V multiplicities must align 1:1 with V knots.'), 'Surface knot/multiplicity mismatches should be reported by the schema entrypoint.')
+  expectTrue(hasIssue(invalidSurface, 'Cadara B-rep spline weights must align 1:1 with poles.'), 'Weighted basis curves on extruded/revolved surfaces should also be validated at the record entrypoint.')
 })
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 function hasIssue(result: { success: false; error: { issues: { message: string }[] } }, message: string) {
   return result.error.issues.some((issue) => issue.message === message)

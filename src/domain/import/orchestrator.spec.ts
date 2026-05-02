@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import { ResultAsync, createAppError } from '@/contracts/errors'
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
@@ -11,14 +12,7 @@ import {
 } from '@/domain/import/orchestrator'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 
-test('src/domain/import/orchestrator.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const result = await applyImportPreparedActions({
+test('src/domain/import/orchestrator.spec.ts', async () => {  const result = await applyImportPreparedActions({
     modelingService: {
       addDocumentVariable() {
         return ResultAsync.fromPromise(Promise.resolve({
@@ -105,8 +99,8 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
     },
   })
 
-  assert(result.revisionId === 'rev_4', 'Import action application should advance to the final mutation revision.')
-  assert(
+  expectTrue(result.revisionId === 'rev_4', 'Import action application should advance to the final mutation revision.')
+  expectTrue(
     result.createdEntityIds.variableIds[0] === 'var_scale'
       && result.createdEntityIds.featureIds[0] === 'feature_image_support'
       && result.createdEntityIds.sketchIds[0] === 'sketch_imported_image',
@@ -115,7 +109,7 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
 
   const file = new File([new Uint8Array([0xde, 0xad, 0xbe, 0xef])], 'fixture.step', { type: 'model/step' })
   const source = await resolveLocalFileImportSource(file)
-  assert(
+  expectTrue(
     source.name === 'fixture.step'
       && source.origin.kind === 'localFile'
       && source.origin.fileName === 'fixture.step'
@@ -142,12 +136,12 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
     },
     createDefaultSelections(returnedReview) {
       providerCalls.push('defaults')
-      assert(returnedReview === review, 'Import session creation should forward the provider review into default-selection creation.')
+      expectTrue(returnedReview === review, 'Import session creation should forward the provider review into default-selection creation.')
       return { body: 'Body 1' }
     },
     getReviewFormSchema(returnedReview, selections) {
       providerCalls.push('schema')
-      assert(returnedReview === review && selections.body === 'Body 1', 'Import session creation should build form schema from the provider review and default selections.')
+      expectTrue(returnedReview === review && selections.body === 'Body 1', 'Import session creation should build form schema from the provider review and default selections.')
       return { sections: [] } as FeatureEditorFormSchema
     },
     applySelectionPatch(_review, selections) {
@@ -155,7 +149,7 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
     },
     async prepare(input) {
       providerCalls.push('prepare')
-      assert(
+      expectTrue(
         input.source === source
           && input.review === review
           && input.selections.body === 'Body 1'
@@ -206,7 +200,7 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
       },
     },
   })
-  assert(
+  expectTrue(
     session.providerId === 'step'
       && session.resolvedSource === source
       && session.review === review
@@ -249,7 +243,7 @@ test('src/domain/import/orchestrator.spec.ts', async () => {
       },
     },
   })
-  assert(
+  expectTrue(
     providerCalls.includes('prepare')
       && prepared.createFeatures?.[0]?.featureLabel === 'Imported plane'
       && prepared.diagnostics?.[0]?.message === 'Imported with defaults.',

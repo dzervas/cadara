@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
 import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import {
@@ -9,14 +10,7 @@ import {
 } from '@/core/shortcuts/profile-repository'
 import { validateShortcutOverrideUpdate } from '@/hooks/shortcut-validation'
 
-test('src/hooks/shortcut-provider.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const commands = [
+test('src/hooks/shortcut-provider.spec.ts', () => {  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',
@@ -39,12 +33,12 @@ test('src/hooks/shortcut-provider.spec.ts', () => {
   const redoOnUndo = setCommandShortcutOverride(disabledUndo, 'editor.redo', ['mod+z'])
 
   const remapResult = validateShortcutOverrideUpdate(registry, redoOnUndo)
-  assert(remapResult.nextOverrides === redoOnUndo, 'Redo can reuse Undo shortcut while Undo remains disabled.')
-  assert(remapResult.conflicts.length === 0, 'Disabled Undo should not conflict with remapped Redo.')
+  expectTrue(remapResult.nextOverrides === redoOnUndo, 'Redo can reuse Undo shortcut while Undo remains disabled.')
+  expectTrue(remapResult.conflicts.length === 0, 'Disabled Undo should not conflict with remapped Redo.')
 
   const resetResult = validateShortcutOverrideUpdate(registry, resetCommandShortcut(redoOnUndo, 'editor.undo'))
-  assert(resetResult.nextOverrides === null, 'Resetting Undo should be rejected when it restores a conflict.')
-  assert(
+  expectTrue(resetResult.nextOverrides === null, 'Resetting Undo should be rejected when it restores a conflict.')
+  expectTrue(
     resetResult.conflicts.some(
       (conflict) =>
         conflict.kind === 'duplicate'

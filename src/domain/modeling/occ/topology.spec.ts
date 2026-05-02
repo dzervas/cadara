@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { expectTrue } from '@/testing/expect.spec'
 import type { ConstructionSnapshotRecord, FeatureDefinition, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type { ConstructionId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
@@ -28,14 +29,7 @@ import {
 } from '@/domain/modeling/opencascade-kernel-seed'
 import { toGpPnt } from '@/domain/modeling/occ/planes'
 
-test('src/domain/modeling/occ/topology.spec.ts', async () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  function pointId(name: string) {
+test('src/domain/modeling/occ/topology.spec.ts', async () => {  function pointId(name: string) {
     return `sketch_point_${name}` as SketchPointId
   }
 
@@ -186,7 +180,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
     const oc = await getDefaultOpenCascadeInstance()
     const builder = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 8, 6)
     builder.Build(new oc.Message_ProgressRange_1())
-    assert(builder.IsDone(), 'Expected OCC box builder to succeed in topology test.')
+    expectTrue(builder.IsDone(), 'Expected OCC box builder to succeed in topology test.')
 
     let body = trackNewSolidBody(oc, {
       bodyId: 'body_seed',
@@ -210,8 +204,8 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
     const initial = createInitialTopologyToken()
     const next = advanceTopologyToken(initial)
 
-    assert(initial === 't0001', 'Initial topology token must start at t0001 for the first body state.')
-    assert(next === 't0002', 'Topology token advancement must produce a stable incremented token.')
+    expectTrue(initial === 't0001', 'Initial topology token must start at t0001 for the first body state.')
+    expectTrue(next === 't0002', 'Topology token advancement must produce a stable incremented token.')
   }
 
   async function testBodySnapshotsAndReferenceStateExposeLiveTopology() {
@@ -254,10 +248,10 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
     const entity = sketch.sketch.definition.entities[0]
     const region = sketch.sketch.regions[0]
 
-    assert(snapshot.topology.faceIds[0] === faceId, 'Body snapshot must preserve enumerated face ids.')
-    assert(snapshot.topology.edgeIds[0] === edgeId, 'Body snapshot must preserve enumerated edge ids.')
-    assert(faceId.includes('_t0001_'), 'Face ids must encode the current body topology token.')
-    assert(edgeId.includes('_t0001_'), 'Edge ids must encode the current body topology token.')
+    expectTrue(snapshot.topology.faceIds[0] === faceId, 'Body snapshot must preserve enumerated face ids.')
+    expectTrue(snapshot.topology.edgeIds[0] === edgeId, 'Body snapshot must preserve enumerated edge ids.')
+    expectTrue(faceId.includes('_t0001_'), 'Face ids must encode the current body topology token.')
+    expectTrue(edgeId.includes('_t0001_'), 'Edge ids must encode the current body topology token.')
 
     const liveFaceResolution = resolveOccReference({
       documentId: OCC_KERNEL_DOCUMENT_ID,
@@ -265,8 +259,8 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState,
     }, { kind: 'face', bodyId: body.bodyId, faceId })
 
-    assert(liveFaceResolution.resolution.invalidation === null, 'Live topology references must resolve without invalidation.')
-    assert(liveFaceResolution.resolution.ownerBodyId === body.bodyId, 'Live topology references must retain owning body metadata.')
+    expectTrue(liveFaceResolution.resolution.invalidation === null, 'Live topology references must resolve without invalidation.')
+    expectTrue(liveFaceResolution.resolution.ownerBodyId === body.bodyId, 'Live topology references must retain owning body metadata.')
 
     const liveSketchPointResolution = resolveOccReference({
       documentId: OCC_KERNEL_DOCUMENT_ID,
@@ -274,8 +268,8 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState,
     }, { kind: 'sketchPoint', sketchId: sketch.sketchId, pointId: point.pointId })
 
-    assert(liveSketchPointResolution.resolution.invalidation === null, 'Live sketch points must resolve without invalidation.')
-    assert(liveSketchPointResolution.resolution.ownerSketchId === sketch.sketchId, 'Live sketch-point references must retain owning sketch metadata.')
+    expectTrue(liveSketchPointResolution.resolution.invalidation === null, 'Live sketch points must resolve without invalidation.')
+    expectTrue(liveSketchPointResolution.resolution.ownerSketchId === sketch.sketchId, 'Live sketch-point references must retain owning sketch metadata.')
 
     const liveSketchEntityResolution = resolveOccReference({
       documentId: OCC_KERNEL_DOCUMENT_ID,
@@ -283,7 +277,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState,
     }, { kind: 'sketchEntity', sketchId: sketch.sketchId, entityId: entity.entityId })
 
-    assert(liveSketchEntityResolution.resolution.invalidation === null, 'Live sketch entities must resolve without invalidation.')
+    expectTrue(liveSketchEntityResolution.resolution.invalidation === null, 'Live sketch entities must resolve without invalidation.')
 
     const liveRegionResolution = resolveOccReference({
       documentId: OCC_KERNEL_DOCUMENT_ID,
@@ -291,7 +285,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState,
     }, { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId })
 
-    assert(liveRegionResolution.resolution.invalidation === null, 'Live region references must resolve without invalidation.')
+    expectTrue(liveRegionResolution.resolution.invalidation === null, 'Live region references must resolve without invalidation.')
 
     const liveFeatureResolution = resolveOccReference({
       documentId: OCC_KERNEL_DOCUMENT_ID,
@@ -299,7 +293,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState,
     }, { kind: 'feature', featureId: feature.featureId })
 
-    assert(liveFeatureResolution.resolution.invalidation === null, 'Live feature references must resolve without invalidation.')
+    expectTrue(liveFeatureResolution.resolution.invalidation === null, 'Live feature references must resolve without invalidation.')
   }
 
   async function testMissingTopologyReferencesInvalidateAgainstPriorState() {
@@ -351,19 +345,19 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState: current,
     }, { kind: 'face', bodyId: original.bodyId, faceId: staleFaceId })
 
-    assert(
+    expectTrue(
       missingFaceResolution.resolution.invalidation?.reason === OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
       'Modified topology references must preserve the history-driven invalidation reason.',
     )
-    assert(
+    expectTrue(
       missingFaceResolution.resolution.invalidation?.sourceTarget?.kind === 'body',
       'Missing topology references must point back to the owning body as the invalidation source.',
     )
-    assert(
+    expectTrue(
       missingFaceResolution.resolution.ownerRevisionId === nextRevisionId,
       'Invalidated references must be restamped to the revision that observed the invalidation.',
     )
-    assert(
+    expectTrue(
       missingFaceResolution.diagnostics[0]?.detail?.kind === 'invalidReference',
       'Missing topology references must surface a structured invalidReference diagnostic.',
     )
@@ -374,7 +368,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState: current,
     }, { kind: 'edge', bodyId: original.bodyId, edgeId: staleEdgeId })
 
-    assert(
+    expectTrue(
       missingEdgeResolution.resolution.invalidation?.reason === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
       'Deleted edge references must preserve the history-driven invalidation reason.',
     )
@@ -385,7 +379,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState: current,
     }, { kind: 'vertex', bodyId: original.bodyId, vertexId: staleVertexId })
 
-    assert(
+    expectTrue(
       missingVertexResolution.resolution.invalidation?.sourceTarget?.kind === 'body',
       'Missing vertex references must point back to the owning body as the invalidation source.',
     )
@@ -396,7 +390,7 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {
       referenceState: current,
     }, { kind: 'face', bodyId: original.bodyId, faceId: 'face_body_seed_t9999_1' })
 
-    assert(
+    expectTrue(
       neverExistedResolution.resolution.invalidation?.sourceTarget === null,
       'Never-seen references must not fabricate an owning source target.',
     )

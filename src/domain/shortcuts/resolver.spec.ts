@@ -1,18 +1,12 @@
 import { test } from 'bun:test'
 
+import { expectTrue } from '@/testing/expect.spec'
 import type { ShortcutCommandDefinition } from '@/core/shortcuts/commands'
 import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
 import { createShortcutResolver } from '@/core/shortcuts/resolver'
 
-test('src/domain/shortcuts/resolver.spec.ts', () => {
-  function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-      throw new Error(message)
-    }
-  }
-
-  const commands = [
+test('src/domain/shortcuts/resolver.spec.ts', () => {  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',
@@ -59,7 +53,7 @@ test('src/domain/shortcuts/resolver.spec.ts', () => {
       isCommandEnabled: () => true,
     },
   )
-  assert(
+  expectTrue(
     executed.at(-1) === 'editor.cancel',
     'Resolver should dispatch the higher-priority scoped command.',
   )
@@ -73,7 +67,7 @@ test('src/domain/shortcuts/resolver.spec.ts', () => {
       isTextEditingTarget: (target) => target !== undefined && target !== null,
     },
   )
-  assert(
+  expectTrue(
     executed.every((commandId) => commandId !== 'editor.deleteSelection'),
     'Resolver should ignore guarded shortcuts from text-editing targets.',
   )
@@ -86,7 +80,7 @@ test('src/domain/shortcuts/resolver.spec.ts', () => {
       isCommandEnabled: () => false,
     },
   )
-  assert(
+  expectTrue(
     executed.filter((commandId) => commandId === 'editor.undo').length === 0,
     'Resolver should not execute disabled commands.',
   )
@@ -107,7 +101,7 @@ test('src/domain/shortcuts/resolver.spec.ts', () => {
       isCommandEnabled: () => true,
     },
   )
-  assert(
+  expectTrue(
     executed.at(-1) === 'editor.redo',
     'Resolver should track and dispatch multi-key sequences.',
   )
@@ -128,7 +122,7 @@ test('src/domain/shortcuts/resolver.spec.ts', () => {
       isTextEditingTarget: (target) => target !== undefined && target !== null,
     },
   )
-  assert(
+  expectTrue(
     !textPrefixResult.handled && !textPrefixResult.pendingSequence && !textPrefixPrevented,
     'Resolver should not reserve sequence prefixes from text-editing targets.',
   )
@@ -147,7 +141,7 @@ test('src/domain/shortcuts/resolver.spec.ts', () => {
       isCommandEnabled: () => false,
     },
   )
-  assert(
+  expectTrue(
     !disabledPrefixResult.handled && !disabledPrefixResult.pendingSequence && !disabledPrefixPrevented,
     'Resolver should not reserve sequence prefixes when matching sequence commands are disabled.',
   )
