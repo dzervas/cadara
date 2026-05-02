@@ -15,6 +15,6 @@ test('src/components/layout/sentry-ad-block-notification.spec.tsx', () => {  con
   expectTrue(markup.includes('data-notification-type="warning"'), 'Sentry ad-block notice should use warning notification presentation.')
   expectTrue(markup.includes('role="status"'), 'Sentry ad-block notice should use warning status semantics.')
   expectTrue(markup.includes('Error reporting blocked'), 'Sentry ad-block notice should render a warning title.')
-  expectTrue(markup.includes('Please disable the ad-block'), 'Sentry ad-block notice should preserve the warning body copy.')
+  expectTrue(markup.includes('Error reporting is blocked by an ad blocker'), 'Sentry ad-block notice should explain that an ad blocker is blocking error reporting.')
   expectTrue(markup.includes('Dismiss ad-block notification'), 'Sentry ad-block notice should preserve manual dismissal.')
 })

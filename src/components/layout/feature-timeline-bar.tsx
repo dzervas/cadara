@@ -407,8 +407,8 @@ function HistoryTimelineSurface({
           style={{
             left: repairTooltip.left,
             top: repairTooltip.top,
-            backgroundColor: 'var(--workbench-shell-danger-surface)',
-            boxShadow: 'var(--workbench-panel-shadow)',
+            backgroundColor: 'var(--workbench-shell-overlay-strong)',
+            boxShadow: 'var(--workbench-panel-shadow), inset 0 0 0 1px var(--workbench-shell-danger-border)',
             color: 'var(--workbench-shell-danger-text)',
           }}
         >
@@ -426,7 +426,7 @@ function HistoryTimelineSurface({
                   className="mb-2 flex h-7 items-center rounded-[4px] px-3 text-xs"
                   style={{
                     background: 'var(--workbench-shell-overlay-soft)',
-                    color: 'var(--mantine-color-dark-2)',
+                    color: 'var(--workbench-shell-text-muted)',
                   }}
                 >
                   {emptyLabel}

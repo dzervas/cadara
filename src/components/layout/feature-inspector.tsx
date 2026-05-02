@@ -50,7 +50,7 @@ interface FeatureInspectorProps {
 function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagnostic[] }) {
   if (diagnostics.length === 0) {
     return (
-      <p className="text-xs text-[var(--mantine-color-dark-2)]">
+      <p className="text-xs text-[var(--workbench-shell-text-muted)]">
         No diagnostics reported for the current preview.
       </p>
     )
@@ -58,24 +58,36 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
 
   return (
     <div className="space-y-2">
-      {diagnostics.map((diagnostic, index) => (
-        <div
-          key={`${diagnostic.code}-${diagnostic.message}-${index}`}
-          className="rounded-[6px] px-3 py-2"
-          style={{ background: 'var(--workbench-shell-overlay-soft)' }}
-        >
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--mantine-color-dark-3)]">
-            {diagnostic.severity}
-          </p>
-          <p className="mt-1 text-sm text-[var(--mantine-color-dark-0)]">{diagnostic.message}</p>
-          {diagnostic.detail ? (
-            <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">
-              {formatInspectorDiagnosticDetail(diagnostic)}
+      {diagnostics.map((diagnostic, index) => {
+        const surface =
+          diagnostic.severity === 'error'
+            ? { bg: 'var(--workbench-shell-danger-surface)', border: 'var(--workbench-shell-danger-border)', label: 'var(--workbench-shell-danger-text)' }
+            : diagnostic.severity === 'warning'
+              ? { bg: 'var(--workbench-shell-warning-surface)', border: 'var(--workbench-shell-warning-border)', label: 'var(--workbench-shell-warning-text)' }
+              : { bg: 'var(--workbench-shell-overlay)', border: 'var(--workbench-shell-border)', label: 'var(--workbench-shell-text-dim)' }
+
+        return (
+          <div
+            key={`${diagnostic.code}-${diagnostic.message}-${index}`}
+            className="rounded-[8px] border px-3 py-2"
+            style={{ background: surface.bg, borderColor: surface.border }}
+          >
+            <p
+              className="text-[11px] font-semibold uppercase tracking-[0.20em]"
+              style={{ color: surface.label }}
+            >
+              {diagnostic.severity}
             </p>
-          ) : null}
-          <p className="mt-1 text-xs text-[var(--mantine-color-dark-2)]">{diagnostic.code}</p>
-        </div>
-      ))}
+            <p className="mt-1 text-sm text-[var(--workbench-shell-text)]">{diagnostic.message}</p>
+            {diagnostic.detail ? (
+              <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">
+                {formatInspectorDiagnosticDetail(diagnostic)}
+              </p>
+            ) : null}
+            <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">{diagnostic.code}</p>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -181,7 +193,7 @@ function FieldMessage(props: { helper?: string; error?: { message: string } | nu
   }
 
   return props.helper ? (
-    <p className="text-xs text-[var(--mantine-color-dark-2)]">{props.helper}</p>
+    <p className="text-xs text-[var(--workbench-shell-text-muted)]">{props.helper}</p>
   ) : null
 }
 
@@ -267,7 +279,7 @@ export function FeatureExpressionEditorControl(props: {
           styles={compactInputStyles({ hasError: props.hasError })}
         />
         {props.preview.ok ? (
-          <span className="pointer-events-none absolute right-2 top-1/2 max-w-[45%] -translate-y-1/2 truncate rounded bg-[var(--workbench-shell-overlay)] px-2 py-0.5 text-xs text-[var(--mantine-color-dark-1)]">
+          <span className="pointer-events-none absolute right-2 top-1/2 max-w-[45%] -translate-y-1/2 truncate rounded bg-[var(--workbench-shell-overlay)] px-2 py-0.5 text-xs text-[var(--workbench-shell-text)]">
             {props.preview.displayText}
           </span>
         ) : null}
@@ -570,7 +582,7 @@ function ReferenceCard(props: {
       <p className="w-[88px] shrink-0 truncate text-[11px] font-medium text-[var(--workbench-shell-text-dim)]">
         {compactFieldLabel(props.title)}
       </p>
-      <p className={`min-w-0 flex-1 truncate text-[12.5px] ${props.error ? 'text-[var(--workbench-shell-danger-text)]' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
+      <p className={`min-w-0 flex-1 truncate text-[12.5px] ${props.error ? 'text-[var(--workbench-shell-danger-text)]' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--workbench-shell-text)]'}`}>
         {props.value}
       </p>
     </div>
@@ -676,7 +688,7 @@ function ReferenceCollectionCard(props: {
                       className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
                       style={{ background: 'var(--workbench-shell-overlay)' }}
                     >
-                      <span className="min-w-0 truncate text-[12px] text-[var(--mantine-color-dark-0)]">
+                      <span className="min-w-0 truncate text-[12px] text-[var(--workbench-shell-text)]">
                         {getPrimitiveRefLabel(target)}
                       </span>
                       <ActionIcon
@@ -727,7 +739,7 @@ function ReferenceCollectionCard(props: {
                 aria-pressed={props.isActive}
               >
                 <p className="sr-only">{props.field.label}</p>
-                <p className={`min-h-6 truncate text-[12.5px] leading-6 ${props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--mantine-color-dark-0)]'}`}>
+                <p className={`min-h-6 truncate text-[12.5px] leading-6 ${props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--workbench-shell-text)]'}`}>
                   {hasSelection ? `${selected.length} selected` : props.field.emptyLabel}
                 </p>
               </button>
@@ -755,7 +767,7 @@ function ReferenceCollectionCard(props: {
                     className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
                     style={{ background: 'var(--workbench-shell-overlay)' }}
                   >
-                    <span className="min-w-0 truncate text-[12px] text-[var(--mantine-color-dark-0)]">
+                    <span className="min-w-0 truncate text-[12px] text-[var(--workbench-shell-text)]">
                       {props.field.picker.itemLabel ?? props.field.label}: {getPrimitiveRefLabel(target)}
                     </span>
                     {props.field.picker.allowsMultiple ? (
@@ -921,7 +933,7 @@ export function FeatureFormFieldRenderer(props: {
           {variants.map((variant) => (
             <div key={variant.value} className="space-y-1">
               {field.showInactiveFields ? (
-                <p className="text-[11px] text-[var(--mantine-color-dark-2)]">{variant.label}</p>
+                <p className="text-[11px] text-[var(--workbench-shell-text-muted)]">{variant.label}</p>
               ) : null}
               {variant.fields.map((field) => (
                 <FeatureFormFieldRenderer
@@ -1088,7 +1100,7 @@ export function FeatureInspector({
           styles={{
             root: {
               backgroundColor: 'var(--workbench-shell-accent)',
-              color: 'var(--mantine-color-dark-9)',
+              color: 'var(--workbench-shell-surface)',
             },
           }}
         >

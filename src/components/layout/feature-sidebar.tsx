@@ -382,19 +382,21 @@ export function FeatureSidebar({
             </Accordion.Panel>
           </Accordion.Item>
 
-          <Accordion.Item value="variables">
-            <header className="relative">
-              <Accordion.Control className={`${sidebarAccordionControlClassName} pr-12`}>
-                Variables
-              </Accordion.Control>
-              <Tooltip label="Add variable" withArrow>
+          <Accordion.Item value="variables" style={{ position: 'relative' }}>
+            <Accordion.Control className={`${sidebarAccordionControlClassName} pr-16`}>
+              Variables
+            </Accordion.Control>
+            <div
+              className="pointer-events-none absolute right-10 top-2 z-10 flex items-center"
+            >
+              <Tooltip label="Add variable">
                 <ActionIcon
                   type="button"
                   variant="subtle"
                   color="gray"
-                  size={24}
+                  size={28}
                   aria-label="Add variable"
-                  className="absolute right-4 top-1/2 z-10 -translate-y-1/2"
+                  className="pointer-events-auto"
                   onMouseDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -404,7 +406,7 @@ export function FeatureSidebar({
                   <WorkbenchIcon name="plus" className="h-3.5 w-3.5" />
                 </ActionIcon>
               </Tooltip>
-            </header>
+            </div>
             <Accordion.Panel className="pb-3">
               <div className="space-y-2 px-3">
                 {(snapshot?.document.variables ?? []).map((variable) => {
@@ -631,7 +633,7 @@ export function FeatureSidebar({
                           }}
                         >
                           <p
-                            className="text-[11px] uppercase tracking-[0.18em]"
+                            className="text-[11px] uppercase tracking-[0.20em]"
                             style={{
                               color:
                                 diagnostic.severity === 'error'

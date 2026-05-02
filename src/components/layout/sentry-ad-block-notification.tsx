@@ -7,7 +7,7 @@ import {
 } from '@/contracts/errors/sentry-client'
 
 const sentryAdBlockMessage =
-  "Please disable the ad-block on this page, it's used to gather errors and crashes - there are absolutely 0 ads and no big-corp is gathering your precious data, I swear. Thank you - the dev"
+  'Error reporting is blocked by an ad blocker. CADara uses Sentry to surface crashes; no advertising or third-party tracking. Allow this domain in your blocker to enable reporting.'
 
 export function SentryAdBlockNotification() {
   const isBlocked = useSyncExternalStore(

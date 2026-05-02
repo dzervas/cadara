@@ -105,7 +105,7 @@ export function ShortcutSettings() {
       <ScrollArea.Autosize mah={520}>
         {groups.map((group) => (
           <section key={group.category} className="mb-5" data-shortcut-reference-group={group.category}>
-            <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={6}>
+            <Text size="11px" fw={600} tt="uppercase" c="var(--workbench-shell-text-dim)" mb={6} style={{ letterSpacing: '0.20em' }}>
               {group.category}
             </Text>
             <Table verticalSpacing={6} horizontalSpacing="sm">

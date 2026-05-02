@@ -205,7 +205,7 @@ function SketchToolControlField({
               disabled={control.disabled}
               checked={control.value}
               size="xs"
-              color="teal"
+              color="workbench"
               onChange={(event) => {
                 onPatch({ ...control.action.patch, value: event.currentTarget.checked })
               }}

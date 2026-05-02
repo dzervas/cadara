@@ -62,11 +62,11 @@ export function ImportInspector({ onCommit }: ImportInspectorProps) {
           <ThemeIcon variant="light" color="workbench" size={20}>
             <WorkbenchIcon name="import" className="h-4 w-4" />
           </ThemeIcon>
-          <Text size="11px" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.22em' }}>
+          <Text size="11px" fw={600} tt="uppercase" c="var(--workbench-shell-text-dim)" style={{ letterSpacing: '0.20em' }}>
             Import Session
           </Text>
         </div>
-        <Text mt={8} size="sm" fw={500} c="dark.0">{provider?.label ?? 'Import'}</Text>
+        <Text mt={8} size="sm" fw={500} c="var(--workbench-shell-text)">{provider?.label ?? 'Import'}</Text>
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">

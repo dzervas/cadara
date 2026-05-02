@@ -1,7 +1,7 @@
 import type React from 'react'
 
 export const SECTION_HEADER_CLASSES =
-  'text-[10px] font-semibold uppercase tracking-[0.20em] text-[var(--mantine-color-dark-3)]'
+  'text-[11px] font-semibold uppercase tracking-[0.20em] text-[var(--workbench-shell-text-dim)]'
 
 export function fieldSurfaceStyle(
   field: { error?: { message: string } | null },
@@ -25,7 +25,7 @@ export function fieldSurfaceStyle(
 
   return {
     background: 'var(--workbench-shell-overlay-soft)',
-    color: 'var(--mantine-color-dark-0)',
+    color: 'var(--workbench-shell-text)',
   }
 }
 

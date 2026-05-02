@@ -74,7 +74,7 @@ export function WorkbenchStateDebugger({
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--cad-muted)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.20em] text-[var(--cad-muted)]">
             State Debugger
           </p>
           <p className="mt-1 text-[var(--cad-muted-foreground)]">

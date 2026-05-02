@@ -24,6 +24,8 @@
 		"@automerge/automerge-repo": "^2.5.5",
 		"@automerge/automerge-repo-network-broadcastchannel": "^2.5.5",
 		"@automerge/automerge-repo-storage-indexeddb": "^2.5.5",
+		"@fontsource/ibm-plex-mono": "^5.2.7",
+		"@fontsource/ibm-plex-sans": "^5.2.8",
 		"@mantine/core": "^9.1.1",
 		"@mantine/hooks": "^9.1.1",
 		"@react-three/drei": "^10.7.7",

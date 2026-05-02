@@ -236,7 +236,7 @@ export function WorkspaceToolbar({
                 {index < visibleSections.length - 1 ? (
                   <Divider
                     orientation="vertical"
-                    style={{ borderColor: 'var(--workbench-shell-overlay-strong)', height: 'auto', opacity: 0.6 }}
+                    style={{ borderColor: 'var(--workbench-shell-divider)', height: 'auto' }}
                   />
                 ) : null}
               </div>

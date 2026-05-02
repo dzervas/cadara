@@ -182,6 +182,7 @@ export const workbenchTheme = createTheme({
   black: workbenchColors[9],
   white: workbenchColors[0],
   fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
+  fontFamilyMonospace: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
   headings: {
     fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
     fontWeight: '600',
