@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-02T00:00:01Z",
+  "title": "Design System: CADara",
+  "extensions": {
+    "colorMeta": {
+      "graphite-deep": {
+        "role": "neutral",
+        "displayName": "Graphite Deep",
+        "canonical": "#333333",
+        "tonalRamp": [
+          "#1a1a1a",
+          "#222222",
+          "#2b2b2b",
+          "#333333",
+          "#404040",
+          "#525252",
+          "#656565",
+          "#7a7a7a"
+        ]
+      },
+      "graphite-800": {
+        "role": "neutral",
+        "displayName": "Graphite 800",
+        "canonical": "#656565",
+        "tonalRamp": [
+          "#2b2b2b",
+          "#3d3d3d",
+          "#4f4f4f",
+          "#5c5c5c",
+          "#656565",
+          "#777777",
+          "#8a8a8a",
+          "#9f9f9f"
+        ]
+      },
+      "workshop-steel": {
+        "role": "primary",
+        "displayName": "Workshop Steel",
+        "canonical": "#9a9a9a",
+        "tonalRamp": [
+          "#3a3a3a",
+          "#525252",
+          "#6b6b6b",
+          "#848484",
+          "#9a9a9a",
+          "#b2b2b2",
+          "#cdcdcd",
+          "#e7e7e7"
+        ]
+      },
+      "graphite-bone": {
+        "role": "neutral",
+        "displayName": "Graphite Bone",
+        "canonical": "#f5f5f5",
+        "tonalRamp": [
+          "#9a9a9a",
+          "#b2b2b2",
+          "#cdcdcd",
+          "#dcdcdc",
+          "#e7e7e7",
+          "#ededed",
+          "#f5f5f5",
+          "#fbfbfb"
+        ]
+      },
+      "spark-orange": {
+        "role": "tertiary",
+        "displayName": "Spark Orange",
+        "canonical": "#f0a14a",
+        "tonalRamp": [
+          "#3a230a",
+          "#5a3812",
+          "#7a4f1c",
+          "#a06425",
+          "#c47e30",
+          "#e09340",
+          "#f0a14a",
+          "#f6b777"
+        ]
+      },
+      "ember-hover": {
+        "role": "tertiary",
+        "displayName": "Ember Hover",
+        "canonical": "#f6b777",
+        "tonalRamp": [
+          "#3a230a",
+          "#5a3812",
+          "#7a4f1c",
+          "#a06425",
+          "#c47e30",
+          "#e09340",
+          "#f0a14a",
+          "#f6b777"
+        ]
+      },
+      "pin-amber": {
+        "role": "tertiary",
+        "displayName": "Pin Amber",
+        "canonical": "#f6c356",
+        "tonalRamp": [
+          "#3a2c0d",
+          "#5a4516",
+          "#7a5d20",
+          "#9c772b",
+          "#c29637",
+          "#e0b042",
+          "#f6c356",
+          "#fff4c2"
+        ]
+      },
+      "corner-cyan": {
+        "role": "tertiary",
+        "displayName": "Corner Cyan",
+        "canonical": "#7ab8d4",
+        "tonalRamp": [
+          "#13313e",
+          "#1f4a5c",
+          "#2c647c",
+          "#3b7e9c",
+          "#4d97b6",
+          "#62aac6",
+          "#7ab8d4",
+          "#b8dce8"
+        ]
+      },
+      "viewcube-slate": {
+        "role": "tertiary",
+        "displayName": "Viewcube Slate",
+        "canonical": "#314255",
+        "tonalRamp": [
+          "#101521",
+          "#19202e",
+          "#222b3c",
+          "#2a374a",
+          "#314255",
+          "#3e5269",
+          "#4f6680",
+          "#7c92ad"
+        ]
+      },
+      "viewcube-outline": {
+        "role": "tertiary",
+        "displayName": "Viewcube Outline",
+        "canonical": "#8db7ff",
+        "tonalRamp": [
+          "#1c2a4a",
+          "#2c3f6a",
+          "#3d558a",
+          "#506da9",
+          "#6788c5",
+          "#7ea3df",
+          "#8db7ff",
+          "#bcd3ff"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Top-level identity moments. Rare in this shell. 20px is the largest text on screen by intent." },
+      "headline": { "displayName": "Headline", "purpose": "Section titles inside dense panels — feature inspector headings, modal titles." },
+      "title": { "displayName": "Title", "purpose": "Tool button labels, item names in trees, variable names. The dominant text register." },
+      "body": { "displayName": "Body", "purpose": "Tooltip descriptions, helper text, diagnostic messages." },
+      "label": { "displayName": "Section Label", "purpose": "Uppercase tracked sidebar headers — PARTS & OBJECTS, VARIABLES, DOCUMENT DIAGNOSTICS." },
+      "mono": { "displayName": "Mono Numeric", "purpose": "Variable expressions, evaluated values, dimension readouts, units. Anything where 1 and l must differ." }
+    },
+    "shadows": [
+      { "name": "toolbar", "value": "0 4px 16px rgba(0, 0, 0, 0.25)", "purpose": "Lightest structural shadow. Sits under the top toolbar." },
+      { "name": "sidebar", "value": "4px 0 20px rgba(0, 0, 0, 0.2)", "purpose": "Horizontal-only shadow under the left sidebar — depth runs into the viewport, not down." },
+      { "name": "elevation-md", "value": "0 12px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04)", "purpose": "Standard elevation for menu dropdowns and the toolbar search palette." },
+      { "name": "timeline", "value": "0 14px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05)", "purpose": "Feature-history scrubber bar. Slightly stronger lift to communicate draggable timeline." },
+      { "name": "panel", "value": "0 20px 50px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.04) inset", "purpose": "Deepest shadow. Reserved for floating panels, modals, and heaviest overlays." }
+    ],
+    "motion": [
+      { "name": "tool-state", "value": "background-color 160ms ease, border-color 160ms ease, opacity 160ms ease", "purpose": "Default tool button state transition. Color/opacity only — never animate layout." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Tool Button (Default)",
+      "kind": "button",
+      "refersTo": "tool-button",
+      "description": "Icon-only toolbar button. Transparent at rest, lifts into Workshop-Steel light tint on hover/active.",
+      "html": "<button class=\"ds-tool-btn\" type=\"button\" aria-label=\"Sketch\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14.5 2.5l7 7-12 12H2.5v-7l12-12z\"></path><path d=\"M11 6l7 7\"></path></svg></button>",
+      "css": ".ds-tool-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; background: transparent; color: #f5f5f5; border: 1px solid transparent; cursor: pointer; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; padding: 0; } .ds-tool-btn:hover { background: rgba(154,154,154,0.12); } .ds-tool-btn:focus-visible { outline: none; border-color: #9a9a9a; box-shadow: 0 0 0 2px rgba(154,154,154,0.25); }"
+    },
+    {
+      "name": "Tool Button (Active)",
+      "kind": "button",
+      "refersTo": "tool-button-active",
+      "description": "Tool button in active/pressed state. Workshop-Steel tinted background, full-opacity icon.",
+      "html": "<button class=\"ds-tool-btn-active\" type=\"button\" aria-pressed=\"true\" aria-label=\"Line\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M4 20L20 4\"></path></svg></button>",
+      "css": ".ds-tool-btn-active { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; background: rgba(154,154,154,0.18); color: #f5f5f5; border: 1px solid #9a9a9a; cursor: pointer; padding: 0; } .ds-tool-btn-active:hover { background: rgba(154,154,154,0.24); }"
+    },
+    {
+      "name": "Tool Button (Success — Finish Sketch)",
+      "kind": "button",
+      "refersTo": "tool-button-success",
+      "description": "The single chromatic affordance permitted in the toolbar. Marks the moment-of-commit out of sketch mode.",
+      "html": "<button class=\"ds-tool-btn-success\" type=\"button\" aria-label=\"Finish sketch\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12l5 5L20 7\"></path></svg></button>",
+      "css": ".ds-tool-btn-success { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; background: rgba(45,121,67,0.28); color: #a8d9b1; border: 1px solid #2d7943; cursor: pointer; padding: 0; transition: background-color 160ms ease; } .ds-tool-btn-success:hover { background: rgba(45,121,67,0.4); color: #c2e4ca; }"
+    },
+    {
+      "name": "Search Input (Toolbar)",
+      "kind": "input",
+      "refersTo": "input-compact",
+      "description": "30px compact search field with leading icon. Used in the toolbar to fuzzy-find tools.",
+      "html": "<div class=\"ds-search\"><span class=\"ds-search-icon\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><circle cx=\"11\" cy=\"11\" r=\"7\"></circle><path d=\"M20 20l-3.5-3.5\"></path></svg></span><input class=\"ds-search-input\" type=\"text\" placeholder=\"Search tools\" /></div>",
+      "css": ".ds-search { position: relative; width: 240px; height: 30px; border-radius: 8px; background: rgba(58,58,58,0.82); border: 1px solid #5c5c5c; display: flex; align-items: center; padding: 0 8px 0 28px; transition: border-color 160ms ease; } .ds-search:focus-within { border-color: #9a9a9a; } .ds-search-icon { position: absolute; left: 8px; color: #cdcdcd; display: flex; align-items: center; } .ds-search-input { background: transparent; border: 0; outline: 0; color: #f5f5f5; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; font-size: 13px; flex: 1; padding: 0; } .ds-search-input::placeholder { color: #b2b2b2; }"
+    },
+    {
+      "name": "Tooltip",
+      "kind": "custom",
+      "refersTo": "tooltip",
+      "description": "Two-line tooltip — title with optional shortcut hint, plus dimmed description. No arrow, soft 100ms reveal.",
+      "html": "<div class=\"ds-tooltip\"><div class=\"ds-tooltip-row\"><span class=\"ds-tooltip-title\">Sketch</span><span class=\"ds-shortcut\">S</span></div><div class=\"ds-tooltip-desc\">Start a sketch on a face or reference plane.</div></div>",
+      "css": ".ds-tooltip { display: inline-flex; flex-direction: column; gap: 4px; max-width: 280px; padding: 8px 12px; border-radius: 8px; background: rgba(31,33,34,0.98); border: 1px solid #5c5c5c; box-shadow: 0 20px 50px rgba(0,0,0,0.38), 0 1px 0 rgba(255,255,255,0.04) inset; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; } .ds-tooltip-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; } .ds-tooltip-title { font-size: 12px; font-weight: 600; color: #f5f5f5; } .ds-tooltip-desc { font-size: 12px; line-height: 1.5; color: #cdcdcd; } .ds-shortcut { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.35); color: #e7e7e7; border: 1px solid #4a4a4a; }"
+    },
+    {
+      "name": "Sidebar Section Header",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Wide-tracked uppercase section label. Identity-defining typography register.",
+      "html": "<header class=\"ds-section-header\"><span class=\"ds-section-label\">Parts &amp; Objects</span></header>",
+      "css": ".ds-section-header { padding: 12px 16px; background: #333333; } .ds-section-label { font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; font-size: 11px; font-weight: 600; line-height: 1.2; letter-spacing: 0.20em; text-transform: uppercase; color: #b2b2b2; }"
+    },
+    {
+      "name": "Sidebar Item",
+      "kind": "nav",
+      "refersTo": "sidebar-item",
+      "description": "Tree row in the parts/objects panel. Tight padding, hover lifts to a subtle Workshop-Steel tint.",
+      "html": "<div class=\"ds-sidebar-item\"><span class=\"ds-sidebar-icon\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z\"></path><path d=\"M12 12l8-4.5\"></path><path d=\"M12 12L4 7.5\"></path><path d=\"M12 12v9\"></path></svg></span><span class=\"ds-sidebar-label\">Bracket Body</span><button class=\"ds-sidebar-eye\" type=\"button\" aria-label=\"Toggle visibility\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle></svg></button></div>",
+      "css": ".ds-sidebar-item { display: flex; align-items: center; gap: 8px; padding: 6px 20px; background: transparent; cursor: pointer; transition: background-color 160ms ease; } .ds-sidebar-item:hover { background: rgba(154,154,154,0.12); } .ds-sidebar-item[aria-selected=\"true\"] { background: rgba(154,154,154,0.18); } .ds-sidebar-icon { color: #9a9a9a; display: flex; align-items: center; } .ds-sidebar-label { font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 500; line-height: 1.4; color: #f5f5f5; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-sidebar-eye { background: transparent; border: 0; padding: 4px; border-radius: 6px; color: #b2b2b2; cursor: pointer; opacity: 0.72; transition: opacity 160ms ease, background-color 160ms ease; display: inline-flex; align-items: center; justify-content: center; } .ds-sidebar-item:hover .ds-sidebar-eye { opacity: 1; } .ds-sidebar-eye:hover { background: rgba(154,154,154,0.16); }"
+    },
+    {
+      "name": "Variable Row",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Inline-editable parametric variable. Name + expression chip + result chip. Mono for numbers.",
+      "html": "<div class=\"ds-var-row\"><span class=\"ds-var-name\">thickness</span><span class=\"ds-var-right\"><span class=\"ds-chip ds-chip-expr\">2 * wallMin</span><span class=\"ds-chip-eq\" aria-hidden=\"true\">=</span><span class=\"ds-chip ds-chip-result\">5.0</span></span></div>",
+      "css": ".ds-var-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px; border-radius: 8px; background: transparent; cursor: pointer; transition: background-color 160ms ease; } .ds-var-row:hover { background: rgba(154,154,154,0.10); } .ds-var-name { font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; font-size: 13px; font-weight: 500; line-height: 1.4; color: #f5f5f5; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-var-right { display: inline-flex; align-items: center; gap: 6px; min-width: 0; } .ds-chip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1; padding: 4px 8px; border-radius: 4px; border: 1px solid #5c5c5c; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-chip-expr { background: #2b2b2b; color: #e7e7e7; } .ds-chip-result { background: rgba(45,121,67,0.32); color: #c2e4ca; border-color: #2d7943; } .ds-chip-eq { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #b2b2b2; }"
+    },
+    {
+      "name": "Diagnostic Card (Error)",
+      "kind": "card",
+      "refersTo": "diagnostic-card-error",
+      "description": "Severity-tinted card for document diagnostics. Severity tag at top, message, optional target reference, code.",
+      "html": "<div class=\"ds-diag\" data-severity=\"error\"><span class=\"ds-diag-severity\">error</span><p class=\"ds-diag-msg\">Sketch is over-constrained — remove one constraint to recover.</p><p class=\"ds-diag-target\">Target Sketch01</p><p class=\"ds-diag-code\">SKETCH_OVERCONSTRAINED</p></div>",
+      "css": ".ds-diag { padding: 8px 8px; border-radius: 8px; border: 1px solid; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; } .ds-diag[data-severity=\"error\"] { background: rgba(140,28,30,0.5); border-color: #8c1c1e; } .ds-diag[data-severity=\"warning\"] { background: rgba(120,90,20,0.5); border-color: #b08438; } .ds-diag-severity { display: inline-block; font-size: 11px; line-height: 1.2; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #f5b8b8; } .ds-diag[data-severity=\"warning\"] .ds-diag-severity { color: #f0d59a; } .ds-diag-msg { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: #f5f5f5; } .ds-diag-target { margin: 4px 0 0; font-size: 12px; color: #cdcdcd; } .ds-diag-code { margin: 4px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #b2b2b2; }"
+    },
+    {
+      "name": "Notification (Error)",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Toast-style alert overlay. 4px severity rail on the leading edge — the only sanctioned side-stripe in the system. Surface stays graphite; severity reads through the rail, the matching full border, and the title color.",
+      "html": "<div class=\"ds-notif\" data-severity=\"error\" role=\"alert\" aria-live=\"assertive\"><span class=\"ds-notif-rail\" aria-hidden=\"true\"></span><div class=\"ds-notif-body\"><span class=\"ds-notif-icon\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path d=\"M12 8v4\"></path><path d=\"M12 16h.01\"></path></svg></span><div class=\"ds-notif-stack\"><div class=\"ds-notif-title\">Import failed</div><div class=\"ds-notif-msg\">CADara could not parse the geometry section of bracket.sldprt. Try re-exporting from SolidWorks.</div><button class=\"ds-notif-action\" type=\"button\">Open log</button></div><button class=\"ds-notif-dismiss\" type=\"button\" aria-label=\"Dismiss notification\"><svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"><path d=\"M6 6l12 12M18 6L6 18\"></path></svg></button></div></div>",
+      "css": ".ds-notif { position: relative; display: flex; align-items: stretch; max-width: 24rem; min-width: 0; overflow: hidden; border-radius: 8px; border: 1px solid; background: rgba(51,51,51,0.96); color: #f5f5f5; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; font-size: 12px; line-height: 1.5; box-shadow: 0 20px 50px rgba(0,0,0,0.38), 0 1px 0 rgba(255,255,255,0.04) inset; } .ds-notif[data-severity=\"info\"] { border-color: #8b8b8b; } .ds-notif[data-severity=\"info\"] .ds-notif-rail { background: #9a9a9a; } .ds-notif[data-severity=\"info\"] .ds-notif-icon, .ds-notif[data-severity=\"info\"] .ds-notif-title { color: #e7e7e7; } .ds-notif[data-severity=\"warning\"] { border-color: #b08438; } .ds-notif[data-severity=\"warning\"] .ds-notif-rail { background: #f08c00; } .ds-notif[data-severity=\"warning\"] .ds-notif-icon, .ds-notif[data-severity=\"warning\"] .ds-notif-title { color: #ffec99; } .ds-notif[data-severity=\"error\"] { border-color: #c92a2a; } .ds-notif[data-severity=\"error\"] .ds-notif-rail { background: #e03131; } .ds-notif[data-severity=\"error\"] .ds-notif-icon, .ds-notif[data-severity=\"error\"] .ds-notif-title { color: #ffc9c9; } .ds-notif-rail { width: 4px; flex-shrink: 0; } .ds-notif-body { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; flex: 1; min-width: 0; } .ds-notif-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; } .ds-notif-stack { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; } .ds-notif-title { font-size: 12px; font-weight: 600; } .ds-notif-msg { font-size: 12px; color: #cdcdcd; } .ds-notif-action { align-self: flex-start; margin-top: 4px; padding: 4px 10px; background: #2b2b2b; color: #f5f5f5; border: 1px solid #717171; border-radius: 6px; font: inherit; font-size: 11px; cursor: pointer; transition: background-color 160ms ease; } .ds-notif-action:hover { background: #3a3a3a; } .ds-notif-dismiss { width: 24px; height: 24px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 1px solid #717171; border-radius: 6px; color: #b2b2b2; cursor: pointer; padding: 0; transition: background-color 160ms ease, color 160ms ease; } .ds-notif-dismiss:hover { background: #3a3a3a; color: #f5f5f5; }"
+    },
+    {
+      "name": "View Cube (Viewport overlay)",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "WebGL widget approximated in CSS for the panel. Slate-blue cut-corner cube with cyan-blue outlines and Plex Sans labels. Lives in the viewport top-right and drives camera transitions on click. The slate palette is a sanctioned exception to the Quiet Chrome Rule because the cube lives on the canvas, not on the chrome.",
+      "html": "<div class=\"ds-vcube-stage\"><div class=\"ds-vcube\"><div class=\"ds-vcube-face ds-vcube-top\">TOP</div><div class=\"ds-vcube-face ds-vcube-front\">FRONT</div><div class=\"ds-vcube-face ds-vcube-right\">RIGHT</div></div></div>",
+      "css": ".ds-vcube-stage { width: 96px; height: 96px; perspective: 320px; display: inline-flex; align-items: center; justify-content: center; padding: 8px; } .ds-vcube { position: relative; width: 56px; height: 56px; transform-style: preserve-3d; transform: rotateX(-25deg) rotateY(-35deg); } .ds-vcube-face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #314255; border: 1px solid rgba(141,183,255,0.5); color: #f5f5f5; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-shadow: 0 0 4px #333333, 0 0 4px #333333, 0 0 4px #333333; } .ds-vcube-top { transform: rotateX(90deg) translateZ(28px); } .ds-vcube-front { transform: translateZ(28px); } .ds-vcube-right { transform: rotateY(90deg) translateZ(28px); }"
+    },
+    {
+      "name": "Toolbar Shell (Container)",
+      "kind": "custom",
+      "refersTo": "toolbar-shell",
+      "description": "Top toolbar surface. Sharp corners on the shell, soft shadow under, no chromatic accent.",
+      "html": "<header class=\"ds-toolbar\"><div class=\"ds-toolbar-section\"><button class=\"ds-tool-btn\" type=\"button\" aria-label=\"New\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z\"></path><path d=\"M14 3v6h6\"></path></svg></button><button class=\"ds-tool-btn\" type=\"button\" aria-label=\"Undo\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 14l-5-5 5-5\"></path><path d=\"M4 9h11a5 5 0 010 10H9\"></path></svg></button></div><div class=\"ds-toolbar-divider\"></div><div class=\"ds-toolbar-section\"><button class=\"ds-tool-btn-active\" type=\"button\" aria-pressed=\"true\" aria-label=\"Line\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M4 20L20 4\"></path></svg></button><button class=\"ds-tool-btn\" type=\"button\" aria-label=\"Circle\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"><circle cx=\"12\" cy=\"12\" r=\"8\"></circle></svg></button></div></header>",
+      "css": ".ds-toolbar { display: flex; align-items: center; gap: 12px; padding: 4px 16px; background: #333333; box-shadow: 0 4px 16px rgba(0,0,0,0.25); border-radius: 0; min-height: 48px; } .ds-toolbar-section { display: flex; align-items: center; gap: 4px; } .ds-toolbar-divider { width: 1px; align-self: stretch; background: rgba(255,255,255,0.04); margin: 4px 0; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Visible Workshop",
+    "overview": "CADara is a workshop, not a dashboard. Every tool the operator might reach for stays in the open — on the toolbar, in the tree, against the dark wall of the workspace. The chrome is monochromatic on purpose: graphite-on-graphite, no chromatic accent in the shell, because the only thing that should ever be in color is the geometry being made. The reference for feel is Plasticity — bold, dark, decisive — but with the discoverability re-enabled. CADara hasn't earned the right to hide tools yet, so density is a feature, not an apology. Targets are tight, type is small, tracking is wide. The interface looks like it was made in 2026, not retrofitted from 2005, and it explicitly rejects the chrome-and-baroque-dialogs lineage of SolidWorks, the unfinished-Qt look of FreeCAD, the IDE-coldness of Rhino, the kid-friendly bubblegum of TinkerCAD, and the cards-and-charts pattern of generic SaaS dashboards.",
+    "keyCharacteristics": [
+      "Dark-first, dense without being cramped, browser-native but never about being browser-native.",
+      "Monochromatic shell. Saturated color is reserved for canvas semantics — selection, sketch references, status states.",
+      "Typographic discipline carries the density: small text, wide-tracked uppercase labels, monospace for numbers.",
+      "Soft layered shadows with a 1px inset top highlight, not glassmorphism, not flat-by-decree."
+    ],
+    "rules": [
+      { "name": "The Quiet Chrome Rule", "section": "colors", "body": "The shell is monochromatic. No saturated color belongs in the toolbar, sidebar, or panel chrome unless it is communicating a status the user must see. If a designer reaches for a brand color to make something feel 'more designed,' they have already failed the rule." },
+      { "name": "The Geometry-Owns-Color Rule", "section": "colors", "body": "Saturated hues live where the part lives. Spark Orange is for geometry the user has selected, Pin Amber is for sketch references the user has placed, Mantine reds and yellows are for problems the user has caused. The shell stays out of the way." },
+      { "name": "The Brand-Color-Is-Grey Rule", "section": "colors", "body": "The Mantine primaryColor is workbench and primaryShade is 4 — Workshop Steel. This is intentional. There is no purple, no electric blue, no neon. If a future feature needs a primary tint, it pulls from the graphite scale, not from a chromatic palette." },
+      { "name": "The Tracked Caps Rule", "section": "typography", "body": "Uppercase is used for sidebar section headers and for diagnostic severity tags — never for body copy, never for buttons, never for marketing-style emphasis. Tracking is 0.20em. Anything tighter reads as default uppercase and breaks the register." },
+      { "name": "The Mono-For-Numbers Rule", "section": "typography", "body": "Any field a user might compare against another field — a length, a constraint value, a coordinate, a variable result — is monospaced. The eye scans columns of 12.5 and 12.500001 and immediately sees the difference. Sans-serif numbers hide that difference." },
+      { "name": "The No-Display-Hero Rule", "section": "typography", "body": "There are no oversized hero headlines. The largest text on screen is 20px. PRODUCT.md is explicit: oversized friendly buttons are an anti-reference. Restraint at the top of the scale is the point." },
+      { "name": "The Inner Highlight Rule", "section": "elevation", "body": "Every elevated surface carries 0 1px 0 rgba(255,255,255,0.04) (or 0.05) on the top edge. It is barely visible and that is the point — it gives the surface a sculpted lip that sells the depth without adding chrome. If a new surface skips this, it will read as flat-in-a-bad-way against the rest of the shell." },
+      { "name": "The No-Glass Rule", "section": "elevation", "body": "No backdrop-filter: blur(...) in the chrome. Surfaces are opaque or use color-mix(... transparent) for tonal layering, never optical blur. PRODUCT.md says it directly: glassmorphism reads as 2014, and it is forbidden." },
+      { "name": "The Visible Tool Rule", "section": "components", "body": "Every tool the operator might need is on the toolbar at all times. There are no advanced overflow menus that hide capability. Dropdown variant families exist (e.g., pattern variants), but their parent is always present. Discoverability beats minimalism in a CAD app where missing a tool costs minutes of hunting." },
+      { "name": "The 320px-Inspector Rule", "section": "components", "body": "The inspector / sidebar width is 320px. Components inside it are designed to fit that width without horizontal scroll. If a future panel needs more, the right answer is to refactor the panel, not widen the shell." },
+      { "name": "The No-Round-On-Shell Rule", "section": "components", "body": "The toolbar Paper and the sidebar Paper are radius={0}. Rounding is for components inside the shell, not the shell itself. The window-edge feel comes from sharp shell corners + soft component corners." }
+    ],
+    "dos": [
+      "Do keep saturated color confined to the viewport, sketch overlays, and status states. New chrome is graphite-on-graphite or it is rejected.",
+      "Do use rounded.md (8px) for components and rounded.none (0) for the shell itself.",
+      "Do match the Inner Highlight Rule on every new elevated surface — a 1px inset top highlight at ~4% white. Without it, the surface reads as a flat patch.",
+      "Do use IBM Plex Sans for everything, monospace only for numbers, units, expressions, and identifiers.",
+      "Do apply 0.20em letter-spacing on uppercase section labels at 11px/600, and never at body sizes.",
+      "Do treat hobbyists as professionals. Tooltips are short, exact, and load-bearing — not Welcome copy.",
+      "Do use Mantine primitives configured through workbench-theme.ts. New bespoke styled components require a reason; new bespoke div chrome requires a very good reason."
+    ],
+    "donts": [
+      "Don't introduce a primary brand color that isn't grey. The brand is grey on purpose. PRODUCT.md is unambiguous: this is a tool, not a dashboard.",
+      "Don't ship UI that reads as SolidWorks — frozen-in-2005 chrome, baroque dialog stacks, every feature with a different visual language.",
+      "Don't ship UI that reads as FreeCAD — inconsistent enough to feel broken, default Qt look. Open-source must not look open-source in the bad way.",
+      "Don't ship UI that reads as Rhino — IDE-cold, panel-stacked, hostile to anyone who isn't already a Rhino expert.",
+      "Don't ship UI that reads as TinkerCAD — playful illustrations, oversized friendly buttons, let's design a robot copy. CADara users are adults making real things.",
+      "Don't use the generic SaaS dashboard cliché — cards-and-charts, hero metrics, gradient accents, identical card grids. CADara is a tool, not a dashboard.",
+      "Don't announce browser-native-ness. No cute illustrations, no marketing-ish empty states, no intro tours about how to use the browser app.",
+      "Don't reach for side-stripe borders as a default accent. The Notification widget's 4px severity rail is the only sanctioned side stripe in the system, and it earns that exception because notifications are short-lived overlays where severity must be readable in peripheral vision. On cards, list items, sidebar rows, diagnostics, callouts — severity is carried by full borders + tinted surfaces, never side stripes.",
+      "Don't use gradient text. Single solid color, weight or size for emphasis.",
+      "Don't apply backdrop-filter blur to chrome surfaces. No glassmorphism. Use opaque graphite layered by shadow.",
+      "Don't reach for a modal as the first idea. Inline editing (the variable row pattern) is the house style. Modals exist (export, file dialogs) but are the second answer, not the first.",
+      "Don't use rounded corners on the shell itself. The toolbar and sidebar are radius={0}.",
+      "Don't use serif fonts, script fonts, or display fonts. The stack is IBM Plex Sans, full stop.",
+      "Don't use letter-spacing on body text. Tracking is reserved for the uppercase section-label register.",
+      "Don't introduce sentence-case Great job affirmations, mascots, or success illustrations. Confirmation is a state change, not a celebration."
+    ]
+  }
+}
