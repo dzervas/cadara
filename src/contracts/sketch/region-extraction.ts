@@ -62,6 +62,16 @@ type SegmentRecord = {
   startAngle: number
   endAngle: number
   traversalDirection: 'forward' | 'reverse'
+  curve:
+    | { kind: 'lineSegment' }
+    | {
+        kind: 'arc'
+        center: SketchPoint2D
+        radius: number
+        startAngle: number
+        endAngle: number
+        sweepDirection: 'clockwise' | 'counterClockwise'
+      }
 }
 
 type RingBoundarySegment = {
@@ -167,6 +177,16 @@ function normalizeAngle(angle: number) {
   const tau = Math.PI * 2
   const normalized = angle % tau
   return normalized < 0 ? normalized + tau : normalized
+}
+
+function reverseSweepDirection(direction: 'clockwise' | 'counterClockwise') {
+  return direction === 'clockwise' ? 'counterClockwise' : 'clockwise'
+}
+
+function getArcSweep(startAngle: number, endAngle: number, direction: 'clockwise' | 'counterClockwise') {
+  return direction === 'counterClockwise'
+    ? normalizeAngle(endAngle - startAngle)
+    : normalizeAngle(startAngle - endAngle)
 }
 
 function signedArea(points: SketchPoint2D[]) {
@@ -287,7 +307,53 @@ function reverseSegment(segment: SegmentRecord): SegmentRecord {
     startAngle: (segment.endAngle + Math.PI) % (Math.PI * 2),
     endAngle: (segment.startAngle + Math.PI) % (Math.PI * 2),
     traversalDirection: segment.traversalDirection === 'forward' ? 'reverse' : 'forward',
+    curve: segment.curve.kind === 'arc'
+      ? {
+          ...segment.curve,
+          startAngle: segment.curve.endAngle,
+          endAngle: segment.curve.startAngle,
+          sweepDirection: reverseSweepDirection(segment.curve.sweepDirection),
+        }
+      : segment.curve,
   }
+}
+
+function sampleSegmentPoints(segment: SegmentRecord): SketchPoint2D[] {
+  if (segment.curve.kind === 'lineSegment') {
+    return [segment.start, segment.end]
+  }
+
+  const arc = segment.curve
+  const sweep = getArcSweep(arc.startAngle, arc.endAngle, arc.sweepDirection)
+  const sampleCount = Math.max(
+    3,
+    Math.ceil(getClosedCurveSampleCount(arc.radius) * (sweep / (Math.PI * 2))),
+  )
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
+    const angle = arc.sweepDirection === 'counterClockwise'
+      ? arc.startAngle + sweep * t
+      : arc.startAngle - sweep * t
+
+    return [
+      arc.center[0] + Math.cos(angle) * arc.radius,
+      arc.center[1] + Math.sin(angle) * arc.radius,
+    ]
+  })
+}
+
+function buildRingPoints(segments: readonly SegmentRecord[]) {
+  const points = segments.flatMap((segment, index) => {
+    const sampled = sampleSegmentPoints(segment)
+    return index === 0 ? sampled : sampled.slice(1)
+  })
+
+  if (points.length > 1 && equalsPoint(points[0]!, points[points.length - 1]!)) {
+    points.pop()
+  }
+
+  return points
 }
 
 function cross(
@@ -420,23 +486,24 @@ function buildSegments(
         return []
       }
       return [{
-        source: { kind: 'entity', entityId: entity.entityId },
-        sourceKey: getSegmentSourceKey({ kind: 'entity', entityId: entity.entityId }),
-        startPointId: entity.startPointId,
-        endPointId: entity.endPointId,
+          source: { kind: 'entity', entityId: entity.entityId },
+          sourceKey: getSegmentSourceKey({ kind: 'entity', entityId: entity.entityId }),
+          startPointId: entity.startPointId,
+          endPointId: entity.endPointId,
         start: solved.startPosition,
         end: solved.endPosition,
         startAngle: Math.atan2(
           solved.endPosition[1] - solved.startPosition[1],
           solved.endPosition[0] - solved.startPosition[0],
         ),
-        endAngle: Math.atan2(
-          solved.endPosition[1] - solved.startPosition[1],
-          solved.endPosition[0] - solved.startPosition[0],
-        ),
-        traversalDirection: 'forward' as const,
-      } satisfies SegmentRecord]
-    }
+          endAngle: Math.atan2(
+            solved.endPosition[1] - solved.startPosition[1],
+            solved.endPosition[0] - solved.startPosition[0],
+          ),
+          traversalDirection: 'forward' as const,
+          curve: { kind: 'lineSegment' as const },
+        } satisfies SegmentRecord]
+      }
 
     if (entity.kind === 'arc') {
       const solved = solvedArcMap.get(entity.entityId)
@@ -460,6 +527,20 @@ function buildSegments(
           solved.endPosition[0] - solved.centerPosition[0],
         ),
         traversalDirection: 'forward' as const,
+        curve: {
+          kind: 'arc' as const,
+          center: solved.centerPosition,
+          radius: distanceBetweenPoints(solved.startPosition, solved.centerPosition),
+          startAngle: Math.atan2(
+            solved.startPosition[1] - solved.centerPosition[1],
+            solved.startPosition[0] - solved.centerPosition[0],
+          ),
+          endAngle: Math.atan2(
+            solved.endPosition[1] - solved.centerPosition[1],
+            solved.endPosition[0] - solved.centerPosition[0],
+          ),
+          sweepDirection: solved.sweepDirection,
+        },
       } satisfies SegmentRecord]
     }
 
@@ -498,6 +579,7 @@ function buildProjectedSegments(
             geometry.endPosition[0] - geometry.startPosition[0],
           ),
           traversalDirection: 'forward',
+          curve: { kind: 'lineSegment' },
         }]
       }
 
@@ -518,6 +600,20 @@ function buildProjectedSegments(
             geometry.endPosition[0] - geometry.centerPosition[0],
           ),
           traversalDirection: 'forward',
+          curve: {
+            kind: 'arc',
+            center: geometry.centerPosition,
+            radius: distanceBetweenPoints(geometry.startPosition, geometry.centerPosition),
+            startAngle: Math.atan2(
+              geometry.startPosition[1] - geometry.centerPosition[1],
+              geometry.startPosition[0] - geometry.centerPosition[0],
+            ),
+            endAngle: Math.atan2(
+              geometry.endPosition[1] - geometry.centerPosition[1],
+              geometry.endPosition[0] - geometry.centerPosition[0],
+            ),
+            sweepDirection: geometry.sweepDirection,
+          },
         }]
       }
 
@@ -831,7 +927,7 @@ function walkSegmentGraphFace(
 }
 
 function createRingFromGraphFace(faceEdges: readonly DirectedSegmentRecord[]): SketchRingCandidate {
-  const points = faceEdges.map((entry) => entry.start)
+  const points = buildRingPoints(faceEdges)
   return {
     kind: 'segments',
     boundarySegments: faceEdges.map((entry) => ({

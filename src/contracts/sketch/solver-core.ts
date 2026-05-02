@@ -6,7 +6,6 @@ import type {
   SketchDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
-  SketchReferenceDefinition,
   SketchSolveDiagnostic,
   SolvedSketchEntityGeometryRecord,
   SolvedSketchSnapshot,
@@ -85,13 +84,19 @@ type PointState = {
   baseIndex: number
 }
 
+type CircleState = {
+  kind: 'circle'
+  entityId: SketchEntityId
+  baseIndex: number
+}
+
 type ArcState = {
   kind: 'arc'
   entityId: SketchEntityId
   baseIndex: number
 }
 
-type SolverEntityState = PointState | ArcState
+type SolverEntityState = PointState | CircleState | ArcState
 
 type ScalarConstraintEvaluation = {
   residual: number
@@ -188,6 +193,10 @@ function getArcParameters(values: Float64Array, arc: ArcState) {
     startAngle: values[arc.baseIndex + 1]!,
     endAngle: values[arc.baseIndex + 2]!,
   }
+}
+
+function getCircleRadius(values: Float64Array, circle: CircleState) {
+  return values[circle.baseIndex]!
 }
 
 function subtract(left: SketchPoint2D, right: SketchPoint2D): SketchPoint2D {
@@ -640,6 +649,44 @@ function localArcSweepViolation(point: SketchPoint2D, arc: ReturnType<typeof loc
   )
 }
 
+function getLocalCircleLikeGeometry(
+  values: Float64Array,
+  entity: SketchEntityDefinition,
+  pointRecords: Map<SketchPointId, SolverPointRecord>,
+  entityStates: Map<SketchEntityId, SolverEntityState>,
+): { center: SketchPoint2D; radius: number; arc?: ReturnType<typeof localArcData> } | null {
+  if (entity.kind === 'circle') {
+    const center = pointRecords.get(entity.centerPointId)
+    const circleState = entityStates.get(entity.entityId)
+    return center
+      ? {
+          center: getPoint(values, center),
+          radius: circleState?.kind === 'circle' ? getCircleRadius(values, circleState) : entity.radius,
+        }
+      : null
+  }
+
+  if (entity.kind === 'arc') {
+    const center = pointRecords.get(entity.centerPointId)
+    const arcState = entityStates.get(entity.entityId)
+    if (!center || !arcState || arcState.kind !== 'arc') {
+      return null
+    }
+
+    const { radius, startAngle, endAngle } = getArcParameters(values, arcState)
+    const arc = localArcData({
+      center: getPoint(values, center),
+      radius,
+      startAngle,
+      endAngle,
+      sweepDirection: entity.sweepDirection,
+    })
+    return { center: arc.center, radius: arc.radius, arc }
+  }
+
+  return null
+}
+
 function localCircleTangencyContacts(
   first: { center: SketchPoint2D; radius: number },
   second: { center: SketchPoint2D; radius: number },
@@ -710,6 +757,9 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
   const pointRecords = new Map<SketchPointId, SolverPointRecord>()
   const entityStates = new Map<SketchEntityId, SolverEntityState>()
   const scalarConstraints: ScalarConstraintRecord[] = []
+  const dimensionDrivenCircleIds = new Set(definition.dimensions.flatMap((dimension) =>
+    dimension.kind === 'circleRadius' || dimension.kind === 'diameter' ? [dimension.entityId] : [],
+  ))
 
   let parameterCount = 0
   for (const point of definition.points) {
@@ -722,6 +772,16 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
   }
 
   for (const entity of definition.entities) {
+    if (entity.kind === 'circle' && dimensionDrivenCircleIds.has(entity.entityId)) {
+      entityStates.set(entity.entityId, {
+        kind: 'circle',
+        entityId: entity.entityId,
+        baseIndex: parameterCount,
+      })
+      parameterCount += 1
+      continue
+    }
+
     if (entity.kind === 'arc') {
       const center = pointRecords.get(entity.centerPointId)
       const start = pointRecords.get(entity.startPointId)
@@ -752,6 +812,14 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
   }
 
   for (const entity of definition.entities) {
+    if (entity.kind === 'circle') {
+      const circleState = entityStates.get(entity.entityId)
+      if (circleState?.kind === 'circle') {
+        initialValues[circleState.baseIndex] = entity.radius
+      }
+      continue
+    }
+
     if (entity.kind !== 'arc') {
       continue
     }
@@ -785,32 +853,8 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
   const getLocalCircleLike = (
     values: Float64Array,
     entity: SketchEntityDefinition,
-  ): { center: SketchPoint2D; radius: number; arc?: ReturnType<typeof localArcData> } | null => {
-    if (entity.kind === 'circle') {
-      const center = pointRecords.get(entity.centerPointId)
-      return center ? { center: getPoint(values, center), radius: entity.radius } : null
-    }
-
-    if (entity.kind === 'arc') {
-      const center = pointRecords.get(entity.centerPointId)
-      const arcState = entityStates.get(entity.entityId)
-      if (!center || !arcState || arcState.kind !== 'arc') {
-        return null
-      }
-
-      const { radius, startAngle, endAngle } = getArcParameters(values, arcState)
-      const arc = localArcData({
-        center: getPoint(values, center),
-        radius,
-        startAngle,
-        endAngle,
-        sweepDirection: entity.sweepDirection,
-      })
-      return { center: arc.center, radius: arc.radius, arc }
-    }
-
-    return null
-  }
+  ): { center: SketchPoint2D; radius: number; arc?: ReturnType<typeof localArcData> } | null =>
+    getLocalCircleLikeGeometry(values, entity, pointRecords, entityStates)
 
   const pointOnLocalCurveResidual = (
     values: Float64Array,
@@ -1379,25 +1423,25 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       }
 
       if (entity.kind === 'circle') {
-        const center = pointRecords.get(entity.centerPointId)
-        if (!center) {
-          continue
-        }
-
         scalarConstraints.push(createNumericalScalarConstraint({
           id: constraint.constraintId,
           targetKind: 'constraint',
           parameterCount,
           evaluateResidual(values) {
-            const localCenter = getPoint(values, center)
+            const localCircle = getLocalCircleLike(values, entity)
+            if (!localCircle) {
+              return 0
+            }
+
+            const localCenter = localCircle.center
             const centerOffset = subtract(localCenter, projectedCircle.center)
             const centerDistance = length(centerOffset)
             const direction: SketchPoint2D = centerDistance > DEGENERATE_NORM_EPSILON
               ? [centerOffset[0] / centerDistance, centerOffset[1] / centerDistance]
               : [1, 0]
             const targetDistance = constraint.relation === 'external'
-              ? entity.radius + projectedCircle.radius
-              : Math.abs(entity.radius - projectedCircle.radius)
+              ? localCircle.radius + projectedCircle.radius
+              : Math.abs(localCircle.radius - projectedCircle.radius)
             const contactDirection = constraint.relation === 'external'
               ? direction
               : [-direction[0], -direction[1]] as const
@@ -1799,9 +1843,17 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: 'dimension',
-        evaluate() {
-          const err = entity.radius - dimension.value
-          return { residual: 0.5 * err * err, gradient: zeroVector(parameterCount) }
+        evaluate(values) {
+          const gradient = zeroVector(parameterCount)
+          const circleState = entityStates.get(entity.entityId)
+          if (!circleState || circleState.kind !== 'circle') {
+            const err = entity.radius - dimension.value
+            return { residual: 0.5 * err * err, gradient }
+          }
+
+          const err = getCircleRadius(values, circleState) - dimension.value
+          gradient[circleState.baseIndex] = err
+          return { residual: 0.5 * err * err, gradient }
         },
       })
       continue
@@ -2019,13 +2071,67 @@ function validateDefinition(
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): SketchCoreValidationResult {
   const diagnostics: SketchSolveDiagnostic[] = []
+  const authoredStyleIds = definition.styleIds ?? []
+  const authoredStyles = definition.styles ?? []
   const pointIds = new Set<SketchPointId>()
   const entityIds = new Set<SketchEntityId>()
   const constraintIds = new Set<ConstraintId>()
   const dimensionIds = new Set<DimensionId>()
   const referenceIds = new Set<ReferenceId>()
-  const pointMap = new Map(definition.points.map((point) => [point.pointId, point]))
-  const entityMap = new Map(definition.entities.map((entity) => [entity.entityId, entity]))
+  const styleIds = new Set<typeof authoredStyleIds[number]>()
+  const collectRecordMap = <Id extends string, Record>(
+    records: readonly Record[],
+    getId: (record: Record) => Id,
+    duplicateCode: string,
+    message: (id: Id) => string,
+  ) => {
+    const map = new Map<Id, Record>()
+    for (const record of records) {
+      const id = getId(record)
+      if (map.has(id)) {
+        diagnostics.push(makeDiagnostic(duplicateCode, 'error', message(id), null))
+        continue
+      }
+      map.set(id, record)
+    }
+    return map
+  }
+  const pointMap = collectRecordMap(
+    definition.points,
+    (point) => point.pointId,
+    'duplicate-point-record',
+    (pointId) => `Point record ${pointId} appears more than once.`,
+  )
+  const entityMap = collectRecordMap(
+    definition.entities,
+    (entity) => entity.entityId,
+    'duplicate-entity-record',
+    (entityId) => `Entity record ${entityId} appears more than once.`,
+  )
+  const constraintMap = collectRecordMap(
+    definition.constraints,
+    (constraint) => constraint.constraintId,
+    'duplicate-constraint-record',
+    (constraintId) => `Constraint record ${constraintId} appears more than once.`,
+  )
+  const dimensionMap = collectRecordMap(
+    definition.dimensions,
+    (dimension) => dimension.dimensionId,
+    'duplicate-dimension-record',
+    (dimensionId) => `Dimension record ${dimensionId} appears more than once.`,
+  )
+  const referenceMap = collectRecordMap(
+    definition.references,
+    (reference) => reference.referenceId,
+    'duplicate-reference-record',
+    (referenceId) => `Reference record ${referenceId} appears more than once.`,
+  )
+  const styleMap = collectRecordMap(
+    authoredStyles,
+    (style) => style.styleId,
+    'duplicate-style-record',
+    (styleId) => `Style record ${styleId} appears more than once.`,
+  )
   const projectedTargetExists = (
     reference: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> },
   ) => findProjectedGeometry(projectedReferences, reference) !== null
@@ -2163,6 +2269,13 @@ function validateDefinition(
     referenceIds.add(referenceId)
   }
 
+  for (const styleId of authoredStyleIds) {
+    if (styleIds.has(styleId)) {
+      diagnostics.push(makeDiagnostic('duplicate-style-id', 'error', `Style ${styleId} appears more than once.`, null))
+    }
+    styleIds.add(styleId)
+  }
+
   for (const entity of definition.entities) {
     if (!entityIds.has(entity.entityId)) {
       diagnostics.push(makeDiagnostic('entity-missing-from-order', 'error', `Entity ${entity.entityId} is not listed in entityIds.`, { kind: 'entity', entityId: entity.entityId }))
@@ -2279,7 +2392,6 @@ function validateDefinition(
     }
   }
 
-  const constraintMap = new Map(definition.constraints.map((constraint) => [constraint.constraintId, constraint]))
   for (const constraint of definition.constraints) {
     if (!constraintIds.has(constraint.constraintId)) {
       diagnostics.push(makeDiagnostic('constraint-missing-from-order', 'error', `Constraint ${constraint.constraintId} is not listed in constraintIds.`, { kind: 'constraint', constraintId: constraint.constraintId }))
@@ -2486,7 +2598,6 @@ function validateDefinition(
     }
   }
 
-  const dimensionMap = new Map(definition.dimensions.map((dimension) => [dimension.dimensionId, dimension]))
   for (const dimension of definition.dimensions) {
     if (!dimensionIds.has(dimension.dimensionId)) {
       diagnostics.push(makeDiagnostic('dimension-missing-from-order', 'error', `Dimension ${dimension.dimensionId} is not listed in dimensionIds.`, { kind: 'dimension', dimensionId: dimension.dimensionId }))
@@ -2576,15 +2687,7 @@ function validateDefinition(
     }
   }
 
-  const referenceMap = new Map<ReferenceId, SketchReferenceDefinition>()
   for (const reference of definition.references) {
-    if (referenceMap.has(reference.referenceId)) {
-      diagnostics.push(makeDiagnostic('duplicate-reference-record', 'error', `Reference record ${reference.referenceId} appears more than once.`, null))
-      continue
-    }
-
-    referenceMap.set(reference.referenceId, reference)
-
     if (!referenceIds.has(reference.referenceId)) {
       diagnostics.push(makeDiagnostic('reference-missing-from-order', 'error', `Reference ${reference.referenceId} is not listed in referenceIds.`, null))
     }
@@ -2593,6 +2696,18 @@ function validateDefinition(
   for (const referenceId of definition.referenceIds) {
     if (!referenceMap.has(referenceId)) {
       diagnostics.push(makeDiagnostic('reference-missing-from-records', 'error', `referenceIds references missing reference ${referenceId}.`, null))
+    }
+  }
+
+  for (const style of authoredStyles) {
+    if (!styleIds.has(style.styleId)) {
+      diagnostics.push(makeDiagnostic('style-missing-from-order', 'error', `Style ${style.styleId} is not listed in styleIds.`, null))
+    }
+  }
+
+  for (const styleId of authoredStyleIds) {
+    if (!styleMap.has(styleId)) {
+      diagnostics.push(makeDiagnostic('style-missing-from-records', 'error', `styleIds references missing style ${styleId}.`, null))
     }
   }
 
@@ -2986,12 +3101,13 @@ function buildSolvedEntities(
 
     if (entity.kind === 'circle') {
       const center = pointRecords.get(entity.centerPointId)
+      const circleState = entityStates.get(entity.entityId)
       if (center) {
         solved.push({
             entityId: entity.entityId,
             kind: 'circle',
             centerPosition: getPoint(values, center),
-            solvedRadius: entity.radius,
+            solvedRadius: circleState?.kind === 'circle' ? getCircleRadius(values, circleState) : entity.radius,
           })
       }
       continue
@@ -3323,15 +3439,12 @@ function buildDimensionStatuses(
       }
     } else if (dimension.kind === 'circleRadius') {
       const entity = entityMap.get(dimension.entityId)
-      solvedValue = entity?.kind === 'circle' ? entity.radius : null
+      const circleLike = entity ? getLocalCircleLikeGeometry(values, entity, pointRecords, entityStates) : null
+      solvedValue = entity?.kind === 'circle' ? circleLike?.radius ?? null : null
     } else if (dimension.kind === 'diameter') {
       const entity = entityMap.get(dimension.entityId)
-      if (entity?.kind === 'circle') {
-        solvedValue = entity.radius * 2
-      } else {
-        const state = entityStates.get(dimension.entityId)
-        solvedValue = state?.kind === 'arc' ? values[state.baseIndex] * 2 : null
-      }
+      const circleLike = entity ? getLocalCircleLikeGeometry(values, entity, pointRecords, entityStates) : null
+      solvedValue = circleLike ? circleLike.radius * 2 : null
     } else if (dimension.kind === 'lineLength') {
       const entity = lineEntityMap.get(dimension.entityId)
       const start = entity ? pointRecords.get(entity.startPointId) : null

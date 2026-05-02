@@ -1075,6 +1075,50 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {  function a
     )
   }
 
+  async function testArcAndChordDeriveSingleClosedRegion() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_center', 'sketch_point_start', 'sketch_point_end'],
+      points: [
+        makePoint('sketch_point_center', 'Center', 0, 0),
+        makePoint('sketch_point_start', 'Start', 1, 0),
+        makePoint('sketch_point_end', 'End', -1, 0),
+      ],
+      entityIds: ['sketch_entity_arc', 'sketch_entity_chord'],
+      entities: [
+        makeArc('sketch_entity_arc', 'Arc', 'sketch_point_center', 'sketch_point_start', 'sketch_point_end'),
+        makeLine('sketch_entity_chord', 'Chord', 'sketch_point_end', 'sketch_point_start'),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }
+
+    const derived = deriveSketchRegionsCore({
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    })
+
+    expectTrue(derived.regions.length === 1, 'An arc and its chord should derive one closed D-shaped region.')
+    const outerLoop = derived.regions[0]?.loops[0]
+    expectTrue(!!outerLoop, 'Derived arc-chord region should include an outer loop.')
+    expectTrue(outerLoop?.segments.length === 2, 'Derived arc-chord loop should preserve the two authored boundary segments.')
+    expectTrue(
+      outerLoop?.segments[0]?.source.kind === 'entity' && outerLoop.segments[0].source.entityId === 'sketch_entity_arc',
+      'Derived arc-chord loop should keep the arc as the first boundary segment.',
+    )
+    expectTrue(
+      outerLoop?.segments[1]?.source.kind === 'entity' && outerLoop.segments[1].source.entityId === 'sketch_entity_chord',
+      'Derived arc-chord loop should keep the chord as the second boundary segment.',
+    )
+  }
+
   async function run() {
     await testFindRingsNone()
     await testFindRingsOne()
@@ -1094,6 +1138,7 @@ test('src/contracts/sketch/region-extraction.spec.ts', async () => {  function a
     await testClosedConstructionCircleDoesNotCreateRegion()
     await testSelfIntersectingProfileIsRejectedWithDiagnostic()
     await testOpenAndDegenerateSegmentsAreSurfacedAsDiagnostics()
+    await testArcAndChordDeriveSingleClosedRegion()
   }
 
   run().catch((error: unknown) => {
