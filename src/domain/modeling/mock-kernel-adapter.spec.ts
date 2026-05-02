@@ -3,7 +3,7 @@ import { expectTrue } from '@/testing/expect.spec'
 import { MockKernelAdapter } from './mock-kernel-adapter'
 import { createModelingService, modelingRuntimeValidators } from './modeling-service'
 import { MockSketchSolverAdapter } from '@/domain/solver/mock-sketch-solver-adapter'
-import { bindRenderableObject, resolvePickTarget } from '@/domain/workspace/render-picking'
+import { bindRenderableObject, resolvePickTarget } from '@/infrastructure/viewport/render-picking'
 import * as THREE from 'three'
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,

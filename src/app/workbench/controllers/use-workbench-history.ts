@@ -13,7 +13,7 @@ import {
   getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
 import { getWorkbenchHistoryAvailability, documentHistoryOrdersEqual, getDocumentHistoryOrderRestoreMoves } from '@/app/workbench/history/workbench-history'
-import { runWorkbenchAction } from '@/app/workbench/shared/workbench-action'
+import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
 
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>

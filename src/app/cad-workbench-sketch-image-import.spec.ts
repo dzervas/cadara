@@ -1,7 +1,7 @@
 import { test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
-import { runSketchImageImportFlow } from '@/app/sketch-image-import-flow'
+import { runSketchImageImportFlow } from '@/domain/reference-image/import-flow'
 import { ResultAsync, createAppError } from '@/contracts/errors'
 import { createAuthoredModelDocumentFromSnapshot } from '@/contracts/modeling/authored-document'
 import type { ReferenceImagePayload } from '@/contracts/reference-image/schema'

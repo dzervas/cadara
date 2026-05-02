@@ -3,8 +3,8 @@ import { test } from 'bun:test'
 import { expectTrue } from '@/testing/expect.spec'
 import {
   requireAcceptedModelingResult,
-  runWorkbenchAction,
-} from '@/app/workbench/shared/workbench-action'
+  runReportedAction as runWorkbenchAction,
+} from '@/lib/reported-action'
 import { appErrorToModelingDiagnostic, createTestErrorReporter } from '@/contracts/errors'
 
 test('src/app/workbench-action.spec.ts', async () => {  const reporter = createTestErrorReporter()

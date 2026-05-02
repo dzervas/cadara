@@ -9,7 +9,8 @@ import {
   shortcutFromKeyboardEvent,
 } from '@/core/shortcuts/shortcut-grammar'
 
-test('src/domain/shortcuts/shortcut-grammar.spec.ts', () => {  const chord = parseShortcut('mod+shift+z')
+test('src/core/shortcuts/shortcut-grammar.spec.ts', () => {
+  const chord = parseShortcut('mod+shift+z')
   expectTrue(chord.chords.length === 1, 'Modifier shortcuts should parse as one chord.')
   expectTrue(
     serializeShortcut(chord) === 'mod+shift+z',

@@ -9,10 +9,11 @@ import {
   createSectionCapRenderables,
   createSectionClippingPlane,
   resolveSectionDragOffset,
-} from '@/domain/section-view/rendering'
+} from '@/infrastructure/section-view/rendering'
 import type { SectionViewSession } from '@/core/section-view/session'
 
-test('src/domain/section-view/rendering.spec.ts', () => {  function createSection(retainedSide: SectionViewSession['retainedSide']): SectionViewSession {
+test('src/infrastructure/section-view/rendering.spec.ts', () => {
+  function createSection(retainedSide: SectionViewSession['retainedSide']): SectionViewSession {
     return {
       seed: { kind: 'construction', constructionId: 'construction_plane-xy' },
       plane: createStandardPlaneDefinition('xy'),

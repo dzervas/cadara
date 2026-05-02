@@ -44,7 +44,8 @@ The repo will incrementally move toward these top-level implementation layers:
 ## Migration Policy
 
 - Move code incrementally by slice
-- Prefer compatibility re-exports during migration instead of big-bang renames
+- Prefer canonical imports once a slice has moved
+- Do not leave compatibility re-exports behind after a slice has been migrated
 - Add boundary tests before broad moves
 - When a touched module is clearly orchestration or adapter code, move it to `application` or `infrastructure`
 

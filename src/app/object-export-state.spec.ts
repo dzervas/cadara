@@ -1,7 +1,7 @@
 import { test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
-import { createObjectExportModalState } from '@/app/object-export-state'
+import { createObjectExportModalState } from '@/domain/export/object-export-state'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 
 test('src/app/object-export-state.spec.ts', async () => {  const adapter = new MockKernelAdapter()

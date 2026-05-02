@@ -4,7 +4,8 @@ import { expectTrue } from '@/testing/expect.spec'
 import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/core/tools/tool-registry'
 import { toolIconAssetFileNames } from '@/core/tools/tool-icons'
 
-test('src/domain/tools/tool-registry.spec.ts', () => {  const importTool = getToolById('import')
+test('src/core/tools/tool-registry.spec.ts', () => {
+  const importTool = getToolById('import')
   const partToolIds = getToolbarSectionsForMode('part').flatMap((section) => section.toolIds)
   const sketchToolIds = getToolbarSectionsForMode('sketch').flatMap((section) => section.toolIds)
 

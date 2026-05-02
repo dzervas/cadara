@@ -7,7 +7,8 @@ import {
   getToolCommandId,
 } from '@/core/shortcuts/commands'
 
-test('src/domain/shortcuts/commands.spec.ts', () => {  const registry = createShortcutCommandRegistry()
+test('src/core/shortcuts/commands.spec.ts', () => {
+  const registry = createShortcutCommandRegistry()
 
   expectTrue(
     registry.get(getToolCommandId('line'))?.label === 'Line',

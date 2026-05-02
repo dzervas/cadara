@@ -6,7 +6,8 @@ import {
   resolveToolActivationMode,
 } from '@/core/tools/activation-policy'
 
-test('src/domain/tools/activation-policy.spec.ts', () => {  expectTrue(
+test('src/core/tools/activation-policy.spec.ts', () => {
+  expectTrue(
     getToolCommandBehavior('undo') === 'undo',
     'Undo should declare undo behavior through tool metadata.',
   )

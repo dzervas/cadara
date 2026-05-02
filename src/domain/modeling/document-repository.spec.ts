@@ -8,7 +8,7 @@ import {
   createLocalStorageDocumentRepositoryUrlStore,
   IndexedDbAutomergeDocumentRepository,
   type DocumentRepositoryUrlStore,
-} from '@/domain/modeling/automerge-indexeddb-document-repository'
+} from '@/infrastructure/persistence/indexeddb-automerge-document-repository'
 import { createMemoryGeometryAssetStore } from '@/domain/modeling/geometry-asset-store'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'

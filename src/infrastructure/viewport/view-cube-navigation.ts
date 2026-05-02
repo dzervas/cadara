@@ -2,7 +2,7 @@ import {
   VIEW_NAVIGATION_PRESETS,
   type ViewNavigationCornerPresetId,
   type ViewNavigationFacePresetId,
-} from '@/domain/workspace/view-navigation'
+} from '@/infrastructure/viewport/view-navigation'
 
 interface ViewCubeFaceTarget {
   presetId: ViewNavigationFacePresetId

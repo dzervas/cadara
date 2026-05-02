@@ -23,7 +23,7 @@ import {
   collectBindings,
   SURFACE_COLORS,
   updateWorkspaceHighlight,
-} from '@/domain/workspace/render-picking'
+} from '@/infrastructure/viewport/render-picking'
 
 test('src/domain/editor/sketch-reference-geometry.spec.ts', () => {  function createDefinition(): SketchDefinition {
     return {

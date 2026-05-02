@@ -10,7 +10,8 @@ import {
   type ShortcutStorageLike,
 } from '@/core/shortcuts/profile-repository'
 
-test('src/domain/shortcuts/profile-repository.spec.ts', async () => {  const values = new Map<string, string>()
+test('src/core/shortcuts/profile-repository.spec.ts', async () => {
+  const values = new Map<string, string>()
   const storage: ShortcutStorageLike = {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value),

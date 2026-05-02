@@ -8,7 +8,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
 
 import { createBuildMetadataPlugin } from './build-metadata'
-import { toolIconAssetFileNames } from './src/domain/tools/tool-icons'
+import { toolIconAssetFileNames } from './src/core/tools/tool-icons'
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
 const singleHtmlFileName = 'cadara-single.html'

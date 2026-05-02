@@ -5,7 +5,7 @@ import type { EditorEffectRuntime, EditorState } from '@/domain/editor/state-mac
 import {
   createEditorEventLoop,
   type EditorEventLoop,
-} from '@/domain/editor/runtime-machine'
+} from '@/application/editor/editor-event-loop'
 import { createTestErrorReporter } from '@/contracts/errors'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 

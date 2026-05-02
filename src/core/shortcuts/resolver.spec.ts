@@ -6,7 +6,8 @@ import { createShortcutCommandRegistry } from '@/core/shortcuts/commands'
 import { createEffectiveKeymap } from '@/core/shortcuts/keymap'
 import { createShortcutResolver } from '@/core/shortcuts/resolver'
 
-test('src/domain/shortcuts/resolver.spec.ts', () => {  const commands = [
+test('src/core/shortcuts/resolver.spec.ts', () => {
+  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',

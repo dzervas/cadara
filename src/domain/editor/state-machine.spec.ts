@@ -12,7 +12,7 @@ import {
   type EditorEvent,
   createModelingServiceEditorEffectRuntime,
 } from './state-machine'
-import { createEditorEventLoop } from './runtime-machine'
+import { createEditorEventLoop } from '@/application/editor/editor-event-loop'
 import {
   replayEditorEvents,
   replayEditorEventsWithRuntime,

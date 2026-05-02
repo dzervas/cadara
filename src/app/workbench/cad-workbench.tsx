@@ -39,7 +39,7 @@ import { useWorkbenchNotifications } from "@/app/workbench/controllers/use-workb
 import { useWorkbenchPartImport } from "@/app/workbench/controllers/use-workbench-part-import";
 import { useWorkbenchSidebarResize } from "@/app/workbench/controllers/use-workbench-sidebar-resize";
 import { useWorkbenchViewportEvents } from "@/app/workbench/controllers/use-workbench-viewport-events";
-import { runWorkbenchAction } from "@/app/workbench/shared/workbench-action";
+import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type {
 	DocumentFeatureCursor,
 	DocumentHistoryItemRecord,

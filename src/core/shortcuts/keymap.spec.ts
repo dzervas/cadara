@@ -10,7 +10,8 @@ import {
 } from '@/core/shortcuts/keymap'
 import { serializeShortcut } from '@/core/shortcuts/shortcut-grammar'
 
-test('src/domain/shortcuts/keymap.spec.ts', () => {  const commands = [
+test('src/core/shortcuts/keymap.spec.ts', () => {
+  const commands = [
     {
       id: 'editor.undo',
       label: 'Undo',

@@ -3,7 +3,8 @@ import { test } from 'bun:test'
 import { expectTrue } from '@/testing/expect.spec'
 import { createToolActionBus } from '@/core/tools/tool-action-bus'
 
-test('src/domain/tools/tool-action-bus.spec.ts', () => {  const actionBus = createToolActionBus()
+test('src/core/tools/tool-action-bus.spec.ts', () => {
+  const actionBus = createToolActionBus()
   let observedSource: string | null = null
   const unsubscribe = actionBus.subscribeToTool('line', (event) => {
     observedSource = event.source
