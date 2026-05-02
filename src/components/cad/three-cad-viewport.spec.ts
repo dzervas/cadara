@@ -4,6 +4,7 @@ import { expectTrue } from '@/testing/expect.spec'
 import {
   cancelCoalescedSketchGeometryDragMove,
   getViewportPickTuning,
+  isViewportNavigationPointerMove,
   WORKSPACE_SCAFFOLD_RENDER_ORDER,
   configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
@@ -419,6 +420,25 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
     )
   }
 
+  function testNavigationPointerMoveDetectionIgnoresPrimaryDrawingGestures() {
+    expectTrue(
+      isViewportNavigationPointerMove(0) === false,
+      'Hover moves without pressed buttons should stay available to sketch preview interactions.',
+    )
+    expectTrue(
+      isViewportNavigationPointerMove(1) === false,
+      'Primary-button moves should stay available so sketch drawing and dragging can continue.',
+    )
+    expectTrue(
+      isViewportNavigationPointerMove(2),
+      'Secondary-button moves should be treated as viewport navigation so sketch projection does not reframe the camera mid-rotate.',
+    )
+    expectTrue(
+      isViewportNavigationPointerMove(4),
+      'Auxiliary-button moves should be treated as viewport navigation so panning bypasses sketch hover work.',
+    )
+  }
+
   function testDimensionAnnotationDragPatchTargetsDurablePlacement() {
     const patch = createDimensionAnnotationPlacementPatch(
       { id: 'dimension_1-annotation-drag', dimensionId: 'dimension_1' },
@@ -541,6 +561,7 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
   testViewCubeResizeUpdatesCanvasCssSize()
   testWorkspaceScaffoldWiresDoNotWriteDepth()
   testMeasurePickTuningTightensWirePassThroughTolerance()
+  testNavigationPointerMoveDetectionIgnoresPrimaryDrawingGestures()
   testDimensionAnnotationDragPatchTargetsDurablePlacement()
   testViewCubeRequestsAnimatedTransition()
   testSketchEntryRequestsAnimatedFraming()

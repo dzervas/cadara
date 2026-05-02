@@ -1,5 +1,9 @@
 # AGENTS
 
+## Design Context
+
+Strategic design context lives in `PRODUCT.md` at the project root — register, target users, brand personality, anti-references, and design principles. Read it before any UI/UX-shaping work. Key load-bearing principles: interop is identity, visible tools beat hidden tools, treat hobbyists as professionals, browser-native is invisible, density-but-readable. Reference for feel: Plasticity (with tools kept visible). Anti-references: SolidWorks, FreeCAD, Rhino, TinkerCAD, generic SaaS dashboards.
+
 ## Stack
 
 - Runtime/package manager: Bun

@@ -130,6 +130,7 @@ import {
   cancelCoalescedSketchGeometryDragMove,
   createViewportBvhSceneKey,
   getViewportPickTuning,
+  isViewportNavigationPointerMove,
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
   resolveSectionScreenDragOffset,
@@ -1093,6 +1094,10 @@ export function ThreeCadViewport({
 
           return
         }
+      }
+
+      if (isViewportNavigationPointerMove(event.buttons)) {
+        return
       }
 
       if (pointerWithinViewCube(event.clientX, event.clientY)) {

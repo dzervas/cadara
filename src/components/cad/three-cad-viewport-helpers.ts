@@ -19,6 +19,8 @@ import type { ViewportRenderableRecord } from '@/core/workspace/viewport-rendera
 export const WORKSPACE_SCAFFOLD_RENDER_ORDER = 0
 const MEASURE_LINE_PICK_THRESHOLD = 0.12
 const MEASURE_WIRE_OCCLUSION_TOLERANCE = 0.001
+const POINTER_BUTTON_SECONDARY = 2
+const POINTER_BUTTON_AUXILIARY = 4
 
 interface MutableRef<T> {
   current: T
@@ -108,6 +110,10 @@ export function configureWorkspaceScaffoldWireObject<TObject extends THREE.Objec
   applyWireMaterialDepthPolicy(object.material)
 
   return object
+}
+
+export function isViewportNavigationPointerMove(buttons: number) {
+  return (buttons & (POINTER_BUTTON_SECONDARY | POINTER_BUTTON_AUXILIARY)) !== 0
 }
 
 export function getViewportPickTuning(selectionFilter: SelectionFilter | null): {

@@ -27,13 +27,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
   && apt-get install -y --no-install-recommends nodejs
 
 RUN curl -fsSL https://bun.com/install | bash
-ENV PATH=$PATH:/root/.bun/bin
+ENV PATH=$PATH:/root/.bun/bin:/root/.local/bin
 
 # Install codex from npm globally
 RUN bun install -g @openai/codex@latest @fission-ai/openspec@latest openspecui@latest
 RUN bun install -g @mariozechner/pi-coding-agent task-factory
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 RUN bunx playwright install --with-deps chrome chromium-headless-shell
+RUN bunx skills add pbakaus/impeccable -g --agent claude-code -y
 
 # Set npm global config for any user
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
@@ -41,6 +43,9 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 # Inside the container we consider the environment already sufficiently locked
 # down, therefore instruct Codex CLI to allow running without sandboxing.
 ENV CODEX_UNSAFE_ALLOW_NO_SANDBOX=1
+# Yes claude, it's fine
+ENV IS_SANDBOX=1
+ENV COLORTERM=truecolor
 
 RUN mkdir -p /app
 WORKDIR /app
