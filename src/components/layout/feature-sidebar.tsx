@@ -38,7 +38,7 @@ interface FeatureSidebarProps {
 
 const defaultSidebarAccordionValues = ['objects', 'variables', 'diagnostics'] as const
 const sidebarAccordionControlClassName =
-  'px-4 py-3 text-[12.5px] font-semibold tracking-[-0.005em] text-[var(--workbench-shell-text-dim)] hover:text-[var(--workbench-shell-text)] [transition:color_180ms_cubic-bezier(0.22,1,0.36,1)]'
+  'text-[12.5px] font-semibold tracking-[-0.005em] text-[var(--workbench-shell-text-dim)] hover:text-[var(--workbench-shell-text)] [transition:color_180ms_cubic-bezier(0.22,1,0.36,1)]'
 
 type VariableResultPresentation =
   | { kind: 'success'; text: string }
@@ -235,17 +235,17 @@ export function FeatureSidebar({
           transitionDuration={180}
           styles={{
             item: {
-              borderBottom: '1px solid var(--workbench-shell-border)',
+              border: 'none',
             },
             content: {
               padding: 0,
             },
             control: {
-              padding: 0,
+              padding: '12px 16px',
               background: 'transparent',
             },
             chevron: {
-              color: 'var(--mantine-color-dark-5)',
+              color: 'var(--workbench-shell-text-dim)',
             },
             panel: {
               padding: 0,
@@ -258,8 +258,8 @@ export function FeatureSidebar({
                 Parts & Objects
               </Accordion.Control>
             </header>
-            <Accordion.Panel className="pb-3">
-              <div className="space-y-1 px-3">
+            <Accordion.Panel className="pb-4">
+              <div>
                 {(snapshot?.presentation.objects ?? []).map((item) => {
                   const target = item.target
                   const targetKey = getPrimitiveRefKey(target)
@@ -300,7 +300,7 @@ export function FeatureSidebar({
                   return (
                     <WorkbenchContextMenu key={item.id} label={`${itemLabel} actions`} items={menuItems}>
                       <div
-                        className={`-mx-3 flex items-center gap-2 px-5 py-1.5 transition ${
+                        className={`flex items-center gap-2 px-5 py-1.5 transition ${
                           isSelected
                             ? 'bg-[var(--workbench-shell-sidebar-item-selected)] hover:bg-[var(--workbench-shell-sidebar-item-selected)]'
                             : 'hover:bg-[var(--workbench-shell-sidebar-item-hover)]'
@@ -382,33 +382,12 @@ export function FeatureSidebar({
             </Accordion.Panel>
           </Accordion.Item>
 
-          <Accordion.Item value="variables" style={{ position: 'relative' }}>
-            <Accordion.Control className={`${sidebarAccordionControlClassName} pr-16`}>
+          <Accordion.Item value="variables">
+            <Accordion.Control className={sidebarAccordionControlClassName}>
               Variables
             </Accordion.Control>
-            <div
-              className="pointer-events-none absolute right-10 top-2 z-10 flex items-center"
-            >
-              <Tooltip label="Add variable">
-                <ActionIcon
-                  type="button"
-                  variant="subtle"
-                  color="gray"
-                  size={28}
-                  aria-label="Add variable"
-                  className="pointer-events-auto"
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onAddVariable()
-                  }}
-                >
-                  <WorkbenchIcon name="plus" className="h-3.5 w-3.5" />
-                </ActionIcon>
-              </Tooltip>
-            </div>
-            <Accordion.Panel className="pb-3">
-              <div className="space-y-2 px-3">
+            <Accordion.Panel className="pb-4">
+              <div className="space-y-1 px-3">
                 {(snapshot?.document.variables ?? []).map((variable) => {
                   const draft = getVariableDraft(variable)
                   const accessibleVariableName = getVariableAccessibleName(variable)
@@ -564,9 +543,20 @@ export function FeatureSidebar({
                     </div>
                   )
               })}
-              {snapshot && snapshot.document.variables.length === 0 ? (
-                  <p className="text-xs text-[var(--workbench-shell-text-muted)]">No document variables.</p>
-              ) : null}
+              <button
+                type="button"
+                onClick={onAddVariable}
+                aria-label="Add variable"
+                className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium leading-5 text-[var(--workbench-shell-text-dim)] transition hover:bg-[var(--workbench-shell-sidebar-item-hover)] hover:text-[var(--workbench-shell-text)] focus:outline-none focus:ring-1 focus:ring-[var(--workbench-shell-accent)]"
+              >
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center"
+                  style={{ color: 'var(--mantine-color-workbench-4)' }}
+                >
+                  <WorkbenchIcon name="plus" className="h-3.5 w-3.5" />
+                </span>
+                <span>Add variable</span>
+              </button>
               </div>
             </Accordion.Panel>
           </Accordion.Item>
@@ -577,8 +567,8 @@ export function FeatureSidebar({
                 Document Diagnostics
               </Accordion.Control>
             </header>
-            <Accordion.Panel className="pb-3">
-              <div className="space-y-2 px-3">
+            <Accordion.Panel className="pb-4">
+              <div className="space-y-1.5 px-3">
                 {snapshot?.document.diagnostics.length ? (
                   snapshot.document.diagnostics.map((diagnostic, index) => {
                     const isAllowed = diagnostic.target
@@ -662,7 +652,9 @@ export function FeatureSidebar({
                     )
                   })
                 ) : (
-                  <p className="text-xs text-[var(--workbench-shell-text-muted)]">No document diagnostics.</p>
+                  <p className="px-2 py-1 text-[12px] italic leading-5 text-[var(--workbench-shell-text-dim)]">
+                    No diagnostics.
+                  </p>
                 )}
               </div>
             </Accordion.Panel>

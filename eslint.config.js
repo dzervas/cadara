@@ -12,6 +12,7 @@ export default defineConfig([
     'build',
     'coverage',
     '*.min.js',
+    '.claude',
     '.codex',
     '.playwright',
     '.playwright-cli',

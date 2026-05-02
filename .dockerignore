@@ -1,6 +1,7 @@
 .git
 .jj
 .codex
+.claude
 node_modules
 dist
 build
@@ -13,3 +14,4 @@ bun-debug.log*
 coverage
 .env*
 .playwright-cli
+/test-results
