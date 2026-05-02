@@ -81,9 +81,9 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
       '--workbench-shell-elevation-timeline':
         '0 14px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05)',
       '--workbench-shell-elevation-sidebar':
-        '4px 0 20px rgba(0, 0, 0, 0.2)',
+        '4px 0 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
       '--workbench-shell-elevation-toolbar':
-        '0 4px 16px rgba(0, 0, 0, 0.25)',
+        '0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
       '--workbench-shell-scrubber-track': 'rgba(255, 255, 255, 0.06)',
       '--workbench-shell-scrubber-track-glow':
         '0 0 10px color-mix(in oklch, var(--workbench-shell-accent) 12%, transparent)',
@@ -101,9 +101,16 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
         'color-mix(in srgb, var(--mantine-color-dark-7) 88%, transparent)',
       '--workbench-shell-border': 'var(--mantine-color-dark-5)',
       '--workbench-shell-border-strong': 'var(--mantine-color-dark-4)',
+      '--workbench-shell-divider':
+        'color-mix(in srgb, var(--workbench-shell-border) 55%, transparent)',
       '--workbench-shell-text': 'var(--mantine-color-dark-0)',
       '--workbench-shell-text-muted': 'var(--mantine-color-dark-2)',
       '--workbench-shell-text-dim': 'var(--mantine-color-dark-3)',
+      '--workbench-shell-sidebar-item-hover':
+        'color-mix(in oklch, var(--workbench-shell-surface-panel) 94%, white 6%)',
+      '--workbench-shell-sidebar-item-selected':
+        'color-mix(in oklch, var(--workbench-shell-surface-panel) 88%, white 12%)',
+      '--workbench-shell-sidebar-item-selected-icon': 'var(--mantine-color-dark-1)',
       '--workbench-shell-accent': 'var(--mantine-color-workbench-4)',
       '--workbench-shell-accent-surface': 'var(--mantine-color-workbench-light)',
       '--workbench-shell-accent-surface-hover': 'var(--mantine-color-workbench-light-hover)',

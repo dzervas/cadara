@@ -13,6 +13,13 @@ interface ToolButtonProps {
   onTrigger?: () => void
   active?: boolean
   disabled?: boolean
+  selected?: boolean
+  buttonId?: string
+  buttonRole?: string
+  buttonTabIndex?: number
+  ariaSelected?: boolean
+  onButtonFocus?: () => void
+  onButtonMouseEnter?: () => void
 }
 
 export function ToolButton({
@@ -21,27 +28,37 @@ export function ToolButton({
   onTrigger,
   active = false,
   disabled = false,
+  selected = false,
+  buttonId,
+  buttonRole,
+  buttonTabIndex,
+  ariaSelected,
+  onButtonFocus,
+  onButtonMouseEnter,
 }: ToolButtonProps) {
   const { activateTool } = useWorkbenchCommandHandlers()
   const commandId = getToolbarToolCommandId(tool.id)
   const isSuccessAction = tool.id === 'finishSketch'
+  const isEmphasized = active || isSuccessAction || selected
   const emphasisBackground = isSuccessAction
     ? 'var(--workbench-shell-success-surface)'
-    : active
+    : isEmphasized
       ? 'var(--workbench-shell-accent-surface)'
       : 'transparent'
   const emphasisBorder = isSuccessAction
     ? 'var(--workbench-shell-success-border)'
-    : active
+    : isEmphasized
       ? 'var(--workbench-shell-accent)'
       : 'transparent'
   const emphasisColor = isSuccessAction
     ? 'var(--workbench-shell-success-text)'
-    : 'var(--workbench-shell-text)'
+    : selected
+      ? 'var(--workbench-shell-accent)'
+      : 'var(--workbench-shell-text)'
   const controlBackground = disabled
     ? 'var(--workbench-shell-control-surface)'
     : emphasisBackground
-  const controlBorder = active || isSuccessAction
+  const controlBorder = isEmphasized
     ? emphasisBorder
     : 'transparent'
   const controlColor = disabled
@@ -69,20 +86,26 @@ export function ToolButton({
       type="button"
       onClick={handleClick}
       aria-label={tool.name}
+      aria-selected={ariaSelected}
       disabled={disabled}
+      id={buttonId}
+      role={buttonRole}
+      tabIndex={buttonTabIndex}
       data-tool-id={tool.id}
       data-tool-source="search"
       data-tool-tooltip={tool.tooltip}
       data-disabled={disabled || undefined}
+      onFocus={onButtonFocus}
+      onMouseEnter={onButtonMouseEnter}
     >
       <Paper
         radius="md"
         px="sm"
         py={10}
-        withBorder={disabled || active || isSuccessAction}
+        withBorder={disabled || isEmphasized}
         style={{
           backgroundColor: controlBackground,
-          borderColor: disabled ? 'var(--workbench-shell-border)' : active || isSuccessAction ? emphasisBorder : 'var(--workbench-shell-border)',
+          borderColor: disabled ? 'var(--workbench-shell-border)' : isEmphasized ? emphasisBorder : 'var(--workbench-shell-border)',
           opacity: disabled ? 0.52 : 1,
         }}
       >

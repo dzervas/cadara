@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
+import { getNextHistoryTreeFocusIndex } from '@/components/layout/feature-timeline-bar.a11y'
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
@@ -246,6 +247,18 @@ function HistoryTimelineSurface({
   const dragPointerIdRef = useRef<number | null>(null)
   const [dragCursorIndex, setDragCursorIndex] = useState<number | null>(null)
   const [repairTooltip, setRepairTooltip] = useState<RepairTooltipState | null>(null)
+  const [focusedItemIndex, setFocusedItemIndex] = useState(() => {
+    if (items.length === 0) {
+      return -1
+    }
+
+    return Math.min(Math.max(cursorIndex, 0), items.length - 1)
+  })
+  const resolvedFocusedItemIndex = items.length === 0
+    ? -1
+    : focusedItemIndex < 0 || focusedItemIndex >= items.length
+      ? Math.min(Math.max(cursorIndex, 0), items.length - 1)
+      : focusedItemIndex
   const activeCursorIndex = dragCursorIndex ?? cursorIndex
 
   const getSlotRects = useCallback(
@@ -364,6 +377,16 @@ function HistoryTimelineSurface({
     })
   }
 
+  const focusTreeItem = useCallback((index: number) => {
+    const nextButton = itemRefs.current[index]?.querySelector('button')
+    if (nextButton instanceof HTMLButtonElement) {
+      nextButton.focus()
+      return
+    }
+
+    setFocusedItemIndex(index)
+  }, [itemRefs])
+
   return (
     <section
       className="pointer-events-auto relative shrink-0 overflow-visible rounded-[8px] px-4 pt-3"
@@ -397,80 +420,101 @@ function HistoryTimelineSurface({
       <div className="min-w-0 overflow-hidden">
         <div ref={scrollerRef} className="overflow-x-auto overflow-y-hidden">
           <div ref={trackRef} className="relative min-w-full w-max">
-            {items.length === 0 ? (
-              <span
-                className="mb-2 flex h-7 items-center rounded-[4px] px-3 text-xs"
-                style={{
-                  background: 'var(--workbench-shell-overlay-soft)',
-                  color: 'var(--mantine-color-dark-2)',
-                }}
-              >
-                {emptyLabel}
-              </span>
-            ) : (
-              <div className="flex items-center gap-1.5 pb-2">
-                {items.map((item, index) => (
-                  <div
-                    key={item.id}
-                    ref={(element) => {
-                      itemRefs.current[index] = element
-                    }}
-                    className="shrink-0"
-                    data-anchor-index={index}
-                  >
-                    <WorkbenchContextMenu label={`${item.label} actions`} items={item.menuItems}>
-                      <button
-                        type="button"
-                        onPointerDown={item.onPointerDown}
-                        onClick={item.onClick}
-                        onDoubleClick={item.onDoubleClick}
-                        className={`relative flex h-7 shrink-0 items-center gap-1.5 rounded-[4px] pl-2 pr-2.5 text-[11px] transition ${
-                          item.isAfterCursor ? 'opacity-45' : ''
-                        } ${item.isDragging ? 'opacity-70' : ''} ${!item.isAllowed ? 'cursor-not-allowed' : ''}`}
-                        style={{
-                          backgroundColor: item.errorMessage
-                            ? 'var(--workbench-shell-danger-surface)'
-                            : item.isSelected || item.isHighlighted
-                              ? 'var(--workbench-shell-accent-surface)'
-                              : item.isAtCursor
-                                ? 'var(--workbench-shell-control-surface)'
-                                : 'transparent',
-                          boxShadow: item.errorMessage
-                            ? 'inset 0 0 0 1px var(--workbench-shell-danger-border)'
-                            : item.isSelected || item.isHighlighted
-                              ? 'inset 0 0 0 1px var(--workbench-shell-accent-border)'
-                              : 'none',
-                          color: item.errorMessage
-                            ? 'var(--workbench-shell-danger-text)'
-                            : item.isSelected || item.isHighlighted
-                              ? 'var(--workbench-shell-accent)'
-                              : 'var(--workbench-shell-text)',
-                        }}
-                        aria-label={item.ariaLabel}
-                        aria-grabbed={item.isDragging}
-                        aria-disabled={!item.isAllowed}
-                        title={item.title}
-                        data-feature-error={item.dataFeatureError}
-                        data-derived-highlighted={item.dataDerivedHighlighted}
-                        data-history-feature-id={item.dataHistoryFeatureId}
-                        data-delete-supported={item.dataDeleteSupported}
-                        data-repair-guidance={item.dataRepairGuidance}
-                        aria-describedby={item.errorMessage ? tooltipId : undefined}
-                        onMouseEnter={(event) => showRepairTooltip(event.currentTarget, item.errorMessage)}
-                        onMouseLeave={() => setRepairTooltip(null)}
-                        onFocus={(event) => showRepairTooltip(event.currentTarget, item.errorMessage)}
-                        onBlur={() => setRepairTooltip(null)}
-                      >
-                        {item.icon}
-                        <span className="max-w-[9ch] truncate text-[11px]">
-                          {item.label}
-                        </span>
-                      </button>
-                    </WorkbenchContextMenu>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div role="tree" aria-label={ariaLabel} aria-orientation="horizontal">
+              {items.length === 0 ? (
+                <span
+                  className="mb-2 flex h-7 items-center rounded-[4px] px-3 text-xs"
+                  style={{
+                    background: 'var(--workbench-shell-overlay-soft)',
+                    color: 'var(--mantine-color-dark-2)',
+                  }}
+                >
+                  {emptyLabel}
+                </span>
+              ) : (
+                <div className="flex items-center gap-1.5 pb-2">
+                  {items.map((item, index) => (
+                    <div
+                      key={item.id}
+                      ref={(element) => {
+                        itemRefs.current[index] = element
+                      }}
+                      className="shrink-0"
+                      data-anchor-index={index}
+                      role="treeitem"
+                      aria-label={item.ariaLabel}
+                      aria-level={1}
+                      aria-posinset={index + 1}
+                      aria-selected={item.isSelected || undefined}
+                      aria-setsize={items.length}
+                    >
+                      <WorkbenchContextMenu label={`${item.label} actions`} items={item.menuItems}>
+                        <button
+                          type="button"
+                          onPointerDown={item.onPointerDown}
+                          onClick={item.onClick}
+                          onDoubleClick={item.onDoubleClick}
+                          className={`relative flex h-7 shrink-0 items-center gap-1.5 rounded-[4px] pl-2 pr-2.5 text-[11px] transition ${
+                            item.isAfterCursor ? 'opacity-45' : ''
+                          } ${item.isDragging ? 'opacity-70' : ''} ${!item.isAllowed ? 'cursor-not-allowed' : ''}`}
+                          style={{
+                            backgroundColor: item.errorMessage
+                              ? 'var(--workbench-shell-danger-surface)'
+                              : item.isSelected || item.isHighlighted
+                                ? 'var(--workbench-shell-accent-surface)'
+                                : item.isAtCursor
+                                  ? 'var(--workbench-shell-control-surface)'
+                                  : 'transparent',
+                            boxShadow: item.errorMessage
+                              ? 'inset 0 0 0 1px var(--workbench-shell-danger-border)'
+                              : item.isSelected || item.isHighlighted
+                                ? 'inset 0 0 0 1px var(--workbench-shell-accent-border)'
+                                : 'none',
+                            color: item.errorMessage
+                              ? 'var(--workbench-shell-danger-text)'
+                              : item.isSelected || item.isHighlighted
+                                ? 'var(--workbench-shell-accent)'
+                                : 'var(--workbench-shell-text)',
+                          }}
+                          aria-label={item.ariaLabel}
+                          aria-grabbed={item.isDragging}
+                          aria-disabled={!item.isAllowed}
+                          title={item.title}
+                          tabIndex={index === resolvedFocusedItemIndex ? 0 : -1}
+                          data-feature-error={item.dataFeatureError}
+                          data-derived-highlighted={item.dataDerivedHighlighted}
+                          data-history-feature-id={item.dataHistoryFeatureId}
+                          data-delete-supported={item.dataDeleteSupported}
+                          data-repair-guidance={item.dataRepairGuidance}
+                          aria-describedby={item.errorMessage ? tooltipId : undefined}
+                          onFocus={(event) => {
+                            setFocusedItemIndex(index)
+                            showRepairTooltip(event.currentTarget, item.errorMessage)
+                          }}
+                          onKeyDown={(event) => {
+                            const nextIndex = getNextHistoryTreeFocusIndex(index, event.key, items.length)
+                            if (nextIndex === null) {
+                              return
+                            }
+
+                            event.preventDefault()
+                            focusTreeItem(nextIndex)
+                          }}
+                          onMouseEnter={(event) => showRepairTooltip(event.currentTarget, item.errorMessage)}
+                          onMouseLeave={() => setRepairTooltip(null)}
+                          onBlur={() => setRepairTooltip(null)}
+                        >
+                          {item.icon}
+                          <span className="max-w-[9ch] truncate text-[11px]">
+                            {item.label}
+                          </span>
+                        </button>
+                      </WorkbenchContextMenu>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {items.length > 0 ? (
               <div

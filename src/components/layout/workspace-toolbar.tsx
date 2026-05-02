@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ActionIcon, Divider, Paper, ScrollArea, Text, TextInput, Tooltip } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
@@ -7,6 +7,7 @@ import { DocumentFileMenu } from '@/components/layout/document-file-menu'
 import { ToolButton } from '@/components/layout/tool-button'
 import { ToolDropdownButton } from '@/components/layout/tool-dropdown-button'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
+import { getNextToolSearchHighlightIndex } from '@/components/layout/workspace-toolbar.a11y'
 import {
   getToolById,
   getToolbarSectionsForMode,
@@ -21,6 +22,7 @@ import {
 } from '@/domain/editor/sketch-session'
 import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
 import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
 
 const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
@@ -50,9 +52,14 @@ export function WorkspaceToolbar({
   onDownloadBugReportState,
 }: WorkspaceToolbarProps = {}) {
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchPopoverOpen, setSearchPopoverOpen] = useState(false)
+  const [highlightedSearchResultIndex, setHighlightedSearchResultIndex] = useState(-1)
+  const searchListboxId = useId()
+  const searchRootRef = useRef<HTMLDivElement | null>(null)
   const {
     state: { activeCommand, activeEditSession, activeImportSession, history, mode, sketchSession },
   } = useEditorState()
+  const { activateTool } = useWorkbenchCommandHandlers()
   const visibleHistory = historyAvailability ?? history
   const visibleSections = useMemo(
     () => getToolbarSectionsForMode(mode),
@@ -62,6 +69,12 @@ export function WorkspaceToolbar({
     () => searchToolDefinitions(searchQuery),
     [searchQuery],
   )
+  const clampedHighlightedSearchResultIndex = searchResults.length === 0
+    ? -1
+    : highlightedSearchResultIndex < 0 || highlightedSearchResultIndex >= searchResults.length
+      ? 0
+      : highlightedSearchResultIndex
+  const isSearchPopoverVisible = searchPopoverOpen && searchQuery.length > 0
   const hasActiveSketchSession = sketchSession !== null
   const canImportReferenceImage = sketchSession !== null || activeCommand?.toolId === 'sketch'
 
@@ -74,6 +87,84 @@ export function WorkspaceToolbar({
     || (tool.id === 'import' && (activeEditSession !== null || activeImportSession !== null))
     || (tool.id === 'importImage' && !canImportReferenceImage)
     || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
+
+  const closeSearchPopover = () => {
+    setSearchPopoverOpen(false)
+  }
+
+  const triggerSearchTool = (tool: RegisteredToolDefinition) => {
+    if (isToolDisabled(tool)) {
+      return
+    }
+
+    void activateTool(tool.id, { source: 'search' })
+    setSearchQuery('')
+    setSearchPopoverOpen(false)
+    setHighlightedSearchResultIndex(-1)
+  }
+
+  const handleDocumentPointerDown = useEffectEvent((event: PointerEvent) => {
+    const eventTarget = event.target
+    if (!(eventTarget instanceof Node)) {
+      return
+    }
+
+    if (searchRootRef.current?.contains(eventTarget)) {
+      return
+    }
+
+    closeSearchPopover()
+  })
+
+  useEffect(() => {
+    if (!isSearchPopoverVisible) {
+      return
+    }
+
+    document.addEventListener('pointerdown', handleDocumentPointerDown)
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentPointerDown)
+    }
+  }, [isSearchPopoverVisible])
+
+  const handleSearchInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      if (!isSearchPopoverVisible) {
+        return
+      }
+
+      event.preventDefault()
+      closeSearchPopover()
+      return
+    }
+
+    const nextIndex = getNextToolSearchHighlightIndex(clampedHighlightedSearchResultIndex, event.key, searchResults.length)
+    if (nextIndex !== null) {
+      event.preventDefault()
+      setSearchPopoverOpen(true)
+      setHighlightedSearchResultIndex(nextIndex)
+      return
+    }
+
+    if (event.key !== 'Enter' || !isSearchPopoverVisible) {
+      return
+    }
+
+    const highlightedTool = searchResults[clampedHighlightedSearchResultIndex]
+    if (!highlightedTool) {
+      return
+    }
+
+    event.preventDefault()
+    triggerSearchTool(highlightedTool)
+  }
+
+  const activeSearchResult = clampedHighlightedSearchResultIndex >= 0
+    ? searchResults[clampedHighlightedSearchResultIndex]
+    : null
+  const activeSearchResultId = activeSearchResult
+    ? `${searchListboxId}-option-${activeSearchResult.id}`
+    : undefined
 
   const renderTool = (tool: RegisteredToolDefinition) => {
     if (tool.id === 'sketch' && hasActiveSketchSession) {
@@ -117,7 +208,7 @@ export function WorkspaceToolbar({
       component="header"
       radius={0}
       px="md"
-      // py={4}
+      py={4}
       style={{
         backgroundColor: 'var(--workbench-shell-surface-strong)',
         boxShadow: 'var(--workbench-shell-elevation-toolbar)',
@@ -133,7 +224,7 @@ export function WorkspaceToolbar({
           onExportDocument={onExportDocument}
         />
         <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-          <div className="flex w-max items-center gap-3">
+          <div className="flex w-max items-center gap-3" role="toolbar" aria-label="CAD tools">
             {visibleSections.map((section, index) => (
               <div
                 key={section.id}
@@ -153,50 +244,79 @@ export function WorkspaceToolbar({
           </div>
         </div>
 
-        <div className="relative w-full max-w-[240px] shrink-0">
+        <div ref={searchRootRef} className="relative w-full max-w-[240px] shrink-0">
           <TextInput
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onChange={(event) => {
+              const nextQuery = event.target.value
+              setSearchQuery(nextQuery)
+              setSearchPopoverOpen(nextQuery.length > 0)
+              setHighlightedSearchResultIndex(nextQuery.length > 0 ? 0 : -1)
+            }}
+            onFocus={() => {
+              if (searchQuery.length > 0) {
+                setSearchPopoverOpen(true)
+              }
+            }}
+            onKeyDown={handleSearchInputKeyDown}
             placeholder="Search tools"
             leftSection={<WorkbenchIcon name="search" className="h-4 w-4" />}
             data-workbench-command="editor.focusSearch"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls={isSearchPopoverVisible ? searchListboxId : undefined}
+            aria-activedescendant={isSearchPopoverVisible ? activeSearchResultId : undefined}
+            aria-expanded={isSearchPopoverVisible}
             styles={{
               input: {
                 height: 30,
               },
             }}
           />
-          {searchQuery && (
+          {isSearchPopoverVisible && (
             <Paper
               className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden"
-              withBorder
               style={{
                 backgroundColor: 'var(--workbench-shell-overlay-strong)',
-                borderColor: 'var(--workbench-shell-border-strong)',
                 boxShadow: 'var(--workbench-panel-shadow)',
               }}
             >
               {searchResults.length > 0 ? (
                 <ScrollArea.Autosize mah={320} mx={4} my={4}>
-                  <div className="grid gap-1">
-                    {searchResults.map((tool) => {
+                  <div id={searchListboxId} role="listbox" aria-label="Tool search results" className="grid gap-1">
+                    {searchResults.map((tool, index) => {
+                      const optionId = `${searchListboxId}-option-${tool.id}`
+                      const isHighlighted = searchResults[clampedHighlightedSearchResultIndex]?.id === tool.id
                       return (
                         <ToolButton
                           key={`search-${tool.id}`}
                           tool={tool}
                           inline
+                          buttonId={optionId}
+                          buttonRole="option"
+                          buttonTabIndex={-1}
+                          ariaSelected={isHighlighted}
                           active={activeCommand?.toolId === tool.id}
+                          selected={isHighlighted}
                           disabled={isToolDisabled(tool)}
-                          onTrigger={() => setSearchQuery('')}
+                          onButtonFocus={() => setHighlightedSearchResultIndex(index)}
+                          onButtonMouseEnter={() => setHighlightedSearchResultIndex(index)}
+                          onTrigger={() => {
+                            setSearchQuery('')
+                            setSearchPopoverOpen(false)
+                            setHighlightedSearchResultIndex(-1)
+                          }}
                         />
                       )
                     })}
                   </div>
                 </ScrollArea.Autosize>
               ) : (
-                <Text c="dimmed" px="sm" py="md" size="sm">
-                  No tools match “{searchQuery}”.
-                </Text>
+                <div id={searchListboxId} role="listbox" aria-label="Tool search results">
+                  <Text c="dimmed" px="sm" py="md" size="sm" role="status">
+                    No tools match “{searchQuery}”.
+                  </Text>
+                </div>
               )}
             </Paper>
           )}

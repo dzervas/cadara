@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { WorkspaceToolbar } from '@/components/layout/workspace-toolbar'
+import { getNextToolSearchHighlightIndex } from '@/components/layout/workspace-toolbar.a11y'
 import {
   getEditorViewState,
   initialEditorState,
@@ -87,6 +88,12 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
 
   expectTrue(toolbarMarkup.includes('Search tools'), 'Toolbar should keep the tool search input.')
   expectTrue(
+    toolbarMarkup.includes('role="combobox"')
+      && toolbarMarkup.includes('aria-autocomplete="list"')
+      && toolbarMarkup.includes('aria-expanded="false"'),
+    'Toolbar search should expose collapsed combobox semantics before any results are shown.',
+  )
+  expectTrue(
     toolbarMarkup.includes('aria-label="File"')
       && toolbarMarkup.indexOf('aria-label="File"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
     'Toolbar should render the document file menu before the CAD tool sections.',
@@ -96,6 +103,10 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
       && toolbarMarkup.includes('w-max')
       && toolbarMarkup.includes('shrink-0'),
     'Toolbar tools should scroll inside the header instead of widening the workbench shell.',
+  )
+  expectTrue(
+    toolbarMarkup.includes('role="toolbar"') && toolbarMarkup.includes('aria-label="CAD tools"'),
+    'Toolbar tool groups should be wrapped in an explicit toolbar landmark.',
   )
   expectTrue(
     toolbarMarkup.includes('/icons/extrude.svg'),
@@ -295,5 +306,13 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
   expectTrue(
     !getToolMarkup(historyToolbarMarkup, 'undo').includes('data-disabled="true"'),
     'Undo should render enabled when an undo step is available.',
+  )
+  expectTrue(
+    getNextToolSearchHighlightIndex(-1, 'ArrowDown', 4) === 0
+      && getNextToolSearchHighlightIndex(0, 'ArrowUp', 4) === 0
+      && getNextToolSearchHighlightIndex(1, 'End', 4) === 3
+      && getNextToolSearchHighlightIndex(3, 'Home', 4) === 0
+      && getNextToolSearchHighlightIndex(0, 'Escape', 4) === null,
+    'Toolbar search keyboard navigation should clamp within the result set and ignore unrelated keys.',
   )
 })

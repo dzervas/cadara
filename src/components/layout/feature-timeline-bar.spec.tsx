@@ -4,7 +4,9 @@ import { MantineProvider } from '@mantine/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
+import { shouldStartVariableKeyboardEdit } from '@/components/layout/feature-sidebar.a11y'
 import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
+import { getNextHistoryTreeFocusIndex } from '@/components/layout/feature-timeline-bar.a11y'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
 import {
   getDocumentHistoryMenuEntryDescriptors,
@@ -83,10 +85,55 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
   expectTrue(!sidebarMarkup.includes('Snapshot References'), 'Sidebar should not render snapshot references as the standard middle section.')
   expectTrue(sidebarMarkup.includes('aria-label="Add variable"'), 'Sidebar variables should expose an add button.')
   expectTrue(sidebarMarkup.includes('Document Diagnostics'), 'Sidebar should keep document diagnostics.')
+  expectTrue(/data-accordion="true"/.test(sidebarMarkup), 'Sidebar should render its sections inside a Mantine accordion shell.')
+  expectTrue(
+    (sidebarMarkup.match(/data-accordion-control="true"/g) ?? []).length === 3,
+    'Sidebar should expose three accordion controls for objects, variables, and diagnostics.',
+  )
+  expectTrue(
+    !sidebarMarkup.includes('grid-rows-[minmax(0,1.1fr)_minmax(0,0.9fr)]') && !sidebarMarkup.includes('max-h-56 flex-[0.85]'),
+    'Sidebar should remove the old stacked split-pane sizing once the accordion shell owns section layout.',
+  )
   expectTrue(sidebarMarkup.includes('aria-haspopup="menu"'), 'Sidebar rows should expose custom context menu affordances.')
   expectTrue(
-    sidebarMarkup.includes('hover:bg-[var(--workbench-shell-accent-surface)]'),
-    'Sidebar object rows should highlight across the full row container with the shared workbench accent surface.',
+    sidebarMarkup.includes('hover:bg-[var(--workbench-shell-sidebar-item-hover)]'),
+    'Sidebar object rows should use the dedicated hover graphite step instead of sharing the selected-state surface.',
+  )
+
+  const selectedSidebarMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureSidebar
+          snapshot={snapshot}
+          hiddenTargetKeys={{}}
+          invalidVariableValueIds={{}}
+          objectLabelOverrides={{}}
+          visibleSelection={[snapshot.presentation.objects[0]!.target]}
+          onAddVariable={() => undefined}
+          onInspectDiagnostic={() => undefined}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+          onUpdateVariable={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  expectTrue(
+    selectedSidebarMarkup.includes('bg-[var(--workbench-shell-sidebar-item-selected)]'),
+    'Selected sidebar object rows should use the dedicated selected graphite step.',
+  )
+  expectTrue(
+    selectedSidebarMarkup.includes('font-semibold'),
+    'Selected sidebar object rows should add a stronger label weight cue.',
+  )
+  expectTrue(
+    selectedSidebarMarkup.includes('var(--workbench-shell-sidebar-item-selected-icon)'),
+    'Selected sidebar object rows should brighten the leading icon as a selection cue.',
   )
 
   const variableResultSnapshot = {
@@ -126,10 +173,17 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
     </MantineProvider>,
   )
 
-  expectTrue(variableSidebarMarkup.includes('aria-label="Edit variable variable_width"'), 'Existing variables should expose a double-click row edit control.')
+  expectTrue(variableSidebarMarkup.includes('aria-label="Edit variable width"'), 'Existing variables should expose a double-click row edit control using the authored variable name.')
+  expectTrue(
+    variableSidebarMarkup.includes('aria-keyshortcuts="Enter Space F2"'),
+    'Existing variables should advertise the keyboard shortcuts that enter edit mode.',
+  )
   expectTrue(!variableSidebarMarkup.includes('aria-label="Variable name variable_width"'), 'Existing variables should render read-only rows until edited.')
   expectTrue(variableSidebarMarkup.includes('data-variable-expression="variable_width"') && variableSidebarMarkup.includes('10 + 2'), 'Read-only variable rows should keep the authored expression visible.')
-  expectTrue(variableSidebarMarkup.includes('aria-hidden="true" class="shrink-0 text-[12px] leading-4 text-[var(--mantine-color-dark-3)]">=</span>'), 'Read-only variable rows should separate expressions and results with an equals sign.')
+  expectTrue(
+    /data-variable-expression="variable_width"[\s\S]*aria-hidden="true"[\s\S]*>=<\/span>[\s\S]*aria-label="Variable result: 12"/.test(variableSidebarMarkup),
+    'Read-only variable rows should separate expressions and results with an equals sign before the computed result chip.',
+  )
   expectTrue(variableSidebarMarkup.includes('font-mono') && variableSidebarMarkup.includes('>12</span>'), 'Variable expression results should render in a monospace value chip.')
   expectTrue(variableSidebarMarkup.includes('inline-block max-w-full shrink-0 truncate rounded border px-2 py-1 text-right font-mono'), 'Variable expression results should size to their text instead of using a fixed minimum width.')
   expectTrue(variableSidebarMarkup.includes('var(--workbench-shell-success-surface)'), 'Successful variable results should use the shared success background.')
@@ -163,6 +217,37 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
   expectTrue(invalidVariableSidebarMarkup.includes('var(--workbench-shell-danger-text)'), 'Invalid variable results should use the shared danger color.')
   expectTrue(invalidVariableSidebarMarkup.includes('Variable result error: Width expression failed.'), 'Invalid variable results should expose the same error message used by the persistent tooltip.')
   expectTrue(invalidVariableSidebarMarkup.includes('data-invalid-value="true"'), 'Runtime invalid variable state should render danger styling.')
+
+  const multipleInvalidVariablesMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FeatureSidebar
+          snapshot={variableResultSnapshot}
+          hiddenTargetKeys={{}}
+          invalidVariableValueMessages={{
+            variable_width: 'Width expression failed.',
+            variable_depth: 'Depth expression failed.',
+          }}
+          objectLabelOverrides={{}}
+          visibleSelection={[]}
+          onAddVariable={() => undefined}
+          onInspectDiagnostic={() => undefined}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+          onUpdateVariable={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  expectTrue(
+    multipleInvalidVariablesMarkup.split('aria-describedby=').length - 1 === 1,
+    'Variable result tooltips should auto-open at most one invalid row at a time.',
+  )
 
   const blankVariableSnapshot = {
     ...snapshot,
@@ -282,6 +367,12 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
   )
 
   expectTrue(timelineMarkup.includes('aria-label="Feature timeline"'), 'Timeline should expose a region label.')
+  expectTrue(
+    timelineMarkup.includes('role="tree"')
+      && timelineMarkup.includes('aria-orientation="horizontal"')
+      && timelineMarkup.includes('role="treeitem"'),
+    'Timeline history items should expose tree semantics for assistive technologies.',
+  )
   expectTrue(timelineMarkup.includes('aria-label="Select Sketch 1. Double-click to reopen."'), 'Timeline should expose committed sketch selection labels.')
   expectTrue(timelineMarkup.includes('aria-label="Select Extrude 1. Double-click to reopen."'), 'Timeline should expose feature selection labels.')
   expectTrue(timelineMarkup.includes('/icons/new-sketch.svg'), 'Timeline sketch entries should use shared sketch tool icons.')
@@ -482,6 +573,22 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
   expectTrue(
     reorderDisabledMarkup.includes('data-reorder-disabled="true"'),
     'Timeline should expose pending-state reorder disablement.',
+  )
+  expectTrue(
+    getNextHistoryTreeFocusIndex(0, 'ArrowLeft', 4) === 0
+      && getNextHistoryTreeFocusIndex(0, 'ArrowRight', 4) === 1
+      && getNextHistoryTreeFocusIndex(1, 'ArrowDown', 4) === 2
+      && getNextHistoryTreeFocusIndex(3, 'End', 4) === 3
+      && getNextHistoryTreeFocusIndex(2, 'Home', 4) === 0
+      && getNextHistoryTreeFocusIndex(1, 'Escape', 4) === null,
+    'Timeline tree navigation should clamp roving focus within the available history items.',
+  )
+  expectTrue(
+    shouldStartVariableKeyboardEdit('Enter')
+      && shouldStartVariableKeyboardEdit(' ')
+      && shouldStartVariableKeyboardEdit('F2')
+      && !shouldStartVariableKeyboardEdit('Escape'),
+    'Variable rows should only enter edit mode from the supported keyboard shortcuts.',
   )
 
   const sketchCursorSnapshot = {

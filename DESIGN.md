@@ -113,9 +113,16 @@ components:
     textColor: "{colors.graphite-bone}"
     rounded: "{rounded.none}"
     padding: "6px 20px"
-  sidebar-item-active:
-    backgroundColor: "#3d3d3d"
+  sidebar-item-hover:
+    backgroundColor: "color-mix(in oklch, {colors.graphite-deep} 94%, white 6%)"
     textColor: "{colors.graphite-bone}"
+    rounded: "{rounded.none}"
+    padding: "6px 20px"
+  sidebar-item-active:
+    backgroundColor: "color-mix(in oklch, {colors.graphite-deep} 88%, white 12%)"
+    textColor: "{colors.graphite-bone}"
+    iconColor: "{colors.graphite-100}"
+    fontWeight: 600
     rounded: "{rounded.none}"
     padding: "6px 20px"
   diagnostic-card-error:
@@ -247,7 +254,8 @@ Components are Mantine primitives configured through the central `workbench-them
 ### Sidebar Items (Parts & Objects, Variables, Diagnostics)
 - **Shape:** No rounding on the row itself — full-width hit target with internal padding `6px 20px`.
 - **Default state:** Transparent background, 13px Title typography, leading 14px tool icon in Workshop-Steel.
-- **Hover/Selected:** Background switches to the subtle Workshop-Steel light tint (`--workbench-shell-accent-surface`).
+- **Hover:** Background lifts one graphite step (`--workbench-shell-sidebar-item-hover`). Text and icon stay in their default tone so incidental pointer travel does not read as selection.
+- **Selected:** Background lifts a second graphite step (`--workbench-shell-sidebar-item-selected`), label weight tightens to semibold, and the leading icon brightens to `Graphite 100`. Selection should read as a committed state even when the pointer is elsewhere.
 - **Hidden state:** Container at `opacity: 0.55`, eye icon flips from open to closed.
 - **Trailing affordance:** Visibility toggle as a 24px subtle ActionIcon, only visually committed on hover or when toggled.
 
