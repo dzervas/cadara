@@ -286,7 +286,7 @@ export function createViewCubeLabelMesh(label: string, geometry: THREE.PlaneGeom
 
   context.scale(devicePixelRatio, devicePixelRatio)
   context.clearRect(0, 0, width, height)
-  context.font = '600 42px "IBM Plex Sans", "Segoe UI", sans-serif'
+  context.font = '600 42px "Geist Sans", ui-sans-serif, system-ui, sans-serif'
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.lineJoin = 'round'

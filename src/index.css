@@ -1,13 +1,13 @@
 @import 'tailwindcss';
 
 @theme {
-  --font-sans: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --font-sans: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root {
   color-scheme: dark;
-  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

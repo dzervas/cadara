@@ -24,31 +24,38 @@ colors:
   viewcube-outline: "#8db7ff"
 typography:
   display:
-    fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif"
+    fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "20px"
     fontWeight: 600
     lineHeight: 1.3
   headline:
-    fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif"
+    fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "16px"
     fontWeight: 600
     lineHeight: 1.4
   title:
-    fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif"
+    fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 500
     lineHeight: 1.4
   body:
-    fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif"
+    fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.5
-  label:
-    fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif"
+  section:
+    fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif"
+    fontSize: "12.5px"
+    fontWeight: 600
+    lineHeight: 1.3
+    letterSpacing: "-0.005em"
+  tag:
+    fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif"
     fontSize: "11px"
     fontWeight: 600
     lineHeight: 1.2
-    letterSpacing: "0.20em"
+    letterSpacing: "0.18em"
+    textTransform: "uppercase"
   mono:
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
     fontSize: "12px"
@@ -192,23 +199,24 @@ A 10-step graphite scale carries the entire shell — background, surfaces, text
 
 ## 3. Typography
 
-**Display Font:** IBM Plex Sans (with Segoe UI, sans-serif fallback)
-**Body Font:** IBM Plex Sans (same stack — no display/body split)
-**Mono Font:** Mantine's monospace stack — used exclusively for numeric values, expressions, and constraint readouts.
+**Display Font:** Geist Sans (with `ui-sans-serif`, `system-ui`, sans-serif fallback)
+**Body Font:** Geist Sans (same stack — no display/body split)
+**Mono Font:** IBM Plex Mono — used exclusively for numeric values, expressions, and constraint readouts.
 
-**Character:** One typeface, three sizes, two weights, one wide-tracked uppercase register. The voice is engineered, not editorial. IBM Plex was chosen for its competence on small sizes and its mechanical neutrality — it never tries to be charming, which is exactly right for an operator-grade tool. `font-synthesis: none` prevents browsers from faking weights or italics; if a weight isn't loaded, it doesn't render.
+**Character:** One typeface, four sizes, two weights, one narrow uppercase register reserved for tags. The voice is engineered with warmth — not editorial, not cold. Geist was designed by Vercel for technical software, and its slightly open apertures and rounded counters keep dense CAD information from reading as IDE-grim. The headers are sentence case with near-zero tracking; the register is "operator who has time for you," not "drafting print." `font-synthesis: none` prevents browsers from faking weights or italics; if a weight isn't loaded, it doesn't render.
 
 ### Hierarchy
 - **Display** (600, 20px, line-height 1.3): Reserved for top-level identity moments (rare in this shell). Headings inside the workspace are smaller.
 - **Headline** (600, 16px, 1.4): Section titles inside dense panels — feature inspector headings, modal titles.
+- **Section** (600, 12.5px, line-height 1.3, letter-spacing -0.005em, sentence case): Sidebar accordion headers — `Parts & Objects`, `Variables`, `Document Diagnostics`. Identity-defining; sentence case at near-zero tracking is what makes the shell read as 2026 and not 2005.
 - **Title** (500, 13px, 1.4): Tool button labels, item names in the parts/objects tree, variable names. The dominant text register in the application.
 - **Body** (400, 13px, 1.5): Tooltip descriptions, helper text, diagnostic messages.
-- **Label** (600, 11px, line-height 1.2, letter-spacing 0.20em, uppercase): Section headers in the sidebar — `PARTS & OBJECTS`, `VARIABLES`, `DOCUMENT DIAGNOSTICS`. Identity-defining.
+- **Tag** (600, 11px, line-height 1.2, letter-spacing 0.18em, uppercase): Reserved for diagnostic severity badges and short metadata stamps. Not for sidebar section headers — those moved to the Section register.
 - **Mono** (400, 12px, 1.4): Variable expressions, evaluated values, dimension readouts, units. Anything where a `1` and an `l` need to be different shapes.
 
 ### Named Rules
 
-**The Tracked Caps Rule.** Uppercase is used for sidebar section headers and for diagnostic severity tags — never for body copy, never for buttons, never for marketing-style emphasis. Tracking is `0.20em`. Anything tighter reads as "default uppercase" and breaks the register.
+**The Tracked Caps Rule.** Uppercase is reserved for the **Tag** register — diagnostic severity badges and similar short metadata stamps — never for sidebar headers, body copy, buttons, or marketing-style emphasis. Tracking is `0.18em`. Anything tighter reads as "default uppercase" and breaks the register; anything wider feels like a 2005 enterprise dashboard.
 
 **The Mono-For-Numbers Rule.** Any field a user might compare against another field — a length, a constraint value, a coordinate, a variable result — is monospaced. The eye scans columns of `12.5` and `12.500001` and immediately sees the difference. Sans-serif numbers hide that difference.
 
@@ -291,7 +299,7 @@ Components are Mantine primitives configured through the central `workbench-them
 - **What it is:** A WebGL widget rendered into a small inset scene at the top-right of the viewport — not a DOM component. Faces and corners are interactive hit targets that drive camera transitions to canonical orientations (`TOP`, `BOTTOM`, `FRONT`, `BACK`, `LEFT`, `RIGHT`, plus eight beveled corners).
 - **Body:** A cube with cut corners. Body half-size is `0.58` scene units, corner cut size `0.30`.
 - **Faces:** Filled with `Viewcube Slate` (`#314255`), outlined in `Viewcube Outline` (`#8db7ff`) at 50% opacity. The slate-blue palette is a permitted exception to the Quiet Chrome Rule: the view cube lives *in* the viewport, not on the chrome, so it falls under the Geometry-Owns-Color Rule's domain.
-- **Labels:** Face labels (`TOP`, `FRONT`, etc.) are rendered to a 256×128 canvas texture using `600 42px IBM Plex Sans, Segoe UI, sans-serif` with a thick 10px outline in the viewport background color and fill in `--workbench-shell-text` (Graphite Bone). The outline reads as a halo against any face tint, keeping the text legible.
+- **Labels:** Face labels (`TOP`, `FRONT`, etc.) are rendered to a 256×128 canvas texture using `600 42px Geist Sans, ui-sans-serif, system-ui, sans-serif` with a thick 10px outline in the viewport background color and fill in `--workbench-shell-text` (Graphite Bone). The outline reads as a halo against any face tint, keeping the text legible.
 - **Corners:** Same Viewcube Slate fill and Viewcube Outline edges. Corners are clickable for isometric-style 3/4 views.
 - **Lighting:** Ambient `#ffffff` at 1.1 intensity plus a directional light at 0.9 — bright enough that the cube reads as flatly lit (deliberately uniform, no dramatic shading) so the user reads it as a navigation widget, not as a model.
 
@@ -309,8 +317,8 @@ Components are Mantine primitives configured through the central `workbench-them
 - **Do** keep saturated color confined to the viewport, sketch overlays, and status states. New chrome is graphite-on-graphite or it is rejected.
 - **Do** use `{rounded.md}` (8px) for components and `{rounded.none}` (0) for the shell itself.
 - **Do** match the Inner Highlight Rule on every new elevated surface — a 1px inset top highlight at ~4% white. Without it, the surface reads as a flat patch.
-- **Do** use IBM Plex Sans for everything, monospace only for numbers, units, expressions, and identifiers.
-- **Do** apply 0.20em letter-spacing on uppercase section labels at 11px/600, and never at body sizes.
+- **Do** use Geist Sans for everything, IBM Plex Mono only for numbers, units, expressions, and identifiers.
+- **Do** apply 0.18em letter-spacing on the uppercase **Tag** register at 11px/600 (severity badges only), and never at body sizes or on sidebar headers.
 - **Do** treat hobbyists as professionals. Tooltips are short, exact, and load-bearing — not "Welcome! 👋" copy.
 - **Do** use Mantine primitives configured through `workbench-theme.ts`. New bespoke styled components require a reason; new bespoke `<div>` chrome requires a *very* good reason.
 
@@ -327,6 +335,6 @@ Components are Mantine primitives configured through the central `workbench-them
 - **Don't** apply `backdrop-filter: blur(...)` to chrome surfaces. No glassmorphism. Use opaque graphite layered by shadow.
 - **Don't** reach for a modal as the first idea. Inline editing (the variable row pattern) is the house style. Modals exist (export, file dialogs) but are the second answer, not the first.
 - **Don't** use rounded corners on the shell itself. The toolbar and sidebar are `radius={0}`.
-- **Don't** use serif fonts, script fonts, or display fonts. The stack is IBM Plex Sans, full stop.
-- **Don't** use letter-spacing on body text. Tracking is reserved for the uppercase section-label register.
+- **Don't** use serif fonts, script fonts, or display fonts. The sans stack is Geist Sans, full stop; the mono stack is IBM Plex Mono.
+- **Don't** use letter-spacing on body text or on sidebar section headers. Tracking is reserved for the uppercase **Tag** register (severity badges).
 - **Don't** introduce sentence-case "Great job!" affirmations, mascots, or success illustrations. Confirmation is a state change, not a celebration.

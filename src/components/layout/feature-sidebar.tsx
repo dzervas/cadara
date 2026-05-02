@@ -38,7 +38,7 @@ interface FeatureSidebarProps {
 
 const defaultSidebarAccordionValues = ['objects', 'variables', 'diagnostics'] as const
 const sidebarAccordionControlClassName =
-  'px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.20em] text-[var(--workbench-shell-text-dim)] transition-colors hover:text-[var(--workbench-shell-text)]'
+  'px-4 py-3 text-[12.5px] font-semibold tracking-[-0.005em] text-[var(--workbench-shell-text-dim)] hover:text-[var(--workbench-shell-text)] [transition:color_180ms_cubic-bezier(0.22,1,0.36,1)]'
 
 type VariableResultPresentation =
   | { kind: 'success'; text: string }
@@ -245,7 +245,7 @@ export function FeatureSidebar({
               background: 'transparent',
             },
             chevron: {
-              color: 'var(--workbench-shell-text-dim)',
+              color: 'var(--mantine-color-dark-5)',
             },
             panel: {
               padding: 0,
