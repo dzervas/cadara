@@ -60,7 +60,7 @@ export function getEditorViewState(state: EditorState) {
     activeSketchPlaneEditSession: state.kind === 'editingSketchPlane' ? state.session : null,
     activeImportSession: state.kind === 'importing' ? state.session : null,
     activeReferencePickerFieldId:
-      state.kind === 'editingFeature' || state.kind === 'importing'
+      state.kind === 'editingFeature' || state.kind === 'editingSketchPlane' || state.kind === 'importing'
         ? state.activeReferencePickerFieldId
         : null,
     sketchSession: state.kind === 'editingSketch' ? state.session : null,

@@ -4,12 +4,14 @@ import type {
   FeatureEditorFormSchema,
 } from '@/core/feature-authoring/form-schema'
 import { getFeatureEditorFormField } from '@/domain/editor/feature-editing'
+import { getSketchPlaneEditFormField } from '@/domain/editor/sketch-plane-editing'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import type { PrimitiveRef } from '@/core/editor/schema'
 import type {
   FeatureEditorState,
   ImportEditorState,
   ImportSessionState,
+  SketchPlaneEditorState,
 } from './types'
 
 export function getActiveReferencePickerField(state: FeatureEditorState) {
@@ -18,6 +20,17 @@ export function getActiveReferencePickerField(state: FeatureEditorState) {
   }
 
   const field = getFeatureEditorFormField(state.session, state.activeReferencePickerFieldId)
+  return field?.kind === 'referencePicker' || field?.kind === 'referenceCollection'
+    ? field
+    : null
+}
+
+export function getActiveSketchPlaneReferencePickerField(state: SketchPlaneEditorState) {
+  if (!state.activeReferencePickerFieldId) {
+    return null
+  }
+
+  const field = getSketchPlaneEditFormField(state.session, state.activeReferencePickerFieldId)
   return field?.kind === 'referencePicker' || field?.kind === 'referenceCollection'
     ? field
     : null

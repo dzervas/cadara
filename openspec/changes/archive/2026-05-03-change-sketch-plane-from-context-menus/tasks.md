@@ -13,8 +13,8 @@
 ## 3. Inspector and draft editing
 
 - [x] 3.1 Extract or generalize the inspector shell so it can render the sketch-plane edit session through the existing form primitives
-- [x] 3.2 Implement the origin-plane selector draft state, including current-plane hydration and supported origin-plane option resolution from the active snapshot
-- [x] 3.3 Add UI or logic coverage for plane-option rendering and patch application in the dedicated sketch-plane editor flow
+- [x] 3.2 Implement the support-plane picker draft state, including current-support hydration and construction-plane or planar-face resolution from the active snapshot
+- [x] 3.3 Add UI or logic coverage for picker rendering and selection application in the dedicated sketch-plane editor flow
 
 ## 4. Commit and rebuild behavior
 

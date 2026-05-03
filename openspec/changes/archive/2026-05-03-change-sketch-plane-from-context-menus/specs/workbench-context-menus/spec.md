@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Parts and objects sketch menus SHALL expose plane reassignment for eligible sketches
-The `Parts & Objects` context menu SHALL expose `Change Sketch Plane` for committed sketch rows that participate in the origin-plane reassignment capability.
+The `Parts & Objects` context menu SHALL expose `Change Sketch Plane` for committed sketch rows that participate in the support-plane reassignment capability.
 
 #### Scenario: Eligible sketch row shows change-plane action
 - **WHEN** the user opens the context menu for an eligible committed sketch row in `Parts & Objects`
@@ -9,13 +9,13 @@ The `Parts & Objects` context menu SHALL expose `Change Sketch Plane` for commit
 - **AND** selecting that action opens the dedicated sketch-plane edit flow for that sketch
 
 #### Scenario: Non-sketch or unsupported sketch row omits change-plane action
-- **WHEN** the user opens the context menu for a non-sketch row or a committed sketch row that does not participate in origin-plane reassignment
+- **WHEN** the user opens the context menu for a non-sketch row or a committed sketch row that does not participate in support-plane reassignment
 - **THEN** the `Parts & Objects` menu does not expose `Change Sketch Plane` as an enabled action
 
 ## MODIFIED Requirements
 
 ### Requirement: Feature history menu SHALL include edit, suppress, cursor, and delete actions
-The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History Here, Roll To End, and Delete for supported committed document history items. Committed sketch items that participate in origin-plane reassignment SHALL also offer `Change Sketch Plane`. Feature-only actions such as Suppress SHALL remain available only for committed feature items.
+The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History Here, Roll To End, and Delete for supported committed document history items. Committed sketch items that participate in support-plane reassignment SHALL also offer `Change Sketch Plane`. Feature-only actions such as Suppress SHALL remain available only for committed feature items.
 
 #### Scenario: Edit history item from menu
 - **WHEN** the user selects Edit from a committed sketch or feature history context menu

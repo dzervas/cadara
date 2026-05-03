@@ -14,12 +14,11 @@ The modeling mutation path is favorable: committed sketch persistence already go
 **Goals:**
 - Add `Change Sketch Plane` to committed sketch context menus in `Parts & Objects` and the bottom history bar.
 - Open an inspector-backed edit flow that is distinct from normal sketch reopen.
-- Let the user retarget a committed sketch to another supported origin datum plane (`XY`, `YZ`, `XZ`).
+- Let the user retarget a committed sketch to another construction plane or planar face.
 - Persist the new plane through the existing sketch commit path and rebuild downstream history from the accepted snapshot.
 - Preserve the current `Edit` action semantics for sketches.
 
 **Non-Goals:**
-- Generalize sketch support editing to arbitrary planar faces or arbitrary construction planes.
 - Merge sketch editing into the feature authoring registry.
 - Change sketch-local authoring tools, camera-entry behavior, or the standard sketch reopen flow.
 - Introduce a new modeling-service mutation if `commitSketch` remains sufficient.
@@ -43,14 +42,14 @@ Alternatives considered:
 - Route the flow through `authoring.reopenRequested` with a synthetic tool ID. Rejected because that event currently encodes either full sketch reopen or committed feature hydration.
 - Represent sketch plane reassignment as a feature edit session. Rejected because sketches are not authored features and the feature registry should not become a catch-all editor abstraction.
 
-### Reuse the existing inspector form vocabulary with an enum-backed origin-plane field
+### Reuse the existing inspector form vocabulary with a shared reference picker
 
-The current form schema already supports enum fields, summaries, diagnostics, and generic patch binding. For this scope, the plane selector should be an enum over the supported origin plane keys rather than a viewport reference picker.
+The current form schema already supports reference pickers, summaries, diagnostics, and generic patch binding. Sketch-plane reassignment should reuse the same reference-picker field vocabulary that feature editing and import review already use so the inspector and viewport stay aligned on one plane-picking interaction model.
 
-That keeps the change small, avoids new form-schema vocabulary, and matches the explicit assumption that this capability targets origin datum planes only.
+The picker should accept a single construction plane or planar face, hydrate from the committed support target, and reuse the existing picker activation/cancel lifecycle in the state machine.
 
 Alternative considered:
-- Use a reference picker against construction targets. Rejected for this proposal because it broadens the behavior toward arbitrary construction selection and invites viewport-selection complexity that the user did not ask for.
+- Use a bespoke sketch-plane-only picker widget. Rejected because the existing form vocabulary already models the selection semantics this workflow needs and keeps the inspector surface consistent.
 
 ### Persist by recommitting the sketch with its existing definition and a new plane
 
@@ -66,26 +65,26 @@ This keeps the modeling boundary unchanged and makes downstream feature rebuild 
 Alternative considered:
 - Add a dedicated `updateSketchPlane` mutation. Rejected unless implementation discovery proves `commitSketch` cannot safely cover the change.
 
-### Limit the first version to origin-backed sketch reassignment
+### Allow reassignment only when the committed support is pickable again
 
-The action should be shown only when the committed sketch participates in the new reassignment capability. For the first version, that means sketches whose current plane support can be resolved to a supported origin datum plane, and the destination options are the other supported origin datum planes in the current snapshot.
+The action should be shown only when the committed sketch participates in the reassignment capability. In practice that means the stored support target must still be a construction plane or planar face that can hydrate back into a valid `SketchPlaneDefinition`.
 
-This keeps the data contract simple and avoids underspecified behavior for face-backed sketches, consumed sketch planes, or custom construction planes.
+This keeps the data contract explicit while still supporting both origin-backed and face-backed sketches through the same picker workflow.
 
 Alternative considered:
-- Show the action for every sketch and allow arbitrary planar retargeting. Rejected as too ambiguous for a first pass and likely to require new reference-picking, validation, and migration behavior.
+- Show the action for every sketch regardless of support shape. Rejected because sketches whose stored support can no longer be resolved should not open a broken picker flow.
 
 ## Risks / Trade-offs
 
 - [Inspector state is feature-only today] → Extract the reusable inspector panel/form rendering from `FeatureInspector` and introduce a sketch-plane-specific session adapter instead of widening everything to `any`.
 - [Downstream features may fail after a plane change] → Let the recommit rebuild through the normal diagnostics path and preserve the existing rollback/restore lifecycle so the user can repair or undo from a coherent document state.
-- [Origin-plane availability depends on snapshot constructions] → Derive selectable plane options from the authoritative datum constructions in the active snapshot and disable or omit the action when the sketch cannot participate safely.
+- [Support-plane validity depends on pickable document geometry] → Rehydrate the committed support target through the active snapshot and disable or omit the action when the sketch cannot participate safely.
 - [The action now differs between sketch and feature history items] → Keep the item-kind branching in the menu helper minimal and explicit: features retain existing actions, eligible sketches gain one additional action.
 
 ## Migration Plan
 
 1. Extend the sketch row and history-item context-menu builders to surface `Change Sketch Plane` for eligible committed sketches.
-2. Add editor-runtime events, state, and effects for sketch-plane edit entry, patching, commit, cancel, and rollback-aware restore.
+2. Add editor-runtime events, state, and effects for sketch-plane edit entry, picker activation, picker selection, commit, cancel, and rollback-aware restore.
 3. Extract or generalize the inspector shell just enough to render the sketch-plane session through the existing form controls.
 4. Recommit sketches with updated plane payloads through `commitSketch`, then refresh the accepted snapshot and diagnostics.
 5. Add or update tests at the appropriate UI/logic lanes when implementation begins.
@@ -94,5 +93,5 @@ No persisted-data migration is required because the change reuses the existing c
 
 ## Open Questions
 
-- Should the first version omit the action entirely for non-origin-backed sketches, or show it disabled with an explanatory label?
+- Should the first version omit the action entirely for sketches whose stored support cannot be resolved anymore, or show it disabled with an explanatory label?
 - If a sketch contains plane-sensitive imported assets such as reference images, is preserving the same local sketch coordinates sufficient, or do any imported payloads need explicit validation before commit?

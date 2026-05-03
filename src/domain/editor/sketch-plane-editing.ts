@@ -6,65 +6,61 @@ import type {
 import type { SketchId } from '@/contracts/shared/ids'
 import type {
   SketchPlaneDefinition,
-  SketchPlaneKey,
 } from '@/contracts/shared/sketch-plane'
 import type {
+  FeatureEditorFormField,
   FeatureEditorFormSchema,
   FeatureEditorPatch,
 } from '@/core/feature-authoring/form-schema'
-import { deriveStandardPlaneKeyFromConstructionId } from '@/domain/modeling/opencascade-kernel-seed'
+import {
+  getPrimitiveRefLabel,
+  planeSelectionFilter,
+  primitiveRefEquals,
+  type PrimitiveRef,
+} from '@/core/editor/schema'
+import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 
-const ORIGIN_PLANE_ORDER = ['xy', 'yz', 'xz'] as const satisfies readonly SketchPlaneKey[]
-
-export interface SketchPlaneEditOption {
-  key: SketchPlaneKey
-  label: string
-  plane: SketchPlaneDefinition
-}
+export type SketchPlaneSupportTarget = Extract<PrimitiveRef, { kind: 'construction' | 'face' }>
+export const SKETCH_PLANE_SUPPORT_FIELD_ID = 'sketch-plane-support' as const
 
 export interface SketchPlaneEditSessionState {
   sketchId: SketchId
   sketchLabel: string
-  currentPlaneKey: SketchPlaneKey
+  currentPlaneTarget: SketchPlaneSupportTarget
   definition: SketchSnapshotRecord['sketch']['definition']
   draft: {
-    selectedPlaneKey: SketchPlaneKey
+    selectedPlaneTarget: SketchPlaneSupportTarget | null
+    selectedPlane: SketchPlaneDefinition | null
   }
-  options: readonly SketchPlaneEditOption[]
   diagnostics: readonly ModelingDiagnostic[]
   status: 'idle' | 'submitting'
 }
 
-function getSketchPlaneKey(plane: SketchPlaneDefinition): SketchPlaneKey | null {
-  if (plane.key) {
-    return plane.key
-  }
-
-  return plane.support.kind === 'construction'
-    ? deriveStandardPlaneKeyFromConstructionId(plane.support.constructionId)
-    : null
+function isSketchPlaneSupportTarget(value: unknown): value is SketchPlaneSupportTarget {
+  return !!value
+    && typeof value === 'object'
+    && 'kind' in value
+    && (value.kind === 'construction' || value.kind === 'face')
 }
 
-function getOriginPlaneOptions(snapshot: WorkspaceSnapshot): SketchPlaneEditOption[] {
-  const optionsByKey = new Map<SketchPlaneKey, SketchPlaneEditOption>()
+function isSketchPlaneDefinition(value: unknown): value is SketchPlaneDefinition {
+  return !!value
+    && typeof value === 'object'
+    && 'support' in value
+    && 'frame' in value
+    && 'key' in value
+}
 
-  for (const construction of snapshot.document.constructions) {
-    const key = getSketchPlaneKey(construction.plane)
-    if (!key) {
-      continue
-    }
-
-    optionsByKey.set(key, {
-      key,
-      label: construction.label,
-      plane: construction.plane,
-    })
+function resolveSketchPlaneTargetPlane(
+  snapshot: WorkspaceSnapshot,
+  target: SketchPlaneSupportTarget,
+): SketchPlaneDefinition | null {
+  const session = openSketchSessionFromSelection([target], snapshot)
+  if (!session) {
+    return null
   }
 
-  return ORIGIN_PLANE_ORDER.flatMap((key) => {
-    const option = optionsByKey.get(key)
-    return option ? [option] : []
-  })
+  return session.plane
 }
 
 export function hydrateSketchPlaneEditSession(
@@ -76,28 +72,20 @@ export function hydrateSketchPlaneEditSession(
     return null
   }
 
-  const currentPlaneKey = getSketchPlaneKey(sketch.plane)
-  if (!currentPlaneKey) {
+  if (!isSketchPlaneSupportTarget(sketch.plane.support)) {
     return null
   }
-
-  const options = getOriginPlaneOptions(snapshot)
-  if (
-    options.length < 2
-    || !options.some((option) => option.key === currentPlaneKey)
-  ) {
-    return null
-  }
+  const currentPlaneTarget = sketch.plane.support
 
   return {
     sketchId: sketch.sketchId,
     sketchLabel: sketch.label,
-    currentPlaneKey,
+    currentPlaneTarget,
     definition: sketch.sketch.definition,
     draft: {
-      selectedPlaneKey: currentPlaneKey,
+      selectedPlaneTarget: currentPlaneTarget,
+      selectedPlane: sketch.plane,
     },
-    options,
     diagnostics: [],
     status: 'idle',
   }
@@ -114,13 +102,24 @@ export function patchSketchPlaneEditSession(
   session: SketchPlaneEditSessionState,
   patch: FeatureEditorPatch,
 ): SketchPlaneEditSessionState {
-  const selectedPlaneKey = patch.selectedPlaneKey
-  if (typeof selectedPlaneKey !== 'string') {
+  if (!('selectedPlaneTarget' in patch)) {
     return session
   }
 
-  const selectedOption = session.options.find((option) => option.key === selectedPlaneKey)
-  if (!selectedOption) {
+  const selectedPlaneTarget = patch.selectedPlaneTarget
+  const selectedPlane = patch.selectedPlane
+  if (selectedPlaneTarget === null) {
+    return {
+      ...session,
+      draft: {
+        ...session.draft,
+        selectedPlaneTarget: null,
+        selectedPlane: null,
+      },
+    }
+  }
+
+  if (!isSketchPlaneSupportTarget(selectedPlaneTarget) || !isSketchPlaneDefinition(selectedPlane)) {
     return session
   }
 
@@ -128,7 +127,32 @@ export function patchSketchPlaneEditSession(
     ...session,
     draft: {
       ...session.draft,
-      selectedPlaneKey: selectedOption.key,
+      selectedPlaneTarget,
+      selectedPlane,
+    },
+  }
+}
+
+export function applySelectionToSketchPlaneEditSession(
+  session: SketchPlaneEditSessionState,
+  target: PrimitiveRef,
+  snapshot: WorkspaceSnapshot | null,
+): SketchPlaneEditSessionState {
+  if (!snapshot || !isSketchPlaneSupportTarget(target)) {
+    return session
+  }
+
+  const selectedPlane = resolveSketchPlaneTargetPlane(snapshot, target)
+  if (!selectedPlane) {
+    return session
+  }
+
+  return {
+    ...session,
+    draft: {
+      ...session.draft,
+      selectedPlaneTarget: target,
+      selectedPlane,
     },
   }
 }
@@ -143,16 +167,19 @@ export function getSketchPlaneEditFormSchema(
         title: 'Support',
         fields: [
           {
-            kind: 'enum',
-            id: 'sketch-plane',
-            label: 'Origin plane',
-            helper: 'Retarget the committed sketch to another origin datum plane.',
-            value: session.draft.selectedPlaneKey,
-            options: session.options.map((option) => ({
-              value: option.key,
-              label: option.label,
-            })),
-            patch: { patchKey: 'selectedPlaneKey' },
+            kind: 'referencePicker',
+            id: SKETCH_PLANE_SUPPORT_FIELD_ID,
+            label: 'Support plane',
+            helper: 'Retarget the committed sketch to another construction plane or planar face.',
+            value: session.draft.selectedPlaneTarget,
+            emptyLabel: 'Select a construction plane or planar face.',
+            picker: {
+              mode: 'replace',
+              allowsMultiple: false,
+              selectionFilter: planeSelectionFilter,
+              itemLabel: 'Planar reference',
+            },
+            patch: { patchKey: 'selectedPlaneTarget' },
           },
         ],
       },
@@ -176,25 +203,41 @@ export function getSketchPlaneEditSelectionTarget(session: SketchPlaneEditSessio
   return { kind: 'sketch', sketchId: session.sketchId } as const
 }
 
+export function getSketchPlaneEditFormField(
+  session: SketchPlaneEditSessionState,
+  fieldId: string,
+): FeatureEditorFormField | null {
+  for (const section of getSketchPlaneEditFormSchema(session).sections) {
+    const field = section.fields.find((entry) => entry.id === fieldId)
+    if (field) {
+      return field
+    }
+  }
+
+  return null
+}
+
 export function getSketchPlaneEditPreviewLabel(session: SketchPlaneEditSessionState) {
-  const selectedOption = session.options.find((option) => option.key === session.draft.selectedPlaneKey)
-  return `Editing ${session.sketchLabel} on ${selectedOption?.label ?? session.draft.selectedPlaneKey.toUpperCase()}`
+  const selectedPlaneTarget = session.draft.selectedPlaneTarget
+  return selectedPlaneTarget
+    ? `Editing ${session.sketchLabel} on ${getPrimitiveRefLabel(selectedPlaneTarget)}`
+    : `Editing ${session.sketchLabel}`
 }
 
 export function hasSketchPlaneEditChanges(session: SketchPlaneEditSessionState) {
-  return session.draft.selectedPlaneKey !== session.currentPlaneKey
+  return !!session.draft.selectedPlaneTarget
+    && !primitiveRefEquals(session.currentPlaneTarget, session.draft.selectedPlaneTarget)
 }
 
 export function buildSketchPlaneCommitRequest(session: SketchPlaneEditSessionState) {
-  const selectedOption = session.options.find((option) => option.key === session.draft.selectedPlaneKey)
-  if (!selectedOption) {
+  if (!session.draft.selectedPlaneTarget || !session.draft.selectedPlane) {
     return null
   }
 
   return {
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,
-    plane: selectedOption.plane,
+    plane: session.draft.selectedPlane,
     definition: session.definition,
   }
 }

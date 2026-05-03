@@ -3,6 +3,7 @@ import type { SectionViewSession } from '@/core/section-view/session'
 import {
   defaultSelectionFilter,
   getDefaultSelectionFilterForMode,
+  planeSelectionFilter,
   primitiveRefEquals,
   type CommandPreview,
   type PrimitiveRef,
@@ -18,8 +19,7 @@ import {
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
 import {
-  getSketchPlaneEditPreviewLabel,
-  getSketchPlaneEditSelectionTarget,
+  SKETCH_PLANE_SUPPORT_FIELD_ID,
   type SketchPlaneEditSessionState,
 } from '@/domain/editor/sketch-plane-editing'
 import type { EditorExtensionDependencies } from './dependencies'
@@ -200,23 +200,17 @@ export function createSketchPlaneEditingState(
   state: SelectionCommandEditorState,
   session: SketchPlaneEditSessionState,
 ): SketchPlaneEditorState {
-  const target = getSketchPlaneEditSelectionTarget(session)
-
   return {
     kind: 'editingSketchPlane',
     mode: 'part',
     document: state.document,
     snapshot: state.snapshot,
     previewRenderables: null,
-    selection: [target],
-    hoverTarget: target,
-    selectionFilter: getDefaultSelectionFilterForMode('part'),
+    selection: [],
+    hoverTarget: null,
+    selectionFilter: planeSelectionFilter,
     selectionCatalog: state.selectionCatalog,
-    preview: {
-      kind: 'selection',
-      label: getSketchPlaneEditPreviewLabel(session),
-      target,
-    },
+    preview: createSelectionPreviewForSelection([], planeSelectionFilter),
     nextCommandSequence: state.nextCommandSequence,
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
@@ -227,9 +221,10 @@ export function createSketchPlaneEditingState(
         : null,
     command: {
       ...state.command,
-      phase: 'editing',
+      phase: 'collecting',
     },
     session,
+    activeReferencePickerFieldId: SKETCH_PLANE_SUPPORT_FIELD_ID,
     pendingCommitRequestId: null,
   }
 }

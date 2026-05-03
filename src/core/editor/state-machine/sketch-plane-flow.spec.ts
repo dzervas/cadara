@@ -1,12 +1,17 @@
 import { test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
+import { planeSelectionFilter } from '@/core/editor/schema'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import {
   getDocumentHistoryCursorBeforeTarget,
 } from '@/domain/modeling/document-history'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
-import { hydrateSketchPlaneEditSession } from '@/domain/editor/sketch-plane-editing'
+import {
+  getSketchPlaneEditPreviewLabel,
+  SKETCH_PLANE_SUPPORT_FIELD_ID,
+  hydrateSketchPlaneEditSession,
+} from '@/domain/editor/sketch-plane-editing'
 
 import { emitSketchPlaneCommit } from './effect-emitters'
 import { initialEditorState } from './state-creators'
@@ -69,8 +74,12 @@ test('sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
   expectTrue(
     opened.state.kind === 'editingSketchPlane'
       && opened.state.command.toolId === 'sketchPlaneEdit'
+      && opened.state.command.phase === 'collecting'
+      && opened.state.activeReferencePickerFieldId === SKETCH_PLANE_SUPPORT_FIELD_ID
+      && opened.state.selectionFilter?.kind === planeSelectionFilter.kind
+      && opened.state.selection.length === 0
       && opened.effects.length === 0,
-    'Sketch-plane edits should open immediately when the active history cursor is already on the target sketch.',
+    'Sketch-plane edits should open immediately with the only support-plane picker armed when the active history cursor is already on the target sketch.',
   )
 
   const cancelledDirect = opened.state.kind === 'editingSketchPlane'
@@ -121,7 +130,53 @@ test('sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
   )
 })
 
-test('sketch-plane-flow.spec.ts emits sketch-plane commits only after a plane change and refreshes the accepted snapshot afterward', async () => {
+test('sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference picker through the shared form events', async () => {
+  const snapshot = await createSeedDocumentSnapshot()
+  const sketchId = snapshot.document.sketches[0]!.sketchId
+  const directOpenSnapshot = {
+    ...snapshot,
+    document: {
+      ...snapshot.document,
+      cursor: { kind: 'sketch' as const, sketchId },
+    },
+  }
+  const opened = transitionEditorState(makeLoadedState(directOpenSnapshot), {
+    type: 'sketchPlaneEdit.requested',
+    target: { kind: 'sketch', sketchId },
+  })
+
+  expectTrue(opened.state.kind === 'editingSketchPlane', 'Sketch-plane picker coverage needs the direct edit session to open.')
+
+  const activated = opened.state.kind === 'editingSketchPlane'
+    ? transitionEditorState(opened.state, {
+        type: 'form.referencePickerActivated',
+        fieldId: 'sketch-plane-support',
+      })
+    : null
+
+  expectTrue(
+    activated?.state.kind === 'editingSketchPlane'
+      && activated.state.activeReferencePickerFieldId === 'sketch-plane-support'
+      && activated.state.command.phase === 'collecting'
+      && activated.state.selectionFilter?.kind === 'planeReferences',
+    'Sketch-plane edits should reuse the shared reference-picker activation seam and switch to plane selection collection.',
+  )
+
+  const cancelled = activated?.state.kind === 'editingSketchPlane'
+    ? transitionEditorState(activated.state, { type: 'form.referencePickerCancelled' })
+    : null
+
+  expectTrue(
+    cancelled?.state.kind === 'editingSketchPlane'
+      && cancelled.state.activeReferencePickerFieldId === null
+      && cancelled.state.command.phase === 'editing'
+      && cancelled.state.selection[0]?.kind === 'sketch'
+      && cancelled.state.preview?.label === getSketchPlaneEditPreviewLabel(cancelled.state.session),
+    'Cancelling the sketch-plane picker should restore the sketch-scoped selection and preview state.',
+  )
+})
+
+test('sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked plane change and refreshes the accepted snapshot afterward', async () => {
   const snapshot = await createSeedDocumentSnapshot()
   const sketchId = snapshot.document.sketches[0]!.sketchId
   const directOpenSnapshot = {
@@ -143,19 +198,25 @@ test('sketch-plane-flow.spec.ts emits sketch-plane commits only after a plane ch
     : null
   expectTrue(
     unchangedCommit?.effects.length === 0,
-    'Sketch-plane commits should stay synchronous when the draft still targets the current origin plane.',
+    'Sketch-plane commits should stay synchronous when the draft still targets the current support plane.',
   )
 
-  const patched = opened.state.kind === 'editingSketchPlane'
+  const pickerActivated = opened.state.kind === 'editingSketchPlane'
     ? transitionEditorState(opened.state, {
-        type: 'sketchPlaneEdit.patched',
-        patch: { selectedPlaneKey: 'yz' },
+        type: 'form.referencePickerActivated',
+        fieldId: 'sketch-plane-support',
       })
     : null
-  const committed = patched?.state.kind === 'editingSketchPlane'
-    ? transitionEditorState(patched.state, {
+  const selected = pickerActivated?.state.kind === 'editingSketchPlane'
+    ? transitionEditorState(pickerActivated.state, {
+        type: 'viewport.selectionRequested',
+        target: { kind: 'construction', constructionId: 'construction_plane-yz' },
+      })
+    : null
+  const committed = selected?.state.kind === 'editingSketchPlane'
+    ? transitionEditorState(selected.state, {
         type: 'command.commitRequested',
-        commandSessionId: patched.state.command.commandSessionId,
+        commandSessionId: selected.state.command.commandSessionId,
       })
     : null
 
@@ -163,7 +224,7 @@ test('sketch-plane-flow.spec.ts emits sketch-plane commits only after a plane ch
     committed?.state.kind === 'editingSketchPlane'
       && committed.state.pendingCommitRequestId !== null
       && committed.effects[0]?.type === 'sketchPlane.commit',
-    'Sketch-plane commits should issue the dedicated recommit effect once the selected origin plane changes.',
+    'Sketch-plane commits should issue the dedicated recommit effect once the picked support plane changes.',
   )
 
   const accepted = committed?.state.kind === 'editingSketchPlane'

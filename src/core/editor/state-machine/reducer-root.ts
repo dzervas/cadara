@@ -75,6 +75,10 @@ import {
   handleSketchPlaneEditRequested,
 } from './transitions-viewport'
 import {
+  handleFormReferencePickerActivated,
+  handleFormReferencePickerCancelled,
+} from './transitions-feature'
+import {
   handleEffectDocumentCursorMoved,
   handleEffectDocumentCursorMoveFailed,
   handleEffectSnapshotLoaded,
@@ -132,6 +136,8 @@ function isImportWorkflowEvent(event: EditorEvent): event is ImportWorkflowEvent
 
 function isSketchPlaneEvent(event: EditorEvent): event is SketchPlaneEvent {
   return event.type.startsWith('sketchPlaneEdit.')
+    || event.type === 'form.referencePickerActivated'
+    || event.type === 'form.referencePickerCancelled'
     || event.type === 'command.cancelled'
     || event.type === 'command.commitRequested'
 }
@@ -139,6 +145,7 @@ function isSketchPlaneEvent(event: EditorEvent): event is SketchPlaneEvent {
 function reduceSketchPlaneWorkflow(
   state: Extract<EditorState, { kind: 'editingSketchPlane' }>,
   event: SketchPlaneEvent,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   switch (event.type) {
     case 'command.cancelled':
@@ -158,6 +165,10 @@ function reduceSketchPlaneWorkflow(
       return state.command.commandSessionId === event.commandSessionId
         ? emitSketchPlaneCommit(state)
         : { state, effects: [] }
+    case 'form.referencePickerActivated':
+      return handleFormReferencePickerActivated(state, event)
+    case 'form.referencePickerCancelled':
+      return handleFormReferencePickerCancelled(state, dependencies)
     case 'sketchPlaneEdit.patched': {
       const session = patchSketchPlaneEditSession(state.session, event.patch)
       return {
@@ -436,7 +447,7 @@ function routeToWorkflow(
   }
 
   if (state.kind === 'editingSketchPlane' && isSketchPlaneEvent(event)) {
-    return reduceSketchPlaneWorkflow(state, event)
+    return reduceSketchPlaneWorkflow(state, event, dependencies)
   }
 
   if (state.kind === 'importing' && isImportWorkflowEvent(event)) {

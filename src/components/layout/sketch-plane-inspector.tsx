@@ -32,9 +32,12 @@ export function SketchPlaneInspector({
   onPatch,
   session,
 }: SketchPlaneInspectorProps) {
+  const editor = useEditorState()
   const {
-    state: { activeCommand },
-  } = useEditorState()
+    activeCommand,
+    activeReferencePickerFieldId,
+  } = editor.state
+  const { dispatch } = editor
   const formSchema = session ? getSketchPlaneEditFormSchema(session) : null
   const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
   const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })
@@ -88,8 +91,8 @@ export function SketchPlaneInspector({
                 control={form.control}
                 field={field}
                 documentVariables={[]}
-                activeReferencePickerFieldId={null}
-                onReferencePickerActivate={() => undefined}
+                activeReferencePickerFieldId={activeReferencePickerFieldId}
+                onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
                 onPatch={onPatch}
               />
             ))}

@@ -189,6 +189,7 @@ export interface SketchPlaneEditorState extends EditorStateBase {
   kind: 'editingSketchPlane'
   command: EditorActiveCommand
   session: SketchPlaneEditSessionState
+  activeReferencePickerFieldId: string | null
   pendingCommitRequestId: RequestId | null
 }
 
@@ -920,6 +921,8 @@ export type FeatureEvent = Extract<
 export type SketchPlaneEvent = Extract<
   EditorEvent,
   | { type: `sketchPlaneEdit.${string}` }
+  | { type: 'form.referencePickerActivated' }
+  | { type: 'form.referencePickerCancelled' }
   | { type: 'command.cancelled' }
   | { type: 'command.commitRequested' }
 >
@@ -1112,7 +1115,7 @@ export interface EditorEffectRuntime {
     actualRevisionId?: RevisionId
     errorContext?: AppErrorContextEntry[]
   } | null>
-  /** Recommits a committed sketch with an updated origin-plane definition. */
+  /** Recommits a committed sketch with an updated support-plane definition. */
   commitSketchPlane(input: {
     requestId: RequestId
     baseRevisionId: RevisionId

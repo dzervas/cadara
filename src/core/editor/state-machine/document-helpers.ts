@@ -172,7 +172,7 @@ export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorT
         : {
             state: withPreview(activeState, {
               kind: 'selection',
-              label: `Sketch ${cursorContext.target.sketchId} does not support origin-plane reassignment.`,
+              label: `Sketch ${cursorContext.target.sketchId} does not support plane reassignment.`,
               target: { kind: 'sketch', sketchId: cursorContext.target.sketchId },
             }),
             effects: [],

@@ -40,7 +40,12 @@ import {
   patchFeatureEditSession,
   type FeatureEditSessionState,
 } from '@/domain/editor/feature-editing'
-import { hydrateSketchPlaneEditSession } from '@/domain/editor/sketch-plane-editing'
+import {
+  applySelectionToSketchPlaneEditSession,
+  getSketchPlaneEditSelectionTarget,
+  getSketchPlaneEditPreviewLabel,
+  hydrateSketchPlaneEditSession,
+} from '@/domain/editor/sketch-plane-editing'
 import type {
   EditorEvent,
   EditorTransitionResult,
@@ -50,6 +55,7 @@ import type {
 import type { EditorExtensionDependencies } from './dependencies'
 import {
   createImportViewportSelectionPatch,
+  getActiveSketchPlaneReferencePickerField,
   getActiveImportReferencePickerField,
   getActiveReferencePickerField,
   getDefaultImportSelectionField,
@@ -571,6 +577,46 @@ function handleImportViewportSelection(
   }
 }
 
+function handleEditingSketchPlaneViewportSelection(
+  state: Extract<EditorState, { kind: 'editingSketchPlane' }>,
+  event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
+): EditorTransitionResult {
+  const activeReferenceField = getActiveSketchPlaneReferencePickerField(state)
+  if (!activeReferenceField) {
+    return { state, effects: [] }
+  }
+
+  const target = getSketchPlaneEditSelectionTarget(state.session)
+  const nextSession = {
+    ...applySelectionToSketchPlaneEditSession(state.session, event.target, state.snapshot),
+    status: 'idle' as const,
+  }
+
+  return {
+    state: {
+      ...state,
+      selection: [target],
+      hoverTarget: target,
+      selectionFilter: getDefaultSelectionFilterForMode('part'),
+      session: nextSession,
+      preview: {
+        kind: 'selection',
+        label: getSketchPlaneEditPreviewLabel(nextSession),
+        target,
+      },
+      command: {
+        ...state.command,
+        phase: 'editing',
+      },
+      activeReferencePickerFieldId:
+        activeReferenceField.kind === 'referencePicker'
+          ? null
+          : activeReferenceField.id,
+    },
+    effects: [],
+  }
+}
+
 function handleEditingSketchViewportSelection(
   state: SketchEditorState,
   event: Extract<EditorEvent, { type: 'viewport.selectionRequested' }>,
@@ -719,6 +765,10 @@ export function handleViewportSelectionRequested(
 
   if (state.kind === 'importing') {
     return handleImportViewportSelection(state, event, dependencies)
+  }
+
+  if (state.kind === 'editingSketchPlane') {
+    return handleEditingSketchPlaneViewportSelection(state, event)
   }
 
   if (state.kind === 'editingSketch') {
@@ -900,7 +950,7 @@ export function handleSketchPlaneEditRequested(
     return {
       state: withPreview(nextState, {
         kind: 'selection',
-        label: `Sketch ${event.target.sketchId} does not support origin-plane reassignment.`,
+        label: `Sketch ${event.target.sketchId} does not support plane reassignment.`,
         target: event.target,
       }),
       effects: [],
