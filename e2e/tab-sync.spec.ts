@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 test.setTimeout(90_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
-test('opt-in local peer sync propagates authored document changes between tabs', async ({ context }, testInfo) => {
+test('opt-in local peer sync exposes peer-authored document changes after refresh', async ({ context }, testInfo) => {
   const channelName = `cad-e2e-tab-sync-${testInfo.workerIndex}-${Date.now()}`
   const firstTabUrl = createSyncedWorkbenchUrl(channelName, `${channelName}-a`)
   const secondTabUrl = createSyncedWorkbenchUrl(channelName, `${channelName}-b`)
@@ -20,6 +20,10 @@ test('opt-in local peer sync propagates authored document changes between tabs',
   await expect(firstTab.getByLabel('Variable name variable_1')).toHaveValue('var1', { timeout: 30_000 })
   await expect(firstTab.getByLabel('Variable value variable_1')).toHaveValue('0')
 
+  await secondTab.evaluate(() => {
+    window.__cadaraDebug?.refreshDocument()
+  })
+  await expect.poll(() => revisionLabel(secondTab), { timeout: 30_000 }).toBe('rev_0002')
   await expect(secondTab.getByLabel('Variable name variable_1')).toHaveValue('var1', { timeout: 30_000 })
   await expect(secondTab.getByLabel('Variable value variable_1')).toHaveValue('0')
 

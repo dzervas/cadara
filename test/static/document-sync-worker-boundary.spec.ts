@@ -6,6 +6,7 @@ import { expectTrue } from '@/testing/expect.spec'
 test('test/static/document-sync-worker-boundary.spec.ts', () => {  const modelingServiceSource = readFileSync(join(process.cwd(), 'src/domain/modeling/modeling-service.ts'), 'utf8')
   const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
   const workerSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync.worker.ts'), 'utf8')
+  const workerDispatcherSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync-worker-dispatcher.ts'), 'utf8')
 
   expectTrue(
     !modelingServiceSource.includes('normalizeCollaborativeAuthoredModelDocument'),
@@ -16,11 +17,13 @@ test('test/static/document-sync-worker-boundary.spec.ts', () => {  const modelin
     'App should pass repository URL parameters to the browser document sync worker.',
   )
   expectTrue(
-    workerSource.includes("message.kind === 'bootstrap'")
+    workerSource.includes('createDocumentSyncWorkerDispatcher(createWorkerMessageHandler)')
       && workerSource.includes("const workerSearchParams = new URLSearchParams(search)")
       && workerSource.includes("workerSearchParams.get('cadLocalPeerSync') === '1'")
       && workerSource.includes("workerSearchParams.get('cadLocalPeerSyncChannel')")
-      && workerSource.includes("workerSearchParams.get('cadRepositoryDbName')"),
+      && workerSource.includes("workerSearchParams.get('cadRepositoryDbName')")
+      && workerDispatcherSource.includes("message.kind === 'bootstrap'")
+      && workerDispatcherSource.includes('pendingRequests.push(message)'),
     'Document sync worker should consume opt-in peer-sync and repository database bootstrap parameters.',
   )
 })

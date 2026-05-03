@@ -155,6 +155,7 @@ export function createModelingService(
     diagnostics: [],
   }
   let currentRepositoryMetadata: DocumentRepositoryMetadata | null = null
+  let latestDocumentChangeEvent: ModelingServiceDocumentChangeEvent | null = null
   let seedAuthoredDocument: AuthoredModelDocument | null = null
   let repositoryChangePromise = Promise.resolve()
   let repositoryPersistencePromise = Promise.resolve()
@@ -627,23 +628,32 @@ export function createModelingService(
       documentId: currentDocumentId,
       metadata: event.metadata,
     }
+    latestDocumentChangeEvent = {
+      documentId: serviceEvent.documentId,
+      metadata: {
+        ...serviceEvent.metadata,
+        heads: [...serviceEvent.metadata.heads],
+      },
+    }
     for (const listener of documentChangeListeners) {
-      listener(serviceEvent)
+      listener(latestDocumentChangeEvent)
     }
   }
 
   const unsubscribeDocumentRepository = documentRepository?.subscribe(currentDocumentId, (event) => {
-    if (isRestoringRepositoryDocument) {
-      return
-    }
-
     rememberRepositoryMetadata(event.metadata)
     if (event.metadata.source !== 'peer') {
+      if (isRestoringRepositoryDocument) {
+        return
+      }
+
       notifyModelingDocumentChange(event)
       return
     }
 
     repositoryChangePromise = repositoryChangePromise.then(async () => {
+      await restorePromise
+      rememberRepositoryMetadata(event.metadata)
       await restoreAuthoredRepositoryDocument(event.document, event.diagnostics)
       notifyModelingDocumentChange(event)
     })
@@ -1021,6 +1031,21 @@ export function createModelingService(
     },
     subscribeToDocumentChanges(listener) {
       documentChangeListeners.add(listener)
+      if (latestDocumentChangeEvent) {
+        queueMicrotask(() => {
+          if (!documentChangeListeners.has(listener) || !latestDocumentChangeEvent) {
+            return
+          }
+
+          listener({
+            documentId: latestDocumentChangeEvent.documentId,
+            metadata: {
+              ...latestDocumentChangeEvent.metadata,
+              heads: [...latestDocumentChangeEvent.metadata.heads],
+            },
+          })
+        })
+      }
       return () => {
         documentChangeListeners.delete(listener)
       }

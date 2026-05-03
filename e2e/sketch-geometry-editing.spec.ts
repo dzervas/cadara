@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { SketchWorkbenchHarness } from './helpers/sketch-workbench'
 
-const MODELING_OPERATION_HISTORY_STORAGE_KEY = 'cad.modeling.operationHistory.v1'
+const MODELING_OPERATION_HISTORY_STORAGE_KEY = 'cad.modeling.operationHistory.doc_workspace.v1'
 
 test.setTimeout(60_000)
 test.use({ viewport: { width: 1440, height: 960 } })

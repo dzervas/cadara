@@ -202,6 +202,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     const listeners = this.listeners.get(documentId) ?? new Set()
     listeners.add(listener)
     this.listeners.set(documentId, listeners)
+    this.emitCurrentDocument(documentId, listener)
 
     return () => {
       listeners.delete(listener)
@@ -399,6 +400,37 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
         document: structuredClone(document),
         diagnostics,
         assetAvailability,
+        status,
+        metadata,
+      })
+    }
+  }
+
+  private emitCurrentDocument(
+    documentId: DocumentId,
+    listener: (event: DocumentRepositoryChangeEvent) => void,
+  ) {
+    const localPeerDocument = this.localPeerDocuments.get(documentId)
+    const status = this.statuses.get(documentId)
+    const metadata = this.metadata.get(documentId)
+
+    if (localPeerDocument && status && metadata) {
+      listener({
+        document: structuredClone(localPeerDocument),
+        diagnostics: [],
+        assetAvailability: metadata.assetAvailability ?? [],
+        status,
+        metadata,
+      })
+      return
+    }
+
+    const handleDocument = this.handles.get(documentId)?.doc().authoredDocument
+    if (handleDocument && status && metadata) {
+      listener({
+        document: structuredClone(handleDocument),
+        diagnostics: [],
+        assetAvailability: metadata.assetAvailability ?? [],
         status,
         metadata,
       })

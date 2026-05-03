@@ -62,6 +62,19 @@ Application-layer controllers SHALL compose browser-facing coordination and user
 - **THEN** it delegates authoritative document updates to the runtime-owned path
 - **AND** it does not keep a competing controller-local source of truth for the same concern
 
+### Requirement: Workbench document sessions SHALL be composed as application-owned active-session hosts
+The application architecture SHALL compose the active workbench document session from application-owned bootstrap or workbench modules instead of embedding singleton document-session mutation logic directly into the top-level shell component.
+
+#### Scenario: Workbench starts an active document session
+- **WHEN** the workbench boots or restores an active tab
+- **THEN** application-owned composition creates the active document-scoped modeling service and editor/runtime provider graph for that tab's `documentId`
+- **AND** the top-level shell consumes that composed session rather than instantiating or retargeting singleton document-session services inline
+
+#### Scenario: Active tab changes
+- **WHEN** the user activates a different document tab
+- **THEN** the workbench swaps to a newly composed active session for the selected `documentId`
+- **AND** the shell remains render-focused while consuming the new active session's callbacks and view models
+
 ### Requirement: Extension registry composition SHALL be application-owned bootstrap work
 The application architecture SHALL treat provider and mode registry composition as an application or bootstrap concern rather than a responsibility of shell components or unrelated domain service constructors.
 
@@ -87,4 +100,3 @@ The workbench application architecture SHALL treat dev debug namespace installat
 - **WHEN** runtime, domain, or contract code needs to provide debug data to the platform
 - **THEN** that data is passed through narrow application-facing interfaces
 - **AND** lower layers do not import `src/app/` debug composition modules directly
-

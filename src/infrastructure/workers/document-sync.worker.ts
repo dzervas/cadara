@@ -3,13 +3,12 @@ import {
   MemoryDocumentRepositoryUrlStore,
 } from '@/infrastructure/persistence/indexeddb-automerge-document-repository'
 import { createDocumentSyncWorkerMessageHandler } from '@/infrastructure/workers/document-sync-worker-runtime'
+import {
+  createDocumentSyncWorkerDispatcher,
+  type DocumentSyncWorkerBootstrapMessage,
+} from '@/infrastructure/workers/document-sync-worker-dispatcher'
 import type { DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from '@/domain/modeling/document-sync-worker-protocol'
 import { createIndexedDbLocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
-
-type DocumentSyncWorkerBootstrapMessage = {
-  kind: 'bootstrap'
-  search: string
-}
 
 interface DocumentSyncWorkerGlobalScope {
   postMessage(message: DocumentSyncWorkerResponse): void
@@ -21,11 +20,6 @@ interface DocumentSyncWorkerGlobalScope {
 
 const workerScope = globalThis as unknown as DocumentSyncWorkerGlobalScope
 const repositoryUrlStore = new MemoryDocumentRepositoryUrlStore()
-let handleMessage: ReturnType<typeof createDocumentSyncWorkerMessageHandler> | null = null
-
-function isBootstrapMessage(message: DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerRequest): message is DocumentSyncWorkerBootstrapMessage {
-  return message.kind === 'bootstrap'
-}
 
 function createWorkerMessageHandler(search: string) {
   const workerSearchParams = new URLSearchParams(search)
@@ -46,13 +40,8 @@ function createWorkerMessageHandler(search: string) {
   )
 }
 
-workerScope.addEventListener('message', (event: MessageEvent<DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerRequest>) => {
-  if (isBootstrapMessage(event.data)) {
-    handleMessage = createWorkerMessageHandler(event.data.search)
-    return
-  }
+const dispatchWorkerMessage = createDocumentSyncWorkerDispatcher(createWorkerMessageHandler)
 
-  const activeHandleMessage = handleMessage ?? createWorkerMessageHandler('')
-  handleMessage = activeHandleMessage
-  void activeHandleMessage(event.data)
+workerScope.addEventListener('message', (event: MessageEvent<DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerRequest>) => {
+  dispatchWorkerMessage(event.data)
 })

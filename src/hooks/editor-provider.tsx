@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { PropsWithChildren } from 'react'
 
 import {
@@ -44,17 +44,13 @@ export function EditorProvider({ modelingService, editorDependencies, children }
     traceRecorder.record,
   )
 
-  const handleDocumentChange = useEffectEvent((event: Parameters<ModelingService['subscribeToDocumentChanges']>[0] extends (event: infer TEvent) => void ? TEvent : never) => {
-    if (event.metadata.source === 'peer') {
-      dispatch({ type: 'document.refreshRequested' })
-    }
-  })
-
   useEffect(() => {
     return modelingService.subscribeToDocumentChanges((event) => {
-      handleDocumentChange(event)
+      if (event.metadata.source === 'peer') {
+        dispatch({ type: 'document.refreshRequested' })
+      }
     })
-  }, [modelingService])
+  }, [dispatch, modelingService])
 
   useEffect(() => {
     if (!machineState.snapshot) {

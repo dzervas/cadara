@@ -100,8 +100,13 @@ export class DocumentSyncWorkerClient {
     listener: (event: Extract<DocumentSyncWorkerResponse, { kind: 'documentChanged' }>['event']) => void,
   ) {
     const subscriptionId = this.createSubscriptionId()
-    await this.request('subscribe', 'subscribed', { documentId, subscriptionId })
     this.documentListeners.set(subscriptionId, listener)
+    try {
+      await this.request('subscribe', 'subscribed', { documentId, subscriptionId })
+    } catch (error: unknown) {
+      this.documentListeners.delete(subscriptionId)
+      throw error
+    }
 
     return () => {
       this.documentListeners.delete(subscriptionId)

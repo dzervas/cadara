@@ -19,6 +19,7 @@ export function useEditorEventLoop(
   traceListener?: EditorEventLoopTraceListener,
 ) {
   const eventLoopRef = useRef<EditorEventLoop | null>(null)
+  const pendingEventsRef = useRef<EditorEvent[]>([])
   const eventLoop = useMemo(
     () => createEditorEventLoop(runtime, errorReporter, executeEffect, dependencies),
     [dependencies, errorReporter, executeEffect, runtime],
@@ -33,6 +34,9 @@ export function useEditorEventLoop(
     })
 
     eventLoop.start()
+    for (const event of pendingEventsRef.current.splice(0)) {
+      eventLoop.dispatch(event)
+    }
 
     return () => {
       traceSubscription?.unsubscribe()
@@ -45,7 +49,12 @@ export function useEditorEventLoop(
   }, [eventLoop, traceListener])
 
   const dispatch = useCallback((event: EditorEvent) => {
-    eventLoopRef.current?.dispatch(event)
+    if (!eventLoopRef.current) {
+      pendingEventsRef.current.push(event)
+      return
+    }
+
+    eventLoopRef.current.dispatch(event)
   }, [])
 
   return {

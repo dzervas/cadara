@@ -1,5 +1,6 @@
 import type { GeometryAssetResolver } from '@/contracts/modeling/adapter'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
+import type { DocumentId } from '@/contracts/shared/ids'
 import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import { packWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
 import {
@@ -57,7 +58,7 @@ function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
   return openCascadePromise
 }
 
-function getWorkerAdapter(documentId: string) {
+function getWorkerAdapter(documentId: DocumentId) {
   const existing = adapters.get(documentId)
   if (existing) {
     return existing

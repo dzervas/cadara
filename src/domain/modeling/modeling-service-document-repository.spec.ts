@@ -25,6 +25,12 @@ import { createMemoryOperationHistoryStore } from '@/domain/modeling/modeling-hi
 import { createModelingService, type ModelingService } from '@/domain/modeling/modeling-service'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
+import type {
+  DocumentRepository,
+  DocumentRepositoryChangeEvent,
+  DocumentRepositoryMetadata,
+  DocumentRepositoryRestoreStatus,
+} from '@/domain/modeling/document-repository'
 
 test('src/domain/modeling/modeling-service-document-repository.spec.ts', async () => {  type ExtrudeFeatureDefinition = Extract<FeatureDefinition, { kind: 'extrude' }>
 
@@ -1128,6 +1134,143 @@ test('src/domain/modeling/modeling-service-document-repository.spec.ts', async (
     unsubscribe()
   }
 
+  async function testPeerRepositoryChangesQueuedDuringInitialRestore() {
+    const seedDocument = await createSeedAuthoredDocument()
+    const peerDocument = structuredClone(seedDocument)
+    peerDocument.revisionId = 'rev_9999'
+    peerDocument.bodyLabels = peerDocument.bodyLabels.map((label) =>
+      label.bodyId === 'body_part-1'
+        ? { ...label, label: 'Peer During Restore Body' }
+        : label,
+    )
+
+    let emitRepositoryEvent: ((event: DocumentRepositoryChangeEvent) => void) | null = null
+    let resolveLoad: ((result: Awaited<ReturnType<DocumentRepository['load']>>) => void) | null = null
+    const pendingLoad = new Promise<Awaited<ReturnType<DocumentRepository['load']>>>((resolve) => {
+      resolveLoad = resolve
+    })
+    const seedStatus: DocumentRepositoryRestoreStatus = {
+      kind: 'seeded',
+      documentId: 'doc_workspace',
+    }
+    const seedMetadata: DocumentRepositoryMetadata = {
+      documentId: 'doc_workspace',
+      heads: ['head_seed'],
+      source: 'seed',
+    }
+    const peerStatus: DocumentRepositoryRestoreStatus = {
+      kind: 'restored',
+      documentId: 'doc_workspace',
+    }
+    const peerMetadata: DocumentRepositoryMetadata = {
+      documentId: 'doc_workspace',
+      heads: ['head_peer'],
+      source: 'peer',
+    }
+    const documentRepository: DocumentRepository = {
+      async load() {
+        return pendingLoad
+      },
+      async mutate() {
+        throw new Error('Unexpected mutate call in queued peer restore test.')
+      },
+      subscribe(_documentId, listener) {
+        emitRepositoryEvent = listener
+        return () => {
+          emitRepositoryEvent = null
+        }
+      },
+      async reset(documentId) {
+        return { kind: 'reset', documentId }
+      },
+      getRestoreStatus(documentId) {
+        return { kind: 'pending', documentId }
+      },
+      getMetadata(documentId) {
+        return { documentId, heads: [], source: 'restore' }
+      },
+    }
+
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+
+    let peerEventCount = 0
+    service.subscribeToDocumentChanges((event) => {
+      if (event.metadata.source === 'peer') {
+        peerEventCount += 1
+      }
+    })
+
+    emitRepositoryEvent?.({
+      document: peerDocument,
+      status: peerStatus,
+      metadata: peerMetadata,
+      diagnostics: [],
+      assetAvailability: [],
+    })
+    resolveLoad?.({
+      ok: true,
+      document: seedDocument,
+      status: seedStatus,
+      metadata: seedMetadata,
+      diagnostics: [],
+      assetAvailability: [],
+    })
+
+    const snapshot = await service.getCurrentDocumentSnapshot()
+
+    expectTrue(peerEventCount === 1, 'Peer repository changes that arrive during initial restore should be replayed after restore completes.')
+    expectTrue(
+      snapshot.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Peer During Restore Body',
+      'Initial restore should not drop queued peer-authored document updates.',
+    )
+    expectTrue(
+      snapshot.provenance?.repositorySource === 'peer',
+      'Snapshots should report peer provenance after a queued peer-authored update wins over the initial seed restore.',
+    )
+  }
+
+  async function testLateDocumentChangeSubscribersReplayLatestPeerEvent() {
+    const documentRepository = createMemoryDocumentRepository()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+    })
+    const snapshot = await service.getCurrentDocumentSnapshot()
+    const peerDocument = createAuthoredModelDocumentFromSnapshot(snapshot)
+    peerDocument.revisionId = 'rev_9999'
+    peerDocument.bodyLabels = peerDocument.bodyLabels.map((label) =>
+      label.bodyId === 'body_part-1'
+        ? { ...label, label: 'Late Subscriber Peer Body' }
+        : label,
+    )
+
+    const peerResult = await documentRepository.receivePeerDocument(peerDocument)
+    expectTrue(peerResult.ok, 'Late-subscriber peer document should be accepted by the repository.')
+    const refreshed = await service.getCurrentDocumentSnapshot()
+    expectTrue(
+      refreshed.document.bodies.find((body) => body.bodyId === 'body_part-1')?.label === 'Late Subscriber Peer Body',
+      'Peer restore should finish before the late-subscriber replay assertion runs.',
+    )
+
+    let replayedPeerEvents = 0
+    const unsubscribe = service.subscribeToDocumentChanges((event) => {
+      if (event.metadata.source === 'peer') {
+        replayedPeerEvents += 1
+      }
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expectTrue(
+      replayedPeerEvents === 1,
+      'Late modeling-service document-change subscribers should receive the latest peer event immediately.',
+    )
+    unsubscribe()
+  }
+
   async function testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory() {
     const documentRepository = createMemoryDocumentRepository()
     const historyStore = createMemoryOperationHistoryStore(createEmptyOperationHistory('doc_workspace'))
@@ -1268,6 +1411,8 @@ class AssetResolvingRestoreAdapter extends MockKernelAdapter {
   await testMigrationWriteFailureResetsSeededRepositoryForRetry()
   await testInvalidRepositoryDocumentBlocksFutureWrites()
   await testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict()
+  await testPeerRepositoryChangesQueuedDuringInitialRestore()
+  await testLateDocumentChangeSubscribersReplayLatestPeerEvent()
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
 })

@@ -3,7 +3,8 @@ import { expect } from '@playwright/test'
 
 import type { ModelingOperationHistoryPayload } from '../../src/contracts/modeling/operation-history'
 
-const MODELING_OPERATION_HISTORY_STORAGE_KEY = 'cad.modeling.operationHistory.v1'
+const WORKSPACE_DOCUMENT_ID = 'doc_workspace'
+const MODELING_OPERATION_HISTORY_STORAGE_KEY = `cad.modeling.operationHistory.${WORKSPACE_DOCUMENT_ID}.v1`
 
 export class SketchWorkbenchHarness {
   constructor(readonly page: Page) {}
