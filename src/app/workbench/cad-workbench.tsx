@@ -8,6 +8,7 @@ import { SketchToolPanel } from "@/components/cad/sketch-tool-panel";
 import { FeatureInspector } from "@/components/layout/feature-inspector";
 import { FloatingPartsTree } from "@/components/layout/floating-parts-tree";
 import { ImportInspector } from "@/components/layout/import-inspector";
+import { SketchPlaneInspector } from "@/components/layout/sketch-plane-inspector";
 import { DocumentTabsBar, type DocumentTabsBarHandle } from "@/components/layout/document-tabs-bar";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
 import { MeasurementPanel } from "@/components/layout/measurement-panel";
@@ -153,6 +154,7 @@ export function CadWorkbench({
 			hoverTarget,
 			sketchSession,
 			activeEditSession,
+			activeSketchPlaneEditSession,
 			activeImportSession,
 			mode,
 			preview,
@@ -394,8 +396,29 @@ export function CadWorkbench({
 	const editableFeatureSnapshot = activeFeatureSnapshot ?? null;
 
 	const { commitFeature, cancelFeature } = useFeatureEditing();
+	const commitSketchPlaneEdit = useCallback(() => {
+		if (!activeCommand || !activeSketchPlaneEditSession) {
+			return;
+		}
+
+		dispatch({
+			type: "command.commitRequested",
+			commandSessionId: activeCommand.commandSessionId,
+		});
+	}, [activeCommand, activeSketchPlaneEditSession, dispatch]);
+	const cancelSketchPlaneEdit = useCallback(() => {
+		if (!activeCommand || !activeSketchPlaneEditSession) {
+			return;
+		}
+
+		dispatch({
+			type: "command.cancelled",
+			commandSessionId: activeCommand.commandSessionId,
+		});
+	}, [activeCommand, activeSketchPlaneEditSession, dispatch]);
 	const { commitImportSession, requestPartImport } = useWorkbenchPartImport({
 		activeEditSession,
+		activeSketchPlaneEditSession,
 		activeImportSession,
 		dispatch,
 		modelingService,
@@ -846,6 +869,9 @@ export function CadWorkbench({
 	const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
 		dispatch({ type: "document.historyCursorRequested", cursor });
 	};
+	const handleSketchPlaneEditRequest = useCallback((target: Extract<PrimitiveRef, { kind: "sketch" }>) => {
+		dispatch({ type: "sketchPlaneEdit.requested", target });
+	}, [dispatch]);
 
 	const shortcutActiveScopes = useMemo(() => getWorkbenchShortcutActiveScopes(mode), [mode]);
 	const baseShortcutCommandHandlers = createWorkbenchShortcutCommandHandlers({
@@ -1220,6 +1246,15 @@ export function CadWorkbench({
 									<WorkbenchInspectorOverlay>
 										<ImportInspector onCommit={() => void commitImportSession()} />
 									</WorkbenchInspectorOverlay>
+								) : activeSketchPlaneEditSession ? (
+									<WorkbenchInspectorOverlay>
+										<SketchPlaneInspector
+											session={activeSketchPlaneEditSession}
+											onPatch={(patch) => dispatch({ type: "sketchPlaneEdit.patched", patch })}
+											onCommit={commitSketchPlaneEdit}
+											onCancel={cancelSketchPlaneEdit}
+										/>
+									</WorkbenchInspectorOverlay>
 								) : activeEditSession ? (
 									<WorkbenchInspectorOverlay>
 										<FeatureInspector
@@ -1259,6 +1294,7 @@ export function CadWorkbench({
 									visibleSelection={visibleSelection}
 									onSelectTarget={handleShellSelect}
 									onReopenTarget={handleNavigationReopen}
+									onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
 									onObjectDelete={handleDeleteTarget}
 									onObjectExport={handleObjectExport}
 									onRenameTarget={handleTargetRename}
@@ -1292,6 +1328,7 @@ export function CadWorkbench({
 											visibleSelection={visibleSelection}
 											onSelectTarget={handleShellSelect}
 											onReopenTarget={handleNavigationReopen}
+											onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
 											onDocumentCursorRequested={handleTimelineCursorRequested}
 											documentCursorDisabled={!history.canUndo && !history.canRedo}
 											onDocumentHistoryReorder={handleDocumentHistoryReorder}

@@ -40,6 +40,7 @@ import {
   patchFeatureEditSession,
   type FeatureEditSessionState,
 } from '@/domain/editor/feature-editing'
+import { hydrateSketchPlaneEditSession } from '@/domain/editor/sketch-plane-editing'
 import type {
   EditorEvent,
   EditorTransitionResult,
@@ -60,6 +61,7 @@ import {
 } from './selection-helpers'
 import {
   createCommandState,
+  createSketchPlaneEditingState,
   createSectionViewEditingState,
   enterSketchEditing,
   withPreview,
@@ -799,7 +801,7 @@ export function handleAuthoringReopenRequested(
     const cursorContext = createEditSessionCursorContext(state.snapshot, {
       kind: 'sketch',
       sketchId: event.target.sketchId,
-    })
+    }, 'sketchAuthoring')
 
     if (!cursorContext) {
       return {
@@ -844,7 +846,7 @@ export function handleAuthoringReopenRequested(
   const cursorContext = createEditSessionCursorContext(state.snapshot, {
     kind: 'feature',
     featureId: event.target.featureId,
-  })
+  }, 'featureEdit')
 
   if (!cursorContext) {
     return {
@@ -866,6 +868,84 @@ export function handleAuthoringReopenRequested(
       preview: {
         kind: 'selection',
         label: `Rolling back before feature ${event.target.featureId}`,
+        target: event.target,
+      },
+    },
+    cursorContext.rollbackCursor,
+    true,
+  )
+}
+
+export function handleSketchPlaneEditRequested(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: 'sketchPlaneEdit.requested' }>,
+): EditorTransitionResult {
+  const nextState = createCommandState(
+    state,
+    'sketchPlaneEdit',
+    'part',
+    getDefaultSelectionFilterForMode('part'),
+    {
+      kind: 'selection',
+      label: `Change sketch plane for ${event.target.sketchId}`,
+      target: event.target,
+    },
+  )
+
+  const session = state.snapshot
+    ? hydrateSketchPlaneEditSession(state.snapshot, event.target.sketchId)
+    : null
+
+  if (!session) {
+    return {
+      state: withPreview(nextState, {
+        kind: 'selection',
+        label: `Sketch ${event.target.sketchId} does not support origin-plane reassignment.`,
+        target: event.target,
+      }),
+      effects: [],
+    }
+  }
+
+  if (canReopenSketchDirectlyFromCurrentCursor(state.snapshot, event.target)) {
+    return {
+      state: createSketchPlaneEditingState(
+        {
+          ...nextState,
+          selection: [event.target],
+          hoverTarget: event.target,
+        },
+        session,
+      ),
+      effects: [],
+    }
+  }
+
+  const cursorContext = createEditSessionCursorContext(state.snapshot, {
+    kind: 'sketch',
+    sketchId: event.target.sketchId,
+  }, 'sketchPlaneEdit')
+
+  if (!cursorContext) {
+    return {
+      state: withPreview(nextState, {
+        kind: 'selection',
+        label: `Sketch ${event.target.sketchId} is not in document history.`,
+        target: event.target,
+      }),
+      effects: [],
+    }
+  }
+
+  return emitDocumentCursorMove(
+    {
+      ...nextState,
+      selection: [event.target],
+      hoverTarget: event.target,
+      editSessionCursorContext: cursorContext,
+      preview: {
+        kind: 'selection',
+        label: `Rolling back before sketch ${event.target.sketchId}`,
         target: event.target,
       },
     },

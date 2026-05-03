@@ -9,6 +9,9 @@ import {
   updateSketchReferenceProjection,
 } from '@/domain/editor/sketch-session'
 import {
+  getSketchPlaneEditSelectionTarget,
+} from '@/domain/editor/sketch-plane-editing'
+import {
   applySketchSpecialModeEffectResult,
   getSketchSpecialModeSelectionFilter,
 } from '@/core/sketch-special-modes/presentation'
@@ -573,6 +576,130 @@ export function handleEffectSketchCommitFailed(
       session: {
         ...state.session,
         validationMessage: event.message,
+      },
+    },
+    effects: [],
+  }
+}
+
+export function handleEffectSketchPlaneCommitted(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: 'effect.sketchPlaneCommitted' }>,
+): EditorTransitionResult {
+  if (
+    state.kind !== 'editingSketchPlane' ||
+    state.pendingCommitRequestId !== event.requestId ||
+    state.command.commandSessionId !== event.commandSessionId ||
+    state.document.revisionId !== event.baseRevisionId ||
+    !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+  ) {
+    return { state, effects: [] }
+  }
+
+  if (!event.accepted) {
+    const message =
+      event.diagnostics[0]?.message
+      ?? `Sketch plane change rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+    const nextState = {
+      ...state,
+      document: event.actualRevisionId
+        ? {
+            ...state.document,
+            revisionId: event.actualRevisionId,
+          }
+        : state.document,
+      pendingCommitRequestId: null,
+      command: {
+        ...state.command,
+        phase: 'editing',
+      },
+      preview: {
+        kind: 'selection' as const,
+        label: message,
+        target: getSketchPlaneEditSelectionTarget(state.session),
+      },
+      session: {
+        ...state.session,
+        status: 'idle' as const,
+        diagnostics: event.diagnostics,
+      },
+    } satisfies EditorState
+
+    return event.actualRevisionId
+      ? emitSnapshotFetch(nextState, state.command.commandSessionId)
+      : { state: nextState, effects: [] }
+  }
+
+  const idleState = toIdleState(
+    {
+      ...state,
+      document: {
+        ...state.document,
+        revisionId: event.revisionId,
+      },
+    },
+    'part',
+  )
+
+  if (state.editSessionCursorContext?.phase === 'active') {
+    return emitSnapshotFetch(
+      {
+        ...idleState,
+        editSessionCursorContext: advanceCursorPhase(state.editSessionCursorContext, 'commitCompleted'),
+      },
+      state.command.commandSessionId,
+    )
+  }
+
+  return emitSnapshotFetch(
+    withPreview(idleState, {
+      kind: 'selection',
+      label: `Updated sketch plane for ${state.session.sketchLabel}`,
+      target: getSketchPlaneEditSelectionTarget(state.session),
+    }),
+    state.command.commandSessionId,
+  )
+}
+
+export function handleEffectSketchPlaneCommitFailed(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: 'effect.sketchPlaneCommitFailed' }>,
+): EditorTransitionResult {
+  if (
+    state.kind !== 'editingSketchPlane' ||
+    state.pendingCommitRequestId !== event.requestId ||
+    state.command.commandSessionId !== event.commandSessionId ||
+    state.document.revisionId !== event.baseRevisionId ||
+    !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+  ) {
+    return { state, effects: [] }
+  }
+
+  return {
+    state: {
+      ...state,
+      pendingCommitRequestId: null,
+      command: {
+        ...state.command,
+        phase: 'editing',
+      },
+      preview: {
+        kind: 'selection',
+        label: event.message,
+        target: getSketchPlaneEditSelectionTarget(state.session),
+      },
+      session: {
+        ...state.session,
+        status: 'idle',
+        diagnostics: [
+          {
+            code: 'sketch-plane-commit-failed',
+            severity: 'error',
+            message: event.message,
+            target: getDurableDiagnosticTarget(getSketchPlaneEditSelectionTarget(state.session)),
+            detail: null,
+          },
+        ],
       },
     },
     effects: [],

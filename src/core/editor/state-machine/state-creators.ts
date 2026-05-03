@@ -1,4 +1,3 @@
-import type { ToolId } from '@/core/tools/tool-registry'
 import type { ToolbarMode } from '@/core/tools/schema'
 import type { SectionViewSession } from '@/core/section-view/session'
 import {
@@ -18,6 +17,11 @@ import {
   updateSketchReferenceProjection,
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
+import {
+  getSketchPlaneEditPreviewLabel,
+  getSketchPlaneEditSelectionTarget,
+  type SketchPlaneEditSessionState,
+} from '@/domain/editor/sketch-plane-editing'
 import type { EditorExtensionDependencies } from './dependencies'
 import { getDefaultImportSelectionField } from './form-traversal'
 import { advanceCursorPhase } from './cursor-lifecycle'
@@ -38,6 +42,7 @@ import type {
   SectionViewEditorState,
   SelectionCommandEditorState,
   SketchEditorState,
+  SketchPlaneEditorState,
 } from './types'
 
 function createInitialState(): EditorState {
@@ -115,7 +120,7 @@ export function toIdleState(state: EditorState, mode: ToolbarMode): IdleEditorSt
 
 export function createCommandState(
   state: EditorState,
-  toolId: ToolId,
+  toolId: EditorActiveCommand['toolId'],
   mode: ToolbarMode,
   selectionFilter: SelectionFilter,
   preview: CommandPreview | null,
@@ -187,6 +192,44 @@ export function createFeatureEditingState(
     session,
     activeReferencePickerFieldId: null,
     pendingPreviewRequestId: null,
+    pendingCommitRequestId: null,
+  }
+}
+
+export function createSketchPlaneEditingState(
+  state: SelectionCommandEditorState,
+  session: SketchPlaneEditSessionState,
+): SketchPlaneEditorState {
+  const target = getSketchPlaneEditSelectionTarget(session)
+
+  return {
+    kind: 'editingSketchPlane',
+    mode: 'part',
+    document: state.document,
+    snapshot: state.snapshot,
+    previewRenderables: null,
+    selection: [target],
+    hoverTarget: target,
+    selectionFilter: getDefaultSelectionFilterForMode('part'),
+    selectionCatalog: state.selectionCatalog,
+    preview: {
+      kind: 'selection',
+      label: getSketchPlaneEditPreviewLabel(session),
+      target,
+    },
+    nextCommandSequence: state.nextCommandSequence,
+    nextRequestSequence: state.nextRequestSequence,
+    pendingSnapshotRequestId: state.pendingSnapshotRequestId,
+    pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    editSessionCursorContext:
+      state.editSessionCursorContext
+        ? advanceCursorPhase(state.editSessionCursorContext, 'sessionOpened')
+        : null,
+    command: {
+      ...state.command,
+      phase: 'editing',
+    },
+    session,
     pendingCommitRequestId: null,
   }
 }

@@ -4,6 +4,7 @@ import {
   type DocumentHistoryOrderEntry,
 } from '@/domain/modeling/document-history'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
+import { hydrateSketchPlaneEditSession } from '@/domain/editor/sketch-plane-editing'
 import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
@@ -13,7 +14,7 @@ import {
   advanceCursorPhase,
   getCursorPhaseAction,
 } from './cursor-lifecycle'
-import { enterSketchEditing } from './state-creators'
+import { createSketchPlaneEditingState, enterSketchEditing, withPreview } from './state-creators'
 import { isFeatureTool } from './utility-helpers'
 import type {
   EditorEvent,
@@ -131,7 +132,7 @@ export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorT
 
   if (
     nextPhaseAction
-    && (nextPhaseAction === 'openSession' || nextPhaseAction === 'hydrateFeature')
+    && (nextPhaseAction === 'openSketchSession' || nextPhaseAction === 'hydrateFeature' || nextPhaseAction === 'openSketchPlaneEdit')
     && nextCursorContext
     && updatedState.kind === 'selectionCommand'
   ) {
@@ -140,7 +141,7 @@ export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorT
       editSessionCursorContext: nextCursorContext,
     }
 
-    if (nextPhaseAction === 'openSession' && cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketch') {
+    if (nextPhaseAction === 'openSketchSession' && cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketch') {
       const target = { kind: 'sketch', sketchId: cursorContext.target.sketchId } as const
       const session = activeState.snapshot
         ? openSketchSessionFromSelection([target], activeState.snapshot)
@@ -156,6 +157,26 @@ export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorT
             },
             [target],
           )
+    }
+
+    if (nextPhaseAction === 'openSketchPlaneEdit' && cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketchPlaneEdit') {
+      const session = activeState.snapshot
+        ? hydrateSketchPlaneEditSession(activeState.snapshot, cursorContext.target.sketchId)
+        : null
+
+      return session
+        ? {
+            state: createSketchPlaneEditingState(activeState, session),
+            effects: [],
+          }
+        : {
+            state: withPreview(activeState, {
+              kind: 'selection',
+              label: `Sketch ${cursorContext.target.sketchId} does not support origin-plane reassignment.`,
+              target: { kind: 'sketch', sketchId: cursorContext.target.sketchId },
+            }),
+            effects: [],
+          }
     }
 
     if (nextPhaseAction === 'hydrateFeature' && cursorContext.target.kind === 'feature' && isFeatureTool(activeState.command.toolId)) {
@@ -222,6 +243,7 @@ export function eventMatchesOptionalDocument(
 export function createEditSessionCursorContext(
   snapshot: WorkspaceSnapshot | null,
   target: DocumentHistoryOrderEntry,
+  sessionKind: EditSessionCursorContext['sessionKind'],
 ): EditSessionCursorContext | null {
   if (!snapshot) {
     return null
@@ -238,6 +260,7 @@ export function createEditSessionCursorContext(
 
   return {
     target,
+    sessionKind,
     rollbackCursor,
     restoreCursor: structuredClone(snapshot.document.cursor),
     phase: 'rollingBack',

@@ -11,6 +11,7 @@ test('invalid variable edit reports a UI error notification and actionable conso
   const workbench = new FeatureWorkbenchHarness(page)
 
   await workbench.open()
+  await page.locator('[data-workbench-variables-fab]').click()
   await page.getByRole('button', { name: 'Add variable' }).click()
   const valueInput = page.getByLabel(/^Variable value /)
   await expect(valueInput).toBeVisible({ timeout: 30_000 })

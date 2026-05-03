@@ -7,6 +7,10 @@ import {
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
+import {
+  buildSketchPlaneCommitRequest,
+  getSketchPlaneEditSelectionTarget,
+} from '@/domain/editor/sketch-plane-editing'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import type {
   DocumentFeatureCursor,
@@ -202,6 +206,31 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           }
         } catch (error: unknown) {
           return createEditorEffectFailureEvent(effect, error, 'Sketch commit failed.')
+        }
+      }
+      case 'sketchPlane.commit': {
+        try {
+          const result = await runtime.commitSketchPlane({
+            requestId: effect.requestId,
+            baseRevisionId: effect.baseRevisionId,
+            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
+            session: effect.session,
+          })
+
+          return {
+            type: 'effect.sketchPlaneCommitted',
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            commandSessionId: effect.commandSessionId,
+            baseRevisionId: effect.baseRevisionId,
+            revisionId: result.revisionId,
+            accepted: result.accepted,
+            diagnostics: result.diagnostics,
+            actualRevisionId: result.actualRevisionId,
+            errorContext: result.errorContext,
+          }
+        } catch (error: unknown) {
+          return createEditorEffectFailureEvent(effect, error, 'Sketch plane commit failed.')
         }
       }
       case 'sketch.projectReferences': {
@@ -490,6 +519,49 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           revisionId: actualRevisionId ?? input.baseRevisionId,
           accepted: false,
           diagnostics: [modelingMutationErrorToDiagnostic(result.error, getDurableDiagnosticTarget(input.session.planeTarget))],
+          actualRevisionId,
+          errorContext: result.error.context,
+        }
+      }
+
+      return {
+        revisionId: result.value.revisionId,
+        accepted: true,
+        diagnostics: result.value.diagnostics,
+      }
+    },
+    async commitSketchPlane(input) {
+      const request = buildSketchPlaneCommitRequest(input.session)
+      if (!request) {
+        throw new Error('Sketch plane commit failed because the selected plane is unavailable.')
+      }
+
+      const result = await modelingService.commitSketch({
+        requestId: input.requestId,
+        baseRevisionId: input.baseRevisionId,
+        baseRepositoryHeads: input.baseRepositoryHeads,
+        ...request,
+        solverCorrelation: modelingService.sketchSolver
+          ? modelingService.sketchSolver.createCommitCorrelation(input.requestId)
+          : null,
+      })
+
+      if (result.isErr()) {
+        if (!isModelingMutationError(result.error)) {
+          throw result.error
+        }
+
+        const actualRevisionId = getAppErrorRevisionId(result.error, 'actualRevisionId')
+
+        return {
+          revisionId: actualRevisionId ?? input.baseRevisionId,
+          accepted: false,
+          diagnostics: [
+            modelingMutationErrorToDiagnostic(
+              result.error,
+              getDurableDiagnosticTarget(getSketchPlaneEditSelectionTarget(input.session)),
+            ),
+          ],
           actualRevisionId,
           errorContext: result.error.context,
         }

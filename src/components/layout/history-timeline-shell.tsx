@@ -25,6 +25,7 @@ interface HistoryTimelineShellProps {
   onSketchCursorRequested?: (cursor: SketchHistoryCursor) => void
   onDeleteDocumentItem: (item: DocumentHistoryItemRecord) => void
   onRenameDocumentItem: (item: DocumentHistoryItemRecord) => void
+  onChangeSketchPlaneTarget?: (target: Extract<PrimitiveRef, { kind: 'sketch' }>) => void
   onSuppressFeature: (item: Extract<DocumentHistoryItemRecord, { kind: 'feature' }>) => void
   visibleSelection: PrimitiveRef[]
 }
@@ -42,6 +43,7 @@ export function HistoryTimelineShell({
   onSketchCursorRequested,
   onDeleteDocumentItem,
   onRenameDocumentItem,
+  onChangeSketchPlaneTarget,
   onSuppressFeature,
   visibleSelection,
 }: HistoryTimelineShellProps) {
@@ -72,6 +74,7 @@ export function HistoryTimelineShell({
           reorderDisabled={documentHistoryReorderDisabled}
           onDeleteItem={onDeleteDocumentItem}
           onRenameItem={onRenameDocumentItem}
+          onChangeSketchPlaneTarget={onChangeSketchPlaneTarget}
           onSuppressFeature={onSuppressFeature}
         />
       </div>

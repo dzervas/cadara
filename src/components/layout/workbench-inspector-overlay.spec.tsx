@@ -18,7 +18,7 @@ test('src/components/layout/workbench-inspector-overlay.spec.tsx', async () => {
   expectTrue(
     markup.includes('pointer-events-auto') &&
       markup.includes('min-w-0') &&
-      markup.includes('max-w-full'),
-    'Workbench inspector overlay should clip and capture interaction only inside the panel surface.',
+      markup.includes('max-w-md'),
+    'Workbench inspector overlay should clip and capture interaction only inside the panel surface, capped at a medium-width column so it does not collide with the parts tree or the right-edge floating chrome.',
   )
 })

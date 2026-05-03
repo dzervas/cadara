@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Paper, Select, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Paper, Select, Tooltip } from '@mantine/core'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
 
@@ -35,10 +35,11 @@ import {
 } from '@/core/feature-authoring/form-events'
 import type {
   FeatureEditorFormField,
-  FeatureEditorFormSection,
   FeatureNumericField,
 } from '@/core/feature-authoring/form-schema'
 import { useEditorState } from '@/hooks/use-editor-state'
+import { WorkbenchInspectorPanel } from '@/components/layout/workbench-inspector-panel'
+import { getVisualFormSections } from '@/components/layout/feature-inspector-sections'
 
 interface FeatureInspectorProps {
   featureSnapshot: FeatureSnapshotRecord | null
@@ -115,78 +116,6 @@ function getNumericUnit(field: FeatureNumericField) {
   return field.input === 'angleDegrees' ? '°' : null
 }
 
-interface VisualFormSection {
-  id: string
-  title: string
-  hint?: string
-  fields: readonly FeatureEditorFormField[]
-}
-
-function getSectionSelectedCount(fields: readonly FeatureEditorFormField[]) {
-  return fields.reduce((count, field) => count + (field.advancedParticipant?.selectedCount ?? 0), 0)
-}
-
-function isReferenceCollectionField(
-  field: FeatureEditorFormField,
-): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
-  return field.kind === 'referenceCollection'
-}
-
-function isProfileReferenceCollectionField(
-  field: FeatureEditorFormField,
-): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
-  return isReferenceCollectionField(field) && field.advancedParticipant?.role === 'profile'
-}
-
-function getReferenceSectionTitle(section: FeatureEditorFormSection) {
-  const participantRole = section.fields.find((field) => field.advancedParticipant)?.advancedParticipant?.role
-
-  if (participantRole === 'profile') {
-    return 'Profile'
-  }
-
-  return section.title
-}
-
-function isOutputField(field: FeatureEditorFormField) {
-  return field.label === 'Operation' || field.id.endsWith('-operation') || field.id.endsWith('-operation-intent')
-    || field.id.endsWith('-target-bodies')
-}
-
-function isEmptyDiagnosticsSection(section: FeatureEditorFormSection) {
-  return section.fields.every((field) => field.kind === 'diagnostics' && field.diagnostics.length === 0)
-}
-
-function getVisualFormSections(sections: readonly FeatureEditorFormSection[]): VisualFormSection[] {
-  return sections.flatMap((section) => {
-    if (isEmptyDiagnosticsSection(section)) {
-      return []
-    }
-
-    if (section.id === 'references') {
-      const selectedCount = getSectionSelectedCount(section.fields)
-      const isProfileSection = section.fields.some(isProfileReferenceCollectionField)
-      return [{
-        id: section.id,
-        title: getReferenceSectionTitle(section),
-        hint: !isProfileSection && selectedCount > 0 ? `${selectedCount} selected` : undefined,
-        fields: section.fields,
-      }]
-    }
-
-    if (section.id === 'parameters') {
-      const geometryFields = section.fields.filter((field) => !isOutputField(field))
-      const outputFields = section.fields.filter(isOutputField)
-      return [
-        ...(geometryFields.length > 0 ? [{ id: `${section.id}-geometry`, title: 'Geometry', fields: geometryFields }] : []),
-        ...(outputFields.length > 0 ? [{ id: `${section.id}-output`, title: 'Output', fields: outputFields }] : []),
-      ]
-    }
-
-    return [{ id: section.id, title: section.title, fields: section.fields }]
-  })
-}
-
 function FieldMessage(props: { helper?: string; error?: { message: string } | null }) {
   if (props.error) {
     return <p className="text-xs text-[var(--workbench-shell-danger-text)]">{props.error.message}</p>
@@ -207,6 +136,12 @@ function formatParticipantHelper(field: FeatureEditorFormField) {
   const status = participant.required ? 'Required' : 'Optional'
   const participantStatus = `${status}; ${participant.selectedCount} selected; expected ${participant.cardinality.min}${max}.`
   return field.helper ? `${participantStatus} ${field.helper}` : participantStatus
+}
+
+function isProfileReferenceCollectionField(
+  field: FeatureEditorFormField,
+): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
+  return field.kind === 'referenceCollection' && field.advancedParticipant?.role === 'profile'
 }
 
 function FunctionIcon() {
@@ -997,116 +932,59 @@ export function FeatureInspector({
   const visualSections = getVisualFormSections(formSchema.sections)
 
   return (
-    <Paper
-      component="aside"
-      className="flex max-h-[70vh] w-[320px] min-w-0 max-w-full flex-col overflow-hidden rounded-[6px]"
-      style={{
-        background: 'var(--workbench-shell-surface-panel-elev)',
-        boxShadow: 'var(--workbench-shell-elevation-md)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
+    <WorkbenchInspectorPanel
+      iconName="layers"
+      title={title}
+      shortCode={featureIdShortCode}
+      statusLabel="idle"
+      onCancel={onCancel}
+      onCommit={onCommit}
     >
-      <header className="px-3 pb-2.5 pt-3">
-        <div className="flex items-center gap-2">
-          <span
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded"
-            style={{ background: 'var(--workbench-shell-accent-surface)', color: 'var(--workbench-shell-accent)' }}
-          >
-            <WorkbenchIcon name="layers" className="h-3.5 w-3.5" />
-          </span>
-          <Text size="13px" fw={500} c="dark.0" className="min-w-0 flex-1 truncate">{title}</Text>
-          {featureIdShortCode ? (
-            <Text size="11px" ff="monospace" c="dimmed" className="shrink-0">{featureIdShortCode}</Text>
-          ) : null}
-        </div>
-      </header>
+      {visualSections.map((section) => {
+        const profileReferenceField = section.fields.find(isProfileReferenceCollectionField)
+        const hasProfileSelection = (profileReferenceField?.value.length ?? 0) > 0
 
-      <div className="flex-1 overflow-y-auto pb-1">
-        {visualSections.map((section) => {
-          const profileReferenceField = section.fields.find(isProfileReferenceCollectionField)
-          const hasProfileSelection = (profileReferenceField?.value.length ?? 0) > 0
-
-          return (
-            <section key={section.id} className="pb-1">
-              <div className="flex items-center justify-between px-3 pb-1 pt-3">
-                <p className={SECTION_HEADER_CLASSES}>
-                  {section.title}
+        return (
+          <section key={section.id} className="pb-1">
+            <div className="flex items-center justify-between px-3 pb-1 pt-3">
+              <p className={SECTION_HEADER_CLASSES}>
+                {section.title}
+              </p>
+              {profileReferenceField ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    form.setValue(profileReferenceField.id, [])
+                    onPatch(createFeatureEditorClearReferencePatch(profileReferenceField))
+                  }}
+                  disabled={!hasProfileSelection}
+                  aria-label={`Clear ${profileReferenceField.label}`}
+                  className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium text-[var(--workbench-shell-text-muted)] transition-colors enabled:hover:bg-[var(--workbench-shell-overlay)] disabled:opacity-40"
+                >
+                  Clear
+                </button>
+              ) : section.hint ? (
+                <p className="font-mono text-[10px] text-[var(--workbench-shell-text-dim)]">
+                  {section.hint}
                 </p>
-                {profileReferenceField ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      form.setValue(profileReferenceField.id, [])
-                      onPatch(createFeatureEditorClearReferencePatch(profileReferenceField))
-                    }}
-                    disabled={!hasProfileSelection}
-                    aria-label={`Clear ${profileReferenceField.label}`}
-                    className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium text-[var(--workbench-shell-text-muted)] transition-colors enabled:hover:bg-[var(--workbench-shell-overlay)] disabled:opacity-40"
-                  >
-                    Clear
-                  </button>
-                ) : section.hint ? (
-                  <p className="font-mono text-[10px] text-[var(--workbench-shell-text-dim)]">
-                    {section.hint}
-                  </p>
-                ) : null}
-              </div>
-              <div className="space-y-0.5 px-2">
-                {section.fields.map((field) => (
-                  <FeatureFormFieldRenderer
-                    key={field.id}
-                    control={form.control}
-                    field={field}
-                    documentVariables={documentVariables}
-                    activeReferencePickerFieldId={activeReferencePickerFieldId}
-                    onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
-                    onPatch={onPatch}
-                  />
-                ))}
-              </div>
-            </section>
-          )
-        })}
-      </div>
-
-      <footer className="flex items-center gap-2 px-3 py-2.5">
-        <span
-          className="flex items-center gap-1.5 text-[10px] font-mono"
-          style={{ color: 'var(--workbench-shell-success)' }}
-        >
-          <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
-          idle
-        </span>
-        <div className="flex-1" />
-        <Button
-          type="button"
-          onClick={onCancel}
-          variant="subtle"
-          color="gray"
-          size="xs"
-          styles={{
-            root: {
-              color: 'var(--workbench-shell-text-muted)',
-            },
-          }}
-        >
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          onClick={onCommit}
-          size="xs"
-          styles={{
-            root: {
-              backgroundColor: 'var(--workbench-shell-accent)',
-              color: 'var(--workbench-shell-surface)',
-            },
-          }}
-        >
-          Commit
-        </Button>
-      </footer>
-    </Paper>
+              ) : null}
+            </div>
+            <div className="space-y-0.5 px-2">
+              {section.fields.map((field) => (
+                <FeatureFormFieldRenderer
+                  key={field.id}
+                  control={form.control}
+                  field={field}
+                  documentVariables={documentVariables}
+                  activeReferencePickerFieldId={activeReferencePickerFieldId}
+                  onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
+                  onPatch={onPatch}
+                />
+              ))}
+            </div>
+          </section>
+        )
+      })}
+    </WorkbenchInspectorPanel>
   )
 }

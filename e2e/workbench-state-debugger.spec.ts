@@ -49,18 +49,16 @@ test('diagnostics and debugger stay in-frame without page scrollbars', async ({ 
 
   await workbench.openWithOperationHistory(createBaseExtrudeOperationHistory())
 
-  const documentDiagnostics = page.getByText('Document Diagnostics', { exact: true })
   const stateDebugger = page.getByText('State Debugger', { exact: true })
 
   await expect(page.getByText('Snapshot References', { exact: true })).toHaveCount(0)
-  await expect(documentDiagnostics).toBeVisible()
   await expect(stateDebugger).toBeVisible()
 
-  for (const locator of [documentDiagnostics, stateDebugger]) {
+  for (const locator of [stateDebugger]) {
     const box = await locator.boundingBox()
 
     if (!box) {
-      throw new Error('Expected sidebar/debug header to be measurable.')
+      throw new Error('Expected debug chip to be measurable.')
     }
 
     expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight)

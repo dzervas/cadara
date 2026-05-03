@@ -57,6 +57,7 @@ export function getEditorViewState(state: EditorState) {
     hoverTarget: state.hoverTarget,
     preview: state.preview,
     activeEditSession: state.kind === 'editingFeature' ? state.session : null,
+    activeSketchPlaneEditSession: state.kind === 'editingSketchPlane' ? state.session : null,
     activeImportSession: state.kind === 'importing' ? state.session : null,
     activeReferencePickerFieldId:
       state.kind === 'editingFeature' || state.kind === 'importing'

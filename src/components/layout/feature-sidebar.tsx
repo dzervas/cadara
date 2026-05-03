@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Accordion, ActionIcon, Paper, Tooltip } from '@mantine/core'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
+import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu.helpers'
 import { shouldStartVariableKeyboardEdit } from '@/components/layout/feature-sidebar.a11y'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -16,6 +17,7 @@ import {
 import { getObjectTreeNodeToolIcon } from '@/core/tools/tool-icon-resolvers'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
 import { formatSidebarDiagnosticDetail } from '@/domain/modeling/diagnostic-formatting'
+import { canReassignCommittedSketchPlane } from '@/domain/editor/sketch-plane-editing'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FeatureSidebarProps {
@@ -29,6 +31,7 @@ interface FeatureSidebarProps {
   onObjectExport: (target: PrimitiveRef, label: string) => void
   onRenameTarget: (target: PrimitiveRef, label: string) => void
   onReopenTarget: (target: PrimitiveRef) => void
+  onChangeSketchPlaneTarget?: (target: Extract<PrimitiveRef, { kind: 'sketch' }>) => void
   onToggleTargetVisibility: (target: PrimitiveRef) => void
   onUpdateVariable: (variable: DocumentVariableRecord, next: Pick<DocumentVariableRecord, 'name' | 'valueText'>) => void
   snapshot: WorkspaceSnapshot | null
@@ -127,6 +130,7 @@ export function FeatureSidebar({
   onObjectExport,
   onRenameTarget,
   onReopenTarget,
+  onChangeSketchPlaneTarget,
   onSelectTarget,
   onToggleTargetVisibility,
   onUpdateVariable,
@@ -269,33 +273,16 @@ export function FeatureSidebar({
                     visibleSelection.some((entry) => getPrimitiveRefKey(entry) === targetKey)
                   const isAllowed = selectionFilterAllowsTarget(selectionFilter, selection, target, selectionCatalog)
                   const itemToolIcon = getObjectTreeNodeToolIcon(item)
-                  const menuItems: WorkbenchContextMenuEntry[] = [
-                    {
-                      kind: 'item',
-                      id: 'rename',
-                      label: 'Rename',
-                      commandId: 'context.rename',
-                      icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
-                      onSelect: () => onRenameTarget(target, itemLabel),
-                    },
-                    {
-                      kind: 'item',
-                      id: 'delete',
-                      label: 'Delete',
-                      commandId: 'context.delete',
-                      icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
-                      danger: true,
-                      onSelect: () => onObjectDelete(target, itemLabel),
-                    },
-                    {
-                      kind: 'item',
-                      id: 'export',
-                      label: 'Export',
-                      commandId: 'context.export',
-                      icon: <WorkbenchIcon name="download" className="h-3.5 w-3.5" />,
-                      onSelect: () => onObjectExport(target, itemLabel),
-                    },
-                  ]
+                  const menuItems: WorkbenchContextMenuEntry[] = getPartsObjectMenuEntries({
+                    target,
+                    label: itemLabel,
+                    canChangeSketchPlane:
+                      target.kind === 'sketch' && canReassignCommittedSketchPlane(snapshot ?? null, target.sketchId),
+                    onChangeSketchPlaneTarget,
+                    onObjectDelete,
+                    onObjectExport,
+                    onRenameTarget,
+                  })
 
                   return (
                     <WorkbenchContextMenu key={item.id} label={`${itemLabel} actions`} items={menuItems}>

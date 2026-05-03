@@ -3,9 +3,9 @@ import type { PrimitiveRef } from '@/core/editor/schema'
 import type { SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
 import type { CommandSessionId, RequestId } from '@/contracts/shared/ids'
 import type { SketchSessionState } from '@/domain/editor/sketch-session'
-import type { EditorState } from './types'
+import type { EditorCommandToolId, EditorState } from './types'
 
-export function nextCommandSessionId(state: EditorState, toolId: ToolId) {
+export function nextCommandSessionId(state: EditorState, toolId: EditorCommandToolId) {
   return `command_${toolId}-${state.nextCommandSequence}` as CommandSessionId
 }
 
@@ -34,7 +34,7 @@ export function assertSketchPlaneSupport(target: PrimitiveRef): SketchPlaneSuppo
   throw new Error('Sketch commits require a construction plane or planar face target.')
 }
 
-export function isFeatureTool(toolId: ToolId): toolId is Extract<ToolId, 'extrude' | 'revolve' | 'fillet' | 'shell' | 'plane' | 'sweep' | 'loft' | 'chamfer' | 'thicken' | 'combine' | 'split' | 'deleteSolid' | 'mirror' | 'transform'> {
+export function isFeatureTool(toolId: EditorCommandToolId): toolId is Extract<ToolId, 'extrude' | 'revolve' | 'fillet' | 'shell' | 'plane' | 'sweep' | 'loft' | 'chamfer' | 'thicken' | 'combine' | 'split' | 'deleteSolid' | 'mirror' | 'transform'> {
   return toolId === 'extrude'
     || toolId === 'revolve'
     || toolId === 'fillet'

@@ -11,8 +11,8 @@ export const TIMELINE_CURSOR_GLYPH = '↕'
 export type DocumentHistoryMenuEntryDescriptor =
   | {
       kind: 'item'
-      id: 'edit' | 'rename' | 'suppress' | 'roll-history-here' | 'roll-to-end' | 'delete'
-      label: 'Edit' | 'Rename' | 'Suppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
+      id: 'edit' | 'rename' | 'change-sketch-plane' | 'suppress' | 'roll-history-here' | 'roll-to-end' | 'delete'
+      label: 'Edit' | 'Rename' | 'Change Sketch Plane' | 'Suppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
       disabled?: boolean
     }
   | {
@@ -86,8 +86,9 @@ export function getDocumentHistoryMenuEntryDescriptors(input: {
   cursorDisabled: boolean
   cursorIndex: number
   historyLength: number
+  canChangeSketchPlane?: boolean
 }): DocumentHistoryMenuEntryDescriptor[] {
-  const { item, cursorDisabled, cursorIndex, historyLength } = input
+  const { item, cursorDisabled, cursorIndex, historyLength, canChangeSketchPlane = false } = input
   const rollToEndDisabled = cursorDisabled || isDocumentHistoryCursorIndexAtTail(historyLength, cursorIndex)
 
   return [
@@ -101,6 +102,13 @@ export function getDocumentHistoryMenuEntryDescriptors(input: {
       id: 'rename',
       label: 'Rename',
     },
+    ...(item.kind === 'sketch' && canChangeSketchPlane
+      ? [{
+          kind: 'item' as const,
+          id: 'change-sketch-plane' as const,
+          label: 'Change Sketch Plane' as const,
+        }]
+      : []),
     ...(item.kind === 'feature'
       ? [{
           kind: 'item' as const,

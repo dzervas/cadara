@@ -7,8 +7,9 @@ export type CursorLifecycleTrigger =
   | 'restoreStarted'
 
 export type CursorPhaseAction =
-  | 'openSession'
+  | 'openSketchSession'
   | 'hydrateFeature'
+  | 'openSketchPlaneEdit'
   | 'restore'
   | 'complete'
   | null
@@ -66,7 +67,15 @@ export function getCursorPhaseAction(
 ): CursorPhaseAction {
   switch (context.phase) {
     case 'rollingBack':
-      return context.target.kind === 'sketch' ? 'openSession' : 'hydrateFeature'
+      if (context.sessionKind === 'sketchAuthoring') {
+        return 'openSketchSession'
+      }
+
+      if (context.sessionKind === 'sketchPlaneEdit') {
+        return 'openSketchPlaneEdit'
+      }
+
+      return 'hydrateFeature'
     case 'restorePending':
       return 'restore'
     case 'restoring':

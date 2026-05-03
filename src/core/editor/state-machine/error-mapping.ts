@@ -47,6 +47,7 @@ export function getEditorEffectContext(effect: EditorEffect): AppErrorContextEnt
 
   if (
     effect.type === 'sketch.commit'
+    || effect.type === 'sketchPlane.commit'
     || effect.type === 'sketch.projectReferences'
     || effect.type === 'sketch.importReferenceImages'
   ) {
@@ -122,6 +123,15 @@ export function createEditorEffectFailureEvent(
     case 'sketch.commit':
       return {
         type: 'effect.sketchCommitFailed',
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      }
+    case 'sketchPlane.commit':
+      return {
+        type: 'effect.sketchPlaneCommitFailed',
         requestId: effect.requestId,
         documentId: effect.documentId,
         commandSessionId: effect.commandSessionId,

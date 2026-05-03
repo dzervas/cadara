@@ -6,6 +6,10 @@ import { createAppError, err, ok, type AppErrorContextEntry } from '@/contracts/
 import type { EditorEffect, EditorEffectRuntime } from '@/core/editor/state-machine'
 import { createFeatureEditSession } from '@/domain/editor/feature-editing'
 import { hydrateFeatureSessionFromSnapshot } from '@/core/editor/state-machine'
+import {
+  hydrateSketchPlaneEditSession,
+  patchSketchPlaneEditSession,
+} from '@/domain/editor/sketch-plane-editing'
 import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
 import { createSeedDocumentSnapshot } from '@/domain/modeling/modeling-test-fixtures'
 
@@ -224,6 +228,36 @@ test('editor effect runtime maps preview, commit, and sketch projection outcomes
     'No-op sketch commits should map to an accepted event pinned to the base revision.',
   )
 
+  const sketchPlaneSession = hydrateSketchPlaneEditSession(snapshot, sketchSession.sketchId!)
+  expectTrue(sketchPlaneSession, 'Seed snapshot should expose a sketch-plane edit session for effect coverage.')
+
+  const sketchPlaneCommit = sketchPlaneSession
+    ? await runEditorEffect({
+        type: 'sketchPlane.commit',
+        requestId: 'request_editor_commit_sketch_plane' as EditorEffect['requestId'],
+        commandSessionId: 'command_commit_sketch_plane' as EditorEffect['commandSessionId'],
+        documentId: snapshot.document.documentId,
+        baseRevisionId: snapshot.document.revisionId,
+        mutationBasis: { baseRepositoryHeads: ['head_sketch_plane_1'] },
+        session: patchSketchPlaneEditSession(sketchPlaneSession, { selectedPlaneKey: 'yz' }),
+      }, {
+        async commitSketchPlane() {
+          return {
+            revisionId: 'rev_sketch_plane_commit' as typeof snapshot.document.revisionId,
+            accepted: true,
+            diagnostics: [],
+          }
+        },
+      } as EditorEffectRuntime)
+    : null
+  expectTrue(sketchPlaneCommit?.type === 'effect.sketchPlaneCommitted', 'Sketch-plane commits should resolve through the sketch-plane committed event seam.')
+  expectTrue(
+    sketchPlaneCommit?.type === 'effect.sketchPlaneCommitted'
+      && sketchPlaneCommit.revisionId === 'rev_sketch_plane_commit'
+      && sketchPlaneCommit.accepted === true,
+    'Sketch-plane commit effects should preserve the accepted revision returned by the runtime.',
+  )
+
   const projected = await runEditorEffect({
     type: 'sketch.projectReferences',
     requestId: 'request_editor_project_refs' as EditorEffect['requestId'],
@@ -387,11 +421,19 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     [{ kind: 'sketch', sketchId: snapshot.document.sketches[0]!.sketchId }],
     snapshot,
   )
+  const sketchPlaneSession = hydrateSketchPlaneEditSession(snapshot, snapshot.document.sketches[0]!.sketchId)
 
   expectTrue(hydratedFeatureSession, 'Seed snapshot should expose an editable feature for runtime adapter coverage.')
   expectTrue(sketchSession, 'Seed snapshot should expose a sketch session for runtime adapter coverage.')
+  expectTrue(sketchPlaneSession, 'Seed snapshot should expose a sketch-plane edit session for runtime adapter coverage.')
 
-  const commitCalls: Array<{ sketchLabel: string; sketchId: string | null; planeKind: string; baseRepositoryHeads?: readonly string[] }> = []
+  const commitCalls: Array<{
+    sketchLabel: string
+    sketchId: string | null
+    planeConstructionId: string | null
+    planeKind: string
+    baseRepositoryHeads?: readonly string[]
+  }> = []
   const createFeatureCalls: Array<{ definitionKind: string; baseRepositoryHeads?: readonly string[] }> = []
   const updateFeatureCalls: Array<{ featureId: string; definitionKind: string }> = []
   const cursorCalls: Array<{ persistHistory: boolean | undefined }> = []
@@ -404,6 +446,7 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
       commitCalls.push({
         sketchLabel: input.sketchLabel,
         sketchId: input.sketchId,
+        planeConstructionId: input.plane.support.kind === 'construction' ? input.plane.support.constructionId : null,
         planeKind: input.plane.support.kind,
         baseRepositoryHeads: input.baseRepositoryHeads,
       })
@@ -477,6 +520,23 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
       && commitCalls[0]?.planeKind === 'construction'
       && commitCalls[0]?.baseRepositoryHeads?.[0] === 'head_runtime_sketch',
     'Sketch commit runtime adaptation should forward commit defaults and accepted results.',
+  )
+
+  const committedSketchPlane = sketchPlaneSession
+    ? await runtime.commitSketchPlane({
+        requestId: 'request_runtime_sketch_plane' as EditorEffect['requestId'],
+        baseRevisionId: snapshot.document.revisionId,
+        baseRepositoryHeads: ['head_runtime_sketch_plane'],
+        session: patchSketchPlaneEditSession(sketchPlaneSession, { selectedPlaneKey: 'yz' }),
+      })
+    : null
+  expectTrue(
+    committedSketchPlane?.accepted === true
+      && committedSketchPlane.revisionId === 'rev_runtime_sketch'
+      && commitCalls[1]?.sketchId === sketchSession.sketchId
+      && commitCalls[1]?.planeConstructionId === 'construction_plane-yz'
+      && commitCalls[1]?.baseRepositoryHeads?.[0] === 'head_runtime_sketch_plane',
+    'Sketch-plane runtime adaptation should recommit the sketch through commitSketch with the newly selected origin plane.',
   )
 
   const noReferenceProjection = await runtime.projectSketchReferences({
@@ -710,6 +770,13 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
     baseRevisionId: snapshot.document.revisionId,
     featureSession: hydratedFeatureSession,
   })
+  const rejectedSketchPlane = sketchPlaneSession
+    ? await rejectedRuntime.commitSketchPlane({
+        requestId: 'request_runtime_sketch_plane_rejected' as EditorEffect['requestId'],
+        baseRevisionId: snapshot.document.revisionId,
+        session: patchSketchPlaneEditSession(sketchPlaneSession, { selectedPlaneKey: 'yz' }),
+      })
+    : null
   const rejectedCursor = await rejectedRuntime.setDocumentCursor({
     baseRevisionId: snapshot.document.revisionId,
     cursor: snapshot.document.cursor,
@@ -725,5 +792,11 @@ test('modeling-service effect runtime adapts sketch, feature, projection, and cu
       && rejectedCursor.actualRevisionId === 'rev_cursor_actual'
       && rejectedCursor.diagnostics[0]?.message === 'Cursor conflict.',
     'Cursor adapter should map modeling mutation errors into rejected cursor results.',
+  )
+  expectTrue(
+    rejectedSketchPlane?.accepted === false
+      && rejectedSketchPlane.actualRevisionId === 'rev_sketch_actual'
+      && rejectedSketchPlane.diagnostics[0]?.message === 'conflict',
+    'Sketch-plane runtime adaptation should reuse the sketch mutation error mapping path.',
   )
 })

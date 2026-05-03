@@ -37,6 +37,7 @@ function promptForImportProvider(
 
 interface WorkbenchPartImportControllerInput {
   activeEditSession: EditorViewState['activeEditSession']
+  activeSketchPlaneEditSession?: EditorViewState['activeSketchPlaneEditSession']
   activeImportSession: EditorViewState['activeImportSession']
   deps?: Partial<WorkbenchPartImportDependencies>
   dispatch: (event: EditorEvent) => void
@@ -58,6 +59,7 @@ interface WorkbenchPartImportDependencies {
 
 export function useWorkbenchPartImport({
   activeEditSession,
+  activeSketchPlaneEditSession = null,
   activeImportSession,
   deps,
   dispatch,
@@ -120,7 +122,7 @@ export function useWorkbenchPartImport({
   }, [activeImportSession, dispatch, documentOwner, showWorkbenchError, showWorkbenchInfo, snapshot])
 
   const requestPartImport = useCallback(async () => {
-    if (activeEditSession || activeImportSession) {
+    if (activeEditSession || activeSketchPlaneEditSession || activeImportSession) {
       return
     }
 
@@ -180,6 +182,7 @@ export function useWorkbenchPartImport({
     }
   }, [
     activeEditSession,
+    activeSketchPlaneEditSession,
     activeImportSession,
     createCapabilities,
     createSession,

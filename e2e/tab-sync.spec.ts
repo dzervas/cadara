@@ -16,6 +16,7 @@ test('opt-in local peer sync exposes peer-authored document changes after refres
   await expect(firstTab.locator('[data-variable-row]')).toHaveCount(0)
   await expect(secondTab.locator('[data-variable-row]')).toHaveCount(0)
 
+  await firstTab.locator('[data-workbench-variables-fab]').click()
   await firstTab.getByRole('button', { name: 'Add variable' }).click()
   await expect(firstTab.getByLabel('Variable name variable_1')).toHaveValue('var1', { timeout: 30_000 })
   await expect(firstTab.getByLabel('Variable value variable_1')).toHaveValue('0')
@@ -24,8 +25,13 @@ test('opt-in local peer sync exposes peer-authored document changes after refres
     window.__cadaraDebug?.refreshDocument()
   })
   await expect.poll(() => revisionLabel(secondTab), { timeout: 30_000 }).toBe('rev_0002')
-  await expect(secondTab.getByLabel('Variable name variable_1')).toHaveValue('var1', { timeout: 30_000 })
-  await expect(secondTab.getByLabel('Variable value variable_1')).toHaveValue('0')
+  await secondTab.locator('[data-workbench-variables-fab]').click()
+  // Synced (non-locally-added) variables render in view mode by default, so we assert against
+  // the row's data attributes rather than the edit-mode inputs.
+  const syncedRow = secondTab.locator('[data-variable-row="variable_1"]')
+  await expect(syncedRow).toBeVisible({ timeout: 30_000 })
+  await expect(syncedRow).toContainText('var1')
+  await expect(syncedRow.locator('[data-variable-expression="variable_1"]')).toContainText('0')
 
   await secondTab.close()
   await firstTab.close()

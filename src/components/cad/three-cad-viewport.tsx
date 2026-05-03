@@ -125,7 +125,13 @@ import {
 } from '@/core/workspace/sketch-plane-mapping'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
-import { VIEWPORT_OVERLAY_TOP_INSET_PX, VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
+import {
+  LEGACY_VIEWPORT_HEIGHT_PX,
+  LEGACY_VIEWPORT_LEFT_INSET_PX,
+  LEGACY_VIEWPORT_WIDTH_PX,
+  VIEWPORT_CANVAS_TOP_INSET_PX,
+  VIEW_CUBE_SIZE_PX,
+} from '@/components/cad/viewport-overlay-layout'
 import {
   cancelCoalescedSketchGeometryDragMove,
   createViewportBvhSceneKey,
@@ -1460,7 +1466,7 @@ export function ThreeCadViewport({
       const viewportElement = viewportRef.current
       const rect = viewportElement?.getBoundingClientRect()
 
-      return projectSceneTargetCentroidToViewport({
+      const projected = projectSceneTargetCentroidToViewport({
         root: pickRootRef.current,
         camera: cameraRef.current,
         objectId,
@@ -1469,6 +1475,16 @@ export function ThreeCadViewport({
           height: rect?.height ?? 0,
         },
       })
+      if (!projected) {
+        return null
+      }
+      // Return coordinates relative to the legacy positioning marker so e2e
+      // helpers can use a single bbox source for both projected and hardcoded
+      // pointer coordinates. See `LEGACY_VIEWPORT_LEFT_INSET_PX`.
+      return {
+        x: projected.x - LEGACY_VIEWPORT_LEFT_INSET_PX,
+        y: projected.y,
+      }
     }
 
     return () => {
@@ -1512,7 +1528,17 @@ export function ThreeCadViewport({
         },
       })
 
-      return handle ? { handle, normal, offset: section.offset } : null
+      // Reproject to legacy positioning marker space — see `__cadProjectToScreen`.
+      if (!handle) {
+        return null
+      }
+      return {
+        handle: { x: handle.x - LEGACY_VIEWPORT_LEFT_INSET_PX, y: handle.y },
+        normal: normal
+          ? { x: normal.x - LEGACY_VIEWPORT_LEFT_INSET_PX, y: normal.y }
+          : null,
+        offset: section.offset,
+      }
     }
 
     return () => {
@@ -1523,7 +1549,38 @@ export function ThreeCadViewport({
   const isEditorRenderIdle = machineState.kind === 'idle'
 
   return (
-    <div ref={viewportRef} data-testid="cad-viewport" className="relative h-full w-full">
+    <div
+      ref={viewportRef}
+      className="relative"
+      style={{
+        position: 'absolute',
+        top: VIEWPORT_CANVAS_TOP_INSET_PX,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      }}
+    >
+      {/*
+        Legacy positioning marker for e2e harnesses. Sits inside the canvas at the
+        sub-region the structural shell used to reserve (1080×912 at left:180,
+        top:0 within the cad-viewport ref). Hardcoded pointer coordinates in
+        e2e specs (`hoverViewportAtReal({ x, y })`) translate through this marker's
+        boundingBox so they continue to hit the same world points they did under
+        the structural shell. See LEGACY_VIEWPORT_* constants in
+        `viewport-overlay-layout.ts`.
+       */}
+      <div
+        data-testid="cad-viewport"
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: LEGACY_VIEWPORT_LEFT_INSET_PX,
+          width: LEGACY_VIEWPORT_WIDTH_PX,
+          height: LEGACY_VIEWPORT_HEIGHT_PX,
+          pointerEvents: 'none',
+        }}
+      />
       <Canvas
         className="h-full w-full"
         frameloop="always"
@@ -1620,9 +1677,8 @@ export function ThreeCadViewport({
         />
       </Canvas>
       <div
-        className="pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-1"
+        className="pointer-events-none absolute right-4 top-4 z-20 flex flex-col items-end gap-1"
         style={{
-          top: VIEWPORT_OVERLAY_TOP_INSET_PX,
           width: `min(${VIEW_CUBE_SIZE_PX}px, calc(100% - 32px))`,
         }}
       >

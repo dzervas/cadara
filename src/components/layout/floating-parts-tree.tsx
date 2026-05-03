@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type ReactNode } from 'react'
 import { ActionIcon } from '@mantine/core'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
+import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu.helpers'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
@@ -11,6 +12,7 @@ import {
   selectionFilterAllowsTarget,
 } from '@/core/editor/schema'
 import { getObjectTreeNodeToolIcon } from '@/core/tools/tool-icon-resolvers'
+import { canReassignCommittedSketchPlane } from '@/domain/editor/sketch-plane-editing'
 import { useEditorState } from '@/hooks/use-editor-state'
 
 interface FloatingPartsTreeProps {
@@ -23,6 +25,7 @@ interface FloatingPartsTreeProps {
   onObjectDelete: (target: PrimitiveRef, label: string) => void
   onObjectExport: (target: PrimitiveRef, label: string) => void
   onRenameTarget: (target: PrimitiveRef, label: string) => void
+  onChangeSketchPlaneTarget?: (target: Extract<PrimitiveRef, { kind: 'sketch' }>) => void
   onToggleTargetVisibility: (target: PrimitiveRef) => void
 }
 
@@ -45,6 +48,7 @@ export function FloatingPartsTree({
   onObjectDelete,
   onObjectExport,
   onRenameTarget,
+  onChangeSketchPlaneTarget,
   onToggleTargetVisibility,
 }: FloatingPartsTreeProps) {
   const {
@@ -52,17 +56,13 @@ export function FloatingPartsTree({
   } = useEditorState()
   const objects = snapshot?.presentation.objects ?? []
 
-  if (objects.length === 0) {
-    return null
-  }
-
   return (
     <aside
       aria-label="Parts and objects"
       className="pointer-events-auto absolute left-4 top-[76px] select-none"
       style={{ width: 240, zIndex: 15, color: 'var(--workbench-shell-text)' }}
     >
-      <div
+      <header
         className="px-2.5 pb-2 text-[11px] font-semibold uppercase"
         style={{
           letterSpacing: '0.18em',
@@ -71,7 +71,7 @@ export function FloatingPartsTree({
         }}
       >
         Parts &amp; Objects
-      </div>
+      </header>
       <div className="flex flex-col">
         {objects.map((item) => {
           const target = item.target
@@ -83,33 +83,16 @@ export function FloatingPartsTree({
           const isAllowed = selectionFilterAllowsTarget(selectionFilter, selection, target, selectionCatalog)
           const itemToolIcon = getObjectTreeNodeToolIcon(item)
 
-          const menuItems: WorkbenchContextMenuEntry[] = [
-            {
-              kind: 'item',
-              id: 'rename',
-              label: 'Rename',
-              commandId: 'context.rename',
-              icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
-              onSelect: () => onRenameTarget(target, itemLabel),
-            },
-            {
-              kind: 'item',
-              id: 'delete',
-              label: 'Delete',
-              commandId: 'context.delete',
-              icon: <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />,
-              danger: true,
-              onSelect: () => onObjectDelete(target, itemLabel),
-            },
-            {
-              kind: 'item',
-              id: 'export',
-              label: 'Export',
-              commandId: 'context.export',
-              icon: <WorkbenchIcon name="download" className="h-3.5 w-3.5" />,
-              onSelect: () => onObjectExport(target, itemLabel),
-            },
-          ]
+          const menuItems: WorkbenchContextMenuEntry[] = getPartsObjectMenuEntries({
+            target,
+            label: itemLabel,
+            canChangeSketchPlane:
+              target.kind === 'sketch' && canReassignCommittedSketchPlane(snapshot, target.sketchId),
+            onChangeSketchPlaneTarget,
+            onObjectDelete,
+            onObjectExport,
+            onRenameTarget,
+          })
 
           return (
             <WorkbenchContextMenu key={item.id} label={`${itemLabel} actions`} items={menuItems}>

@@ -12,9 +12,11 @@ function makeCursorContext(
     kind: 'sketch',
     sketchId: 'sketch_1',
   },
+  sessionKind: EditSessionCursorContext['sessionKind'] = 'sketchAuthoring',
 ): EditSessionCursorContext {
   return {
     target,
+    sessionKind,
     rollbackCursor: {
       kind: 'document',
       featureId: null,
@@ -31,7 +33,7 @@ describe('cursor lifecycle', () => {
   test('maps rollback refresh to opening and sketch reopen', () => {
     const context = makeCursorContext('rollingBack')
 
-    expect(getCursorPhaseAction(context)).toBe('openSession')
+    expect(getCursorPhaseAction(context)).toBe('openSketchSession')
     expect(advanceCursorPhase(context, 'snapshotRefreshed')).toEqual({
       ...context,
       phase: 'opening',
@@ -42,9 +44,22 @@ describe('cursor lifecycle', () => {
     const context = makeCursorContext('rollingBack', {
       kind: 'feature',
       featureId: 'feature_1',
-    })
+    }, 'featureEdit')
 
     expect(getCursorPhaseAction(context)).toBe('hydrateFeature')
+    expect(advanceCursorPhase(context, 'snapshotRefreshed')).toEqual({
+      ...context,
+      phase: 'opening',
+    })
+  })
+
+  test('maps rollback refresh to sketch-plane editing for sketch-plane sessions', () => {
+    const context = makeCursorContext('rollingBack', {
+      kind: 'sketch',
+      sketchId: 'sketch_1',
+    }, 'sketchPlaneEdit')
+
+    expect(getCursorPhaseAction(context)).toBe('openSketchPlaneEdit')
     expect(advanceCursorPhase(context, 'snapshotRefreshed')).toEqual({
       ...context,
       phase: 'opening',

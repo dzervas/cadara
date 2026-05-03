@@ -68,7 +68,7 @@ export function WorkspaceToolbar({
   const searchListboxId = useId()
   const searchRootRef = useRef<HTMLDivElement | null>(null)
   const {
-    state: { activeCommand, activeEditSession, activeImportSession, history, mode, sketchSession },
+    state: { activeCommand, activeEditSession, activeSketchPlaneEditSession, activeImportSession, history, mode, sketchSession },
   } = useEditorState()
   const { activateTool } = useWorkbenchCommandHandlers()
   const visibleHistory = historyAvailability ?? history
@@ -95,7 +95,7 @@ export function WorkspaceToolbar({
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
     (tool.id === 'undo' && !visibleHistory.canUndo)
     || (tool.id === 'redo' && !visibleHistory.canRedo)
-    || (tool.id === 'import' && (activeEditSession !== null || activeImportSession !== null))
+    || (tool.id === 'import' && (activeEditSession !== null || activeSketchPlaneEditSession !== null || activeImportSession !== null))
     || (tool.id === 'importImage' && !canImportReferenceImage)
     || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
 
@@ -216,7 +216,7 @@ export function WorkspaceToolbar({
 
   return (
     <div
-      className="absolute left-3 right-3 top-3 z-30 flex h-[50px] items-center gap-2 text-[var(--workbench-shell-text)]"
+      className="absolute left-4 right-4 top-3 z-30 flex h-[50px] items-center gap-2 text-[var(--workbench-shell-text)]"
       style={{ pointerEvents: 'none' }}
       role="toolbar"
       aria-label="CAD tools"
@@ -232,7 +232,25 @@ export function WorkspaceToolbar({
         trigger={<SparkLogo />}
       />
 
-      <div className="flex min-w-0 items-center gap-2">
+      {/*
+        Cluster row scrolls horizontally when the bar is too narrow to fit all
+        clusters. The padding-y + negative margin-y trick gives the pill drop-shadows
+        (`box-shadow: 0 12px 32px ...`) room to render *inside* the scroll container
+        instead of being clipped at the cluster row's bottom edge — see DESIGN.md
+        "Floating Toolbar (Pill Clusters)".
+       */}
+      <div
+        className="flex min-w-0 items-center gap-2"
+        style={{
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          paddingTop: 40,
+          paddingBottom: 40,
+          marginTop: -40,
+          marginBottom: -40,
+          scrollbarWidth: 'none',
+        }}
+      >
         {visibleSections.map((section) => (
           <ToolbarPill key={section.id} style={pillCommonStyle}>
             {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
@@ -257,7 +275,7 @@ export function WorkspaceToolbar({
             }
           }}
           onKeyDown={handleSearchInputKeyDown}
-          placeholder="Search tools…"
+          placeholder="Search tools"
           leftSection={<WorkbenchIcon name="search" className="h-4 w-4" />}
           rightSectionWidth={28}
           rightSection={<KbdHint label="/" />}
@@ -453,7 +471,8 @@ const SparkLogo = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonE
       <button
         ref={ref}
         type="button"
-        aria-label="CADara document menu"
+        aria-label="File"
+        data-workbench-file-menu=""
         {...props}
         style={{
           flexShrink: 0,

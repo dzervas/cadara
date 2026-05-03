@@ -8,6 +8,7 @@ import { shouldStartVariableKeyboardEdit } from '@/components/layout/feature-sid
 import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
 import { getNextHistoryTreeFocusIndex } from '@/components/layout/feature-timeline-bar.a11y'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
+import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu.helpers'
 import {
   getDocumentHistoryMenuEntryDescriptors,
   getNearestTimelineAnchorIndex,
@@ -427,7 +428,20 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
       .filter((entry) => entry.kind === 'item')
       .map((entry) => entry.label)
       .join('|') === 'Edit|Rename|Roll History Here|Roll To End|Delete',
-    'Sketch history menus should expose the shared committed-history actions without feature-only suppress.',
+    'Sketch history menus should keep the shared committed-history actions when plane reassignment is unavailable.',
+  )
+  expectTrue(
+    getDocumentHistoryMenuEntryDescriptors({
+      item: sketchHistoryItem,
+      cursorDisabled: false,
+      cursorIndex: 0,
+      historyLength: snapshot.presentation.documentHistory.length,
+      canChangeSketchPlane: true,
+    })
+      .filter((entry) => entry.kind === 'item')
+      .map((entry) => entry.label)
+      .join('|') === 'Edit|Rename|Change Sketch Plane|Roll History Here|Roll To End|Delete',
+    'Sketch history menus should insert Change Sketch Plane without affecting the feature-only actions.',
   )
   expectTrue(
     tailMenuDescriptors.find((entry) => entry.id === 'roll-to-end')?.disabled === true,
@@ -437,6 +451,37 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
     pendingCursorMenuDescriptors.find((entry) => entry.id === 'roll-history-here')?.disabled === true
       && pendingCursorMenuDescriptors.find((entry) => entry.id === 'roll-to-end')?.disabled === true,
     'Timeline menus should disable cursor actions while a cursor mutation or refresh is pending.',
+  )
+
+  const sidebarSketchMenuLabels = getPartsObjectMenuEntries({
+    canChangeSketchPlane: true,
+    label: 'Sketch 1',
+    onChangeSketchPlaneTarget: () => undefined,
+    onObjectDelete: () => undefined,
+    onObjectExport: () => undefined,
+    onRenameTarget: () => undefined,
+    target: { kind: 'sketch', sketchId: sketchHistoryItem.sketchId },
+  })
+    .filter((entry) => entry.kind === 'item')
+    .map((entry) => entry.label)
+    .join('|')
+  const sidebarObjectMenuLabels = getPartsObjectMenuEntries({
+    canChangeSketchPlane: false,
+    label: 'Body 1',
+    onChangeSketchPlaneTarget: () => undefined,
+    onObjectDelete: () => undefined,
+    onObjectExport: () => undefined,
+    onRenameTarget: () => undefined,
+    target: snapshot.presentation.objects[0]!.target,
+  })
+    .filter((entry) => entry.kind === 'item')
+    .map((entry) => entry.label)
+    .join('|')
+
+  expectTrue(
+    sidebarSketchMenuLabels === 'Rename|Change Sketch Plane|Delete|Export'
+      && sidebarObjectMenuLabels === 'Rename|Delete|Export',
+    'Parts and objects menus should expose Change Sketch Plane only for eligible sketch rows.',
   )
 
   const erroredTimelineSnapshot = structuredClone(snapshot)

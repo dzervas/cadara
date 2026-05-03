@@ -41,6 +41,7 @@ import {
 import {
   getDocumentHistoryCursorForIndex,
 } from '@/domain/modeling/document-history'
+import { canReassignCommittedSketchPlane } from '@/domain/editor/sketch-plane-editing'
 import {
   getDocumentHistoryItemToolIcon,
   getSketchHistoryItemToolIcon,
@@ -59,6 +60,7 @@ interface FeatureTimelineBarProps {
   reorderDisabled?: boolean
   onDeleteItem: (item: DocumentHistoryItemRecord) => void
   onRenameItem: (item: DocumentHistoryItemRecord) => void
+  onChangeSketchPlaneTarget?: (target: Extract<PrimitiveRef, { kind: 'sketch' }>) => void
   onSuppressFeature: (item: FeatureHistoryItem) => void
   visibleSelection: PrimitiveRef[]
 }
@@ -584,6 +586,7 @@ export function FeatureTimelineBar({
   reorderDisabled = false,
   onDeleteItem,
   onRenameItem,
+  onChangeSketchPlaneTarget,
   onSuppressFeature,
   visibleSelection,
 }: FeatureTimelineBarProps) {
@@ -716,6 +719,8 @@ export function FeatureTimelineBar({
       cursorDisabled: documentCursorActionsDisabled,
       cursorIndex,
       historyLength: historyItems.length,
+      canChangeSketchPlane:
+        item.kind === 'sketch' && canReassignCommittedSketchPlane(snapshot ?? null, item.sketchId),
     }).map((entry) => {
       switch (entry.id) {
         case 'edit':
@@ -735,6 +740,14 @@ export function FeatureTimelineBar({
             commandId: 'context.rename' as const,
             icon: <WorkbenchIcon name="type" className="h-3.5 w-3.5" />,
             onSelect: () => onRenameItem(item),
+          }
+        case 'change-sketch-plane':
+          return {
+            kind: 'item' as const,
+            id: entry.id,
+            label: entry.label,
+            icon: <WorkbenchIcon name="edit" className="h-3.5 w-3.5" />,
+            onSelect: () => item.kind === 'sketch' ? onChangeSketchPlaneTarget?.(item.target) : undefined,
           }
         case 'suppress':
           return {
@@ -842,6 +855,7 @@ export function FeatureTimelineBar({
     itemDragState,
     onCursorRequested,
     onDeleteItem,
+    onChangeSketchPlaneTarget,
     onRenameItem,
     onReopenTarget,
     onSelectTarget,

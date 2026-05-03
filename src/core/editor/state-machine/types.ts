@@ -21,6 +21,7 @@ import type {
   SketchSessionState,
   SketchHistoryCursor,
 } from '@/domain/editor/sketch-session'
+import type { SketchPlaneEditSessionState } from '@/domain/editor/sketch-plane-editing'
 import type {
   DocumentFeatureCursor,
   WorkspaceSnapshot,
@@ -45,6 +46,8 @@ import type {
 } from '@/contracts/errors'
 import type { DocumentHistoryOrderEntry } from '@/domain/modeling/document-history'
 
+export type EditorCommandToolId = ToolId | 'sketchPlaneEdit'
+
 /**
  * Visible command metadata derived from the active machine state.
  * The command session ID is deterministic so event replay reaches the same state.
@@ -53,7 +56,7 @@ export interface EditorActiveCommand {
   /** Stable editor-owned correlation ID for the active command session. */
   commandSessionId: CommandSessionId
   /** Tool that opened the active command session. */
-  toolId: ToolId
+  toolId: EditorCommandToolId
   /** Current explicit lifecycle phase for the active command. */
   phase: 'armed' | 'collecting' | 'editing' | 'awaitingEffect'
 }
@@ -73,6 +76,8 @@ export interface EditorDocumentContext {
 export interface EditSessionCursorContext {
   /** Committed sketch or feature being edited through rollback-aware re-entry. */
   target: DocumentHistoryOrderEntry
+  /** Editor workflow that should resume after the rollback refresh completes. */
+  sessionKind: 'sketchAuthoring' | 'featureEdit' | 'sketchPlaneEdit'
   /** Document cursor immediately before the committed item being edited. */
   rollbackCursor: DocumentFeatureCursor
   /** Exact document cursor that was active before edit entry. */
@@ -180,6 +185,13 @@ export interface FeatureEditorState extends EditorStateBase {
   pendingCommitRequestId: RequestId | null
 }
 
+export interface SketchPlaneEditorState extends EditorStateBase {
+  kind: 'editingSketchPlane'
+  command: EditorActiveCommand
+  session: SketchPlaneEditSessionState
+  pendingCommitRequestId: RequestId | null
+}
+
 export interface ImportSessionState {
   providerId: string
   resolvedSource: ResolvedImportSource
@@ -216,6 +228,7 @@ export type EditorState =
   | SelectionCommandEditorState
   | SketchEditorState
   | FeatureEditorState
+  | SketchPlaneEditorState
   | ImportEditorState
   | SectionViewEditorState
 
@@ -322,6 +335,16 @@ export interface AuthoringReopenRequestedEvent {
   target: PrimitiveRef
   /** Tool flow to use for the reopen request. */
   toolId: ToolId
+}
+
+export interface SketchPlaneEditRequestedEvent {
+  type: 'sketchPlaneEdit.requested'
+  target: Extract<PrimitiveRef, { kind: 'sketch' }>
+}
+
+export interface SketchPlaneEditPatchedEvent {
+  type: 'sketchPlaneEdit.patched'
+  patch: FeatureDraftPatch
 }
 
 /** Updates the current sketch pointer position in sketch-plane coordinates. */
@@ -575,6 +598,8 @@ export type EditorEvent =
   | SketchConnectedSelectionRequestedEvent
   | SelectionClearedEvent
   | AuthoringReopenRequestedEvent
+  | SketchPlaneEditRequestedEvent
+  | SketchPlaneEditPatchedEvent
   | SketchPointerMovedEvent
   | SketchPointerReleasedEvent
   | SketchReferenceImagePayloadsPickedEvent
@@ -767,6 +792,26 @@ export type EditorEvent =
       message: string
     }
   | {
+      type: 'effect.sketchPlaneCommitted'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      revisionId: RevisionId
+      accepted: boolean
+      diagnostics: ModelingDiagnostic[]
+      actualRevisionId?: RevisionId
+      errorContext?: AppErrorContextEntry[]
+    }
+  | {
+      type: 'effect.sketchPlaneCommitFailed'
+      requestId: RequestId
+      documentId: DocumentId
+      commandSessionId: CommandSessionId
+      baseRevisionId: RevisionId
+      message: string
+    }
+  | {
       type: 'effect.sketchReferencesProjected'
       requestId: RequestId
       documentId: DocumentId
@@ -868,6 +913,13 @@ export type SketchEvent = Extract<
 export type FeatureEvent = Extract<
   EditorEvent,
   | { type: `form.${string}` }
+  | { type: 'command.cancelled' }
+  | { type: 'command.commitRequested' }
+>
+
+export type SketchPlaneEvent = Extract<
+  EditorEvent,
+  | { type: `sketchPlaneEdit.${string}` }
   | { type: 'command.cancelled' }
   | { type: 'command.commitRequested' }
 >
@@ -976,6 +1028,15 @@ export type EditorEffect =
       session: SketchSessionState
     }
   | {
+      type: 'sketchPlane.commit'
+      requestId: RequestId
+      commandSessionId: CommandSessionId
+      documentId: DocumentId
+      baseRevisionId: RevisionId
+      mutationBasis: SnapshotMutationBasis
+      session: SketchPlaneEditSessionState
+    }
+  | {
       type: 'sketch.projectReferences'
       requestId: RequestId
       commandSessionId: CommandSessionId
@@ -1051,6 +1112,19 @@ export interface EditorEffectRuntime {
     actualRevisionId?: RevisionId
     errorContext?: AppErrorContextEntry[]
   } | null>
+  /** Recommits a committed sketch with an updated origin-plane definition. */
+  commitSketchPlane(input: {
+    requestId: RequestId
+    baseRevisionId: RevisionId
+    baseRepositoryHeads?: readonly string[]
+    session: SketchPlaneEditSessionState
+  }): Promise<{
+    revisionId: RevisionId
+    accepted: boolean
+    diagnostics: ModelingDiagnostic[]
+    actualRevisionId?: RevisionId
+    errorContext?: AppErrorContextEntry[]
+  }>
   /** Projects authored external sketch references for active sketch display. */
   projectSketchReferences(input: {
     requestId: RequestId
@@ -1152,6 +1226,8 @@ export interface EditorViewState {
   preview: CommandPreview | null
   /** Active feature edit session, or null when not editing a feature. */
   activeEditSession: FeatureEditSessionState | null
+  /** Active committed-sketch plane edit session, or null when inactive. */
+  activeSketchPlaneEditSession?: SketchPlaneEditSessionState | null
   /** Active import session, or null when no import review session is open. */
   activeImportSession: ImportSessionState | null
   /** Active form reference picker field id, or null when no field is collecting selections. */

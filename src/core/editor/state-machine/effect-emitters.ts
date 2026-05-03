@@ -9,6 +9,10 @@ import {
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
 import {
+  buildSketchPlaneCommitRequest,
+  hasSketchPlaneEditChanges,
+} from '@/domain/editor/sketch-plane-editing'
+import {
   getSketchSpecialModeSelectionFilter,
   resolveSketchSpecialModeEffectRequest,
 } from '@/core/sketch-special-modes/presentation'
@@ -28,6 +32,7 @@ import type {
   FeatureEditorState,
   SelectionCommandEditorState,
   SketchEditorState,
+  SketchPlaneEditorState,
 } from './types'
 
 export function emitSnapshotFetch(
@@ -117,11 +122,17 @@ export function emitEditSessionCursorRestore(state: EditorState): EditorTransiti
     }
   }
 
+  const restoreContext =
+    context.phase === 'active'
+      ? advanceCursorPhase(context, 'commitCompleted') ?? context
+      : context
+  const restoringContext = advanceCursorPhase(restoreContext, 'restoreStarted')
+
   return emitDocumentCursorMove(
     withPreview(
       {
         ...state,
-        editSessionCursorContext: advanceCursorPhase(context, 'restoreStarted'),
+        editSessionCursorContext: restoringContext,
       },
       {
         kind: 'selection',
@@ -256,6 +267,51 @@ export function emitFeatureCommit(state: FeatureEditorState): EditorTransitionRe
         baseRevisionId: mutationBasis.baseRevisionId,
         mutationBasis,
         featureSession: draftSession,
+      },
+    ],
+  }
+}
+
+export function emitSketchPlaneCommit(state: SketchPlaneEditorState): EditorTransitionResult {
+  const mutationBasis = getSnapshotMutationBasis(state)
+  if (
+    mutationBasis === null
+    || state.document.documentId === null
+    || !hasSketchPlaneEditChanges(state.session)
+    || !buildSketchPlaneCommitRequest(state.session)
+  ) {
+    return {
+      state,
+      effects: [],
+    }
+  }
+
+  const requestId = nextRequestId(state, 'sketch-plane-commit')
+  const draftSession = {
+    ...state.session,
+    status: 'submitting' as const,
+  }
+
+  return {
+    state: {
+      ...state,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      pendingCommitRequestId: requestId,
+      command: {
+        ...state.command,
+        phase: 'awaitingEffect',
+      },
+      session: draftSession,
+    },
+    effects: [
+      {
+        type: 'sketchPlane.commit',
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: mutationBasis.baseRevisionId,
+        mutationBasis,
+        session: draftSession,
       },
     ],
   }

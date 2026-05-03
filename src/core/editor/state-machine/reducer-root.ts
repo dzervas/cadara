@@ -11,6 +11,10 @@ import {
   getSelectionFilterForFeatureType,
 } from '@/domain/editor/feature-editing'
 import {
+  getSketchPlaneEditSelectionTarget,
+  patchSketchPlaneEditSession,
+} from '@/domain/editor/sketch-plane-editing'
+import {
   getDocumentHistoryCursorIndex,
   isValidDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
@@ -22,6 +26,7 @@ import type {
   ImportWorkflowEvent,
   SectionEvent,
   SketchEvent,
+  SketchPlaneEvent,
   ToolActivatedEvent,
 } from './types'
 import {
@@ -50,6 +55,7 @@ import {
   emitEditSessionCursorRestore,
   emitFeaturePreview,
   emitSketchOpen,
+  emitSketchPlaneCommit,
   emitSnapshotFetch,
 } from './effect-emitters'
 import { isFeatureTool } from './utility-helpers'
@@ -66,6 +72,7 @@ import {
   handleSelectionCleared,
   handleViewportSelectionRequested,
   handleAuthoringReopenRequested,
+  handleSketchPlaneEditRequested,
 } from './transitions-viewport'
 import {
   handleEffectDocumentCursorMoved,
@@ -82,6 +89,8 @@ import {
   handleEffectFeatureCommitFailed,
   handleEffectSketchCommitted,
   handleEffectSketchCommitFailed,
+  handleEffectSketchPlaneCommitted,
+  handleEffectSketchPlaneCommitFailed,
   handleEffectSketchReferencesProjected,
   handleEffectSketchReferenceProjectionFailed,
   handleEffectSketchReferenceImageImportCompleted,
@@ -119,6 +128,60 @@ function isImportWorkflowEvent(event: EditorEvent): event is ImportWorkflowEvent
     || event.type === 'import.cancelled'
     || event.type === 'import.committed'
     || event.type === 'import.failed'
+}
+
+function isSketchPlaneEvent(event: EditorEvent): event is SketchPlaneEvent {
+  return event.type.startsWith('sketchPlaneEdit.')
+    || event.type === 'command.cancelled'
+    || event.type === 'command.commitRequested'
+}
+
+function reduceSketchPlaneWorkflow(
+  state: Extract<EditorState, { kind: 'editingSketchPlane' }>,
+  event: SketchPlaneEvent,
+): EditorTransitionResult {
+  switch (event.type) {
+    case 'command.cancelled':
+      if (state.command.commandSessionId !== event.commandSessionId) {
+        return { state, effects: [] }
+      }
+
+      if (state.editSessionCursorContext?.phase === 'active') {
+        return emitEditSessionCursorRestore(toIdleState(state, 'part'))
+      }
+
+      return {
+        state: toIdleState(state, 'part'),
+        effects: [],
+      }
+    case 'command.commitRequested':
+      return state.command.commandSessionId === event.commandSessionId
+        ? emitSketchPlaneCommit(state)
+        : { state, effects: [] }
+    case 'sketchPlaneEdit.patched': {
+      const session = patchSketchPlaneEditSession(state.session, event.patch)
+      return {
+        state: withPreview(
+          {
+            ...state,
+            session,
+            command: {
+              ...state.command,
+              phase: 'editing',
+            },
+          },
+          {
+            kind: 'selection',
+            label: `Editing ${session.sketchLabel}`,
+            target: getSketchPlaneEditSelectionTarget(session),
+          },
+        ),
+        effects: [],
+      }
+    }
+  }
+
+  return { state, effects: [] }
 }
 
 function isSectionEvent(event: EditorEvent): event is SectionEvent {
@@ -194,7 +257,7 @@ function handleSketchToolActivation(state: EditorState): EditorTransitionResult 
       const cursorContext = createEditSessionCursorContext(state.snapshot, {
         kind: 'sketch',
         sketchId: selectedTarget.sketchId,
-      })
+      }, 'sketchAuthoring')
 
       if (!cursorContext) {
         return {
@@ -254,7 +317,7 @@ function handleFeatureToolActivation(
     const cursorContext = createEditSessionCursorContext(state.snapshot, {
       kind: 'feature',
       featureId: selectedTarget.featureId,
-    })
+    }, 'featureEdit')
 
     if (!cursorContext) {
       return {
@@ -372,6 +435,10 @@ function routeToWorkflow(
     return reduceFeatureWorkflow(state, event, dependencies)
   }
 
+  if (state.kind === 'editingSketchPlane' && isSketchPlaneEvent(event)) {
+    return reduceSketchPlaneWorkflow(state, event)
+  }
+
   if (state.kind === 'importing' && isImportWorkflowEvent(event)) {
     return reduceImportWorkflow(state, event, dependencies)
   }
@@ -454,6 +521,8 @@ function handleSharedEvent(
       return handleViewportSelectionRequested(state, event, dependencies)
     case 'authoring.reopenRequested':
       return handleAuthoringReopenRequested(state, event)
+    case 'sketchPlaneEdit.requested':
+      return handleSketchPlaneEditRequested(state, event)
     case 'sketch.referenceImagePayloadsPicked':
       return state.kind === 'selectionCommand'
         ? handleSketchReferenceImagePayloadsPicked(state, event, transitionEditorState)
@@ -495,6 +564,10 @@ function handleSharedEvent(
       return handleEffectSketchCommitted(state, event)
     case 'effect.sketchCommitFailed':
       return handleEffectSketchCommitFailed(state, event)
+    case 'effect.sketchPlaneCommitted':
+      return handleEffectSketchPlaneCommitted(state, event)
+    case 'effect.sketchPlaneCommitFailed':
+      return handleEffectSketchPlaneCommitFailed(state, event)
     case 'effect.sketchReferencesProjected':
       return handleEffectSketchReferencesProjected(state, event)
     case 'effect.sketchReferenceProjectionFailed':

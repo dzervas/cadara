@@ -94,9 +94,9 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
     'Toolbar search should expose collapsed combobox semantics before any results are shown.',
   )
   expectTrue(
-    toolbarMarkup.includes('aria-label="CADara document menu"')
-      && toolbarMarkup.indexOf('aria-label="CADara document menu"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
-    'Toolbar should render the document file menu trigger (the spark logo) before the CAD tool sections.',
+    toolbarMarkup.includes('aria-label="File"')
+      && toolbarMarkup.indexOf('aria-label="File"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
+    'Toolbar should render the file menu trigger (the spark logo) before the CAD tool sections.',
   )
   expectTrue(
     toolbarMarkup.includes('min-w-0'),

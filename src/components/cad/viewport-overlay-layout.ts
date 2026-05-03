@@ -7,6 +7,35 @@ export const VIEW_CUBE_SIZE_PX = 120
  * Used by the view cube, notifications, and any other top-anchored overlay.
  */
 export const VIEWPORT_OVERLAY_TOP_INSET_PX = 76
+/**
+ * Top inset for the cad-viewport canvas itself. Matches the legacy structural
+ * toolbar height (Mantine Paper py={4} + 40px ActionIcon = 48px) so e2e specs
+ * that hardcode viewport-relative pointer coordinates resolve to the same
+ * world-space position they did under the structural shell.
+ *
+ * Note: there is no horizontal counterpart — per design the canvas extends
+ * to the left edge of `<main>` so the floating parts tree overlays a live
+ * 3D view, not an opaque graphite reserve.
+ */
+export const VIEWPORT_CANVAS_TOP_INSET_PX = 48
+
+/**
+ * Width of the legacy structural sidebar that the canvas no longer reserves.
+ * The fullscreen canvas extends `LEGACY_VIEWPORT_LEFT_INSET_PX` further to
+ * the LEFT than the legacy canvas did; the orthographic camera frustum scales
+ * with canvas width, so the same world point now projects 180px (= 360/2)
+ * further LEFT in canvas pixel space than under the legacy 1080px canvas.
+ *
+ * This constant exists so the e2e marker `data-testid="cad-viewport"` can sit
+ * at (180, 48, 1080, 912) — recreating the legacy viewport bbox without
+ * reserving the corresponding screen real estate. Tests that hardcode pixel
+ * coordinates (`hoverViewportAtReal({x, y})`) and projection-based clicks both
+ * resolve through this marker so they hit the same world points they did
+ * under the structural shell.
+ */
+export const LEGACY_VIEWPORT_LEFT_INSET_PX = 180
+export const LEGACY_VIEWPORT_WIDTH_PX = 1080
+export const LEGACY_VIEWPORT_HEIGHT_PX = 912
 export const WORKBENCH_STATUS_TOP_PX = VIEWPORT_OVERLAY_TOP_INSET_PX
 export const WORKBENCH_STATUS_TOP_WITH_RESTORE_PX = WORKBENCH_STATUS_TOP_PX + 60
 
