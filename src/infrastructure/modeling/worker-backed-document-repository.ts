@@ -1,4 +1,8 @@
 import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
+import type {
+  DurableHistoryAvailability,
+  PersistedSketchDraftSession,
+} from '@/contracts/modeling/durable-history'
 import type { DocumentId } from '@/contracts/shared/ids'
 import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
 import type { DocumentSyncWorkerClient } from '@/infrastructure/workers/document-sync-worker-client'
@@ -105,6 +109,58 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
 
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
     return this.metadata.get(documentId) ?? { documentId, heads: [], source: 'restore' }
+  }
+
+  getDurableHistoryAvailability(documentId: DocumentId): Promise<DurableHistoryAvailability> {
+    return this.client.getDurableHistoryAvailability({ documentId })
+  }
+
+  async undoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null> {
+    const result = await this.client.undoDurableHistory({ documentId })
+    if (!result?.ok) {
+      if (result) {
+        this.statuses.set(documentId, result.status)
+      }
+      return result
+    }
+
+    return this.normalizeResult(result)
+  }
+
+  async redoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null> {
+    const result = await this.client.redoDurableHistory({ documentId })
+    if (!result?.ok) {
+      if (result) {
+        this.statuses.set(documentId, result.status)
+      }
+      return result
+    }
+
+    return this.normalizeResult(result)
+  }
+
+  getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    return this.client.getSketchDraftHistory({ documentId, draftKey })
+  }
+
+  saveSketchDraftHistory(
+    documentId: DocumentId,
+    draftKey: string,
+    session: PersistedSketchDraftSession,
+  ) {
+    return this.client.saveSketchDraftHistory({ documentId, draftKey, session })
+  }
+
+  undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    return this.client.undoSketchDraftHistory({ documentId, draftKey })
+  }
+
+  redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    return this.client.redoSketchDraftHistory({ documentId, draftKey })
+  }
+
+  clearSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    return this.client.clearSketchDraftHistory({ documentId, draftKey })
   }
 
   async bindLocalFile(input: {

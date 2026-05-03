@@ -1,29 +1,8 @@
-import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
 import type { DocumentHistoryOrderEntry } from '@/contracts/modeling/schema'
 import {
   getDocumentHistoryOrderEntryKey,
   reorderDocumentHistoryOrder,
 } from '@/domain/modeling/document-history'
-
-interface WorkbenchHistoryAvailabilityInput {
-  documentHistory: EditorHistoryAvailability
-  undoStackLength: number
-  redoStackLength: number
-  isUndoRedoRunning: boolean
-}
-
-export function getWorkbenchHistoryAvailability(
-  input: WorkbenchHistoryAvailabilityInput,
-): EditorHistoryAvailability {
-  if (input.isUndoRedoRunning) {
-    return { canUndo: false, canRedo: false }
-  }
-
-  return {
-    canUndo: input.undoStackLength > 0 || input.documentHistory.canUndo,
-    canRedo: input.redoStackLength > 0 || input.documentHistory.canRedo,
-  }
-}
 
 export interface DocumentHistoryOrderRestoreMove {
   item: DocumentHistoryOrderEntry

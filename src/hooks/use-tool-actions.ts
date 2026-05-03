@@ -12,6 +12,7 @@ import {
 import { supportedReferenceImageFileTypes } from '@/domain/reference-image/raster'
 import { readReferenceImagePayload } from '@/domain/reference-image/import-flow'
 import { WorkbenchCommandContext } from '@/hooks/workbench-command-context'
+import type { WorkbenchCommandHandlers } from '@/hooks/workbench-command-context'
 import { showOpenImportFilePicker } from '@/lib/import-file-picker'
 
 const useRequiredToolActionContext = createRequiredContextHook(
@@ -24,9 +25,19 @@ export function useToolActionBus() {
   return useRequiredToolActionContext().actionBus
 }
 
-export function useToolActions() {
+type ToolActionCommandHandlers = Pick<
+  WorkbenchCommandHandlers,
+  'requestPartImport' | 'requestRedo' | 'requestUndo'
+>
+
+interface ToolActionsOptions {
+  commandHandlers?: ToolActionCommandHandlers | null
+}
+
+export function useToolActions(options: ToolActionsOptions = {}) {
   const { actionBus } = useRequiredToolActionContext()
-  const commandHandlers = useContext(WorkbenchCommandContext)
+  const contextCommandHandlers = useContext(WorkbenchCommandContext)
+  const commandHandlers = options.commandHandlers ?? contextCommandHandlers
   const {
     machineState,
     dispatch,

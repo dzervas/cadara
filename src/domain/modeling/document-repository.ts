@@ -5,13 +5,24 @@ import type {
   GeometryAssetHash,
   GeometryAssetRecord,
 } from '@/contracts/modeling/geometry-assets'
+import type {
+  DurableHistoryAvailability,
+  PersistedSketchDraftSession,
+} from '@/contracts/modeling/durable-history'
 import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import type { DocumentId } from '@/contracts/shared/ids'
 import type { LocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
 import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
-export type DocumentRepositoryChangeSource = 'local' | 'peer' | 'restore' | 'seed' | 'reset'
+export type DocumentRepositoryChangeSource =
+  | 'local'
+  | 'peer'
+  | 'restore'
+  | 'seed'
+  | 'reset'
+  | 'undo'
+  | 'redo'
 
 export interface DocumentRepositoryMetadata {
   documentId: DocumentId
@@ -75,6 +86,36 @@ export interface DocumentRepository {
   reset(documentId: DocumentId): Promise<DocumentRepositoryRestoreStatus>
   getRestoreStatus(documentId: DocumentId): DocumentRepositoryRestoreStatus
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata
+  getDurableHistoryAvailability(documentId: DocumentId): Promise<DurableHistoryAvailability>
+  undoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null>
+  redoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null>
+  getSketchDraftHistory(
+    documentId: DocumentId,
+    draftKey: string,
+  ): Promise<{
+    session: PersistedSketchDraftSession | null
+    availability: DurableHistoryAvailability
+  }>
+  saveSketchDraftHistory(
+    documentId: DocumentId,
+    draftKey: string,
+    session: PersistedSketchDraftSession,
+  ): Promise<DurableHistoryAvailability>
+  undoSketchDraftHistory(
+    documentId: DocumentId,
+    draftKey: string,
+  ): Promise<{
+    session: PersistedSketchDraftSession | null
+    availability: DurableHistoryAvailability
+  }>
+  redoSketchDraftHistory(
+    documentId: DocumentId,
+    draftKey: string,
+  ): Promise<{
+    session: PersistedSketchDraftSession | null
+    availability: DurableHistoryAvailability
+  }>
+  clearSketchDraftHistory(documentId: DocumentId, draftKey: string): Promise<void>
 }
 
 export interface GeometryAssetDocumentRepository extends DocumentRepository {

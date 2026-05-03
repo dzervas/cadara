@@ -30,6 +30,7 @@ import type {
 import type { EditorExtensionDependencies } from './dependencies'
 import {
   emitSketchCommit,
+  emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
   emitEditSessionCursorRestore,
 } from './effect-emitters'
@@ -218,6 +219,17 @@ export function reduceSketchWorkflow(
       return getEditorHistoryAvailability(state).canRedo
         ? moveSketchHistory(state, 'redo')
         : { state, effects: [] }
+    case 'sketch.draftHistoryRestored':
+      return emitSketchReferenceProjection({
+        ...state,
+        selection: [{ kind: 'sketch', sketchId: event.session.sketchId ?? ('sketch_draft' as const) }],
+        hoverTarget: null,
+        preview: {
+          kind: 'sketch',
+          label: getSketchSessionPreviewLabel(event.session),
+          target: event.session.planeTarget,
+        },
+      }, event.session)
     case 'command.cancelled':
       if (state.command.commandSessionId !== event.commandSessionId) {
         return { state, effects: [] }

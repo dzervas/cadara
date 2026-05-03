@@ -29,6 +29,7 @@ function createWorkerMessageHandler(search: string) {
       repository: createIndexedDbAutomergeDocumentRepository({
         urlStore: repositoryUrlStore,
         databaseName: workerSearchParams.get('cadRepositoryDbName') ?? undefined,
+        historyScope: workerSearchParams.get('cadLocalHistoryScope') ?? undefined,
         localPeerSync: localPeerSyncEnabled
           ? { channelName: workerSearchParams.get('cadLocalPeerSyncChannel') ?? undefined }
           : false,

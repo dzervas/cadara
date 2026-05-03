@@ -95,6 +95,71 @@ export class DocumentSyncWorkerClient {
     )
   }
 
+  getDurableHistoryAvailability(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'getDurableHistoryAvailability' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('getDurableHistoryAvailability', 'durableHistoryAvailability', input).then((message) =>
+      (message as Extract<DocumentSyncWorkerResponse, { kind: 'durableHistoryAvailability' }>).availability,
+    )
+  }
+
+  undoDurableHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'undoDurableHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('undoDurableHistory', 'durableHistoryMutated', input).then((message) =>
+      (message as Extract<DocumentSyncWorkerResponse, { kind: 'durableHistoryMutated' }>).result,
+    )
+  }
+
+  redoDurableHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'redoDurableHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('redoDurableHistory', 'durableHistoryMutated', input).then((message) =>
+      (message as Extract<DocumentSyncWorkerResponse, { kind: 'durableHistoryMutated' }>).result,
+    )
+  }
+
+  getSketchDraftHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'getSketchDraftHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('getSketchDraftHistory', 'sketchDraftHistory', input).then((message) => ({
+      session: (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistory' }>).session,
+      availability: (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistory' }>).availability,
+    }))
+  }
+
+  saveSketchDraftHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'saveSketchDraftHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('saveSketchDraftHistory', 'sketchDraftHistorySaved', input).then((message) =>
+      (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistorySaved' }>).availability,
+    )
+  }
+
+  undoSketchDraftHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'undoSketchDraftHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('undoSketchDraftHistory', 'sketchDraftHistory', input).then((message) => ({
+      session: (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistory' }>).session,
+      availability: (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistory' }>).availability,
+    }))
+  }
+
+  redoSketchDraftHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'redoSketchDraftHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('redoSketchDraftHistory', 'sketchDraftHistory', input).then((message) => ({
+      session: (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistory' }>).session,
+      availability: (message as Extract<DocumentSyncWorkerResponse, { kind: 'sketchDraftHistory' }>).availability,
+    }))
+  }
+
+  clearSketchDraftHistory(
+    input: Omit<Extract<DocumentSyncWorkerRequest, { kind: 'clearSketchDraftHistory' }>, 'kind' | 'requestId'>,
+  ) {
+    return this.request('clearSketchDraftHistory', 'sketchDraftHistoryCleared', input).then(() => undefined)
+  }
+
   async subscribe(
     documentId: Extract<DocumentSyncWorkerRequest, { kind: 'subscribe' }>['documentId'],
     listener: (event: Extract<DocumentSyncWorkerResponse, { kind: 'documentChanged' }>['event']) => void,

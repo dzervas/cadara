@@ -56,6 +56,36 @@ test('createBrowserDocumentSyncWorkerClient defaults bootstrap search to an empt
   )
 })
 
+test('createBrowserDocumentSyncWorkerClient appends a session scoped local-history key for the worker bootstrap', () => {
+  const worker = new FakeBrowserWorker()
+  const sessionStorage = createMemorySessionStorage()
+
+  createBrowserDocumentSyncWorkerClient({
+    search: '?document=abc',
+    createWorker: () => worker,
+    sessionStorage,
+  }).dispose()
+
+  const firstSearch = worker.bootstrapMessages[0]?.search ?? ''
+  const firstScope = new URLSearchParams(firstSearch).get('cadLocalHistoryScope')
+  expectTrue(
+    firstScope !== null && new URLSearchParams(firstSearch).get('document') === 'abc',
+    'Browser worker bootstrap should preserve the provided search and append a stable local-history scope.',
+  )
+
+  const secondWorker = new FakeBrowserWorker()
+  createBrowserDocumentSyncWorkerClient({
+    search: '?document=xyz',
+    createWorker: () => secondWorker,
+    sessionStorage,
+  }).dispose()
+
+  expectTrue(
+    new URLSearchParams(secondWorker.bootstrapMessages[0]?.search ?? '').get('cadLocalHistoryScope') === firstScope,
+    'Browser worker bootstrap should reuse the same session scoped local-history key across refreshes in one tab.',
+  )
+})
+
 class FakeBrowserWorker implements DocumentSyncWorkerLike {
   readonly postedRequests: Extract<DocumentSyncWorkerRequest, { kind: 'getWriteStatus' }>[] = []
   readonly bootstrapMessages: { kind: 'bootstrap'; search: string }[] = []
@@ -92,5 +122,17 @@ class FakeBrowserWorker implements DocumentSyncWorkerLike {
 
   emit(message: DocumentSyncWorkerResponse) {
     this.listener?.({ data: message } as MessageEvent<DocumentSyncWorkerResponse>)
+  }
+}
+
+function createMemorySessionStorage() {
+  const values = new Map<string, string>()
+  return {
+    getItem(key: string) {
+      return values.get(key) ?? null
+    },
+    setItem(key: string, value: string) {
+      values.set(key, value)
+    },
   }
 }

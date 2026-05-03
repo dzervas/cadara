@@ -46,7 +46,7 @@ import type { GeometryAssetDiagnosticDetail } from "@/contracts/modeling/geometr
 
 export interface DocumentSnapshotProvenance {
 	repositoryHeads: readonly string[];
-	repositorySource: "local" | "peer" | "restore" | "seed" | "reset" | null;
+	repositorySource: "local" | "peer" | "restore" | "seed" | "reset" | "undo" | "redo" | null;
 }
 
 export interface SnapshotMutationBasis {

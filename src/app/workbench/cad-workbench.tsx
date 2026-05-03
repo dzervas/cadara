@@ -53,6 +53,7 @@ import {
 	getSketchToolPresentation,
 	getSketchSessionRegionDiagnostics,
 } from "@/domain/editor/sketch-session";
+import { persistSketchDraftSession } from "@/domain/editor/sketch-session/persistence";
 import {
 	getSketchSpecialModePanel,
 	getSketchSpecialModeViewportPresentation,
@@ -82,6 +83,7 @@ import { useCadaraDebugPlatform } from "@/app/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { useFeatureEditing } from "@/hooks/use-feature-editing";
+import { useDurableHistory } from "@/hooks/use-durable-history";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useModelingService } from "@/hooks/use-modeling-service";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
@@ -140,7 +142,7 @@ export function CadWorkbench({
 	onSyncActiveDocumentTab,
 }: CadWorkbenchProps) {
 	const actionBus = useToolActionBus();
-	const { triggerTool } = useToolActions();
+	const durableHistory = useDurableHistory();
 	const modelingService = useModelingService();
 	const { sketchSpecialModes } = useRuntimeExtensionRegistry();
 	const documentOwner = useWorkbenchDocumentOwner();
@@ -167,6 +169,19 @@ export function CadWorkbench({
 		getRuntimeTrace,
 	} = useEditorState();
 	const snapshot = machineState.snapshot;
+	const sketchDraftSyncRef = useRef<{
+		documentId: DocumentId | null;
+		draftKey: string | null;
+		sessionHash: string | null;
+	}>({
+		documentId: null,
+		draftKey: null,
+		sessionHash: null,
+	});
+	const previousSketchDraftRef = useRef<{
+		documentId: DocumentId;
+		draftKey: string;
+	} | null>(null);
 	const initialOccRenderPending = isInitialOccRenderPending(machineState);
 	const previewRenderables = machineState.previewRenderables;
 	const [variablesPanelOpen, setVariablesPanelOpen] = useState(false);
@@ -443,6 +458,92 @@ export function CadWorkbench({
 		sketchSession,
 		snapshot,
 	});
+	const { triggerTool } = useToolActions({
+		commandHandlers: {
+			requestPartImport,
+			requestRedo,
+			requestUndo,
+		},
+	});
+
+	useEffect(() => {
+		if (!sketchSession || !snapshot) {
+			const previousDraft = previousSketchDraftRef.current;
+			previousSketchDraftRef.current = null;
+			sketchDraftSyncRef.current = {
+				documentId: null,
+				draftKey: null,
+				sessionHash: null,
+			};
+			if (previousDraft) {
+				void durableHistory.clearSketchDraft(previousDraft);
+			}
+			return;
+		}
+
+		const documentId = snapshot.document.documentId;
+		const draftKey = durableHistory.getSketchDraftKey(sketchSession);
+		const sessionHash = JSON.stringify(persistSketchDraftSession(sketchSession));
+		const trackedSession = sketchDraftSyncRef.current;
+		previousSketchDraftRef.current = { documentId, draftKey };
+
+		let cancelled = false;
+		if (trackedSession.documentId !== documentId || trackedSession.draftKey !== draftKey) {
+			void durableHistory.restoreSketchDraft({
+				documentId,
+				session: sketchSession,
+			}).then((restoredSession) => {
+				if (cancelled) {
+					return;
+				}
+
+				if (restoredSession) {
+					const restoredHash = JSON.stringify(persistSketchDraftSession(restoredSession));
+					sketchDraftSyncRef.current = {
+						documentId,
+						draftKey,
+						sessionHash: restoredHash,
+					};
+					if (restoredHash !== sessionHash) {
+						dispatch({ type: "sketch.draftHistoryRestored", session: restoredSession });
+						return;
+					}
+				}
+
+				sketchDraftSyncRef.current = {
+					documentId,
+					draftKey,
+					sessionHash,
+				};
+				void durableHistory.syncSketchDraft({
+					documentId,
+					session: sketchSession,
+				});
+			});
+
+			return () => {
+				cancelled = true;
+			};
+		}
+
+		if (trackedSession.sessionHash === sessionHash) {
+			return;
+		}
+
+		sketchDraftSyncRef.current = {
+			documentId,
+			draftKey,
+			sessionHash,
+		};
+		void durableHistory.syncSketchDraft({
+			documentId,
+			session: sketchSession,
+		});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [dispatch, durableHistory, sketchSession, snapshot]);
 	const {
 		handleNavigationReopen,
 		handleSectionClear,

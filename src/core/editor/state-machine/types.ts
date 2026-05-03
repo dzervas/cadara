@@ -471,6 +471,12 @@ export interface HistoryRedoRequestedEvent {
   type: 'history.redoRequested'
 }
 
+/** Replaces the active sketch draft with a repository-backed durable-history state. */
+export interface SketchDraftHistoryRestoredEvent {
+  type: 'sketch.draftHistoryRestored'
+  session: SketchSessionState
+}
+
 /** Deletes a targeted sketch-local authoring-operation row from history. */
 export interface SketchHistoryOperationDeleteRequestedEvent {
   type: 'sketch.historyOperationDeleteRequested'
@@ -620,6 +626,7 @@ export type EditorEvent =
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent
+  | SketchDraftHistoryRestoredEvent
   | SketchHistoryOperationDeleteRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
   | SketchAnnotationEditRequestedEvent

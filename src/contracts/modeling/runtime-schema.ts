@@ -595,6 +595,8 @@ export const workspaceSnapshotSchema = z.object({
       z.literal('restore'),
       z.literal('seed'),
       z.literal('reset'),
+      z.literal('undo'),
+      z.literal('redo'),
     ]).nullable(),
   }).nullable().optional(),
 }).transform((value) => ({

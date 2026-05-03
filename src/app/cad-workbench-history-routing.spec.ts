@@ -2,6 +2,7 @@ import { beforeEach, mock, test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
 import { createAppError, createTestErrorReporter, err, ok } from '@/contracts/errors'
+import type { DurableHistoryService } from '@/application/workbench/durable-history'
 
 import {
   createHookTestHarness,
@@ -11,6 +12,8 @@ import {
 const hookHarness = createHookTestHarness()
 const actualReactModule = await import('react')
 const actualWorkbenchDocumentOwnerModule = await import('@/hooks/use-workbench-document-owner')
+let currentDurableHistory: DurableHistoryService = createDurableHistoryStub()
+
 mock.module('react', () => hookHarness.reactModule)
 mock.module('@/hooks/use-workbench-document-owner', () => ({
   useWorkbenchDocumentOwner() {
@@ -24,6 +27,11 @@ mock.module('@/hooks/use-workbench-document-owner', () => ({
     }
   },
 }))
+mock.module('@/hooks/use-durable-history', () => ({
+  useDurableHistory() {
+    return currentDurableHistory
+  },
+}))
 
 const { useWorkbenchHistory } = await import('./workbench/controllers/use-workbench-history')
 mock.module('react', () => actualReactModule)
@@ -31,6 +39,7 @@ mock.module('@/hooks/use-workbench-document-owner', () => actualWorkbenchDocumen
 
 beforeEach(() => {
   hookHarness.reset()
+  currentDurableHistory = createDurableHistoryStub()
 })
 
 function makeHistoryItem(kind: 'feature' | 'sketch', id: string, label = id) {
@@ -58,6 +67,7 @@ function makeHistoryItem(kind: 'feature' | 'sketch', id: string, label = id) {
 function makeSnapshot(input?: {
   cursor?: { kind: 'empty' } | { kind: 'feature'; featureId: string } | { kind: 'sketch'; sketchId: string }
   documentHistory?: ReturnType<typeof makeHistoryItem>[]
+  documentId?: string
   revisionId?: string
   variables?: Array<{ variableId: string; name: string; valueText: string }>
 }) {
@@ -66,6 +76,7 @@ function makeSnapshot(input?: {
   return {
     document: {
       cursor: input?.cursor ?? { kind: 'empty' as const },
+      documentId: input?.documentId ?? 'doc_workspace',
       revisionId,
       variables: input?.variables ?? [],
     },
@@ -75,8 +86,27 @@ function makeSnapshot(input?: {
   } as never
 }
 
-test('useWorkbenchHistory gives sketch sessions undo and redo priority', () => {
+test('useWorkbenchHistory routes sketch undo and redo through the durable history service', async () => {
   const dispatched: unknown[] = []
+  currentDurableHistory = createDurableHistoryStub({
+    async getAvailability() {
+      return { canUndo: true, canRedo: true }
+    },
+    async undo() {
+      return {
+        context: 'sketch',
+        session: { sketchId: 'sketch_restored_undo' } as never,
+        availability: { canUndo: false, canRedo: true },
+      }
+    },
+    async redo() {
+      return {
+        context: 'sketch',
+        session: { sketchId: 'sketch_restored_redo' } as never,
+        availability: { canUndo: true, canRedo: false },
+      }
+    },
+  })
 
   const controller = hookHarness.render(() =>
     useWorkbenchHistory({
@@ -101,32 +131,46 @@ test('useWorkbenchHistory gives sketch sessions undo and redo priority', () => {
       showWorkbenchError() {
         throw new Error('Sketch undo should not surface a document error.')
       },
-      sketchSession: { id: 'active-sketch' },
+      sketchSession: { sketchId: 'sketch_active' } as never,
       snapshot: makeSnapshot(),
     }),
   )
 
   controller.requestUndo()
   controller.requestRedo()
+  await flushMicrotasks()
 
   expectTrue(
     JSON.stringify(dispatched) === JSON.stringify([
-      { type: 'history.undoRequested' },
-      { type: 'history.redoRequested' },
+      { type: 'sketch.draftHistoryRestored', session: { sketchId: 'sketch_restored_undo' } },
+      { type: 'sketch.draftHistoryRestored', session: { sketchId: 'sketch_restored_redo' } },
     ]),
-    'Active sketch sessions should consume undo and redo before document-level history runs.',
+    'Sketch undo and redo should restore draft sessions through the durable history coordinator.',
   )
 })
 
-test('useWorkbenchHistory falls back to document history cursors when local stacks are empty', () => {
+test('useWorkbenchHistory routes document undo and redo through the durable history service', async () => {
   const dispatched: unknown[] = []
-  const snapshot = makeSnapshot({
-    cursor: { featureId: 'feature_b', kind: 'feature' },
-    documentHistory: [
-      makeHistoryItem('sketch', 'sketch_a'),
-      makeHistoryItem('feature', 'feature_b'),
-      makeHistoryItem('feature', 'feature_c'),
-    ],
+  const undoSnapshot = makeSnapshot({ revisionId: 'rev_history_undo' })
+  const redoSnapshot = makeSnapshot({ revisionId: 'rev_history_redo' })
+  currentDurableHistory = createDurableHistoryStub({
+    async getAvailability() {
+      return { canUndo: true, canRedo: true }
+    },
+    async undo() {
+      return {
+        context: 'document',
+        snapshot: undoSnapshot,
+        availability: { canUndo: false, canRedo: true },
+      }
+    },
+    async redo() {
+      return {
+        context: 'document',
+        snapshot: redoSnapshot,
+        availability: { canUndo: true, canRedo: false },
+      }
+    },
   })
 
   const controller = hookHarness.render(() =>
@@ -134,10 +178,10 @@ test('useWorkbenchHistory falls back to document history cursors when local stac
       deps: {
         documentOwner: {
           async reorderDocumentHistory() {
-            throw new Error('Cursor fallback should not reorder history.')
+            throw new Error('Document undo should not reorder document history directly.')
           },
           async updateDocumentVariable() {
-            throw new Error('Cursor fallback should not mutate variables.')
+            throw new Error('Document undo should not mutate variables directly.')
           },
         },
       },
@@ -145,43 +189,121 @@ test('useWorkbenchHistory falls back to document history cursors when local stac
         dispatched.push(event)
       },
       errorReporter: createTestErrorReporter(),
-      history: { canRedo: true, canUndo: true },
+      history: { canRedo: false, canUndo: false },
       setInvalidVariableValueMessages() {
-        throw new Error('Cursor fallback should not touch variable validation messages.')
+        throw new Error('Document undo should not touch variable validation messages.')
       },
       showWorkbenchError() {
-        throw new Error('Cursor fallback should not surface a document error.')
+        throw new Error('Document undo should not surface a document error.')
       },
       sketchSession: null,
-      snapshot,
+      snapshot: makeSnapshot(),
     }),
   )
 
   controller.requestUndo()
   controller.requestRedo()
+  await flushMicrotasks()
 
-  expectTrue(dispatched.length === 2, 'Cursor fallback should dispatch one undo cursor request and one redo cursor request.')
   expectTrue(
-    (dispatched[0] as { type: string; cursor: { kind: string; sketchId?: string } }).type === 'document.historyCursorRequested'
-      && (dispatched[0] as { type: string; cursor: { kind: string; sketchId?: string } }).cursor.kind === 'sketch'
-      && (dispatched[0] as { type: string; cursor: { kind: string; sketchId?: string } }).cursor.sketchId === 'sketch_a',
-    'Undo cursor fallback should target the previous document-history row.',
-  )
-  expectTrue(
-    (dispatched[1] as { type: string; cursor: { kind: string; featureId?: string } }).type === 'document.historyCursorRequested'
-      && (dispatched[1] as { type: string; cursor: { kind: string; featureId?: string } }).cursor.kind === 'feature'
-      && (dispatched[1] as { type: string; cursor: { kind: string; featureId?: string } }).cursor.featureId === 'feature_c',
-    'Redo cursor fallback should target the next document-history row.',
+    JSON.stringify(dispatched) === JSON.stringify([
+      { type: 'document.replaced', snapshot: undoSnapshot },
+      { type: 'document.replaced', snapshot: redoSnapshot },
+    ]),
+    'Document undo and redo should replace the active snapshot through the durable history coordinator.',
   )
 })
 
-test('useWorkbenchHistory updates variables through the document owner and tracks undo and redo state', async () => {
+test('useWorkbenchHistory derives sketch toolbar availability from the durable history service', async () => {
+  currentDurableHistory = createDurableHistoryStub({
+    async getAvailability() {
+      return { canUndo: true, canRedo: false }
+    },
+    getSketchDraftKey() {
+      return 'sketch:sketch_active'
+    },
+  })
+
+  let controller = hookHarness.render(() =>
+    useWorkbenchHistory({
+      deps: {
+        documentOwner: {
+          async reorderDocumentHistory() {
+            throw new Error('Sketch availability should not reorder document history.')
+          },
+          async updateDocumentVariable() {
+            throw new Error('Sketch availability should not update variables.')
+          },
+        },
+      },
+      dispatch() {
+        throw new Error('Sketch availability should not dispatch editor events.')
+      },
+      errorReporter: createTestErrorReporter(),
+      history: { canRedo: false, canUndo: false },
+      setInvalidVariableValueMessages() {
+        throw new Error('Sketch availability should not touch variable validation messages.')
+      },
+      showWorkbenchError() {
+        throw new Error('Sketch availability should not surface workbench errors.')
+      },
+      sketchSession: { sketchId: 'sketch_active' } as never,
+      snapshot: makeSnapshot(),
+    }),
+  )
+
+  await hookHarness.flushEffects()
+  await flushMicrotasks()
+  controller = hookHarness.render(() =>
+    useWorkbenchHistory({
+      deps: {
+        documentOwner: {
+          async reorderDocumentHistory() {
+            throw new Error('Sketch availability should not reorder document history.')
+          },
+          async updateDocumentVariable() {
+            throw new Error('Sketch availability should not update variables.')
+          },
+        },
+      },
+      dispatch() {
+        throw new Error('Sketch availability should not dispatch editor events.')
+      },
+      errorReporter: createTestErrorReporter(),
+      history: { canRedo: false, canUndo: false },
+      setInvalidVariableValueMessages() {
+        throw new Error('Sketch availability should not touch variable validation messages.')
+      },
+      showWorkbenchError() {
+        throw new Error('Sketch availability should not surface workbench errors.')
+      },
+      sketchSession: { sketchId: 'sketch_active' } as never,
+      snapshot: makeSnapshot(),
+    }),
+  )
+
+  expectTrue(
+    controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
+    'Active sketch toolbar availability should come from the durable-history coordinator, not the legacy sketch cursor availability.',
+  )
+})
+
+test('useWorkbenchHistory updates variables through the document owner and reflects durable-history availability', async () => {
   const reporter = createTestErrorReporter()
   const ownerCalls: unknown[] = []
+  const availabilityRequests: string[] = []
   const shownErrors: string[] = []
   let invalidVariableMessages: Record<string, string> = { width: 'stale error' }
   let currentSnapshot = makeSnapshot({
     variables: [{ name: 'Width', valueText: '10 mm', variableId: 'width' }],
+  })
+  currentDurableHistory = createDurableHistoryStub({
+    async getAvailability(input) {
+      availabilityRequests.push(currentSnapshot.document.revisionId)
+      return input.documentId === 'doc_workspace' && currentSnapshot.document.revisionId === 'rev_history_2'
+        ? { canUndo: true, canRedo: false }
+        : { canUndo: false, canRedo: false }
+    },
   })
 
   const setInvalidVariableValueMessages = (
@@ -200,7 +322,7 @@ test('useWorkbenchHistory updates variables through the document owner and track
           async updateDocumentVariable(variableId, next, options) {
             ownerCalls.push({ next, options, variableId })
             currentSnapshot = makeSnapshot({
-              revisionId: `rev_history_${ownerCalls.length + 1}`,
+              revisionId: 'rev_history_2',
               variables: [{ name: next.name, valueText: next.valueText, variableId }],
             })
             return ok({
@@ -224,6 +346,7 @@ test('useWorkbenchHistory updates variables through the document owner and track
     }),
   )
 
+  await hookHarness.flushEffects()
   controller.handleVariableUpdate(
     { name: 'Width', valueText: '10 mm', variableId: 'width' } as never,
     { name: 'Width', valueText: '20 mm' },
@@ -240,7 +363,7 @@ test('useWorkbenchHistory updates variables through the document owner and track
           async updateDocumentVariable(variableId, next, options) {
             ownerCalls.push({ next, options, variableId })
             currentSnapshot = makeSnapshot({
-              revisionId: `rev_history_${ownerCalls.length + 1}`,
+              revisionId: 'rev_history_3',
               variables: [{ name: next.name, valueText: next.valueText, variableId }],
             })
             return ok({
@@ -264,6 +387,7 @@ test('useWorkbenchHistory updates variables through the document owner and track
     }),
   )
   await hookHarness.flushEffects()
+  await flushMicrotasks()
 
   expectTrue(ownerCalls.length === 1, 'Variable updates should route through the document owner exactly once.')
   expectTrue(
@@ -275,107 +399,13 @@ test('useWorkbenchHistory updates variables through the document owner and track
     'Successful variable updates should clear any prior invalid-value message for that variable.',
   )
   expectTrue(
-    controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
-    'Successful variable updates should create a local undo entry and clear any redo history.',
+    availabilityRequests.includes('rev_history_2'),
+    'Variable updates should trigger a durable-history availability refresh after the accepted document mutation.',
   )
-
-  controller.requestUndo()
-  await flushMicrotasks()
-  controller = hookHarness.render(() =>
-    useWorkbenchHistory({
-      deps: {
-        documentOwner: {
-          async reorderDocumentHistory() {
-            throw new Error('Variable updates should not reorder document history.')
-          },
-          async updateDocumentVariable(variableId, next, options) {
-            ownerCalls.push({ next, options, variableId })
-            currentSnapshot = makeSnapshot({
-              revisionId: `rev_history_${ownerCalls.length + 1}`,
-              variables: [{ name: next.name, valueText: next.valueText, variableId }],
-            })
-            return ok({
-              mutation: { revisionState: { kind: 'accepted' }, diagnostics: [] },
-              snapshot: currentSnapshot,
-            })
-          },
-        },
-      },
-      dispatch() {
-        throw new Error('Variable updates should not dispatch editor events.')
-      },
-      errorReporter: reporter,
-      history: { canRedo: false, canUndo: false },
-      setInvalidVariableValueMessages,
-      showWorkbenchError(message) {
-        shownErrors.push(message)
-      },
-      sketchSession: null,
-      snapshot: currentSnapshot,
-    }),
-  )
-  await hookHarness.flushEffects()
-
-  expectTrue(
-    ownerCalls[1] && (ownerCalls[1] as { next: { valueText: string }; options: { operation: string } }).next.valueText === '10 mm'
-      && (ownerCalls[1] as { next: { valueText: string }; options: { operation: string } }).options.operation === 'Undo Width',
-    'Undo should restore the prior variable value through the document owner seam.',
-  )
-  expectTrue(
-    !controller.toolbarHistoryAvailability.canUndo && controller.toolbarHistoryAvailability.canRedo,
-    'Undoing the local variable edit should move the workbench entry onto the redo stack.',
-  )
-
-  controller.requestRedo()
-  await flushMicrotasks()
-  controller = hookHarness.render(() =>
-    useWorkbenchHistory({
-      deps: {
-        documentOwner: {
-          async reorderDocumentHistory() {
-            throw new Error('Variable updates should not reorder document history.')
-          },
-          async updateDocumentVariable(variableId, next, options) {
-            ownerCalls.push({ next, options, variableId })
-            currentSnapshot = makeSnapshot({
-              revisionId: `rev_history_${ownerCalls.length + 1}`,
-              variables: [{ name: next.name, valueText: next.valueText, variableId }],
-            })
-            return ok({
-              mutation: { revisionState: { kind: 'accepted' }, diagnostics: [] },
-              snapshot: currentSnapshot,
-            })
-          },
-        },
-      },
-      dispatch() {
-        throw new Error('Variable updates should not dispatch editor events.')
-      },
-      errorReporter: reporter,
-      history: { canRedo: false, canUndo: false },
-      setInvalidVariableValueMessages,
-      showWorkbenchError(message) {
-        shownErrors.push(message)
-      },
-      sketchSession: null,
-      snapshot: currentSnapshot,
-    }),
-  )
-  await hookHarness.flushEffects()
-
-  expectTrue(
-    ownerCalls[2] && (ownerCalls[2] as { next: { valueText: string }; options: { operation: string } }).next.valueText === '20 mm'
-      && (ownerCalls[2] as { next: { valueText: string }; options: { operation: string } }).options.operation === 'Redo Width',
-    'Redo should reapply the edited variable value through the document owner seam.',
-  )
-  expectTrue(
-    controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
-    'Redo should move the entry back onto the undo stack.',
-  )
-  expectTrue(shownErrors.length === 0, 'Successful variable updates and undo/redo should not show workbench errors.')
+  expectTrue(shownErrors.length === 0, 'Successful variable updates should not surface workbench errors.')
 })
 
-test('useWorkbenchHistory surfaces invalid variable updates without creating an undo entry', async () => {
+test('useWorkbenchHistory surfaces invalid variable updates without changing durable-history availability', async () => {
   const reporter = createTestErrorReporter()
   const shownErrors: string[] = []
   let invalidVariableMessages: Record<string, string> = {}
@@ -416,6 +446,7 @@ test('useWorkbenchHistory surfaces invalid variable updates without creating an 
     }),
   )
 
+  await hookHarness.flushEffects()
   controller.handleVariableUpdate(
     { name: 'Width', valueText: '10 mm', variableId: 'width' } as never,
     { name: 'Width', valueText: 'missingRef' },
@@ -433,12 +464,13 @@ test('useWorkbenchHistory surfaces invalid variable updates without creating an 
   )
   expectTrue(
     !controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
-    'Rejected variable updates should not create a local undo or redo entry.',
+    'Rejected variable updates should not change durable-history availability.',
   )
 })
 
-test('useWorkbenchHistory reorders document history through the document owner and restores it with undo and redo', async () => {
+test('useWorkbenchHistory reorders document history through the document owner and reflects durable-history availability', async () => {
   const reporter = createTestErrorReporter()
+  const availabilityRequests: string[] = []
   const shownErrors: string[] = []
   const reorderCalls: unknown[] = []
   const currentSnapshot = makeSnapshot({
@@ -446,6 +478,14 @@ test('useWorkbenchHistory reorders document history through the document owner a
       makeHistoryItem('feature', 'feature_a', 'Feature A'),
       makeHistoryItem('feature', 'feature_b', 'Feature B'),
     ],
+  })
+  currentDurableHistory = createDurableHistoryStub({
+    async getAvailability() {
+      availabilityRequests.push(currentSnapshot.document.revisionId)
+      return currentSnapshot.document.revisionId === 'rev_history_reorder_2'
+        ? { canUndo: true, canRedo: false }
+        : { canUndo: false, canRedo: false }
+    },
   })
 
   const documentOwner = {
@@ -493,6 +533,7 @@ test('useWorkbenchHistory reorders document history through the document owner a
     }),
   )
 
+  await hookHarness.flushEffects()
   controller.handleDocumentHistoryReorder(
     { featureId: 'feature_b', kind: 'feature' } as never,
     { featureId: 'feature_a', kind: 'feature' } as never,
@@ -520,84 +561,44 @@ test('useWorkbenchHistory reorders document history through the document owner a
     }),
   )
   await hookHarness.flushEffects()
-
-  expectTrue(
-    reorderCalls[0] && (reorderCalls[0] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).item.featureId === 'feature_b',
-    'The initial reorder should be delegated to the document owner with the requested move.',
-  )
-  expectTrue(
-    controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
-    'A successful document history reorder should create a local undo entry.',
-  )
-
-  controller.requestUndo()
   await flushMicrotasks()
-  controller = hookHarness.render(() =>
-    useWorkbenchHistory({
-      deps: {
-        documentOwner,
-      },
-      dispatch() {
-        throw new Error('History reorder undo should not dispatch editor events.')
-      },
-      errorReporter: reporter,
-      history: { canRedo: false, canUndo: false },
-      setInvalidVariableValueMessages() {
-        throw new Error('History reorder undo should not touch variable validation messages.')
-      },
-      showWorkbenchError(message) {
-        shownErrors.push(message)
-      },
-      sketchSession: null,
-      snapshot: currentSnapshot,
-    }),
-  )
-  await hookHarness.flushEffects()
 
   expectTrue(
-    reorderCalls[1]
-      && (reorderCalls[1] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).item.featureId === 'feature_a'
-      && (reorderCalls[1] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).beforeItem?.featureId === 'feature_b',
-    'Undo should restore the previous history order through the document owner seam.',
+    reorderCalls[0] && (reorderCalls[0] as { item: { featureId: string } }).item.featureId === 'feature_b',
+    'Document history reorder should be delegated to the document owner with the requested move.',
   )
   expectTrue(
-    !controller.toolbarHistoryAvailability.canUndo && controller.toolbarHistoryAvailability.canRedo,
-    'Undoing the reorder should move the entry onto the redo stack.',
+    availabilityRequests.includes('rev_history_reorder_2'),
+    'Accepted history reorders should trigger a durable-history availability refresh from the repository-backed coordinator.',
   )
-
-  controller.requestRedo()
-  await flushMicrotasks()
-  controller = hookHarness.render(() =>
-    useWorkbenchHistory({
-      deps: {
-        documentOwner,
-      },
-      dispatch() {
-        throw new Error('History reorder redo should not dispatch editor events.')
-      },
-      errorReporter: reporter,
-      history: { canRedo: false, canUndo: false },
-      setInvalidVariableValueMessages() {
-        throw new Error('History reorder redo should not touch variable validation messages.')
-      },
-      showWorkbenchError(message) {
-        shownErrors.push(message)
-      },
-      sketchSession: null,
-      snapshot: currentSnapshot,
-    }),
-  )
-  await hookHarness.flushEffects()
-
-  expectTrue(
-    reorderCalls[2]
-      && (reorderCalls[2] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).item.featureId === 'feature_b'
-      && (reorderCalls[2] as { item: { featureId: string }; beforeItem: { featureId: string } | null }).beforeItem?.featureId === 'feature_a',
-    'Redo should reapply the reordered history through the document owner seam.',
-  )
-  expectTrue(
-    controller.toolbarHistoryAvailability.canUndo && !controller.toolbarHistoryAvailability.canRedo,
-    'Redo should move the history entry back onto the undo stack.',
-  )
-  expectTrue(shownErrors.length === 0, 'Accepted history reorders and their undo/redo flow should not surface workbench errors.')
+  expectTrue(shownErrors.length === 0, 'Accepted history reorders should not surface workbench errors.')
 })
+
+function createDurableHistoryStub(
+  overrides: Partial<DurableHistoryService> = {},
+): DurableHistoryService {
+  return {
+    async getAvailability() {
+      return { canUndo: false, canRedo: false }
+    },
+    async undo() {
+      return null
+    },
+    async redo() {
+      return null
+    },
+    async restoreSketchDraft() {
+      return null
+    },
+    async syncSketchDraft() {
+      return { canUndo: false, canRedo: false }
+    },
+    async clearSketchDraft() {
+      return undefined
+    },
+    getSketchDraftKey() {
+      return 'draft-key'
+    },
+    ...overrides,
+  }
+}

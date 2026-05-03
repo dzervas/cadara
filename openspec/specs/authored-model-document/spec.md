@@ -15,7 +15,7 @@ The system SHALL define a versioned authored model document as the canonical per
 - **THEN** it validates the document identity, durable document name, schema version, required authored collections, feature references, sketch references, variable records, and cursor shape before exposing it to the modeling service
 
 ### Requirement: Authored model document SHALL exclude derived runtime and presentation state
-The authored model document MUST NOT persist derived render exports, feature tree rows, object tree rows, selection catalogs, preview state, diagnostics, OpenCascade runtime objects, or transient editor state.
+The authored model document MUST NOT persist derived render exports, feature tree rows, object tree rows, selection catalogs, preview state, diagnostics, OpenCascade runtime objects, transient editor state, repository-local durable undo metadata, or local draft-history bookkeeping.
 
 #### Scenario: Snapshot is rebuilt from authored state
 - **WHEN** the modeling service exposes a current document snapshot
@@ -26,6 +26,11 @@ The authored model document MUST NOT persist derived render exports, feature tre
 - **WHEN** a feature preview is evaluated
 - **THEN** preview geometry and preview diagnostics remain transient
 - **AND** they are not written into the authored model document
+
+#### Scenario: Local durable history is restored
+- **WHEN** the local editing context restores repository-backed durable undo metadata or draft-history bookkeeping
+- **THEN** that metadata is restored through repository-local persistence behavior
+- **AND** it is not treated as authored model document content
 
 ### Requirement: Authored model document SHALL support schema migration
 The system SHALL version authored model documents and provide explicit migrations from supported older authored schemas into the current schema.
@@ -70,3 +75,4 @@ The authored model document contract SHALL include a versioned geometry asset ma
 - **WHEN** an authored model document includes geometry asset records
 - **THEN** runtime validation accepts only records with valid ids, hashes, byte lengths, formats, and provenance values
 - **AND** validation rejects duplicate asset ids with conflicting content metadata
+

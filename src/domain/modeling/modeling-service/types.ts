@@ -62,6 +62,7 @@ export interface ModelingService {
   readonly sketchSolver: SketchSolverService | null
   dispose(): void
   subscribeToDocumentChanges(listener: (event: ModelingServiceDocumentChangeEvent) => void): () => void
+  waitForPersistence(): Promise<void>
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
   setViewportLodTier(tierId: OccTessellationTierId): boolean

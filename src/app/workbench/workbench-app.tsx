@@ -21,6 +21,7 @@ import { RuntimeExtensionRegistryProvider } from '@/hooks/runtime-extension-regi
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import type { ToolActionBus } from '@/core/tools/tool-action-bus'
 import { CadWorkbench, type WorkbenchDocumentActionResult } from '@/app/workbench/cad-workbench'
+import { createDurableHistoryService } from '@/application/workbench/durable-history'
 import { createLocalStorageOperationHistoryStore } from '@/infrastructure/persistence/local-storage-operation-history-store'
 import { createLocalStorageWorkbenchTabsStore } from '@/infrastructure/persistence/local-storage-workbench-tabs-store'
 import {
@@ -30,6 +31,7 @@ import {
 } from '@/infrastructure/persistence/document-repository-url-store'
 import { createWorkerBackedDocumentRepository } from '@/infrastructure/modeling/worker-backed-document-repository'
 import type { DocumentSyncWorkerClient } from '@/infrastructure/workers/document-sync-worker-client'
+import { DurableHistoryProvider } from '@/hooks/durable-history-provider'
 import {
   ensureLocalFileWritePermission,
   readCadaraDocumentFile,
@@ -142,6 +144,13 @@ export function WorkbenchApp({
         documentRepository,
       }),
     [createKernelAdapter, documentRepository, runtimeExtensionRegistries.exportProviders, tabsState.activeDocumentId],
+  )
+  const durableHistory = useMemo(
+    () => createDurableHistoryService({
+      documentRepository,
+      modelingService,
+    }),
+    [documentRepository, modelingService],
   )
 
   useEffect(() => {
@@ -402,23 +411,25 @@ export function WorkbenchApp({
   return (
     <RuntimeExtensionRegistryProvider registries={runtimeExtensionRegistries}>
       <ModelingServiceProvider modelingService={modelingService}>
-        <EditorProvider
-          modelingService={modelingService}
-          editorDependencies={editorDependencies}
-        >
-          <ToolActionProvider actionBus={actionBus}>
-            <CadWorkbench
-              tabsState={tabsState}
-              onActivateDocumentTab={activateDocumentTab}
-              onCloseDocumentTab={closeDocumentTab}
-              onCreateNewDocument={createNewDocumentTab}
-              onImportDocumentFile={importDocumentFile}
-              onOpenLocalFile={openLocalFile}
-              onReorderDocumentTab={reorderDocumentTab}
-              onSyncActiveDocumentTab={syncActiveDocumentTab}
-            />
-          </ToolActionProvider>
-        </EditorProvider>
+        <DurableHistoryProvider durableHistory={durableHistory}>
+          <EditorProvider
+            modelingService={modelingService}
+            editorDependencies={editorDependencies}
+          >
+            <ToolActionProvider actionBus={actionBus}>
+              <CadWorkbench
+                tabsState={tabsState}
+                onActivateDocumentTab={activateDocumentTab}
+                onCloseDocumentTab={closeDocumentTab}
+                onCreateNewDocument={createNewDocumentTab}
+                onImportDocumentFile={importDocumentFile}
+                onOpenLocalFile={openLocalFile}
+                onReorderDocumentTab={reorderDocumentTab}
+                onSyncActiveDocumentTab={syncActiveDocumentTab}
+              />
+            </ToolActionProvider>
+          </EditorProvider>
+        </DurableHistoryProvider>
       </ModelingServiceProvider>
     </RuntimeExtensionRegistryProvider>
   )

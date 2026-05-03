@@ -6,6 +6,15 @@ import { IndexedDBStorageAdapter } from '@automerge/automerge-repo-storage-index
 
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/contracts/modeling/authored-document'
+import {
+  createDurableHistoryAvailability,
+} from '@/contracts/modeling/durable-history.runtime-schema'
+import {
+  createEmptyDocumentLocalDurableHistoryState,
+  type DocumentLocalDurableHistoryState,
+  type DurableHistoryAvailability,
+  type PersistedSketchDraftSession,
+} from '@/contracts/modeling/durable-history'
 import type { DocumentId } from '@/contracts/shared/ids'
 import type { GeometryAssetBlobInput, GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
 import {
@@ -29,6 +38,10 @@ import {
   storeGeometryAssetInputsForManifest,
   type GeometryAssetStore,
 } from '@/domain/modeling/geometry-asset-store'
+import {
+  createIndexedDbLocalDurableHistoryStore,
+  type LocalDurableHistoryStore,
+} from '@/domain/modeling/local-durable-history-store'
 
 interface AutomergeDocumentEnvelope {
   authoredDocument: AuthoredModelDocument
@@ -75,6 +88,8 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
   databaseName?: string
   storeName?: string
   assetStore?: GeometryAssetStore
+  localDurableHistoryStore?: LocalDurableHistoryStore
+  historyScope?: string
   localPeerSync?: false | {
     channelName?: string
     peerWaitMs?: number
@@ -89,12 +104,15 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
   private readonly storeName?: string
   private readonly localPeerSync: IndexedDbAutomergeDocumentRepositoryOptions['localPeerSync']
   private readonly assetStore: GeometryAssetStore
+  private readonly localDurableHistoryStore: LocalDurableHistoryStore
+  private readonly historyScope: string
   private readonly statuses = new Map<DocumentId, DocumentRepositoryRestoreStatus>()
   private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>()
+  private readonly historyState = new Map<DocumentId, DocumentLocalDurableHistoryState>()
   private readonly handles = new Map<DocumentId, AutomergeHandleLike<AutomergeDocumentEnvelope>>()
   private readonly localPeerDocuments = new Map<DocumentId, AuthoredModelDocument>()
   private readonly installedListeners = new Set<string>()
-  private readonly pendingLocalChanges = new Set<DocumentId>()
+  private readonly pendingLocalChanges = new Map<DocumentId, DocumentRepositoryChangeSource>()
   private readonly pendingSeedEchoes = new Map<DocumentId, AuthoredModelDocument>()
   private readonly listeners = new Map<DocumentId, Set<(event: DocumentRepositoryChangeEvent) => void>>()
   private readonly localPeerId = `peer-${Math.random().toString(36).slice(2)}`
@@ -109,6 +127,10 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     this.storeName = options.storeName
     this.assetStore = options.assetStore ?? createIndexedDbGeometryAssetStore({
       databaseName: `${options.databaseName ?? 'cad-authored-documents'}-geometry-assets`,
+    })
+    this.historyScope = options.historyScope ?? 'default'
+    this.localDurableHistoryStore = options.localDurableHistoryStore ?? createIndexedDbLocalDurableHistoryStore({
+      databaseName: `${options.databaseName ?? 'cad-authored-documents'}-local-history`,
     })
     this.localPeerSync = options.localPeerSync
     this.localPeerDocumentChannel = createLocalPeerDocumentChannel(options.localPeerSync)
@@ -139,6 +161,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       const metadata = this.createMetadata(input.documentId, handle, 'restore', assets.availability)
       this.statuses.set(input.documentId, status)
       this.metadata.set(input.documentId, metadata)
+      await this.loadHistoryState(input.documentId)
       return {
         ok: true,
         document: parsed.document,
@@ -171,11 +194,13 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
 
     try {
       const handle = await this.getHandle(input.documentId, parsed.document)
-      this.pendingLocalChanges.add(input.documentId)
+      const previousDocument = structuredClone(handle.doc().authoredDocument)
+      this.pendingLocalChanges.set(input.documentId, 'local')
       handle.change((doc) => {
         doc.authoredDocument = structuredClone(parsed.document)
       })
       await this.flush(handle)
+      await this.recordCommittedDocumentMutation(input.documentId, previousDocument)
       const status = { kind: 'restored' as const, documentId: input.documentId }
       const metadata = this.createMetadata(input.documentId, handle, 'local', assets.availability)
       this.statuses.set(input.documentId, status)
@@ -217,7 +242,12 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     }
     this.handles.delete(documentId)
     this.localPeerDocuments.delete(documentId)
+    this.historyState.delete(documentId)
     this.urlStore.delete(documentId)
+    await this.localDurableHistoryStore.clear({
+      documentId,
+      scope: this.historyScope,
+    })
     const status = { kind: 'reset' as const, documentId }
     this.statuses.set(documentId, status)
     this.metadata.set(documentId, { documentId, heads: [], source: 'reset' })
@@ -230,6 +260,137 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
 
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
     return this.metadata.get(documentId) ?? { documentId, heads: [], source: 'restore' }
+  }
+
+  async getDurableHistoryAvailability(documentId: DocumentId): Promise<DurableHistoryAvailability> {
+    const state = await this.loadHistoryState(documentId)
+    return createDurableHistoryAvailability({
+      canUndo: state.undoStack.length > 0,
+      canRedo: state.redoStack.length > 0,
+    })
+  }
+
+  async undoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null> {
+    const state = await this.loadHistoryState(documentId)
+    const nextState = structuredClone(state)
+    const nextDocument = nextState.undoStack.pop()
+    const handle = this.handles.get(documentId)
+    if (!nextDocument || !handle) {
+      return null
+    }
+
+    nextState.redoStack.push(structuredClone(handle.doc().authoredDocument))
+    return this.applyHistoryDocument(documentId, nextDocument, 'undo', nextState)
+  }
+
+  async redoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null> {
+    const state = await this.loadHistoryState(documentId)
+    const nextState = structuredClone(state)
+    const nextDocument = nextState.redoStack.pop()
+    const handle = this.handles.get(documentId)
+    if (!nextDocument || !handle) {
+      return null
+    }
+
+    nextState.undoStack.push(structuredClone(handle.doc().authoredDocument))
+    return this.applyHistoryDocument(documentId, nextDocument, 'redo', nextState)
+  }
+
+  async getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    const entry = (await this.loadHistoryState(documentId)).draftSessions[draftKey] ?? null
+    return {
+      session: entry ? structuredClone(entry.current) : null,
+      availability: createDraftHistoryAvailability(entry),
+    }
+  }
+
+  async saveSketchDraftHistory(
+    documentId: DocumentId,
+    draftKey: string,
+    session: PersistedSketchDraftSession,
+  ): Promise<DurableHistoryAvailability> {
+    const state = await this.loadHistoryState(documentId)
+    const nextSession = structuredClone(session)
+    const current = state.draftSessions[draftKey]
+    if (!current) {
+      state.draftSessions[draftKey] = {
+        current: nextSession,
+        undoStack: [],
+        redoStack: [],
+      }
+      await this.persistHistoryState(documentId, state)
+      return createDraftHistoryAvailability(state.draftSessions[draftKey])
+    }
+
+    if (documentsEqual(current.current, nextSession)) {
+      return createDraftHistoryAvailability(current)
+    }
+
+    current.undoStack.push(structuredClone(current.current))
+    current.redoStack = []
+    current.current = nextSession
+    await this.persistHistoryState(documentId, state)
+    return createDraftHistoryAvailability(current)
+  }
+
+  async undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    const state = await this.loadHistoryState(documentId)
+    const entry = state.draftSessions[draftKey] ?? null
+    if (!entry) {
+      return {
+        session: null,
+        availability: createDurableHistoryAvailability({ canUndo: false, canRedo: false }),
+      }
+    }
+
+    const nextSession = entry.undoStack.pop()
+    if (!nextSession) {
+      return {
+        session: structuredClone(entry.current),
+        availability: createDraftHistoryAvailability(entry),
+      }
+    }
+
+    entry.redoStack.push(structuredClone(entry.current))
+    entry.current = structuredClone(nextSession)
+    await this.persistHistoryState(documentId, state)
+    return {
+      session: structuredClone(entry.current),
+      availability: createDraftHistoryAvailability(entry),
+    }
+  }
+
+  async redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    const state = await this.loadHistoryState(documentId)
+    const entry = state.draftSessions[draftKey] ?? null
+    if (!entry) {
+      return {
+        session: null,
+        availability: createDurableHistoryAvailability({ canUndo: false, canRedo: false }),
+      }
+    }
+
+    const nextSession = entry.redoStack.pop()
+    if (!nextSession) {
+      return {
+        session: structuredClone(entry.current),
+        availability: createDraftHistoryAvailability(entry),
+      }
+    }
+
+    entry.undoStack.push(structuredClone(entry.current))
+    entry.current = structuredClone(nextSession)
+    await this.persistHistoryState(documentId, state)
+    return {
+      session: structuredClone(entry.current),
+      availability: createDraftHistoryAvailability(entry),
+    }
+  }
+
+  async clearSketchDraftHistory(documentId: DocumentId, draftKey: string): Promise<void> {
+    const state = await this.loadHistoryState(documentId)
+    delete state.draftSessions[draftKey]
+    await this.persistHistoryState(documentId, state)
   }
 
   async getGeometryAssetBytes(hash: GeometryAssetHash) {
@@ -268,6 +429,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     this.metadata.set(documentId, metadata)
     this.pendingSeedEchoes.set(documentId, structuredClone(parsed.document))
     this.installHandleListener(documentId, handle)
+    await this.persistHistoryState(documentId, createEmptyDocumentLocalDurableHistoryState())
     this.notify(documentId, parsed.document, status, metadata, assets.diagnostics, assets.availability)
     return {
       ok: true,
@@ -323,11 +485,19 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       }
 
       const status = { kind: 'restored' as const, documentId }
-      const source = this.pendingLocalChanges.has(documentId) ? 'local' : 'peer'
+      const source = this.pendingLocalChanges.get(documentId) ?? 'peer'
       this.pendingLocalChanges.delete(documentId)
       const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
       const metadata = this.createMetadata(documentId, handle, source, assets.availability)
       const previousMetadata = this.metadata.get(documentId)
+      if (
+        source === 'peer'
+        && previousMetadata
+        && previousMetadata.source !== 'peer'
+        && sameStringSet(previousMetadata.heads, metadata.heads)
+      ) {
+        return
+      }
       if (
         source === 'peer'
         && previousMetadata?.source === 'seed'
@@ -339,6 +509,12 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
         return
       }
       this.pendingSeedEchoes.delete(documentId)
+      if (source === 'peer') {
+        const historyState = await this.loadHistoryState(documentId)
+        historyState.undoStack = []
+        historyState.redoStack = []
+        await this.persistHistoryState(documentId, historyState)
+      }
       this.statuses.set(documentId, status)
       this.metadata.set(documentId, metadata)
       this.notify(documentId, parsed.document, status, metadata, assets.diagnostics, assets.availability)
@@ -369,6 +545,88 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     const status = { kind: 'failed' as const, documentId, diagnostic }
     this.statuses.set(documentId, status)
     return { ok: false, status }
+  }
+
+  private async loadHistoryState(documentId: DocumentId) {
+    const existing = this.historyState.get(documentId)
+    if (existing) {
+      return existing
+    }
+
+    const result = await this.localDurableHistoryStore.load({
+      documentId,
+      scope: this.historyScope,
+    })
+    if (!result.ok) {
+      const empty = createEmptyDocumentLocalDurableHistoryState()
+      this.historyState.set(documentId, empty)
+      return empty
+    }
+
+    this.historyState.set(documentId, result.value)
+    return result.value
+  }
+
+  private async persistHistoryState(documentId: DocumentId, state: DocumentLocalDurableHistoryState) {
+    this.historyState.set(documentId, structuredClone(state))
+    await this.localDurableHistoryStore.save({
+      documentId,
+      scope: this.historyScope,
+      state,
+    })
+  }
+
+  private async recordCommittedDocumentMutation(documentId: DocumentId, previousDocument: AuthoredModelDocument) {
+    const state = await this.loadHistoryState(documentId)
+    state.undoStack.push(structuredClone(previousDocument))
+    state.redoStack = []
+    await this.persistHistoryState(documentId, state)
+  }
+
+  private async applyHistoryDocument(
+    documentId: DocumentId,
+    document: AuthoredModelDocument,
+    source: Extract<DocumentRepositoryMetadata['source'], 'undo' | 'redo'>,
+    nextHistoryState: DocumentLocalDurableHistoryState,
+  ): Promise<DocumentRepositoryMutationResult> {
+    const handle = this.handles.get(documentId)
+    if (!handle) {
+      return this.fail(
+        documentId,
+        createFailureDiagnostic('automerge-history-handle-missing', new Error('Document history handle is unavailable.'), 'Document history handle is unavailable.'),
+      )
+    }
+
+    try {
+      this.pendingLocalChanges.set(documentId, source)
+      handle.change((doc) => {
+        doc.authoredDocument = structuredClone(document)
+      })
+      await this.flush(handle)
+      await this.persistHistoryState(documentId, nextHistoryState)
+      const assets = await collectAssetAvailability(this.assetStore, document.assets.records)
+      const status = { kind: 'restored' as const, documentId }
+      const metadata = this.createMetadata(documentId, handle, source, assets.availability)
+      this.statuses.set(documentId, status)
+      this.metadata.set(documentId, metadata)
+      await this.broadcastLocalPeerDocument(documentId, document)
+      this.pendingLocalChanges.delete(documentId)
+      this.notify(documentId, document, status, metadata, assets.diagnostics, assets.availability)
+      return {
+        ok: true,
+        document: structuredClone(document),
+        diagnostics: assets.diagnostics,
+        assetAvailability: assets.availability,
+        status,
+        metadata,
+      }
+    } catch (error: unknown) {
+      this.pendingLocalChanges.delete(documentId)
+      return this.fail(
+        documentId,
+        createFailureDiagnostic('automerge-write-failed', error, 'Authored document could not be written.'),
+      )
+    }
   }
 
   private createMetadata(
@@ -481,6 +739,10 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     await storeGeometryAssetInputsForManifest(this.assetStore, parsed.document.assets.records, peerAssets)
 
     this.localPeerDocuments.set(data.documentId, structuredClone(parsed.document))
+    const historyState = await this.loadHistoryState(data.documentId)
+    historyState.undoStack = []
+    historyState.redoStack = []
+    await this.persistHistoryState(data.documentId, historyState)
     const assets = await collectAssetAvailability(this.assetStore, parsed.document.assets.records)
     const status = { kind: 'restored' as const, documentId: data.documentId }
     const metadata: DocumentRepositoryMetadata = {
@@ -562,8 +824,23 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
   return left.every((value) => rightSet.has(value))
 }
 
-function documentsEqual(left: AuthoredModelDocument | undefined, right: AuthoredModelDocument) {
+function documentsEqual(left: unknown, right: unknown) {
   return left !== undefined && JSON.stringify(left) === JSON.stringify(right)
+}
+
+function createDraftHistoryAvailability(
+  entry:
+    | {
+        undoStack: unknown[]
+        redoStack: unknown[]
+      }
+    | null
+    | undefined,
+): DurableHistoryAvailability {
+  return createDurableHistoryAvailability({
+    canUndo: (entry?.undoStack.length ?? 0) > 0,
+    canRedo: (entry?.redoStack.length ?? 0) > 0,
+  })
 }
 
 export {

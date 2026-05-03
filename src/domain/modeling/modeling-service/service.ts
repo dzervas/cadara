@@ -642,7 +642,7 @@ export function createModelingService(
 
   const unsubscribeDocumentRepository = documentRepository?.subscribe(currentDocumentId, (event) => {
     rememberRepositoryMetadata(event.metadata)
-    if (event.metadata.source !== 'peer') {
+    if (event.metadata.source !== 'peer' && event.metadata.source !== 'undo' && event.metadata.source !== 'redo') {
       if (isRestoringRepositoryDocument) {
         return
       }
@@ -1049,6 +1049,11 @@ export function createModelingService(
       return () => {
         documentChangeListeners.delete(listener)
       }
+    },
+    async waitForPersistence() {
+      await restorePromise
+      await repositoryChangePromise
+      await repositoryPersistencePromise
     },
     async getHistoryRestoreState() {
       await restorePromise

@@ -211,7 +211,129 @@ test('src/infrastructure/modeling/worker-backed-document-repository.spec.ts', as
     client.dispose()
   }
 
+  async function testDurableHistoryMethodsProxyThroughWorker() {
+    const seed = await createSeedAuthoredModelDocument()
+    const worker = new FakeDocumentSyncWorker()
+    const client = new DocumentSyncWorkerClient({ worker })
+    const repository = createWorkerBackedDocumentRepository({ client })
+
+    const availabilityPromise = repository.getDurableHistoryAvailability(seed.documentId)
+    const availabilityRequest = worker.takePosted('getDurableHistoryAvailability')
+    worker.emit({
+      kind: 'durableHistoryAvailability',
+      requestId: availabilityRequest.requestId,
+      availability: { canUndo: true, canRedo: false },
+    })
+    const availability = await availabilityPromise
+    expectTrue(availability.canUndo && !availability.canRedo, 'Worker-backed repositories should proxy durable-history availability queries.')
+
+    const undoPromise = repository.undoDurableHistory(seed.documentId)
+    const undoRequest = worker.takePosted('undoDurableHistory')
+    worker.emit({
+      kind: 'durableHistoryMutated',
+      requestId: undoRequest.requestId,
+      result: {
+        ok: true,
+        document: seed,
+        status: { kind: 'restored', documentId: seed.documentId },
+        metadata: { documentId: seed.documentId, heads: ['head_undo'], source: 'undo' },
+      },
+    })
+    await flushAsync()
+    const undoNormalizeRequest = worker.takePosted('normalize')
+    worker.emit({
+      kind: 'normalized',
+      requestId: undoNormalizeRequest.requestId,
+      result: {
+        document: seed,
+        diagnostics: [],
+        metadata: { documentId: seed.documentId, heads: ['head_undo'], source: 'undo' },
+      },
+    })
+    const undone = await undoPromise
+    expectTrue(undone?.ok && undone.metadata.source === 'undo', 'Worker-backed durable undo should preserve worker metadata.')
+
+    const draftHistoryPromise = repository.getSketchDraftHistory(seed.documentId, 'draft:xy')
+    const draftHistoryRequest = worker.takePosted('getSketchDraftHistory')
+    worker.emit({
+      kind: 'sketchDraftHistory',
+      requestId: draftHistoryRequest.requestId,
+      session: null,
+      availability: { canUndo: false, canRedo: false },
+    })
+    const draftHistory = await draftHistoryPromise
+    expectTrue(
+      draftHistory.session === null && !draftHistory.availability.canUndo && !draftHistory.availability.canRedo,
+      'Worker-backed repositories should proxy sketch draft history queries.',
+    )
+
+    const saveDraftPromise = repository.saveSketchDraftHistory(seed.documentId, 'draft:xy', {
+      sketchId: null,
+      sketchLabel: 'Draft',
+      plane: {
+        support: { kind: 'construction', constructionId: 'construction_plane-xy' },
+        frame: {
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: 'documentLength',
+          handedness: 'rightHanded',
+        },
+        key: 'xy',
+      },
+      definition: {
+        schemaVersion: 'sketch-definition/v1alpha1',
+        referenceIds: [],
+        references: [],
+        pointIds: [],
+        points: [],
+        entityIds: [],
+        entities: [],
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+      },
+      fullDefinition: {
+        schemaVersion: 'sketch-definition/v1alpha1',
+        referenceIds: [],
+        references: [],
+        pointIds: [],
+        points: [],
+        entityIds: [],
+        entities: [],
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+      },
+      historyCursor: { kind: 'empty' },
+      historyOperations: [],
+      sequence: 0,
+      commitRequest: null,
+    })
+    const saveDraftRequest = worker.takePosted('saveSketchDraftHistory')
+    worker.emit({
+      kind: 'sketchDraftHistorySaved',
+      requestId: saveDraftRequest.requestId,
+      availability: { canUndo: true, canRedo: false },
+    })
+    const savedAvailability = await saveDraftPromise
+    expectTrue(savedAvailability.canUndo && !savedAvailability.canRedo, 'Worker-backed repositories should proxy sketch draft persistence.')
+
+    const clearDraftPromise = repository.clearSketchDraftHistory(seed.documentId, 'draft:xy')
+    const clearDraftRequest = worker.takePosted('clearSketchDraftHistory')
+    worker.emit({
+      kind: 'sketchDraftHistoryCleared',
+      requestId: clearDraftRequest.requestId,
+    })
+    await clearDraftPromise
+    client.dispose()
+  }
+
   await testLoadMutatePeerUpdateAndDiagnostics()
+  await testDurableHistoryMethodsProxyThroughWorker()
 })
 
 function createMemoryUrlStore(): DocumentRepositoryUrlStore {

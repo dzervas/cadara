@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 import type { EditorEvent, EditorHistoryAvailability } from '@/domain/editor/state-machine'
+import type { SketchSessionState } from '@/domain/editor/sketch-session'
 import { ok, type AppError, type ErrorReporter } from '@/contracts/errors'
 import type {
   DocumentHistoryOrderEntry,
@@ -9,28 +10,15 @@ import type {
 } from '@/contracts/modeling/schema'
 import {
   createDocumentHistoryOrder,
-  getNextDocumentHistoryCursor,
-  getPreviousDocumentHistoryCursor,
 } from '@/domain/modeling/document-history'
-import { getWorkbenchHistoryAvailability, documentHistoryOrdersEqual, getDocumentHistoryOrderRestoreMoves } from '@/app/workbench/history/workbench-history'
+import {
+  documentHistoryOrdersEqual,
+} from '@/app/workbench/history/workbench-history'
 import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
+import { useDurableHistory } from '@/hooks/use-durable-history'
 
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
-type WorkbenchUndoEntry =
-  | {
-      kind: 'updateVariable'
-      variableId: DocumentVariableRecord['variableId']
-      before: DocumentVariablePatch
-      after: DocumentVariablePatch
-      label: string
-    }
-  | {
-      kind: 'reorderDocumentHistory'
-      before: DocumentHistoryOrderEntry[]
-      after: DocumentHistoryOrderEntry[]
-      label: string
-    }
 
 interface WorkbenchHistoryControllerInput {
   deps?: Partial<WorkbenchHistoryDependencies>
@@ -39,7 +27,7 @@ interface WorkbenchHistoryControllerInput {
   history: EditorHistoryAvailability
   setInvalidVariableValueMessages: Dispatch<SetStateAction<Record<string, string>>>
   showWorkbenchError: (message: string) => void
-  sketchSession: unknown
+  sketchSession: SketchSessionState | null
   snapshot: WorkspaceSnapshot | null
 }
 
@@ -48,26 +36,32 @@ interface WorkbenchHistoryDependencies {
   runWorkbenchAction: typeof runWorkbenchAction
 }
 
+const EMPTY_HISTORY_AVAILABILITY: EditorHistoryAvailability = {
+  canUndo: false,
+  canRedo: false,
+}
+
 export function useWorkbenchHistory({
   deps,
   dispatch,
   errorReporter,
-  history,
+  history: _history,
   setInvalidVariableValueMessages,
   showWorkbenchError,
   sketchSession,
   snapshot,
 }: WorkbenchHistoryControllerInput) {
   const hookDocumentOwner = useWorkbenchDocumentOwner()
+  const durableHistory = useDurableHistory()
   const documentOwner = deps?.documentOwner ?? hookDocumentOwner
   const runAction = deps?.runWorkbenchAction ?? runWorkbenchAction
-  const [undoStack, setUndoStack] = useState<WorkbenchUndoEntry[]>([])
-  const [redoStack, setRedoStack] = useState<WorkbenchUndoEntry[]>([])
   const [isUndoRedoRunning, setIsUndoRedoRunning] = useState(false)
   const [isDocumentHistoryReorderRunning, setIsDocumentHistoryReorderRunning] = useState(false)
+  const [activeHistoryAvailability, setActiveHistoryAvailability] = useState<{
+    contextKey: string
+    availability: EditorHistoryAvailability
+  } | null>(null)
   const snapshotRef = useRef(snapshot)
-  const undoStackRef = useRef(undoStack)
-  const redoStackRef = useRef(redoStack)
   const sketchSessionRef = useRef(sketchSession)
 
   useEffect(() => {
@@ -75,211 +69,161 @@ export function useWorkbenchHistory({
   }, [snapshot])
 
   useEffect(() => {
-    undoStackRef.current = undoStack
-  }, [undoStack])
-
-  useEffect(() => {
-    redoStackRef.current = redoStack
-  }, [redoStack])
-
-  useEffect(() => {
     sketchSessionRef.current = sketchSession
   }, [sketchSession])
 
-  const toolbarHistoryAvailability: EditorHistoryAvailability = useMemo(
-    () => sketchSession
-      ? history
-      : getWorkbenchHistoryAvailability({
-          documentHistory: history,
-          undoStackLength: undoStack.length,
-          redoStackLength: redoStack.length,
-          isUndoRedoRunning,
-        }),
-    [history, isUndoRedoRunning, redoStack.length, sketchSession, undoStack.length],
-  )
+  const activeDocumentId = snapshot?.document.documentId ?? null
+  const activeRevisionId = snapshot?.document.revisionId ?? null
+  const activeHistoryContextKey = useMemo(() => {
+    if (!activeDocumentId) {
+      return null
+    }
 
-  const setVariableFailure = (variableId: DocumentVariableRecord['variableId'], error: AppError) => {
+    if (!sketchSession) {
+      return activeDocumentId
+    }
+
+    return `${activeDocumentId}:${durableHistory.getSketchDraftKey(sketchSession)}`
+  }, [activeDocumentId, durableHistory, sketchSession])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!activeDocumentId || !activeHistoryContextKey || isUndoRedoRunning) {
+      return
+    }
+
+    void durableHistory.getAvailability({
+      documentId: activeDocumentId,
+      sketchSession,
+    }).then((availability) => {
+      if (cancelled) {
+        return
+      }
+
+      setActiveHistoryAvailability({
+        contextKey: activeHistoryContextKey,
+        availability,
+      })
+    }).catch(() => {
+      if (!cancelled) {
+        setActiveHistoryAvailability({
+          contextKey: activeHistoryContextKey,
+          availability: EMPTY_HISTORY_AVAILABILITY,
+        })
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeHistoryContextKey,
+    activeDocumentId,
+    activeRevisionId,
+    durableHistory,
+    isUndoRedoRunning,
+    sketchSession,
+  ])
+
+  const toolbarHistoryAvailability = useMemo<EditorHistoryAvailability>(() => {
+    if (!activeDocumentId || isUndoRedoRunning) {
+      return EMPTY_HISTORY_AVAILABILITY
+    }
+
+    if (!activeHistoryContextKey || activeHistoryAvailability?.contextKey !== activeHistoryContextKey) {
+      return EMPTY_HISTORY_AVAILABILITY
+    }
+
+    return activeHistoryAvailability.availability
+  }, [
+    activeDocumentId,
+    activeHistoryAvailability,
+    activeHistoryContextKey,
+    isUndoRedoRunning,
+  ])
+
+  const setVariableFailure = useCallback((variableId: DocumentVariableRecord['variableId'], error: AppError) => {
     setInvalidVariableValueMessages((current) => ({
       ...current,
       [variableId]: error.message,
     }))
     showWorkbenchError(error.message)
-  }
+  }, [setInvalidVariableValueMessages, showWorkbenchError])
 
-  const applyVariablePatch = async (
-    variableId: DocumentVariableRecord['variableId'],
-    next: DocumentVariablePatch,
-    failureLabel: string,
-  ) => {
+  const requestUndo = useCallback(() => {
     const currentSnapshot = snapshotRef.current
-    if (!currentSnapshot) {
-      return false
+    if (!currentSnapshot || isUndoRedoRunning) {
+      return
     }
 
-    const result = await runAction({
-      operation: failureLabel,
-      reporter: errorReporter,
-      context: [
-        { key: 'baseRevisionId', value: currentSnapshot.document.revisionId },
-        { key: 'variableId', value: variableId },
-      ],
-      action: () => documentOwner.updateDocumentVariable(variableId, next, {
-        operation: failureLabel,
-        fallbackMessage: `${failureLabel} failed.`,
-        context: [
-          { key: 'baseRevisionId', value: currentSnapshot.document.revisionId },
-          { key: 'variableId', value: variableId },
-        ],
-      }),
-      mapSuccess: (output) => ok(output),
-      onError: (error) => setVariableFailure(variableId, error),
+    setIsUndoRedoRunning(true)
+    void durableHistory.undo({
+      documentId: currentSnapshot.document.documentId,
+      sketchSession: sketchSessionRef.current,
+    }).then((result) => {
+      if (!result) {
+        return
+      }
+
+      if (result.context === 'document') {
+        setActiveHistoryAvailability({
+          contextKey: currentSnapshot.document.documentId,
+          availability: result.availability,
+        })
+        dispatch({ type: 'document.replaced', snapshot: result.snapshot })
+        return
+      }
+
+      setActiveHistoryAvailability({
+        contextKey: `${currentSnapshot.document.documentId}:${durableHistory.getSketchDraftKey(result.session)}`,
+        availability: result.availability,
+      })
+      dispatch({ type: 'sketch.draftHistoryRestored', session: result.session })
+    }).catch((error: unknown) => {
+      showWorkbenchError(error instanceof Error ? error.message : 'Undo failed.')
+    }).finally(() => {
+      setIsUndoRedoRunning(false)
     })
+  }, [dispatch, durableHistory, isUndoRedoRunning, showWorkbenchError])
 
-    if (result.isOk()) {
-      setInvalidVariableValueMessages((current) => {
-        const nextMessages = { ...current }
-        delete nextMessages[variableId]
-        return nextMessages
-      })
-      return true
-    }
-
-    return false
-  }
-
-  const applyDocumentHistoryOrder = async (
-    nextOrder: DocumentHistoryOrderEntry[],
-    failureLabel: string,
-  ) => {
+  const requestRedo = useCallback(() => {
     const currentSnapshot = snapshotRef.current
-    if (!currentSnapshot) {
-      return false
+    if (!currentSnapshot || isUndoRedoRunning) {
+      return
     }
 
-    const currentOrder = createDocumentHistoryOrder(currentSnapshot.presentation.documentHistory)
-    const moves = getDocumentHistoryOrderRestoreMoves(currentOrder, nextOrder)
-    if (!moves) {
-      return false
-    }
-
-    let accepted = true
-
-    for (const move of moves) {
-      const latestSnapshot = snapshotRef.current
-      if (!latestSnapshot) {
-        return false
+    setIsUndoRedoRunning(true)
+    void durableHistory.redo({
+      documentId: currentSnapshot.document.documentId,
+      sketchSession: sketchSessionRef.current,
+    }).then((result) => {
+      if (!result) {
+        return
       }
 
-      const result = await runAction({
-        operation: failureLabel,
-        reporter: errorReporter,
-        context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
-        action: () => documentOwner.reorderDocumentHistory(move.item, move.beforeItem, {
-          operation: failureLabel,
-          fallbackMessage: `${failureLabel} failed.`,
-          context: [{ key: 'baseRevisionId', value: latestSnapshot.document.revisionId }],
-        }),
-        mapSuccess: (output) => ok(output),
-        onError: (error) => showWorkbenchError(error.message),
+      if (result.context === 'document') {
+        setActiveHistoryAvailability({
+          contextKey: currentSnapshot.document.documentId,
+          availability: result.availability,
+        })
+        dispatch({ type: 'document.replaced', snapshot: result.snapshot })
+        return
+      }
+
+      setActiveHistoryAvailability({
+        contextKey: `${currentSnapshot.document.documentId}:${durableHistory.getSketchDraftKey(result.session)}`,
+        availability: result.availability,
       })
+      dispatch({ type: 'sketch.draftHistoryRestored', session: result.session })
+    }).catch((error: unknown) => {
+      showWorkbenchError(error instanceof Error ? error.message : 'Redo failed.')
+    }).finally(() => {
+      setIsUndoRedoRunning(false)
+    })
+  }, [dispatch, durableHistory, isUndoRedoRunning, showWorkbenchError])
 
-      if (result.isErr()) {
-        accepted = false
-        break
-      }
-    }
-
-    const finalOrder = snapshotRef.current
-      ? createDocumentHistoryOrder(snapshotRef.current.presentation.documentHistory)
-      : currentOrder
-    return accepted && documentHistoryOrdersEqual(nextOrder, finalOrder)
-  }
-
-  const applyUndoEntry = (entry: WorkbenchUndoEntry, direction: 'undo' | 'redo') => {
-    switch (entry.kind) {
-      case 'updateVariable':
-        return applyVariablePatch(
-          entry.variableId,
-          direction === 'undo' ? entry.before : entry.after,
-          direction === 'undo' ? `Undo ${entry.label}` : `Redo ${entry.label}`,
-        )
-      case 'reorderDocumentHistory':
-        return applyDocumentHistoryOrder(
-          direction === 'undo' ? entry.before : entry.after,
-          direction === 'undo' ? `Undo ${entry.label}` : `Redo ${entry.label}`,
-        )
-    }
-  }
-
-  const requestUndo = () => {
-    if (sketchSessionRef.current || isUndoRedoRunning) {
-      if (sketchSessionRef.current) {
-        dispatch({ type: 'history.undoRequested' })
-      }
-      return
-    }
-
-    const entry = undoStackRef.current.at(-1)
-    const documentCursor = entry || !history.canUndo || !snapshotRef.current
-      ? null
-      : getPreviousDocumentHistoryCursor(snapshotRef.current)
-    if (!entry && !documentCursor) {
-      return
-    }
-
-    if (entry) {
-      setIsUndoRedoRunning(true)
-      void applyUndoEntry(entry, 'undo').then((accepted) => {
-        if (accepted) {
-          setUndoStack((current) => current.slice(0, -1))
-          setRedoStack((current) => [...current, entry])
-        }
-      }).finally(() => {
-        setIsUndoRedoRunning(false)
-      })
-      return
-    }
-
-    if (documentCursor) {
-      dispatch({ type: 'document.historyCursorRequested', cursor: documentCursor })
-    }
-  }
-
-  const requestRedo = () => {
-    if (sketchSessionRef.current || isUndoRedoRunning) {
-      if (sketchSessionRef.current) {
-        dispatch({ type: 'history.redoRequested' })
-      }
-      return
-    }
-
-    const entry = redoStackRef.current.at(-1)
-    const documentCursor = entry || !history.canRedo || !snapshotRef.current
-      ? null
-      : getNextDocumentHistoryCursor(snapshotRef.current)
-    if (!entry && !documentCursor) {
-      return
-    }
-
-    if (entry) {
-      setIsUndoRedoRunning(true)
-      void applyUndoEntry(entry, 'redo').then((accepted) => {
-        if (accepted) {
-          setRedoStack((current) => current.slice(0, -1))
-          setUndoStack((current) => [...current, entry])
-        }
-      }).finally(() => {
-        setIsUndoRedoRunning(false)
-      })
-      return
-    }
-
-    if (documentCursor) {
-      dispatch({ type: 'document.historyCursorRequested', cursor: documentCursor })
-    }
-  }
-
-  const handleVariableUpdate = (
+  const handleVariableUpdate = useCallback((
     variable: DocumentVariableRecord,
     next: DocumentVariablePatch,
   ) => {
@@ -315,24 +259,17 @@ export function useWorkbenchHistory({
         delete nextMessages[variable.variableId]
         return nextMessages
       })
-      setUndoStack((current) => [
-        ...current,
-        {
-          kind: 'updateVariable',
-          variableId: variable.variableId,
-          before: {
-            name: variable.name,
-            valueText: variable.valueText,
-          },
-          after: next,
-          label: variable.name || variable.variableId,
-        },
-      ])
-      setRedoStack([])
     })
-  }
+  }, [
+    documentOwner,
+    errorReporter,
+    runAction,
+    setInvalidVariableValueMessages,
+    setVariableFailure,
+    snapshot,
+  ])
 
-  const handleDocumentHistoryReorder = (
+  const handleDocumentHistoryReorder = useCallback((
     item: DocumentHistoryOrderEntry,
     beforeItem: DocumentHistoryOrderEntry | null,
   ) => {
@@ -360,35 +297,35 @@ export function useWorkbenchHistory({
 
       const afterOrder = createDocumentHistoryOrder(result.value.snapshot.presentation.documentHistory)
       if (!documentHistoryOrdersEqual(beforeOrder, afterOrder)) {
-        setUndoStack((current) => [
-          ...current,
-          {
-            kind: 'reorderDocumentHistory',
-            before: beforeOrder,
-            after: afterOrder,
-            label: 'document history reorder',
-          },
-        ])
-        setRedoStack([])
+        return
       }
     }).finally(() => {
       setIsDocumentHistoryReorderRunning(false)
     })
-  }
+  }, [
+    documentOwner,
+    errorReporter,
+    isDocumentHistoryReorderRunning,
+    runAction,
+    showWorkbenchError,
+    snapshot,
+  ])
 
-  const resetHistoryState = () => {
-    setUndoStack([])
-    setRedoStack([])
-  }
-
-  return {
+  return useMemo(() => ({
     handleDocumentHistoryReorder,
     handleVariableUpdate,
     isDocumentHistoryReorderRunning,
     isUndoRedoRunning,
     requestRedo,
     requestUndo,
-    resetHistoryState,
     toolbarHistoryAvailability,
-  }
+  }), [
+    handleDocumentHistoryReorder,
+    handleVariableUpdate,
+    isDocumentHistoryReorderRunning,
+    isUndoRedoRunning,
+    requestRedo,
+    requestUndo,
+    toolbarHistoryAvailability,
+  ])
 }

@@ -9,10 +9,14 @@ import {
   IndexedDbAutomergeDocumentRepository,
   type DocumentRepositoryUrlStore,
 } from '@/infrastructure/persistence/indexeddb-automerge-document-repository'
+import { createMemoryLocalDurableHistoryStore } from '@/domain/modeling/local-durable-history-store'
 import { createMemoryGeometryAssetStore } from '@/domain/modeling/geometry-asset-store'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { createNewSketchSession } from '@/domain/editor/sketch-session'
+import { persistSketchDraftSession } from '@/domain/editor/sketch-session/persistence'
+import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 
 test('src/domain/modeling/document-repository.spec.ts', async () => {  async function createSeedDocument() {
     const adapter = new MockKernelAdapter()
@@ -180,11 +184,19 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {  async fun
       },
     })
     await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expectTrue(events.some((event) => event.startsWith('peer:')), 'Peer-originated handle changes should notify subscribers.')
     unsubscribe()
     const eventCount = events.length
     repo.pushPeerChange(urlStore.get(seed.documentId)!, { authoredDocument: seed })
     await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expectTrue(events.length === eventCount, 'Unsubscribed Automerge repository listeners should not receive later peer changes.')
 
     const unsupported = await repository.mutate({
@@ -216,6 +228,228 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {  async fun
     const reset = await repository.reset(seed.documentId)
     expectTrue(reset.kind === 'reset', 'IndexedDB repository reset should clear the mapped document.')
     expectTrue(urlStore.get(seed.documentId) === null, 'Reset should remove the stored Automerge URL mapping.')
+  }
+
+  async function testDocumentRepositoriesPersistDurableUndoRedoLocally() {
+    const seed = await createSeedDocument()
+    const repository = createMemoryDocumentRepository()
+    await repository.load({ documentId: seed.documentId, seedDocument: seed })
+
+    const mutated = await repository.mutate({
+      documentId: seed.documentId,
+      document: {
+        ...seed,
+        bodyLabels: seed.bodyLabels.map((label) =>
+          label.bodyId === 'body_part-1' ? { ...label, label: 'Durable Undo Body' } : label,
+        ),
+      },
+    })
+    expectTrue(mutated.ok, 'Durable history fixtures require the initial repository mutation to succeed.')
+
+    const afterMutation = await repository.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(afterMutation.canUndo && !afterMutation.canRedo, 'Accepted local mutations should create one durable undo step.')
+
+    const undone = await repository.undoDurableHistory(seed.documentId)
+    expectTrue(
+      undone?.ok && undone.document.bodyLabels.every((label) => label.label !== 'Durable Undo Body'),
+      'Undo should restore the prior authored document snapshot through the repository seam.',
+    )
+    const afterUndo = await repository.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(!afterUndo.canUndo && afterUndo.canRedo, 'Undo should move durable history availability onto redo.')
+
+    const redone = await repository.redoDurableHistory(seed.documentId)
+    expectTrue(
+      redone?.ok && redone.document.bodyLabels.some((label) => label.label === 'Durable Undo Body'),
+      'Redo should reapply the durable authored document snapshot through the repository seam.',
+    )
+
+    await repository.receivePeerDocument({
+      ...seed,
+      revisionId: 'rev_peer_override' as AuthoredModelDocument['revisionId'],
+    })
+    const afterPeer = await repository.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(
+      !afterPeer.canUndo && !afterPeer.canRedo,
+      'Peer-authored repository changes should not arrive as locally undoable durable history.',
+    )
+  }
+
+  async function testIndexedDbRepositoryRestoresDurableHistoryAcrossRefresh() {
+    const seed = await createSeedDocument()
+    const urlStore = createMemoryUrlStore()
+    const repo = createFakeAutomergeRepo()
+    const localDurableHistoryStore = createMemoryLocalDurableHistoryStore()
+    const repository = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore,
+      localDurableHistoryStore,
+    })
+
+    await repository.load({ documentId: seed.documentId, seedDocument: seed })
+    const mutated = await repository.mutate({
+      documentId: seed.documentId,
+      document: {
+        ...seed,
+        bodyLabels: seed.bodyLabels.map((label) =>
+          label.bodyId === 'body_part-1' ? { ...label, label: 'Restored Durable Undo Body' } : label,
+        ),
+      },
+    })
+    expectTrue(mutated.ok, 'Refresh durable-history coverage needs an accepted repository mutation.')
+
+    const refreshedRepository = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore,
+      localDurableHistoryStore,
+    })
+    await refreshedRepository.load({ documentId: seed.documentId, seedDocument: seed })
+    const restoredAvailability = await refreshedRepository.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(
+      restoredAvailability.canUndo && !restoredAvailability.canRedo,
+      'Refreshing the same local repository should restore durable undo availability from repository-local storage.',
+    )
+  }
+
+  async function testIndexedDbRepositoryScopesDurableHistoryPerLocalSession() {
+    const seed = await createSeedDocument()
+    const urlStore = createMemoryUrlStore()
+    const repo = createFakeAutomergeRepo()
+    const localDurableHistoryStore = createMemoryLocalDurableHistoryStore()
+    const sessionA = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore,
+      localDurableHistoryStore,
+      historyScope: 'session-a',
+    })
+    await sessionA.load({ documentId: seed.documentId, seedDocument: seed })
+    const mutated = await sessionA.mutate({
+      documentId: seed.documentId,
+      document: {
+        ...seed,
+        bodyLabels: seed.bodyLabels.map((label) =>
+          label.bodyId === 'body_part-1' ? { ...label, label: 'Scoped Durable Undo Body' } : label,
+        ),
+      },
+    })
+    expectTrue(mutated.ok, 'Session-scoped durable history coverage needs an accepted repository mutation.')
+
+    const refreshedSessionA = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore,
+      localDurableHistoryStore,
+      historyScope: 'session-a',
+    })
+    await refreshedSessionA.load({ documentId: seed.documentId, seedDocument: seed })
+    const sessionAAvailability = await refreshedSessionA.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(
+      sessionAAvailability.canUndo && !sessionAAvailability.canRedo,
+      'Refreshing the same local session should restore that session scoped durable undo state.',
+    )
+
+    const sessionB = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore,
+      localDurableHistoryStore,
+      historyScope: 'session-b',
+    })
+    await sessionB.load({ documentId: seed.documentId, seedDocument: seed })
+    const sessionBAvailability = await sessionB.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(
+      !sessionBAvailability.canUndo && !sessionBAvailability.canRedo,
+      'A different local session should not inherit another session durable undo ledger.',
+    )
+
+    await sessionB.reset(seed.documentId)
+    const sessionAAfterReset = await refreshedSessionA.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(
+      sessionAAfterReset.canUndo && !sessionAAfterReset.canRedo,
+      'Resetting a different local session should not clear the original session durable undo ledger.',
+    )
+  }
+
+  async function testIndexedDbUndoFailureKeepsDurableHistoryAvailability() {
+    const seed = await createSeedDocument()
+    const urlStore = createMemoryUrlStore()
+    const repo = createFakeAutomergeRepo()
+    const localDurableHistoryStore = createMemoryLocalDurableHistoryStore()
+    const repository = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore,
+      localDurableHistoryStore,
+      historyScope: 'session-undo-failure',
+    })
+
+    await repository.load({ documentId: seed.documentId, seedDocument: seed })
+    const mutated = await repository.mutate({
+      documentId: seed.documentId,
+      document: {
+        ...seed,
+        bodyLabels: seed.bodyLabels.map((label) =>
+          label.bodyId === 'body_part-1' ? { ...label, label: 'Undo Failure Body' } : label,
+        ),
+      },
+    })
+    expectTrue(mutated.ok, 'Undo failure coverage needs an accepted repository mutation.')
+
+    repo.failNextChange = true
+    const failedUndo = await repository.undoDurableHistory(seed.documentId)
+    expectTrue(!failedUndo?.ok, 'Undo should surface repository write failures.')
+
+    const availability = await repository.getDurableHistoryAvailability(seed.documentId)
+    expectTrue(
+      availability.canUndo && !availability.canRedo,
+      'A failed durable undo should leave the undo and redo ledger unchanged.',
+    )
+  }
+
+  async function testRepositoryPersistsLocalSketchDraftHistory() {
+    const seed = await createSeedDocument()
+    const repository = createMemoryDocumentRepository()
+    await repository.load({ documentId: seed.documentId, seedDocument: seed })
+
+    let sketchSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    const initialDraft = persistSketchDraftSession(sketchSession)
+    sketchSession = {
+      ...sketchSession,
+      sketchLabel: 'Sketch Draft Updated',
+      sequence: sketchSession.sequence + 1,
+    }
+    const updatedDraft = persistSketchDraftSession(sketchSession)
+
+    const initialAvailability = await repository.saveSketchDraftHistory(seed.documentId, 'draft:xy', initialDraft)
+    expectTrue(
+      !initialAvailability.canUndo && !initialAvailability.canRedo,
+      'Seeding a draft session should not create undo history before the draft changes.',
+    )
+
+    const updatedAvailability = await repository.saveSketchDraftHistory(seed.documentId, 'draft:xy', updatedDraft)
+    expectTrue(
+      updatedAvailability.canUndo && !updatedAvailability.canRedo,
+      'Updating a draft session should create repository-backed draft undo availability.',
+    )
+
+    const undone = await repository.undoSketchDraftHistory(seed.documentId, 'draft:xy')
+    expectTrue(
+      undone.session?.sketchLabel === initialDraft.sketchLabel,
+      'Draft undo should restore the prior persisted sketch draft session.',
+    )
+    expectTrue(
+      !undone.availability.canUndo && undone.availability.canRedo,
+      'Draft undo should move local draft availability onto redo.',
+    )
+
+    const redone = await repository.redoSketchDraftHistory(seed.documentId, 'draft:xy')
+    expectTrue(
+      redone.session?.sketchLabel === updatedDraft.sketchLabel,
+      'Draft redo should reapply the newer persisted sketch draft session.',
+    )
+
+    await repository.clearSketchDraftHistory(seed.documentId, 'draft:xy')
+    const cleared = await repository.getSketchDraftHistory(seed.documentId, 'draft:xy')
+    expectTrue(
+      cleared.session === null && !cleared.availability.canUndo && !cleared.availability.canRedo,
+      'Explicit draft clearing should remove repository-local sketch draft history.',
+    )
   }
 
   function testLocalStorageUrlStoreValidatesPersistedPayloads() {
@@ -252,6 +486,11 @@ test('src/domain/modeling/document-repository.spec.ts', async () => {  async fun
   await testRepositoryAssetMutationsAreAtomic()
   await testPeerAssetTransferStoresBlobs()
   await testIndexedDbRepositoryUsesInternalHandleAndReportsFailures()
+  await testDocumentRepositoriesPersistDurableUndoRedoLocally()
+  await testIndexedDbRepositoryRestoresDurableHistoryAcrossRefresh()
+  await testIndexedDbRepositoryScopesDurableHistoryPerLocalSession()
+  await testIndexedDbUndoFailureKeepsDurableHistoryAvailability()
+  await testRepositoryPersistsLocalSketchDraftHistory()
   testLocalStorageUrlStoreValidatesPersistedPayloads()
 })
 
