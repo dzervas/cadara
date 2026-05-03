@@ -124,6 +124,7 @@ test('src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
 })
 
 test('src/app/workbench-architecture-boundary.spec.ts extension registry composition ownership', () => {  const appSource = readFileSync(join(ROOT, 'src/App.tsx'), 'utf8')
+  const workbenchAppSource = readFileSync(join(ROOT, 'src/app/workbench/workbench-app.tsx'), 'utf8')
   const modelingServiceSource = readFileSync(join(ROOT, 'src/domain/modeling/modeling-service/service.ts'), 'utf8')
   const importControllerSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-part-import.ts'), 'utf8')
   const specialModeRegistrySource = readFileSync(join(ROOT, 'src/core/sketch-special-modes/registry.ts'), 'utf8')
@@ -131,9 +132,10 @@ test('src/app/workbench-architecture-boundary.spec.ts extension registry composi
 
   expectTrue(
     appSource.includes('createBuiltinRuntimeExtensionRegistryComposition')
-      && appSource.includes('RuntimeExtensionRegistryProvider')
-      && appSource.includes('exportProviders: runtimeExtensionRegistries.exportProviders'),
-    'Application bootstrap should own runtime extension registry composition and inject it into services and UI.',
+      && appSource.includes('<WorkbenchApp')
+      && workbenchAppSource.includes('RuntimeExtensionRegistryProvider')
+      && workbenchAppSource.includes('exportProviders: runtimeExtensionRegistries.exportProviders'),
+    'Application bootstrap should own runtime extension registry composition and hand it to the workbench session host for service and UI injection.',
   )
   expectTrue(
     !modelingServiceSource.includes('registerBuiltinExportProviders')

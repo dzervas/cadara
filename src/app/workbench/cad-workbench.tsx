@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader } from "@mantine/core";
 import { appVersion, gitCommit } from "virtual:cadara-build-metadata";
 
@@ -28,20 +28,10 @@ import { createObjectExportModalState } from "@/domain/export/object-export-stat
 import { createCadaraDebugSession } from "@/app/debug/cadara-debug-session";
 import { selectCadaraDebugTarget } from "@/app/debug/cadara-debug-actions";
 import {
-	createNewWorkbenchDocument,
 	exportWorkbenchDocument,
-	importWorkbenchDocumentFile,
-	openWorkbenchLocalFile,
 	saveWorkbenchLocalFile,
 } from "@/app/workbench/document/workbench-document-actions";
-import {
-	createInitialWorkbenchTabsState,
-	reconcileWorkbenchTabsForActiveDocument,
-	reduceWorkbenchTabs,
-	type WorkbenchTab,
-	type WorkbenchTabsState,
-} from "@/domain/workspace/workbench-tabs";
-import { createLocalStorageWorkbenchTabsStore } from "@/infrastructure/persistence/local-storage-workbench-tabs-store";
+import type { WorkbenchTab, WorkbenchTabsState } from "@/domain/workspace/workbench-tabs";
 import type { DocumentId } from "@/contracts/shared/ids";
 import { useWorkbenchHistory } from "@/app/workbench/controllers/use-workbench-history";
 import { useWorkbenchDocumentPresentation } from "@/app/workbench/controllers/use-workbench-document-presentation";
@@ -122,14 +112,33 @@ import { getBuildModeLabel } from "@/components/layout/build-metadata";
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "feature" }>;
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "sketch" }>;
 
-function generateDocumentId(): DocumentId {
-	const slug = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-		? crypto.randomUUID().replaceAll("-", "")
-		: Math.random().toString(36).slice(2) + Date.now().toString(36);
-	return `doc_${slug}` as DocumentId;
+export type WorkbenchDocumentActionResult =
+	| { status: "success"; documentId: DocumentId; message: string }
+	| { status: "cancelled" }
+	| { status: "user-error"; message: string }
+	| { status: "unexpected-error"; source: string; message: string; error: unknown };
+
+interface CadWorkbenchProps {
+	tabsState: WorkbenchTabsState;
+	onActivateDocumentTab: (documentId: DocumentId) => void;
+	onCloseDocumentTab: (documentId: DocumentId) => void;
+	onCreateNewDocument: () => Promise<DocumentId>;
+	onImportDocumentFile: (file: File) => Promise<WorkbenchDocumentActionResult>;
+	onOpenLocalFile: () => Promise<WorkbenchDocumentActionResult>;
+	onReorderDocumentTab: (documentId: DocumentId, toIndex: number) => void;
+	onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
 }
 
-export function CadWorkbench() {
+export function CadWorkbench({
+	tabsState,
+	onActivateDocumentTab,
+	onCloseDocumentTab,
+	onCreateNewDocument,
+	onImportDocumentFile,
+	onOpenLocalFile,
+	onReorderDocumentTab,
+	onSyncActiveDocumentTab,
+}: CadWorkbenchProps) {
 	const actionBus = useToolActionBus();
 	const { triggerTool } = useToolActions();
 	const modelingService = useModelingService();
@@ -171,8 +180,6 @@ export function CadWorkbench() {
 		objectLabelOverrides,
 		rawExplicitHiddenTargetKeys,
 		rawExplicitlyShownAutoHiddenTargetKeys,
-		requestViewportFit,
-		resetForDocumentReplacement,
 		setInvalidVariableValueMessages,
 		setObjectExportModal,
 		setObjectLabelOverrides,
@@ -256,124 +263,77 @@ export function CadWorkbench() {
 		};
 	}, [modelingService]);
 
-	const { localFileSyncEnabled } = useWorkbenchLocalFileSync({
+	const { localFileBindingMetadata, localFileSyncEnabled } = useWorkbenchLocalFileSync({
 		modelingService,
 		reportDocumentFileActionFailure,
 		showWorkbenchError,
 		showWorkbenchInfo,
 	});
 	const showBrowserStorageWarning = !localFileSyncEnabled && !cloudSaveEnabled;
+	const tabsBarRef = useRef<DocumentTabsBarHandle | null>(null);
 
-	// Document tabs strip
-	//
-	// Path-C scope (see DocumentTabsBar): the strip is a UI + persistence layer over the
-	// list of documents the user has opened. The seam for switching the active document
-	// (swapping the automerge db, recomputing) is intentionally not wired here yet —
-	// `handleTabActivate` is a no-op below until ModelingService gains a switchDocument
-	// method. The active tab is therefore pinned to `modelingService.currentDocumentId`,
-	// which today is always OCC_KERNEL_DOCUMENT_ID.
-	const tabsStorage = useMemo(() => {
-		if (typeof window === "undefined") {
-			return null;
-		}
-		return createLocalStorageWorkbenchTabsStore(window.localStorage);
-	}, []);
-	const [localFileBindingFileName, setLocalFileBindingFileName] = useState<string | null>(null);
 	useEffect(() => {
-		return modelingService.subscribeToLocalFileSyncStatus((status) => {
-			if (
-				status.kind === "binding-restored"
-				|| status.kind === "syncing"
-				|| status.kind === "synced"
-			) {
-				setLocalFileBindingFileName(status.metadata.fileName);
-				return;
-			}
-			if (status.kind === "idle") {
-				setLocalFileBindingFileName(null);
-			}
-		});
-	}, [modelingService]);
-	const activeWorkbenchTab = useMemo<WorkbenchTab>(() => {
-		const storageKind = localFileSyncEnabled ? "filesystem" : "browser";
-		const title = localFileBindingFileName ?? "Workspace";
-		return {
-			documentId: modelingService.currentDocumentId,
-			title,
-			storageKind,
-			storageDescriptor: localFileBindingFileName,
-		};
-	}, [localFileBindingFileName, localFileSyncEnabled, modelingService.currentDocumentId]);
-	const [tabsState, tabsDispatch] = useReducer(
-		reduceWorkbenchTabs,
-		activeWorkbenchTab,
-		(seed): WorkbenchTabsState => {
-			if (!tabsStorage) {
-				return createInitialWorkbenchTabsState(seed);
-			}
-			const result = tabsStorage.load();
-			const persisted = result.ok ? result.state : null;
-			return reconcileWorkbenchTabsForActiveDocument(persisted, seed);
-		},
-	);
-	useEffect(() => {
-		// Keep the active tab's metadata in sync with the loaded document's actual storage.
-		tabsDispatch({
-			type: "open",
-			tab: activeWorkbenchTab,
-		});
-	}, [activeWorkbenchTab]);
-	useEffect(() => {
-		if (!tabsStorage) {
+		if (!snapshot) {
 			return;
 		}
-		tabsStorage.save(tabsState);
-	}, [tabsState, tabsStorage]);
 
-	const handleTabActivate = useCallback(
-		(_documentId: DocumentId) => {
-			// Path C: switching is not yet wired. The active tab is pinned to the loaded
-			// document via the `activeWorkbenchTab` effect above. When ModelingService
-			// gains a switchDocument seam, replace this with the real activation call.
-			void _documentId;
-		},
-		[],
-	);
-	const handleTabClose = useCallback(
-		(documentId: DocumentId) => {
-			if (documentId === modelingService.currentDocumentId) {
-				// The currently-loaded document can't be closed without a switch target.
+		onSyncActiveDocumentTab({
+			documentId: snapshot.document.documentId,
+			title: snapshot.document.name,
+			storageKind: localFileBindingMetadata ? "filesystem" : "browser",
+			storageDescriptor: localFileBindingMetadata?.fileName ?? null,
+		});
+	}, [localFileBindingMetadata, onSyncActiveDocumentTab, snapshot]);
+	const handleTabClose = useCallback((documentId: DocumentId) => {
+		onCloseDocumentTab(documentId);
+	}, [onCloseDocumentTab]);
+	const handleTabReorder = useCallback((documentId: DocumentId, toIndex: number) => {
+		onReorderDocumentTab(documentId, toIndex);
+	}, [onReorderDocumentTab]);
+	const handleTabRename = useCallback((documentId: DocumentId, title: string) => {
+		if (!snapshot) {
+			return;
+		}
+		if (documentId !== modelingService.currentDocumentId) {
+			onActivateDocumentTab(documentId);
+			return;
+		}
+
+		const previousTitle = tabsState.tabs.find((tab) => tab.documentId === documentId)?.title ?? title;
+		void runWorkbenchAction({
+			operation: `Rename ${previousTitle}`,
+			reporter: errorReporter,
+			context: [
+				{ key: "baseRevisionId", value: snapshot.document.revisionId },
+				{ key: "documentId", value: documentId },
+			],
+			action: () =>
+				documentOwner.renameDocument(title, {
+					operation: `Rename ${previousTitle}`,
+					fallbackMessage: `Rename ${previousTitle} failed.`,
+					context: [
+						{ key: "baseRevisionId", value: snapshot.document.revisionId },
+						{ key: "documentId", value: documentId },
+					],
+				}),
+			mapSuccess: (result) => ok(result),
+			onError: (error) => showWorkbenchError(error.message),
+		}).then((result) => {
+			if (result.isErr()) {
 				return;
 			}
-			tabsDispatch({ type: "close", documentId });
-		},
-		[modelingService.currentDocumentId],
-	);
-	const handleTabReorder = useCallback((documentId: DocumentId, toIndex: number) => {
-		tabsDispatch({ type: "reorder", documentId, toIndex });
-	}, []);
-	const handleTabRename = useCallback((documentId: DocumentId, title: string) => {
-		tabsDispatch({ type: "rename", documentId, title });
-	}, []);
-	const tabsBarRef = useRef<DocumentTabsBarHandle | null>(null);
-	const handleNewDocumentTab = useCallback(() => {
-		const id = generateDocumentId();
-		tabsDispatch({
-			type: "open",
-			tab: {
-				documentId: id,
-				title: "Untitled",
-				storageKind: "browser",
-				storageDescriptor: null,
-			},
+			showWorkbenchInfo(`Renamed ${previousTitle} to ${title}.`);
 		});
-		// Defer one frame so Mantine's menu finishes returning focus to the trigger
-		// before we ask the rename input to focus. Without this, the menu's focus
-		// restoration races and immediately blurs the input we just mounted.
-		requestAnimationFrame(() => {
-			tabsBarRef.current?.requestRename(id);
-		});
-	}, []);
+	}, [
+		documentOwner,
+		errorReporter,
+		modelingService.currentDocumentId,
+		onActivateDocumentTab,
+		showWorkbenchError,
+		showWorkbenchInfo,
+		snapshot,
+		tabsState.tabs,
+	]);
 
 	const visibleObjectTargetKeys = useMemo(
 		() =>
@@ -452,7 +412,6 @@ export function CadWorkbench() {
 		isUndoRedoRunning,
 		requestRedo,
 		requestUndo,
-		resetHistoryState,
 		toolbarHistoryAvailability,
 	} = useWorkbenchHistory({
 		dispatch,
@@ -920,35 +879,35 @@ export function CadWorkbench() {
 		"document.activateTab1": {
 			execute: () => {
 				const tab = tabAtIndex(0);
-				if (tab) handleTabActivate(tab.documentId);
+				if (tab) onActivateDocumentTab(tab.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length >= 1,
 		},
 		"document.activateTab2": {
 			execute: () => {
 				const tab = tabAtIndex(1);
-				if (tab) handleTabActivate(tab.documentId);
+				if (tab) onActivateDocumentTab(tab.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length >= 2,
 		},
 		"document.activateTab3": {
 			execute: () => {
 				const tab = tabAtIndex(2);
-				if (tab) handleTabActivate(tab.documentId);
+				if (tab) onActivateDocumentTab(tab.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length >= 3,
 		},
 		"document.activateTab4": {
 			execute: () => {
 				const tab = tabAtIndex(3);
-				if (tab) handleTabActivate(tab.documentId);
+				if (tab) onActivateDocumentTab(tab.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length >= 4,
 		},
 		"document.activateTab5": {
 			execute: () => {
 				const tab = tabAtIndex(4);
-				if (tab) handleTabActivate(tab.documentId);
+				if (tab) onActivateDocumentTab(tab.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length >= 5,
 		},
@@ -958,7 +917,7 @@ export function CadWorkbench() {
 					(tab) => tab.documentId === tabsState.activeDocumentId,
 				);
 				const next = tabsState.tabs[(currentIndex + 1) % tabsState.tabs.length];
-				if (next) handleTabActivate(next.documentId);
+				if (next) onActivateDocumentTab(next.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length > 1,
 		},
@@ -969,7 +928,7 @@ export function CadWorkbench() {
 				);
 				const previousIndex = (currentIndex - 1 + tabsState.tabs.length) % tabsState.tabs.length;
 				const previous = tabsState.tabs[previousIndex];
-				if (previous) handleTabActivate(previous.documentId);
+				if (previous) onActivateDocumentTab(previous.documentId);
 			},
 			isEnabled: () => tabsState.tabs.length > 1,
 		},
@@ -1106,54 +1065,41 @@ export function CadWorkbench() {
 		}
 	};
 
-	const replaceAfterDocumentFileAction = async (
-		message: string,
-		options: { fitView?: boolean } = {},
-	): Promise<void> => {
-		resetForDocumentReplacement();
-		resetHistoryState();
-		try {
-			await documentOwner.replaceActiveDocumentBasis();
-			if (options.fitView) {
-				requestViewportFit();
-			}
-			showWorkbenchInfo(message);
-		} catch (error: unknown) {
-			reportDocumentFileActionFailure(
-				"workbench.file.replace",
-				"Document replacement failed.",
-				error,
-			);
-		}
-	};
-
 	const handleNewDocument = async () => {
-		await createNewWorkbenchDocument({
-			modelingService,
-			replaceAfterDocumentFileAction,
-			showWorkbenchError,
-			reportDocumentFileActionFailure,
-		});
+		await onCreateNewDocument();
 	};
 
 	const handleImportDocument = async (file: File) => {
-		await importWorkbenchDocumentFile({
-			file,
-			modelingService,
-			replaceAfterDocumentFileAction,
-			showWorkbenchError,
-			reportDocumentFileActionFailure,
-		});
+		const result = await onImportDocumentFile(file);
+		handleDocumentActionResult(result);
 	};
 
 	const handleOpenLocalFile = async () => {
-		await openWorkbenchLocalFile({
-			modelingService,
-			replaceAfterDocumentFileAction,
-			reportDocumentFileActionFailure,
-			showWorkbenchError,
-		});
+		const result = await onOpenLocalFile();
+		handleDocumentActionResult(result);
 	};
+
+	const handleDocumentActionResult = (result: WorkbenchDocumentActionResult) => {
+		switch (result.status) {
+			case "success":
+				showWorkbenchInfo(result.message);
+				return;
+			case "cancelled":
+				return;
+			case "user-error":
+				showWorkbenchError(result.message);
+				return;
+			case "unexpected-error":
+				reportDocumentFileActionFailure(result.source, result.message, result.error);
+		}
+	};
+
+	const handleNewDocumentTab = useCallback(async () => {
+		const id = await onCreateNewDocument();
+		requestAnimationFrame(() => {
+			tabsBarRef.current?.requestRename(id);
+		});
+	}, [onCreateNewDocument]);
 
 	const handleSaveLocalFile = async () => {
 		await saveWorkbenchLocalFile({
@@ -1382,7 +1328,7 @@ export function CadWorkbench() {
 										<DocumentTabsBar
 											ref={tabsBarRef}
 											state={tabsState}
-											onActivate={handleTabActivate}
+											onActivate={onActivateDocumentTab}
 											onClose={handleTabClose}
 											onReorder={handleTabReorder}
 											onRename={handleTabRename}

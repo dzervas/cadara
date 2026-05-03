@@ -6,15 +6,16 @@ import {
   OCC_KERNEL_INITIAL_REVISION_ID,
 } from '@/domain/modeling/opencascade-kernel-seed'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
+import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
 
 const browserOccWorkerClient = typeof window === 'undefined' ? null : createBrowserOccWorkerClient()
 let browserOccKernelAdapter: OpenCascadeKernelAdapter | null = null
 let browserOccWarmupController: OccPreloadController | null = null
 let browserOccWarmupPromise: Promise<void> | null = null
 
-function createKernelSketchSolver(revisionId: typeof OCC_KERNEL_INITIAL_REVISION_ID) {
+function createKernelSketchSolver(documentId: DocumentId, revisionId: RevisionId | null) {
   return new SketchConstraintSolverAdapter({
-    documentId: OCC_KERNEL_DOCUMENT_ID,
+    documentId,
     revisionId,
   })
 }
@@ -37,14 +38,19 @@ export function getBrowserOccWorkerClient() {
   return browserOccWorkerClient
 }
 
+export function createBrowserOccKernelAdapter(documentId: DocumentId = OCC_KERNEL_DOCUMENT_ID) {
+  return new OpenCascadeKernelAdapter({
+    solverAdapter: createKernelSketchSolver(documentId, OCC_KERNEL_INITIAL_REVISION_ID),
+    solverAdapterFactory: (revisionId) => createKernelSketchSolver(documentId, revisionId),
+    initialSnapshotRequiresRuntime: typeof window !== 'undefined',
+    workerSnapshotClient: browserOccWorkerClient,
+    documentId,
+  })
+}
+
 export function getBrowserOccKernelAdapter() {
   if (!browserOccKernelAdapter) {
-    browserOccKernelAdapter = new OpenCascadeKernelAdapter({
-      solverAdapter: createKernelSketchSolver(OCC_KERNEL_INITIAL_REVISION_ID),
-      solverAdapterFactory: (revisionId) => createKernelSketchSolver(revisionId),
-      initialSnapshotRequiresRuntime: typeof window !== 'undefined',
-      workerSnapshotClient: browserOccWorkerClient,
-    })
+    browserOccKernelAdapter = createBrowserOccKernelAdapter()
   }
 
   return browserOccKernelAdapter

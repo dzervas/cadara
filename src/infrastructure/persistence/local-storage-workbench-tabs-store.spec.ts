@@ -64,7 +64,7 @@ describe('createLocalStorageWorkbenchTabsStore', () => {
     const result = store.load()
 
     expect(result).toEqual({ ok: true, state })
-    expect(storage.snapshot()[WORKBENCH_TABS_STORAGE_KEY]).toContain('"version":1')
+    expect(storage.snapshot()[WORKBENCH_TABS_STORAGE_KEY]).toContain('"version":2')
   })
 
   it('rejects malformed JSON with invalid-json reason', () => {
@@ -84,7 +84,7 @@ describe('createLocalStorageWorkbenchTabsStore', () => {
     storage.setItem(
       WORKBENCH_TABS_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         tabs: [{ documentId: docA, title: 'A', storageKind: 'browser', storageDescriptor: null }],
         activeDocumentId: docB,
       }),

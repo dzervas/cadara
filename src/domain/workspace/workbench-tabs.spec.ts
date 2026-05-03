@@ -163,6 +163,68 @@ describe('reduceWorkbenchTabs', () => {
       expect(next.tabs[0].storageKind).toBe('filesystem')
       expect(next.tabs[0].storageDescriptor).toBe('bracket.cadara')
     })
+
+    it('syncs the active tab title and storage from the active session snapshot', () => {
+      const seeded = reduceWorkbenchTabs(createInitialWorkbenchTabsState(tab(docA, 'Untitled')), {
+        type: 'open',
+        tab: tab(docB, 'Bracket v1'),
+        activate: true,
+      })
+
+      const next = reduceWorkbenchTabs(seeded, {
+        type: 'syncActive',
+        tab: {
+          documentId: docB,
+          title: 'Bracket v2',
+          storageKind: 'filesystem',
+          storageDescriptor: 'bracket.cadara',
+        },
+      })
+
+      expect(next.tabs).toEqual([
+        tab(docA, 'Untitled'),
+        {
+          documentId: docB,
+          title: 'Bracket v2',
+          storageKind: 'filesystem',
+          storageDescriptor: 'bracket.cadara',
+        },
+      ])
+      expect(next.activeDocumentId).toBe(docB)
+    })
+
+    it('ignores stale active-session sync for a tab that is no longer active or open', () => {
+      const seeded = reduceWorkbenchTabs(createInitialWorkbenchTabsState(tab(docA, 'Old A')), {
+        type: 'open',
+        tab: tab(docB, 'Current B'),
+        activate: true,
+      })
+
+      const next = reduceWorkbenchTabs(seeded, {
+        type: 'syncActive',
+        tab: {
+          documentId: docA,
+          title: 'Stale A',
+          storageKind: 'filesystem',
+          storageDescriptor: 'stale-a.cadara',
+        },
+      })
+
+      expect(next).toEqual(seeded)
+
+      const closed = reduceWorkbenchTabs(seeded, { type: 'close', documentId: docA })
+      const afterClosedSync = reduceWorkbenchTabs(closed, {
+        type: 'syncActive',
+        tab: {
+          documentId: docA,
+          title: 'Reopened by stale sync',
+          storageKind: 'filesystem',
+          storageDescriptor: 'wrong-target.cadara',
+        },
+      })
+
+      expect(afterClosedSync).toEqual(closed)
+    })
   })
 })
 

@@ -111,6 +111,7 @@ import { projectSketchExternalReferencesFromSnapshot } from '@/domain/modeling/s
 const CONTRACT_VERSION = 'modeling-contract/v1alpha1' as const
 const REVISION_ID = 'rev_0001' as const
 const DOCUMENT_ID = 'doc_workspace' as const
+const DOCUMENT_NAME = 'Workspace'
 const SKETCH_ID = 'sketch_primary' as const
 const CONSTRUCTION_PICK_PRIORITY = 40
 
@@ -2208,6 +2209,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Worksp
     contractVersion: CONTRACT_VERSION,
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     documentId: DOCUMENT_ID,
+    name: DOCUMENT_NAME,
     revisionId: REVISION_ID,
     settings: {
       linearUnit: 'millimeter',
@@ -2892,6 +2894,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       .filter((feature): feature is RepositoryAuthoredModelDocument['features'][number] => Boolean(feature))
 
     snapshot.document.revisionId = document.revisionId
+    snapshot.document.name = document.name
     snapshot.document.settings = structuredClone(document.settings)
     snapshot.document.variables = structuredClone(document.variables)
     snapshot.document.sketches = document.sketches.map((sketch) => {

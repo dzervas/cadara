@@ -260,6 +260,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
       contractVersion: CONTRACT_VERSION,
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       documentId: 'doc_workspace' as const,
+      name: 'Workspace',
       revisionId,
       settings: {
         linearUnit: 'millimeter' as const,

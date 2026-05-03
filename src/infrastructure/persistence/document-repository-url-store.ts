@@ -4,6 +4,9 @@ import type { AutomergeUrl } from '@automerge/automerge-repo/slim'
 import { parseAutomergeDocumentUrlStorePayload } from '@/contracts/modeling/document-repository.runtime-schema'
 import type { DocumentId } from '@/contracts/shared/ids'
 
+const DEFAULT_DOCUMENT_REPOSITORY_URL_STORAGE_KEY = 'cad.documentRepository.automergeUrls.v1'
+const DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE = 'cad-authored-documents'
+
 export interface DocumentRepositoryUrlStore {
   get(documentId: DocumentId): AutomergeUrl | null
   set(documentId: DocumentId, url: AutomergeUrl): void
@@ -28,7 +31,7 @@ export class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlSt
 
 export function createLocalStorageDocumentRepositoryUrlStore(
   storage: { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void },
-  key = 'cad.documentRepository.automergeUrls.v1',
+  key = DEFAULT_DOCUMENT_REPOSITORY_URL_STORAGE_KEY,
 ): DocumentRepositoryUrlStore {
   function read() {
     const serialized = storage.getItem(key)
@@ -66,4 +69,14 @@ export function createLocalStorageDocumentRepositoryUrlStore(
       write(next)
     },
   }
+}
+
+export function createDocumentRepositoryUrlStorageKey(namespace: string = DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE) {
+  return namespace === DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE
+    ? DEFAULT_DOCUMENT_REPOSITORY_URL_STORAGE_KEY
+    : `${DEFAULT_DOCUMENT_REPOSITORY_URL_STORAGE_KEY}:${namespace}`
+}
+
+export function getDocumentRepositoryStorageNamespace(search: string) {
+  return new URLSearchParams(search).get('cadRepositoryDbName') ?? DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE
 }

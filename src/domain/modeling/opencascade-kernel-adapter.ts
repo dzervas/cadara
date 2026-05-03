@@ -113,6 +113,7 @@ import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/mo
 import { createOccExportCapabilities } from '@/domain/export/occ-export-capabilities'
 import {
   OCC_KERNEL_DOCUMENT_ID,
+  OCC_KERNEL_DOCUMENT_NAME,
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_PRIMARY_SKETCH_ID,
   OCC_KERNEL_SETTINGS,
@@ -194,6 +195,7 @@ function createAuthoredModelDocumentFromAuthoringState(
     contractVersion: CONTRACT_VERSION,
     schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
     documentId: state.documentId,
+    name: state.name,
     revisionId: state.revisionId,
     settings: {
       linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
@@ -1359,6 +1361,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const oc = await this.loadOpenCascadeInstance()
     const authoringState = createOccAuthoringState(oc, {
       documentId: this.documentId,
+      name: OCC_KERNEL_DOCUMENT_NAME,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     })
@@ -1526,6 +1529,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const sketches: SketchSnapshotRecord[] = []
     let projectionState = createOccAuthoringState(oc, {
       documentId: document.documentId,
+      name: document.name,
       revisionId: document.revisionId,
       modelingTolerance: document.settings.modelingTolerance,
       variables: structuredClone(document.variables),
@@ -1582,6 +1586,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     let authoringState = createOccAuthoringState(oc, {
       documentId: document.documentId,
+      name: document.name,
       revisionId: document.revisionId,
       modelingTolerance: document.settings.modelingTolerance,
       sketches,
@@ -1646,6 +1651,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private buildInitialSnapshotWithoutRuntime() {
     const authoringState = createOccAuthoringState({} as OpenCascadeInstance, {
       documentId: this.documentId,
+      name: OCC_KERNEL_DOCUMENT_NAME,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     })
@@ -1677,6 +1683,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ) {
     const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
       documentId: this.documentId,
+      name: runtimeState.authoringState.name,
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
@@ -1880,6 +1887,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const deferredFeatureIds = input.deferredFeatureIds
     const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
       documentId: this.documentId,
+      name: runtimeState.authoringState.name,
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
@@ -3248,7 +3256,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   async getExportCapabilities(baseRevisionId: RevisionId): Promise<ExportCapabilities | DocumentExportDiagnostic> {
     if (this.workerSnapshotClient) {
-      return this.workerSnapshotClient.getExportCapabilities(baseRevisionId)
+      return this.workerSnapshotClient.getExportCapabilities(this.documentId, baseRevisionId)
     }
 
     const runtimeState = await this.getRuntimeState()

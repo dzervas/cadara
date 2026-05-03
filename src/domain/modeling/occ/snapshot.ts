@@ -1726,6 +1726,7 @@ export function buildOccKernelDocumentSnapshot(
     contractVersion: CONTRACT_VERSION,
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     documentId: state.documentId,
+    name: state.name,
     revisionId: state.revisionId,
     settings: {
       linearUnit: OCC_KERNEL_SETTINGS.linearUnit,

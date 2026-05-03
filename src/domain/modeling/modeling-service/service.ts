@@ -632,7 +632,7 @@ export function createModelingService(
     }
   }
 
-  documentRepository?.subscribe(currentDocumentId, (event) => {
+  const unsubscribeDocumentRepository = documentRepository?.subscribe(currentDocumentId, (event) => {
     if (isRestoringRepositoryDocument) {
       return
     }
@@ -1016,6 +1016,9 @@ export function createModelingService(
   return {
     currentDocumentId,
     sketchSolver,
+    dispose() {
+      unsubscribeDocumentRepository?.()
+    },
     subscribeToDocumentChanges(listener) {
       documentChangeListeners.add(listener)
       return () => {
@@ -1051,6 +1054,23 @@ export function createModelingService(
       }
 
       return replaceCurrentAuthoredDocument(normalized.document, input.assets ?? [])
+    },
+    async renameDocument(input) {
+      await restorePromise
+      await repositoryChangePromise
+      const document = await exportAuthoredDocumentForRepository()
+      if (document.name === input.name) {
+        const snapshot = validateSnapshotResponse(
+          await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+          currentDocumentId,
+        )
+        return { ok: true, revisionId: snapshot.document.revisionId, diagnostics: snapshot.document.diagnostics }
+      }
+
+      return replaceCurrentAuthoredDocument({
+        ...document,
+        name: input.name,
+      })
     },
     async bindLocalFile(input) {
       await restorePromise

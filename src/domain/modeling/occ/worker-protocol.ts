@@ -136,6 +136,7 @@ export type OccWorkerOperation =
     }
   | {
       kind: 'getExportCapabilities'
+      documentId: AuthoredModelDocument['documentId']
       baseRevisionId: RevisionId
     }
 

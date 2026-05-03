@@ -141,7 +141,37 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {  async funct
     expectTrue(failed, 'Worker warmup failures must surface to the caller.')
   }
 
+  async function testExportCapabilitiesCarryDocumentIdentity() {
+    const worker = new FakeOccWorker()
+    const client = new OccWorkerClient({ worker })
+
+    const promise = client.getExportCapabilities('doc_export_caps', 'revision_1')
+    const request = worker.posted[0]
+
+    expectTrue(
+      request?.kind === 'invoke'
+        && request.operation.kind === 'getExportCapabilities'
+        && request.operation.documentId === 'doc_export_caps'
+        && request.operation.baseRevisionId === 'revision_1',
+      'Export capability queries should carry the active document identity into the OCC worker request.',
+    )
+
+    worker.emit({
+      kind: 'invoked',
+      requestId: request.requestId,
+      operation: 'getExportCapabilities',
+      payload: {
+        format: 'step',
+        label: 'STEP',
+        supportsBinary: false,
+      },
+    })
+
+    await promise
+  }
+
   await testWarmupInvokesWorkerOperation()
   await testSnapshotResponsesAreUnpacked()
   await testWarmupFailuresSurfaceToCaller()
+  await testExportCapabilitiesCarryDocumentIdentity()
 })

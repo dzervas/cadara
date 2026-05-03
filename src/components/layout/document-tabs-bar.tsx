@@ -259,9 +259,12 @@ function DocumentTabButton({
     (event: MouseEvent<HTMLSpanElement>) => {
       event.stopPropagation()
       event.preventDefault()
+      if (!isActive) {
+        onActivate(tab.documentId)
+      }
       onBeginRename(tab.documentId)
     },
-    [onBeginRename, tab.documentId],
+    [isActive, onActivate, onBeginRename, tab.documentId],
   )
 
   const handleAuxClick = useCallback(

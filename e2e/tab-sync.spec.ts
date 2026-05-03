@@ -1,7 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const DOCUMENT_REPOSITORY_URL_STORAGE_KEY = 'cad.documentRepository.automergeUrls.v1'
-
 test.setTimeout(90_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
@@ -13,7 +11,7 @@ test('opt-in local peer sync propagates authored document changes between tabs',
   const secondTab = await context.newPage()
 
   await openSyncedWorkbench(firstTab, firstTabUrl)
-  await waitForRepositoryUrl(firstTab)
+  await waitForRepositoryUrl(firstTab, `${channelName}-a`)
   await openSyncedWorkbench(secondTab, secondTabUrl)
   await expect(firstTab.locator('[data-variable-row]')).toHaveCount(0)
   await expect(secondTab.locator('[data-variable-row]')).toHaveCount(0)
@@ -46,11 +44,12 @@ async function openSyncedWorkbench(page: Page, url: string) {
   await expect.poll(() => revisionLabel(page), { timeout: 30_000 }).not.toBe('loading')
 }
 
-async function waitForRepositoryUrl(page: Page) {
+async function waitForRepositoryUrl(page: Page, databaseName: string) {
+  const storageKey = `cad.documentRepository.automergeUrls.v1:${databaseName}`
   await expect.poll(
     () => page.evaluate(
-      (storageKey) => window.localStorage.getItem(storageKey),
-      DOCUMENT_REPOSITORY_URL_STORAGE_KEY,
+      (key) => window.localStorage.getItem(key),
+      storageKey,
     ),
     { timeout: 30_000 },
   ).toContain('doc_workspace')

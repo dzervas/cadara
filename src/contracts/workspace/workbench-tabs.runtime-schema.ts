@@ -25,7 +25,7 @@ const tabSchema = z.object({
 
 export const workbenchTabsPayloadSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     tabs: z.array(tabSchema).min(1).max(64),
     activeDocumentId: documentIdSchema,
   })
@@ -65,7 +65,7 @@ export function parseWorkbenchTabsPayload(input: unknown): WorkbenchTabsLoadResu
 
 export function serializeWorkbenchTabsState(state: WorkbenchTabsState): WorkbenchTabsPayload {
   return {
-    version: 1,
+    version: 2,
     tabs: state.tabs.map((tab) => ({ ...tab })),
     activeDocumentId: state.activeDocumentId,
   }

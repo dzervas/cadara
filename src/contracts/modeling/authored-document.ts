@@ -43,6 +43,7 @@ export interface AuthoredModelDocument {
   contractVersion: ContractVersion
   schemaVersion: AuthoredModelDocumentSchemaVersion
   documentId: DocumentId
+  name: string
   revisionId: RevisionId
   settings: KernelDocumentSnapshot['settings']
   variables: DocumentVariableRecord[]
@@ -70,6 +71,7 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: WorkspaceSnaps
     contractVersion: CONTRACT_VERSION,
     schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
     documentId: snapshot.document.documentId,
+    name: snapshot.document.name,
     revisionId: snapshot.document.revisionId,
     settings: structuredClone(snapshot.document.settings),
     variables: structuredClone(snapshot.document.variables),

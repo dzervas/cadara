@@ -72,6 +72,7 @@ export const authoredModelDocumentSchema = z.object({
   contractVersion: contractVersionSchema,
   schemaVersion: authoredModelDocumentSchemaVersionSchema,
   documentId: documentIdSchema,
+  name: stringSchema,
   revisionId: revisionIdSchema,
   settings: modelingDocumentSettingsSchema,
   variables: z.array(z.object({

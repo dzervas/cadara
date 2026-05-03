@@ -150,6 +150,21 @@ export function createWorkbenchDocumentOwner({
 		return acceptMutation(result, options);
 	}
 
+	async function renameDocument(
+		name: string,
+		_options: Pick<AcceptedMutationOptions, "fallbackMessage" | "operation" | "context">,
+	) {
+		const result = await modelingService.renameDocument({ name });
+		if (!result.ok) {
+			return result;
+		}
+
+		return ok({
+			mutation: result,
+			snapshot: await loadAcceptedMutationSnapshot(),
+		});
+	}
+
 	async function renameTarget(
 		target: PrimitiveRef,
 		nextLabel: string,
@@ -248,6 +263,7 @@ export function createWorkbenchDocumentOwner({
 		addDocumentVariable,
 		commitPartImport,
 		deleteTarget,
+		renameDocument,
 		reorderDocumentHistory,
 		renameTarget,
 		replaceActiveDocumentBasis,

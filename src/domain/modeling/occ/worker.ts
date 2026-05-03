@@ -22,7 +22,7 @@ import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint
 
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null
 let lastAssets: OccWorkerAssetConfig | undefined
-let adapter: OpenCascadeKernelAdapter | null = null
+const adapters = new Map<string, OpenCascadeKernelAdapter>()
 let requestQueue: Promise<void> = Promise.resolve()
 
 interface OccWorkerGlobalScope {
@@ -57,51 +57,55 @@ function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
   return openCascadePromise
 }
 
-function getWorkerAdapter() {
-  if (!adapter) {
-    adapter = new OpenCascadeKernelAdapter({
+function getWorkerAdapter(documentId: string) {
+  const existing = adapters.get(documentId)
+  if (existing) {
+    return existing
+  }
+
+  const adapter = new OpenCascadeKernelAdapter({
+      documentId,
       solverAdapter: new SketchConstraintSolverAdapter({
-        documentId: OCC_KERNEL_DOCUMENT_ID,
+        documentId,
         revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       }),
       solverAdapterFactory: (revisionId) =>
         new SketchConstraintSolverAdapter({
-          documentId: OCC_KERNEL_DOCUMENT_ID,
+          documentId,
           revisionId,
         }),
       getOpenCascadeInstance: () => getWorkerOpenCascadeInstance(),
       initialSnapshotRequiresRuntime: true,
     })
-  }
+  adapters.set(documentId, adapter)
 
   return adapter
 }
 
 async function handleWorkerOperation(operation: OccWorkerOperation) {
-  const workerAdapter = getWorkerAdapter()
-
   switch (operation.kind) {
     case 'warmup':
       await getWorkerOpenCascadeInstance(operation.assets)
-      await workerAdapter.preloadRuntime()
+      await getWorkerAdapter(OCC_KERNEL_DOCUMENT_ID).preloadRuntime()
       return undefined
     case 'restoreAuthoredModelDocument':
-      await workerAdapter.restoreAuthoredModelDocument?.(
+      await getWorkerAdapter(operation.document.documentId).restoreAuthoredModelDocument?.(
         operation.document,
         operation.diagnostics ?? [],
         createWorkerAssetResolver(operation.assets),
       )
       return undefined
     case 'validateAuthoredModelDocument':
-      await workerAdapter.validateAuthoredModelDocument?.(
+      await getWorkerAdapter(operation.document.documentId).validateAuthoredModelDocument?.(
         operation.document,
         operation.diagnostics ?? [],
         createWorkerAssetResolver(operation.assets),
       )
       return undefined
     case 'exportAuthoredModelDocument':
-      return workerAdapter.exportAuthoredModelDocument?.(operation.documentId)
+      return getWorkerAdapter(operation.documentId).exportAuthoredModelDocument?.(operation.documentId)
     case 'getDocumentSnapshot': {
+      const workerAdapter = getWorkerAdapter(operation.request.documentId)
       workerAdapter.setSnapshotLodTier(operation.lodTierId ?? 'startup')
       const response = await workerAdapter.getDocumentSnapshot(operation.request)
       const packed = packWorkspaceSnapshotRenderMeshes(response.snapshot)
@@ -112,35 +116,35 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       } satisfies PackedSnapshotOperationResult
     }
     case 'projectSketchExternalReferences':
-      return workerAdapter.projectSketchExternalReferences(operation.request)
+      return getWorkerAdapter(operation.request.documentId).projectSketchExternalReferences(operation.request)
     case 'commitSketch':
-      return workerAdapter.commitSketch(operation.request)
+      return getWorkerAdapter(operation.request.documentId).commitSketch(operation.request)
     case 'createFeature':
-      return workerAdapter.createFeature(operation.request)
+      return getWorkerAdapter(operation.request.documentId).createFeature(operation.request)
     case 'updateFeature':
-      return workerAdapter.updateFeature(operation.request)
+      return getWorkerAdapter(operation.request.documentId).updateFeature(operation.request)
     case 'deleteFeature':
-      return workerAdapter.deleteFeature(operation.request)
+      return getWorkerAdapter(operation.request.documentId).deleteFeature(operation.request)
     case 'deleteTarget':
-      return workerAdapter.deleteTarget(operation.request)
+      return getWorkerAdapter(operation.request.documentId).deleteTarget(operation.request)
     case 'renameBody':
-      return workerAdapter.renameBody(operation.request)
+      return getWorkerAdapter(operation.request.documentId).renameBody(operation.request)
     case 'reorderFeature':
-      return workerAdapter.reorderFeature(operation.request)
+      return getWorkerAdapter(operation.request.documentId).reorderFeature(operation.request)
     case 'reorderDocumentHistory':
-      return workerAdapter.reorderDocumentHistory(operation.request)
+      return getWorkerAdapter(operation.request.documentId).reorderDocumentHistory(operation.request)
     case 'setFeatureCursor':
-      return workerAdapter.setFeatureCursor(operation.request)
+      return getWorkerAdapter(operation.request.documentId).setFeatureCursor(operation.request)
     case 'addDocumentVariable':
-      return workerAdapter.addDocumentVariable(operation.request)
+      return getWorkerAdapter(operation.request.documentId).addDocumentVariable(operation.request)
     case 'updateDocumentVariable':
-      return workerAdapter.updateDocumentVariable(operation.request)
+      return getWorkerAdapter(operation.request.documentId).updateDocumentVariable(operation.request)
     case 'evaluatePreview':
-      return workerAdapter.evaluatePreview(operation.request)
+      return getWorkerAdapter(operation.request.documentId).evaluatePreview(operation.request)
     case 'resolveReference':
-      return workerAdapter.resolveReference(operation.request)
+      return getWorkerAdapter(operation.request.documentId).resolveReference(operation.request)
     case 'getExportCapabilities':
-      return workerAdapter.getExportCapabilities(operation.baseRevisionId)
+      return getWorkerAdapter(operation.documentId).getExportCapabilities(operation.baseRevisionId)
   }
 }
 

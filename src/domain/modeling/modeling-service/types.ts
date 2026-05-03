@@ -60,6 +60,7 @@ import type { ExportProviderRegistry } from '@/domain/export/provider-registry'
 export interface ModelingService {
   readonly currentDocumentId: DocumentId
   readonly sketchSolver: SketchSolverService | null
+  dispose(): void
   subscribeToDocumentChanges(listener: (event: ModelingServiceDocumentChangeEvent) => void): () => void
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>
   resetOperationHistory(): void
@@ -67,6 +68,7 @@ export interface ModelingService {
   getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>
   importDocument(input: ModelingImportDocumentInput): Promise<ModelingDocumentFileMutationResult>
+  renameDocument(input: { name: string }): Promise<ModelingDocumentFileMutationResult>
   exportCurrentDocument(): Promise<DocumentExportSuccessResult>
   bindLocalFile(input: {
     handle: LocalFileSystemFileHandle

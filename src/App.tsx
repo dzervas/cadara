@@ -1,23 +1,13 @@
 import { useEffect, useMemo, useRef } from "react";
 
-import { CadWorkbench } from "@/app/workbench/cad-workbench";
-import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
-import { createLocalStorageDocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
+import { WorkbenchApp } from "@/app/workbench/workbench-app";
 import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
-import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
 import { registerOpenCascadeAssetCache } from "@/infrastructure/occ/asset-cache";
 import {
-	getBrowserOccKernelAdapter,
+	createBrowserOccKernelAdapter,
 	startBrowserOccWarmup,
 } from "@/infrastructure/occ/browser-kernel-runtime";
-import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { EditorProvider } from "@/hooks/editor-provider";
 import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";
-import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
-import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
-import { ToolActionProvider } from "@/hooks/tool-action-provider";
 import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import { ReportedErrorBoundary } from "@/components/layout/reported-error-boundary";
 import { BuildMetadataLabel } from "@/components/layout/build-metadata-label";
@@ -32,21 +22,6 @@ function App() {
 		() => createBuiltinRuntimeExtensionRegistryComposition(),
 		[],
 	);
-	const editorDependencies = useMemo(
-		() => ({
-			importProviders: runtimeExtensionRegistries.importProviders,
-			sketchSpecialModes: runtimeExtensionRegistries.sketchSpecialModes,
-		}),
-		[runtimeExtensionRegistries],
-	);
-	const editorSketchSolver = useMemo(
-		() =>
-			new SketchConstraintSolverAdapter({
-				documentId: OCC_KERNEL_DOCUMENT_ID,
-				revisionId: null,
-			}),
-		[],
-	);
 	const documentSyncWorkerClient = useMemo(
 		() =>
 			typeof window === "undefined"
@@ -55,7 +30,6 @@ function App() {
 		[],
 	);
 	const documentSyncWorkerDisposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const kernelAdapter = useMemo(() => getBrowserOccKernelAdapter(), []);
 	useEffect(() => {
 		if (documentSyncWorkerDisposeTimerRef.current) {
 			clearTimeout(documentSyncWorkerDisposeTimerRef.current);
@@ -73,45 +47,18 @@ function App() {
 			}, 0);
 		};
 	}, [documentSyncWorkerClient]);
-	const modelingService = useMemo(
-		() =>
-			createModelingService(kernelAdapter, {
-				currentDocumentId: OCC_KERNEL_DOCUMENT_ID,
-				sketchSolver: editorSketchSolver,
-				exportProviders: runtimeExtensionRegistries.exportProviders,
-				operationHistoryStore:
-					typeof window === "undefined"
-						? null
-						: createLocalStorageOperationHistoryStore(window.localStorage),
-				documentRepositoryPersistence: "background",
-				documentRepository:
-					typeof window === "undefined" || shouldDisableDevRepository() || !documentSyncWorkerClient
-						? null
-						: createWorkerBackedDocumentRepository({
-								client: documentSyncWorkerClient,
-								urlStore: createLocalStorageDocumentRepositoryUrlStore(window.localStorage),
-							}),
-			}),
-		[kernelAdapter, editorSketchSolver, documentSyncWorkerClient, runtimeExtensionRegistries],
-	);
 
 	return (
 		<ErrorReporterProvider>
 			<ReportedErrorBoundary>
 				<OccWarmupErrorEffect />
 				<OccAssetCacheEffect />
-				<RuntimeExtensionRegistryProvider registries={runtimeExtensionRegistries}>
-					<ModelingServiceProvider modelingService={modelingService}>
-						<EditorProvider
-							modelingService={modelingService}
-							editorDependencies={editorDependencies}
-						>
-							<ToolActionProvider actionBus={actionBus}>
-								<CadWorkbench />
-							</ToolActionProvider>
-						</EditorProvider>
-					</ModelingServiceProvider>
-				</RuntimeExtensionRegistryProvider>
+				<WorkbenchApp
+					actionBus={actionBus}
+					createKernelAdapter={createBrowserOccKernelAdapter}
+					documentSyncWorkerClient={shouldDisableDevRepository() ? null : documentSyncWorkerClient}
+					runtimeExtensionRegistries={runtimeExtensionRegistries}
+				/>
 			</ReportedErrorBoundary>
 			<SentryAdBlockNotification />
 			<BuildMetadataLabel />

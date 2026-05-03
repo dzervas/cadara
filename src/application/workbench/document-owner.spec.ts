@@ -236,6 +236,42 @@ test('document owner covers snapshot replacement and loading guards', async () =
   expectTrue(message === 'The current document is still loading.', 'Mutation entrypoints should guard against missing snapshots.')
 })
 
+test('document owner routes durable document rename through the modeling seam and refreshes the snapshot', async () => {
+  const snapshot = await createSeedDocumentSnapshot()
+  const nextSnapshot = await createSeedDocumentSnapshot()
+  nextSnapshot.document.name = 'Bracket v3'
+  const dispatched: EditorEvent[] = []
+  const renameCalls: string[] = []
+
+  const owner = createOwner({
+    machineState: { snapshot } as EditorState,
+    dispatch: (event) => dispatched.push(event),
+    modelingService: {
+      currentDocumentId: snapshot.document.documentId,
+      sketchSolver: null,
+      async getCurrentDocumentSnapshot() {
+        return nextSnapshot
+      },
+      async renameDocument(input) {
+        renameCalls.push(input.name)
+        return { ok: true as const, revisionId: nextSnapshot.document.revisionId, diagnostics: [] }
+      },
+    },
+  })
+
+  const result = await owner.renameDocument('Bracket v3', {
+    operation: 'Rename document',
+    fallbackMessage: 'Rename document failed.',
+  })
+
+  expectTrue(result.isOk(), 'Accepted document rename mutations should resolve successfully through the document owner seam.')
+  expectTrue(renameCalls[0] === 'Bracket v3', 'Document owner should pass the durable document name through to the modeling service.')
+  expectTrue(
+    dispatched[0]?.type === 'document.snapshotLoaded' && dispatched[0].snapshot === nextSnapshot,
+    'Accepted document renames should refresh and dispatch the next snapshot through the shared snapshot-loaded handoff.',
+  )
+})
+
 test('document owner routes rename operations for bodies, features, and sketches', async () => {
   const snapshot = await createSeedDocumentSnapshot()
   const nextSnapshot = await createSeedDocumentSnapshot()

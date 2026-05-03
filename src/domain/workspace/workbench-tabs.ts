@@ -31,6 +31,7 @@ export type WorkbenchTabsAction =
   | { type: 'close'; documentId: DocumentId }
   | { type: 'activate'; documentId: DocumentId }
   | { type: 'reorder'; documentId: DocumentId; toIndex: number }
+  | { type: 'syncActive'; tab: WorkbenchTab }
   | { type: 'rename'; documentId: DocumentId; title: string }
   | {
       type: 'updateStorage'
@@ -52,6 +53,7 @@ export function createInitialWorkbenchTabsState(seed: WorkbenchTab): WorkbenchTa
  *   - Closing the active tab promotes the right-hand neighbor (or left if rightmost).
  *   - Closing the only tab is a no-op; the strip never goes empty.
  *   - `open` with an existing documentId updates the existing tab in place rather than duplicating.
+ *   - Active-session sync may only update the currently active, already-open tab.
  */
 export function reduceWorkbenchTabs(
   state: WorkbenchTabsState,
@@ -119,6 +121,20 @@ export function reduceWorkbenchTabs(
       const [moved] = next.splice(fromIndex, 1)
       next.splice(clampedTo, 0, moved)
       return { tabs: next, activeDocumentId: state.activeDocumentId }
+    }
+
+    case 'syncActive': {
+      if (action.tab.documentId !== state.activeDocumentId) {
+        return state
+      }
+
+      const existingIndex = state.tabs.findIndex((tab) => tab.documentId === action.tab.documentId)
+      if (existingIndex < 0) {
+        return state
+      }
+
+      const nextTabs = state.tabs.map((tab, index) => (index === existingIndex ? action.tab : tab))
+      return { tabs: nextTabs, activeDocumentId: state.activeDocumentId }
     }
 
     case 'rename': {

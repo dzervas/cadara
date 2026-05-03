@@ -23,6 +23,7 @@ import {
 } from '@/contracts/shared/versioning'
 
 export const OCC_KERNEL_DOCUMENT_ID = 'doc_workspace' as DocumentId
+export const OCC_KERNEL_DOCUMENT_NAME = 'Workspace'
 export const OCC_KERNEL_INITIAL_REVISION_ID = 'rev_0001' as RevisionId
 export const OCC_KERNEL_PRIMARY_SKETCH_ID = 'sketch_primary' as SketchId
 

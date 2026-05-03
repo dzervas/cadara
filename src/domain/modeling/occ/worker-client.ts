@@ -98,7 +98,10 @@ export interface OccWorkerSnapshotClient {
   updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse>
   evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse>
   resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse>
-  getExportCapabilities(baseRevisionId: RevisionId): Promise<ExportCapabilities | DocumentExportDiagnostic>
+  getExportCapabilities(
+    documentId: AuthoredModelDocument['documentId'],
+    baseRevisionId: RevisionId,
+  ): Promise<ExportCapabilities | DocumentExportDiagnostic>
   dispose?(): void
 }
 
@@ -223,9 +226,10 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     return this.invoke<ResolveReferenceResponse>({ kind: 'resolveReference', request })
   }
 
-  getExportCapabilities(baseRevisionId: RevisionId) {
+  getExportCapabilities(documentId: AuthoredModelDocument['documentId'], baseRevisionId: RevisionId) {
     return this.invoke<ExportCapabilities | DocumentExportDiagnostic>({
       kind: 'getExportCapabilities',
+      documentId,
       baseRevisionId,
     })
   }

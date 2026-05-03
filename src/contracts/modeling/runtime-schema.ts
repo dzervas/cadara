@@ -551,6 +551,7 @@ export const kernelDocumentSnapshotSchema = z.object({
   contractVersion: contractVersionSchema,
   schemaVersion: snapshotSchemaVersionSchema,
   documentId: documentIdSchema,
+  name: stringSchema,
   revisionId: revisionIdSchema,
   settings: z.object({
     linearUnit: z.literal('millimeter'),

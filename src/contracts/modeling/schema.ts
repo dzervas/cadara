@@ -952,6 +952,8 @@ export interface KernelDocumentSnapshot {
 	schemaVersion: SnapshotSchemaVersion;
 	/** Durable document identity represented by this snapshot. */
 	documentId: DocumentId;
+	/** Durable authored document name represented by this snapshot. */
+	name: string;
 	/** Committed revision represented by every durable record in this payload. */
 	revisionId: RevisionId;
 	/** Explicit document-level units and tolerance policy for this revision. */

@@ -18,7 +18,7 @@ export interface WorkbenchTabsStore {
   clear(): void
 }
 
-export const WORKBENCH_TABS_STORAGE_KEY = 'cad.workbench.tabs.v1'
+export const WORKBENCH_TABS_STORAGE_KEY = 'cad.workbench.tabs.v2'
 
 export function createLocalStorageWorkbenchTabsStore(
   storage: StorageLike,

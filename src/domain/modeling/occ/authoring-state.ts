@@ -12,6 +12,7 @@ import type { BodyId, ConstructionId, FeatureId, SketchId } from '@/contracts/sh
 import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
 import {
   OCC_KERNEL_DOCUMENT_ID,
+  OCC_KERNEL_DOCUMENT_NAME,
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
@@ -39,6 +40,7 @@ export interface OccAuthoringFeatureRecord {
 }
 
 export interface OccAuthoringState extends OccFeatureExecutionContext {
+  name: string
   baseBodies: readonly OccTrackedBody[]
   baseConstructions: OccFeatureExecutionContext['constructions']
   baseConstructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>
@@ -167,6 +169,7 @@ export function createOccAuthoringState(
     constructions?: OccFeatureExecutionContext['constructions']
     constructionPlanes?: ReadonlyMap<ConstructionId, SketchPlaneDefinition>
     documentId?: OccFeatureExecutionContext['documentId']
+    name?: string
     revisionId?: OccFeatureExecutionContext['revisionId']
     modelingTolerance?: number
     previousReferenceState?: OccReferenceState
@@ -174,6 +177,7 @@ export function createOccAuthoringState(
   } = {},
 ): OccAuthoringState {
   const documentId = input.documentId ?? OCC_KERNEL_DOCUMENT_ID
+  const name = input.name ?? OCC_KERNEL_DOCUMENT_NAME
   const revisionId = input.revisionId ?? OCC_KERNEL_INITIAL_REVISION_ID
   const standardState = createStandardConstructionState(documentId, revisionId)
   const constructionById = new Map<ConstructionId, OccFeatureExecutionContext['constructions'][number]>(
@@ -215,6 +219,7 @@ export function createOccAuthoringState(
   return {
     oc,
     documentId,
+    name,
     revisionId,
     modelingTolerance: input.modelingTolerance ?? OCC_KERNEL_SETTINGS.modelingTolerance,
     sketches,
@@ -306,6 +311,7 @@ export function rebuildOccAuthoringState(
 ) {
   let current = createOccAuthoringState(state.oc, {
     documentId: state.documentId,
+    name: state.name,
     revisionId: state.revisionId,
     modelingTolerance: state.modelingTolerance,
     sketches: state.sketches,
