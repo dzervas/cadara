@@ -19,8 +19,13 @@ export const workbenchColors: MantineColorsTuple = [
 ]
 
 export const workbenchShellTokens = {
-  inspectorWidth: 320,
-  panelShadow: '0 20px 50px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.04) inset',
+  panelShadow: '0 24px 48px rgba(0, 0, 0, 0.48), 0 8px 20px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+  pillShadow: '0 12px 32px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+  fabShadow: '0 16px 36px rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
+  /** Spark Orange (#f0a14a) — see DESIGN.md "Spark Affordance Rule". */
+  sparkAccent: '#f0a14a',
+  sparkAccentHover: '#f6b777',
+  sparkAccentInk: '#1a1209',
 } as const
 
 export const workbenchGeometryHighlightColors = {
@@ -69,6 +74,32 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
     variables: {
       ...defaults.variables,
       '--workbench-panel-shadow': theme.shadows.panel,
+      '--workbench-pill-shadow': workbenchShellTokens.pillShadow,
+      '--workbench-fab-shadow': workbenchShellTokens.fabShadow,
+      '--workbench-spark-accent': workbenchShellTokens.sparkAccent,
+      '--workbench-spark-accent-hover': workbenchShellTokens.sparkAccentHover,
+      '--workbench-spark-accent-ink': workbenchShellTokens.sparkAccentInk,
+      '--workbench-glass-fill': 'rgba(40, 40, 40, 0.55)',
+      '--workbench-glass-fill-strong': 'rgba(40, 40, 40, 0.65)',
+      '--workbench-glass-fill-row-hover': 'rgba(40, 40, 40, 0.55)',
+      '--workbench-glass-fill-row-active': 'rgba(40, 40, 40, 0.65)',
+      '--workbench-glass-border': 'rgba(255, 255, 255, 0.06)',
+      '--workbench-glass-border-strong': 'rgba(255, 255, 255, 0.07)',
+      '--workbench-glass-border-spark-open': 'rgba(255, 255, 255, 0.18)',
+      '--workbench-glass-divider': 'rgba(255, 255, 255, 0.05)',
+      '--workbench-glass-blur': 'blur(18px) saturate(140%)',
+      '--workbench-glass-blur-row': 'blur(12px) saturate(140%)',
+      '--workbench-glass-blur-panel': 'blur(20px) saturate(140%)',
+      '--workbench-kbd-border': 'rgba(255, 255, 255, 0.08)',
+      '--workbench-text-shadow-canvas': '0 1px 2px rgba(0, 0, 0, 0.6)',
+      '--workbench-text-shadow-canvas-strong': '0 1px 2px rgba(0, 0, 0, 0.7)',
+      '--workbench-icon-drop-shadow-canvas': 'drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6))',
+      '--workbench-parts-tree-row-active-shadow':
+        'inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 12px rgba(0, 0, 0, 0.3)',
+      '--workbench-spark-logo-shadow':
+        'inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 24px rgba(240, 161, 74, 0.20), 0 4px 12px rgba(0, 0, 0, 0.45)',
+      '--workbench-debugger-surface': 'rgba(20, 20, 20, 0.85)',
+      '--workbench-debugger-chevron-bg': 'rgba(255, 255, 255, 0.06)',
       '--workbench-app-background': 'var(--mantine-color-dark-9)',
       '--workbench-shell-surface': 'var(--mantine-color-dark-9)',
       '--workbench-shell-surface-strong': 'var(--mantine-color-dark-9)',
@@ -191,6 +222,8 @@ export const workbenchTheme = createTheme({
   },
   shadows: {
     panel: workbenchShellTokens.panelShadow,
+    pill: workbenchShellTokens.pillShadow,
+    fab: workbenchShellTokens.fabShadow,
   },
   components: {
     ActionIcon: {

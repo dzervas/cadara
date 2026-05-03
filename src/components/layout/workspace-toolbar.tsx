@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ActionIcon, Divider, Paper, ScrollArea, Text, TextInput, Tooltip } from '@mantine/core'
+import { forwardRef, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
+import { ActionIcon, Paper, ScrollArea, Text, TextInput, Tooltip } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { ShortcutSettingsButton } from '@/components/shortcuts/shortcut-settings'
@@ -41,6 +41,15 @@ interface WorkspaceToolbarProps {
   onDownloadBugReportState?: () => void | Promise<void>
 }
 
+/**
+ * Floating CAD toolbar — see DESIGN.md "Floating Toolbar (Pill Clusters)".
+ *
+ * The bar itself is `pointer-events: none` so the gaps between pills pass clicks through
+ * to the viewport beneath; each pill carries `pointer-events: auto`. Tool clusters,
+ * search, and the right-edge utility cluster are glass surfaces — `--workbench-glass-fill`
+ * + `--workbench-glass-blur` + `--workbench-pill-shadow` — earned because they float over
+ * the canvas (Floating-Glass Rule).
+ */
 export function WorkspaceToolbar({
   historyAvailability,
   showBrowserStorageWarning = false,
@@ -206,127 +215,131 @@ export function WorkspaceToolbar({
   }
 
   return (
-    <Paper
-      component="header"
-      radius={0}
-      px="md"
-      py={4}
-      style={{
-        backgroundColor: 'var(--workbench-shell-surface-strong)',
-        boxShadow: 'var(--workbench-shell-elevation-toolbar)',
-      }}
+    <div
+      className="absolute left-3 right-3 top-3 z-30 flex h-[50px] items-center gap-2 text-[var(--workbench-shell-text)]"
+      style={{ pointerEvents: 'none' }}
+      role="toolbar"
+      aria-label="CAD tools"
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <DocumentFileMenu
-          showBrowserStorageWarning={showBrowserStorageWarning}
-          onNewDocument={onNewDocument}
-          onNewDocumentTab={onNewDocumentTab}
-          onOpenLocalFile={onOpenLocalFile}
-          onSaveLocalFile={onSaveLocalFile}
-          onImportDocument={onImportDocument}
-          onExportDocument={onExportDocument}
-        />
-        <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-          <div className="flex w-max items-center gap-3" role="toolbar" aria-label="CAD tools">
-            {visibleSections.map((section, index) => (
-              <div
-                key={section.id}
-                className="flex items-center gap-3"
-              >
-                <div className="flex items-center gap-1">
-                  {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
-                </div>
-                {index < visibleSections.length - 1 ? (
-                  <Divider
-                    orientation="vertical"
-                    style={{ borderColor: 'var(--workbench-shell-divider)', height: 'auto' }}
-                  />
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </div>
+      <DocumentFileMenu
+        showBrowserStorageWarning={showBrowserStorageWarning}
+        onNewDocument={onNewDocument}
+        onNewDocumentTab={onNewDocumentTab}
+        onOpenLocalFile={onOpenLocalFile}
+        onSaveLocalFile={onSaveLocalFile}
+        onImportDocument={onImportDocument}
+        onExportDocument={onExportDocument}
+        trigger={<SparkLogo />}
+      />
 
-        <div ref={searchRootRef} className="relative w-full max-w-[240px] shrink-0">
-          <TextInput
-            value={searchQuery}
-            onChange={(event) => {
-              const nextQuery = event.target.value
-              setSearchQuery(nextQuery)
-              setSearchPopoverOpen(nextQuery.length > 0)
-              setHighlightedSearchResultIndex(nextQuery.length > 0 ? 0 : -1)
+      <div className="flex min-w-0 items-center gap-2">
+        {visibleSections.map((section) => (
+          <ToolbarPill key={section.id} style={pillCommonStyle}>
+            {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
+          </ToolbarPill>
+        ))}
+      </div>
+
+      <div className="flex-1" />
+
+      <div ref={searchRootRef} className="relative w-[260px] shrink-0" style={{ pointerEvents: 'auto' }}>
+        <TextInput
+          value={searchQuery}
+          onChange={(event) => {
+            const nextQuery = event.target.value
+            setSearchQuery(nextQuery)
+            setSearchPopoverOpen(nextQuery.length > 0)
+            setHighlightedSearchResultIndex(nextQuery.length > 0 ? 0 : -1)
+          }}
+          onFocus={() => {
+            if (searchQuery.length > 0) {
+              setSearchPopoverOpen(true)
+            }
+          }}
+          onKeyDown={handleSearchInputKeyDown}
+          placeholder="Search tools…"
+          leftSection={<WorkbenchIcon name="search" className="h-4 w-4" />}
+          rightSectionWidth={28}
+          rightSection={<KbdHint label="/" />}
+          data-workbench-command="editor.focusSearch"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls={isSearchPopoverVisible ? searchListboxId : undefined}
+          aria-activedescendant={isSearchPopoverVisible ? activeSearchResultId : undefined}
+          aria-expanded={isSearchPopoverVisible}
+          styles={{
+            input: {
+              height: 50,
+              borderRadius: 12,
+              backgroundColor: 'var(--workbench-glass-fill)',
+              backdropFilter: 'var(--workbench-glass-blur)',
+              WebkitBackdropFilter: 'var(--workbench-glass-blur)',
+              borderColor: 'var(--workbench-glass-border)',
+              borderWidth: 1,
+              boxShadow: 'var(--workbench-pill-shadow)',
+              color: 'var(--workbench-shell-text)',
+              fontSize: 12.5,
+            },
+            section: {
+              color: 'var(--workbench-shell-text-dim)',
+            },
+          }}
+        />
+        {isSearchPopoverVisible && (
+          <Paper
+            className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden"
+            radius="md"
+            style={{
+              backgroundColor: 'var(--workbench-glass-fill-strong)',
+              backdropFilter: 'var(--workbench-glass-blur)',
+              WebkitBackdropFilter: 'var(--workbench-glass-blur)',
+              border: '1px solid var(--workbench-glass-border)',
+              boxShadow: 'var(--workbench-panel-shadow)',
             }}
-            onFocus={() => {
-              if (searchQuery.length > 0) {
-                setSearchPopoverOpen(true)
-              }
-            }}
-            onKeyDown={handleSearchInputKeyDown}
-            placeholder="Search tools"
-            leftSection={<WorkbenchIcon name="search" className="h-4 w-4" />}
-            data-workbench-command="editor.focusSearch"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-controls={isSearchPopoverVisible ? searchListboxId : undefined}
-            aria-activedescendant={isSearchPopoverVisible ? activeSearchResultId : undefined}
-            aria-expanded={isSearchPopoverVisible}
-            styles={{
-              input: {
-                height: 30,
-              },
-            }}
-          />
-          {isSearchPopoverVisible && (
-            <Paper
-              className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden"
-              style={{
-                backgroundColor: 'var(--workbench-shell-overlay-strong)',
-                boxShadow: 'var(--workbench-panel-shadow)',
-              }}
-            >
-              {searchResults.length > 0 ? (
-                <ScrollArea.Autosize mah={320} mx={4} my={4}>
-                  <div id={searchListboxId} role="listbox" aria-label="Tool search results" className="grid gap-1">
-                    {searchResults.map((tool, index) => {
-                      const optionId = `${searchListboxId}-option-${tool.id}`
-                      const isHighlighted = searchResults[clampedHighlightedSearchResultIndex]?.id === tool.id
-                      return (
-                        <ToolButton
-                          key={`search-${tool.id}`}
-                          tool={tool}
-                          inline
-                          buttonId={optionId}
-                          buttonRole="option"
-                          buttonTabIndex={-1}
-                          ariaSelected={isHighlighted}
-                          active={activeCommand?.toolId === tool.id}
-                          selected={isHighlighted}
-                          disabled={isToolDisabled(tool)}
-                          onButtonFocus={() => setHighlightedSearchResultIndex(index)}
-                          onButtonMouseEnter={() => setHighlightedSearchResultIndex(index)}
-                          onTrigger={() => {
-                            setSearchQuery('')
-                            setSearchPopoverOpen(false)
-                            setHighlightedSearchResultIndex(-1)
-                          }}
-                        />
-                      )
-                    })}
-                  </div>
-                </ScrollArea.Autosize>
-              ) : (
-                <div id={searchListboxId} role="listbox" aria-label="Tool search results">
-                  <Text c="dimmed" px="sm" py="md" size="sm" role="status">
-                    No tools match “{searchQuery}”.
-                  </Text>
+          >
+            {searchResults.length > 0 ? (
+              <ScrollArea.Autosize mah={320} mx={4} my={4}>
+                <div id={searchListboxId} role="listbox" aria-label="Tool search results" className="grid gap-1">
+                  {searchResults.map((tool, index) => {
+                    const optionId = `${searchListboxId}-option-${tool.id}`
+                    const isHighlighted = searchResults[clampedHighlightedSearchResultIndex]?.id === tool.id
+                    return (
+                      <ToolButton
+                        key={`search-${tool.id}`}
+                        tool={tool}
+                        inline
+                        buttonId={optionId}
+                        buttonRole="option"
+                        buttonTabIndex={-1}
+                        ariaSelected={isHighlighted}
+                        active={activeCommand?.toolId === tool.id}
+                        selected={isHighlighted}
+                        disabled={isToolDisabled(tool)}
+                        onButtonFocus={() => setHighlightedSearchResultIndex(index)}
+                        onButtonMouseEnter={() => setHighlightedSearchResultIndex(index)}
+                        onTrigger={() => {
+                          setSearchQuery('')
+                          setSearchPopoverOpen(false)
+                          setHighlightedSearchResultIndex(-1)
+                        }}
+                      />
+                    )
+                  })}
                 </div>
-              )}
-            </Paper>
-          )}
-        </div>
-        <div className="shrink-0">
-          <ShortcutSettingsButton />
-        </div>
+              </ScrollArea.Autosize>
+            ) : (
+              <div id={searchListboxId} role="listbox" aria-label="Tool search results">
+                <Text c="dimmed" px="sm" py="md" size="sm" role="status">
+                  No tools match “{searchQuery}”.
+                </Text>
+              </div>
+            )}
+          </Paper>
+        )}
+      </div>
+
+      <ToolbarPill style={utilityPillStyle}>
+        <ShortcutSettingsButton />
         {onReportBug ? (
           <Tooltip
             label={
@@ -340,7 +353,7 @@ export function WorkspaceToolbar({
               type="button"
               variant="subtle"
               color="workbench"
-              className="shrink-0"
+              size={32}
               aria-label="Report bug"
               onClick={onReportBug}
               onContextMenu={onDownloadBugReportState
@@ -369,7 +382,7 @@ export function WorkspaceToolbar({
             rel="noreferrer"
             variant="subtle"
             color="workbench"
-            className="shrink-0"
+            size={32}
             aria-label="Join Discord community"
           >
             <WorkbenchIcon name="discord" className="h-4 w-4" />
@@ -390,13 +403,98 @@ export function WorkspaceToolbar({
             rel="noreferrer"
             variant="subtle"
             color="workbench"
-            className="shrink-0"
+            size={32}
             aria-label="Open repository on GitHub"
           >
             <WorkbenchIcon name="github" className="h-4 w-4" />
           </ActionIcon>
         </Tooltip>
-      </div>
-    </Paper>
+      </ToolbarPill>
+    </div>
+  )
+}
+
+const pillCommonStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 2,
+  padding: 4,
+  borderRadius: 12,
+  backgroundColor: 'var(--workbench-glass-fill)',
+  backdropFilter: 'var(--workbench-glass-blur)',
+  WebkitBackdropFilter: 'var(--workbench-glass-blur)',
+  border: '1px solid var(--workbench-glass-border)',
+  boxShadow: 'var(--workbench-pill-shadow)',
+  flexShrink: 0,
+  pointerEvents: 'auto',
+}
+
+const utilityPillStyle: CSSProperties = {
+  ...pillCommonStyle,
+}
+
+interface ToolbarPillProps {
+  style: CSSProperties
+  children: ReactNode
+}
+
+function ToolbarPill({ style, children }: ToolbarPillProps) {
+  return <div style={style}>{children}</div>
+}
+
+/**
+ * The brand mark — the first of the three Spark Affordances. Identity, not ornament.
+ * Doubles as the file-menu trigger: clicking it opens the document file menu, replacing
+ * the older standalone file button. See DESIGN.md "Spark Affordance Rule".
+ */
+const SparkLogo = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement>>(
+  function SparkLogo(props, ref) {
+    return (
+      <button
+        ref={ref}
+        type="button"
+        aria-label="CADara document menu"
+        {...props}
+        style={{
+          flexShrink: 0,
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          background: 'var(--workbench-spark-accent)',
+          display: 'grid',
+          placeItems: 'center',
+          color: 'var(--workbench-spark-accent-ink)',
+          fontWeight: 700,
+          fontSize: 14,
+          boxShadow: 'var(--workbench-spark-logo-shadow)',
+          pointerEvents: 'auto',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          ...props.style,
+        }}
+      >
+        C
+      </button>
+    )
+  },
+)
+
+function KbdHint({ label }: { label: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        fontSize: 10.5,
+        padding: '2px 5px',
+        borderRadius: 4,
+        border: '1px solid var(--workbench-kbd-border)',
+        color: 'var(--workbench-shell-text-dim)',
+      }}
+    >
+      {label}
+    </span>
   )
 }

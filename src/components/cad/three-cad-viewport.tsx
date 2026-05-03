@@ -125,7 +125,7 @@ import {
 } from '@/core/workspace/sketch-plane-mapping'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
-import { VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
+import { VIEWPORT_OVERLAY_TOP_INSET_PX, VIEW_CUBE_SIZE_PX } from '@/components/cad/viewport-overlay-layout'
 import {
   cancelCoalescedSketchGeometryDragMove,
   createViewportBvhSceneKey,
@@ -1620,8 +1620,9 @@ export function ThreeCadViewport({
         />
       </Canvas>
       <div
-        className="pointer-events-none absolute right-4 top-4 z-20 flex flex-col items-end gap-1"
+        className="pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-1"
         style={{
+          top: VIEWPORT_OVERLAY_TOP_INSET_PX,
           width: `min(${VIEW_CUBE_SIZE_PX}px, calc(100% - 32px))`,
         }}
       >

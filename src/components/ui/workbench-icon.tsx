@@ -33,6 +33,7 @@ export type WorkbenchIconName =
   | 'target'
   | 'trash'
   | 'type'
+  | 'variables'
   | 'warning'
 
 const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
@@ -68,6 +69,7 @@ const workbenchIconAssetMap: Record<WorkbenchIconName, string> = {
   target: 'dimension-origin.svg',
   trash: 'trash.svg',
   type: 'markup-text.svg',
+  variables: 'variable-table.svg',
   warning: 'warning-overlay.svg',
 }
 

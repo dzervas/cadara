@@ -94,15 +94,13 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
     'Toolbar search should expose collapsed combobox semantics before any results are shown.',
   )
   expectTrue(
-    toolbarMarkup.includes('aria-label="File"')
-      && toolbarMarkup.indexOf('aria-label="File"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
-    'Toolbar should render the document file menu before the CAD tool sections.',
+    toolbarMarkup.includes('aria-label="CADara document menu"')
+      && toolbarMarkup.indexOf('aria-label="CADara document menu"') < toolbarMarkup.indexOf('data-tool-id="undo"'),
+    'Toolbar should render the document file menu trigger (the spark logo) before the CAD tool sections.',
   )
   expectTrue(
-    toolbarMarkup.includes('overflow-x-auto')
-      && toolbarMarkup.includes('w-max')
-      && toolbarMarkup.includes('shrink-0'),
-    'Toolbar tools should scroll inside the header instead of widening the workbench shell.',
+    toolbarMarkup.includes('min-w-0'),
+    'Toolbar tool cluster row should be allowed to shrink so the absolute floating bar does not widen the workbench shell.',
   )
   expectTrue(
     toolbarMarkup.includes('role="toolbar"') && toolbarMarkup.includes('aria-label="CAD tools"'),

@@ -29,32 +29,48 @@ export function WorkbenchStateDebugger({
 
   return (
     <div
-      className={`${className} max-w-[360px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)] ${
+      className={`${className} max-w-[360px] rounded-lg border text-[10px] text-[var(--cad-muted)] shadow-[var(--workbench-shell-elevation-md)] ${
         pointerPassthrough ? 'pointer-events-none' : 'pointer-events-auto'
       }`}
+      data-workbench-state-debugger
+      data-expanded={isExpanded ? 'true' : 'false'}
+      style={{
+        backgroundColor: 'var(--workbench-debugger-surface)',
+        borderColor: 'var(--workbench-glass-border)',
+        fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      }}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.20em] text-[var(--cad-muted)]">
-            State Debugger
-          </p>
-          <p className="mt-1 text-[var(--cad-muted-foreground)]">
-            {state.activeMode} / {state.machineState} / {state.command}
-          </p>
-        </div>
+      <div
+        className="flex items-center gap-2.5 px-2.5 py-2"
+        style={{ letterSpacing: '0.18em', textTransform: 'uppercase' }}
+      >
+        <span className="font-semibold text-[var(--cad-muted-foreground)]">State Debugger</span>
+        <span className="text-[var(--cad-muted)]" data-workbench-state-debugger-summary>
+          {state.activeMode} / {state.machineState} / {state.command}
+        </span>
         <button
           type="button"
           aria-expanded={isExpanded}
           aria-label={isExpanded ? 'Collapse state debugger' : 'Expand state debugger'}
           onClick={() => setIsExpanded((current) => !current)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--cad-border)] text-[var(--cad-muted-foreground)] transition hover:border-[var(--cad-border-strong)] hover:text-[var(--cad-foreground)]"
+          className="ml-auto grid h-[18px] w-[18px] shrink-0 place-items-center rounded text-[var(--cad-foreground)] transition"
+          style={{ backgroundColor: 'var(--workbench-debugger-chevron-bg)' }}
         >
-          <WorkbenchIcon name={isExpanded ? 'chevronDown' : 'chevronRight'} className="h-4 w-4" />
+          <WorkbenchIcon name={isExpanded ? 'chevronDown' : 'chevronRight'} className="h-3 w-3" />
         </button>
       </div>
 
       {isExpanded ? (
-        <div className="mt-3 grid gap-3">
+        <div
+          className="grid gap-3 px-3 pb-3 pt-2 text-xs"
+          style={{
+            fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif",
+            letterSpacing: 0,
+            textTransform: 'none',
+            color: 'var(--cad-muted-foreground)',
+            borderTop: '1px solid var(--workbench-glass-divider)',
+          }}
+        >
           <div className="grid gap-1">
             <DebuggerRow label="Active mode" value={state.activeMode} />
             <DebuggerRow label="Machine" value={state.machineState} />

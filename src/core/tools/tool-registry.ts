@@ -398,11 +398,25 @@ const toolbarSections = [
     toolIds: ['import'],
   },
   {
-    id: 'features',
-    label: 'Features',
+    id: 'featuresBuild',
+    label: 'Build',
     align: 'center',
     modes: ['part'],
-    toolIds: ['extrude', 'revolve', 'sweep', 'loft', 'split', 'fillet', 'chamfer', 'thicken', 'deleteSolid', 'shell', 'plane', 'combine'],
+    toolIds: ['extrude', 'revolve', 'sweep', 'loft'],
+  },
+  {
+    id: 'featuresFinish',
+    label: 'Finish',
+    align: 'center',
+    modes: ['part'],
+    toolIds: ['fillet', 'chamfer', 'shell', 'thicken'],
+  },
+  {
+    id: 'featuresMods',
+    label: 'Modify',
+    align: 'center',
+    modes: ['part'],
+    toolIds: ['split', 'combine', 'deleteSolid', 'plane'],
   },
   {
     id: 'patterns',

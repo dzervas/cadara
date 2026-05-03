@@ -44,16 +44,20 @@ export interface DocumentTabsBarHandle {
   requestRename(documentId: DocumentId): void
 }
 
-const TAB_HEIGHT_PX = 32
-const TAB_MIN_WIDTH_PX = 120
-const TAB_MAX_WIDTH_PX = 240
+const TAB_HEIGHT_PX = 36
+const TAB_MIN_WIDTH_PX = 96
+const TAB_MAX_WIDTH_PX = 200
 const DRAG_THRESHOLD_PX = 4
+const TAB_GAP_PX = 18
+const STRIP_PADDING_X_PX = 16
 
 const stripStyle: CSSProperties = {
   height: TAB_HEIGHT_PX,
+  paddingInline: STRIP_PADDING_X_PX,
+  gap: TAB_GAP_PX,
+  alignItems: 'stretch',
   backgroundColor: 'var(--workbench-shell-overlay-strong)',
   boxShadow: 'var(--workbench-shell-elevation-tabs)',
-  borderTop: '1px solid var(--workbench-shell-border)',
 }
 
 export const DocumentTabsBar = forwardRef(DocumentTabsBarComponent)
@@ -171,9 +175,8 @@ function DocumentTabsBarComponent(
             key={tab.documentId}
             onDragOver={(event) => handleDragOver(event, index)}
             onDrop={(event) => handleDrop(event, index)}
-            className="flex shrink-0"
+            className="relative flex shrink-0"
             style={{
-              borderRight: '1px solid var(--workbench-shell-border)',
               transform: isDropTarget ? 'translateX(8px)' : undefined,
               transition: 'transform 160ms cubic-bezier(0.25, 1, 0.5, 1)',
             }}
@@ -296,9 +299,10 @@ function DocumentTabButton({
     height: TAB_HEIGHT_PX,
     minWidth: TAB_MIN_WIDTH_PX,
     maxWidth: TAB_MAX_WIDTH_PX,
-    paddingInline: 14,
+    paddingInline: 4,
+    gap: 8,
     color: isActive ? 'var(--workbench-shell-text)' : 'var(--workbench-shell-text-dim)',
-    fontWeight: isActive ? 600 : 400,
+    fontWeight: isActive ? 500 : 500,
     cursor: isActive ? 'default' : 'pointer',
     opacity: isDragging ? 0.55 : 1,
     transition: 'color 120ms cubic-bezier(0.25, 1, 0.5, 1), opacity 120ms cubic-bezier(0.25, 1, 0.5, 1)',
@@ -414,7 +418,8 @@ function ActiveOrPendingHairline({
       <span
         aria-hidden="true"
         data-tab-hairline="pending"
-        className="pointer-events-none absolute inset-x-0 -top-px h-[1.5px] overflow-hidden"
+        className="pointer-events-none absolute -bottom-px left-[-6px] right-[-6px] h-[2px] overflow-hidden"
+        style={{ borderTopLeftRadius: 1, borderTopRightRadius: 1 }}
       >
         <span
           className="absolute inset-y-0 w-[36%]"
@@ -431,18 +436,22 @@ function ActiveOrPendingHairline({
     <span
       aria-hidden="true"
       data-tab-hairline={hasError ? 'error' : 'active'}
-      className="pointer-events-none absolute inset-x-0 -top-px h-[1.5px]"
+      className="pointer-events-none absolute -bottom-px left-[-6px] right-[-6px] h-[2px]"
       style={{
         backgroundColor: hasError
           ? 'var(--workbench-shell-danger-border)'
           : 'var(--workbench-shell-text-muted)',
+        borderTopLeftRadius: 1,
+        borderTopRightRadius: 1,
       }}
     />
   )
 }
 
 function StorageGlyph({ kind, active }: { kind: WorkbenchTabStorageKind; active: boolean }) {
-  const tone = active ? 'var(--workbench-shell-text)' : 'var(--workbench-shell-text-dim)'
+  // Active tabs render their storage glyph in spark-orange — the third Spark Affordance
+  // (see DESIGN.md). Inactive tabs stay graphite.
+  const tone = active ? 'var(--workbench-spark-accent)' : 'var(--workbench-shell-text-dim)'
 
   switch (kind) {
     case 'browser':

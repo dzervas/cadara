@@ -6,14 +6,16 @@ import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
 import { SketchToolPanel } from "@/components/cad/sketch-tool-panel";
 import { FeatureInspector } from "@/components/layout/feature-inspector";
+import { FloatingPartsTree } from "@/components/layout/floating-parts-tree";
 import { ImportInspector } from "@/components/layout/import-inspector";
-import { FeatureSidebar } from "@/components/layout/feature-sidebar";
 import { DocumentTabsBar, type DocumentTabsBarHandle } from "@/components/layout/document-tabs-bar";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
 import { MeasurementPanel } from "@/components/layout/measurement-panel";
 import { DocumentExportModal } from "@/components/layout/document-export-modal";
 import { WorkbenchInspectorOverlay } from "@/components/layout/workbench-inspector-overlay";
 import { WorkspaceToolbar } from "@/components/layout/workspace-toolbar";
+import { WorkbenchVariablesFab } from "@/components/layout/workbench-variables-fab";
+import { WorkbenchVariablesPanel } from "@/components/layout/workbench-variables-panel";
 import {
 	WorkbenchStateDebugger,
 	type WorkbenchStateDebuggerModel,
@@ -38,13 +40,11 @@ import { useWorkbenchDocumentPresentation } from "@/app/workbench/controllers/us
 import { useWorkbenchLocalFileSync } from "@/app/workbench/controllers/use-workbench-local-file-sync";
 import { useWorkbenchNotifications } from "@/app/workbench/controllers/use-workbench-notifications";
 import { useWorkbenchPartImport } from "@/app/workbench/controllers/use-workbench-part-import";
-import { useWorkbenchSidebarResize } from "@/app/workbench/controllers/use-workbench-sidebar-resize";
 import { useWorkbenchViewportEvents } from "@/app/workbench/controllers/use-workbench-viewport-events";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type {
 	DocumentFeatureCursor,
 	DocumentHistoryItemRecord,
-	ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
 import { createAppError, errorContext, ok } from "@/contracts/errors";
 import {
@@ -97,7 +97,6 @@ import {
 	WORKBENCH_STATUS_TOP_WITH_RESTORE_PX,
 	getWorkbenchNotificationRightOffsetPx,
 } from "@/components/cad/viewport-overlay-layout";
-import { DEFAULT_LEFT_SIDEBAR_WIDTH } from "@/app/workbench/shell/workbench-shell-layout";
 import {
 	createBugReportDebugArtifact,
 	createBugReportIssueDraft,
@@ -168,8 +167,7 @@ export function CadWorkbench({
 	const snapshot = machineState.snapshot;
 	const initialOccRenderPending = isInitialOccRenderPending(machineState);
 	const previewRenderables = machineState.previewRenderables;
-	const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH);
-	const shellFrameRef = useRef<HTMLDivElement | null>(null);
+	const [variablesPanelOpen, setVariablesPanelOpen] = useState(false);
 	const snapshotRef = useRef(snapshot);
 	const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true });
 	// TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
@@ -450,11 +448,6 @@ export function CadWorkbench({
 		modelingService,
 		snapshot,
 	});
-	const { handleSidebarResizeStart } = useWorkbenchSidebarResize({
-		setLeftSidebarWidth,
-		shellFrameRef,
-	});
-
 	const viewportRenderables = useMemo(() => {
 		return composeViewportRenderables({
 			snapshotRenderables: snapshot?.document.render.records ?? [],
@@ -645,11 +638,6 @@ export function CadWorkbench({
 
 		setWorkbenchStatusNotification(null);
 		setObjectExportModal(nextModalState);
-	};
-
-	// TODO: Implement this
-	const handleDiagnosticInspectPlaceholder = (diagnostic: ModelingDiagnostic) => {
-		showPlaceholderStatus(`Inspect diagnostic ${diagnostic.code} is not implemented yet.`);
 	};
 
 	// TODO: Implement this
@@ -1131,52 +1119,8 @@ export function CadWorkbench({
 				activeScopes={shortcutActiveScopes}
 				commandHandlers={shortcutCommandHandlers}
 			>
-				<div className="flex h-screen min-h-screen flex-col overflow-hidden bg-(--cad-background) text-(--cad-foreground)">
-					<WorkspaceToolbar
-						historyAvailability={toolbarHistoryAvailability}
-						showBrowserStorageWarning={showBrowserStorageWarning}
-						onNewDocument={handleNewDocument}
-						onNewDocumentTab={handleNewDocumentTab}
-						onOpenLocalFile={handleOpenLocalFile}
-						onSaveLocalFile={handleSaveLocalFile}
-						onImportDocument={handleImportDocument}
-						onExportDocument={handleExportDocument}
-						onReportBug={handleReportBug}
-						onDownloadBugReportState={handleDownloadBugReportState}
-					/>
-					<div ref={shellFrameRef} className="flex min-h-0 flex-1 overflow-hidden">
-						<div
-							className="relative min-h-0 shrink-0 overflow-hidden"
-							style={{ width: leftSidebarWidth }}
-						>
-							<FeatureSidebar
-								snapshot={snapshot}
-								hiddenTargetKeys={effectiveHiddenTargetKeys}
-								invalidVariableValueMessages={invalidVariableValueMessages}
-								objectLabelOverrides={objectLabelOverrides}
-								onAddVariable={handleVariableAdd}
-								onInspectDiagnostic={handleDiagnosticInspectPlaceholder}
-								onObjectDelete={handleDeleteTarget}
-								onObjectExport={handleObjectExport}
-								onRenameTarget={handleTargetRename}
-								onReopenTarget={handleNavigationReopen}
-								onSelectTarget={handleShellSelect}
-								onToggleTargetVisibility={handleTargetVisibilityToggle}
-								onUpdateVariable={handleVariableUpdate}
-								visibleSelection={visibleSelection}
-							/>
-							<div
-								role="separator"
-								aria-label="Resize left sidebar"
-								aria-orientation="vertical"
-								className="absolute inset-y-0 right-0 z-20 w-3 translate-x-1/2 cursor-col-resize touch-none"
-								onPointerDown={handleSidebarResizeStart}
-							>
-								<div className="mx-auto h-full w-px bg-(--cad-border) transition hover:bg-(--cad-accent)" />
-							</div>
-						</div>
-						<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-							<main className="relative min-h-0 min-w-0 flex-1 overflow-hidden border-l border-(--cad-border) bg-(--workbench-viewport-background)">
+				<div className="relative flex h-screen min-h-screen flex-col overflow-hidden bg-(--cad-background) text-(--cad-foreground)">
+					<main className="relative min-h-0 flex-1 overflow-hidden bg-(--workbench-viewport-background)">
 								<ThreeCadViewport
 									renderables={viewportRenderables.documentRenderables}
 									sketchDisplayRenderables={viewportRenderables.sketchDisplayRenderables}
@@ -1294,6 +1238,47 @@ export function CadWorkbench({
 									onDownload={downloadDocumentExportResult}
 									onClose={() => setObjectExportModal(null)}
 								/>
+
+								<WorkspaceToolbar
+									historyAvailability={toolbarHistoryAvailability}
+									showBrowserStorageWarning={showBrowserStorageWarning}
+									onNewDocument={handleNewDocument}
+									onNewDocumentTab={handleNewDocumentTab}
+									onOpenLocalFile={handleOpenLocalFile}
+									onSaveLocalFile={handleSaveLocalFile}
+									onImportDocument={handleImportDocument}
+									onExportDocument={handleExportDocument}
+									onReportBug={handleReportBug}
+									onDownloadBugReportState={handleDownloadBugReportState}
+								/>
+
+								<FloatingPartsTree
+									snapshot={snapshot}
+									hiddenTargetKeys={effectiveHiddenTargetKeys}
+									objectLabelOverrides={objectLabelOverrides}
+									visibleSelection={visibleSelection}
+									onSelectTarget={handleShellSelect}
+									onReopenTarget={handleNavigationReopen}
+									onObjectDelete={handleDeleteTarget}
+									onObjectExport={handleObjectExport}
+									onRenameTarget={handleTargetRename}
+									onToggleTargetVisibility={handleTargetVisibilityToggle}
+								/>
+
+								<WorkbenchVariablesFab
+									open={variablesPanelOpen}
+									onToggle={() => setVariablesPanelOpen((current) => !current)}
+								/>
+								{variablesPanelOpen ? (
+									<WorkbenchVariablesPanel
+										snapshot={snapshot}
+										invalidVariableValueMessages={invalidVariableValueMessages}
+										onAddVariable={handleVariableAdd}
+										onUpdateVariable={handleVariableUpdate}
+										onClose={() => setVariablesPanelOpen(false)}
+									/>
+								) : null}
+
 								<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col">
 									<div className="flex flex-col gap-3">
 										<div className="flex items-end gap-3 px-4">
@@ -1336,8 +1321,6 @@ export function CadWorkbench({
 									</div>
 								</div>
 							</main>
-						</div>
-					</div>
 				</div>
 			</ShortcutProvider>
 		</WorkbenchCommandProvider>

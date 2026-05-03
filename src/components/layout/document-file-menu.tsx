@@ -1,4 +1,4 @@
-import { useRef, type ChangeEvent } from 'react'
+import { useRef, type ChangeEvent, type ReactElement } from 'react'
 import { ActionIcon, Menu, Tooltip } from '@mantine/core'
 
 import {
@@ -32,6 +32,12 @@ interface DocumentFileMenuHandlers {
 interface DocumentFileMenuProps extends DocumentFileMenuHandlers {
   defaultOpened?: boolean
   showBrowserStorageWarning?: boolean
+  /**
+   * Custom Menu.Target trigger. When provided, the file menu opens from this element
+   * instead of the default file ActionIcon. Used by the floating toolbar to attach the
+   * file menu to the spark-orange logo.
+   */
+  trigger?: ReactElement
 }
 
 export function DocumentFileMenu({
@@ -43,6 +49,7 @@ export function DocumentFileMenu({
   onSaveLocalFile,
   onImportDocument,
   onExportDocument,
+  trigger,
 }: DocumentFileMenuProps) {
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const openImportPicker = () => {
@@ -91,24 +98,26 @@ export function DocumentFileMenu({
           width={180}
         >
           <Menu.Target>
-            <Tooltip
-              label={
-                <ToolbarTooltipContent
-                  title="File"
-                  description="Create, open, save, import, or export the current document."
-                />
-              }
-            >
-              <ActionIcon
-                type="button"
-                variant="subtle"
-                color="workbench"
-                aria-label="File"
-                data-workbench-file-menu
+            {trigger ?? (
+              <Tooltip
+                label={
+                  <ToolbarTooltipContent
+                    title="File"
+                    description="Create, open, save, import, or export the current document."
+                  />
+                }
               >
-                <WorkbenchIcon name="file" className="h-4 w-4" />
-              </ActionIcon>
-            </Tooltip>
+                <ActionIcon
+                  type="button"
+                  variant="subtle"
+                  color="workbench"
+                  aria-label="File"
+                  data-workbench-file-menu
+                >
+                  <WorkbenchIcon name="file" className="h-4 w-4" />
+                </ActionIcon>
+              </Tooltip>
+            )}
           </Menu.Target>
 
           <Menu.Dropdown
@@ -130,7 +139,7 @@ export function DocumentFileMenu({
             ))}
           </Menu.Dropdown>
         </Menu>
-        {showBrowserStorageWarning ? (
+        {showBrowserStorageWarning && !trigger ? (
           <Tooltip label={<BrowserStorageWarningTooltipLabel />}>
             <span
               role="img"

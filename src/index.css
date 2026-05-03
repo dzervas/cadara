@@ -47,6 +47,17 @@ input {
   }
 }
 
+@keyframes workbench-vars-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-tab-hairline='pending'] > * {
     animation-duration: 0ms !important;
