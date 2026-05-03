@@ -10,5 +10,5 @@ test('feature-tree plane entry opens the same sketch editing mode as viewport en
 
   await workbench.expectMachine('editingSketch')
   await workbench.expectSketchPlane('XY')
-  await expect.poll(() => page.evaluate(() => window.__cadTestState?.command ?? '')).toBe('sketch')
+  await expect.poll(() => page.evaluate(() => window.__cadaraDebug?.getState()?.command ?? '')).toBe('sketch')
 })

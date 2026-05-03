@@ -3,6 +3,12 @@ services:
     build:
       dockerfile: Dockerfile.agent
     init: true
+    environment:
+      CADARA_DEV_FRONTEND_URL: http://frontend:3000
+      CADARA_DEV_DEBUG_BROWSER_HTTP_URL: http://debug-browser:3000
+      CADARA_DEV_DEBUG_BROWSER_WS_URL: ws://debug-browser:3000?token=cadara-local-debug
+      PLAYWRIGHT_BASE_URL: http://frontend:3000
+      PLAYWRIGHT_WEB_SERVER: "0"
     ports:
       - "127.0.0.1:8000:8000"
       - "127.0.0.1:3100:3100"
@@ -10,6 +16,7 @@ services:
       - .:/app
       - .codex/container:/root/.codex
       - .claude/container:/root/.claude
+      - .claude/container.json:/root/.claude.json
       - $HOME/.config/git/ignore:/root/.config/git/ignore:ro
 
   frontend:
@@ -20,3 +27,16 @@ services:
     volumes:
       - .:/app
     command: bun run dev --host 0.0.0.0 --port 3000
+
+  debug-browser:
+    image: ghcr.io/browserless/chromium
+    init: true
+    depends_on:
+      - frontend
+    environment:
+      TOKEN: cadara-local-debug
+      CONCURRENT: "2"
+      QUEUED: "2"
+      TIMEOUT: "-1"
+    ports:
+      - "127.0.0.1:9222:3000"

@@ -25,7 +25,8 @@ import {
 	isTargetHidden,
 } from "@/app/workbench/shell/viewport-renderables";
 import { createObjectExportModalState } from "@/domain/export/object-export-state";
-import { dispatchCadTestSelection, syncCadTestState } from "@/app/workbench/cad-test-bridge";
+import { createCadaraDebugSession } from "@/app/debug/cadara-debug-session";
+import { selectCadaraDebugTarget } from "@/app/debug/cadara-debug-actions";
 import {
 	createNewWorkbenchDocument,
 	exportWorkbenchDocument,
@@ -86,6 +87,7 @@ import {
 import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
 import { createTopologyDebugSummary } from "@/domain/modeling/topology-debug";
 import { installConsoleLoggingSubscribers } from "@/domain/tools/console-logging";
+import { useCadaraDebugPlatform } from "@/app/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { useFeatureEditing } from "@/hooks/use-feature-editing";
@@ -152,6 +154,7 @@ export function CadWorkbench() {
 			history,
 		},
 		dispatch,
+		getRuntimeTrace,
 	} = useEditorState();
 	const snapshot = machineState.snapshot;
 	const initialOccRenderPending = isInitialOccRenderPending(machineState);
@@ -575,31 +578,36 @@ export function CadWorkbench() {
 		[activeCommand?.toolId, snapshot, visibleSelection],
 	);
 
-	useEffect(() => {
-		if (import.meta.env.DEV) {
-			syncCadTestState(debuggerState);
-		}
-	});
-
-	useEffect(() => {
-		if (!import.meta.env.DEV) {
-			return;
-		}
-
-		window.__cadSelectTarget = (targetId: string) =>
-			dispatchCadTestSelection({
+	useCadaraDebugPlatform({
+		getState: () => debuggerState,
+		getTrace: () => getRuntimeTrace(),
+		selectTarget: (targetId) =>
+			selectCadaraDebugTarget({
 				targetId,
 				snapshot,
 				selection,
 				selectionFilter,
 				selectionCatalog,
 				dispatch,
-			});
-
-		return () => {
-			delete window.__cadSelectTarget;
-		};
-	}, [dispatch, selection, selectionCatalog, selectionFilter, snapshot]);
+			}),
+		clearSelection: () => {
+			dispatch({ type: "selection.cleared" });
+		},
+		refreshDocument: () => {
+			dispatch({ type: "document.refreshRequested" });
+		},
+		exportSession: () =>
+			createCadaraDebugSession({
+				build: {
+					version: appVersion,
+					commit: gitCommit,
+					mode: getBuildModeLabel(import.meta.env.MODE, import.meta.env.DEV),
+				},
+				state: debuggerState,
+				trace: getRuntimeTrace(),
+				location: typeof window === "undefined" ? null : window.location,
+			}),
+	});
 
 	const handleTargetVisibilityToggle = (target: PrimitiveRef) => {
 		const nextVisibility = toggleWorkbenchTargetVisibility({
@@ -991,6 +999,7 @@ export function CadWorkbench() {
 				sketchSession,
 			},
 			snapshot,
+			debugTrace: getRuntimeTrace(),
 			storage: window.localStorage,
 			environment: {
 				navigator: window.navigator,

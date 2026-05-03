@@ -173,7 +173,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     if (expectedFeatureId) {
       await expect.poll(
         () => this.evaluateWithNavigationRetry(
-          (featureId) => window.__cadTestState?.featureIds.includes(featureId) ?? false,
+          (featureId) => window.__cadaraDebug?.getState()?.featureIds.includes(featureId) ?? false,
           expectedFeatureId,
         ),
         { timeout: 30_000 },
@@ -213,7 +213,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
   private async selectReferenceThroughCurrentUi(targetId: string) {
     const selected = await this.evaluateWithNavigationRetry(
-      (id) => window.__cadSelectTarget?.(id) ?? false,
+      (id) => window.__cadaraDebug?.selectTarget(id) ?? false,
       targetId,
     )
 
@@ -264,7 +264,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     const targetId = await this.evaluateWithNavigationRetry(
       ({ source, flags }) => {
         const matcher = new RegExp(source, flags)
-        const targets = window.__cadTestState?.selectableTargets ?? []
+        const targets = window.__cadaraDebug?.getState()?.selectableTargets ?? []
         return targets.find((target) => matcher.test(`Select viewport target ${target}`)) ?? null
       },
       { source: pattern.source, flags: pattern.flags },
@@ -301,19 +301,19 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async revisionLabel() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.revision ?? 'loading')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.revision ?? 'loading')
   }
 
   private async machineLabel() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.machineState ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.machineState ?? '')
   }
 
   private async featureSessionLabel() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.featureSession ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.featureSession ?? '')
   }
 
   private async currentPreviewDiagnosticsText() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.previewDiagnostics ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.previewDiagnostics ?? '')
   }
 
   private async hasVisibleFeatureErrorDiagnostics() {

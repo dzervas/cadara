@@ -7,6 +7,7 @@ import {
   type EditorEvent,
   type EditorExtensionDependencies,
 } from '@/domain/editor/state-machine'
+import type { EditorEventLoopTraceListener } from '@/application/editor/editor-debug-trace'
 import type { ErrorReporter } from '@/contracts/errors'
 import { createEditorEventLoop, type EditorEventLoop } from '@/application/editor/editor-event-loop'
 
@@ -15,6 +16,7 @@ export function useEditorEventLoop(
   errorReporter: ErrorReporter,
   dependencies: EditorExtensionDependencies,
   executeEffect?: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>,
+  traceListener?: EditorEventLoopTraceListener,
 ) {
   const eventLoopRef = useRef<EditorEventLoop | null>(null)
   const eventLoop = useMemo(
@@ -25,6 +27,7 @@ export function useEditorEventLoop(
 
   useEffect(() => {
     eventLoopRef.current = eventLoop
+    const traceSubscription = traceListener ? eventLoop.subscribeToTrace(traceListener) : null
     const subscription = eventLoop.subscribe((nextState) => {
       setMachineState(nextState)
     })
@@ -32,13 +35,14 @@ export function useEditorEventLoop(
     eventLoop.start()
 
     return () => {
+      traceSubscription?.unsubscribe()
       subscription.unsubscribe()
       if (eventLoopRef.current === eventLoop) {
         eventLoopRef.current = null
       }
       eventLoop.stop()
     }
-  }, [eventLoop])
+  }, [eventLoop, traceListener])
 
   const dispatch = useCallback((event: EditorEvent) => {
     eventLoopRef.current?.dispatch(event)

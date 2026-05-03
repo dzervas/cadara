@@ -15,13 +15,13 @@ test('section handle drags forward and back along the active section normal', as
   await workbench.activateTool('Create a temporary section view.')
   await workbench.clickViewportAtReal(FACE_POINT)
 
-  await expect.poll(() => page.evaluate(() => window.__cadTestState?.machineState ?? ''), { timeout: 10_000 })
+  await expect.poll(() => page.evaluate(() => window.__cadaraDebug?.getState()?.machineState ?? ''), { timeout: 10_000 })
     .toBe('inspectingSection')
   await expect.poll(() => page.evaluate(() => window.__cadProjectSectionHandleToScreen?.()), { timeout: 10_000 })
     .not.toBeNull()
 
   const initialSection = await page.evaluate(() => ({
-    offset: window.__cadTestState?.sectionOffset ?? null,
+    offset: window.__cadaraDebug?.getState()?.sectionOffset ?? null,
     projection: window.__cadProjectSectionHandleToScreen?.() ?? null,
   }))
 
@@ -60,10 +60,10 @@ test('section handle drags forward and back along the active section normal', as
     )
   }
 
-  await expect.poll(() => page.evaluate(() => window.__cadTestState?.sectionOffset ?? null), { timeout: 10_000 })
+  await expect.poll(() => page.evaluate(() => window.__cadaraDebug?.getState()?.sectionOffset ?? null), { timeout: 10_000 })
     .not.toBe(initialSection.offset)
 
-  const movedOffset = await page.evaluate(() => window.__cadTestState?.sectionOffset ?? null)
+  const movedOffset = await page.evaluate(() => window.__cadaraDebug?.getState()?.sectionOffset ?? null)
 
   expect(typeof movedOffset).toBe('number')
   expect(Math.abs((movedOffset as number) - (initialSection.offset as number))).toBeGreaterThan(0.25)
@@ -78,7 +78,7 @@ test('section handle drags forward and back along the active section normal', as
   await page.mouse.up()
 
   await expect.poll(
-    async () => Math.abs((await page.evaluate(() => window.__cadTestState?.sectionOffset ?? 999)) as number),
+    async () => Math.abs((await page.evaluate(() => window.__cadaraDebug?.getState()?.sectionOffset ?? 999)) as number),
     { timeout: 10_000 },
   ).toBeLessThan(0.25)
 })

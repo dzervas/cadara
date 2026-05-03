@@ -3,6 +3,7 @@ import { strToU8, zipSync } from 'fflate'
 import { createAuthoredModelDocumentFromSnapshot, type AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import { validateOperationHistoryPayload, type ModelingOperationHistoryPayload } from '@/contracts/modeling/operation-history'
 import type { WorkspaceSnapshot, ModelingDiagnostic } from '@/contracts/modeling/schema'
+import type { EditorRuntimeTraceSnapshot } from '@/domain/debug/debug-platform'
 import type { EditorViewState } from '@/domain/editor/state-machine'
 import { MODELING_OPERATION_HISTORY_STORAGE_KEY, type StorageLike } from '@/domain/modeling/modeling-history-persistence'
 
@@ -38,6 +39,7 @@ type BugReportSectionId =
   | 'documentSummary'
   | 'authoredDocument'
   | 'operationHistory'
+  | 'runtimeTrace'
   | 'payloadStatus'
 
 export interface BugReportBuildMetadata {
@@ -187,12 +189,13 @@ export interface BugReportPayload {
   documentSummary: BugReportDocumentSummary
   authoredDocument: BugReportSection<AuthoredModelDocument>
   operationHistory: BugReportSection<ModelingOperationHistoryPayload>
+  runtimeTrace: BugReportSection<EditorRuntimeTraceSnapshot>
   payloadStatus: BugReportPayloadStatus
 }
 
 export interface BugReportPayloadResult {
   payload: BugReportPayload
-  artifactSections: Partial<Record<'authoredDocument' | 'operationHistory', unknown>>
+  artifactSections: Partial<Record<'authoredDocument' | 'operationHistory' | 'runtimeTrace', unknown>>
 }
 
 export interface BugReportPayloadOptions {
@@ -216,6 +219,7 @@ export interface BugReportPayloadInput {
     | 'sketchSession'
   >
   snapshot: WorkspaceSnapshot | null
+  debugTrace?: EditorRuntimeTraceSnapshot | null
   storage?: StorageLike | null
   environment?: BrowserReportEnvironment
 }
@@ -360,6 +364,10 @@ export function createBugReportPayload(
     sectionByteLimit,
     options.recentOperationEntryLimit ?? DEFAULT_RECENT_OPERATION_ENTRY_LIMIT,
   )
+  const runtimeTrace = createRuntimeTraceSection(
+    input.debugTrace ?? null,
+    sectionByteLimit,
+  )
 
   if (authoredDocument.status === 'omitted-too-large' && input.snapshot) {
     artifactSections.authoredDocument = createAuthoredModelDocumentFromSnapshot(input.snapshot)
@@ -371,6 +379,9 @@ export function createBugReportPayload(
       artifactSections.operationHistory = history.value
     }
   }
+  if (runtimeTrace.status === 'omitted-too-large' && input.debugTrace) {
+    artifactSections.runtimeTrace = input.debugTrace
+  }
 
   const omittedSectionIds: BugReportSectionId[] = []
   if (authoredDocument.status !== 'included') {
@@ -378,6 +389,9 @@ export function createBugReportPayload(
   }
   if (operationHistory.status !== 'included') {
     omittedSectionIds.push('operationHistory')
+  }
+  if (runtimeTrace.status !== 'included') {
+    omittedSectionIds.push('runtimeTrace')
   }
 
   return {
@@ -393,6 +407,7 @@ export function createBugReportPayload(
       documentSummary,
       authoredDocument,
       operationHistory,
+      runtimeTrace,
       payloadStatus: {
         inlineLimits: {
           sectionByteLimit,
@@ -472,6 +487,7 @@ export function createBugReportIssueDraft(
     { id: 'documentSummary', summary: 'Document summary', value: result.payload.documentSummary },
     { id: 'authoredDocument', summary: 'Authored document', value: result.payload.authoredDocument },
     { id: 'operationHistory', summary: 'Operation history', value: result.payload.operationHistory },
+    { id: 'runtimeTrace', summary: 'Runtime trace', value: result.payload.runtimeTrace },
     { id: 'payloadStatus', summary: 'Payload status', value: { ...result.payload.payloadStatus, artifact: artifactStatus } },
   ], {
     sectionByteLimit: options.sectionByteLimit,
@@ -598,12 +614,16 @@ export async function createBugReportStateArchive(
   }
   const authoredDocument = getArchivedSectionValue(result, 'authoredDocument')
   const operationHistory = getArchivedSectionValue(result, 'operationHistory')
+  const runtimeTrace = getArchivedSectionValue(result, 'runtimeTrace')
 
   if (authoredDocument !== null) {
     entries['state/authored-document.json'] = strToU8(stringifyJson(authoredDocument))
   }
   if (operationHistory !== null) {
     entries['state/operation-history.json'] = strToU8(stringifyJson(operationHistory))
+  }
+  if (runtimeTrace !== null) {
+    entries['state/runtime-trace.json'] = strToU8(stringifyJson(runtimeTrace))
   }
 
   return {
@@ -713,6 +733,33 @@ function loadOperationHistorySection(
     status: 'included',
     byteLength,
     value: recentPayload,
+  }
+}
+
+function createRuntimeTraceSection(
+  debugTrace: EditorRuntimeTraceSnapshot | null,
+  sectionByteLimit: number,
+): BugReportSection<EditorRuntimeTraceSnapshot> {
+  if (!debugTrace) {
+    return {
+      status: 'unavailable',
+      reason: 'No runtime trace data is available.',
+    }
+  }
+
+  const byteLength = getUtf8ByteLength(stringifyJson(debugTrace))
+  if (byteLength > sectionByteLimit) {
+    return {
+      status: 'omitted-too-large',
+      byteLength,
+      reason: `Runtime trace is ${byteLength} bytes, over the ${sectionByteLimit} byte inline limit.`,
+    }
+  }
+
+  return {
+    status: 'included',
+    byteLength,
+    value: debugTrace,
   }
 }
 
@@ -1147,6 +1194,7 @@ function createStateArchiveReadme() {
     'report/compact-report.json contains the same compact diagnostics used by the GitHub bug-report flow.',
     'state/authored-document.json contains the authored document reconstructed from the current runtime snapshot when available.',
     'state/operation-history.json contains the persisted operation-history fallback when available.',
+    'state/runtime-trace.json contains the bounded runtime trace captured by the dev debug platform when available.',
     'state/local-storage.json contains known Cadara localStorage entries.',
     'state/indexeddb.json contains a JSON-safe dump of known Cadara IndexedDB databases when the browser allows enumeration.',
   ].join('\n')
@@ -1154,7 +1202,7 @@ function createStateArchiveReadme() {
 
 function getArchivedSectionValue(
   result: BugReportPayloadResult,
-  sectionId: 'authoredDocument' | 'operationHistory',
+  sectionId: 'authoredDocument' | 'operationHistory' | 'runtimeTrace',
 ) {
   const section = result.payload[sectionId]
   if (section.status === 'included') {

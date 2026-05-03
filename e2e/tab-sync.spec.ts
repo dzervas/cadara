@@ -42,7 +42,7 @@ function createSyncedWorkbenchUrl(channelName: string, databaseName: string) {
 
 async function openSyncedWorkbench(page: Page, url: string) {
   await page.goto(url)
-  await expect.poll(() => page.evaluate(() => window.__cadTestState?.machineState ?? ''), { timeout: 30_000 }).not.toBe('')
+  await expect.poll(() => page.evaluate(() => window.__cadaraDebug?.getState()?.machineState ?? ''), { timeout: 30_000 }).not.toBe('')
   await expect.poll(() => revisionLabel(page), { timeout: 30_000 }).not.toBe('loading')
 }
 
@@ -57,5 +57,5 @@ async function waitForRepositoryUrl(page: Page) {
 }
 
 async function revisionLabel(page: Page) {
-  return page.evaluate(() => window.__cadTestState?.revision ?? 'loading')
+  return page.evaluate(() => window.__cadaraDebug?.getState()?.revision ?? 'loading')
 }

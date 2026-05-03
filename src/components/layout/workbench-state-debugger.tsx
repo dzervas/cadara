@@ -1,48 +1,9 @@
 import { useState } from 'react'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
-import type { TopologyDebugSummary } from '@/domain/modeling/topology-debug'
+import type { WorkbenchDebugState } from '@/domain/debug/debug-platform'
 
-export interface WorkbenchStateDebuggerRequirement {
-  id: string
-  label: string
-  description: string
-  slotCount: number
-}
-
-export interface WorkbenchStateDebuggerSelectionDetail {
-  label: string
-  kindLabel: string
-  ownerLabel: string
-  relatedLabels: readonly string[]
-  targetLabel: string
-}
-
-export interface WorkbenchStateDebuggerModel {
-  activeMode: string
-  machineState: string
-  command: string
-  phase: string
-  selectionCount: number
-  selectionTargets: string
-  revision: string
-  snapshotDiagnosticsCount: number
-  sketchSession: string
-  sketchPlane: string
-  featureSession: string
-  previewState: string
-  selectionFilterLabel: string
-  activeTargetRule: string
-  selectableTargets: readonly string[]
-  featureIds: readonly string[]
-  previewDiagnostics: string
-  requirements: readonly WorkbenchStateDebuggerRequirement[]
-  selectionDetail: WorkbenchStateDebuggerSelectionDetail
-  hoverTarget: string
-  topologyDebug: TopologyDebugSummary
-  sectionOffset?: number | null
-  sectionRetainedSide?: string | null
-}
+export type WorkbenchStateDebuggerModel = WorkbenchDebugState
 
 interface WorkbenchStateDebuggerProps {
   state: WorkbenchStateDebuggerModel

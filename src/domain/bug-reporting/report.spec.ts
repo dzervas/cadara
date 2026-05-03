@@ -43,6 +43,32 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {  function createSt
   const authoredDocument = createAuthoredModelDocumentFromSnapshot(snapshot)
   const operationHistory = createEmptyOperationHistory(snapshot.document.documentId)
   const baseEditorState = getEditorViewState(initialEditorState)
+  const debugTrace = {
+    maxEntries: 200,
+    totalEntries: 3,
+    droppedEntries: 0,
+    entries: [
+      {
+        kind: 'event-dispatched',
+        sequence: 1,
+        at: '2026-01-02T03:04:05.000Z',
+        event: {
+          type: 'session.started',
+          requestId: null,
+        },
+        state: {
+          machineState: 'idle',
+          mode: 'part',
+          activeCommand: null,
+          activePhase: null,
+          revisionId: snapshot.document.revisionId,
+          selectionCount: 0,
+          pendingSnapshotRequestId: null,
+        },
+        emittedEffects: [],
+      },
+    ],
+  } as const
 
   const payloadResult = createBugReportPayload({
     build: { version: '0.0.1', commit: 'abc1234', mode: 'test' },
@@ -59,6 +85,7 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {  function createSt
       sketchSession: createNewSketchSession(createStandardPlaneDefinition('xy')),
     },
     snapshot,
+    debugTrace,
     storage: createStorage(JSON.stringify(operationHistory)),
     environment: {
       navigator: {
@@ -97,6 +124,7 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {  function createSt
   expectTrue(!('render' in payloadResult.payload.authoredDocument.value), 'Authored debug data should exclude render exports.')
   expectTrue(!('presentation' in payloadResult.payload.authoredDocument.value), 'Authored debug data should exclude presentation state.')
   expectTrue(payloadResult.payload.operationHistory.status === 'included', 'Valid stored operation history should be included.')
+  expectTrue(payloadResult.payload.runtimeTrace.status === 'included', 'Available runtime trace data should be included when it fits.')
   expectTrue(
     payloadResult.payload.editor.activeSketch?.entityCount === 0 &&
       payloadResult.payload.editor.activeFeatureEdit?.featureType === 'extrude' &&
@@ -145,12 +173,14 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {  function createSt
     build: { version: '0.0.1', commit: 'abc1234', mode: 'test' },
     editorState: baseEditorState,
     snapshot,
+    debugTrace,
     storage: createStorage(JSON.stringify(operationHistory)),
   }, { sectionByteLimit: 8 })
   expectTrue(omittedSections.payload.authoredDocument.status === 'omitted-too-large', 'Large authored documents should be omitted from inline payloads.')
   expectTrue(omittedSections.payload.operationHistory.status === 'omitted-too-large', 'Large operation histories should be omitted from inline payloads.')
+  expectTrue(omittedSections.payload.runtimeTrace.status === 'omitted-too-large', 'Large runtime traces should be omitted from inline payloads.')
   expectTrue(
-    omittedSections.artifactSections.authoredDocument && omittedSections.artifactSections.operationHistory,
+    omittedSections.artifactSections.authoredDocument && omittedSections.artifactSections.operationHistory && omittedSections.artifactSections.runtimeTrace,
     'Omitted high-value sections should be available for the debug artifact.',
   )
 
@@ -220,6 +250,7 @@ test('src/domain/bug-reporting/report.spec.ts', async () => {  function createSt
   expectTrue(stateArchiveEntries['README.txt'], 'State archive should include a brief manifest.')
   expectTrue(stateArchiveEntries['state/authored-document.json'], 'State archive should include the full authored document when available.')
   expectTrue(stateArchiveEntries['state/operation-history.json'], 'State archive should include operation history when available.')
+  expectTrue(stateArchiveEntries['state/runtime-trace.json'], 'State archive should include runtime trace data when available.')
   expectTrue(
     localStorageState.entries['cad.documentRepository.automergeUrls.v1']?.includes('automerge:debug')
       && localStorageState.entries['cad.extraDebugKey'] === 'extra',

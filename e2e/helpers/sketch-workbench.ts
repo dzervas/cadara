@@ -121,23 +121,23 @@ export class SketchWorkbenchHarness {
   }
 
   async currentHoverTarget() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.hoverTarget ?? 'none')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.hoverTarget ?? 'none')
   }
 
   async currentEditorSelection() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.selectionTargets ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.selectionTargets ?? '')
   }
 
   async currentSketchSession() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.sketchSession ?? 'none')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.sketchSession ?? 'none')
   }
 
   async currentMachineSelectionCount() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.selectionCount ?? Number.NaN)
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.selectionCount ?? Number.NaN)
   }
 
   async currentPhase() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.phase ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.phase ?? '')
   }
 
   async clearHoverByLeavingViewport() {
@@ -188,12 +188,12 @@ export class SketchWorkbenchHarness {
   }
 
   async expectSketchPlane(label: string) {
-    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadTestState?.sketchPlane ?? 'none')).toBe(label)
+    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.sketchPlane ?? 'none')).toBe(label)
   }
 
   async expectSketchSessionActive() {
     await this.expectMachine('editingSketch')
-    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadTestState?.sketchPlane ?? 'none')).not.toBe('none')
+    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.sketchPlane ?? 'none')).not.toBe('none')
   }
 
   async expectMachine(kind: string, timeout = 10_000) {
@@ -232,18 +232,18 @@ export class SketchWorkbenchHarness {
   private async waitForCadStateReady() {
     await this.page.waitForLoadState('domcontentloaded')
     await this.page.waitForFunction(
-      () => Boolean(window.__cadTestState?.machineState || window.__cadTestState?.revision),
+      () => Boolean(window.__cadaraDebug?.getState()?.machineState || window.__cadaraDebug?.getState()?.revision),
       undefined,
       { timeout: 30_000 },
     )
   }
 
   private async revisionLabel() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.revision ?? 'loading')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.revision ?? 'loading')
   }
 
   private async readMachineLabel() {
-    return this.evaluateWithNavigationRetry(() => window.__cadTestState?.machineState ?? '')
+    return this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.machineState ?? '')
   }
 
   private async currentPath() {

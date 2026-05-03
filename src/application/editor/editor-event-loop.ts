@@ -6,14 +6,21 @@ import {
 import {
   createEditorEffectFailureEvent,
   defaultEditorExtensionDependencies,
-  transitionEditorState,
   initialEditorState,
+  transitionEditorState,
   type EditorExtensionDependencies,
   type EditorEffect,
   type EditorEffectRuntime,
   type EditorEvent,
   type EditorState,
 } from '@/core/editor/state-machine'
+import {
+  createEffectCompletedTraceEntry,
+  createEffectFailedTraceEntry,
+  createEffectStartedTraceEntry,
+  createEventDispatchedTraceEntry,
+  type EditorEventLoopTraceListener,
+} from './editor-debug-trace'
 import { runEditorEffect } from './effect-registry'
 
 export type EditorEventLoopListener = (state: EditorState) => void
@@ -26,9 +33,11 @@ export class EditorEventLoop {
   private state: EditorState = initialEditorState
   private readonly effectQueue: EditorEffect[] = []
   private readonly listeners = new Set<EditorEventLoopListener>()
+  private readonly traceListeners = new Set<EditorEventLoopTraceListener>()
   private processing = false
   private running = false
   private runToken = 0
+  private traceSequence = 0
 
   constructor(
     runtime: EditorEffectRuntime,
@@ -49,6 +58,14 @@ export class EditorEventLoop {
 
     const result = transitionEditorState(this.state, event, this.dependencies)
     this.applyTransitionResult(result)
+    this.emitTrace(
+      createEventDispatchedTraceEntry({
+        sequence: this.nextTraceSequence(),
+        event,
+        state: this.state,
+        emittedEffects: result.effects,
+      }),
+    )
     this.scheduleDrain()
   }
 
@@ -58,6 +75,16 @@ export class EditorEventLoop {
     return {
       unsubscribe: () => {
         this.listeners.delete(listener)
+      },
+    }
+  }
+
+  subscribeToTrace(listener: EditorEventLoopTraceListener) {
+    this.traceListeners.add(listener)
+
+    return {
+      unsubscribe: () => {
+        this.traceListeners.delete(listener)
       },
     }
   }
@@ -120,6 +147,14 @@ export class EditorEventLoop {
           break
         }
 
+        this.emitTrace(
+          createEffectStartedTraceEntry({
+            sequence: this.nextTraceSequence(),
+            effect,
+            queueDepthAfterStart: this.effectQueue.length,
+          }),
+        )
+
         try {
           const effectEvent = await this.executeEffect(effect, this.runtime)
 
@@ -129,6 +164,15 @@ export class EditorEventLoop {
 
           const result = transitionEditorState(this.state, effectEvent, this.dependencies)
           this.applyTransitionResult(result)
+          this.emitTrace(
+            createEffectCompletedTraceEntry({
+              sequence: this.nextTraceSequence(),
+              effect,
+              completion: effectEvent,
+              state: this.state,
+              emittedEffects: result.effects,
+            }),
+          )
         } catch (error: unknown) {
           if (!this.running || runToken !== this.runToken) {
             break
@@ -157,12 +201,58 @@ export class EditorEventLoop {
           )
           const result = transitionEditorState(this.state, failureEvent, this.dependencies)
           this.applyTransitionResult(result)
+          this.emitTrace(
+            createEffectFailedTraceEntry({
+              sequence: this.nextTraceSequence(),
+              effect,
+              failureEvent,
+              error: appError,
+              state: this.state,
+              emittedEffects: result.effects,
+            }),
+          )
         }
       }
     } finally {
       this.processing = false
       if (this.running && this.effectQueue.length > 0) {
         this.scheduleDrain()
+      }
+    }
+  }
+
+  private nextTraceSequence() {
+    this.traceSequence += 1
+    return this.traceSequence
+  }
+
+  private emitTrace(
+    entry: ReturnType<
+      | typeof createEventDispatchedTraceEntry
+      | typeof createEffectStartedTraceEntry
+      | typeof createEffectCompletedTraceEntry
+      | typeof createEffectFailedTraceEntry
+    >,
+  ) {
+    if (this.traceListeners.size === 0) {
+      return
+    }
+
+    for (const listener of this.traceListeners) {
+      try {
+        listener(entry)
+      } catch (error: unknown) {
+        const appError = normalizeUnknownError(error, {
+          code: 'app/unknown',
+          fallbackMessage: 'Editor debug trace listener failed.',
+          context: [{ key: 'traceKind', value: entry.kind }],
+        })
+
+        this.errorReporter.report(appError, {
+          source: 'editor-runtime',
+          visibility: 'developer',
+          dedupeKey: `debug-trace:${entry.kind}:${appError.message}`,
+        })
       }
     }
   }

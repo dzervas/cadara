@@ -1,5 +1,8 @@
 import { defineConfig } from '@playwright/test'
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000'
+const shouldStartWebServer = (process.env.PLAYWRIGHT_WEB_SERVER ?? '1') !== '0'
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -10,18 +13,20 @@ export default defineConfig({
   workers: 8,
   retries: 0,
   use: {
-    baseURL: 'http://127.0.0.1:3000',
+    baseURL,
     headless: true,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: {
-    command: 'bun run dev',
-    url: 'http://127.0.0.1:3000',
-    reuseExistingServer: true,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    timeout: 120_000,
-  },
+  webServer: shouldStartWebServer
+    ? {
+        command: 'bun run dev',
+        url: baseURL,
+        reuseExistingServer: true,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        timeout: 120_000,
+      }
+    : undefined,
 })

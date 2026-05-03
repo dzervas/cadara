@@ -3,9 +3,7 @@
 ## Purpose
 
 Define the editor runtime orchestration model, including the reducer-driven event loop, async effect sequencing, cursor sequencing, and application/runtime ownership boundaries.
-
 ## Requirements
-
 ### Requirement: Editor runtime SHALL use explicit statechart-owned orchestration for command workflows
 The editor runtime SHALL orchestrate command workflows through an explicit event loop and pure reducer rather than through an xstate statechart/actor model. The event loop SHALL dispatch events through the pure transition function, manage an effect queue, execute effects serially, and feed results back through the transition function.
 
@@ -140,3 +138,22 @@ The editor runtime SHALL expose distinct sequencing behavior for ordinary increm
 - **WHEN** the application requests replacement of the active document basis
 - **THEN** the runtime processes that request through an explicit replacement handoff
 - **AND** the replacement path is not reused as the generic completion path for ordinary workbench mutations
+
+### Requirement: Editor runtime SHALL expose passive debug trace observation
+The editor runtime SHALL expose passive observability for recent event, effect, and accepted-state sequencing so development-only tooling can inspect runtime causality without making the runtime the owner of browser globals or debug transport.
+
+#### Scenario: Runtime dispatches an event
+- **WHEN** the editor event loop dispatches an editor event
+- **THEN** development-only observers can receive structured trace data describing the event, resulting transition, and any emitted effects
+- **AND** the runtime continues to own the sequencing of those transitions
+
+#### Scenario: Effect completes or fails
+- **WHEN** an editor effect completes successfully or fails
+- **THEN** development-only observers can receive structured trace data describing the completion or failure and the resulting follow-up transition
+- **AND** the runtime does not write that trace directly to browser globals
+
+#### Scenario: No debug observer is installed
+- **WHEN** no development-only debug observer is active
+- **THEN** the runtime continues normal event-loop behavior
+- **AND** the absence of an observer does not change command or effect sequencing
+

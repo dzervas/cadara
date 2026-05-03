@@ -15,6 +15,7 @@ import type { EditorExtensionDependencies } from '@/domain/editor/state-machine'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { EditorContext } from '@/hooks/editor-context'
 import { useErrorReporter } from '@/hooks/use-error-reporter'
+import { createEditorDebugTraceRecorder } from '@/application/editor/editor-debug-trace'
 
 interface EditorProviderProps extends PropsWithChildren {
   modelingService: ModelingService
@@ -34,10 +35,13 @@ export function EditorProvider({ modelingService, editorDependencies, children }
     }),
     [editorDependencies.importProviders, editorDependencies.sketchSpecialModes],
   )
+  const traceRecorder = useMemo(() => createEditorDebugTraceRecorder(), [])
   const { machineState, dispatch } = useEditorEventLoop(
     runtime,
     errorReporter,
     stableEditorDependencies,
+    undefined,
+    traceRecorder.record,
   )
 
   const handleDocumentChange = useEffectEvent((event: Parameters<ModelingService['subscribeToDocumentChanges']>[0] extends (event: infer TEvent) => void ? TEvent : never) => {
@@ -69,8 +73,9 @@ export function EditorProvider({ modelingService, editorDependencies, children }
       machineState,
       state: getEditorViewState(machineState),
       dispatch,
+      getRuntimeTrace: () => traceRecorder.getSnapshot(),
     }),
-    [dispatch, machineState],
+    [dispatch, machineState, traceRecorder],
   )
 
   return <EditorContext.Provider value={value}>{children}</EditorContext.Provider>

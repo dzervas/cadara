@@ -1,4 +1,3 @@
-import type { WorkbenchStateDebuggerModel } from '@/components/layout/workbench-state-debugger'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { EditorEvent } from '@/domain/editor/state-machine'
 import {
@@ -10,18 +9,7 @@ import {
   type SelectionTargetCatalog,
 } from '@/core/editor/schema'
 
-interface CadTestStateWindow {
-  __cadTestState?: WorkbenchStateDebuggerModel
-}
-
-export function syncCadTestState(
-  state: WorkbenchStateDebuggerModel,
-  targetWindow: CadTestStateWindow = window,
-) {
-  targetWindow.__cadTestState = state
-}
-
-export function resolveCadTestTarget(
+export function resolveCadaraDebugTarget(
   snapshot: WorkspaceSnapshot | null,
   targetId: string,
 ): PrimitiveRef | null {
@@ -34,7 +22,7 @@ export function resolveCadTestTarget(
   })?.target ?? null
 }
 
-export function dispatchCadTestSelection(input: {
+export function selectCadaraDebugTarget(input: {
   targetId: string
   snapshot: WorkspaceSnapshot | null
   selection: PrimitiveRef[]
@@ -42,7 +30,7 @@ export function dispatchCadTestSelection(input: {
   selectionCatalog: SelectionTargetCatalog | null
   dispatch: (event: EditorEvent) => void
 }) {
-  const target = resolveCadTestTarget(input.snapshot, input.targetId)
+  const target = resolveCadaraDebugTarget(input.snapshot, input.targetId)
 
   if (
     !target
