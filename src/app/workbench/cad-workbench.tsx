@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Loader } from "@mantine/core";
 import { appVersion, gitCommit } from "virtual:cadara-build-metadata";
 
@@ -8,6 +8,7 @@ import { SketchToolPanel } from "@/components/cad/sketch-tool-panel";
 import { FeatureInspector } from "@/components/layout/feature-inspector";
 import { ImportInspector } from "@/components/layout/import-inspector";
 import { FeatureSidebar } from "@/components/layout/feature-sidebar";
+import { DocumentTabsBar, type DocumentTabsBarHandle } from "@/components/layout/document-tabs-bar";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
 import { MeasurementPanel } from "@/components/layout/measurement-panel";
 import { DocumentExportModal } from "@/components/layout/document-export-modal";
@@ -32,6 +33,15 @@ import {
 	openWorkbenchLocalFile,
 	saveWorkbenchLocalFile,
 } from "@/app/workbench/document/workbench-document-actions";
+import {
+	createInitialWorkbenchTabsState,
+	reconcileWorkbenchTabsForActiveDocument,
+	reduceWorkbenchTabs,
+	type WorkbenchTab,
+	type WorkbenchTabsState,
+} from "@/domain/workspace/workbench-tabs";
+import { createLocalStorageWorkbenchTabsStore } from "@/infrastructure/persistence/local-storage-workbench-tabs-store";
+import type { DocumentId } from "@/contracts/shared/ids";
 import { useWorkbenchHistory } from "@/app/workbench/controllers/use-workbench-history";
 import { useWorkbenchDocumentPresentation } from "@/app/workbench/controllers/use-workbench-document-presentation";
 import { useWorkbenchLocalFileSync } from "@/app/workbench/controllers/use-workbench-local-file-sync";
@@ -109,6 +119,13 @@ import { getBuildModeLabel } from "@/components/layout/build-metadata";
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "feature" }>;
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "sketch" }>;
+
+function generateDocumentId(): DocumentId {
+	const slug = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+		? crypto.randomUUID().replaceAll("-", "")
+		: Math.random().toString(36).slice(2) + Date.now().toString(36);
+	return `doc_${slug}` as DocumentId;
+}
 
 export function CadWorkbench() {
 	const actionBus = useToolActionBus();
@@ -243,6 +260,117 @@ export function CadWorkbench() {
 		showWorkbenchInfo,
 	});
 	const showBrowserStorageWarning = !localFileSyncEnabled && !cloudSaveEnabled;
+
+	// Document tabs strip
+	//
+	// Path-C scope (see DocumentTabsBar): the strip is a UI + persistence layer over the
+	// list of documents the user has opened. The seam for switching the active document
+	// (swapping the automerge db, recomputing) is intentionally not wired here yet —
+	// `handleTabActivate` is a no-op below until ModelingService gains a switchDocument
+	// method. The active tab is therefore pinned to `modelingService.currentDocumentId`,
+	// which today is always OCC_KERNEL_DOCUMENT_ID.
+	const tabsStorage = useMemo(() => {
+		if (typeof window === "undefined") {
+			return null;
+		}
+		return createLocalStorageWorkbenchTabsStore(window.localStorage);
+	}, []);
+	const [localFileBindingFileName, setLocalFileBindingFileName] = useState<string | null>(null);
+	useEffect(() => {
+		return modelingService.subscribeToLocalFileSyncStatus((status) => {
+			if (
+				status.kind === "binding-restored"
+				|| status.kind === "syncing"
+				|| status.kind === "synced"
+			) {
+				setLocalFileBindingFileName(status.metadata.fileName);
+				return;
+			}
+			if (status.kind === "idle") {
+				setLocalFileBindingFileName(null);
+			}
+		});
+	}, [modelingService]);
+	const activeWorkbenchTab = useMemo<WorkbenchTab>(() => {
+		const storageKind = localFileSyncEnabled ? "filesystem" : "browser";
+		const title = localFileBindingFileName ?? "Workspace";
+		return {
+			documentId: modelingService.currentDocumentId,
+			title,
+			storageKind,
+			storageDescriptor: localFileBindingFileName,
+		};
+	}, [localFileBindingFileName, localFileSyncEnabled, modelingService.currentDocumentId]);
+	const [tabsState, tabsDispatch] = useReducer(
+		reduceWorkbenchTabs,
+		activeWorkbenchTab,
+		(seed): WorkbenchTabsState => {
+			if (!tabsStorage) {
+				return createInitialWorkbenchTabsState(seed);
+			}
+			const result = tabsStorage.load();
+			const persisted = result.ok ? result.state : null;
+			return reconcileWorkbenchTabsForActiveDocument(persisted, seed);
+		},
+	);
+	useEffect(() => {
+		// Keep the active tab's metadata in sync with the loaded document's actual storage.
+		tabsDispatch({
+			type: "open",
+			tab: activeWorkbenchTab,
+		});
+	}, [activeWorkbenchTab]);
+	useEffect(() => {
+		if (!tabsStorage) {
+			return;
+		}
+		tabsStorage.save(tabsState);
+	}, [tabsState, tabsStorage]);
+
+	const handleTabActivate = useCallback(
+		(_documentId: DocumentId) => {
+			// Path C: switching is not yet wired. The active tab is pinned to the loaded
+			// document via the `activeWorkbenchTab` effect above. When ModelingService
+			// gains a switchDocument seam, replace this with the real activation call.
+			void _documentId;
+		},
+		[],
+	);
+	const handleTabClose = useCallback(
+		(documentId: DocumentId) => {
+			if (documentId === modelingService.currentDocumentId) {
+				// The currently-loaded document can't be closed without a switch target.
+				return;
+			}
+			tabsDispatch({ type: "close", documentId });
+		},
+		[modelingService.currentDocumentId],
+	);
+	const handleTabReorder = useCallback((documentId: DocumentId, toIndex: number) => {
+		tabsDispatch({ type: "reorder", documentId, toIndex });
+	}, []);
+	const handleTabRename = useCallback((documentId: DocumentId, title: string) => {
+		tabsDispatch({ type: "rename", documentId, title });
+	}, []);
+	const tabsBarRef = useRef<DocumentTabsBarHandle | null>(null);
+	const handleNewDocumentTab = useCallback(() => {
+		const id = generateDocumentId();
+		tabsDispatch({
+			type: "open",
+			tab: {
+				documentId: id,
+				title: "Untitled",
+				storageKind: "browser",
+				storageDescriptor: null,
+			},
+		});
+		// Defer one frame so Mantine's menu finishes returning focus to the trigger
+		// before we ask the rename input to focus. Without this, the menu's focus
+		// restoration races and immediately blurs the input we just mounted.
+		requestAnimationFrame(() => {
+			tabsBarRef.current?.requestRename(id);
+		});
+	}, []);
 
 	const visibleObjectTargetKeys = useMemo(
 		() =>
@@ -765,7 +893,7 @@ export function CadWorkbench() {
 	};
 
 	const shortcutActiveScopes = useMemo(() => getWorkbenchShortcutActiveScopes(mode), [mode]);
-	const shortcutCommandHandlers = createWorkbenchShortcutCommandHandlers({
+	const baseShortcutCommandHandlers = createWorkbenchShortcutCommandHandlers({
 		activeCommand,
 		activeReferencePickerFieldId,
 		activateTool: triggerTool,
@@ -778,6 +906,72 @@ export function CadWorkbench() {
 		selection,
 		sketchSession,
 	});
+	const tabAtIndex = (index: number) => tabsState.tabs[index] ?? null;
+	const shortcutCommandHandlers = {
+		...baseShortcutCommandHandlers,
+		"document.activateTab1": {
+			execute: () => {
+				const tab = tabAtIndex(0);
+				if (tab) handleTabActivate(tab.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length >= 1,
+		},
+		"document.activateTab2": {
+			execute: () => {
+				const tab = tabAtIndex(1);
+				if (tab) handleTabActivate(tab.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length >= 2,
+		},
+		"document.activateTab3": {
+			execute: () => {
+				const tab = tabAtIndex(2);
+				if (tab) handleTabActivate(tab.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length >= 3,
+		},
+		"document.activateTab4": {
+			execute: () => {
+				const tab = tabAtIndex(3);
+				if (tab) handleTabActivate(tab.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length >= 4,
+		},
+		"document.activateTab5": {
+			execute: () => {
+				const tab = tabAtIndex(4);
+				if (tab) handleTabActivate(tab.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length >= 5,
+		},
+		"document.activateNext": {
+			execute: () => {
+				const currentIndex = tabsState.tabs.findIndex(
+					(tab) => tab.documentId === tabsState.activeDocumentId,
+				);
+				const next = tabsState.tabs[(currentIndex + 1) % tabsState.tabs.length];
+				if (next) handleTabActivate(next.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length > 1,
+		},
+		"document.activatePrevious": {
+			execute: () => {
+				const currentIndex = tabsState.tabs.findIndex(
+					(tab) => tab.documentId === tabsState.activeDocumentId,
+				);
+				const previousIndex = (currentIndex - 1 + tabsState.tabs.length) % tabsState.tabs.length;
+				const previous = tabsState.tabs[previousIndex];
+				if (previous) handleTabActivate(previous.documentId);
+			},
+			isEnabled: () => tabsState.tabs.length > 1,
+		},
+		"document.closeActive": {
+			execute: () => handleTabClose(tabsState.activeDocumentId),
+			isEnabled: () =>
+				tabsState.tabs.length > 1
+				&& tabsState.activeDocumentId !== modelingService.currentDocumentId,
+		},
+	};
 
 	const createCurrentBugReportPayload = () =>
 		createBugReportPayload({
@@ -987,6 +1181,7 @@ export function CadWorkbench() {
 						historyAvailability={toolbarHistoryAvailability}
 						showBrowserStorageWarning={showBrowserStorageWarning}
 						onNewDocument={handleNewDocument}
+						onNewDocumentTab={handleNewDocumentTab}
 						onOpenLocalFile={handleOpenLocalFile}
 						onSaveLocalFile={handleSaveLocalFile}
 						onImportDocument={handleImportDocument}
@@ -1144,34 +1339,46 @@ export function CadWorkbench() {
 									onDownload={downloadDocumentExportResult}
 									onClose={() => setObjectExportModal(null)}
 								/>
-								<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3">
-									<div className="flex items-end gap-3 px-4">
-										<WorkbenchStateDebugger state={debuggerState} />
-										<MeasurementPanel measurement={measurementViewModel} />
+								<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col">
+									<div className="flex flex-col gap-3">
+										<div className="flex items-end gap-3 px-4">
+											<WorkbenchStateDebugger state={debuggerState} />
+											<MeasurementPanel measurement={measurementViewModel} />
+										</div>
+										<HistoryTimelineShell
+											snapshot={snapshot}
+											sketchSession={sketchSession}
+											historyHighlightFeatureIds={historyHighlightFeatureIds}
+											visibleSelection={visibleSelection}
+											onSelectTarget={handleShellSelect}
+											onReopenTarget={handleNavigationReopen}
+											onDocumentCursorRequested={handleTimelineCursorRequested}
+											documentCursorDisabled={!history.canUndo && !history.canRedo}
+											onDocumentHistoryReorder={handleDocumentHistoryReorder}
+											documentHistoryReorderDisabled={
+												Boolean(sketchSession) ||
+												isDocumentHistoryReorderRunning ||
+												isUndoRedoRunning ||
+												(!history.canUndo && !history.canRedo)
+											}
+											onSketchCursorRequested={(cursor) =>
+												dispatch({ type: "sketch.historyCursorRequested", cursor })
+											}
+											onDeleteDocumentItem={handleDocumentHistoryDelete}
+											onRenameDocumentItem={handleDocumentHistoryRename}
+											onSuppressFeature={handleFeatureSuppressPlaceholder}
+										/>
 									</div>
-									<HistoryTimelineShell
-										snapshot={snapshot}
-										sketchSession={sketchSession}
-										historyHighlightFeatureIds={historyHighlightFeatureIds}
-										visibleSelection={visibleSelection}
-										onSelectTarget={handleShellSelect}
-										onReopenTarget={handleNavigationReopen}
-										onDocumentCursorRequested={handleTimelineCursorRequested}
-										documentCursorDisabled={!history.canUndo && !history.canRedo}
-										onDocumentHistoryReorder={handleDocumentHistoryReorder}
-										documentHistoryReorderDisabled={
-											Boolean(sketchSession) ||
-											isDocumentHistoryReorderRunning ||
-											isUndoRedoRunning ||
-											(!history.canUndo && !history.canRedo)
-										}
-										onSketchCursorRequested={(cursor) =>
-											dispatch({ type: "sketch.historyCursorRequested", cursor })
-										}
-										onDeleteDocumentItem={handleDocumentHistoryDelete}
-										onRenameDocumentItem={handleDocumentHistoryRename}
-										onSuppressFeature={handleFeatureSuppressPlaceholder}
-									/>
+									<div className="pointer-events-auto mt-3">
+										<DocumentTabsBar
+											ref={tabsBarRef}
+											state={tabsState}
+											onActivate={handleTabActivate}
+											onClose={handleTabClose}
+											onReorder={handleTabReorder}
+											onRename={handleTabRename}
+										/>
+									</div>
 								</div>
 							</main>
 						</div>

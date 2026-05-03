@@ -6,9 +6,16 @@ export interface DocumentFileMenuItem {
   icon: WorkbenchIconName
 }
 
-export type DocumentFileMenuItemId = 'new' | 'openLocal' | 'saveLocal' | 'import' | 'export'
+export type DocumentFileMenuItemId =
+  | 'new'
+  | 'newDocumentTab'
+  | 'openLocal'
+  | 'saveLocal'
+  | 'import'
+  | 'export'
 export type DocumentFileMenuCommand =
   | 'newDocument'
+  | 'newDocumentTab'
   | 'openLocalFile'
   | 'saveLocalFile'
   | 'importDocument'
@@ -19,6 +26,11 @@ export const DOCUMENT_FILE_MENU_ITEMS: readonly DocumentFileMenuItem[] = [
     id: 'new',
     label: 'New',
     icon: 'newDocument',
+  },
+  {
+    id: 'newDocumentTab',
+    label: 'New document',
+    icon: 'plus',
   },
   {
     id: 'openLocal',
@@ -46,6 +58,8 @@ export function getDocumentFileMenuCommand(itemId: DocumentFileMenuItemId): Docu
   switch (itemId) {
     case 'new':
       return 'newDocument'
+    case 'newDocumentTab':
+      return 'newDocumentTab'
     case 'openLocal':
       return 'openLocalFile'
     case 'saveLocal':

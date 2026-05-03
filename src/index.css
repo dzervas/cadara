@@ -37,3 +37,23 @@ button,
 input {
   font: inherit;
 }
+
+@keyframes workbench-tab-loading-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(380%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tab-hairline='pending'] > * {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transform: none !important;
+    width: 100% !important;
+    opacity: 0.6;
+  }
+}
+

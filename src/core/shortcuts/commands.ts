@@ -6,6 +6,7 @@ export type ShortcutScope = 'active-tool' | 'focused-panel' | 'global' | 'modal'
 
 export type ShortcutCommandCategory =
   | 'Context Menus'
+  | 'Documents'
   | 'Editor'
   | 'History'
   | 'Sketch'
@@ -28,6 +29,14 @@ export type WorkbenchCommandId =
   | 'context.rollCursorHere'
   | 'context.selectTarget'
   | 'context.suppress'
+  | 'document.activateNext'
+  | 'document.activatePrevious'
+  | 'document.activateTab1'
+  | 'document.activateTab2'
+  | 'document.activateTab3'
+  | 'document.activateTab4'
+  | 'document.activateTab5'
+  | 'document.closeActive'
   | 'selection.clear'
   | 'viewport.fit'
   | 'viewport.viewBack'
@@ -224,6 +233,70 @@ const workbenchCommands = [
     category: 'Viewport',
     scope: 'global',
     defaultShortcuts: [],
+    customizable: true,
+  },
+  {
+    id: 'document.activateNext',
+    label: 'Next Document',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+shift+]'],
+    customizable: true,
+  },
+  {
+    id: 'document.activatePrevious',
+    label: 'Previous Document',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+shift+['],
+    customizable: true,
+  },
+  {
+    id: 'document.activateTab1',
+    label: 'Activate Document 1',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+1'],
+    customizable: true,
+  },
+  {
+    id: 'document.activateTab2',
+    label: 'Activate Document 2',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+2'],
+    customizable: true,
+  },
+  {
+    id: 'document.activateTab3',
+    label: 'Activate Document 3',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+3'],
+    customizable: true,
+  },
+  {
+    id: 'document.activateTab4',
+    label: 'Activate Document 4',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+4'],
+    customizable: true,
+  },
+  {
+    id: 'document.activateTab5',
+    label: 'Activate Document 5',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+5'],
+    customizable: true,
+  },
+  {
+    id: 'document.closeActive',
+    label: 'Close Document',
+    category: 'Documents',
+    scope: 'global',
+    defaultShortcuts: ['mod+w'],
     customizable: true,
   },
 ] as const satisfies readonly ShortcutCommandDefinition[]

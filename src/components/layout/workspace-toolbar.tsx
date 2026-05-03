@@ -32,6 +32,7 @@ interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
   showBrowserStorageWarning?: boolean
   onNewDocument?: () => void
+  onNewDocumentTab?: () => void
   onOpenLocalFile?: () => void
   onSaveLocalFile?: () => void
   onImportDocument?: (file: File) => void
@@ -44,6 +45,7 @@ export function WorkspaceToolbar({
   historyAvailability,
   showBrowserStorageWarning = false,
   onNewDocument = () => undefined,
+  onNewDocumentTab = () => undefined,
   onOpenLocalFile = () => undefined,
   onSaveLocalFile = () => undefined,
   onImportDocument = () => undefined,
@@ -218,6 +220,7 @@ export function WorkspaceToolbar({
         <DocumentFileMenu
           showBrowserStorageWarning={showBrowserStorageWarning}
           onNewDocument={onNewDocument}
+          onNewDocumentTab={onNewDocumentTab}
           onOpenLocalFile={onOpenLocalFile}
           onSaveLocalFile={onSaveLocalFile}
           onImportDocument={onImportDocument}

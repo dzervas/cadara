@@ -10,7 +10,7 @@ export function BuildMetadataLabel() {
   })
 
   return (
-    <div className="pointer-events-none fixed bottom-1 left-2 z-50 select-none text-[10px] leading-none text-[var(--cad-muted)] opacity-65">
+    <div className="pointer-events-none fixed bottom-10 left-2 z-50 select-none text-[10px] leading-none text-[var(--cad-muted)] opacity-65">
       {label}
     </div>
   )

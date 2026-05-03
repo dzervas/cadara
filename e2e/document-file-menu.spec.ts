@@ -10,7 +10,8 @@ test('toolbar file menu exports and imports the current cadara document', async 
   const fileButton = page.getByRole('button', { name: 'File' })
   await expect(fileButton).toBeVisible()
   await fileButton.click()
-  await expect(page.getByRole('menuitem', { name: 'New' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'New', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'New document', exact: true })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: 'Import' })).toBeVisible()
 
   const firstDownloadPromise = page.waitForEvent('download')

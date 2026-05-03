@@ -22,6 +22,7 @@ function BrowserStorageWarningTooltipLabel() {
 
 interface DocumentFileMenuHandlers {
   onNewDocument: () => void
+  onNewDocumentTab: () => void
   onOpenLocalFile: () => void
   onSaveLocalFile: () => void
   onImportDocument: (file: File) => void
@@ -37,6 +38,7 @@ export function DocumentFileMenu({
   defaultOpened = false,
   showBrowserStorageWarning = false,
   onNewDocument,
+  onNewDocumentTab,
   onOpenLocalFile,
   onSaveLocalFile,
   onImportDocument,
@@ -60,6 +62,9 @@ export function DocumentFileMenu({
     switch (getDocumentFileMenuCommand(itemId)) {
       case 'newDocument':
         onNewDocument()
+        return
+      case 'newDocumentTab':
+        onNewDocumentTab()
         return
       case 'openLocalFile':
         onOpenLocalFile()

@@ -14,13 +14,13 @@ import {
 import { workbenchTheme } from '@/theme/workbench-theme'
 
 test('src/components/layout/document-file-menu.spec.tsx', () => {  expectTrue(
-    DOCUMENT_FILE_MENU_ITEMS.map((item) => item.label).join(',') === 'New,Open local file,Save local file,Import,Export',
-    'Document file menu model should expose New, Open local file, Save local file, Import, and Export in order.',
+    DOCUMENT_FILE_MENU_ITEMS.map((item) => item.label).join(',') === 'New,New document,Open local file,Save local file,Import,Export',
+    'Document file menu model should expose New, New document, Open local file, Save local file, Import, and Export in order.',
   )
 
   expectTrue(
     DOCUMENT_FILE_MENU_ITEMS.map((item) => getDocumentFileMenuCommand(item.id)).join(',')
-      === 'newDocument,openLocalFile,saveLocalFile,importDocument,exportDocument',
+      === 'newDocument,newDocumentTab,openLocalFile,saveLocalFile,importDocument,exportDocument',
     'Document file menu model should route each item to the expected handler command.',
   )
 
@@ -30,6 +30,7 @@ test('src/components/layout/document-file-menu.spec.tsx', () => {  expectTrue(
         defaultOpened
         showBrowserStorageWarning
         onNewDocument={() => undefined}
+        onNewDocumentTab={() => undefined}
         onOpenLocalFile={() => undefined}
         onSaveLocalFile={() => undefined}
         onImportDocument={() => undefined}

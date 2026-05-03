@@ -84,6 +84,8 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
         '4px 0 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
       '--workbench-shell-elevation-toolbar':
         '0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+      '--workbench-shell-elevation-tabs':
+        '0 -10px 28px rgba(0, 0, 0, 0.32), 0 -1px 0 rgba(0, 0, 0, 0.45)',
       '--workbench-shell-scrubber-track': 'rgba(255, 255, 255, 0.06)',
       '--workbench-shell-scrubber-track-glow':
         '0 0 10px color-mix(in oklch, var(--workbench-shell-accent) 12%, transparent)',
