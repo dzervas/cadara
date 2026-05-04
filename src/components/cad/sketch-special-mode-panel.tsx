@@ -14,6 +14,10 @@ import {
   TextInput,
 } from '@mantine/core'
 
+import {
+  VIEWPORT_FLOATING_PANEL_LEFT_PX,
+  VIEWPORT_FLOATING_PANEL_TOP_PX,
+} from '@/components/cad/viewport-overlay-layout'
 import type {
   SketchSpecialModePanelAction,
   SketchSpecialModePanelButton,
@@ -43,8 +47,10 @@ export function SketchSpecialModePanel({
   return (
     <Paper
       component="aside"
-      className="pointer-events-auto absolute left-4 top-4 z-20 flex max-h-[70vh] w-[320px] max-w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden rounded-[6px]"
+      className="pointer-events-auto absolute z-20 flex max-h-[70vh] w-[320px] max-w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden rounded-[6px]"
       style={{
+        left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
+        top: VIEWPORT_FLOATING_PANEL_TOP_PX,
         background: 'var(--workbench-shell-surface-panel-elev)',
         boxShadow: 'var(--workbench-shell-elevation-md)',
       }}

@@ -384,7 +384,7 @@ Components are Mantine primitives configured through the central `workbench-them
 
 **The Variables-Behind-FAB Rule.** Variables don't live in the parts tree and don't have a permanent panel. They are accessed by the bottom-right FAB, which when toggled opens the Variables panel as a transient floating overlay. Rationale: variables are *modeling state*, not navigation, and they're consulted/edited far less often than the parts tree is scanned. Putting them behind the FAB reclaims the right edge of the viewport for the canvas in the steady state.
 
-**The Floating-Panel Anchor Rule.** Floating panels (Variables, future references) anchor to a viewport edge with a fixed corner-distance, *not* to a sidebar slot. Variables: top 76px / right 16px / bottom 100px. Other panels follow the same pattern with explicit pixel offsets. No floating panel should overlap the toolbar (top 12px), the timeline (bottom ~56–96px), or the tab bar (bottom 0–40px). The reservations exist precisely so future panels can compose without colliding.
+**The Floating-Panel Anchor Rule.** Floating panels (Variables, future references) anchor to a viewport edge with a fixed corner-distance, *not* to a sidebar slot. Variables: top 76px / right 16px / bottom 100px. Left-side editor panels (feature inspector, sketch tool prompts, special-mode panels, validation status) use top 76px / left 268px so they clear both the toolbar and the floating parts tree. Other panels follow the same pattern with explicit pixel offsets. No floating panel should overlap the toolbar (top 12px), the timeline (bottom ~56-96px), or the tab bar (bottom 0-40px). The reservations exist precisely so future panels can compose without colliding.
 
 ## 6. Do's and Don'ts
 

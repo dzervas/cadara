@@ -51,7 +51,6 @@ import { createAppError, errorContext, ok } from "@/contracts/errors";
 import {
 	getSketchAnnotationDescriptors,
 	getSketchToolPresentation,
-	getSketchSessionRegionDiagnostics,
 } from "@/domain/editor/sketch-session";
 import { persistSketchDraftSession } from "@/domain/editor/sketch-session/persistence";
 import {
@@ -98,6 +97,8 @@ import {
 import {
 	WORKBENCH_STATUS_TOP_PX,
 	WORKBENCH_STATUS_TOP_WITH_RESTORE_PX,
+	VIEWPORT_FLOATING_PANEL_LEFT_PX,
+	VIEWPORT_FLOATING_PANEL_TOP_PX,
 	getWorkbenchNotificationRightOffsetPx,
 } from "@/components/cad/viewport-overlay-layout";
 import {
@@ -589,11 +590,6 @@ export function CadWorkbench({
 		? getSketchSpecialModeViewportPresentation(sketchSession, sketchSpecialModes)
 		: null;
 	const sketchAnnotations = sketchSession ? getSketchAnnotationDescriptors(sketchSession) : [];
-	const sketchRegionDiagnosticMessage = sketchSession
-		? (getSketchSessionRegionDiagnostics(sketchSession).find(
-				(diagnostic) => diagnostic.severity !== "info",
-			)?.message ?? null)
-		: null;
 
 	const debuggerState: WorkbenchStateDebuggerModel = {
 		activeMode: mode,
@@ -1335,12 +1331,16 @@ export function CadWorkbench({
 										onDismiss={() => setWorkbenchStatusNotification(null)}
 									/>
 								) : null}
-								{sketchSession?.validationMessage || sketchRegionDiagnosticMessage ? (
+								{sketchSession?.validationMessage ? (
 									<div
 										role="status"
-										className="absolute left-4 top-4 z-20 max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
+										className="pointer-events-none absolute z-20 max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
+										style={{
+											left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
+											top: VIEWPORT_FLOATING_PANEL_TOP_PX,
+										}}
 									>
-										{sketchSession?.validationMessage ?? sketchRegionDiagnosticMessage}
+										{sketchSession.validationMessage}
 									</div>
 								) : null}
 								{activeImportSession ? (

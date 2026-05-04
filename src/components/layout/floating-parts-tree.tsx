@@ -3,6 +3,11 @@ import { ActionIcon } from '@mantine/core'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
 import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu.helpers'
+import {
+  FLOATING_PARTS_TREE_WIDTH_PX,
+  VIEWPORT_OVERLAY_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_PX,
+} from '@/components/cad/viewport-overlay-layout'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
@@ -59,8 +64,14 @@ export function FloatingPartsTree({
   return (
     <aside
       aria-label="Parts and objects"
-      className="pointer-events-auto absolute left-4 top-[76px] select-none"
-      style={{ width: 240, zIndex: 15, color: 'var(--workbench-shell-text)' }}
+      className="pointer-events-auto absolute select-none"
+      style={{
+        left: VIEWPORT_OVERLAY_INSET_PX,
+        top: VIEWPORT_OVERLAY_TOP_INSET_PX,
+        width: FLOATING_PARTS_TREE_WIDTH_PX,
+        zIndex: 15,
+        color: 'var(--workbench-shell-text)',
+      }}
     >
       <header
         className="px-2.5 pb-2 text-[11px] font-semibold uppercase"

@@ -1,6 +1,10 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import {
+  VIEWPORT_OVERLAY_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_PX,
+} from '@/components/cad/viewport-overlay-layout'
+import {
   getSketchSpecialModeOverlayProjectionId,
   getSketchSpecialModeOverlayTone,
   getSketchSpecialModeSegmentProjectionId,
@@ -69,7 +73,13 @@ export function SketchSpecialModeViewportFeedback({
   return (
     <>
       {hasStatus ? (
-        <div className="pointer-events-none absolute right-4 top-4 z-20 flex max-w-sm items-end gap-2">
+        <div
+          className="pointer-events-none absolute z-20 flex max-w-sm items-end gap-2"
+          style={{
+            right: VIEWPORT_OVERLAY_INSET_PX,
+            top: VIEWPORT_OVERLAY_TOP_INSET_PX,
+          }}
+        >
           {presentation.prompts?.map((prompt) => (
             <div
               key={prompt.id}

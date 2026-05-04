@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ActionIcon, Tooltip } from '@mantine/core'
 
 import { shouldStartVariableKeyboardEdit } from '@/components/layout/feature-sidebar.a11y'
+import {
+  VIEWPORT_OVERLAY_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_PX,
+} from '@/components/cad/viewport-overlay-layout'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import type { DocumentVariableRecord, WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
@@ -84,8 +88,8 @@ function getVariableResultPresentations(
 
 const PANEL_STYLE: CSSProperties = {
   position: 'absolute',
-  top: 76,
-  right: 16,
+  top: VIEWPORT_OVERLAY_TOP_INSET_PX,
+  right: VIEWPORT_OVERLAY_INSET_PX,
   bottom: 172,
   width: 320,
   zIndex: 27,

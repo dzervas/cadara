@@ -1,5 +1,9 @@
 import { NumberInput, Paper, Select, Switch, TextInput } from '@mantine/core'
 
+import {
+  VIEWPORT_FLOATING_PANEL_LEFT_PX,
+  VIEWPORT_FLOATING_PANEL_TOP_PX,
+} from '@/components/cad/viewport-overlay-layout'
 import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
 import {
   SECTION_HEADER_CLASSES,
@@ -47,11 +51,15 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
     return null
   }
 
+  const pointerEventsClassName = controlGroups.length > 0 ? 'pointer-events-auto' : 'pointer-events-none'
+
   return (
     <Paper
       component="div"
-      className="pointer-events-auto absolute left-4 top-4 w-[260px] overflow-hidden rounded-[6px] text-xs text-[var(--workbench-shell-text-muted)]"
+      className={`${pointerEventsClassName} absolute z-20 w-[260px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[6px] text-xs text-[var(--workbench-shell-text-muted)]`}
       style={{
+        left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
+        top: VIEWPORT_FLOATING_PANEL_TOP_PX,
         background: 'var(--workbench-shell-surface-panel-elev)',
         boxShadow: 'var(--workbench-shell-elevation-md)',
       }}
