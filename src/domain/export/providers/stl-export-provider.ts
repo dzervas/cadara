@@ -1,5 +1,5 @@
 import type { ExportCapabilities, MeshTriangle } from '@/contracts/export/capabilities'
-import type { ExportProvider, ExportProviderInput } from '@/contracts/export/provider'
+import type { ExportProvider, ExportProviderInput, ExportProviderResult } from '@/contracts/export/provider'
 import type { ExportResult } from '@/contracts/export/result'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
@@ -72,30 +72,30 @@ function exportStl(
   target: DurableRef,
   options: StlExportOptions,
   capabilities: ExportCapabilities,
-): ExportResult {
-  const result = capabilities.mesh.tessellate(target, options.meshAccuracy)
-
-  if (!Array.isArray(result)) {
-    return { ok: false, diagnostics: [result] }
-  }
-
-  const triangles = result
-
-  if (triangles.length === 0) {
-    return {
-      ok: false,
-      diagnostics: [{
-        code: 'export-empty-mesh',
-        severity: 'error',
-        message: 'STL export could not produce triangles for the selected body.',
-        target,
-      }],
+): Promise<ExportResult> {
+  return Promise.resolve(capabilities.mesh.tessellate(target, options.meshAccuracy)).then((result) => {
+    if (!Array.isArray(result)) {
+      return { ok: false, diagnostics: [result] }
     }
-  }
 
-  const payload = options.encoding === 'ascii' ? writeAsciiStl(triangles) : writeBinaryStl(triangles)
+    const triangles = result
 
-  return { ok: true, payload, diagnostics: [] }
+    if (triangles.length === 0) {
+      return {
+        ok: false,
+        diagnostics: [{
+          code: 'export-empty-mesh',
+          severity: 'error',
+          message: 'STL export could not produce triangles for the selected body.',
+          target,
+        }],
+      }
+    }
+
+    const payload = options.encoding === 'ascii' ? writeAsciiStl(triangles) : writeBinaryStl(triangles)
+
+    return { ok: true, payload, diagnostics: [] }
+  })
 }
 
 export const stlExportProvider: ExportProvider<StlExportOptions, FeatureEditorFormSchema> = {
@@ -172,7 +172,7 @@ export const stlExportProvider: ExportProvider<StlExportOptions, FeatureEditorFo
     return current
   },
 
-  export(input: ExportProviderInput<StlExportOptions>): ExportResult {
+  export(input: ExportProviderInput<StlExportOptions>): ExportProviderResult {
     return exportStl(input.target, input.options, input.capabilities)
   },
 }

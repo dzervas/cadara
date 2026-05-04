@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from 'fflate'
 
 import type { ExportCapabilities, MeshTriangle } from '@/contracts/export/capabilities'
-import type { ExportProvider, ExportProviderInput } from '@/contracts/export/provider'
+import type { ExportProvider, ExportProviderInput, ExportProviderResult } from '@/contracts/export/provider'
 import type { ExportResult } from '@/contracts/export/result'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
@@ -126,28 +126,28 @@ function exportThreeMf(
   targetLabel: string,
   options: ThreeMfExportOptions,
   capabilities: ExportCapabilities,
-): ExportResult {
-  const result = capabilities.mesh.tessellate(target, options.meshAccuracy)
-
-  if (!Array.isArray(result)) {
-    return { ok: false, diagnostics: [result] }
-  }
-
-  const triangles = result
-
-  if (triangles.length === 0) {
-    return {
-      ok: false,
-      diagnostics: [{
-        code: 'export-empty-mesh',
-        severity: 'error',
-        message: '3MF export could not produce triangles for the selected body.',
-        target,
-      }],
+): Promise<ExportResult> {
+  return Promise.resolve(capabilities.mesh.tessellate(target, options.meshAccuracy)).then((result) => {
+    if (!Array.isArray(result)) {
+      return { ok: false, diagnostics: [result] }
     }
-  }
 
-  return { ok: true, payload: writeThreeMfPackage(triangles, targetLabel, options.includeMetadata), diagnostics: [] }
+    const triangles = result
+
+    if (triangles.length === 0) {
+      return {
+        ok: false,
+        diagnostics: [{
+          code: 'export-empty-mesh',
+          severity: 'error',
+          message: '3MF export could not produce triangles for the selected body.',
+          target,
+        }],
+      }
+    }
+
+    return { ok: true, payload: writeThreeMfPackage(triangles, targetLabel, options.includeMetadata), diagnostics: [] }
+  })
 }
 
 export const threeMfExportProvider: ExportProvider<ThreeMfExportOptions, FeatureEditorFormSchema> = {
@@ -233,7 +233,7 @@ export const threeMfExportProvider: ExportProvider<ThreeMfExportOptions, Feature
     return current
   },
 
-  export(input: ExportProviderInput<ThreeMfExportOptions>): ExportResult {
+  export(input: ExportProviderInput<ThreeMfExportOptions>): ExportProviderResult {
     return exportThreeMf(input.target, input.targetLabel, input.options, input.capabilities)
   },
 }

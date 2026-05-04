@@ -36,8 +36,9 @@ import type {
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { RequestId, RevisionId } from '@/contracts/shared/ids'
-import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
 import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
+import type { DurableRef } from '@/contracts/shared/references'
 import type {
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
@@ -141,9 +142,18 @@ export type OccWorkerOperation =
       request: ResolveReferenceRequest
     }
   | {
-      kind: 'getExportCapabilities'
+      kind: 'tessellateExportMesh'
       documentId: AuthoredModelDocument['documentId']
       baseRevisionId: RevisionId
+      target: DurableRef
+      options: MeshExportAccuracy
+    }
+  | {
+      kind: 'writeStepExport'
+      documentId: AuthoredModelDocument['documentId']
+      baseRevisionId: RevisionId
+      target: DurableRef
+      options: StepWriterOptions
     }
 
 export type OccWorkerOperationResult =
@@ -165,7 +175,9 @@ export type OccWorkerOperationResult =
   | UpdateDocumentVariableResponse
   | EvaluatePreviewResponse
   | ResolveReferenceResponse
-  | ExportCapabilities
+  | MeshTriangle[]
+  | { payload: string }
+  | { diagnostic: DocumentExportDiagnostic }
   | DocumentExportDiagnostic
 
 export type OccWorkerResponsePayload =

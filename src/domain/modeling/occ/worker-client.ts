@@ -46,8 +46,9 @@ import type {
   OccWorkerRequest,
   OccWorkerResponse,
 } from '@/domain/modeling/occ/worker-protocol'
-import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { ExportCapabilities, MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
 import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
+import type { DurableRef } from '@/contracts/shared/references'
 
 export interface OccWorkerLike {
   postMessage(message: OccWorkerRequest, transfer?: Transferable[]): void
@@ -234,11 +235,28 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   }
 
   getExportCapabilities(documentId: AuthoredModelDocument['documentId'], baseRevisionId: RevisionId) {
-    return this.invoke<ExportCapabilities | DocumentExportDiagnostic>({
-      kind: 'getExportCapabilities',
-      documentId,
-      baseRevisionId,
-    })
+    return Promise.resolve({
+      mesh: {
+        tessellate: (target: DurableRef, options: MeshExportAccuracy) =>
+          this.invoke<MeshTriangle[] | DocumentExportDiagnostic>({
+            kind: 'tessellateExportMesh',
+            documentId,
+            baseRevisionId,
+            target,
+            options,
+          }),
+      },
+      brep: {
+        writeStep: (target: DurableRef, options: StepWriterOptions) =>
+          this.invoke<{ payload: string } | { diagnostic: DocumentExportDiagnostic }>({
+            kind: 'writeStepExport',
+            documentId,
+            baseRevisionId,
+            target,
+            options,
+          }),
+      },
+    } satisfies ExportCapabilities)
   }
 
   dispose() {

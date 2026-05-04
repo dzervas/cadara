@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { FeatureSidebar } from '@/components/layout/feature-sidebar'
 import { shouldStartVariableKeyboardEdit } from '@/components/layout/feature-sidebar.a11y'
 import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
+import { FloatingPartsTree } from '@/components/layout/floating-parts-tree'
 import { getNextHistoryTreeFocusIndex } from '@/components/layout/feature-timeline-bar.a11y'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
 import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu.helpers'
@@ -99,6 +100,31 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
   expectTrue(
     sidebarMarkup.includes('hover:bg-[var(--workbench-shell-sidebar-item-hover)]'),
     'Sidebar object rows should use the dedicated hover graphite step instead of sharing the selected-state surface.',
+  )
+
+  const floatingPartsTreeMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FloatingPartsTree
+          snapshot={snapshot}
+          hiddenTargetKeys={{}}
+          objectLabelOverrides={{}}
+          visibleSelection={[]}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  )
+
+  expectTrue(
+    floatingPartsTreeMarkup.includes('data-parts-tree-row="true"')
+      && floatingPartsTreeMarkup.includes('aria-haspopup="menu"'),
+    'Floating parts tree rows should forward the custom context menu affordance to the DOM row.',
   )
 
   const selectedSidebarMarkup = renderToStaticMarkup(

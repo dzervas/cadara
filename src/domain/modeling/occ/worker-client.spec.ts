@@ -141,30 +141,39 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {  async funct
     expectTrue(failed, 'Worker warmup failures must surface to the caller.')
   }
 
-  async function testExportCapabilitiesCarryDocumentIdentity() {
+  async function testExportCapabilitiesCreateCloneSafeWorkerRequests() {
     const worker = new FakeOccWorker()
     const client = new OccWorkerClient({ worker })
 
-    const promise = client.getExportCapabilities('doc_export_caps', 'revision_1')
+    const capabilities = await client.getExportCapabilities('doc_export_caps', 'revision_1')
+    const promise = capabilities.mesh.tessellate(
+      { kind: 'body', bodyId: 'body_export' as never },
+      { chordTolerance: 0.05, angleToleranceRadians: 0.1 },
+    )
     const request = worker.posted[0]
 
     expectTrue(
       request?.kind === 'invoke'
-        && request.operation.kind === 'getExportCapabilities'
+        && request.operation.kind === 'tessellateExportMesh'
         && request.operation.documentId === 'doc_export_caps'
         && request.operation.baseRevisionId === 'revision_1',
-      'Export capability queries should carry the active document identity into the OCC worker request.',
+      'Export capability calls should carry document identity and data-only arguments into the OCC worker request.',
+    )
+    expectTrue(
+      typeof capabilities.mesh.tessellate === 'function' && typeof capabilities.brep.writeStep === 'function',
+      'Worker export capabilities should be local proxy functions rather than worker-cloned functions.',
+    )
+    expectTrue(
+      JSON.stringify(request.operation).includes('tessellateExportMesh')
+        && !JSON.stringify(request.operation).includes('function'),
+      'Worker export requests should remain structured-clone-safe data payloads.',
     )
 
     worker.emit({
       kind: 'invoked',
       requestId: request.requestId,
-      operation: 'getExportCapabilities',
-      payload: {
-        format: 'step',
-        label: 'STEP',
-        supportsBinary: false,
-      },
+      operation: 'tessellateExportMesh',
+      payload: [],
     })
 
     await promise
@@ -173,5 +182,5 @@ test('src/domain/modeling/occ/worker-client.spec.ts', async () => {  async funct
   await testWarmupInvokesWorkerOperation()
   await testSnapshotResponsesAreUnpacked()
   await testWarmupFailuresSurfaceToCaller()
-  await testExportCapabilitiesCarryDocumentIdentity()
+  await testExportCapabilitiesCreateCloneSafeWorkerRequests()
 })

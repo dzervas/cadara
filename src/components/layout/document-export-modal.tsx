@@ -9,7 +9,6 @@ import {
   SegmentedControl,
   Select,
   Stack,
-  Text,
 } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
@@ -21,8 +20,6 @@ import {
   ok,
   type ErrorReporter,
 } from '@/contracts/errors'
-import { getDefaultCadaraExportOptions } from '@/contracts/modeling/export.runtime-schema'
-import type { CadaraExportOptions } from '@/contracts/modeling/export'
 import type {
   ModelingExportDocumentInput,
   ModelingExportDocumentResult,
@@ -98,14 +95,13 @@ function buildExportInput(
   target: ObjectExportModalState,
   format: string,
   providerOptions: Record<string, unknown>,
-  cadaraOptions: CadaraExportOptions,
 ): ModelingExportDocumentInput {
   return {
     baseRevisionId: target.baseRevisionId,
     target: target.target,
     targetLabel: target.label,
     format,
-    options: format === 'cadara' ? cadaraOptions : (providerOptions[format] ?? {}),
+    options: providerOptions[format] ?? {},
   }
 }
 
@@ -203,7 +199,11 @@ function DocumentExportModalContent({
 }: DocumentExportModalContentProps) {
   const { exportProviders } = useRuntimeExtensionRegistry()
   const providers = exportProviders.getAll()
-  const [format, setFormat] = useState(initialFormat)
+  const [format, setFormat] = useState(() =>
+    providers.some((provider) => provider.formatId === initialFormat)
+      ? initialFormat
+      : (providers[0]?.formatId ?? initialFormat)
+  )
   const [providerOptions, setProviderOptions] = useState<Record<string, unknown>>(() => {
     const map: Record<string, unknown> = {}
     for (const provider of providers) {
@@ -211,7 +211,6 @@ function DocumentExportModalContent({
     }
     return map
   })
-  const [cadaraOptions, setCadaraOptions] = useState(getDefaultCadaraExportOptions)
   const [pending, setPending] = useState(false)
   const [failureMessage, setFailureMessage] = useState<string | null>(null)
 
@@ -233,7 +232,7 @@ function DocumentExportModalContent({
       return
     }
 
-    const input = buildExportInput(target, format, providerOptions, cadaraOptions)
+    const input = buildExportInput(target, format, providerOptions)
 
     setPending(true)
     setFailureMessage(null)
@@ -280,10 +279,7 @@ function DocumentExportModalContent({
       .finally(() => setPending(false))
   }
 
-  const formatData = [
-    ...providers.map((p) => ({ label: p.label, value: p.formatId })),
-    { label: 'cadara', value: 'cadara' },
-  ]
+  const formatData = providers.map((p) => ({ label: p.label, value: p.formatId }))
 
   return (
     <Stack gap="md">
@@ -305,17 +301,6 @@ function DocumentExportModalContent({
           options={providerOptions[format]}
           onPatch={handlePatch}
         />
-      ) : null}
-
-      {format === 'cadara' ? (
-        <Stack gap="xs" data-export-option="cadara-json">
-          <Text size="sm" fw={600}>cadara JSON</Text>
-          <Checkbox
-            label="Readable formatting"
-            checked={cadaraOptions.pretty}
-            onChange={(event) => setCadaraOptions({ pretty: event.currentTarget.checked })}
-          />
-        </Stack>
       ) : null}
 
       {failureMessage ? (

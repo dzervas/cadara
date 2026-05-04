@@ -1,5 +1,5 @@
 import type { ExportCapabilities } from '@/contracts/export/capabilities'
-import type { ExportProvider, ExportProviderInput } from '@/contracts/export/provider'
+import type { ExportProvider, ExportProviderInput, ExportProviderResult } from '@/contracts/export/provider'
 import type { ExportResult } from '@/contracts/export/result'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
@@ -13,17 +13,17 @@ function exportStep(
   target: DurableRef,
   options: StepExportOptions,
   capabilities: ExportCapabilities,
-): ExportResult {
-  const result = capabilities.brep.writeStep(target, {
+): Promise<ExportResult> {
+  return Promise.resolve(capabilities.brep.writeStep(target, {
     schema: options.schema,
     unit: options.unit,
+  })).then((result) => {
+    if (!('payload' in result)) {
+      return { ok: false, diagnostics: [result.diagnostic] }
+    }
+
+    return { ok: true, payload: result.payload, diagnostics: [] }
   })
-
-  if (!('payload' in result)) {
-    return { ok: false, diagnostics: [result.diagnostic] }
-  }
-
-  return { ok: true, payload: result.payload, diagnostics: [] }
 }
 
 export const stepExportProvider: ExportProvider<StepExportOptions, FeatureEditorFormSchema> = {
@@ -84,7 +84,7 @@ export const stepExportProvider: ExportProvider<StepExportOptions, FeatureEditor
     return current
   },
 
-  export(input: ExportProviderInput<StepExportOptions>): ExportResult {
+  export(input: ExportProviderInput<StepExportOptions>): ExportProviderResult {
     return exportStep(input.target, input.options, input.capabilities)
   },
 }

@@ -18,12 +18,14 @@ export interface StepWriterOptions {
   unit: 'millimeter'
 }
 
+export type ExportCapabilityResult<T> = T | Promise<T>
+
 export interface MeshTessellationCapability {
-  tessellate(target: DurableRef, options: MeshExportAccuracy): MeshTriangle[] | ExportDiagnostic
+  tessellate(target: DurableRef, options: MeshExportAccuracy): ExportCapabilityResult<MeshTriangle[] | ExportDiagnostic>
 }
 
 export interface BRepWriterCapability {
-  writeStep(target: DurableRef, options: StepWriterOptions): { payload: string } | { diagnostic: ExportDiagnostic }
+  writeStep(target: DurableRef, options: StepWriterOptions): ExportCapabilityResult<{ payload: string } | { diagnostic: ExportDiagnostic }>
 }
 
 export interface ExportCapabilities {

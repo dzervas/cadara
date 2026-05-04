@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { forwardRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react'
 import { ActionIcon } from '@mantine/core'
 
 import { WorkbenchContextMenu, type WorkbenchContextMenuEntry } from '@/components/layout/workbench-context-menu'
@@ -140,7 +140,7 @@ export function FloatingPartsTree({
   )
 }
 
-interface RowProps {
+interface RowProps extends HTMLAttributes<HTMLDivElement> {
   label: string
   icon: ReactNode
   isSelected: boolean
@@ -166,7 +166,7 @@ const ROW_BASE: CSSProperties = {
   transition: 'background-color 120ms cubic-bezier(0.25, 1, 0.5, 1), opacity 120ms cubic-bezier(0.25, 1, 0.5, 1)',
 }
 
-function Row({
+const Row = forwardRef<HTMLDivElement, RowProps>(function Row({
   label,
   icon,
   isSelected,
@@ -175,7 +175,10 @@ function Row({
   onActivate,
   onReopen,
   onToggleHidden,
-}: RowProps) {
+  onMouseEnter,
+  onMouseLeave,
+  ...rowProps
+}, ref) {
   const [isHover, setIsHover] = useState(false)
   const showLift = isSelected || isHover
   const style: CSSProperties = {
@@ -194,14 +197,22 @@ function Row({
 
   return (
     <div
+      {...rowProps}
+      ref={ref}
       role="treeitem"
       aria-selected={isSelected}
       data-parts-tree-row
       data-active={isSelected ? 'true' : undefined}
       data-hidden={isHidden ? 'true' : undefined}
       style={style}
-      onMouseEnter={() => setIsHover(true)}
-      onMouseLeave={() => setIsHover(false)}
+      onMouseEnter={(event) => {
+        onMouseEnter?.(event)
+        setIsHover(true)
+      }}
+      onMouseLeave={(event) => {
+        onMouseLeave?.(event)
+        setIsHover(false)
+      }}
     >
       {isSelected ? <SelectionRail /> : null}
       <span
@@ -267,7 +278,7 @@ function Row({
       </ActionIcon>
     </div>
   )
-}
+})
 
 function SelectionRail() {
   return (

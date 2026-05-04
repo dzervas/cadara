@@ -160,6 +160,26 @@ test('src/app/viewport-renderables.spec.ts', async () => {  function assertEqual
 
   {
     const composed = composeViewportRenderables({
+      snapshotRenderables: [committedFace, committedEdge],
+      previewRenderables: [previewFace],
+      sketchSession: null,
+      hiddenTargetKeys: {
+        'body:body_a': true,
+      },
+    })
+
+    assertEqual(composed.documentRenderables.length, 0)
+    expectTrue(
+      isTargetHidden(
+        { kind: 'face', bodyId: 'body_a', faceId: 'face_a' },
+        { 'body:body_a': true },
+      ),
+      'Body-hidden visibility should hide body-owned topology selection targets.',
+    )
+  }
+
+  {
+    const composed = composeViewportRenderables({
       snapshotRenderables: [committedFace, committedEdge, committedSketchCurve],
       previewRenderables: [previewFace],
       sketchSession: null,

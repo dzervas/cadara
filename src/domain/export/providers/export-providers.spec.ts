@@ -39,7 +39,7 @@ function createMockCapabilities(options: {
   }
 }
 
-test('src/domain/export/providers/export-providers.spec.ts', () => {  function testStlProviderMetadata() {
+test('src/domain/export/providers/export-providers.spec.ts', async () => {  function testStlProviderMetadata() {
     expectTrue(stlExportProvider.id === 'stl', 'STL provider should have id stl.')
     expectTrue(stlExportProvider.formatId === 'stl', 'STL provider should have formatId stl.')
     expectTrue(stlExportProvider.fileExtension === 'stl', 'STL provider should have extension stl.')
@@ -72,9 +72,9 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
     expectTrue(updated.encoding === 'ascii', 'Patch should update encoding.')
   }
 
-  function testStlExportSucceeds() {
+  async function testStlExportSucceeds() {
     const capabilities = createMockCapabilities()
-    const result = stlExportProvider.export({
+    const result = await stlExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: 'Test Body',
       options: stlExportProvider.getDefaultOptions(),
@@ -84,10 +84,10 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
     expectTrue(result.payload instanceof Uint8Array, 'STL binary export should return a Uint8Array payload.')
   }
 
-  function testStlExportAscii() {
+  async function testStlExportAscii() {
     const capabilities = createMockCapabilities()
     const options = stlExportProvider.applyOptionPatch(stlExportProvider.getDefaultOptions(), { encoding: 'ascii' })
-    const result = stlExportProvider.export({
+    const result = await stlExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: 'Test Body',
       options,
@@ -98,7 +98,7 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
     expectTrue(result.payload.includes('solid cadara'), 'ASCII STL should start with solid cadara.')
   }
 
-  function testStlExportFailsOnCapabilityDiagnostic() {
+  async function testStlExportFailsOnCapabilityDiagnostic() {
     const diagnostic: ExportDiagnostic = {
       code: 'test-failure',
       severity: 'error',
@@ -106,7 +106,7 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
       target: MOCK_BODY_TARGET,
     }
     const capabilities = createMockCapabilities({ triangles: diagnostic })
-    const result = stlExportProvider.export({
+    const result = await stlExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: 'Test Body',
       options: stlExportProvider.getDefaultOptions(),
@@ -137,9 +137,9 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
     expectTrue(section.title === 'STEP options', 'STEP schema section should be titled "STEP options".')
   }
 
-  function testStepExportSucceeds() {
+  async function testStepExportSucceeds() {
     const capabilities = createMockCapabilities({ stepPayload: 'ISO-10303 STEP data' })
-    const result = stepExportProvider.export({
+    const result = await stepExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: 'Test Body',
       options: stepExportProvider.getDefaultOptions(),
@@ -173,9 +173,9 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
     expectTrue(hasCheckbox, '3MF schema should have a checkbox field for includeMetadata.')
   }
 
-  function testThreeMfExportSucceeds() {
+  async function testThreeMfExportSucceeds() {
     const capabilities = createMockCapabilities()
-    const result = threeMfExportProvider.export({
+    const result = await threeMfExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: 'Test Body',
       options: threeMfExportProvider.getDefaultOptions(),
@@ -189,15 +189,15 @@ test('src/domain/export/providers/export-providers.spec.ts', () => {  function t
   testStlProviderDefaultOptions()
   testStlProviderOptionForm()
   testStlProviderApplyPatch()
-  testStlExportSucceeds()
-  testStlExportAscii()
-  testStlExportFailsOnCapabilityDiagnostic()
+  await testStlExportSucceeds()
+  await testStlExportAscii()
+  await testStlExportFailsOnCapabilityDiagnostic()
   testStepProviderMetadata()
   testStepProviderDefaultOptions()
   testStepProviderOptionForm()
-  testStepExportSucceeds()
+  await testStepExportSucceeds()
   testThreeMfProviderMetadata()
   testThreeMfProviderDefaultOptions()
   testThreeMfProviderOptionForm()
-  testThreeMfExportSucceeds()
+  await testThreeMfExportSucceeds()
 })

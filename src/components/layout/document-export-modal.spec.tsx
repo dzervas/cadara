@@ -42,7 +42,7 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {  const targ
   expectTrue(stlMarkup.includes('STL'), 'Export modal should list STL.')
   expectTrue(stlMarkup.includes('STEP'), 'Export modal should list STEP.')
   expectTrue(stlMarkup.includes('3MF'), 'Export modal should list 3MF.')
-  expectTrue(stlMarkup.includes('cadara'), 'Export modal should list cadara.')
+  expectTrue(!stlMarkup.includes('cadara'), 'Solid export modal should not list cadara document export.')
   expectTrue(stlMarkup.includes('Mesh accuracy'), 'STL export should show mesh accuracy controls.')
   expectTrue(!stlMarkup.includes('STEP options'), 'STL export should not show STEP-specific controls.')
   expectTrue(!stlMarkup.includes('cadara JSON'), 'STL export should not show cadara-specific controls.')
@@ -66,26 +66,6 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {  const targ
 
   expectTrue(stepMarkup.includes('STEP options'), 'STEP export should show STEP-specific controls.')
   expectTrue(!stepMarkup.includes('Mesh accuracy'), 'STEP export should omit mesh accuracy controls.')
-
-  const cadaraMarkup = renderToStaticMarkup(
-    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <RuntimeExtensionRegistryProvider registries={registries}>
-        <DocumentExportModal
-          opened
-          initialFormat="cadara"
-          target={target}
-          withinPortal={false}
-          errorReporter={errorReporter}
-          exportDocument={async () => ({ ok: false, format: 'cadara', diagnostics: [] })}
-          onClose={() => undefined}
-          onDownload={() => undefined}
-        />
-      </RuntimeExtensionRegistryProvider>
-    </MantineProvider>,
-  )
-
-  expectTrue(cadaraMarkup.includes('cadara JSON'), 'cadara export should show JSON options.')
-  expectTrue(!cadaraMarkup.includes('Mesh accuracy'), 'cadara export should omit mesh accuracy controls.')
 
   const stepDefaults = stepExportProvider.getDefaultOptions()
   const input = buildDocumentExportModalInput(target, 'step', stepDefaults)

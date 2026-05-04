@@ -9,7 +9,8 @@ The workbench SHALL render an icon-only file button as the first toolbar control
 #### Scenario: Open document file menu
 - **WHEN** the user clicks the file button at the far left of the toolbar
 - **THEN** a workbench-styled menu opens
-- **AND** the menu includes New, Open local file, Save local file, Import, and Export document actions
+- **AND** the menu includes exactly New, Open..., and Save As actions
+- **AND** the menu does not include separate New document, Open local file, Save local file, Import, or Export document actions
 
 #### Scenario: File button remains outside modeling tools
 - **WHEN** the file button is clicked
@@ -17,47 +18,15 @@ The workbench SHALL render an icon-only file button as the first toolbar control
 - **AND** no modeling tool action is dispatched for the file button itself
 
 ### Requirement: File menu SHALL create a new active document
-The workbench SHALL create a new active document from the seeded empty authored document when the user invokes New from the file menu.
+The workbench SHALL create a new active document tab from the seeded empty authored document when the user invokes New from the file menu.
 
-#### Scenario: Create new document
+#### Scenario: Create new document tab
 - **WHEN** the user selects New from the file menu
-- **THEN** the active document is restored to the seeded document state
+- **THEN** the workbench creates a fresh document tab with no filesystem binding
+- **AND** the new tab becomes the active document session
+- **AND** the previously active tab remains open and unchanged
 - **AND** the workbench refreshes to show the new document snapshot
 - **AND** the user receives a visible status message confirming the new document
-
-### Requirement: File menu SHALL import cadara documents
-The workbench SHALL import a selected `.cadara` or JSON file by validating it as one authored model document JSON object and opening it in a newly created active document tab rather than replacing the currently active tab in place.
-
-#### Scenario: Import valid document
-- **WHEN** the user selects Import and chooses a valid authored model document JSON file
-- **THEN** the workbench creates a new document tab for the imported document
-- **AND** the newly created tab becomes active
-- **AND** the previously active tab remains open and unchanged
-- **AND** the workbench refreshes to show the imported snapshot
-- **AND** the user receives a visible status message confirming the import
-
-#### Scenario: Reject invalid document import
-- **WHEN** the user selects Import and chooses a file that is not valid authored model document JSON
-- **THEN** the currently active document is not replaced
-- **AND** no new tab is created
-- **AND** the workbench shows a visible import failure message
-
-#### Scenario: Reject packaged cadara import
-- **WHEN** the user selects Import and chooses a ZIP-backed `.cadara` package
-- **THEN** the currently active document is not replaced
-- **AND** no new tab is created
-- **AND** the workbench does not extract package members or restore packaged geometry blobs
-- **AND** the workbench shows a visible import failure message
-
-### Requirement: File menu SHALL export the current document
-The workbench SHALL export the current authored document as a single-object `.cadara` JSON download from the file menu without requiring an object target selection.
-
-#### Scenario: Export current document
-- **WHEN** the user selects Export from the file menu
-- **THEN** the workbench downloads one `.cadara` JSON file for the current authored document
-- **AND** the downloaded JSON preserves the authored document schema and contract fields
-- **AND** the export does not include presentation-only workbench state
-- **AND** the export does not include ZIP package members, sidecar files, or standalone geometry blob bytes
 
 ### Requirement: Workbench SHALL expose STL and 3MF import
 The workbench import surface SHALL allow users to select STL and 3MF files for mesh-to-baked-geometry import while clearly marking the current mesh import review flow as probably broken.
@@ -99,3 +68,67 @@ The workbench SHALL treat authored-document persistence and initial imported-bod
 - **THEN** that work runs as a background phase rather than as a blocking import-progress phase
 - **AND** any failure or timeout surfaces as a visible diagnostic or status message for the imported feature
 - **AND** the already persisted imported body remains visible to the user
+
+### Requirement: Open modal SHALL choose document open storage behavior
+The workbench SHALL open a modal from Open... that lets the user choose whether to open a browser-only document copy or a document linked to a file on their computer.
+
+#### Scenario: Open modal explains browser-only copy
+- **WHEN** the user selects Open... from the file menu
+- **THEN** the workbench opens an Open Document modal
+- **AND** the modal includes an Open a copy choice described as "Choose a .cadara file; CADara opens it in a new tab, and future changes stay in browser storage until you save again."
+
+#### Scenario: Open modal explains linked file
+- **WHEN** the user selects Open... from the file menu
+- **THEN** the workbench opens an Open Document modal
+- **AND** the modal includes an Open and keep linked choice described as "Choose a .cadara file; CADara opens it in a new tab and keeps future changes saving to that same file on your computer."
+
+#### Scenario: Open browser-only copy
+- **WHEN** the user chooses Open a copy and selects a valid authored model document JSON file
+- **THEN** the workbench creates a new document tab for the selected document
+- **AND** the new tab becomes active
+- **AND** the new tab has browser-backed storage state
+- **AND** the previously active tab remains open and unchanged
+- **AND** the user receives a visible status message confirming the document opened
+
+#### Scenario: Open linked file
+- **WHEN** the user chooses Open and keep linked and selects a valid authored model document through the browser's direct file picker
+- **THEN** the workbench creates a new document tab for the selected document
+- **AND** the new tab becomes active
+- **AND** the selected file handle becomes the direct-write sync target for that new document tab
+- **AND** the previously active tab remains open and unchanged
+- **AND** the user receives a visible status message confirming that future changes will save to that file
+
+#### Scenario: Reject invalid open file
+- **WHEN** the user chooses either Open Document modal option and selects a file that is not valid authored model document JSON
+- **THEN** the currently active document is not replaced
+- **AND** no new tab is created
+- **AND** no filesystem sync binding is created
+- **AND** the workbench shows a visible open failure message
+
+### Requirement: Save As modal SHALL choose document save storage behavior
+The workbench SHALL open a modal from Save As that lets the user choose whether to download a portable document copy or save the current document to a linked file on their computer.
+
+#### Scenario: Save As modal explains download copy
+- **WHEN** the user selects Save As from the file menu
+- **THEN** the workbench opens a Save As modal
+- **AND** the modal includes a Download a copy choice described as "CADara downloads a portable .cadara file; future changes stay in browser storage until you save again."
+
+#### Scenario: Save As modal explains linked save
+- **WHEN** the user selects Save As from the file menu
+- **THEN** the workbench opens a Save As modal
+- **AND** the modal includes a Save and keep linked choice described as "Choose where to save; CADara writes this document there and keeps future changes saving to that same file on your computer."
+
+#### Scenario: Download document copy
+- **WHEN** the user chooses Download a copy from Save As
+- **THEN** the workbench downloads one `.cadara` JSON file for the current authored document
+- **AND** the downloaded JSON preserves the authored document schema and contract fields
+- **AND** the active document's storage binding remains unchanged
+- **AND** the user receives a visible status message confirming the download
+
+#### Scenario: Save and link current document
+- **WHEN** the user chooses Save and keep linked and selects a destination through the browser's direct save picker
+- **THEN** the workbench writes the current normalized authored model document as one JSON object directly to that destination
+- **AND** the selected file handle becomes the direct-write sync target for subsequent accepted changes to the active document
+- **AND** the active tab reports filesystem-backed storage state
+- **AND** the user receives a visible status message confirming that future changes will save to that file
+

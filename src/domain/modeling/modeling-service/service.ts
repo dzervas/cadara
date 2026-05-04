@@ -1471,7 +1471,7 @@ export function createModelingService(
           return mapExportDocumentResponse(failure)
         }
 
-        return mapExportDocumentResponse(orchestrateGeometryExport(
+        return mapExportDocumentResponse(await orchestrateGeometryExport(
           { format: request.format, options: request.options, target: request.target, targetLabel: request.targetLabel },
           capabilitiesOrDiagnostic,
           exportProviders,

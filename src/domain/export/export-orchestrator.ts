@@ -20,11 +20,11 @@ function createExportFilename(targetLabel: string, extension: string): string {
   return `${slug || 'cadara-export'}.${extension}`
 }
 
-export function orchestrateGeometryExport(
+export async function orchestrateGeometryExport(
   input: OrchestratorGeometryExportInput,
   capabilities: ExportCapabilities,
   exportProviders: ExportProviderRegistry,
-): DocumentExportResult {
+): Promise<DocumentExportResult> {
   const provider = exportProviders.getByFormat(input.format)
 
   if (!provider) {
@@ -44,7 +44,7 @@ export function orchestrateGeometryExport(
     return failure
   }
 
-  const result = provider.export({
+  const result = await provider.export({
     target: input.target,
     targetLabel: input.targetLabel,
     options: input.options,

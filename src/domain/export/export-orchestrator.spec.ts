@@ -7,9 +7,9 @@ import type { DurableRef } from '@/contracts/shared/references'
 import type { ExportProviderRegistry } from '@/domain/export/provider-registry'
 import { orchestrateGeometryExport } from '@/domain/export/export-orchestrator'
 
-test('orchestrateGeometryExport returns an unsupported-format diagnostic when no provider is registered', () => {
+test('orchestrateGeometryExport returns an unsupported-format diagnostic when no provider is registered', async () => {
   const target = makeTarget()
-  const result = orchestrateGeometryExport(
+  const result = await orchestrateGeometryExport(
     {
       format: 'step',
       options: { schema: 'AP242' },
@@ -29,7 +29,7 @@ test('orchestrateGeometryExport returns an unsupported-format diagnostic when no
   )
 })
 
-test('orchestrateGeometryExport preserves provider failures without rewriting diagnostics', () => {
+test('orchestrateGeometryExport preserves provider failures without rewriting diagnostics', async () => {
   const diagnostic = {
     code: 'provider-failed',
     severity: 'error' as const,
@@ -42,7 +42,7 @@ test('orchestrateGeometryExport preserves provider failures without rewriting di
     },
   })
 
-  const result = orchestrateGeometryExport(
+  const result = await orchestrateGeometryExport(
     {
       format: 'step',
       options: { schema: 'AP242' },
@@ -60,7 +60,7 @@ test('orchestrateGeometryExport preserves provider failures without rewriting di
   )
 })
 
-test('orchestrateGeometryExport slugs filenames and maps provider success metadata', () => {
+test('orchestrateGeometryExport slugs filenames and maps provider success metadata', async () => {
   const provider = makeProvider({
     formatId: 'mesh',
     fileExtension: 'stl',
@@ -74,7 +74,7 @@ test('orchestrateGeometryExport slugs filenames and maps provider success metada
     },
   })
 
-  const result = orchestrateGeometryExport(
+  const result = await orchestrateGeometryExport(
     {
       format: 'mesh',
       options: { tolerance: 0.1 },
@@ -98,7 +98,7 @@ test('orchestrateGeometryExport slugs filenames and maps provider success metada
   )
 })
 
-test('orchestrateGeometryExport falls back to cadara-export when the target label cannot produce a slug', () => {
+test('orchestrateGeometryExport falls back to cadara-export when the target label cannot produce a slug', async () => {
   const provider = makeProvider({
     export() {
       return {
@@ -109,7 +109,7 @@ test('orchestrateGeometryExport falls back to cadara-export when the target labe
     },
   })
 
-  const result = orchestrateGeometryExport(
+  const result = await orchestrateGeometryExport(
     {
       format: 'step',
       options: { schema: 'AP242' },

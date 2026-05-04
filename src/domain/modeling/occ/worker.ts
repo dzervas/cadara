@@ -83,6 +83,19 @@ function getWorkerAdapter(documentId: DocumentId) {
   return adapter
 }
 
+async function getWorkerExportCapabilities(operation: Extract<OccWorkerOperation, {
+  kind: 'tessellateExportMesh' | 'writeStepExport'
+}>) {
+  const capabilitiesOrDiagnostic = await getWorkerAdapter(operation.documentId)
+    .getExportCapabilities(operation.baseRevisionId)
+
+  if ('code' in capabilitiesOrDiagnostic) {
+    return capabilitiesOrDiagnostic
+  }
+
+  return capabilitiesOrDiagnostic
+}
+
 async function handleWorkerOperation(operation: OccWorkerOperation) {
   switch (operation.kind) {
     case 'warmup':
@@ -146,8 +159,24 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       return getWorkerAdapter(operation.request.documentId).evaluatePreview(operation.request)
     case 'resolveReference':
       return getWorkerAdapter(operation.request.documentId).resolveReference(operation.request)
-    case 'getExportCapabilities':
-      return getWorkerAdapter(operation.documentId).getExportCapabilities(operation.baseRevisionId)
+    case 'tessellateExportMesh': {
+      const capabilitiesOrDiagnostic = await getWorkerExportCapabilities(operation)
+
+      if ('code' in capabilitiesOrDiagnostic) {
+        return capabilitiesOrDiagnostic
+      }
+
+      return capabilitiesOrDiagnostic.mesh.tessellate(operation.target, operation.options)
+    }
+    case 'writeStepExport': {
+      const capabilitiesOrDiagnostic = await getWorkerExportCapabilities(operation)
+
+      if ('code' in capabilitiesOrDiagnostic) {
+        return { diagnostic: capabilitiesOrDiagnostic }
+      }
+
+      return capabilitiesOrDiagnostic.brep.writeStep(operation.target, operation.options)
+    }
   }
 }
 

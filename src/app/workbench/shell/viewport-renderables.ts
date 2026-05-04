@@ -33,6 +33,16 @@ export function getHiddenTargetKeyForTarget(
   }
 
   if (
+    target.kind === 'face'
+    || target.kind === 'edge'
+    || target.kind === 'vertex'
+    || target.kind === 'loop'
+  ) {
+    const bodyKey = getPrimitiveRefKey({ kind: 'body', bodyId: target.bodyId })
+    return hiddenTargetKeys[bodyKey] ? bodyKey : null
+  }
+
+  if (
     target.kind === 'sketchEntity'
     || target.kind === 'sketchPoint'
     || target.kind === 'constraint'
