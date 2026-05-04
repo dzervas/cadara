@@ -24,6 +24,7 @@ import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
 import { useEditorState } from '@/hooks/use-editor-state'
 import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
 import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
+import { getToolbarActionIconStyle, sparkLogoClassName, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
 
 const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 const DISCORD_URL = 'https://discord.gg/T2dBRp4SAQ'
@@ -492,6 +493,8 @@ export function WorkspaceToolbar({
               size={32}
               aria-label="Report bug"
               onClick={onReportBug}
+              className={toolbarActionIconClassName}
+              style={getToolbarActionIconStyle()}
               onContextMenu={onDownloadBugReportState
                 ? (event) => {
                     event.preventDefault()
@@ -520,6 +523,8 @@ export function WorkspaceToolbar({
             color="workbench"
             size={32}
             aria-label="Join Discord community"
+            className={toolbarActionIconClassName}
+            style={getToolbarActionIconStyle()}
           >
             <WorkbenchIcon name="discord" className="h-4 w-4" />
           </ActionIcon>
@@ -541,6 +546,8 @@ export function WorkspaceToolbar({
             color="workbench"
             size={32}
             aria-label="Open repository on GitHub"
+            className={toolbarActionIconClassName}
+            style={getToolbarActionIconStyle()}
           >
             <WorkbenchIcon name="github" className="h-4 w-4" />
           </ActionIcon>
@@ -612,36 +619,22 @@ const ToolbarPill = forwardRef<HTMLDivElement, ToolbarPillProps>(
  * the older standalone file button. See DESIGN.md "Spark Affordance Rule".
  */
 const SparkLogo = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement>>(
-  function SparkLogo(props, ref) {
+  function SparkLogo({ className, style, ...props }, ref) {
     return (
-      <button
+      <ActionIcon
         ref={ref}
         type="button"
         aria-label="File"
         data-workbench-file-menu=""
+        variant="filled"
+        radius={10}
+        size={36}
+        className={[sparkLogoClassName, className].filter(Boolean).join(' ')}
+        style={style}
         {...props}
-        style={{
-          flexShrink: 0,
-          width: 36,
-          height: 36,
-          borderRadius: 10,
-          background: 'var(--workbench-spark-accent)',
-          display: 'grid',
-          placeItems: 'center',
-          color: 'var(--workbench-spark-accent-ink)',
-          fontWeight: 700,
-          fontSize: 14,
-          boxShadow: 'var(--workbench-spark-logo-shadow)',
-          pointerEvents: 'auto',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          ...props.style,
-        }}
       >
         C
-      </button>
+      </ActionIcon>
     )
   },
 )

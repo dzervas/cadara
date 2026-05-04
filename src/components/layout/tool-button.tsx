@@ -6,6 +6,7 @@ import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
 import { getToolbarToolCommandId } from '@/core/shortcuts/commands'
 import type { RegisteredToolDefinition } from '@/core/tools/tool-registry'
 import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
+import { getToolbarActionIconStyle, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
 
 interface ToolButtonProps {
   tool: RegisteredToolDefinition
@@ -165,14 +166,14 @@ export function ToolButton({
       data-tool-source="toolbar"
       data-tool-tooltip={tool.tooltip}
       data-disabled={disabled || undefined}
-      styles={{
-        root: {
-          border: `1px solid ${controlBorder}`,
-          backgroundColor: controlBackground,
-          color: controlColor,
-          cursor: disabled ? 'not-allowed' : undefined,
-          opacity: disabled ? 0.46 : 1,
-        },
+      className={toolbarActionIconClassName}
+      style={{
+        ...getToolbarActionIconStyle({ active: isEmphasized, success: isSuccessAction }),
+        '--workbench-toolbar-action-bg': controlBackground,
+        '--workbench-toolbar-action-border': controlBorder,
+        '--workbench-toolbar-action-color': controlColor,
+        cursor: disabled ? 'not-allowed' : undefined,
+        opacity: disabled ? 0.46 : 1,
       }}
     >
       <ToolbarToolIcon icon={tool.icon} />

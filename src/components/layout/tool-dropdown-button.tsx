@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { flushSync } from 'react-dom'
-import { Menu, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
+import { ActionIcon, Menu, Text, Tooltip } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
@@ -9,6 +9,7 @@ import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
 import { getToolbarToolCommandId } from '@/core/shortcuts/commands'
 import type { DropdownToolDefinition, RegisteredToolDefinition } from '@/core/tools/tool-registry'
 import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
+import { getToolbarActionIconStyle, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
 
 interface ToolDropdownButtonProps {
   tool: DropdownToolDefinition
@@ -105,9 +106,11 @@ export function ToolDropdownButton({
           disabled={opened}
           label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} commandId={commandId} />}
         >
-          <UnstyledButton
+          <ActionIcon
             type="button"
             onClick={handleTriggerClick}
+            variant={active ? 'light' : 'subtle'}
+            color="workbench"
             aria-label={tool.name}
             aria-pressed={active}
             disabled={disabled}
@@ -115,30 +118,28 @@ export function ToolDropdownButton({
             data-tool-dropdown-trigger={tool.id}
             data-tool-tooltip={tool.tooltip}
             data-disabled={disabled || undefined}
+            className={toolbarActionIconClassName}
+            style={{
+              ...getToolbarActionIconStyle({ active }),
+              '--workbench-toolbar-action-bg': controlBackground,
+              '--workbench-toolbar-action-border': controlBorder,
+              '--workbench-toolbar-action-color': controlColor,
+              alignItems: 'center',
+              display: 'flex',
+              gap: 4,
+              height: 40,
+              opacity: disabled ? 0.46 : 1,
+              paddingInline: 10,
+              width: 'auto',
+            }}
           >
-            <Paper
-              radius="md"
-              px={10}
-              h={40}
-              withBorder={disabled || active}
-              style={{
-                alignItems: 'center',
-                backgroundColor: controlBackground,
-                borderColor: controlBorder,
-                color: controlColor,
-                display: 'flex',
-                gap: 4,
-                opacity: disabled ? 0.46 : 1,
-              }}
-            >
-              <ToolbarToolIcon icon={tool.icon} />
-              <WorkbenchIcon
-                name="chevronDown"
-                className="h-3.5 w-3.5"
-                style={{ color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text-muted)' }}
-              />
-            </Paper>
-          </UnstyledButton>
+            <ToolbarToolIcon icon={tool.icon} />
+            <WorkbenchIcon
+              name="chevronDown"
+              className="h-3.5 w-3.5"
+              style={{ color: disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text-muted)' }}
+            />
+          </ActionIcon>
         </Tooltip>
       </Menu.Target>
 

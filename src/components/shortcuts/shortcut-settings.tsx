@@ -16,6 +16,7 @@ import {
 import type { ShortcutCommandId } from '@/core/shortcuts/commands'
 import { createShortcutReferenceGroups } from '@/core/shortcuts/reference'
 import { useShortcuts } from '@/hooks/use-shortcuts'
+import { getToolbarActionIconStyle, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
 
 export function ShortcutSettingsButton() {
   const [opened, setOpened] = useState(false)
@@ -28,6 +29,8 @@ export function ShortcutSettingsButton() {
         color="workbench"
         aria-label="Keyboard shortcuts"
         onClick={() => setOpened(true)}
+        className={toolbarActionIconClassName}
+        style={getToolbarActionIconStyle()}
       >
         <WorkbenchIcon name="keyboard" className="h-4 w-4" />
       </ActionIcon>

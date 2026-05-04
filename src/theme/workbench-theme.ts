@@ -99,6 +99,17 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
         'inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 12px rgba(0, 0, 0, 0.3)',
       '--workbench-spark-logo-shadow':
         'inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 24px rgba(240, 161, 74, 0.20), 0 4px 12px rgba(0, 0, 0, 0.45)',
+      '--workbench-spark-logo-shadow-hover':
+        'inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 12px 34px rgba(240, 161, 74, 0.34), 0 0 0 1px rgba(246, 183, 119, 0.22), 0 6px 16px rgba(0, 0, 0, 0.48)',
+      '--workbench-toolbar-button-transition':
+        'background-color 180ms cubic-bezier(0.25, 1, 0.5, 1), border-color 180ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1), transform 180ms cubic-bezier(0.25, 1, 0.5, 1)',
+      '--workbench-toolbar-button-hover-background': 'rgba(255, 255, 255, 0.06)',
+      '--workbench-toolbar-button-hover-border': 'rgba(255, 255, 255, 0.10)',
+      '--workbench-toolbar-button-hover-shadow':
+        'inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 7px 16px rgba(0, 0, 0, 0.28)',
+      '--workbench-toolbar-button-press-background': 'rgba(255, 255, 255, 0.08)',
+      '--workbench-toolbar-button-press-shadow':
+        'inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 3px 8px rgba(0, 0, 0, 0.22)',
       '--workbench-debugger-surface': 'rgba(20, 20, 20, 0.85)',
       '--workbench-debugger-chevron-bg': 'rgba(255, 255, 255, 0.06)',
       '--workbench-app-background': 'var(--mantine-color-dark-9)',

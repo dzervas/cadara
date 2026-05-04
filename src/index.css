@@ -39,6 +39,52 @@ input {
   font: inherit;
 }
 
+.workbench-toolbar-action {
+  background-color: var(--workbench-toolbar-action-bg, transparent);
+  border: 1px solid var(--workbench-toolbar-action-border, transparent);
+  box-shadow: none;
+  color: var(--workbench-toolbar-action-color, var(--workbench-shell-text));
+  transition: var(--workbench-toolbar-button-transition);
+  will-change: transform, background-color, border-color, box-shadow;
+}
+
+.workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not([data-disabled]) {
+  background-color: var(--workbench-toolbar-action-hover-bg, var(--workbench-toolbar-button-hover-background));
+  border-color: var(--workbench-toolbar-action-hover-border, var(--workbench-toolbar-button-hover-border));
+  box-shadow: var(--workbench-toolbar-button-hover-shadow);
+  transform: translateY(-1px);
+}
+
+.workbench-toolbar-action:where(:active):not(:disabled):not([data-disabled]) {
+  background-color: var(--workbench-toolbar-action-press-bg, var(--workbench-toolbar-button-press-background));
+  box-shadow: var(--workbench-toolbar-button-press-shadow);
+  transform: translateY(0);
+}
+
+.workbench-spark-logo {
+  background: var(--workbench-spark-accent);
+  border: none;
+  box-shadow: var(--workbench-spark-logo-shadow);
+  color: var(--workbench-spark-accent-ink);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: auto;
+  transition: var(--workbench-toolbar-button-transition);
+  will-change: transform, box-shadow;
+}
+
+.workbench-spark-logo:where(:hover, [data-hovered]) {
+  box-shadow: var(--workbench-spark-logo-shadow-hover);
+  transform: translateY(-1px) scale(1.025);
+}
+
+.workbench-spark-logo:where(:active) {
+  transform: translateY(0) scale(1);
+}
+
 @media (width <= 1639px) {
   :root {
     --workbench-viewport-overlay-top: 128px;
@@ -66,6 +112,18 @@ input {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .workbench-toolbar-action,
+  .workbench-spark-logo {
+    transition-duration: 1ms;
+    transform: none;
+    will-change: auto;
+  }
+
+  .workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not([data-disabled]),
+  .workbench-spark-logo:where(:hover, [data-hovered]) {
+    transform: none;
+  }
+
   [data-tab-hairline='pending'] > * {
     animation-duration: 0ms !important;
     animation-iteration-count: 1 !important;
