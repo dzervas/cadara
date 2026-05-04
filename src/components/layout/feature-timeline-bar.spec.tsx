@@ -9,6 +9,12 @@ import { FeatureTimelineBar } from '@/components/layout/feature-timeline-bar'
 import { FloatingPartsTree } from '@/components/layout/floating-parts-tree'
 import { getNextHistoryTreeFocusIndex } from '@/components/layout/feature-timeline-bar.a11y'
 import { HistoryTimelineShell } from '@/components/layout/history-timeline-shell'
+import {
+  HISTORY_TIMELINE_COLLAPSED_STORAGE_KEY,
+  getHistoryTimelinePanelMotionState,
+  readHistoryTimelineCollapsedPreference,
+  writeHistoryTimelineCollapsedPreference,
+} from '@/components/layout/history-timeline-shell-state'
 import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu.helpers'
 import {
   getDocumentHistoryMenuEntryDescriptors,
@@ -25,6 +31,18 @@ import { createSketchSessionFromSnapshot } from '@/domain/editor/sketch-session'
 import { EditorContext } from '@/hooks/editor-context'
 import { workbenchTheme } from '@/theme/workbench-theme'
 import type { FeatureId, RegionId, SketchId } from '@/contracts/shared/ids'
+
+function createTimelinePreferenceStorage() {
+  const map = new Map<string, string>()
+  return {
+    getItem(key: string) {
+      return map.get(key) ?? null
+    },
+    setItem(key: string, value: string) {
+      map.set(key, value)
+    },
+  }
+}
 
 test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const adapter = new MockKernelAdapter()
   const response = await adapter.getDocumentSnapshot({
@@ -744,6 +762,35 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
   expectTrue(
     sketchHistoryMarkup.includes('data-transition-state="leaving-down"'),
     'Document history should expose a reduced-motion-friendly leaving state while sketch history is active.',
+  )
+
+  const collapsedMotion = getHistoryTimelinePanelMotionState(true)
+  expectTrue(
+    collapsedMotion.transitionState === 'collapsed-down'
+      && collapsedMotion.style.transform === 'translateY(calc(100% + 12px))',
+    'Hidden history timeline should use a vertical-only slide-down transform.',
+  )
+
+  const visibleMotion = getHistoryTimelinePanelMotionState(false)
+  expectTrue(
+    visibleMotion.transitionState === 'active'
+      && visibleMotion.style.transform === 'translateY(0)',
+    'Shown history timeline should slide back up into its final vertical position.',
+  )
+
+  const preferenceStorage = createTimelinePreferenceStorage()
+  writeHistoryTimelineCollapsedPreference(true, preferenceStorage)
+  expectTrue(
+    preferenceStorage.getItem(HISTORY_TIMELINE_COLLAPSED_STORAGE_KEY) === 'true'
+      && readHistoryTimelineCollapsedPreference(preferenceStorage) === true,
+    'Hidden history timeline state should persist so refreshes restore the collapsed bar.',
+  )
+
+  writeHistoryTimelineCollapsedPreference(false, preferenceStorage)
+  expectTrue(
+    preferenceStorage.getItem(HISTORY_TIMELINE_COLLAPSED_STORAGE_KEY) === 'false'
+      && readHistoryTimelineCollapsedPreference(preferenceStorage) === false,
+    'Shown history timeline state should persist so refreshes restore the visible bar.',
   )
 
   const source = await Bun.file(new URL('./feature-timeline-bar.tsx', import.meta.url)).text()

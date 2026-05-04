@@ -86,6 +86,53 @@ test('feature error timeline tooltip remains fully visible above the history bar
   expect(geometry.historyScroller.scrollHeight).toBeLessThanOrEqual(geometry.historyScroller.clientHeight + tolerance)
 })
 
+test('history timeline hide toggle remains visible above the document tab bar', async ({ page }) => {
+  const workbench = new FeatureWorkbenchHarness(page)
+
+  await workbench.openWithOperationHistory(createRectangleProfileOperationHistory())
+
+  const toggle = page.locator('[data-history-toggle="timeline-visibility"]')
+  await expect(toggle).toBeVisible({ timeout: 30_000 })
+
+  const geometry = await page.evaluate(() => {
+    const toggleElement = document.querySelector<HTMLElement>('[data-history-toggle="timeline-visibility"]')
+    const tabBarElement = document.querySelector<HTMLElement>('[role="tablist"]')
+
+    if (!toggleElement || !tabBarElement) {
+      throw new Error('Expected the timeline toggle and document tab bar to be present.')
+    }
+
+    const toggleRect = toggleElement.getBoundingClientRect()
+    const tabBarRect = tabBarElement.getBoundingClientRect()
+    const toggleStyle = getComputedStyle(toggleElement)
+
+    return {
+      toggle: {
+        borderRadius: toggleStyle.borderRadius,
+        left: toggleRect.left,
+        right: toggleRect.right,
+        top: toggleRect.top,
+        bottom: toggleRect.bottom,
+        width: toggleRect.width,
+        height: toggleRect.height,
+      },
+      tabBar: {
+        top: tabBarRect.top,
+      },
+      viewport: {
+        width: window.innerWidth,
+      },
+    }
+  })
+
+  expect(geometry.toggle.left).toBeGreaterThanOrEqual(0)
+  expect(geometry.toggle.right).toBeLessThanOrEqual(geometry.viewport.width)
+  expect(geometry.toggle.width).toBe(26)
+  expect(geometry.toggle.height).toBe(26)
+  expect(geometry.toggle.borderRadius).toBe('32px')
+  expect(geometry.toggle.bottom).toBeLessThan(geometry.tabBar.top)
+})
+
 function createRepairableFeatureErrorHistory(): ModelingOperationHistoryPayload {
   const base = createRectangleProfileOperationHistory()
 
