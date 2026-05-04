@@ -12,6 +12,7 @@ import {
   createViewportCamera,
   getDefaultViewportCameraFrame,
   getViewportCameraProjectionMode,
+  updateViewportCameraClipping,
 } from '@/infrastructure/viewport/viewport-projection'
 import type { RenderableEntityRecord } from '@/contracts/render/schema'
 
@@ -135,6 +136,34 @@ test('src/infrastructure/viewport/viewport-projection.spec.ts', () => {
     const applied = applyViewportRenderableFitFrame({ camera, controls, renderables })
     expect(applied).toBeTruthy()
     approxVector(controls.target, new THREE.Vector3(1500, 2500, 480))
+    expect(camera.far > 1000).toBeTruthy()
+  }
+
+  {
+    const camera = createViewportCamera('orthographic', 1)
+    const target = new THREE.Vector3(0, 0, 4)
+    const cameraDistance = camera.position.distanceTo(target)
+    const viewDirection = target.clone().sub(camera.position).normalize()
+    const pointPastCamera = target.clone().addScaledVector(viewDirection, -(cameraDistance + 20))
+
+    camera.zoom = 0.02
+    updateViewportCameraClipping(camera, target)
+    camera.updateMatrixWorld()
+
+    const projected = pointPastCamera.project(camera)
+
+    expect(camera.near < 0).toBeTruthy()
+    expect(projected.z >= -1 && projected.z <= 1).toBeTruthy()
+  }
+
+  {
+    const camera = createViewportCamera('perspective', 1)
+    const target = new THREE.Vector3(0, 0, 0)
+
+    camera.position.set(0, 0, 250)
+    updateViewportCameraClipping(camera, target)
+
+    expect(camera.near).toBe(0.1)
     expect(camera.far > 1000).toBeTruthy()
   }
 })

@@ -32,12 +32,16 @@ const FIT_PADDING_FACTOR = 1.18
 const MIN_FIT_HALF_EXTENT = 1
 const MIN_FIT_CAMERA_DISTANCE = 8
 const MIN_CAMERA_DISTANCE = 0.0001
+const DEFAULT_CAMERA_NEAR = 0.1
+const MIN_CAMERA_FAR = 1000
 const MIN_ORTHOGRAPHIC_ZOOM = 0.0001
+const ORTHOGRAPHIC_CLIP_PADDING_FACTOR = 2
+const PERSPECTIVE_CLIP_PADDING_FACTOR = 8
 
 export function createViewportCamera(mode: ViewportProjectionMode, aspect: number): ViewportCamera {
   const camera = mode === 'orthographic'
-    ? new THREE.OrthographicCamera(0, 0, 0, 0, 0.1, 1000)
-    : new THREE.PerspectiveCamera(DEFAULT_PERSPECTIVE_CAMERA_FOV, 1, 0.1, 1000)
+    ? new THREE.OrthographicCamera(0, 0, 0, 0, DEFAULT_CAMERA_NEAR, MIN_CAMERA_FAR)
+    : new THREE.PerspectiveCamera(DEFAULT_PERSPECTIVE_CAMERA_FOV, 1, DEFAULT_CAMERA_NEAR, MIN_CAMERA_FAR)
 
   updateViewportCameraAspect(camera, aspect)
   applyViewportCameraFrameToCamera(camera, getDefaultViewportCameraFrame())
@@ -115,10 +119,37 @@ export function applyViewportCameraFrameToCamera(
   camera.position.copy(frame.target).addScaledVector(direction, cameraDistance)
   if (camera instanceof THREE.OrthographicCamera) {
     camera.zoom = frame.orthographicZoom
-    camera.updateProjectionMatrix()
   }
   camera.lookAt(frame.target)
+  updateViewportCameraClipping(camera, frame.target)
   camera.updateMatrixWorld()
+}
+
+export function updateViewportCameraClipping(
+  camera: ViewportCamera,
+  target: THREE.Vector3 = DEFAULT_CAMERA_TARGET,
+) {
+  const targetDistance = Math.max(camera.position.distanceTo(target), MIN_CAMERA_DISTANCE)
+
+  if (camera instanceof THREE.OrthographicCamera) {
+    const safeZoom = Math.max(camera.zoom, MIN_ORTHOGRAPHIC_ZOOM)
+    const halfWidth = Math.abs(camera.right - camera.left) / (2 * safeZoom)
+    const halfHeight = Math.abs(camera.top - camera.bottom) / (2 * safeZoom)
+    const visibleRadius = Math.hypot(halfWidth, halfHeight)
+    const clipExtent = Math.max(
+      MIN_CAMERA_FAR,
+      targetDistance + visibleRadius * ORTHOGRAPHIC_CLIP_PADDING_FACTOR,
+    )
+
+    camera.near = -clipExtent
+    camera.far = clipExtent
+    camera.updateProjectionMatrix()
+    return
+  }
+
+  camera.near = DEFAULT_CAMERA_NEAR
+  camera.far = Math.max(MIN_CAMERA_FAR, targetDistance * PERSPECTIVE_CLIP_PADDING_FACTOR)
+  camera.updateProjectionMatrix()
 }
 
 export function cloneViewportCameraFrame(frame: ViewportCameraFrame): ViewportCameraFrame {
@@ -206,14 +237,11 @@ export function applyViewportRenderableFitFrame(input: {
 
   input.camera.up.copy(frame.up)
   input.camera.position.copy(frame.position)
-  input.camera.near = 0.1
-  input.camera.far = Math.max(1000, frame.distance + frame.radius * 4)
-
   if (input.camera instanceof THREE.OrthographicCamera) {
     input.camera.zoom = frame.orthographicZoom
   }
 
-  input.camera.updateProjectionMatrix()
+  updateViewportCameraClipping(input.camera, frame.target)
   input.controls.target.copy(frame.target)
   input.camera.lookAt(frame.target)
   input.camera.updateMatrixWorld()

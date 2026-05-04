@@ -19,6 +19,7 @@ import {
   createViewportCamera,
   getDefaultViewportCameraFrame,
   updateViewportCameraAspect,
+  updateViewportCameraClipping,
   type ViewportCamera,
   type ViewportCameraFrame,
   type ViewportProjectionMode,
@@ -124,7 +125,9 @@ export function ViewportProjectionCameraController({
   useLayoutEffect(() => {
     updateViewportCameraAspect(cameras.orthographic, aspect)
     updateViewportCameraAspect(cameras.perspective, aspect)
-  }, [aspect, cameras])
+    updateViewportCameraClipping(cameras.orthographic, controlsRef.current?.target)
+    updateViewportCameraClipping(cameras.perspective, controlsRef.current?.target)
+  }, [aspect, cameras, controlsRef])
 
   useLayoutEffect(() => {
     const nextCamera = cameras[projectionMode]
@@ -151,6 +154,29 @@ export function ViewportProjectionCameraController({
     applyViewportCameraFrame(camera, controls, frame)
     pendingFrameRef.current = null
   }, [cameraRef, controlsReadyVersion, controlsRef, pendingFrameRef])
+
+  useEffect(() => {
+    const controls = controlsRef.current
+
+    if (!controls) {
+      return
+    }
+
+    const updateClipping = () => {
+      const camera = cameraRef.current
+
+      if (camera) {
+        updateViewportCameraClipping(camera, controls.target)
+      }
+    }
+
+    updateClipping()
+    controls.addEventListener('change', updateClipping)
+
+    return () => {
+      controls.removeEventListener('change', updateClipping)
+    }
+  }, [cameraRef, controlsReadyVersion, controlsRef])
 
   return null
 }
