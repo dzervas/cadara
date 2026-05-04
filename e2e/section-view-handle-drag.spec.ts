@@ -6,7 +6,7 @@ import { createBaseExtrudeOperationHistory } from './helpers/modeling-fixtures'
 test.setTimeout(90_000)
 test.use({ viewport: { width: 1440, height: 960 } })
 
-const FACE_POINT = { x: 230, y: 130 }
+const FACE_POINT = { x: 230, y: 178 }
 
 test('section handle drags forward and back along the active section normal', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)

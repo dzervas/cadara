@@ -234,9 +234,9 @@ export function WorkspaceToolbar({
 
       {/*
         Cluster row scrolls horizontally when the bar is too narrow to fit all
-        clusters. The padding-y + negative margin-y trick gives the pill drop-shadows
+        clusters. The padding + negative margin gives the pill drop-shadows
         (`box-shadow: 0 12px 32px ...`) room to render *inside* the scroll container
-        instead of being clipped at the cluster row's bottom edge — see DESIGN.md
+        instead of being clipped at the cluster row edges — see DESIGN.md
         "Floating Toolbar (Pill Clusters)".
        */}
       <div
@@ -245,9 +245,13 @@ export function WorkspaceToolbar({
           overflowX: 'auto',
           overflowY: 'hidden',
           paddingTop: 40,
+          paddingRight: 32,
           paddingBottom: 40,
+          paddingLeft: 32,
           marginTop: -40,
+          marginRight: -32,
           marginBottom: -40,
+          marginLeft: -32,
           scrollbarWidth: 'none',
         }}
       >

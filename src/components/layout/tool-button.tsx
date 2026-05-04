@@ -97,19 +97,31 @@ export function ToolButton({
       data-disabled={disabled || undefined}
       onFocus={onButtonFocus}
       onMouseEnter={onButtonMouseEnter}
+      style={{ display: 'block', width: '100%', minWidth: 0, maxWidth: '100%' }}
     >
       <Paper
         radius="md"
         px="sm"
         py={10}
-        withBorder={disabled || isEmphasized}
+        withBorder
         style={{
+          width: '100%',
+          minWidth: 0,
+          maxWidth: '100%',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
           backgroundColor: controlBackground,
-          borderColor: disabled ? 'var(--workbench-shell-border)' : isEmphasized ? emphasisBorder : 'var(--workbench-shell-border)',
+          borderColor: disabled
+            ? 'var(--workbench-shell-border)'
+            : isEmphasized
+              ? emphasisBorder
+              : 'var(--workbench-glass-border)',
           opacity: disabled ? 0.52 : 1,
+          boxShadow: isEmphasized ? 'var(--workbench-shell-inner-highlight)' : undefined,
+          transition: 'background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out',
         }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Paper
             radius="md"
             withBorder

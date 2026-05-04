@@ -87,6 +87,7 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
       '--workbench-glass-border-strong': 'rgba(255, 255, 255, 0.07)',
       '--workbench-glass-border-spark-open': 'rgba(255, 255, 255, 0.18)',
       '--workbench-glass-divider': 'rgba(255, 255, 255, 0.05)',
+      '--workbench-shell-inner-highlight': 'inset 0 1px 0 rgba(255, 255, 255, 0.05)',
       '--workbench-glass-blur': 'blur(18px) saturate(140%)',
       '--workbench-glass-blur-row': 'blur(12px) saturate(140%)',
       '--workbench-glass-blur-panel': 'blur(20px) saturate(140%)',

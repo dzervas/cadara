@@ -20,12 +20,12 @@ test('hovering and clicking a seeded datum plane works on a cold load', async ({
   const workbench = new SketchWorkbenchHarness(page)
 
   await workbench.open()
-  await workbench.hoverViewportAtReal({ x: 340, y: 200 })
+  await workbench.hoverViewportAtReal({ x: 340, y: 248 })
 
   await expect.poll(() => workbench.currentHoverTarget(), { timeout: 10_000 }).toBe('construction_plane-xz')
 
   await workbench.activateTool('Start a new sketch.')
-  await workbench.clickViewportAtReal({ x: 340, y: 200 })
+  await workbench.clickViewportAtReal({ x: 340, y: 248 })
   await workbench.expectMachine('editingSketch')
   await workbench.expectSketchPlane('XZ')
 })
