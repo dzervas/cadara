@@ -13,6 +13,7 @@ import {
 } from '@/domain/sketch/point-math'
 
 const DEFAULT_SNAP_TOLERANCE = 0.18
+const DEFAULT_SKETCH_DATUM_AXIS_EXTENT = 10
 const EPSILON = 1e-9
 const TWO_PI = Math.PI * 2
 
@@ -56,6 +57,11 @@ export type SketchSnapSourceRef =
       referenceId: ReferenceId
       geometryId: ProjectedGeometryId
       geometryKind: 'point' | 'lineSegment' | 'circle' | 'arc' | 'spline'
+    }
+  | {
+      kind: 'sketchDatum'
+      datumId: 'origin' | 'xAxis' | 'yAxis'
+      geometryKind: 'point' | 'lineSegment'
     }
   | {
       kind: 'transientAnchor'
@@ -293,18 +299,84 @@ export function collectSketchSnapGeometries(input: {
       }
     })
   })
+  const datumAxisExtent = getSketchDatumAxisExtent(input.definition, input.projectedReferences ?? [])
+  const datumGeometries: SketchSnapGeometry[] = [
+    {
+      kind: 'point',
+      source: { kind: 'sketchDatum', datumId: 'origin', geometryKind: 'point' },
+      point: [0, 0],
+      label: 'Sketch origin',
+    },
+    {
+      kind: 'lineSegment',
+      source: { kind: 'sketchDatum', datumId: 'xAxis', geometryKind: 'lineSegment' },
+      start: [-datumAxisExtent, 0],
+      end: [datumAxisExtent, 0],
+      label: 'Sketch X axis',
+    },
+    {
+      kind: 'lineSegment',
+      source: { kind: 'sketchDatum', datumId: 'yAxis', geometryKind: 'lineSegment' },
+      start: [0, -datumAxisExtent],
+      end: [0, datumAxisExtent],
+      label: 'Sketch Y axis',
+    },
+  ]
 
-  return [...localPointGeometries, ...localEntityGeometries, ...projectedGeometries]
+  return [...datumGeometries, ...localPointGeometries, ...localEntityGeometries, ...projectedGeometries]
+}
+
+function getSketchDatumAxisExtent(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+) {
+  const localCoordinates = definition.points.flatMap((point) => [
+    Math.abs(point.position[0]),
+    Math.abs(point.position[1]),
+  ])
+  const projectedCoordinates = projectedReferences.flatMap((reference) => reference.geometry.flatMap((geometry) => {
+    switch (geometry.kind) {
+      case 'point':
+        return [Math.abs(geometry.position[0]), Math.abs(geometry.position[1])]
+      case 'lineSegment':
+        return [
+          Math.abs(geometry.startPosition[0]),
+          Math.abs(geometry.startPosition[1]),
+          Math.abs(geometry.endPosition[0]),
+          Math.abs(geometry.endPosition[1]),
+        ]
+      case 'circle':
+        return [
+          Math.abs(geometry.centerPosition[0]) + geometry.radius,
+          Math.abs(geometry.centerPosition[1]) + geometry.radius,
+        ]
+      case 'arc': {
+        const radius = Math.hypot(
+          geometry.startPosition[0] - geometry.centerPosition[0],
+          geometry.startPosition[1] - geometry.centerPosition[1],
+        )
+        return [
+          Math.abs(geometry.centerPosition[0]) + radius,
+          Math.abs(geometry.centerPosition[1]) + radius,
+        ]
+      }
+      case 'spline':
+        return geometry.fitPoints.flatMap((point) => [Math.abs(point[0]), Math.abs(point[1])])
+    }
+  }))
+  const maxCoordinate = Math.max(0, ...localCoordinates, ...projectedCoordinates)
+
+  return Math.max(DEFAULT_SKETCH_DATUM_AXIS_EXTENT, maxCoordinate * 1.35 || DEFAULT_SKETCH_DATUM_AXIS_EXTENT)
 }
 
 export function resolveSketchSnap(input: ResolveSketchSnapInput): SketchSnapResult {
   const tolerance = input.tolerance ?? DEFAULT_SNAP_TOLERANCE
-  const candidates = rankSnapCandidates([
+  const candidates = rankSnapCandidates(filterDatumAxisCurveCandidates([
     ...collectPointCandidates(input.pointer, input.geometries, tolerance, input.activeTool),
     ...collectCurveCandidates(input.pointer, input.geometries, tolerance, input.activeTool),
     ...collectIntersectionCandidates(input.pointer, input.geometries, tolerance, input.activeTool),
     ...collectActiveAnchorCandidates(input, tolerance),
-  ])
+  ]))
   const activeCandidate = selectActiveCandidate(candidates, input.activeCandidateKey, tolerance)
 
   return {
@@ -313,6 +385,29 @@ export function resolveSketchSnap(input: ResolveSketchSnapInput): SketchSnapResu
     activeCandidate,
     candidates,
   }
+}
+
+function filterDatumAxisCurveCandidates(candidates: readonly SketchSnapCandidate[]) {
+  const hasPointLikeSnap = candidates.some((candidate) =>
+    !candidate.sources.some((source) => source.kind === 'sketchDatum' && source.geometryKind === 'lineSegment')
+    && (
+      candidate.kind === 'endpoint'
+      || candidate.kind === 'center'
+      || candidate.kind === 'midpoint'
+      || candidate.kind === 'intersection'
+    ),
+  )
+
+  if (!hasPointLikeSnap) {
+    return candidates
+  }
+
+  return candidates.filter((candidate) =>
+    !(
+      candidate.kind === 'nearestOnLine'
+      && candidate.sources.some((source) => source.kind === 'sketchDatum' && source.geometryKind === 'lineSegment')
+    ),
+  )
 }
 
 function collectPointCandidates(
@@ -750,11 +845,21 @@ function sourcePreference(candidate: SketchSnapCandidate) {
     return 1
   }
 
-  if (candidate.sources.some((source) => source.kind === 'projectedGeometry')) {
+  const hasDatum = candidate.sources.some((source) => source.kind === 'sketchDatum')
+
+  if (!hasDatum && candidate.sources.some((source) => source.kind === 'projectedGeometry')) {
     return 2
   }
 
-  return 3
+  if (!hasDatum && candidate.sources.some((source) => source.kind === 'transientAnchor')) {
+    return 3
+  }
+
+  if (hasDatum) {
+    return 4
+  }
+
+  return 5
 }
 
 function sourceKey(source: SketchSnapSourceRef) {
@@ -765,6 +870,8 @@ function sourceKey(source: SketchSnapSourceRef) {
       return `local-entity:${source.entityId}:${source.geometryKind}`
     case 'projectedGeometry':
       return `projected:${source.referenceId}:${source.geometryId}:${source.geometryKind}`
+    case 'sketchDatum':
+      return `datum:${source.datumId}:${source.geometryKind}`
     case 'transientAnchor':
       return `transient:${source.id}`
   }

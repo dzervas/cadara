@@ -42,6 +42,7 @@ import {
 import { DocumentRenderableNode } from '@/components/cad/three-cad-viewport-document-nodes'
 import { SketchDisplayRenderableNode } from '@/components/cad/three-cad-viewport-sketch-nodes'
 import {
+  collectProjectedSketchDatumLineCandidates,
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
   getAnnotationHighlightTargets,
@@ -885,6 +886,15 @@ export function ThreeCadViewport({
           sketchDisplayRenderables: sketchDisplayRenderablesRef.current,
           acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
+        }),
+        ...collectProjectedSketchDatumLineCandidates({
+          clientX,
+          clientY,
+          camera,
+          viewportRect,
+          sketchSession: sketchSessionRef.current,
+          sketchDisplayRenderables: sketchDisplayRenderablesRef.current,
+          acceptsTarget: acceptsViewportTarget,
         }),
         ...collectProjectedVertexCandidates({
           clientX,

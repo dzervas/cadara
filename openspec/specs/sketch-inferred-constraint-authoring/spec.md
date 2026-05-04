@@ -1,7 +1,7 @@
 # sketch-inferred-constraint-authoring Specification
 
 ## Purpose
-TBD - created by archiving change author-inferred-sketch-constraints-from-snaps. Update Purpose after archive.
+Define how accepted sketch snaps become durable inferred constraints when preserving the user's intended relationship matters after later edits.
 ## Requirements
 ### Requirement: Accepted snaps SHALL author durable inferred constraints
 The system SHALL convert supported accepted snap candidates into durable sketch constraints that preserve the intended geometric relationship after later edits.
@@ -14,6 +14,16 @@ The system SHALL convert supported accepted snap candidates into durable sketch 
 #### Scenario: User accepts point-on-line snap
 - **WHEN** the user places a sketch point by accepting a snap onto a line
 - **THEN** the sketch commits a durable point-on-line relationship for the placed point and source line
+
+#### Scenario: User accepts sketch datum origin snap
+- **WHEN** the user places a sketch point by accepting a snap to the active sketch origin datum
+- **THEN** the sketch commits a durable coincident relationship between the placed point and the sketch datum origin
+- **AND** the relationship references the datum operand rather than a generated local proxy point
+
+#### Scenario: User accepts sketch datum axis snap
+- **WHEN** the user places a sketch point by accepting a snap onto the active sketch X or Y datum axis
+- **THEN** the sketch commits a durable point-on-curve relationship between the placed point and the sketch datum axis
+- **AND** the relationship references the datum operand rather than a generated local proxy line
 
 ### Requirement: Inferred constraints SHALL be previewed before commit
 The system SHALL show transient feedback for the constraint relationship that will be authored if the active snap is accepted.
@@ -28,4 +38,3 @@ The system SHALL treat inferred constraints as part of the sketch authoring acti
 #### Scenario: User undoes snapped line creation
 - **WHEN** a line creation accepted snap candidates that authored inferred constraints
 - **THEN** Undo removes or hides the line and its inferred constraints together according to the sketch-local history cursor
-

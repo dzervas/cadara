@@ -10,6 +10,8 @@ import type {
   ConstraintDefinition,
   ProjectedSketchGeometryConstraintOperand,
   ProjectedSketchGeometryRef,
+  ReadOnlySketchCurveConstraintOperand,
+  ReadOnlySketchPointConstraintOperand,
   SketchDefinition,
   SketchReferenceDefinition,
 } from '@/contracts/sketch/schema'
@@ -1070,6 +1072,32 @@ export function projectedOperandFromSource(
   }
 }
 
+export function pointReadOnlyOperandFromSource(
+  source: Extract<SketchSnapSourceRef, { kind: 'projectedGeometry' | 'sketchDatum' }>,
+): ReadOnlySketchPointConstraintOperand {
+  if (source.kind === 'sketchDatum') {
+    return {
+      kind: 'sketchDatum',
+      datum: source.datumId,
+    }
+  }
+
+  return projectedOperandFromSource(source)
+}
+
+export function curveReadOnlyOperandFromSource(
+  source: Extract<SketchSnapSourceRef, { kind: 'projectedGeometry' | 'sketchDatum' }>,
+): ReadOnlySketchCurveConstraintOperand {
+  if (source.kind === 'sketchDatum') {
+    return {
+      kind: 'sketchDatum',
+      datum: source.datumId,
+    }
+  }
+
+  return projectedOperandFromSource(source)
+}
+
 export function localPointOperand(pointId: SketchPointId): Extract<ConstraintDefinition, { kind: 'midpoint' }>['point'] {
   return { kind: 'localPoint', pointId }
 }
@@ -1257,11 +1285,26 @@ export function inferPointSnapConstraints(input: {
         point: localPoint,
         projectedCurve: projectedOperandFromSource(source),
       })
+      return
+    }
+
+    if (source.kind === 'sketchDatum' && source.geometryKind === 'lineSegment') {
+      addConstraint(constraints, {
+        constraintId: createId(`inferred-point-on-datum-${index}`),
+        kind: 'pointOnProjectedCurve',
+        label: `Inferred point on sketch datum ${input.sequence}`,
+        point: localPoint,
+        projectedCurve: curveReadOnlyOperandFromSource(source),
+      })
     }
   }
 
   input.candidate.sources.forEach((source, index) => {
     if (source.kind === 'transientAnchor') {
+      return
+    }
+
+    if (source.kind === 'sketchDatum' && input.candidate.distance <= 1e-9) {
       return
     }
 
@@ -1289,13 +1332,18 @@ export function inferPointSnapConstraints(input: {
         return
       }
 
-      if (source.kind === 'projectedGeometry' && source.geometryKind === 'point') {
+      if (
+        (source.kind === 'projectedGeometry' && source.geometryKind === 'point')
+        || (source.kind === 'sketchDatum' && source.datumId === 'origin')
+      ) {
         addConstraint(constraints, {
-          constraintId: createId(`inferred-coincident-projected-${index}`),
+          constraintId: createId(source.kind === 'sketchDatum' ? `inferred-coincident-datum-${index}` : `inferred-coincident-projected-${index}`),
           kind: 'coincidentProjectedPoint',
-          label: `Inferred coincident projected point ${input.sequence}`,
+          label: source.kind === 'sketchDatum'
+            ? `Inferred coincident sketch datum ${input.sequence}`
+            : `Inferred coincident projected point ${input.sequence}`,
           point: localPoint,
-          projectedPoint: projectedOperandFromSource(source),
+          projectedPoint: pointReadOnlyOperandFromSource(source),
         })
       }
       return
@@ -1340,13 +1388,18 @@ export function inferPointSnapConstraints(input: {
         return
       }
 
-      if (source.kind === 'projectedGeometry' && source.geometryKind === 'point') {
+      if (
+        (source.kind === 'projectedGeometry' && source.geometryKind === 'point')
+        || (source.kind === 'sketchDatum' && source.datumId === 'origin')
+      ) {
         addConstraint(constraints, {
-          constraintId: createId(`inferred-coincident-projected-center-${index}`),
+          constraintId: createId(source.kind === 'sketchDatum' ? `inferred-coincident-datum-center-${index}` : `inferred-coincident-projected-center-${index}`),
           kind: 'coincidentProjectedPoint',
-          label: `Inferred projected center coincident ${input.sequence}`,
+          label: source.kind === 'sketchDatum'
+            ? `Inferred sketch datum center coincident ${input.sequence}`
+            : `Inferred projected center coincident ${input.sequence}`,
           point: localPoint,
-          projectedPoint: projectedOperandFromSource(source),
+          projectedPoint: pointReadOnlyOperandFromSource(source),
         })
       }
       return
@@ -1364,13 +1417,18 @@ export function inferPointSnapConstraints(input: {
         return
       }
 
-      if (source.kind === 'projectedGeometry' && source.geometryKind === 'lineSegment') {
+      if (
+        (source.kind === 'projectedGeometry' && source.geometryKind === 'lineSegment')
+        || (source.kind === 'sketchDatum' && source.geometryKind === 'lineSegment')
+      ) {
         addConstraint(constraints, {
-          constraintId: createId(`inferred-midpoint-projected-${index}`),
+          constraintId: createId(source.kind === 'sketchDatum' ? `inferred-midpoint-datum-${index}` : `inferred-midpoint-projected-${index}`),
           kind: 'midpointProjectedLine',
-          label: `Inferred projected midpoint ${input.sequence}`,
+          label: source.kind === 'sketchDatum'
+            ? `Inferred sketch datum midpoint ${input.sequence}`
+            : `Inferred projected midpoint ${input.sequence}`,
           point: localPoint,
-          projectedLine: projectedOperandFromSource(source),
+          projectedLine: curveReadOnlyOperandFromSource(source),
         })
       }
       return
@@ -1431,7 +1489,7 @@ export function inferLineSnapConstraints(input: {
 
     if (
       candidate.kind === 'perpendicularFoot'
-      && (source.kind === 'localEntity' || source.kind === 'projectedGeometry')
+      && (source.kind === 'localEntity' || source.kind === 'projectedGeometry' || source.kind === 'sketchDatum')
       && source.geometryKind === 'lineSegment'
     ) {
       if (source.kind === 'localEntity') {
@@ -1451,20 +1509,24 @@ export function inferLineSnapConstraints(input: {
         return
       }
 
-      if (source.kind === 'projectedGeometry') {
+      if (source.kind === 'projectedGeometry' || source.kind === 'sketchDatum') {
         addConstraint(constraints, {
-          constraintId: input.createConstraintId(`inferred-perpendicular-projected-${index}`),
+          constraintId: input.createConstraintId(source.kind === 'sketchDatum' ? `inferred-perpendicular-datum-${index}` : `inferred-perpendicular-projected-${index}`),
           kind: 'perpendicularProjectedLine',
-          label: `Inferred perpendicular projected line ${input.sequence}`,
+          label: source.kind === 'sketchDatum'
+            ? `Inferred perpendicular sketch datum ${input.sequence}`
+            : `Inferred perpendicular projected line ${input.sequence}`,
           line: localLine,
-          projectedLine: projectedOperandFromSource(source),
+          projectedLine: curveReadOnlyOperandFromSource(source),
         })
         addConstraint(constraints, {
-          constraintId: input.createConstraintId(`inferred-foot-on-projected-${index}`),
+          constraintId: input.createConstraintId(source.kind === 'sketchDatum' ? `inferred-foot-on-datum-${index}` : `inferred-foot-on-projected-${index}`),
           kind: 'pointOnProjectedCurve',
-          label: `Inferred perpendicular foot projected ${input.sequence}`,
+          label: source.kind === 'sketchDatum'
+            ? `Inferred perpendicular foot sketch datum ${input.sequence}`
+            : `Inferred perpendicular foot projected ${input.sequence}`,
           point: localEndPoint,
-          projectedCurve: projectedOperandFromSource(source),
+          projectedCurve: curveReadOnlyOperandFromSource(source),
         })
       }
       return

@@ -343,6 +343,38 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {  function assertCloseP
     expectTrue(session.definition.entities.length === 1, 'Projected point center snapping should only author the requested local circle.')
   }
 
+  function testSketchDatumSnapsCommitDerivedReferenceConstraints() {
+    let originSession = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    originSession = beginSketchTool(originSession, 'line')
+    originSession = startSketchDraw(originSession, [0.04, 0.03])
+    expectTrue(originSession.activeSnap?.kind === 'endpoint', 'Starting near the sketch origin should activate datum-origin snap.')
+    assertClosePoint(originSession.pointerDownPoint, [0, 0], 'Line start should snap to the exact sketch origin.')
+    originSession = updateSketchPointer(originSession, [2, 1])
+    originSession = acceptSketchDraw(originSession, [2, 1])
+
+    const originConstraint = originSession.definition.constraints.find((constraint) =>
+      constraint.kind === 'coincidentProjectedPoint'
+      && constraint.projectedPoint.kind === 'sketchDatum'
+      && constraint.projectedPoint.datum === 'origin'
+    )
+    expectTrue(originConstraint, 'Accepted datum-origin snap should constrain the authored endpoint to the sketch origin.')
+
+    let axisSession = createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' })
+    axisSession = beginSketchTool(axisSession, 'line')
+    axisSession = startSketchDraw(axisSession, [2, 1])
+    axisSession = updateSketchPointer(axisSession, [4, 0.04])
+    expectTrue(axisSession.activeSnap?.kind === 'nearestOnLine', 'Moving near a sketch datum axis should activate an on-axis snap.')
+    assertClosePoint(axisSession.livePoint, [4, 0], 'Line endpoint should snap onto the X datum axis.')
+    axisSession = acceptSketchDraw(axisSession, [4, 0.04])
+
+    const axisConstraint = axisSession.definition.constraints.find((constraint) =>
+      constraint.kind === 'pointOnProjectedCurve'
+      && constraint.projectedCurve.kind === 'sketchDatum'
+      && constraint.projectedCurve.datum === 'xAxis'
+    )
+    expectTrue(axisConstraint, 'Accepted datum-axis snap should constrain the authored endpoint onto the sketch axis.')
+  }
+
   function testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints() {
     const projectedLineReferences: ProjectedSketchReferenceRecord[] = [
       {
@@ -424,5 +456,6 @@ test('src/domain/editor/sketch-snapping.spec.ts', () => {  function assertCloseP
   testProjectedMidpointSnapCommitsDerivedReferenceConstraint()
   testProjectedConcentricSnapCommitsDerivedReferenceConstraint()
   testProjectedPointCenterSnapCommitsDerivedReferenceConstraint()
+  testSketchDatumSnapsCommitDerivedReferenceConstraints()
   testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints()
 })

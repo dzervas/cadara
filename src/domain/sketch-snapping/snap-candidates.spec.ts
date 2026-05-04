@@ -192,6 +192,43 @@ function testCenterCandidates() {
     )
   }
 
+  function testSketchDatumCandidates() {
+    const datumOnlyGeometries = collectSketchSnapGeometries({
+      definition: {
+        ...definition,
+        pointIds: [],
+        points: [],
+        entityIds: [],
+        entities: [],
+      },
+    })
+    const origin = resolveSketchSnap({
+      pointer: [0.04, 0.03],
+      geometries: datumOnlyGeometries,
+      tolerance: 0.2,
+      activeTool: 'line',
+    })
+    expectTrue(origin.activeCandidate?.kind === 'endpoint', 'Pointer near the sketch origin should snap to the datum origin.')
+    assertClosePoint(origin.snappedPoint, [0, 0], 'Datum origin snap should use exact local origin coordinates.')
+    expectTrue(
+      origin.activeCandidate.sources.some((source) => source.kind === 'sketchDatum' && source.datumId === 'origin'),
+      'Datum origin snap should carry a sketch-datum source.',
+    )
+
+    const axis = resolveSketchSnap({
+      pointer: [3, 0.04],
+      geometries: datumOnlyGeometries,
+      tolerance: 0.2,
+      activeTool: 'line',
+    })
+    expectTrue(axis.activeCandidate?.kind === 'nearestOnLine', 'Pointer near a datum axis should snap onto that axis.')
+    assertClosePoint(axis.snappedPoint, [3, 0], 'Datum axis snap should project to the nearest axis point.')
+    expectTrue(
+      axis.activeCandidate.sources.some((source) => source.kind === 'sketchDatum' && source.datumId === 'xAxis'),
+      'Datum axis snap should carry a sketch-datum source.',
+    )
+  }
+
   function testCurveCandidates() {
     const circle = resolveSketchSnap({
       pointer: [4.05, 1.12],
@@ -348,6 +385,7 @@ function testCenterCandidates() {
   testCenterCandidates()
   testLineMidpointCandidate()
   testProjectedGeometryCandidate()
+  testSketchDatumCandidates()
   testCurveCandidates()
   testAlignmentAndTangentCandidates()
   testPerpendicularFootCandidates()
