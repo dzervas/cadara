@@ -47,6 +47,7 @@ import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/mo
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
 import type { ExportCapabilities, MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
 import type { DocumentExportDiagnostic as ExportDiagnostic } from '@/contracts/modeling/export'
+import { buildSketchVectorExportModelFromSnapshot } from '@/domain/export/sketch-vector-export-model'
 import type {
   DocumentExportDiagnostic,
 } from '@/contracts/modeling/export'
@@ -712,6 +713,12 @@ function createMockExportCapabilities(snapshot: WorkspaceSnapshot): ExportCapabi
         ].join('\n')
 
         return { payload }
+      },
+    },
+    sketchVector: {
+      resolveSketchVectorModel: (target: DurableRef) => {
+        const result = buildSketchVectorExportModelFromSnapshot(snapshot, target)
+        return 'diagnostic' in result ? result : result
       },
     },
   }

@@ -32,6 +32,7 @@ export const stepExportProvider: ExportProvider<StepExportOptions, FeatureEditor
   formatId: 'step',
   fileExtension: 'step',
   mimeType: 'model/step',
+  targetKinds: ['body'],
 
   getDefaultOptions(): StepExportOptions {
     return { schema: 'AP242', unit: 'millimeter' }

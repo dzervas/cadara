@@ -17,6 +17,7 @@ import type {
   SketchPointRef,
 } from '@/contracts/shared/references'
 import type { SketchPlaneDefinition, SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
+import type { SketchPlaneFrame } from '@/contracts/shared/sketch-plane'
 import type {
   CommitSketchRequest,
   SketchPlaneKey,
@@ -176,6 +177,7 @@ export interface SketchSessionDisplayRenderable {
   strokeStyle?: SketchDisplayStrokeStyle
   constraintDisplay?: SketchConstraintDisplayTargetState
   diagnosticStyle?: SketchDisplayDiagnosticStyle
+  sketchPlaneFrame?: SketchPlaneFrame
   textureFill?: {
     kind: 'inlineImage'
     sourceKey: string
@@ -207,7 +209,24 @@ export interface SketchDisplayDiagnosticStyle {
   kind: 'overconstraint'
 }
 
-export interface SketchDisplayPaintStyle {
+export type SketchDisplayPaintStyle =
+  | {
+      kind?: 'solid'
+      color: number
+      opacity: number
+    }
+  | {
+      kind: 'linearGradient'
+      color: number
+      opacity: number
+      startColor: number
+      startOpacity: number
+      endColor: number
+      endOpacity: number
+      angleRadians: number
+    }
+
+export interface SketchDisplaySolidPaintStyle {
   color: number
   opacity: number
 }

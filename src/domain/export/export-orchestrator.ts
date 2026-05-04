@@ -2,6 +2,7 @@ import type { ExportCapabilities } from '@/contracts/export/capabilities'
 import type { DocumentExportFailureResult, DocumentExportResult, DocumentExportSuccessResult } from '@/contracts/modeling/export'
 import type { DurableRef } from '@/contracts/shared/references'
 import type { ExportProviderRegistry } from '@/domain/export/provider-registry'
+import { exportProviderSupportsTarget } from '@/contracts/export/provider'
 
 export interface OrchestratorGeometryExportInput {
   format: string
@@ -36,6 +37,23 @@ export async function orchestrateGeometryExport(
           code: 'export-unsupported-format',
           severity: 'error',
           message: `No export provider is registered for format '${input.format}'.`,
+          target: input.target,
+        },
+      ],
+    }
+
+    return failure
+  }
+
+  if (!exportProviderSupportsTarget(provider, input.target)) {
+    const failure: DocumentExportFailureResult = {
+      ok: false,
+      format: input.format,
+      diagnostics: [
+        {
+          code: 'export-incompatible-target',
+          severity: 'error',
+          message: `Format '${input.format}' cannot export target kind '${input.target.kind}'.`,
           target: input.target,
         },
       ],

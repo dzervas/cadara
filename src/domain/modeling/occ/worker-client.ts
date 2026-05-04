@@ -47,6 +47,7 @@ import type {
   OccWorkerResponse,
 } from '@/domain/modeling/occ/worker-protocol'
 import type { ExportCapabilities, MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
+import type { SketchVectorExportModel } from '@/contracts/export/sketch-vector'
 import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
 import type { DurableRef } from '@/contracts/shared/references'
 
@@ -254,6 +255,15 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
             baseRevisionId,
             target,
             options,
+          }),
+      },
+      sketchVector: {
+        resolveSketchVectorModel: (target: DurableRef) =>
+          this.invoke<SketchVectorExportModel | { diagnostic: DocumentExportDiagnostic }>({
+            kind: 'resolveSketchVectorExportModel',
+            documentId,
+            baseRevisionId,
+            target,
           }),
       },
     } satisfies ExportCapabilities)

@@ -59,6 +59,7 @@ interface FeatureTimelineBarProps {
   onReorderItem?: (item: DocumentHistoryOrderEntry, beforeItem: DocumentHistoryOrderEntry | null) => void
   reorderDisabled?: boolean
   onDeleteItem: (item: DocumentHistoryItemRecord) => void
+  onExportItem: (item: Extract<DocumentHistoryItemRecord, { kind: 'sketch' }>) => void
   onRenameItem: (item: DocumentHistoryItemRecord) => void
   onChangeSketchPlaneTarget?: (target: Extract<PrimitiveRef, { kind: 'sketch' }>) => void
   onSuppressFeature: (item: FeatureHistoryItem) => void
@@ -589,6 +590,7 @@ export function FeatureTimelineBar({
   onReorderItem,
   reorderDisabled = false,
   onDeleteItem,
+  onExportItem,
   onRenameItem,
   onChangeSketchPlaneTarget,
   onSuppressFeature,
@@ -753,6 +755,15 @@ export function FeatureTimelineBar({
             icon: <WorkbenchIcon name="edit" className="h-3.5 w-3.5" />,
             onSelect: () => item.kind === 'sketch' ? onChangeSketchPlaneTarget?.(item.target) : undefined,
           }
+        case 'export':
+          return {
+            kind: 'item' as const,
+            id: entry.id,
+            label: entry.label,
+            commandId: 'context.export' as const,
+            icon: <WorkbenchIcon name="download" className="h-3.5 w-3.5" />,
+            onSelect: () => item.kind === 'sketch' ? onExportItem(item) : undefined,
+          }
         case 'suppress':
           return {
             kind: 'item' as const,
@@ -860,6 +871,7 @@ export function FeatureTimelineBar({
     itemDragState,
     onCursorRequested,
     onDeleteItem,
+    onExportItem,
     onChangeSketchPlaneTarget,
     onRenameItem,
     onReopenTarget,

@@ -84,7 +84,7 @@ function getWorkerAdapter(documentId: DocumentId) {
 }
 
 async function getWorkerExportCapabilities(operation: Extract<OccWorkerOperation, {
-  kind: 'tessellateExportMesh' | 'writeStepExport'
+  kind: 'tessellateExportMesh' | 'writeStepExport' | 'resolveSketchVectorExportModel'
 }>) {
   const capabilitiesOrDiagnostic = await getWorkerAdapter(operation.documentId)
     .getExportCapabilities(operation.baseRevisionId)
@@ -176,6 +176,15 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       }
 
       return capabilitiesOrDiagnostic.brep.writeStep(operation.target, operation.options)
+    }
+    case 'resolveSketchVectorExportModel': {
+      const capabilitiesOrDiagnostic = await getWorkerExportCapabilities(operation)
+
+      if ('code' in capabilitiesOrDiagnostic) {
+        return { diagnostic: capabilitiesOrDiagnostic }
+      }
+
+      return capabilitiesOrDiagnostic.sketchVector.resolveSketchVectorModel(operation.target)
     }
   }
 }

@@ -339,6 +339,7 @@ test('src/components/layout/feature-timeline-highlight-history.spec.tsx', async 
             onReopenTarget={() => undefined}
             onCursorRequested={() => undefined}
             onDeleteItem={() => undefined}
+            onExportItem={() => undefined}
             onRenameItem={() => undefined}
             onSuppressFeature={() => undefined}
           />

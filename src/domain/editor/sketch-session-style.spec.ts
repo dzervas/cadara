@@ -52,7 +52,16 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {  const definition
       {
         styleId: 'style_primary',
         paint: { color: '#3366ff', opacity: 0.42 },
-        stroke: { color: '#ff8844', opacity: 0.63, width: 2.5, dashSize: 0.8, gapSize: 0.3 },
+        stroke: {
+          color: '#ff8844',
+          opacity: 0.63,
+          width: 2.5,
+          lineCap: 'butt',
+          lineJoin: 'bevel',
+          miterLimit: 5,
+          dashSize: 0.8,
+          gapSize: 0.3,
+        },
       },
     ],
     constraintIds: [],
@@ -63,7 +72,16 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {  const definition
     styles: Array<{
       styleId: string
       paint: { color: string; opacity: number }
-      stroke: { color: string; opacity: number; width: number; dashSize: number; gapSize: number }
+      stroke: {
+        color: string
+        opacity: number
+        width: number
+        lineCap: 'butt'
+        lineJoin: 'bevel'
+        miterLimit: number
+        dashSize: number
+        gapSize: number
+      }
     }>
   }
 
@@ -112,6 +130,9 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {  const definition
   expectTrue(lineRenderable.strokeStyle?.color === 0xff8844, 'Stroke style color should resolve from persisted style records.')
   expectTrue(lineRenderable.strokeStyle?.opacity === 0.63, 'Stroke style opacity should resolve from persisted style records.')
   expectTrue(lineRenderable.strokeStyle?.width === 2.5, 'Stroke style width should resolve from persisted style records.')
+  expectTrue(lineRenderable.strokeStyle?.lineCap === 'butt', 'Persisted stroke cap should resolve through display renderables.')
+  expectTrue(lineRenderable.strokeStyle?.lineJoin === 'bevel', 'Persisted stroke join should resolve through display renderables.')
+  expectTrue(lineRenderable.strokeStyle?.miterLimit === 5, 'Persisted stroke miter limit should resolve through display renderables.')
   expectTrue(lineRenderable.strokeStyle?.dashSize === 0.8, 'Stroke dash size should resolve from persisted style records.')
   expectTrue(lineRenderable.strokeStyle?.gapSize === 0.3, 'Stroke gap size should resolve from persisted style records.')
 
@@ -184,6 +205,123 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {  const definition
   expectTrue(localLineRenderable.strokeStyle?.miterLimit === 7, 'Local stroke miter limit should remain available to display helpers.')
   expectTrue(localLineRenderable.strokeStyle?.dashSize === 0.45, 'Local stroke dash size should render from inline style metadata.')
   expectTrue(localLineRenderable.strokeStyle?.gapSize === 0.15, 'Local stroke gap size should render from inline style metadata.')
+
+  const regionDefinition = {
+    ...definition,
+    pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c'],
+    points: [
+      definition.points[0]!,
+      definition.points[1]!,
+      {
+        pointId: 'sketch_point_c',
+        label: 'C',
+        target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'sketch_point_c' },
+        position: [0, 4],
+        isConstruction: false,
+      },
+    ],
+    entityIds: [],
+    entities: [],
+    styles: [
+      {
+        styleId: 'style_region_gradient',
+        label: 'Region gradient',
+        target: { kind: 'region', regionId: 'region_primary' },
+        fill: {
+          kind: 'gradient',
+          gradient: {
+            kind: 'linear',
+            angleRadians: Math.PI / 3,
+            startColor: '#2266ff',
+            startOpacity: 0.21,
+            endColor: '#ffaa33',
+            endOpacity: 0.74,
+          },
+        },
+        stroke: {
+          color: '#1188aa',
+          opacity: 0.52,
+          width: 4,
+          lineCap: 'square',
+          lineJoin: 'miter',
+          miterLimit: 9,
+          dashSize: 1.25,
+          gapSize: 0.5,
+        },
+      },
+    ],
+  } as SketchDefinition
+  const regionSolved = solveSketchDefinitionCore({
+    definition: regionDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    partialSolvePolicy: 'bestEffort',
+  })
+  const regionSession = {
+    ...createSketchSessionFromSnapshot({
+      ownerDocumentId: 'doc_workspace',
+      ownerRevisionId: 'rev_0001',
+      ownerFeatureId: null,
+      ownerSketchId: 'sketch_primary',
+      ownerBodyId: null,
+      sketchId: 'sketch_primary',
+      label: 'Sketch',
+      plane,
+      planeTarget: plane.support,
+      planeKey: 'xy',
+      sketch: {
+        ownerDocumentId: 'doc_workspace',
+        ownerRevisionId: 'rev_0001',
+        ownerFeatureId: null,
+        ownerSketchId: 'sketch_primary',
+        ownerBodyId: null,
+        sketchId: 'sketch_primary',
+        label: 'Sketch',
+        planeSupport: plane.support,
+        definition: regionDefinition,
+        solvedSnapshot: regionSolved.solvedSnapshot,
+        regions: [{
+          ownerDocumentId: 'doc_workspace',
+          ownerRevisionId: 'rev_0001',
+          ownerFeatureId: null,
+          ownerSketchId: 'sketch_primary',
+          ownerBodyId: null,
+          regionId: 'region_primary',
+          label: 'Primary region',
+          target: { kind: 'region', sketchId: 'sketch_primary', regionId: 'region_primary' },
+          sourceSketch: { kind: 'sketch', sketchId: 'sketch_primary' },
+          loops: [{
+            role: 'outer',
+            segments: [],
+            boundaryPointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c'],
+            isClosed: true,
+          }],
+          isClosed: true,
+        }],
+      },
+    } satisfies SketchSnapshotRecord),
+    definition: regionDefinition,
+  }
+  const regionRenderable = getSketchSessionDisplayRenderables(regionSession).find((entry) => entry.semanticClass === 'region')
+  expectTrue(regionRenderable?.paintStyle?.kind === 'linearGradient', 'Region style records should preserve gradient fill metadata through display renderables.')
+  expectTrue(
+    regionRenderable.paintStyle.startColor === 0x2266ff
+      && regionRenderable.paintStyle.startOpacity === 0.21
+      && regionRenderable.paintStyle.endColor === 0xffaa33
+      && regionRenderable.paintStyle.endOpacity === 0.74
+      && regionRenderable.paintStyle.angleRadians === Math.PI / 3,
+    'Region gradient display metadata should preserve colors, opacities, and angle.',
+  )
+  expectTrue(regionRenderable.strokeStyle?.lineCap === 'square', 'Region style record stroke cap should reach display renderables.')
+  expectTrue(regionRenderable.strokeStyle.lineJoin === 'miter', 'Region style record stroke join should reach display renderables.')
+  expectTrue(regionRenderable.strokeStyle.miterLimit === 9, 'Region style record miter limit should reach display renderables.')
+  expectTrue(
+    regionRenderable.strokeStyle.dashSize === 1.25 && regionRenderable.strokeStyle.gapSize === 0.5,
+    'Region style record dash and gap should reach display renderables.',
+  )
 
   const disabledStrokeDefinition = {
     ...localDefinition,

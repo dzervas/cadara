@@ -104,6 +104,7 @@ export const stlExportProvider: ExportProvider<StlExportOptions, FeatureEditorFo
   formatId: 'stl',
   fileExtension: 'stl',
   mimeType: 'model/stl',
+  targetKinds: ['body'],
 
   getDefaultOptions(): StlExportOptions {
     return {

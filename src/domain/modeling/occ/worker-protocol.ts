@@ -37,6 +37,7 @@ import type { AuthoredModelDocument } from '@/contracts/modeling/authored-docume
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
 import type { RequestId, RevisionId } from '@/contracts/shared/ids'
 import type { MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
+import type { SketchVectorExportModel } from '@/contracts/export/sketch-vector'
 import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
 import type { DurableRef } from '@/contracts/shared/references'
 import type {
@@ -155,6 +156,12 @@ export type OccWorkerOperation =
       target: DurableRef
       options: StepWriterOptions
     }
+  | {
+      kind: 'resolveSketchVectorExportModel'
+      documentId: AuthoredModelDocument['documentId']
+      baseRevisionId: RevisionId
+      target: DurableRef
+    }
 
 export type OccWorkerOperationResult =
   | void
@@ -176,6 +183,7 @@ export type OccWorkerOperationResult =
   | EvaluatePreviewResponse
   | ResolveReferenceResponse
   | MeshTriangle[]
+  | SketchVectorExportModel
   | { payload: string }
   | { diagnostic: DocumentExportDiagnostic }
   | DocumentExportDiagnostic

@@ -60,6 +60,33 @@ test('orchestrateGeometryExport preserves provider failures without rewriting di
   )
 })
 
+test('orchestrateGeometryExport rejects incompatible provider targets before invoking providers', async () => {
+  let invoked = false
+  const provider = makeProvider({
+    targetKinds: ['body'],
+    export() {
+      invoked = true
+      return { ok: true as const, payload: 'unexpected', diagnostics: [] }
+    },
+  })
+
+  const result = await orchestrateGeometryExport(
+    {
+      format: 'step',
+      options: { schema: 'AP242' },
+      target: { kind: 'sketch', sketchId: 'sketch_export' },
+      targetLabel: 'Sketch Export',
+    },
+    makeCapabilities(),
+    makeRegistry(provider),
+  )
+
+  expectTrue(result.ok === false, 'Incompatible provider targets should fail at the orchestrator seam.')
+  expectTrue(result.diagnostics[0]?.code === 'export-incompatible-target', 'Incompatible target failures should use the dedicated diagnostic code.')
+  expectTrue(invoked === false, 'The orchestrator should not invoke an incompatible provider.')
+})
+
+
 test('orchestrateGeometryExport slugs filenames and maps provider success metadata', async () => {
   const provider = makeProvider({
     formatId: 'mesh',
@@ -143,6 +170,18 @@ function makeCapabilities(): ExportCapabilities {
         return { payload: '' }
       },
     },
+    sketchVector: {
+      resolveSketchVectorModel() {
+        return {
+          diagnostic: {
+            code: 'test-sketch-vector-unavailable',
+            severity: 'error',
+            message: 'No sketch vector model in this test.',
+            target: null,
+          },
+        }
+      },
+    },
   }
 }
 
@@ -155,6 +194,7 @@ function makeProvider(
     formatId: 'step',
     fileExtension: 'step',
     mimeType: 'model/step',
+    targetKinds: ['feature'],
     getDefaultOptions() {
       return { schema: 'AP242' }
     },
@@ -184,6 +224,12 @@ function makeRegistry(
     },
     getByFormat(formatId) {
       return providers.find((provider) => provider.formatId === formatId)
+    },
+    getCompatibleProviders(target) {
+      return providers.filter((provider) => provider.targetKinds.includes(target.kind))
+    },
+    getCompatibleFormats(target) {
+      return this.getCompatibleProviders(target).map((provider) => provider.formatId)
     },
   }
 }

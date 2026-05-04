@@ -1,12 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 import {
+  buildSketchGradientMeshMaterial,
+  buildSketchPolylineStrokeGeometry,
+  getSketchStrokeWorldUnitsPerPixel,
   getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMarkerMaterialConfig,
   getSketchDisplayMeshMaterialConfig,
   getSketchDisplayPolylineMaterialConfig,
+  shouldUseSketchStrokeMeshGeometry,
   shouldDepthTestSketchDisplayMarker,
+  updateSketchGradientMaterialFrame,
 } from '@/components/cad/sketch-display-style'
 import type { SketchRenderingPalette } from '@/components/cad/sketch-rendering-palette'
 import { createReferenceImageDataUrl } from '@/domain/reference-image/rendering'
@@ -100,11 +106,24 @@ export function SketchDisplayMeshNode({
           polygonOffsetFactor: -1,
           polygonOffsetUnits: -1,
         })
-      : new THREE.MeshBasicMaterial(materialConfig)
+      : materialConfig.fill.kind === 'linearGradient'
+        ? buildSketchGradientMeshMaterial(materialConfig)
+        : new THREE.MeshBasicMaterial({
+            color: materialConfig.color,
+            transparent: materialConfig.transparent,
+            opacity: materialConfig.opacity,
+            side: materialConfig.side,
+            polygonOffset: materialConfig.polygonOffset,
+            polygonOffsetFactor: materialConfig.polygonOffsetFactor,
+            polygonOffsetUnits: materialConfig.polygonOffsetUnits,
+          })
     nextMaterial.depthWrite = false
     return nextMaterial
   }, [materialConfig, renderable.textureFill, texture])
 
+  useLayoutEffect(() => {
+    updateSketchGradientMaterialFrame(material, geometry, materialConfig)
+  }, [geometry, material, materialConfig])
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
   return (
@@ -210,6 +229,7 @@ export function SketchDisplayPolylineNode({
 
   const geometry = useMemo(() => new THREE.BufferGeometry(), [])
   const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette)
+  const useStrokeMesh = shouldUseSketchStrokeMeshGeometry(renderable, materialConfig, applyStyles)
   const {
     color,
     dashSize,
@@ -218,26 +238,43 @@ export function SketchDisplayPolylineNode({
     lineWidth,
     opacity,
   } = materialConfig
+  const { camera, size } = useThree()
+  const strokeGeometryTokenRef = useRef<string | null>(null)
   const material = useMemo(
-    () => applyWireMaterialDepthPolicy(linePattern === 'dashed'
-      ? new THREE.LineDashedMaterial({
+    () => {
+      if (useStrokeMesh) {
+        const nextMaterial = new THREE.MeshBasicMaterial({
           color,
           transparent: true,
           opacity,
-          linewidth: lineWidth,
-          dashSize,
-          gapSize,
+          side: THREE.DoubleSide,
         })
-      : new THREE.LineBasicMaterial({
-          color,
-          transparent: true,
-          opacity,
-          linewidth: lineWidth,
-        })),
-    [color, dashSize, gapSize, linePattern, lineWidth, opacity],
+        nextMaterial.depthWrite = false
+        return nextMaterial
+      }
+
+      return applyWireMaterialDepthPolicy(linePattern === 'dashed'
+        ? new THREE.LineDashedMaterial({
+            color,
+            transparent: true,
+            opacity,
+            linewidth: lineWidth,
+            dashSize,
+            gapSize,
+          })
+        : new THREE.LineBasicMaterial({
+            color,
+            transparent: true,
+            opacity,
+            linewidth: lineWidth,
+          }))
+    },
+    [color, dashSize, gapSize, linePattern, lineWidth, opacity, useStrokeMesh],
   )
   const line = useMemo(() => {
-    const nextLine = new THREE.Line(geometry, material)
+    const nextLine = useStrokeMesh
+      ? new THREE.Mesh(geometry, material)
+      : new THREE.Line(geometry, material)
     nextLine.renderOrder = 3
 
     if (renderable.target) {
@@ -251,15 +288,52 @@ export function SketchDisplayPolylineNode({
     }
 
     return nextLine
-  }, [geometry, material, renderable.role, renderable.target])
+  }, [geometry, material, renderable.role, renderable.target, useStrokeMesh])
 
   useLayoutEffect(() => {
+    if (useStrokeMesh) {
+      updatePolylineStrokeGeometryBuffer(
+        geometry,
+        geometryData,
+        materialConfig,
+        getSketchStrokeWorldUnitsPerPixel(camera, size.height, geometryData.points),
+        renderable.sketchPlaneFrame,
+      )
+      strokeGeometryTokenRef.current = createStrokeGeometryToken(
+        geometryData,
+        materialConfig,
+        getSketchStrokeWorldUnitsPerPixel(camera, size.height, geometryData.points),
+      )
+      return
+    }
+
     updatePolylineGeometryBuffer(geometry, geometryData)
 
-    if (linePattern === 'dashed') {
+    if (linePattern === 'dashed' && line instanceof THREE.Line) {
       line.computeLineDistances()
     }
-  }, [geometry, geometryData, line, linePattern])
+  }, [camera, geometry, geometryData, line, linePattern, materialConfig, renderable.sketchPlaneFrame, size.height, useStrokeMesh])
+
+  useFrame(({ camera: frameCamera, size: frameSize }) => {
+    if (!useStrokeMesh) {
+      return
+    }
+
+    const worldUnitsPerPixel = getSketchStrokeWorldUnitsPerPixel(frameCamera, frameSize.height, geometryData.points)
+    const token = createStrokeGeometryToken(geometryData, materialConfig, worldUnitsPerPixel)
+    if (token === strokeGeometryTokenRef.current) {
+      return
+    }
+
+    updatePolylineStrokeGeometryBuffer(
+      geometry,
+      geometryData,
+      materialConfig,
+      worldUnitsPerPixel,
+      renderable.sketchPlaneFrame,
+    )
+    strokeGeometryTokenRef.current = token
+  })
 
   useEffect(() => {
     return () => {
@@ -269,6 +343,45 @@ export function SketchDisplayPolylineNode({
   useEffect(() => () => material.dispose(), [material])
 
   return <primitive object={line} />
+}
+
+function updatePolylineStrokeGeometryBuffer(
+  geometry: THREE.BufferGeometry,
+  geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
+  materialConfig: ReturnType<typeof getSketchDisplayPolylineMaterialConfig>,
+  worldUnitsPerPixel: number,
+  sketchPlaneFrame: SketchSessionDisplayRenderable['sketchPlaneFrame'],
+) {
+  const nextGeometry = buildSketchPolylineStrokeGeometry({
+    points: geometryData.points,
+    isClosed: geometryData.isClosed,
+    materialConfig,
+    worldUnitsPerPixel,
+    sketchPlaneFrame,
+  })
+  geometry.dispose()
+  geometry.copy(nextGeometry)
+  nextGeometry.dispose()
+  geometry.computeBoundingSphere()
+}
+
+function createStrokeGeometryToken(
+  geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
+  materialConfig: ReturnType<typeof getSketchDisplayPolylineMaterialConfig>,
+  worldUnitsPerPixel: number,
+) {
+  return JSON.stringify({
+    points: geometryData.points,
+    isClosed: geometryData.isClosed,
+    width: materialConfig.lineWidth,
+    cap: materialConfig.lineCap,
+    join: materialConfig.lineJoin,
+    miterLimit: materialConfig.miterLimit,
+    pattern: materialConfig.linePattern,
+    dashSize: materialConfig.dashSize,
+    gapSize: materialConfig.gapSize,
+    worldUnitsPerPixel: Number.isFinite(worldUnitsPerPixel) ? worldUnitsPerPixel.toFixed(8) : '1',
+  })
 }
 
 export function SketchDisplayMarkerNode({

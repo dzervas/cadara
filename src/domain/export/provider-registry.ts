@@ -1,9 +1,13 @@
 import type { ExportProvider } from '@/contracts/export/provider'
+import { exportProviderSupportsTarget } from '@/contracts/export/provider'
+import type { DurableRef } from '@/contracts/shared/references'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 
 export interface ExportProviderRegistry {
   getAll(): readonly ExportProvider<unknown, FeatureEditorFormSchema>[]
   getByFormat(formatId: string): ExportProvider<unknown, FeatureEditorFormSchema> | undefined
+  getCompatibleProviders(target: DurableRef): readonly ExportProvider<unknown, FeatureEditorFormSchema>[]
+  getCompatibleFormats(target: DurableRef): readonly string[]
 }
 
 export function createExportProviderRegistry(
@@ -32,6 +36,12 @@ export function createExportProviderRegistry(
     },
     getByFormat(formatId) {
       return providersByFormat.get(formatId)
+    },
+    getCompatibleProviders(target) {
+      return dedupedProviders.filter((provider) => exportProviderSupportsTarget(provider, target))
+    },
+    getCompatibleFormats(target) {
+      return this.getCompatibleProviders(target).map((provider) => provider.formatId)
     },
   }
 }

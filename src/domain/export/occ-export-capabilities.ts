@@ -4,10 +4,12 @@ import type {
   MeshExportAccuracy,
   MeshTessellationCapability,
   MeshTriangle,
+  SketchVectorExportCapability,
   StepWriterOptions,
 } from '@/contracts/export/capabilities'
 import type { DocumentExportDiagnostic as ExportDiagnostic } from '@/contracts/modeling/export'
 import type { DurableRef } from '@/contracts/shared/references'
+import { buildSketchVectorExportModel } from '@/domain/export/sketch-vector-export-model'
 import type { OccAuthoringState } from '@/domain/modeling/occ/authoring-state'
 import type { OccTrackedBody } from '@/domain/modeling/occ/topology'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
@@ -300,9 +302,23 @@ function createOccBRepWriterCapability(state: OccAuthoringState): BRepWriterCapa
   }
 }
 
+function createOccSketchVectorCapability(state: OccAuthoringState): SketchVectorExportCapability {
+  return {
+    resolveSketchVectorModel(target: DurableRef) {
+      return buildSketchVectorExportModel({
+        documentId: state.documentId,
+        revisionId: state.revisionId,
+        sketches: state.sketches,
+        target,
+      })
+    },
+  }
+}
+
 export function createOccExportCapabilities(state: OccAuthoringState): ExportCapabilities {
   return {
     mesh: createOccMeshTessellationCapability(state),
     brep: createOccBRepWriterCapability(state),
+    sketchVector: createOccSketchVectorCapability(state),
   }
 }

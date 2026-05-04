@@ -16,7 +16,7 @@ The workbench SHALL render a custom right-click context menu for visible navigat
 - **THEN** the workbench opens the same context menu for that row
 
 ### Requirement: Parts and objects menu SHALL include delete and export actions
-The Parts & Objects context menu SHALL offer Delete and Export actions for each object row. Delete SHALL request generic durable deletion for supported parts and objects, and Export SHALL open the document export modal for the selected object row.
+The Parts & Objects context menu SHALL offer Delete and Export actions for each exportable object row. Delete SHALL request generic durable deletion for supported parts and objects, and Export SHALL open the document export modal for the selected row with file types filtered to that row's target.
 
 #### Scenario: Invoke object delete action
 - **WHEN** the user selects Delete from a Parts & Objects row context menu for a supported part or object
@@ -32,6 +32,12 @@ The Parts & Objects context menu SHALL offer Delete and Export actions for each 
 - **WHEN** the user selects Export from a Parts & Objects row context menu
 - **THEN** the workbench opens the export modal for the selected row
 - **AND** the workbench does not show the export placeholder status message
+
+#### Scenario: Sketch object export shows sketch formats only
+- **WHEN** the user selects Export from a committed sketch row in Parts & Objects
+- **THEN** the workbench opens the export modal for that sketch target
+- **AND** the modal offers SVG and DXF as the available file types
+- **AND** the modal omits body-only export formats for that sketch target
 
 ### Requirement: Body and part rename SHALL persist to the document
 The Parts & Objects context menu SHALL offer Rename for body/part rows and commit accepted body labels through the modeling document mutation path.
@@ -58,11 +64,17 @@ Snapshot Reference and Document Diagnostic context menus SHALL offer target sele
 - **THEN** the workbench shows an inline status message that inspection is not implemented yet
 
 ### Requirement: Feature history menu SHALL include edit, suppress, cursor, and delete actions
-The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History Here, Roll To End, and Delete for supported committed document history items. Committed sketch items that participate in support-plane reassignment SHALL also offer `Change Sketch Plane`. Feature-only actions such as Suppress and Unsuppress SHALL remain available only for committed feature items and SHALL route to the modeling suppression mutation.
+The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History Here, Roll To End, and Delete for supported committed document history items. Committed sketch history items SHALL also offer Export and, when eligible, `Change Sketch Plane`. Feature-only actions such as Suppress and Unsuppress SHALL remain available only for committed feature items and SHALL route to the modeling suppression mutation.
 
 #### Scenario: Edit history item from menu
 - **WHEN** the user selects Edit from a committed sketch or feature history context menu
 - **THEN** the workbench uses the same reopen flow as double-clicking that history item
+
+#### Scenario: Export sketch history item from menu
+- **WHEN** the user selects Export from a committed sketch history context menu
+- **THEN** the workbench opens the same export modal used by Parts & Objects export
+- **AND** the modal is scoped to that sketch target
+- **AND** the modal offers the same SVG and DXF file type choices as Parts & Objects sketch export
 
 #### Scenario: Change sketch plane from menu
 - **WHEN** the user selects `Change Sketch Plane` from the context menu for an eligible committed sketch history item

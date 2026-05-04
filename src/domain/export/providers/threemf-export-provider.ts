@@ -156,6 +156,7 @@ export const threeMfExportProvider: ExportProvider<ThreeMfExportOptions, Feature
   formatId: '3mf',
   fileExtension: '3mf',
   mimeType: 'model/3mf',
+  targetKinds: ['body'],
 
   getDefaultOptions(): ThreeMfExportOptions {
     return {

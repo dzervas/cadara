@@ -47,6 +47,32 @@ test('src/components/layout/document-export-modal.spec.tsx', () => {  const targ
   expectTrue(!stlMarkup.includes('STEP options'), 'STL export should not show STEP-specific controls.')
   expectTrue(!stlMarkup.includes('cadara JSON'), 'STL export should not show cadara-specific controls.')
 
+  const sketchMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <RuntimeExtensionRegistryProvider registries={registries}>
+        <DocumentExportModal
+          opened
+          target={{
+            target: { kind: 'sketch', sketchId: 'sketch_profile' },
+            label: 'Sketch 1',
+            baseRevisionId: 'rev_0001',
+          }}
+          withinPortal={false}
+          errorReporter={errorReporter}
+          exportDocument={async () => ({ ok: false, format: 'svg', diagnostics: [] })}
+          onClose={() => undefined}
+          onDownload={() => undefined}
+        />
+      </RuntimeExtensionRegistryProvider>
+    </MantineProvider>,
+  )
+
+  expectTrue(sketchMarkup.includes('SVG'), 'Sketch export modal should list SVG.')
+  expectTrue(sketchMarkup.includes('DXF'), 'Sketch export modal should list DXF.')
+  expectTrue(!sketchMarkup.includes('STL'), 'Sketch export modal should omit STL.')
+  expectTrue(!sketchMarkup.includes('STEP'), 'Sketch export modal should omit STEP.')
+  expectTrue(!sketchMarkup.includes('3MF'), 'Sketch export modal should omit 3MF.')
+
   const stepMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <RuntimeExtensionRegistryProvider registries={registries}>

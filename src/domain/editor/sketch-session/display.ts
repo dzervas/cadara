@@ -305,6 +305,7 @@ export function createDisplayRenderableForRegion(
       vertexNormals: triangulated.points.map(() => session.plane.frame.normal),
       triangleIndices: triangulated.triangleIndices,
     },
+    sketchPlaneFrame: session.plane.frame,
     linePattern: 'solid',
     role: 'local',
     semanticClass: 'region',
@@ -471,6 +472,7 @@ export function createDisplayRenderableForEntity(
         ],
         isClosed: false,
       },
+      sketchPlaneFrame: session.plane.frame,
       linePattern: entity.isConstruction ? 'dashed' : 'solid',
       role: 'local',
       paintStyle: style?.paintStyle,
@@ -490,6 +492,7 @@ export function createDisplayRenderableForEntity(
         points: sampleSplinePoints(entity.points).map((point) => mapSketchPointToWorld(session.plane, point)),
         isClosed: false,
       },
+      sketchPlaneFrame: session.plane.frame,
       linePattern: entity.isConstruction ? 'dashed' : 'solid',
       role: 'local',
       paintStyle: style?.paintStyle,
@@ -509,6 +512,7 @@ export function createDisplayRenderableForEntity(
         points: entity.points.map((point) => mapSketchPointToWorld(session.plane, point)),
         isClosed: entity.isClosed,
       },
+      sketchPlaneFrame: session.plane.frame,
       linePattern: entity.isConstruction ? 'dashed' : 'solid',
       role: 'local',
       paintStyle: style?.paintStyle,
@@ -536,6 +540,7 @@ export function createDisplayRenderableForEntity(
       points,
       isClosed: true,
     },
+    sketchPlaneFrame: session.plane.frame,
     linePattern: entity.isConstruction ? 'dashed' : 'solid',
     role: 'local',
     paintStyle: style?.paintStyle,
@@ -564,6 +569,7 @@ export function createDisplayRenderableForReferenceImageOperation(
       vertexNormals: corners.map(() => session.plane.frame.normal),
       triangleIndices: [[0, 1, 2], [0, 2, 3]],
     },
+    sketchPlaneFrame: session.plane.frame,
     linePattern: 'solid',
     role: 'local',
     semanticClass: 'sketchImage',
@@ -702,14 +708,23 @@ export function parseSketchStyleRecordFill(fill: SketchStyleRecord['fill']): Ske
 
   if (fill.kind === 'solid') {
     return {
+      kind: 'solid',
       color: parseColorValue(fill.color) ?? 0x48b6ff,
       opacity: fill.opacity,
     }
   }
 
+  const startColor = parseColorValue(fill.gradient.startColor) ?? 0x48b6ff
+  const endColor = parseColorValue(fill.gradient.endColor) ?? startColor
   return {
-    color: parseColorValue(fill.gradient.startColor) ?? 0x48b6ff,
+    kind: 'linearGradient',
+    color: startColor,
     opacity: fill.gradient.startOpacity,
+    startColor,
+    startOpacity: fill.gradient.startOpacity,
+    endColor,
+    endOpacity: fill.gradient.endOpacity,
+    angleRadians: fill.gradient.angleRadians,
   }
 }
 
@@ -740,9 +755,25 @@ export function parseLocalPaintStyle(style: SketchStyleDefinition): SketchDispla
     ?? (style.fillMode === 'gradient' ? parseColorValue(style.gradientStartColor) : null)
     ?? 0x48b6ff
 
+  if (style.fillMode === 'gradient') {
+    const startColor = parseColorValue(style.gradientStartColor) ?? color
+    const endColor = parseColorValue(style.gradientEndColor) ?? color
+    return {
+      kind: 'linearGradient',
+      color,
+      opacity: 0.32,
+      startColor,
+      startOpacity: 0.32,
+      endColor,
+      endOpacity: 0.32,
+      angleRadians: 0,
+    }
+  }
+
   return {
+    kind: 'solid',
     color,
-    opacity: style.fillMode === 'gradient' ? 0.32 : 0.42,
+    opacity: 0.42,
   }
 }
 
@@ -821,12 +852,33 @@ export function parsePaintStyle(value: Record<string, unknown> | null): SketchDi
     return undefined
   }
 
+  if (value.kind === 'gradient') {
+    const gradient = getRecordObjectValue(value, 'gradient')
+    const startColor = parseColorValue(gradient?.startColor)
+    const endColor = parseColorValue(gradient?.endColor)
+    if (startColor === null || endColor === null) {
+      return undefined
+    }
+
+    return {
+      kind: 'linearGradient',
+      color: startColor,
+      opacity: getOptionalNumber(gradient?.startOpacity) ?? 1,
+      startColor,
+      startOpacity: getOptionalNumber(gradient?.startOpacity) ?? 1,
+      endColor,
+      endOpacity: getOptionalNumber(gradient?.endOpacity) ?? 1,
+      angleRadians: getOptionalNumber(gradient?.angleRadians) ?? 0,
+    }
+  }
+
   const color = parseColorValue(value.color)
   if (color === null) {
     return undefined
   }
 
   return {
+    kind: 'solid',
     color,
     opacity: getOptionalNumber(value.opacity) ?? 1,
   }

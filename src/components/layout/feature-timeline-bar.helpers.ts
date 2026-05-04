@@ -11,8 +11,8 @@ export const TIMELINE_CURSOR_GLYPH = '↕'
 export type DocumentHistoryMenuEntryDescriptor =
   | {
       kind: 'item'
-      id: 'edit' | 'rename' | 'change-sketch-plane' | 'suppress' | 'roll-history-here' | 'roll-to-end' | 'delete'
-      label: 'Edit' | 'Rename' | 'Change Sketch Plane' | 'Suppress' | 'Unsuppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
+      id: 'edit' | 'rename' | 'export' | 'change-sketch-plane' | 'suppress' | 'roll-history-here' | 'roll-to-end' | 'delete'
+      label: 'Edit' | 'Rename' | 'Export' | 'Change Sketch Plane' | 'Suppress' | 'Unsuppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
       disabled?: boolean
     }
   | {
@@ -102,6 +102,13 @@ export function getDocumentHistoryMenuEntryDescriptors(input: {
       id: 'rename',
       label: 'Rename',
     },
+    ...(item.kind === 'sketch'
+      ? [{
+          kind: 'item' as const,
+          id: 'export' as const,
+          label: 'Export' as const,
+        }]
+      : []),
     ...(item.kind === 'sketch' && canChangeSketchPlane
       ? [{
           kind: 'item' as const,

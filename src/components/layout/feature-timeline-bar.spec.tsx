@@ -386,6 +386,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
           onDeleteItem={() => undefined}
+          onExportItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -469,7 +470,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
     sketchMenuDescriptors
       .filter((entry) => entry.kind === 'item')
       .map((entry) => entry.label)
-      .join('|') === 'Edit|Rename|Roll History Here|Roll To End|Delete',
+      .join('|') === 'Edit|Rename|Export|Roll History Here|Roll To End|Delete',
     'Sketch history menus should keep the shared committed-history actions when plane reassignment is unavailable.',
   )
   expectTrue(
@@ -482,7 +483,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
     })
       .filter((entry) => entry.kind === 'item')
       .map((entry) => entry.label)
-      .join('|') === 'Edit|Rename|Change Sketch Plane|Roll History Here|Roll To End|Delete',
+      .join('|') === 'Edit|Rename|Export|Change Sketch Plane|Roll History Here|Roll To End|Delete',
     'Sketch history menus should insert Change Sketch Plane without affecting the feature-only actions.',
   )
   expectTrue(
@@ -566,6 +567,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
           onDeleteItem={() => undefined}
+          onExportItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -651,6 +653,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
           onCursorRequested={() => undefined}
           reorderDisabled
           onDeleteItem={() => undefined}
+          onExportItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -697,6 +700,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
           onReopenTarget={() => undefined}
           onCursorRequested={() => undefined}
           onDeleteItem={() => undefined}
+          onExportItem={() => undefined}
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
@@ -723,6 +727,7 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
           onDocumentCursorRequested={() => undefined}
           onSketchCursorRequested={() => undefined}
           onDeleteDocumentItem={() => undefined}
+          onExportDocumentItem={() => undefined}
           onRenameDocumentItem={() => undefined}
           onSuppressFeature={() => undefined}
         />

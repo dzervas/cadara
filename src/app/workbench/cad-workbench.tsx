@@ -855,6 +855,10 @@ export function CadWorkbench({
 		setObjectExportModal(nextModalState);
 	};
 
+	const handleDocumentHistoryExport = (item: SketchHistoryItem) => {
+		handleObjectExport(item.target, item.label);
+	};
+
 	const handleFeatureSuppressionRequested = (item: FeatureHistoryItem) => {
 		if (!snapshot) {
 			return;
@@ -1596,6 +1600,7 @@ export function CadWorkbench({
 												dispatch({ type: "sketch.historyCursorRequested", cursor })
 											}
 											onDeleteDocumentItem={handleDocumentHistoryDelete}
+											onExportDocumentItem={handleDocumentHistoryExport}
 											onRenameDocumentItem={handleDocumentHistoryRename}
 											onSuppressFeature={handleFeatureSuppressionRequested}
 										/>

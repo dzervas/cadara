@@ -76,7 +76,7 @@ test('src/domain/modeling/modeling-export.spec.ts', async () => {  async functio
 
     expectTrue(!result.ok, 'Geometry export should reject non-body targets.')
     expectTrue(
-      result.diagnostics.some((diagnostic) => diagnostic.code === 'mock-export-unexportable-target'),
+      result.diagnostics.some((diagnostic) => diagnostic.code === 'export-incompatible-target'),
       'Unexportable targets should report a structured diagnostic.',
     )
   }

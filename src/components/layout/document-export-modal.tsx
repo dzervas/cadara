@@ -28,6 +28,7 @@ import type { ObjectExportModalState } from '@/domain/export/object-export-state
 import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import type { ExportProvider } from '@/contracts/export/provider'
 import type { FeatureEditorFormField, FeatureEditorFormSection } from '@/core/feature-authoring/form-schema'
+import { getPrimitiveRefKey } from '@/core/editor/schema'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
 
 interface DocumentExportModalProps {
@@ -65,7 +66,7 @@ export function DocumentExportModal({
     >
       {target ? (
         <DocumentExportModalContent
-          key={`${target.baseRevisionId}:${target.label}:${initialFormat}`}
+          key={`${target.baseRevisionId}:${getPrimitiveRefKey(target.target)}:${initialFormat}`}
           exportDocument={exportDocument}
           errorReporter={errorReporter}
           initialFormat={initialFormat}
@@ -198,7 +199,7 @@ function DocumentExportModalContent({
   target,
 }: DocumentExportModalContentProps) {
   const { exportProviders } = useRuntimeExtensionRegistry()
-  const providers = exportProviders.getAll()
+  const providers = exportProviders.getCompatibleProviders(target.target)
   const [format, setFormat] = useState(() =>
     providers.some((provider) => provider.formatId === initialFormat)
       ? initialFormat
@@ -280,20 +281,27 @@ function DocumentExportModalContent({
   }
 
   const formatData = providers.map((p) => ({ label: p.label, value: p.formatId }))
+  const hasCompatibleProviders = providers.length > 0
 
   return (
     <Stack gap="md">
-      <SegmentedControl
-        aria-label="Export file type"
-        data={formatData}
-        styles={{
-          root: { isolation: 'isolate' },
-          indicator: { zIndex: 0 },
-          label: { position: 'relative', zIndex: 1 },
-        }}
-        value={format}
-        onChange={setFormat}
-      />
+      {hasCompatibleProviders ? (
+        <SegmentedControl
+          aria-label="Export file type"
+          data={formatData}
+          styles={{
+            root: { isolation: 'isolate' },
+            indicator: { zIndex: 0 },
+            label: { position: 'relative', zIndex: 1 },
+          }}
+          value={format}
+          onChange={setFormat}
+        />
+      ) : (
+        <Alert color="red" variant="light" title="No compatible export formats">
+          This target does not have a registered export provider.
+        </Alert>
+      )}
 
       {activeProvider ? (
         <ProviderOptionsForm
@@ -313,7 +321,7 @@ function DocumentExportModalContent({
         <Button variant="subtle" leftSection={<WorkbenchIcon name="close" size={14} />} onClick={onClose} disabled={pending}>
           Cancel
         </Button>
-        <Button leftSection={<WorkbenchIcon name="download" size={14} />} onClick={handleSubmit} loading={pending} disabled={!target}>
+        <Button leftSection={<WorkbenchIcon name="download" size={14} />} onClick={handleSubmit} loading={pending} disabled={!target || !hasCompatibleProviders}>
           Export
         </Button>
       </Group>
