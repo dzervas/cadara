@@ -10,7 +10,7 @@ import {
   type ErrorReporter,
 } from '@/contracts/errors/reporter'
 import {
-  BUGSINK_DSN,
+  SENTRY_DSN,
   defaultSentryBrowserClient,
   initializeSentryErrorReporting,
   shouldEnableSentryErrorReporting,
@@ -22,7 +22,7 @@ import {
 } from '@/contracts/errors/telemetry-context'
 
 export {
-  BUGSINK_DSN,
+  SENTRY_DSN,
   initializeSentryErrorReporting,
   shouldEnableSentryErrorReporting,
   type SentryBrowserBoundary,

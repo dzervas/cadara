@@ -8,7 +8,7 @@ import {
   createSentryDsnTestUrl,
 } from '@/contracts/errors/sentry-client'
 import {
-  BUGSINK_DSN,
+  SENTRY_DSN,
   createSentryErrorReporter,
   initializeSentryErrorReporting,
   shouldEnableSentryErrorReporting,
@@ -80,7 +80,7 @@ test('src/contracts/errors/sentry-reporter.spec.ts', async () => {  const initOp
   expectTrue(record !== null, 'Sentry reporter should return the first record.')
   expectTrue(duplicate === null, 'Sentry reporter should preserve dedupe behavior.')
   expectTrue(initOptions.length === 1, 'Sentry reporter should initialize the SDK once on creation.')
-  expectTrue((initOptions[0] as { dsn?: string }).dsn === BUGSINK_DSN, 'Sentry reporter should use the Bugsink DSN.')
+  expectTrue((initOptions[0] as { dsn?: string }).dsn === SENTRY_DSN, 'Sentry reporter should use the Bugsink DSN.')
   expectTrue(initializeSentryErrorReporting({ client }), 'Repeated initialization should report the initialized client.')
   expectTrue(initOptions.length === 1, 'Sentry reporter should not initialize the same SDK client twice.')
   expectTrue(

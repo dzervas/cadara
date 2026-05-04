@@ -7,7 +7,7 @@ import type {
 
 export type { CaptureContext, SeverityLevel }
 
-export const BUGSINK_DSN = 'https://0f8f70678fa14347ad0d762e7db3c74c@errors.dzerv.art/1'
+export const SENTRY_DSN = 'https://0a4eee874e00861be4c30cb81fe15ce1@o4511242392961024.ingest.de.sentry.io/4511333375148112'
 const SENTRY_ENVELOPE_VERSION = '7'
 const SENTRY_BROWSER_CLIENT = 'sentry.javascript.browser/10.49.0'
 
@@ -57,8 +57,9 @@ export function initializeSentryErrorReporting(options: SentryInitializationOpti
 
   try {
     client.init({
-      dsn: options.dsn ?? BUGSINK_DSN,
+      dsn: options.dsn ?? SENTRY_DSN,
       environment: options.environment ?? 'production',
+      enableLogs: true,
     })
     initializedClients.add(client)
     return true
@@ -68,7 +69,7 @@ export function initializeSentryErrorReporting(options: SentryInitializationOpti
   }
 }
 
-export function createSentryDsnTestUrl(dsn = BUGSINK_DSN) {
+export function createSentryDsnTestUrl(dsn = SENTRY_DSN) {
   const dsnUrl = new URL(dsn)
   const projectId = dsnUrl.pathname.split('/').filter(Boolean).at(-1)
 
