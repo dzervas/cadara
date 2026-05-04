@@ -103,6 +103,10 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
     'Toolbar tool cluster row should be allowed to shrink so the absolute floating bar does not widen the workbench shell.',
   )
   expectTrue(
+    toolbarMarkup.includes('data-toolbar-responsive-rows="1"'),
+    'Toolbar should advertise its measured responsive row count so browser coverage can guard narrow-width spillover.',
+  )
+  expectTrue(
     toolbarMarkup.includes('role="toolbar"') && toolbarMarkup.includes('aria-label="CAD tools"'),
     'Toolbar tool groups should be wrapped in an explicit toolbar landmark.',
   )

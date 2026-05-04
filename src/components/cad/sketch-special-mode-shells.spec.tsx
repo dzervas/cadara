@@ -11,9 +11,9 @@ import {
 } from '@/components/cad/sketch-special-mode-viewport-feedback'
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
-  VIEWPORT_FLOATING_PANEL_TOP_PX,
   VIEWPORT_OVERLAY_INSET_PX,
-  VIEWPORT_OVERLAY_TOP_INSET_PX,
+  VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+  VIEWPORT_OVERLAY_TOP_INSET_STYLE,
 } from '@/components/cad/viewport-overlay-layout'
 
 test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {  const panelMarkup = renderToStaticMarkup(
@@ -79,7 +79,7 @@ test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {  co
   expectTrue(panelMarkup.includes('Cancel'), 'The generic special-mode panel should render footer actions.')
   expectTrue(
     panelMarkup.includes(`left:${VIEWPORT_FLOATING_PANEL_LEFT_PX}px`)
-      && panelMarkup.includes(`top:${VIEWPORT_FLOATING_PANEL_TOP_PX}px`),
+      && panelMarkup.includes(`top:${VIEWPORT_FLOATING_PANEL_TOP_STYLE}`),
     'The generic special-mode panel should use the same floating left panel slot as the feature editor.',
   )
 
@@ -130,7 +130,7 @@ test('src/components/cad/sketch-special-mode-shells.spec.tsx', async () => {  co
   expectTrue(feedbackMarkup.includes('Corner'), 'The generic special-mode feedback shell should render handle labels.')
   expectTrue(
     feedbackMarkup.includes(`right:${VIEWPORT_OVERLAY_INSET_PX}px`)
-      && feedbackMarkup.includes(`top:${VIEWPORT_OVERLAY_TOP_INSET_PX}px`),
+      && feedbackMarkup.includes(`top:${VIEWPORT_OVERLAY_TOP_INSET_STYLE}`),
     'The generic special-mode viewport status should clear the floating toolbar when it anchors on the right edge.',
   )
 

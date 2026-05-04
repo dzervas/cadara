@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { ActionIcon, Paper, ScrollArea, Text, TextInput, Tooltip } from '@mantine/core'
 
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
@@ -27,6 +27,14 @@ import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
 
 const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
 const DISCORD_URL = 'https://discord.gg/T2dBRp4SAQ'
+const TOOLBAR_GAP_PX = 8
+const TOOLBAR_SHADOW_GUTTER_PX = 32
+const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 32
+type VisibleToolbarSection = ReturnType<typeof getToolbarSectionsForMode>[number]
+interface ResponsiveToolbarSectionState {
+  sectionKey: string
+  primarySectionIds: readonly string[]
+}
 
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability
@@ -59,8 +67,11 @@ export function WorkspaceToolbar({
   const [searchQuery, setSearchQuery] = useState('')
   const [searchPopoverOpen, setSearchPopoverOpen] = useState(false)
   const [highlightedSearchResultIndex, setHighlightedSearchResultIndex] = useState(-1)
+  const [responsiveSectionState, setResponsiveSectionState] = useState<ResponsiveToolbarSectionState | null>(null)
   const searchListboxId = useId()
+  const primaryRailRef = useRef<HTMLDivElement | null>(null)
   const searchRootRef = useRef<HTMLDivElement | null>(null)
+  const toolbarSectionElementsRef = useRef(new Map<string, HTMLDivElement>())
   const {
     state: { activeCommand, activeEditSession, activeSketchPlaneEditSession, activeImportSession, history, mode, sketchSession },
   } = useEditorState()
@@ -70,6 +81,8 @@ export function WorkspaceToolbar({
     () => getToolbarSectionsForMode(mode),
     [mode],
   )
+  const visibleSectionIds = useMemo(() => visibleSections.map((section) => section.id), [visibleSections])
+  const visibleSectionKey = visibleSectionIds.join('|')
   const searchResults = useMemo(
     () => searchToolDefinitions(searchQuery),
     [searchQuery],
@@ -170,6 +183,97 @@ export function WorkspaceToolbar({
   const activeSearchResultId = activeSearchResult
     ? `${searchListboxId}-option-${activeSearchResult.id}`
     : undefined
+  const activePrimarySectionIds = useMemo(() => {
+    const visibleIdSet = new Set<string>(visibleSectionIds)
+    const measuredPrimaryIds = responsiveSectionState?.sectionKey === visibleSectionKey
+      ? responsiveSectionState.primarySectionIds.filter((sectionId) => visibleIdSet.has(sectionId))
+      : []
+    return measuredPrimaryIds.length > 0 ? measuredPrimaryIds : visibleSectionIds
+  }, [responsiveSectionState, visibleSectionIds, visibleSectionKey])
+  const activePrimarySectionIdSet = useMemo(
+    () => new Set(activePrimarySectionIds),
+    [activePrimarySectionIds],
+  )
+  const primarySections = visibleSections.filter((section) => activePrimarySectionIdSet.has(section.id))
+  const overflowSections = visibleSections.filter((section) => !activePrimarySectionIdSet.has(section.id))
+
+  const setToolbarSectionRef = useCallback(
+    (sectionId: string) => (node: HTMLDivElement | null) => {
+      if (node) {
+        toolbarSectionElementsRef.current.set(sectionId, node)
+        return
+      }
+      toolbarSectionElementsRef.current.delete(sectionId)
+    },
+    [],
+  )
+
+  const updateResponsiveSections = useCallback(() => {
+    const primaryRail = primaryRailRef.current
+    if (!primaryRail) {
+      return
+    }
+
+    const availableWidth = primaryRail.clientWidth - TOOLBAR_SHADOW_GUTTER_PX * 2 - TOOLBAR_SEARCH_SHADOW_RESERVE_PX
+    if (availableWidth <= 0) {
+      return
+    }
+
+    const widths = visibleSections.map((section) => ({
+      section,
+      width: toolbarSectionElementsRef.current.get(section.id)?.getBoundingClientRect().width ?? 0,
+    }))
+    if (widths.some(({ width }) => width <= 0)) {
+      return
+    }
+
+    const nextPrimarySectionIds: string[] = []
+    let occupiedWidth = 0
+
+    for (const { section, width } of widths) {
+      const nextWidth = occupiedWidth + (nextPrimarySectionIds.length > 0 ? TOOLBAR_GAP_PX : 0) + width
+      if (nextWidth <= availableWidth || nextPrimarySectionIds.length === 0) {
+        nextPrimarySectionIds.push(section.id)
+        occupiedWidth = nextWidth
+        continue
+      }
+
+      break
+    }
+
+    setResponsiveSectionState((current) => {
+      if (
+        current?.sectionKey === visibleSectionKey
+        && current.primarySectionIds.length === nextPrimarySectionIds.length
+        && current.primarySectionIds.every((sectionId, index) => sectionId === nextPrimarySectionIds[index])
+      ) {
+        return current
+      }
+      return {
+        sectionKey: visibleSectionKey,
+        primarySectionIds: nextPrimarySectionIds,
+      }
+    })
+  }, [visibleSections, visibleSectionKey])
+
+  useEffect(() => {
+    const primaryRail = primaryRailRef.current
+    if (!primaryRail) {
+      return
+    }
+
+    let frameId = window.requestAnimationFrame(updateResponsiveSections)
+    const resizeObserver = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frameId)
+      frameId = window.requestAnimationFrame(updateResponsiveSections)
+    })
+
+    resizeObserver.observe(primaryRail)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      resizeObserver.disconnect()
+    }
+  }, [updateResponsiveSections])
 
   const renderTool = (tool: RegisteredToolDefinition) => {
     if (tool.id === 'sketch' && hasActiveSketchSession) {
@@ -208,12 +312,28 @@ export function WorkspaceToolbar({
     return <ToolButton key={tool.id} tool={tool} active={isActive} disabled={disabled} />
   }
 
+  const renderSection = (section: VisibleToolbarSection) => (
+    <ToolbarPill
+      key={section.id}
+      ref={setToolbarSectionRef(section.id)}
+      sectionId={section.id}
+      style={pillCommonStyle}
+    >
+      {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
+    </ToolbarPill>
+  )
+
   return (
     <div
-      className="absolute left-4 right-4 top-3 z-30 flex h-[50px] items-center gap-2 text-[var(--workbench-shell-text)]"
-      style={{ pointerEvents: 'none' }}
+      className="absolute left-4 right-4 top-3 z-30 grid gap-x-2 gap-y-2 text-[var(--workbench-shell-text)]"
+      style={{
+        alignItems: 'start',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
+        pointerEvents: 'none',
+      }}
       role="toolbar"
       aria-label="CAD tools"
+      data-toolbar-responsive-rows={overflowSections.length > 0 ? '2' : '1'}
     >
       <DocumentFileMenu
         showBrowserStorageWarning={showBrowserStorageWarning}
@@ -224,38 +344,41 @@ export function WorkspaceToolbar({
       />
 
       {/*
-        Cluster row scrolls horizontally when the bar is too narrow to fit all
-        clusters. The padding + negative margin gives the pill drop-shadows
-        (`box-shadow: 0 12px 32px ...`) room to render *inside* the scroll container
-        instead of being clipped at the cluster row edges — see DESIGN.md
-        "Floating Toolbar (Pill Clusters)".
+        Whole tool groups progressively spill into a second rail before they
+        can collide with search or utilities. The second rail scrolls
+        horizontally if a dense mode still exceeds the viewport, so the toolbar
+        never creates a third row.
        */}
       <div
+        ref={primaryRailRef}
+        data-toolbar-primary-rail=""
         className="flex min-w-0 items-center gap-2"
         style={{
-          overflowX: 'auto',
+          boxSizing: 'border-box',
+          gridColumn: '2',
+          gridRow: '1',
+          minHeight: 50,
+          overflowX: 'hidden',
           overflowY: 'hidden',
           paddingTop: 40,
-          paddingRight: 32,
+          paddingRight: TOOLBAR_SHADOW_GUTTER_PX,
           paddingBottom: 40,
-          paddingLeft: 32,
+          paddingLeft: TOOLBAR_SHADOW_GUTTER_PX,
           marginTop: -40,
-          marginRight: -32,
+          marginRight: -TOOLBAR_SHADOW_GUTTER_PX,
           marginBottom: -40,
-          marginLeft: -32,
+          marginLeft: -TOOLBAR_SHADOW_GUTTER_PX,
           scrollbarWidth: 'none',
         }}
       >
-        {visibleSections.map((section) => (
-          <ToolbarPill key={section.id} style={pillCommonStyle}>
-            {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
-          </ToolbarPill>
-        ))}
+        {primarySections.map(renderSection)}
       </div>
 
-      <div className="flex-1" />
-
-      <div ref={searchRootRef} className="relative w-[260px] shrink-0" style={{ pointerEvents: 'auto' }}>
+      <div
+        ref={searchRootRef}
+        className="relative w-[clamp(184px,22vw,260px)] shrink-0"
+        style={{ gridColumn: '3', gridRow: '1', pointerEvents: 'auto' }}
+      >
         <TextInput
           value={searchQuery}
           onChange={(event) => {
@@ -351,7 +474,7 @@ export function WorkspaceToolbar({
         )}
       </div>
 
-      <ToolbarPill style={utilityPillStyle}>
+      <ToolbarPill sectionId="utilities" style={utilityPillStyle}>
         <ShortcutSettingsButton />
         {onReportBug ? (
           <Tooltip
@@ -423,6 +546,31 @@ export function WorkspaceToolbar({
           </ActionIcon>
         </Tooltip>
       </ToolbarPill>
+      {overflowSections.length > 0 ? (
+        <div
+          data-toolbar-overflow-rail=""
+          className="flex min-w-0 items-center gap-2"
+          style={{
+            boxSizing: 'border-box',
+            gridColumn: '2 / -1',
+            gridRow: '2',
+            maxWidth: '100%',
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            paddingTop: 40,
+            paddingRight: TOOLBAR_SHADOW_GUTTER_PX,
+            paddingBottom: 40,
+            paddingLeft: TOOLBAR_SHADOW_GUTTER_PX,
+            marginTop: -40,
+            marginRight: -TOOLBAR_SHADOW_GUTTER_PX,
+            marginBottom: -40,
+            marginLeft: -TOOLBAR_SHADOW_GUTTER_PX,
+            scrollbarWidth: 'none',
+          }}
+        >
+          {overflowSections.map(renderSection)}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -447,13 +595,16 @@ const utilityPillStyle: CSSProperties = {
 }
 
 interface ToolbarPillProps {
+  sectionId?: string
   style: CSSProperties
   children: ReactNode
 }
 
-function ToolbarPill({ style, children }: ToolbarPillProps) {
-  return <div style={style}>{children}</div>
-}
+const ToolbarPill = forwardRef<HTMLDivElement, ToolbarPillProps>(
+  function ToolbarPill({ sectionId, style, children }, ref) {
+    return <div ref={ref} data-toolbar-section={sectionId} style={style}>{children}</div>
+  },
+)
 
 /**
  * The brand mark — the first of the three Spark Affordances. Identity, not ornament.

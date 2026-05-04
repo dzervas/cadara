@@ -102,10 +102,10 @@ import {
 	getWorkbenchShortcutActiveScopes,
 } from "@/app/workbench/commands/workbench-shortcuts";
 import {
-	WORKBENCH_STATUS_TOP_PX,
-	WORKBENCH_STATUS_TOP_WITH_RESTORE_PX,
+	WORKBENCH_STATUS_TOP_STYLE,
+	WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE,
 	VIEWPORT_FLOATING_PANEL_LEFT_PX,
-	VIEWPORT_FLOATING_PANEL_TOP_PX,
+	VIEWPORT_FLOATING_PANEL_TOP_STYLE,
 	getWorkbenchNotificationRightOffsetPx,
 } from "@/components/cad/viewport-overlay-layout";
 import {
@@ -1445,7 +1445,7 @@ export function CadWorkbench({
 										placement={{
 											kind: "viewport",
 											right: notificationRightOffset,
-											top: WORKBENCH_STATUS_TOP_PX,
+											top: WORKBENCH_STATUS_TOP_STYLE,
 										}}
 										action={{
 											label: "Reset stored history",
@@ -1464,8 +1464,8 @@ export function CadWorkbench({
 											kind: "viewport",
 											right: notificationRightOffset,
 											top: restoreMessage
-												? WORKBENCH_STATUS_TOP_WITH_RESTORE_PX
-												: WORKBENCH_STATUS_TOP_PX,
+												? WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE
+												: WORKBENCH_STATUS_TOP_STYLE,
 										}}
 										onDismiss={() => setWorkbenchStatusNotification(null)}
 									/>
@@ -1476,7 +1476,7 @@ export function CadWorkbench({
 										className="pointer-events-none absolute z-20 max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
 										style={{
 											left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
-											top: VIEWPORT_FLOATING_PANEL_TOP_PX,
+											top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
 										}}
 									>
 										{sketchSession.validationMessage}

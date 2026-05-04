@@ -6,7 +6,7 @@ import { getPartsObjectMenuEntries } from '@/components/layout/parts-object-menu
 import {
   FLOATING_PARTS_TREE_WIDTH_PX,
   VIEWPORT_OVERLAY_INSET_PX,
-  VIEWPORT_OVERLAY_TOP_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_STYLE,
 } from '@/components/cad/viewport-overlay-layout'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
@@ -67,7 +67,7 @@ export function FloatingPartsTree({
       className="pointer-events-auto absolute select-none"
       style={{
         left: VIEWPORT_OVERLAY_INSET_PX,
-        top: VIEWPORT_OVERLAY_TOP_INSET_PX,
+        top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
         width: FLOATING_PARTS_TREE_WIDTH_PX,
         zIndex: 15,
         color: 'var(--workbench-shell-text)',

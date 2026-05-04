@@ -131,7 +131,7 @@ import {
   LEGACY_VIEWPORT_LEFT_INSET_PX,
   LEGACY_VIEWPORT_WIDTH_PX,
   VIEWPORT_CANVAS_TOP_INSET_PX,
-  VIEWPORT_OVERLAY_TOP_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_STYLE,
   VIEW_CUBE_SIZE_PX,
 } from '@/components/cad/viewport-overlay-layout'
 import {
@@ -1690,7 +1690,7 @@ export function ThreeCadViewport({
       <div
         className="pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-1"
         style={{
-          top: VIEWPORT_OVERLAY_TOP_INSET_PX,
+          top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
           width: `min(${VIEW_CUBE_SIZE_PX}px, calc(100% - 32px))`,
         }}
       >

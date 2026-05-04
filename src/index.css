@@ -12,6 +12,7 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --workbench-viewport-overlay-top: 76px;
 }
 
 html,
@@ -36,6 +37,12 @@ body {
 button,
 input {
   font: inherit;
+}
+
+@media (width <= 1639px) {
+  :root {
+    --workbench-viewport-overlay-top: 128px;
+  }
 }
 
 @keyframes workbench-tab-loading-sweep {
@@ -67,4 +74,3 @@ input {
     opacity: 0.6;
   }
 }
-

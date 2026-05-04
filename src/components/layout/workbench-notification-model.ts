@@ -8,7 +8,7 @@ export interface WorkbenchNotificationAction {
 }
 
 export type WorkbenchNotificationPlacement =
-  | { kind: 'viewport'; top: number; right: number }
+  | { kind: 'viewport'; top: number | string; right: number | string }
   | { kind: 'app-top-center' }
 
 export interface WorkbenchNotificationModel {

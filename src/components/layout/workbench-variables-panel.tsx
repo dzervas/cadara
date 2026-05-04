@@ -4,7 +4,7 @@ import { ActionIcon, Tooltip } from '@mantine/core'
 import { shouldStartVariableKeyboardEdit } from '@/components/layout/feature-sidebar.a11y'
 import {
   VIEWPORT_OVERLAY_INSET_PX,
-  VIEWPORT_OVERLAY_TOP_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_STYLE,
 } from '@/components/cad/viewport-overlay-layout'
 import { WorkbenchIcon } from '@/components/ui/workbench-icon'
 import type { DocumentVariableRecord, WorkspaceSnapshot } from '@/contracts/modeling/schema'
@@ -88,7 +88,7 @@ function getVariableResultPresentations(
 
 const PANEL_STYLE: CSSProperties = {
   position: 'absolute',
-  top: VIEWPORT_OVERLAY_TOP_INSET_PX,
+  top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
   right: VIEWPORT_OVERLAY_INSET_PX,
   bottom: 172,
   width: 320,

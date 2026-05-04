@@ -97,6 +97,7 @@ test('edited rectangle width annotation solves and still finishes the sketch', a
   await workbench.activateTool('Create rectangle geometry.')
   await canvas.click({ position: { x: 360, y: 260 }, force: true })
   await canvas.click({ position: { x: 500, y: 360 }, force: true })
+  await canvas.click({ position: { x: 700, y: 500 }, force: true })
   await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('4 entities staged')
 
   const widthGlyph = page.locator('[data-sketch-annotation-glyph="dimensionHorizontal"]').first()
@@ -153,6 +154,7 @@ test('edited rectangle height annotation solves and still finishes the sketch', 
   await workbench.activateTool('Create rectangle geometry.')
   await canvas.click({ position: { x: 360, y: 260 }, force: true })
   await canvas.click({ position: { x: 500, y: 360 }, force: true })
+  await canvas.click({ position: { x: 700, y: 500 }, force: true })
   await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('4 entities staged')
 
   const heightGlyph = page.locator('[data-sketch-annotation-glyph="dimensionVertical"]').first()

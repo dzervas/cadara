@@ -9,6 +9,7 @@ export const VIEWPORT_FLOATING_PANEL_GAP_PX = 12
  * Used by the view cube, notifications, and any other top-anchored overlay.
  */
 export const VIEWPORT_OVERLAY_TOP_INSET_PX = 76
+export const VIEWPORT_OVERLAY_TOP_INSET_STYLE = 'var(--workbench-viewport-overlay-top, 76px)'
 /**
  * Shared left-side panel slot. It starts below the toolbar and to the right of
  * the floating parts tree, matching the feature editor placement.
@@ -16,6 +17,7 @@ export const VIEWPORT_OVERLAY_TOP_INSET_PX = 76
 export const VIEWPORT_FLOATING_PANEL_LEFT_PX =
   VIEWPORT_OVERLAY_INSET_PX + FLOATING_PARTS_TREE_WIDTH_PX + VIEWPORT_FLOATING_PANEL_GAP_PX
 export const VIEWPORT_FLOATING_PANEL_TOP_PX = VIEWPORT_OVERLAY_TOP_INSET_PX
+export const VIEWPORT_FLOATING_PANEL_TOP_STYLE = VIEWPORT_OVERLAY_TOP_INSET_STYLE
 /**
  * Top inset for the visible viewport surface itself. The shell uses floating
  * chrome, so the viewport surface starts at the top edge.
@@ -37,6 +39,8 @@ export const LEGACY_VIEWPORT_WIDTH_PX = 1080
 export const LEGACY_VIEWPORT_HEIGHT_PX = 912
 export const WORKBENCH_STATUS_TOP_PX = VIEWPORT_OVERLAY_TOP_INSET_PX
 export const WORKBENCH_STATUS_TOP_WITH_RESTORE_PX = WORKBENCH_STATUS_TOP_PX + 60
+export const WORKBENCH_STATUS_TOP_STYLE = VIEWPORT_OVERLAY_TOP_INSET_STYLE
+export const WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE = 'calc(var(--workbench-viewport-overlay-top, 76px) + 60px)'
 
 export function getWorkbenchNotificationRightOffsetPx(options: { reserveViewCube: boolean }) {
   if (!options.reserveViewCube) {

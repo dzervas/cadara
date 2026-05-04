@@ -16,7 +16,7 @@ import {
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
-  VIEWPORT_FLOATING_PANEL_TOP_PX,
+  VIEWPORT_FLOATING_PANEL_TOP_STYLE,
 } from '@/components/cad/viewport-overlay-layout'
 import type {
   SketchSpecialModePanelAction,
@@ -50,7 +50,7 @@ export function SketchSpecialModePanel({
       className="pointer-events-auto absolute z-20 flex max-h-[70vh] w-[320px] max-w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden rounded-[6px]"
       style={{
         left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
-        top: VIEWPORT_FLOATING_PANEL_TOP_PX,
+        top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
         background: 'var(--workbench-shell-surface-panel-elev)',
         boxShadow: 'var(--workbench-shell-elevation-md)',
       }}

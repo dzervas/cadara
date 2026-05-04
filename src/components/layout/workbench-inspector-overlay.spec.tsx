@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { WorkbenchInspectorOverlay } from '@/components/layout/workbench-inspector-overlay'
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
-  VIEWPORT_FLOATING_PANEL_TOP_PX,
+  VIEWPORT_FLOATING_PANEL_TOP_STYLE,
 } from '@/components/cad/viewport-overlay-layout'
 
 test('src/components/layout/workbench-inspector-overlay.spec.tsx', async () => {  const markup = renderToStaticMarkup(
@@ -27,7 +27,7 @@ test('src/components/layout/workbench-inspector-overlay.spec.tsx', async () => {
   )
   expectTrue(
     markup.includes(`left:${VIEWPORT_FLOATING_PANEL_LEFT_PX}px`)
-      && markup.includes(`top:${VIEWPORT_FLOATING_PANEL_TOP_PX}px`),
+      && markup.includes(`top:${VIEWPORT_FLOATING_PANEL_TOP_STYLE}`),
     'Workbench inspector overlay should use the shared floating panel slot below the toolbar and past the parts tree.',
   )
 })

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
-  VIEWPORT_FLOATING_PANEL_TOP_PX,
+  VIEWPORT_FLOATING_PANEL_TOP_STYLE,
 } from '@/components/cad/viewport-overlay-layout'
 
 interface WorkbenchInspectorOverlayProps {
@@ -16,7 +16,7 @@ export function WorkbenchInspectorOverlay({ children }: WorkbenchInspectorOverla
         className="pointer-events-auto absolute min-w-0 max-w-md"
         style={{
           left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
-          top: VIEWPORT_FLOATING_PANEL_TOP_PX,
+          top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
         }}
       >
         {children}
