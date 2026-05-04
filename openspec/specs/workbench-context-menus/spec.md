@@ -58,7 +58,7 @@ Snapshot Reference and Document Diagnostic context menus SHALL offer target sele
 - **THEN** the workbench shows an inline status message that inspection is not implemented yet
 
 ### Requirement: Feature history menu SHALL include edit, suppress, cursor, and delete actions
-The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History Here, Roll To End, and Delete for supported committed document history items. Committed sketch items that participate in support-plane reassignment SHALL also offer `Change Sketch Plane`. Feature-only actions such as Suppress SHALL remain available only for committed feature items.
+The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History Here, Roll To End, and Delete for supported committed document history items. Committed sketch items that participate in support-plane reassignment SHALL also offer `Change Sketch Plane`. Feature-only actions such as Suppress and Unsuppress SHALL remain available only for committed feature items and SHALL route to the modeling suppression mutation.
 
 #### Scenario: Edit history item from menu
 - **WHEN** the user selects Edit from a committed sketch or feature history context menu
@@ -92,9 +92,17 @@ The Feature Timeline/history context menu SHALL offer Edit, Rename, Roll History
 - **THEN** the workbench requests generic deletion for that document history item through the modeling service
 - **AND** the refreshed history bar no longer shows the deleted history item when the mutation is accepted
 
-#### Scenario: Suppress feature placeholder
-- **WHEN** the user selects Suppress from a feature history context menu
-- **THEN** the workbench shows an inline status message that feature suppression is not implemented yet
+#### Scenario: Suppress active feature
+- **WHEN** the user selects Suppress from an unsuppressed feature history context menu
+- **THEN** the workbench routes a suppress request through the editor/runtime document mutation path
+- **AND** the refreshed history bar marks the feature as suppressed when the mutation is accepted
+- **AND** the action no longer shows the placeholder status message
+
+#### Scenario: Unsuppress suppressed feature
+- **WHEN** the user selects Unsuppress from a suppressed feature history context menu
+- **THEN** the workbench routes an unsuppress request through the editor/runtime document mutation path
+- **AND** the refreshed history bar marks the feature as active when the mutation is accepted
+- **AND** the action no longer shows the placeholder status message
 
 ### Requirement: Parts and objects sketch menus SHALL expose plane reassignment for eligible sketches
 The `Parts & Objects` context menu SHALL expose `Change Sketch Plane` for committed sketch rows that participate in the support-plane reassignment capability.

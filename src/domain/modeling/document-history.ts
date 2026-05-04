@@ -80,6 +80,7 @@ export function createDocumentHistoryItems(input: {
       target: { kind: 'feature', featureId: feature.featureId },
       sketchId: null,
       featureId: feature.featureId,
+      suppressed: feature.suppressed,
     })
   }
 

@@ -26,6 +26,8 @@ import type {
   ResolveReferenceResponse,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionRequest,
+  SetFeatureSuppressionResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
@@ -95,6 +97,10 @@ export type OccWorkerOperation =
       request: UpdateFeatureRequest
     }
   | {
+      kind: 'setFeatureSuppression'
+      request: SetFeatureSuppressionRequest
+    }
+  | {
       kind: 'deleteFeature'
       request: DeleteFeatureRequest
     }
@@ -148,6 +154,7 @@ export type OccWorkerOperationResult =
   | CommitSketchResponse
   | CreateFeatureResponse
   | UpdateFeatureResponse
+  | SetFeatureSuppressionResponse
   | DeleteFeatureResponse
   | DeleteDocumentTargetResponse
   | RenameBodyResponse

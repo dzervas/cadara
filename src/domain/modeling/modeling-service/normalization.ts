@@ -917,6 +917,10 @@ export function normalizeDocumentHistory(value: unknown): DocumentHistoryItemRec
     }
 
     const featureId = assertFeatureId(entry.featureId)
+    if (typeof entry.suppressed !== 'boolean') {
+      throw new Error('Invalid document history feature suppression payload.')
+    }
+
     return {
       id: entry.id as DocumentHistoryItemRecord['id'],
       label: entry.label,
@@ -925,6 +929,7 @@ export function normalizeDocumentHistory(value: unknown): DocumentHistoryItemRec
       target: { kind: 'feature', featureId },
       sketchId: null,
       featureId,
+      suppressed: entry.suppressed,
     }
   })
 }
@@ -2399,6 +2404,7 @@ export function normalizeFeatures(value: unknown): FeatureSnapshotRecord[] {
       !isRecord(entry) ||
       !isString(entry.featureId) ||
       !isString(entry.label) ||
+      typeof entry.suppressed !== 'boolean' ||
       !isRecord(entry.definition) ||
       !Array.isArray(entry.producedTargets)
     ) {
@@ -2409,6 +2415,7 @@ export function normalizeFeatures(value: unknown): FeatureSnapshotRecord[] {
       ...normalizeOwnership(entry),
       featureId: assertFeatureId(entry.featureId),
       label: entry.label,
+      suppressed: entry.suppressed,
       definition: normalizeFeatureDefinition(entry.definition),
       producedTargets: entry.producedTargets.map((target) => assertDurableRef(target)),
     }

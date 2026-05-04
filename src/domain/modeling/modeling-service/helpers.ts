@@ -29,6 +29,7 @@ import type {
   ReorderDocumentHistoryRequest,
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
+  SetFeatureSuppressionRequest,
   UpdateFeatureRequest,
   UpdateDocumentVariableRequest,
 } from '@/contracts/modeling/schema'
@@ -60,6 +61,7 @@ import type {
   ModelingReorderFeatureInput,
   ModelingReorderDocumentHistoryInput,
   ModelingSetFeatureCursorInput,
+  ModelingSetFeatureSuppressionInput,
   ModelingEvaluatePreviewInput,
   ModelingExportDocumentInput,
   ModelingCommitSketchInput,
@@ -185,6 +187,20 @@ export function normalizeUpdateFeatureInput(
   return {
     ...requestInput,
     definition: normalizeFeatureDefinition(input.definition),
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  }
+}
+
+export function normalizeSetFeatureSuppressionInput(
+  input: ModelingSetFeatureSuppressionInput,
+  documentId: DocumentId,
+): SetFeatureSuppressionRequest {
+  assertMutationBase(input)
+  const requestInput = stripRepositoryMutationBasis(input)
+
+  return {
+    ...requestInput,
     contractVersion: CONTRACT_VERSION,
     documentId,
   }

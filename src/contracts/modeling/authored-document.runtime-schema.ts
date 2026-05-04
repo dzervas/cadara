@@ -49,6 +49,7 @@ const authoredSketchRecordSchema = z.object({
 const authoredFeatureRecordSchema = z.object({
   featureId: featureIdSchema,
   label: stringSchema,
+  suppressed: z.boolean(),
   definition: featureDefinitionSchema,
 }).strict()
 

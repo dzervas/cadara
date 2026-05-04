@@ -85,6 +85,7 @@ interface HistoryTimelineVisualItem {
   isAtCursor: boolean
   isDragging?: boolean
   isHighlighted?: boolean
+  isSuppressed?: boolean
   errorMessage?: string | null
   dataFeatureError?: string
   dataDerivedHighlighted?: string
@@ -458,7 +459,7 @@ function HistoryTimelineSurface({
                           onDoubleClick={item.onDoubleClick}
                           className={`relative flex h-7 shrink-0 items-center gap-1.5 rounded-[4px] pl-2 pr-2.5 text-[11px] transition ${
                             item.isAfterCursor ? 'opacity-45' : ''
-                          } ${item.isDragging ? 'opacity-70' : ''} ${!item.isAllowed ? 'cursor-not-allowed' : ''}`}
+                          } ${item.isSuppressed ? 'opacity-60' : ''} ${item.isDragging ? 'opacity-70' : ''} ${!item.isAllowed ? 'cursor-not-allowed' : ''}`}
                           style={{
                             backgroundColor: item.errorMessage
                               ? 'var(--workbench-shell-danger-surface)'
@@ -476,6 +477,8 @@ function HistoryTimelineSurface({
                               ? 'var(--workbench-shell-danger-text)'
                               : item.isSelected || item.isHighlighted
                                 ? 'var(--workbench-shell-accent)'
+                                : item.isSuppressed
+                                  ? 'var(--workbench-shell-text-muted)'
                                 : 'var(--workbench-shell-text)',
                           }}
                           aria-label={item.ariaLabel}
@@ -486,6 +489,7 @@ function HistoryTimelineSurface({
                           data-feature-error={item.dataFeatureError}
                           data-derived-highlighted={item.dataDerivedHighlighted}
                           data-history-feature-id={item.dataHistoryFeatureId}
+                          data-history-feature-suppressed={item.isSuppressed ? 'true' : undefined}
                           data-delete-supported={item.dataDeleteSupported}
                           data-repair-guidance={item.dataRepairGuidance}
                           aria-describedby={item.errorMessage ? tooltipId : undefined}
@@ -507,7 +511,7 @@ function HistoryTimelineSurface({
                           onBlur={() => setRepairTooltip(null)}
                         >
                           {item.icon}
-                          <span className="max-w-[9ch] truncate text-[11px]">
+                          <span className={`max-w-[9ch] truncate text-[11px] ${item.isSuppressed ? 'line-through decoration-[var(--workbench-shell-text-muted)]' : ''}`}>
                             {item.label}
                           </span>
                         </button>
@@ -818,6 +822,7 @@ export function FeatureTimelineBar({
       isAtCursor,
       isDragging: isDraggingItem,
       isHighlighted: isHistoryHighlighted,
+      isSuppressed: item.kind === 'feature' && item.suppressed,
       errorMessage: repairMessage,
       dataFeatureError: primaryFeatureDiagnostic ? 'true' : undefined,
       dataDerivedHighlighted: isHistoryHighlighted ? 'true' : undefined,

@@ -24,6 +24,7 @@ import type {
   ReorderDocumentHistoryResponse,
   ReorderFeatureResponse,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionResponse,
   UpdateDocumentVariableResponse,
   UpdateFeatureResponse,
   WorkspaceSnapshot,
@@ -536,6 +537,7 @@ export const previewFreshnessSchema = z.discriminatedUnion('kind', [
 
 const featureSnapshotRecordSchema = z.object({
   featureId: featureIdSchema,
+  suppressed: z.boolean(),
   definition: featureDefinitionSchema,
 }).passthrough()
 
@@ -626,6 +628,11 @@ export const createFeatureResponseSchema = modelingOperationResponseBaseSchema.e
 export const updateFeatureResponseSchema = modelingOperationResponseBaseSchema.extend({
   featureId: featureIdSchema,
 }).transform((value) => value as UpdateFeatureResponse)
+
+export const setFeatureSuppressionResponseSchema = modelingOperationResponseBaseSchema.extend({
+  featureId: featureIdSchema,
+  suppressed: z.boolean(),
+}).transform((value) => value as SetFeatureSuppressionResponse)
 
 export const deleteFeatureResponseSchema = modelingOperationResponseBaseSchema.extend({
   deletedFeatureId: featureIdSchema,

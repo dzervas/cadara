@@ -428,6 +428,7 @@ function buildSnapshotPresentationRecords(
       ownerBodyId: null,
       featureId: feature.featureId,
       label: buildFeatureLabel(feature.featureId, feature.label),
+      suppressed: feature.suppressed,
       definition: createSnapshotFeatureDefinition(feature.definition),
       producedTargets: [...(producedTargetsByFeatureId.get(feature.featureId) ?? [])],
     }

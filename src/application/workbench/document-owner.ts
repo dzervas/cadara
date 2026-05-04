@@ -5,7 +5,7 @@ import type {
 	DocumentVariableRecord,
 	ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
-import type { RequestId } from "@/contracts/shared/ids";
+import type { FeatureId, RequestId } from "@/contracts/shared/ids";
 import { ok, type AppErrorContextEntry, type AppResult } from "@/contracts/errors";
 import {
 	applyImportPreparedActions,
@@ -150,6 +150,21 @@ export function createWorkbenchDocumentOwner({
 		return acceptMutation(result, options);
 	}
 
+	async function setFeatureSuppression(
+		featureId: FeatureId,
+		suppressed: boolean,
+		options: AcceptedMutationOptions,
+	) {
+		const currentSnapshot = requireSnapshot();
+		const result = await modelingService.setFeatureSuppression({
+			baseRevisionId: currentSnapshot.document.revisionId,
+			featureId,
+			suppressed,
+		});
+
+		return acceptMutation(result, options);
+	}
+
 	async function renameDocument(
 		name: string,
 		_options: Pick<AcceptedMutationOptions, "fallbackMessage" | "operation" | "context">,
@@ -267,6 +282,7 @@ export function createWorkbenchDocumentOwner({
 		reorderDocumentHistory,
 		renameTarget,
 		replaceActiveDocumentBasis,
+		setFeatureSuppression,
 		updateDocumentVariable,
 	};
 }

@@ -764,6 +764,8 @@ export type DocumentHistoryItemRecord =
 			sketchId: null;
 			/** Durable feature identity represented by this item. */
 			featureId: FeatureId;
+			/** Whether this committed feature is bypassed during authored replay. */
+			suppressed: boolean;
 	  };
 
 /**
@@ -820,6 +822,8 @@ export interface FeatureSnapshotRecordBase extends SnapshotOwnershipRecord {
 	featureId: FeatureId;
 	/** Human-readable feature label owned by the modeling system. */
 	label: string;
+	/** Whether authored replay bypasses this feature for rebuild execution. */
+	suppressed: boolean;
 	/**
 	 * Durable targets created or materially re-owned by the rebuilt feature.
 	 * Unaffected targets must remain absent rather than inferred by callers.
@@ -1123,6 +1127,28 @@ export interface UpdateFeatureRequest extends FeatureMutationRequest {
 export interface UpdateFeatureResponse extends ModelingOperationResult {
 	/** Durable feature identity that was targeted by the update. */
 	featureId: FeatureId;
+}
+
+/**
+ * Feature suppression request.
+ * This mutates authored replay metadata only; feature definitions remain pure
+ * operation inputs and do not carry suppression state.
+ */
+export interface SetFeatureSuppressionRequest extends DocumentMutationRequest {
+	/** Durable feature identity whose replay state should be changed. */
+	featureId: FeatureId;
+	/** Requested suppression state. */
+	suppressed: boolean;
+}
+
+/**
+ * Feature suppression response.
+ */
+export interface SetFeatureSuppressionResponse extends ModelingOperationResult {
+	/** Durable feature identity that was targeted by the mutation. */
+	featureId: FeatureId;
+	/** Suppression state observed or accepted by the mutation. */
+	suppressed: boolean;
 }
 
 /**

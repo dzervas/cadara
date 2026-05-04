@@ -32,6 +32,7 @@ import type {
   ReorderFeatureRequest,
   ResolvedReferenceRecord,
   SetFeatureCursorRequest,
+  SetFeatureSuppressionRequest,
   SnapshotMutationBasis,
   UpdateFeatureRequest,
   UpdateDocumentVariableRequest,
@@ -86,6 +87,7 @@ export interface ModelingService {
   updateDocumentVariable(input: ModelingUpdateDocumentVariableInput): AppResultAsync<ModelingDocumentVariableMutationResult>
   createFeature(input: ModelingCreateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
   updateFeature(input: ModelingUpdateFeatureInput): AppResultAsync<ModelingFeatureMutationResult>
+  setFeatureSuppression(input: ModelingSetFeatureSuppressionInput): AppResultAsync<ModelingFeatureSuppressionResult>
   deleteFeature(input: ModelingDeleteFeatureInput): AppResultAsync<ModelingDeleteFeatureResult>
   deleteTarget(input: ModelingDeleteTargetInput): AppResultAsync<ModelingDeleteTargetResult>
   renameBody(input: ModelingRenameBodyInput): AppResultAsync<ModelingRenameBodyResult>
@@ -145,6 +147,16 @@ export interface SketchSolverService {
 export interface ModelingFeatureMutationResult {
   revisionId: WorkspaceSnapshot['document']['revisionId']
   featureId: FeatureId
+  revisionState: MutationRevisionState
+  rebuildResult: RebuildResult
+  changedTargets: PrimitiveRef[]
+  diagnostics: ModelingDiagnostic[]
+}
+
+export interface ModelingFeatureSuppressionResult {
+  revisionId: WorkspaceSnapshot['document']['revisionId']
+  featureId: FeatureId
+  suppressed: boolean
   revisionState: MutationRevisionState
   rebuildResult: RebuildResult
   changedTargets: PrimitiveRef[]
@@ -230,6 +242,8 @@ type ModelingMutationBasisInput = Pick<SnapshotMutationBasis, 'baseRepositoryHea
 export type ModelingCreateFeatureInput = Omit<CreateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingAddDocumentVariableInput = Omit<AddDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingUpdateFeatureInput = Omit<UpdateFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
+export type ModelingSetFeatureSuppressionInput =
+  Omit<SetFeatureSuppressionRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingUpdateDocumentVariableInput = Omit<UpdateDocumentVariableRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingDeleteFeatureInput = Omit<DeleteFeatureRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>
 export type ModelingDeleteTargetInput = Omit<DeleteDocumentTargetRequest, 'contractVersion' | 'documentId'> & Partial<ModelingMutationBasisInput>

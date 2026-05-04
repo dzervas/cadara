@@ -24,6 +24,8 @@ import type {
   ResolveReferenceResponse,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionRequest,
+  SetFeatureSuppressionResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
@@ -88,6 +90,7 @@ export interface OccWorkerSnapshotClient {
   commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>
   createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>
   updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>
+  setFeatureSuppression(request: SetFeatureSuppressionRequest): Promise<SetFeatureSuppressionResponse>
   deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>
   deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse>
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>
@@ -184,6 +187,10 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   updateFeature(request: UpdateFeatureRequest) {
     return this.invoke<UpdateFeatureResponse>({ kind: 'updateFeature', request })
+  }
+
+  setFeatureSuppression(request: SetFeatureSuppressionRequest) {
+    return this.invoke<SetFeatureSuppressionResponse>({ kind: 'setFeatureSuppression', request })
   }
 
   deleteFeature(request: DeleteFeatureRequest) {

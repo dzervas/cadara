@@ -79,6 +79,8 @@ import type {
   ResolveReferenceResponse,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionRequest,
+  SetFeatureSuppressionResponse,
   SnapshotEntityRecord,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
@@ -2154,6 +2156,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Worksp
       ownerBodyId: null,
       featureId: 'feature_extrude-1',
       label: 'Extrude 1',
+      suppressed: false,
       definition: {
         kind: 'extrude',
         featureTypeVersion: 'feature-type/extrude/v1alpha1',
@@ -2190,6 +2193,7 @@ async function buildSnapshot(solverAdapter: SketchSolverAdapter): Promise<Worksp
       ownerBodyId: 'body_part-1',
       featureId: 'feature_fillet-1',
       label: 'Fillet 1',
+      suppressed: false,
       definition: {
         kind: 'fillet',
         featureTypeVersion: 'feature-type/fillet/v1alpha1',
@@ -2942,8 +2946,9 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       ownerBodyId: null,
       featureId: feature.featureId,
       label: feature.label,
+      suppressed: feature.suppressed,
       definition: structuredClone(feature.definition),
-      producedTargets: structuredClone(featureTargets.get(feature.featureId) ?? []),
+      producedTargets: feature.suppressed ? [] : structuredClone(featureTargets.get(feature.featureId) ?? []),
     }))
     snapshot.document.cursor = structuredClone(document.cursor)
     snapshot.presentation.documentHistory = createDocumentHistoryItems({
@@ -3091,6 +3096,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         ownerBodyId: null,
         featureId,
         label: featureLabel,
+        suppressed: false,
         definition: request.definition,
         producedTargets: changedTargets,
       }
@@ -3606,6 +3612,141 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     })
   }
 
+  async setFeatureSuppression(request: SetFeatureSuppressionRequest): Promise<SetFeatureSuppressionResponse> {
+    assertSupportedModelingRequest(request)
+    const snapshot = await this.getSnapshot()
+
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [createRevisionConflictDiagnostic(request.baseRevisionId, this.currentRevisionId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        featureId: request.featureId,
+        suppressed: request.suppressed,
+        revisionState: {
+          kind: 'conflict',
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'revisionConflict',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    const existingFeature = snapshot.document.features.find((feature) => feature.featureId === request.featureId)
+    if (!existingFeature) {
+      const diagnostics = [createMissingFeatureDiagnostic(request.featureId)]
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        featureId: request.featureId,
+        suppressed: request.suppressed,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'mock-missing-feature',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'validationRejected',
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      }
+    }
+
+    if (existingFeature.suppressed === request.suppressed) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        featureId: request.featureId,
+        suppressed: existingFeature.suppressed,
+        revisionState: {
+          kind: 'rejected',
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: 'noOp',
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'skipped',
+          reasonCode: 'noOp',
+          diagnostics: [],
+        }),
+        changedTargets: [],
+        diagnostics: [],
+      }
+    }
+
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      const mutableFeature = mutableSnapshot.document.features.find((feature) => feature.featureId === request.featureId)!
+      const previousTargets = mutableFeature.producedTargets
+      mutableFeature.suppressed = request.suppressed
+      mutableFeature.ownerRevisionId = nextRevisionId
+      mutableFeature.producedTargets = request.suppressed ? [] : getFeatureDefinitionChangedTargets(mutableFeature.definition)
+
+      const featureEntity = mutableSnapshot.presentation.entities.find(
+        (entry) => entry.target.kind === 'feature' && entry.target.featureId === request.featureId,
+      )
+      if (featureEntity) {
+        featureEntity.relatedTargets = mutableFeature.producedTargets
+      }
+
+      updateFeatureEntityRelationship(mutableSnapshot, request.featureId, mutableFeature.producedTargets)
+      mutableSnapshot.presentation.documentHistory = createDocumentHistoryItems({
+        featureTree: mutableSnapshot.presentation.featureTree,
+        features: mutableSnapshot.document.features,
+        sketches: mutableSnapshot.document.sketches,
+        historyOrder: createDocumentHistoryOrder(mutableSnapshot.presentation.documentHistory),
+      })
+      rebuildFeatureTree(mutableSnapshot)
+      rebuildObjectTree(mutableSnapshot)
+
+      const changedTargets = [
+        { kind: 'feature' as const, featureId: request.featureId },
+        ...previousTargets,
+        ...mutableFeature.producedTargets,
+      ]
+      const diagnostics: SetFeatureSuppressionResponse['diagnostics'] = [
+        {
+          code: request.suppressed ? 'mock-suppress-feature' : 'mock-unsuppress-feature',
+          severity: 'info',
+          message: request.suppressed
+            ? 'Mock kernel suppressed the feature for authored replay.'
+            : 'Mock kernel unsuppressed the feature for authored replay.',
+          target: { kind: 'feature', featureId: request.featureId },
+          detail: null,
+        },
+      ]
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        featureId: request.featureId,
+        suppressed: request.suppressed,
+        revisionState: {
+          kind: 'accepted',
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: 'rebuilt',
+          revisionId: nextRevisionId,
+          diagnostics,
+        }),
+        changedTargets,
+        diagnostics,
+      }
+    })
+  }
+
   async deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse> {
     assertSupportedModelingRequest(request)
     const snapshot = await this.getSnapshot()
@@ -3858,6 +3999,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           ownerBodyId: null,
           featureId,
           label: `Delete Solid ${mutableSnapshot.document.features.length + 1}`,
+          suppressed: false,
           definition: createDeleteSolidDefinition(target.bodyId),
           producedTargets: [] as DurableRef[],
         }

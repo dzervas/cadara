@@ -187,6 +187,19 @@ export async function replayHistoryEntry(input: {
         cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
       }
     }
+    case 'setFeatureSuppression': {
+      const response = await input.adapter.setFeatureSuppression({
+        ...input.entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      })
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      }
+    }
     case 'deleteFeature': {
       const response = await input.adapter.deleteFeature({
         ...input.entry.payload,
@@ -295,4 +308,3 @@ export async function replayHistoryEntry(input: {
       throw new Error('Unsupported operation history entry.')
   }
 }
-

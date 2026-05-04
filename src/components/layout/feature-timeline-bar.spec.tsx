@@ -397,6 +397,15 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
     cursorIndex: 0,
     historyLength: snapshot.presentation.documentHistory.length,
   })
+  const suppressedFeatureMenuDescriptors = getDocumentHistoryMenuEntryDescriptors({
+    item: {
+      ...featureHistoryItem,
+      suppressed: true,
+    },
+    cursorDisabled: false,
+    cursorIndex: 0,
+    historyLength: snapshot.presentation.documentHistory.length,
+  })
   const sketchMenuDescriptors = getDocumentHistoryMenuEntryDescriptors({
     item: sketchHistoryItem,
     cursorDisabled: false,
@@ -422,6 +431,13 @@ test('src/components/layout/feature-timeline-bar.spec.tsx', async () => {  const
       .map((entry) => entry.label)
       .join('|') === 'Edit|Rename|Suppress|Roll History Here|Roll To End|Delete',
     'Feature history menus should expose the shared actions plus feature-only suppress.',
+  )
+  expectTrue(
+    suppressedFeatureMenuDescriptors
+      .filter((entry) => entry.kind === 'item')
+      .map((entry) => entry.label)
+      .join('|') === 'Edit|Rename|Unsuppress|Roll History Here|Roll To End|Delete',
+    'Suppressed feature history menus should expose Unsuppress instead of the placeholder Suppress action.',
   )
   expectTrue(
     sketchMenuDescriptors

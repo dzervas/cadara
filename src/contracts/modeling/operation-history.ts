@@ -8,6 +8,7 @@ import type {
   ReorderDocumentHistoryRequest,
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
+  SetFeatureSuppressionRequest,
   UpdateDocumentVariableRequest,
   UpdateFeatureRequest,
 } from '@/contracts/modeling/schema'
@@ -35,6 +36,10 @@ export type PersistedUpdateFeaturePayload = Omit<
 >
 export type PersistedDeleteFeaturePayload = Omit<
   DeleteFeatureRequest,
+  'contractVersion' | 'documentId' | 'baseRevisionId'
+>
+export type PersistedSetFeatureSuppressionPayload = Omit<
+  SetFeatureSuppressionRequest,
   'contractVersion' | 'documentId' | 'baseRevisionId'
 >
 export type PersistedDeleteTargetPayload = Omit<
@@ -70,6 +75,7 @@ export type ModelingOperationHistoryEntry =
   | { kind: 'commitSketch'; payload: PersistedCommitSketchPayload }
   | { kind: 'createFeature'; payload: PersistedCreateFeaturePayload }
   | { kind: 'updateFeature'; payload: PersistedUpdateFeaturePayload }
+  | { kind: 'setFeatureSuppression'; payload: PersistedSetFeatureSuppressionPayload }
   | { kind: 'deleteFeature'; payload: PersistedDeleteFeaturePayload }
   | { kind: 'deleteTarget'; payload: PersistedDeleteTargetPayload }
   | { kind: 'renameBody'; payload: PersistedRenameBodyPayload }
@@ -232,6 +238,18 @@ export function createDeleteFeatureHistoryEntry(
     kind: 'deleteFeature',
     payload: {
       featureId: payload.featureId,
+    },
+  }
+}
+
+export function createSetFeatureSuppressionHistoryEntry(
+  payload: SetFeatureSuppressionRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: 'setFeatureSuppression',
+    payload: {
+      featureId: payload.featureId,
+      suppressed: payload.suppressed,
     },
   }
 }

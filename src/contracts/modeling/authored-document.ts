@@ -27,6 +27,7 @@ export interface AuthoredSketchRecord {
 export interface AuthoredFeatureRecord {
   featureId: FeatureId
   label: string
+  suppressed: boolean
   definition: FeatureDefinition
 }
 
@@ -84,6 +85,7 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: WorkspaceSnaps
     features: snapshot.document.features.map((feature) => ({
       featureId: feature.featureId,
       label: feature.label,
+      suppressed: feature.suppressed,
       definition: structuredClone(feature.definition),
     })),
     featureOrder: snapshot.document.features.map((feature) => feature.featureId),

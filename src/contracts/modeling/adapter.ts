@@ -30,6 +30,8 @@ import type {
   ResolveReferenceResponse,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionRequest,
+  SetFeatureSuppressionResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
@@ -78,6 +80,8 @@ export interface ModelingKernelAdapter {
   createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>
   /** Updates an existing durable feature or rejects the submitted definition explicitly. */
   updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>
+  /** Mutates authored replay suppression state for one committed feature. */
+  setFeatureSuppression(request: SetFeatureSuppressionRequest): Promise<SetFeatureSuppressionResponse>
   /** Deletes an existing durable feature from the document. */
   deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>
   /** Deletes a supported durable document history or object target from the document. */

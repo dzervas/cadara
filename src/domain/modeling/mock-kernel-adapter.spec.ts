@@ -2092,6 +2092,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {  function 
         ownerBodyId: null,
         featureId: 'feature_mirror-1',
         label: 'Mirror 1',
+        suppressed: false,
         definition: {
           kind: 'mirror',
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
@@ -2113,6 +2114,7 @@ test('src/domain/modeling/mock-kernel-adapter.spec.ts', async () => {  function 
         ownerBodyId: null,
         featureId: 'feature_transform-1',
         label: 'Transform 1',
+        suppressed: false,
         definition: {
           kind: 'transform',
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,

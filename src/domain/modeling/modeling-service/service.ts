@@ -40,6 +40,7 @@ import {
   createReorderDocumentHistoryEntry,
   createReorderFeatureHistoryEntry,
   createSetFeatureCursorHistoryEntry,
+  createSetFeatureSuppressionHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
   createUpdateFeatureHistoryEntry,
   type ModelingOperationHistoryEntry,
@@ -83,6 +84,7 @@ import {
   normalizeReorderFeatureInput,
   normalizeReorderDocumentHistoryInput,
   normalizeSetFeatureCursorInput,
+  normalizeSetFeatureSuppressionInput,
   normalizePreviewInput,
   normalizeResolveReferenceInput,
   normalizeExportDocumentInput,
@@ -118,6 +120,7 @@ import {
   mapCommitSketchResponse,
   mapDocumentVariableResponse,
   mapFeatureMutationResponse,
+  mapFeatureSuppressionResponse,
   mapDeleteFeatureResponse,
   mapDeleteTargetResponse,
   mapRenameBodyResponse,
@@ -1289,6 +1292,28 @@ export function createModelingService(
             mapFeatureMutationResponse(response, currentDocumentId),
             input,
             () => createUpdateFeatureHistoryEntry(request),
+          )
+        },
+      })
+    },
+    setFeatureSuppression(input) {
+      return runModelingMutationBoundary({
+        operation: input.suppressed ? 'Suppress feature' : 'Unsuppress feature',
+        fallbackMessage: input.suppressed ? 'Suppress feature failed.' : 'Unsuppress feature failed.',
+        context: [
+          { key: 'baseRevisionId', value: input.baseRevisionId },
+          { key: 'featureId', value: input.featureId },
+        ],
+        action: async () => {
+          await restorePromise
+          await repositoryChangePromise
+          const request = normalizeSetFeatureSuppressionInput(input, currentDocumentId)
+          const response = await adapter.setFeatureSuppression(request)
+          return finalizeMutationResult(
+            response,
+            mapFeatureSuppressionResponse(response, currentDocumentId),
+            input,
+            () => createSetFeatureSuppressionHistoryEntry(request),
           )
         },
       })

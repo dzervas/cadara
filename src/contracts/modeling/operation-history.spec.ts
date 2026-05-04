@@ -8,6 +8,7 @@ import {
   createEmptyOperationHistory,
   createReorderDocumentHistoryEntry,
   createReorderFeatureHistoryEntry,
+  createSetFeatureSuppressionHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
   validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
@@ -20,6 +21,7 @@ import type {
   FeatureDefinition,
   ReorderDocumentHistoryRequest,
   ReorderFeatureRequest,
+  SetFeatureSuppressionRequest,
   UpdateDocumentVariableRequest,
 } from '@/contracts/modeling/schema'
 import { EXTRUDE_FEATURE_SCHEMA_VERSION, REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
@@ -122,6 +124,14 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
     documentId: 'doc_workspace',
     baseRevisionId: 'rev_0005',
     target: { kind: 'feature', featureId: 'feature_extrude-1' },
+  }
+
+  const setFeatureSuppressionRequest: SetFeatureSuppressionRequest = {
+    contractVersion: 'modeling-contract/v1alpha1',
+    documentId: 'doc_workspace',
+    baseRevisionId: 'rev_0006',
+    featureId: 'feature_extrude-1',
+    suppressed: true,
   }
 
   function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
@@ -272,6 +282,7 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
         createDeleteTargetHistoryEntry(deleteTargetRequest),
         createReorderFeatureHistoryEntry(reorderFeatureRequest),
         createReorderDocumentHistoryEntry(reorderDocumentHistoryRequest),
+        createSetFeatureSuppressionHistoryEntry(setFeatureSuppressionRequest),
       ],
     }
 
@@ -298,6 +309,12 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
         && result.payload.entries[4].payload.item.kind === 'sketch'
         && result.payload.entries[4].payload.beforeItem?.kind === 'feature',
       'Persisted document history reorder entries must preserve mixed sketch/feature identities.',
+    )
+    expectTrue(
+      result.payload.entries[5]?.kind === 'setFeatureSuppression'
+        && result.payload.entries[5].payload.featureId === 'feature_extrude-1'
+        && result.payload.entries[5].payload.suppressed === true,
+      'Persisted feature suppression entries should preserve the requested state without transport metadata.',
     )
   }
 

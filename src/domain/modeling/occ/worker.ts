@@ -124,6 +124,8 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       return getWorkerAdapter(operation.request.documentId).createFeature(operation.request)
     case 'updateFeature':
       return getWorkerAdapter(operation.request.documentId).updateFeature(operation.request)
+    case 'setFeatureSuppression':
+      return getWorkerAdapter(operation.request.documentId).setFeatureSuppression(operation.request)
     case 'deleteFeature':
       return getWorkerAdapter(operation.request.documentId).deleteFeature(operation.request)
     case 'deleteTarget':

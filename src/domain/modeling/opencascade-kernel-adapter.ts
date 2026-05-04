@@ -38,6 +38,8 @@ import type {
   ResolveReferenceResponse,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionRequest,
+  SetFeatureSuppressionResponse,
   SketchSnapshotRecord,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
@@ -212,6 +214,7 @@ function createAuthoredModelDocumentFromAuthoringState(
     features: state.features.map((feature) => ({
       featureId: feature.featureId,
       label: feature.label ?? feature.featureId,
+      suppressed: feature.suppressed,
       definition: structuredClone(feature.definition),
     })),
     featureOrder: state.features.map((feature) => feature.featureId),
@@ -1523,6 +1526,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       .map((feature) => ({
         featureId: feature.featureId,
         label: feature.label,
+        suppressed: feature.suppressed,
         definition: structuredClone(feature.definition),
       }))
     const featureRecordById = new Map(features.map((feature) => [feature.featureId, feature]))
@@ -1575,6 +1579,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
       const feature = featureRecordById.get(item.featureId)
       if (feature) {
+        if (feature.suppressed) {
+          failedProjectionFeatures.push(createFailedFeatureRecord(feature))
+          continue
+        }
+
         if (options.deferredFeatureIds?.has(feature.featureId)) {
           failedProjectionFeatures.push(createFailedFeatureRecord(feature))
           continue
@@ -1934,6 +1943,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         continue
       }
 
+      if (feature.suppressed) {
+        current = {
+          ...current,
+          features: [
+            ...current.features,
+            {
+              ...feature,
+              label: feature.label ?? feature.featureId,
+              producedTargets: [],
+            },
+          ],
+        }
+        failedFeatures.push(createFailedFeatureRecord(feature))
+        continue
+      }
+
       const blockingFeature = findBlockingFeature(failedFeatures, feature)
       if (blockingFeature) {
         diagnostics.push(createDependencyBlockedDiagnostic({
@@ -2252,6 +2277,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const feature: OccAuthoringFeatureRecord = {
       featureId,
       label: request.featureLabel ?? `${capitalizeFeatureKind(request.definition.kind)} ${featureOrdinalForLabel(runtimeState.authoringState, request.definition.kind)}`,
+      suppressed: false,
       definition: request.definition,
     }
     const nextSequence = runtimeState.revisionSequence + 1
@@ -2364,6 +2390,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ? {
             ...feature,
             label: request.featureLabel ?? feature.label,
+            suppressed: feature.suppressed,
             definition: request.definition,
           }
         : feature,
@@ -2404,6 +2431,111 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return {
       ...this.withOperationEnvelope({
         featureId: request.featureId,
+        ...accepted,
+        changedTargets: uniqueTargets([
+          { kind: 'feature', featureId: request.featureId },
+          ...(existing.producedTargets ?? []),
+          ...(updated?.producedTargets ?? []),
+        ]),
+      }),
+    }
+  }
+
+  async setFeatureSuppression(request: SetFeatureSuppressionRequest): Promise<SetFeatureSuppressionResponse> {
+    assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.setFeatureSuppression(request)
+    }
+
+    const runtimeState = await this.getRuntimeState()
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState)
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(request.baseRevisionId, currentRevisionId)
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        featureId: request.featureId,
+        suppressed: request.suppressed,
+        changedTargets: [],
+        ...conflict,
+      }
+    }
+
+    const featureIndex = runtimeState.authoringState.features.findIndex(
+      (entry) => entry.featureId === request.featureId,
+    )
+
+    if (featureIndex < 0) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        [createMissingFeatureDiagnostic(request.featureId)],
+        OCC_MISSING_FEATURE_CODE,
+      )
+
+      return {
+        ...this.withOperationEnvelope({
+          featureId: request.featureId,
+          suppressed: request.suppressed,
+          changedTargets: [],
+          ...rejected,
+        }),
+      }
+    }
+
+    const existing = runtimeState.authoringState.features[featureIndex]!
+    if (existing.suppressed === request.suppressed) {
+      return {
+        ...this.withOperationEnvelope({
+          revisionId: currentRevisionId,
+          featureId: request.featureId,
+          suppressed: existing.suppressed,
+          revisionState: {
+            kind: 'rejected' as const,
+            baseRevisionId: request.baseRevisionId,
+            reasonCode: 'noOp',
+          },
+          rebuildResult: {
+            kind: 'skipped' as const,
+            reasonCode: 'noOp' as const,
+            invalidatedTargets: [],
+            diagnostics: [],
+          },
+          changedTargets: [],
+          diagnostics: [],
+        }),
+      }
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1
+    const nextRevisionId = createRevisionId(nextSequence)
+    const nextFeatures = runtimeState.authoringState.features.map((feature) =>
+      feature.featureId === request.featureId
+        ? {
+            ...feature,
+            suppressed: request.suppressed,
+            producedTargets: request.suppressed ? [] : feature.producedTargets,
+          }
+        : feature,
+    )
+    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+      revisionId: nextRevisionId,
+      features: nextFeatures,
+    })
+
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState.state,
+      revisionSequence: nextSequence,
+    })
+
+    const updated = nextAuthoringState.state.features[featureIndex]
+    const accepted = this.buildAcceptedResult(runtimeState.authoringState, nextAuthoringState.state, [], nextAuthoringState.partial)
+
+    return {
+      ...this.withOperationEnvelope({
+        featureId: request.featureId,
+        suppressed: request.suppressed,
         ...accepted,
         changedTargets: uniqueTargets([
           { kind: 'feature', featureId: request.featureId },
@@ -2591,6 +2723,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       const feature: OccAuthoringFeatureRecord = {
         featureId,
         label: `DeleteSolid ${featureOrdinalForLabel(runtimeState.authoringState, 'deleteSolid')}`,
+        suppressed: false,
         definition: createDeleteSolidDefinition(target.bodyId),
       }
       const insertionIndex = getCursorInsertionIndex(
@@ -3157,6 +3290,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const previewFeature: OccAuthoringFeatureRecord = {
       featureId: previewFeatureId,
       label: `Preview ${request.previewId}`,
+      suppressed: false,
       definition: request.definition,
     }
     const previewInsertionIndex = getCursorInsertionIndex(

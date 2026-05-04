@@ -17,6 +17,7 @@ import type {
   ReorderDocumentHistoryResponse,
   ReorderFeatureResponse,
   SetFeatureCursorResponse,
+  SetFeatureSuppressionResponse,
   UpdateDocumentVariableResponse,
   UpdateFeatureResponse,
 } from '@/contracts/modeling/schema'
@@ -37,11 +38,13 @@ import {
   reorderFeatureResponseSchema,
   resolveReferenceResponseSchema,
   setFeatureCursorResponseSchema,
+  setFeatureSuppressionResponseSchema,
   updateDocumentVariableResponseSchema,
   updateFeatureResponseSchema,
 } from '@/contracts/modeling/runtime-schema'
 import type {
   ModelingFeatureMutationResult,
+  ModelingFeatureSuppressionResult,
   ModelingDeleteFeatureResult,
   ModelingDeleteTargetResult,
   ModelingRenameBodyResult,
@@ -168,6 +171,24 @@ export function mapFeatureMutationResponse(
     rebuildResult: normalized.rebuildResult,
     changedTargets: normalized.changedTargets,
     diagnostics: normalized.diagnostics,
+  }
+}
+
+export function mapFeatureSuppressionResponse(
+  response: SetFeatureSuppressionResponse,
+  expectedDocumentId: DocumentId,
+): ModelingFeatureSuppressionResult {
+  const parsed = setFeatureSuppressionResponseSchema.parse(response)
+  assertKernelContractVersion(parsed.contractVersion)
+  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Feature suppression')
+  return {
+    revisionId: parsed.revisionId,
+    featureId: parsed.featureId,
+    suppressed: parsed.suppressed,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
   }
 }
 

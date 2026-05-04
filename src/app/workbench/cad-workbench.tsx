@@ -708,10 +708,6 @@ export function CadWorkbench({
 		}
 	};
 
-	const showPlaceholderStatus = (message: string) => {
-		showWorkbenchInfo(message);
-	};
-
 	// TODO: Split delete logics into separate file
 	const handleDeleteTarget = (target: PrimitiveRef, label: string) => {
 		if (!snapshot) {
@@ -760,9 +756,39 @@ export function CadWorkbench({
 		setObjectExportModal(nextModalState);
 	};
 
-	// TODO: Implement this
-	const handleFeatureSuppressPlaceholder = (item: FeatureHistoryItem) => {
-		showPlaceholderStatus(`Suppress for ${item.label} is not implemented yet.`);
+	const handleFeatureSuppressionRequested = (item: FeatureHistoryItem) => {
+		if (!snapshot) {
+			return;
+		}
+
+		const nextSuppressed = !item.suppressed;
+		const operation = nextSuppressed ? `Suppress ${item.label}` : `Unsuppress ${item.label}`;
+
+		void runWorkbenchAction({
+			operation,
+			reporter: errorReporter,
+			context: [
+				{ key: "baseRevisionId", value: snapshot.document.revisionId },
+				{ key: "featureId", value: item.featureId },
+			],
+			action: () =>
+				documentOwner.setFeatureSuppression(item.featureId, nextSuppressed, {
+					operation,
+					fallbackMessage: `${operation} failed.`,
+					context: [
+						{ key: "baseRevisionId", value: snapshot.document.revisionId },
+						{ key: "featureId", value: item.featureId },
+					],
+				}),
+			mapSuccess: (result) => ok(result),
+			onError: (error) => showWorkbenchError(error.message),
+		}).then((result) => {
+			if (result.isErr()) {
+				return;
+			}
+
+			showWorkbenchInfo(nextSuppressed ? `Suppressed ${item.label}.` : `Unsuppressed ${item.label}.`);
+		});
 	};
 
 	// TODO: Split the variable logic into a separate file
@@ -1444,7 +1470,7 @@ export function CadWorkbench({
 											}
 											onDeleteDocumentItem={handleDocumentHistoryDelete}
 											onRenameDocumentItem={handleDocumentHistoryRename}
-											onSuppressFeature={handleFeatureSuppressPlaceholder}
+											onSuppressFeature={handleFeatureSuppressionRequested}
 										/>
 									</div>
 									<div className="pointer-events-auto mt-3">

@@ -8,6 +8,7 @@ import type {
   PersistedCommitSketchPayload,
   PersistedCreateFeaturePayload,
   PersistedDeleteFeaturePayload,
+  PersistedSetFeatureSuppressionPayload,
   PersistedDeleteTargetPayload,
   PersistedRenameBodyPayload,
   PersistedReorderDocumentHistoryPayload,
@@ -240,6 +241,11 @@ const persistedDeleteFeaturePayloadSchema = z.object({
   featureId: featureIdSchema,
 }).transform((value) => value as PersistedDeleteFeaturePayload)
 
+const persistedSetFeatureSuppressionPayloadSchema = z.object({
+  featureId: featureIdSchema,
+  suppressed: z.boolean(),
+}).strict().transform((value) => value as PersistedSetFeatureSuppressionPayload)
+
 const persistedDeleteTargetPayloadSchema = z.object({
   target: durableRefSchema,
 }).transform((value) => value as PersistedDeleteTargetPayload)
@@ -288,6 +294,7 @@ const operationHistoryEntrySchema = z.object({
     z.literal('commitSketch'),
     z.literal('createFeature'),
     z.literal('updateFeature'),
+    z.literal('setFeatureSuppression'),
     z.literal('deleteFeature'),
     z.literal('deleteTarget'),
     z.literal('renameBody'),
@@ -316,6 +323,8 @@ const operationHistoryEntrySchema = z.object({
         return persistedCreateFeaturePayloadSchema
       case 'updateFeature':
         return persistedUpdateFeaturePayloadSchema
+      case 'setFeatureSuppression':
+        return persistedSetFeatureSuppressionPayloadSchema
       case 'deleteFeature':
         return persistedDeleteFeaturePayloadSchema
       case 'deleteTarget':
@@ -364,6 +373,8 @@ const operationHistoryEntrySchema = z.object({
       return { kind: value.kind, payload: persistedCreateFeaturePayloadSchema.parse(value.payload) }
     case 'updateFeature':
       return { kind: value.kind, payload: persistedUpdateFeaturePayloadSchema.parse(value.payload) }
+    case 'setFeatureSuppression':
+      return { kind: value.kind, payload: persistedSetFeatureSuppressionPayloadSchema.parse(value.payload) }
     case 'deleteFeature':
       return { kind: value.kind, payload: persistedDeleteFeaturePayloadSchema.parse(value.payload) }
     case 'deleteTarget':

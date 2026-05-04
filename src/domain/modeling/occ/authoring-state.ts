@@ -36,6 +36,7 @@ export interface OccAuthoringFeatureRecord {
   featureId: FeatureId
   definition: FeatureDefinition
   label?: string
+  suppressed: boolean
   producedTargets?: readonly DurableRef[]
 }
 
@@ -255,6 +256,7 @@ function applyFeatureResult(
       ...feature,
       definition: result.featureDefinition ?? feature.definition,
       label: feature.label ?? feature.featureId,
+      suppressed: feature.suppressed,
       producedTargets: [...result.producedTargets],
     },
   ]
@@ -327,6 +329,20 @@ export function rebuildOccAuthoringState(
   })
 
   for (const feature of features) {
+    if (feature.suppressed) {
+      current = {
+        ...current,
+        features: [
+          ...current.features,
+          {
+            ...feature,
+            label: feature.label ?? feature.featureId,
+            producedTargets: [],
+          },
+        ],
+      }
+      continue
+    }
     current = applyOccFeatureToAuthoringState(current, feature)
   }
 

@@ -556,6 +556,7 @@ test('src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts', a
           ownerBodyId: null,
           featureId: 'feature_extrude-1',
           label: 'Extrude 1',
+          suppressed: false,
           producedTargets: [],
           definition: request.definition,
         }

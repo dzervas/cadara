@@ -12,7 +12,7 @@ export type DocumentHistoryMenuEntryDescriptor =
   | {
       kind: 'item'
       id: 'edit' | 'rename' | 'change-sketch-plane' | 'suppress' | 'roll-history-here' | 'roll-to-end' | 'delete'
-      label: 'Edit' | 'Rename' | 'Change Sketch Plane' | 'Suppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
+      label: 'Edit' | 'Rename' | 'Change Sketch Plane' | 'Suppress' | 'Unsuppress' | 'Roll History Here' | 'Roll To End' | 'Delete'
       disabled?: boolean
     }
   | {
@@ -113,7 +113,7 @@ export function getDocumentHistoryMenuEntryDescriptors(input: {
       ? [{
           kind: 'item' as const,
           id: 'suppress' as const,
-          label: 'Suppress' as const,
+          label: item.suppressed ? 'Unsuppress' as const : 'Suppress' as const,
         }]
       : []),
     {

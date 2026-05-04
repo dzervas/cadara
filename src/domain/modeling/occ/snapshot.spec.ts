@@ -387,10 +387,12 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
     })
     const features: readonly {
       featureId: FeatureId
+      suppressed: boolean
       definition: FeatureDefinition
     }[] = [
       {
         featureId: 'feature_phase6_plane' as FeatureId,
+        suppressed: false,
         definition: {
           kind: 'plane',
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
@@ -407,6 +409,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       },
       {
         featureId: 'feature_phase6_extrude' as FeatureId,
+        suppressed: false,
         definition: {
           kind: 'extrude',
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -531,6 +534,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       }),
       [{
         featureId: 'feature_phase6_region_consumer' as FeatureId,
+        suppressed: false,
         definition: {
           kind: 'extrude',
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -582,6 +586,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       }),
       [{
         featureId: 'feature_phase6_face_consumer' as FeatureId,
+        suppressed: false,
         definition: {
           kind: 'extrude',
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -642,7 +647,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       sketches: [sketch],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     })
-    const extrudeState = rebuildOccAuthoringState(initialState, [{ featureId: extrudeFeatureId, definition: extrudeDefinition }])
+    const extrudeState = rebuildOccAuthoringState(initialState, [{ featureId: extrudeFeatureId, suppressed: false, definition: extrudeDefinition }])
     const extrudeBody = extrudeState.bodies[0]
 
     expectTrue(extrudeBody, 'Shell contributor coverage requires the extrude body to exist.')
@@ -660,8 +665,8 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       },
     }
     const authoredFeatures = [
-      { featureId: extrudeFeatureId, definition: extrudeDefinition },
-      { featureId: shellFeatureId, definition: shellDefinition },
+      { featureId: extrudeFeatureId, suppressed: false, definition: extrudeDefinition },
+      { featureId: shellFeatureId, suppressed: false, definition: shellDefinition },
     ] as const
     const shelledState = rebuildOccAuthoringState(initialState, authoredFeatures)
     const shelledBody = shelledState.bodies.find((body) => body.ownerFeatureId === shellFeatureId)
@@ -891,6 +896,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
         featureId: 'feature_phase6_join_refine' as FeatureId,
+        suppressed: false,
         definition: {
           kind: 'extrude',
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -944,6 +950,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
         featureId: 'feature_phase6_fillet' as FeatureId,
+        suppressed: false,
         definition: {
           kind: 'fillet',
           featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,

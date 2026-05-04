@@ -1391,6 +1391,71 @@ class AssetResolvingRestoreAdapter extends MockKernelAdapter {
     )
   }
 
+  async function testFeatureSuppressionMutationsPersistAndSkipNoOps() {
+    const documentRepository = createMemoryDocumentRepository()
+    const historyStore = createMemoryOperationHistoryStore()
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+      operationHistoryStore: historyStore,
+    })
+    const initial = await service.getCurrentDocumentSnapshot()
+    const feature = initial.document.features.find((entry) => entry.featureId === 'feature_extrude-1')
+    expectTrue(feature?.suppressed === false, 'Seed feature snapshots should start with explicit unsuppressed state.')
+
+    const suppressed = await unwrapModelingResult(service.setFeatureSuppression({
+      baseRevisionId: initial.document.revisionId,
+      featureId: 'feature_extrude-1',
+      suppressed: true,
+    }))
+    expectTrue(suppressed.revisionState.kind === 'accepted', 'Feature suppression should be accepted against the current revision.')
+    expectTrue(suppressed.changedTargets.some((target) => target.kind === 'feature' && target.featureId === 'feature_extrude-1'), 'Suppression should report the feature row as changed.')
+
+    const suppressedSnapshot = await service.getCurrentDocumentSnapshot()
+    const suppressedFeature = suppressedSnapshot.document.features.find((entry) => entry.featureId === 'feature_extrude-1')
+    expectTrue(suppressedFeature?.suppressed === true, 'Accepted suppression should refresh the snapshot feature row.')
+    expectTrue(suppressedFeature?.producedTargets.length === 0, 'Suppressed feature snapshots should not expose bypassed produced targets.')
+    expectTrue(
+      suppressedSnapshot.presentation.documentHistory.find((item) =>
+        item.kind === 'feature' && item.featureId === 'feature_extrude-1'
+      )?.suppressed === true,
+      'Document history rows should expose suppressed feature state for presentation.',
+    )
+    expectTrue(
+      historyStore.savedPayloads.at(-1)?.entries.at(-1)?.kind === 'setFeatureSuppression',
+      'Accepted suppression should append a durable operation-history entry.',
+    )
+
+    const savedHistoryCount = historyStore.savedPayloads.at(-1)?.entries.length ?? 0
+    await expectModelingError(service.setFeatureSuppression({
+      baseRevisionId: suppressedSnapshot.document.revisionId,
+      featureId: 'feature_extrude-1',
+      suppressed: true,
+    }))
+    expectTrue(
+      (historyStore.savedPayloads.at(-1)?.entries.length ?? 0) === savedHistoryCount,
+      'No-op suppression requests should not append durable operation history.',
+    )
+
+    const unsuppressed = await unwrapModelingResult(service.setFeatureSuppression({
+      baseRevisionId: suppressedSnapshot.document.revisionId,
+      featureId: 'feature_extrude-1',
+      suppressed: false,
+    }))
+    expectTrue(unsuppressed.revisionState.kind === 'accepted', 'Unsuppression should be accepted as a document mutation.')
+
+    const restored = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: 'doc_workspace',
+      documentRepository,
+      operationHistoryStore: historyStore,
+    })
+    const restoredSnapshot = await restored.getCurrentDocumentSnapshot()
+    expectTrue(
+      restoredSnapshot.document.features.find((entry) => entry.featureId === 'feature_extrude-1')?.suppressed === false,
+      'Repository restore plus operation-history replay should preserve the final unsuppressed state.',
+    )
+  }
+
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot()
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState()
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict()
@@ -1415,6 +1480,7 @@ class AssetResolvingRestoreAdapter extends MockKernelAdapter {
   await testLateDocumentChangeSubscribersReplayLatestPeerEvent()
   await testInFlightRepositoryHeadConflictSkipsPersistenceAndHistory()
   await testPackagedAssetImportStoresAssetsBeforeRestore()
+  await testFeatureSuppressionMutationsPersistAndSkipNoOps()
 })
 
 function assertReferenceImageOperationPayloads(
