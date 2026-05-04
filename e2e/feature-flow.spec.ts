@@ -203,6 +203,55 @@ test('extrude boolean scope previews and commits with an explicit target body', 
   await workbench.commitFeature('feature_extrude-2')
 })
 
+test('extrude preselects join and target body for a coplanar face preview', async ({ page }) => {
+  const workbench = new FeatureWorkbenchHarness(page)
+
+  await workbench.openWithBaseExtrudeFixture()
+  await workbench.activateFeature('extrude')
+  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.face_/)
+
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('join')
+  await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body)
+})
+
+test('extrude preserves manual operation and target after later preselection changes', async ({ page }) => {
+  const workbench = new FeatureWorkbenchHarness(page)
+
+  await workbench.openWithBaseExtrudeFixture()
+  await workbench.activateFeature('extrude')
+  await workbench.selectFirstReferenceMatching(/^Select .* body_feature_extrude-1\.face_/)
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('join')
+  await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body)
+
+  await workbench.setOperation('join')
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('join')
+  await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body)
+
+  await workbench.flipDepthDirection()
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('join')
+  await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body)
+
+  await workbench.setOperation('newBody')
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('newBody')
+  await workbench.expectNoBooleanTargetSelected()
+
+  await workbench.setOperation('join')
+  await workbench.selectBodyTarget(FEATURE_FIXTURE.body)
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('join')
+  await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body)
+
+  await workbench.flipDepthDirection()
+  await workbench.expectFeaturePreviewReady('extrude')
+  await workbench.expectOperationSelected('join')
+  await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body)
+})
+
 test('feature chain carries durable context across feature steps', async ({ page }) => {
   const workbench = new FeatureWorkbenchHarness(page)
 

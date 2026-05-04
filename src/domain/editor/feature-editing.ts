@@ -11,6 +11,11 @@ import {
   findFeatureAuthoringDefinition,
 } from '@/core/feature-authoring/registry'
 import type { FeatureEditorFormField, FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
+import {
+  featureSupportsBooleanTargetPreselection,
+  isBooleanOperationPatch,
+  isBooleanTargetPatch,
+} from './feature-boolean-target-preselection'
 
 export type {
   ExtrudeFeatureEditSessionState,
@@ -60,6 +65,10 @@ function createBaseFeatureSession(
     lastPreviewRevisionId: null,
     lastCommittedRevisionId: null,
     diagnostics: [],
+    booleanTargetPreselection: {
+      operationManuallyChanged: featureId !== null,
+      targetManuallyChanged: featureId !== null,
+    },
   }
 }
 
@@ -187,6 +196,12 @@ export function patchFeatureEditSession(
   return {
     ...session,
     draft: definition.applyPatch(session.draft, patch),
+    booleanTargetPreselection: {
+      operationManuallyChanged:
+        session.booleanTargetPreselection.operationManuallyChanged || isBooleanOperationPatch(patch),
+      targetManuallyChanged:
+        session.booleanTargetPreselection.targetManuallyChanged || isBooleanTargetPatch(patch),
+    },
   } as FeatureEditSessionState
 }
 
@@ -195,9 +210,20 @@ export function applySelectionToFeatureEditSession(
   target: PrimitiveRef,
 ): FeatureEditSessionState {
   const definition = getFeatureAuthoringDefinition(session.featureType)
+  const nextDraft = definition.applySelection(session.draft, target)
   return {
     ...session,
-    draft: definition.applySelection(session.draft, target),
+    draft: nextDraft,
+    booleanTargetPreselection: {
+      ...session.booleanTargetPreselection,
+      targetManuallyChanged:
+        session.booleanTargetPreselection.targetManuallyChanged
+        || (
+          target.kind === 'body'
+          && featureSupportsBooleanTargetPreselection(session.featureType)
+          && JSON.stringify(nextDraft) !== JSON.stringify(session.draft)
+        ),
+    },
   } as FeatureEditSessionState
 }
 

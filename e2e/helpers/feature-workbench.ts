@@ -156,6 +156,31 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await this.selectOperation(operation)
   }
 
+  async expectOperationSelected(operation: 'newBody' | 'join' | 'cut' | 'intersect') {
+    const operationLabels: Record<typeof operation, string> = {
+      newBody: 'New body',
+      join: 'Join',
+      cut: 'Cut',
+      intersect: 'Intersect',
+    }
+    await expect(this.featureInspector().getByRole('combobox', { name: 'Operation' })).toHaveValue(
+      operationLabels[operation],
+      { timeout: 10_000 },
+    )
+  }
+
+  async expectBooleanTargetSelected(bodyId: string) {
+    await expect(this.featureInspector()).toContainText(`Target body: ${bodyId}`, { timeout: 10_000 })
+  }
+
+  async expectNoBooleanTargetSelected() {
+    await expect(this.featureInspector()).not.toContainText('Target body:', { timeout: 10_000 })
+  }
+
+  async flipDepthDirection() {
+    await this.page.getByRole('button', { name: 'Flip Depth direction' }).click()
+  }
+
   async setCombineOperation(operation: 'add' | 'subtract' | 'intersect') {
     await this.selectOperation(operation)
   }
@@ -258,6 +283,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await this.page.getByRole('option', {
       name: new RegExp(`^${escapeRegExp(optionLabel)}$`, 'i'),
     }).click()
+  }
+
+  private featureInspector() {
+    return this.page.locator('aside').filter({ hasText: /Create|Edit/ }).first()
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {

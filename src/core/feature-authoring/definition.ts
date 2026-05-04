@@ -209,6 +209,10 @@ export interface FeatureEditSessionStateBase {
   lastPreviewRevisionId: RevisionId | null
   lastCommittedRevisionId: RevisionId | null
   diagnostics: ModelingDiagnostic[]
+  booleanTargetPreselection: {
+    operationManuallyChanged: boolean
+    targetManuallyChanged: boolean
+  }
 }
 
 export type FeatureEditSessionStateForKind<TKind extends AuthoredFeatureKind> = FeatureEditSessionStateBase & {

@@ -5,6 +5,11 @@ import {
   getFeaturePrimarySelectionTarget,
 } from '@/domain/editor/feature-editing'
 import {
+  applyFeatureBooleanTargetPreselection,
+  classifyPreviewBooleanTarget,
+  featurePreviewSupportsAutomaticBooleanTargetPreselection,
+} from '@/domain/editor/feature-boolean-target-preselection'
+import {
   getSketchSessionPreviewLabel,
   updateSketchReferenceProjection,
 } from '@/domain/editor/sketch-session'
@@ -285,17 +290,33 @@ export function handleEffectFeaturePreviewCompleted(
     return { state, effects: [] }
   }
 
+  const previewRenderables = event.stale ? null : event.renderables
+  const session =
+    previewRenderables
+    && state.snapshot
+    && featurePreviewSupportsAutomaticBooleanTargetPreselection(state.session.featureType)
+    ? applyFeatureBooleanTargetPreselection(
+        state.session,
+        classifyPreviewBooleanTarget({
+          previewRenderables,
+          bodyRenderables: state.snapshot.document.render.records,
+          candidateBodyIds: state.snapshot.document.bodies.map((body) => body.bodyId),
+          settings: state.snapshot.document.settings,
+        }),
+      )
+    : state.session
+
   return {
     state: {
       ...state,
       pendingPreviewRequestId: null,
-      previewRenderables: event.stale ? null : event.renderables,
+      previewRenderables,
       command: {
         ...state.command,
         phase: 'editing',
       },
       session: {
-        ...state.session,
+        ...session,
         status: event.stale ? 'idle' : 'previewReady',
         diagnostics: event.diagnostics,
         lastPreviewRevisionId: event.revisionId,
