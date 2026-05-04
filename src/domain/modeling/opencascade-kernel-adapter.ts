@@ -1,5 +1,5 @@
 import type { GeometryAssetResolver, ModelingKernelAdapter } from '@/contracts/modeling/adapter'
-import type { ExportCapabilities } from '@/contracts/export/capabilities'
+import type { ExportCapabilities, MeshExportAccuracy } from '@/contracts/export/capabilities'
 import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
 import { modelingDocumentRequestEnvelopeSchema } from '@/contracts/modeling/runtime-schema'
 import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
@@ -23,6 +23,7 @@ import type {
   DeleteFeatureResponse,
   EvaluatePreviewRequest,
   EvaluatePreviewResponse,
+  FeatureBooleanOperation,
   FeatureDefinition,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
@@ -84,7 +85,11 @@ import {
 } from '@/domain/modeling/occ/authoring-state'
 import { extractPlanarFaceData } from '@/domain/modeling/occ/planes'
 import { OCC_CONTRACT_GAP_CODES } from '@/domain/modeling/occ/implementation-policy'
-import { getOpenCascadeInstance, type OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import {
+  getOpenCascadeInstance,
+  probeOpenCascadeNativeTopologyKernelCapabilities,
+  type OpenCascadeInstance,
+} from '@/domain/modeling/occ/runtime'
 import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
@@ -108,11 +113,30 @@ import {
   createFeatureFieldDiagnostic,
 } from '@/domain/modeling/feature-diagnostic-mapping'
 import {
+  advanceTopologyToken,
   getOccDurableRefKey,
   resolveOccReference,
+  type OccTrackedBody,
 } from '@/domain/modeling/occ/topology'
 import { getExtrudeFeatureExtent, getRevolveFeatureExtent } from '@/contracts/modeling/feature-extents'
 import { createOccExportCapabilities } from '@/domain/export/occ-export-capabilities'
+import {
+  createNativeTopologyDiagnostic,
+  createOccNativeReferenceInvalidationsFromHistoryPayload,
+  createOccNativeExactBrepPayloadFromShimPayload,
+  createOccNativeMeshExportPayloadFromShimPayload,
+  createOccNativeTopologyPayloadFromShimPayloads,
+  parseNativeFeatureTransactionHistoryJson,
+  parseNativeShimPayloadJson,
+  type OccNativeShimPayload,
+  type OpenCascadeNativeTopologyKernelHost,
+  type OccNativeExactBrepPayload,
+  type OccNativeMeshExportPayload,
+  type OccNativeTopologyPayload,
+} from '@/domain/modeling/occ/native-topology-payload'
+import type {
+  OccNativeTopologyWorkerResult,
+} from '@/domain/modeling/occ/worker-protocol'
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_DOCUMENT_NAME,
@@ -120,6 +144,7 @@ import {
   OCC_KERNEL_PRIMARY_SKETCH_ID,
   OCC_KERNEL_SETTINGS,
 } from '@/domain/modeling/opencascade-kernel-seed'
+import { getOccTessellationTier } from '@/domain/modeling/occ/tessellation'
 
 interface OpenCascadeKernelAdapterOptions {
   solverAdapter: SketchSolverAdapter
@@ -134,6 +159,14 @@ interface OpenCascadeKernelAdapterOptions {
 interface OccKernelRuntimeState {
   authoringState: OccAuthoringState
   revisionSequence: number
+}
+
+interface CachedNativeTopologyBodyPayload {
+  bodyId: BodyId
+  topologyToken: string
+  lodTierId: OccTessellationTierId
+  transactionMode: 'snapshot' | 'committedShape'
+  nativePayload: OccNativeShimPayload
 }
 
 interface WorkerRestoredAuthoredDocument {
@@ -1294,6 +1327,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private runtimeState: OccKernelRuntimeState | null = null
   private workerRestoredDocument: WorkerRestoredAuthoredDocument | null = null
   private snapshotLodTierId: OccTessellationTierId = 'startup'
+  private nativeTopologyBodyPayloadCache = new Map<string, CachedNativeTopologyBodyPayload>()
 
   constructor(options: OpenCascadeKernelAdapterOptions) {
     this.solverAdapter = options.solverAdapter
@@ -1670,8 +1704,35 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
     this.workerRestoredDocument = null
+    this.pruneNativeTopologyBodyPayloadCache(runtimeState.authoringState)
     this.runtimeState = runtimeState
     this.initializationPromise = Promise.resolve(runtimeState)
+  }
+
+  private createNativeTopologyBodyPayloadCacheKey(input: {
+    bodyId: BodyId
+    topologyToken: string
+    lodTierId: OccTessellationTierId
+    transactionMode: CachedNativeTopologyBodyPayload['transactionMode']
+  }) {
+    return [
+      input.transactionMode,
+      input.lodTierId,
+      input.bodyId,
+      input.topologyToken,
+    ].join(':')
+  }
+
+  private pruneNativeTopologyBodyPayloadCache(state: OccAuthoringState) {
+    const liveBodyKeys = new Set(
+      state.bodies.map((body) => `${body.bodyId}:${body.topologyToken}`),
+    )
+
+    for (const [key, cached] of this.nativeTopologyBodyPayloadCache) {
+      if (!liveBodyKeys.has(`${cached.bodyId}:${cached.topologyToken}`)) {
+        this.nativeTopologyBodyPayloadCache.delete(key)
+      }
+    }
   }
 
   private getCurrentRevisionId(runtimeState: OccKernelRuntimeState) {
@@ -2039,6 +2100,150 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
   }
 
+  private createNativeTopologyUnavailableResult<TPayload>(
+    state: OccAuthoringState,
+  ): OccNativeTopologyWorkerResult<TPayload> {
+    const capability = probeOpenCascadeNativeTopologyKernelCapabilities(state.oc)
+
+    return {
+      kind: 'nativeTopologyUnavailable',
+      diagnostics: capability.diagnostics,
+      capability,
+    }
+  }
+
+  private getNativeTopologyHost<TPayload>(state: OccAuthoringState):
+    | {
+        ok: false
+        result: OccNativeTopologyWorkerResult<TPayload>
+      }
+    | {
+        ok: true
+        host: OpenCascadeNativeTopologyKernelHost
+      } {
+    const capability = probeOpenCascadeNativeTopologyKernelCapabilities(state.oc)
+
+    if (capability.kind !== 'available') {
+      return {
+        ok: false as const,
+        result: this.createNativeTopologyUnavailableResult<TPayload>(state),
+      }
+    }
+
+    return {
+      ok: true as const,
+      host: state.oc as unknown as OpenCascadeNativeTopologyKernelHost,
+    }
+  }
+
+  private buildNativeTopologyPayloadForState(
+    state: OccAuthoringState,
+    lodTierId: OccTessellationTierId | undefined,
+    options: { useCommittedShapeTransaction?: boolean } = {},
+  ): OccNativeTopologyWorkerResult<OccNativeTopologyPayload> {
+    const nativeHost = this.getNativeTopologyHost<OccNativeTopologyPayload>(state)
+
+    if (!nativeHost.ok) {
+      return nativeHost.result
+    }
+
+    const builder = options.useCommittedShapeTransaction
+      ? nativeHost.host.CadaraExecuteNativeFeatureTransaction?.BuildCommittedShapePayload
+      : nativeHost.host.CadaraBuildNativeTopologyPayload?.BuildJson
+    if (!builder) {
+      return this.createNativeTopologyUnavailableResult<OccNativeTopologyPayload>(state)
+    }
+
+    const tier = getOccTessellationTier(lodTierId ?? this.snapshotLodTierId)
+    const transactionMode = options.useCommittedShapeTransaction ? 'committedShape' : 'snapshot'
+    const nativeBodies = state.bodies.map((body) => {
+      const cacheKey = this.createNativeTopologyBodyPayloadCacheKey({
+        bodyId: body.bodyId,
+        topologyToken: body.topologyToken,
+        lodTierId: tier.id,
+        transactionMode,
+      })
+      const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey)
+
+      if (cached) {
+        return {
+          bodyId: body.bodyId,
+          nativePayload: cached.nativePayload,
+        }
+      }
+
+      const nativePayload = parseNativeShimPayloadJson(builder(
+        body.shape,
+        body.bodyId,
+        body.topologyToken,
+        tier.linearDeflectionModelUnits,
+        tier.angularDeflectionRadians,
+      ))
+
+      this.nativeTopologyBodyPayloadCache.set(cacheKey, {
+        bodyId: body.bodyId,
+        topologyToken: body.topologyToken,
+        lodTierId: tier.id,
+        transactionMode,
+        nativePayload,
+      })
+
+      return {
+        bodyId: body.bodyId,
+        nativePayload,
+      }
+    })
+    const payload = createOccNativeTopologyPayloadFromShimPayloads({
+      revisionId: state.revisionId,
+      lodTierId: tier.id,
+      bodies: nativeBodies,
+    })
+
+    return {
+      kind: 'nativeTopologyPayload',
+      payload,
+      diagnostics: payload.diagnostics,
+    }
+  }
+
+  private getNativePayloadBody(
+    state: OccAuthoringState,
+    target: DurableRef,
+  ): OccTrackedBody | OccNativeTopologyWorkerResult<never> {
+    if (target.kind !== 'body') {
+      const diagnostic = createNativeTopologyDiagnostic(
+        'occ-native-topology-unexportable-target',
+        'Only live solid body targets can be exported through the native topology payload boundary.',
+        { kind: 'unsupportedTargetKind', targetKind: target.kind },
+        target,
+      )
+
+      return {
+        kind: 'nativeTopologyPayload',
+        payload: undefined as never,
+        diagnostics: [diagnostic],
+      }
+    }
+
+    const body = state.bodies.find((candidate) => candidate.bodyId === target.bodyId)
+    if (!body) {
+      const diagnostic = createNativeTopologyDiagnostic(
+        'occ-native-topology-missing-body',
+        `Body ${target.bodyId} does not resolve in the current OpenCascade authoring state.`,
+        { kind: 'missingBody', bodyId: target.bodyId },
+        target,
+      )
+
+      return {
+        kind: 'nativeTopologyPayload',
+        payload: undefined as never,
+        diagnostics: [diagnostic],
+      }
+    }
+
+    return body
+  }
+
   async getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId)
 
@@ -2054,12 +2259,360 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     const runtimeState = await this.getRuntimeState()
+    const nativeTopologyResult = this.buildNativeTopologyPayloadForState(
+      runtimeState.authoringState,
+      this.snapshotLodTierId,
+    )
 
     return {
       contractVersion: CONTRACT_VERSION,
       snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
         lodTierId: this.snapshotLodTierId,
+        nativeTopologyPayload: nativeTopologyResult.kind === 'nativeTopologyPayload'
+          ? nativeTopologyResult.payload
+          : undefined,
       }),
+    }
+  }
+
+  async buildNativeTopologySnapshot(
+    request: GetDocumentSnapshotRequest,
+    lodTierId?: OccTessellationTierId,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeTopologyPayload>> {
+    assertSupportedModelingRequest(request, this.documentId)
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.buildNativeTopologySnapshot(request, lodTierId)
+    }
+
+    const runtimeState = await this.getRuntimeState()
+    return this.buildNativeTopologyPayloadForState(
+      runtimeState.authoringState,
+      lodTierId,
+      { useCommittedShapeTransaction: true },
+    )
+  }
+
+  async executeNativeFeatureHistoryRebuild(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assets: readonly GeometryAssetBlobInput[] = [],
+    lodTierId?: OccTessellationTierId,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeTopologyPayload>> {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.executeNativeFeatureHistoryRebuild(
+        document,
+        diagnostics,
+        assets,
+        lodTierId,
+      )
+    }
+
+    await this.restoreAuthoredModelDocument(
+      document,
+      diagnostics,
+      createInMemoryGeometryAssetResolver(assets),
+    )
+    const runtimeState = await this.getRuntimeState()
+
+    return this.buildNativeTopologyPayloadForState(runtimeState.authoringState, lodTierId)
+  }
+
+  async buildNativeBooleanFeatureTransactionPayload(
+    documentId: AuthoredModelDocument['documentId'],
+    baseRevisionId: RevisionId,
+    leftBodyId: BodyId,
+    rightBodyId: BodyId,
+    operation: Exclude<FeatureBooleanOperation, 'newBody'>,
+    lodTierId?: OccTessellationTierId,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeTopologyPayload>> {
+    if (documentId !== this.documentId) {
+      throw new Error(`OCC native boolean transaction requested document ${documentId}, but active document is ${this.documentId}.`)
+    }
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.buildNativeBooleanFeatureTransactionPayload(
+        documentId,
+        baseRevisionId,
+        leftBodyId,
+        rightBodyId,
+        operation,
+        lodTierId,
+      )
+    }
+
+    const runtimeState = await this.getRuntimeState()
+    const state = runtimeState.authoringState
+    const createDiagnosticPayload = (diagnostics: readonly ReturnType<typeof createNativeTopologyDiagnostic>[]) => {
+      const payload = createOccNativeTopologyPayloadFromShimPayloads({
+        revisionId: state.revisionId,
+        lodTierId: null,
+        bodies: [],
+        diagnostics,
+      })
+
+      return {
+        kind: 'nativeTopologyPayload' as const,
+        payload,
+        diagnostics: payload.diagnostics,
+      }
+    }
+
+    if (baseRevisionId !== state.revisionId) {
+      return createDiagnosticPayload([createNativeTopologyDiagnostic(
+        'occ-native-topology-revision-conflict',
+        `Request revision ${baseRevisionId} does not match current revision ${state.revisionId}.`,
+        { kind: 'revisionConflict', expectedRevisionId: baseRevisionId, actualRevisionId: state.revisionId },
+        { kind: 'body', bodyId: leftBodyId },
+      )])
+    }
+
+    const leftBody = state.bodies.find((candidate) => candidate.bodyId === leftBodyId)
+    const rightBody = state.bodies.find((candidate) => candidate.bodyId === rightBodyId)
+
+    if (!leftBody || !rightBody) {
+      return createDiagnosticPayload([createNativeTopologyDiagnostic(
+        'occ-native-topology-missing-body',
+        `Native boolean transaction could not resolve body ${leftBody ? rightBodyId : leftBodyId}.`,
+        {
+          kind: 'missingBody',
+          leftBodyId,
+          rightBodyId,
+          missingBodyId: leftBody ? rightBodyId : leftBodyId,
+        },
+        { kind: 'body', bodyId: leftBody ? rightBodyId : leftBodyId },
+      )])
+    }
+
+    const nativeHost = this.getNativeTopologyHost<OccNativeTopologyPayload>(state)
+    if (!nativeHost.ok) {
+      return nativeHost.result
+    }
+
+    const builder = nativeHost.host.CadaraExecuteNativeFeatureTransaction?.BuildBooleanCommittedShapeTransactionWithHistory
+    if (!builder) {
+      return this.createNativeTopologyUnavailableResult<OccNativeTopologyPayload>(state)
+    }
+
+    const tier = getOccTessellationTier(lodTierId ?? this.snapshotLodTierId)
+    const nextTopologyToken = advanceTopologyToken(leftBody.topologyToken)
+    const transactionResult = builder(
+      leftBody.shape,
+      rightBody.shape,
+      operation,
+      leftBody.bodyId,
+      leftBody.topologyToken,
+      nextTopologyToken,
+      tier.linearDeflectionModelUnits,
+      tier.angularDeflectionRadians,
+    )
+    const nativePayload = parseNativeShimPayloadJson(transactionResult.PayloadJson())
+    const transactionHistory = parseNativeFeatureTransactionHistoryJson(transactionResult.HistoryJson())
+    const payload = createOccNativeTopologyPayloadFromShimPayloads({
+      revisionId: state.revisionId,
+      lodTierId: tier.id,
+      bodies: [{
+        bodyId: leftBody.bodyId,
+        nativePayload,
+        invalidations: createOccNativeReferenceInvalidationsFromHistoryPayload(transactionHistory),
+      }],
+      diagnostics: transactionHistory.diagnostics,
+    })
+
+    return {
+      kind: 'nativeTopologyPayload',
+      payload,
+      diagnostics: payload.diagnostics,
+    }
+  }
+
+  async buildNativeMeshExportPayload(
+    documentId: AuthoredModelDocument['documentId'],
+    baseRevisionId: RevisionId,
+    target: DurableRef,
+    options: MeshExportAccuracy,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeMeshExportPayload>> {
+    if (documentId !== this.documentId) {
+      throw new Error(`OCC native mesh export requested document ${documentId}, but active document is ${this.documentId}.`)
+    }
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.buildNativeMeshExportPayload(documentId, baseRevisionId, target, options)
+    }
+
+    const runtimeState = await this.getRuntimeState()
+    const state = runtimeState.authoringState
+    const bodyOrResult = this.getNativePayloadBody(state, target)
+
+    if ('kind' in bodyOrResult) {
+      const diagnosticPayload = createOccNativeMeshExportPayloadFromShimPayload({
+        revisionId: state.revisionId,
+        target,
+        options,
+        nativePayload: parseNativeShimPayloadJson(JSON.stringify({
+          schemaVersion: 'occ-native-topology-payload/v1alpha1',
+          source: 'occt7-shim',
+          topology: [],
+          edgeVertices: [],
+          diagnostics: [],
+        })),
+        diagnostics: bodyOrResult.diagnostics,
+      })
+      return {
+        kind: 'nativeTopologyPayload',
+        payload: diagnosticPayload,
+        diagnostics: diagnosticPayload.diagnostics,
+      }
+    }
+
+    if (baseRevisionId !== state.revisionId) {
+      const diagnostic = createNativeTopologyDiagnostic(
+        'occ-native-topology-revision-conflict',
+        `Request revision ${baseRevisionId} does not match current revision ${state.revisionId}.`,
+        { kind: 'revisionConflict', expectedRevisionId: baseRevisionId, actualRevisionId: state.revisionId },
+        target,
+      )
+      const diagnosticPayload = createOccNativeMeshExportPayloadFromShimPayload({
+        revisionId: state.revisionId,
+        target,
+        options,
+        nativePayload: parseNativeShimPayloadJson(JSON.stringify({
+          schemaVersion: 'occ-native-topology-payload/v1alpha1',
+          source: 'occt7-shim',
+          topology: [],
+          edgeVertices: [],
+          diagnostics: [],
+        })),
+        diagnostics: [diagnostic],
+      })
+
+      return {
+        kind: 'nativeTopologyPayload',
+        payload: diagnosticPayload,
+        diagnostics: diagnosticPayload.diagnostics,
+      }
+    }
+
+    const nativeHost = this.getNativeTopologyHost<OccNativeMeshExportPayload>(state)
+    if (!nativeHost.ok) {
+      return nativeHost.result
+    }
+
+    const builder = nativeHost.host.CadaraBuildNativeMeshExportPayload?.BuildJson
+    if (!builder) {
+      return this.createNativeTopologyUnavailableResult<OccNativeMeshExportPayload>(state)
+    }
+
+    const nativePayload = parseNativeShimPayloadJson(builder(
+      bodyOrResult.shape,
+      options.chordTolerance,
+      options.angleToleranceRadians,
+    ))
+    const payload = createOccNativeMeshExportPayloadFromShimPayload({
+      revisionId: state.revisionId,
+      target,
+      options,
+      nativePayload,
+    })
+
+    return {
+      kind: 'nativeTopologyPayload',
+      payload,
+      diagnostics: payload.diagnostics,
+    }
+  }
+
+  async buildNativeExactBrepPayload(
+    documentId: AuthoredModelDocument['documentId'],
+    baseRevisionId: RevisionId,
+    target: DurableRef,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>> {
+    if (documentId !== this.documentId) {
+      throw new Error(`OCC native exact B-rep requested document ${documentId}, but active document is ${this.documentId}.`)
+    }
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.buildNativeExactBrepPayload(documentId, baseRevisionId, target)
+    }
+
+    const runtimeState = await this.getRuntimeState()
+    const state = runtimeState.authoringState
+    const bodyOrResult = this.getNativePayloadBody(state, target)
+    const emptyNativePayload = () => parseNativeShimPayloadJson(JSON.stringify({
+      schemaVersion: 'occ-native-topology-payload/v1alpha1',
+      source: 'occt7-shim',
+      topology: [],
+      edgeVertices: [],
+      diagnostics: [],
+    }))
+
+    if ('kind' in bodyOrResult) {
+      const diagnosticPayload = createOccNativeExactBrepPayloadFromShimPayload({
+        revisionId: state.revisionId,
+        target,
+        bodyId: target.kind === 'body' ? target.bodyId : ('body_unresolved' as BodyId),
+        bodyLabel: 'Unresolved body',
+        nativePayload: emptyNativePayload(),
+        diagnostics: bodyOrResult.diagnostics,
+      })
+
+      return {
+        kind: 'nativeTopologyPayload',
+        payload: diagnosticPayload,
+        diagnostics: diagnosticPayload.diagnostics,
+      }
+    }
+
+    if (baseRevisionId !== state.revisionId) {
+      const diagnostic = createNativeTopologyDiagnostic(
+        'occ-native-topology-revision-conflict',
+        `Request revision ${baseRevisionId} does not match current revision ${state.revisionId}.`,
+        { kind: 'revisionConflict', expectedRevisionId: baseRevisionId, actualRevisionId: state.revisionId },
+        target,
+      )
+      const diagnosticPayload = createOccNativeExactBrepPayloadFromShimPayload({
+        revisionId: state.revisionId,
+        target,
+        bodyId: bodyOrResult.bodyId,
+        bodyLabel: bodyOrResult.label,
+        nativePayload: emptyNativePayload(),
+        diagnostics: [diagnostic],
+      })
+
+      return {
+        kind: 'nativeTopologyPayload',
+        payload: diagnosticPayload,
+        diagnostics: diagnosticPayload.diagnostics,
+      }
+    }
+
+    const nativeHost = this.getNativeTopologyHost<OccNativeExactBrepPayload>(state)
+    if (!nativeHost.ok) {
+      return nativeHost.result
+    }
+
+    const builder = nativeHost.host.CadaraBuildNativeExactBrepPayload?.BuildJson
+    if (!builder) {
+      return this.createNativeTopologyUnavailableResult<OccNativeExactBrepPayload>(state)
+    }
+
+    const nativePayload = parseNativeShimPayloadJson(builder(
+      bodyOrResult.shape,
+      bodyOrResult.bodyId,
+      bodyOrResult.topologyToken,
+    ))
+    const payload = createOccNativeExactBrepPayloadFromShimPayload({
+      revisionId: state.revisionId,
+      target,
+      bodyId: bodyOrResult.bodyId,
+      bodyLabel: bodyOrResult.label,
+      nativePayload,
+    })
+
+    return {
+      kind: 'nativeTopologyPayload',
+      payload,
+      diagnostics: payload.diagnostics,
     }
   }
 

@@ -1,0 +1,28 @@
+## Mutating Solid History Audit
+
+This audit records the current OCCT 7.x history source available to the durable topology reconciliation path. It is intentionally tied to the temporary pre-8.0 shim and should be replaced by BRepGraph-owned identity/history after the OCCT 8 migration.
+
+| Feature family | Current OCCT builder/history source | Current reconciliation behavior | Gap before native graph cutover |
+| --- | --- | --- | --- |
+| Extrude | `BRepPrimAPI_MakePrism` for the feature shape, plus `BRepAlgoAPI_*` history when composed by `applyBooleanPolicy` | New-body creates fresh topology; join/cut/intersect replacement bodies reconcile through boolean builder/refinement history | Native transaction still needs prism creation, boolean composition, refinement, validation, and payload emission in one kernel command |
+| Revolve | Revolved feature shape, plus `BRepAlgoAPI_*` history when composed by `applyBooleanPolicy` | Same as extrude | Native transaction still needs revolve creation and boolean history collapsed into one kernel result |
+| Boolean join/cut/intersect | `BRepAlgoAPI_Fuse`, `BRepAlgoAPI_Cut`, `BRepAlgoAPI_Common`, plus same-domain refinement history | Single-target replacement bodies use native transaction payload/history where the custom runtime exposes it; multi-body policy paths still stitch builder history in TypeScript | Multi-body boolean composition still needs one native transaction result instead of sequential JS orchestration |
+| Fillet | `BRepFilletAPI_MakeFillet` | Replacement bodies use native transaction payload/history where the custom runtime exposes it | Still needs BRepGraph-backed identity after OCCT 8; pre-8 history remains shim-derived |
+| Chamfer | `BRepFilletAPI_MakeChamfer` | Replacement bodies use native transaction payload/history where the custom runtime exposes it, including native adjacent-face lookup | Still needs BRepGraph-backed identity after OCCT 8; pre-8 history remains shim-derived |
+| Shell | `BRepOffsetAPI_MakeThickSolid` in the pre-8 native transaction for composed shells; JS builder remains for new-body shell | Composed shell builds the shell shape through native transaction validation/payload/history before boolean composition; new-body shell uses derived topology from shell builder history | New-body shell still needs a native payload path if copied shell topology should preserve source successors; pre-8 history remains shim-derived |
+| Thicken | `BRepPrimAPI_MakePrism` from one planar face, then `applyBooleanPolicy` | Current implementation supports create/new-body only, so topology is fresh; no composed mutating-body history is exposed | Boolean composition is unsupported and must either gain native history or keep structured unsupported diagnostics |
+| Sweep | `BRepOffsetAPI_MakePipeShell` or loft-style section construction, then `applyBooleanPolicy` | Current implementation supports create/new-body only, so topology is fresh | Boolean composition and guide/history preservation are unsupported and must be native-owned before durable successor preservation |
+| Loft | `BRepOffsetAPI_ThruSections`, plus optional transformed/path sections, then `applyBooleanPolicy` | Current implementation supports create/new-body only, so topology is fresh | Boolean composition, section/guide successor identity, and validation remain unsupported |
+| Combine | Repeated `BRepAlgoAPI_*` builders through `runBoolean` | Target replacement bodies reconcile through accumulated boolean history; consumed tool bodies are invalidated as deleted | Multi-step history is still stitched in TypeScript and should become one native transaction result |
+| Split | Separate cut and intersect builders | Original target body is invalidated; cut/intersection successor maps are marked ambiguous instead of traversal-selected | Needs native multi-result successor classification to preserve unique successors where safe |
+| Delete solid | No OCCT builder | Deleted body topology is invalidated explicitly | No native shape history expected; native transaction should still emit the invalidations |
+| Mirror | `BRepBuilderAPI_Transform` with copy mode | Copy creates fresh mirrored result bodies without preserving source topology ids | Needs graph-derived copy identity policy, or explicit fresh-id behavior documented in native diagnostics |
+| Transform | `BRepBuilderAPI_Transform` with copy mode in the pre-8 native transaction | Replacement bodies use native transaction payload/history where the custom runtime exposes it | Still needs BRepGraph-backed identity after OCCT 8; pre-8 history remains shim-derived |
+
+## Unsupported History Gaps
+
+- The adapter still consumes builder history and topology maps in TypeScript for several mutating operations. Single-target booleans, fillet, chamfer, composed shell feature-shape creation, and transform replacements now have native pre-8 transaction payload/history paths, but committed feature execution has not fully become one native transaction boundary.
+- Same-domain refinement history is merged for booleans, but validation/healing/tolerance normalization is not centralized in the native shim.
+- Sweep, loft, and thicken currently reject boolean composition beyond create/new-body behavior; there is no reliable successor preservation for composed mutations yet.
+- Split intentionally reports ambiguous/deleted invalidations instead of choosing traversal-order successors; preserving unique split successors requires native multi-result classification.
+- Mirror copy currently creates fresh copied topology; it does not attempt source-to-copy durable reference preservation.

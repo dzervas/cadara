@@ -5,6 +5,7 @@ import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-a
 import { packWorkspaceSnapshotRenderMeshes } from '@/domain/modeling/occ/mesh-transport'
 import {
   loadDefaultOpenCascadeFactory,
+  probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from '@/domain/modeling/occ/runtime'
 import {
@@ -58,6 +59,11 @@ function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
   return openCascadePromise
 }
 
+async function probeWorkerNativeTopologyKernelCapabilities(assets?: OccWorkerAssetConfig) {
+  const oc = await getWorkerOpenCascadeInstance(assets)
+  return probeOpenCascadeNativeTopologyKernelCapabilities(oc)
+}
+
 function getWorkerAdapter(documentId: DocumentId) {
   const existing = adapters.get(documentId)
   if (existing) {
@@ -102,6 +108,44 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       await getWorkerOpenCascadeInstance(operation.assets)
       await getWorkerAdapter(OCC_KERNEL_DOCUMENT_ID).preloadRuntime()
       return undefined
+    case 'probeNativeTopologyKernelCapabilities':
+      return probeWorkerNativeTopologyKernelCapabilities(operation.assets)
+    case 'buildNativeTopologySnapshot':
+      return getWorkerAdapter(operation.request.documentId)
+        .buildNativeTopologySnapshot(operation.request, operation.lodTierId)
+    case 'executeNativeFeatureHistoryRebuild':
+      return getWorkerAdapter(operation.document.documentId)
+        .executeNativeFeatureHistoryRebuild(
+          operation.document,
+          operation.diagnostics ?? [],
+          operation.assets ?? [],
+          operation.lodTierId,
+        )
+    case 'buildNativeBooleanFeatureTransactionPayload':
+      return getWorkerAdapter(operation.documentId)
+        .buildNativeBooleanFeatureTransactionPayload(
+          operation.documentId,
+          operation.baseRevisionId,
+          operation.leftBodyId,
+          operation.rightBodyId,
+          operation.operation,
+          operation.lodTierId,
+        )
+    case 'buildNativeMeshExportPayload':
+      return getWorkerAdapter(operation.documentId)
+        .buildNativeMeshExportPayload(
+          operation.documentId,
+          operation.baseRevisionId,
+          operation.target,
+          operation.options,
+        )
+    case 'buildNativeExactBrepPayload':
+      return getWorkerAdapter(operation.documentId)
+        .buildNativeExactBrepPayload(
+          operation.documentId,
+          operation.baseRevisionId,
+          operation.target,
+        )
     case 'restoreAuthoredModelDocument':
       await getWorkerAdapter(operation.document.documentId).restoreAuthoredModelDocument?.(
         operation.document,

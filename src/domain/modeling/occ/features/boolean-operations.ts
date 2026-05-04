@@ -4,12 +4,16 @@ import type {
 } from '@/contracts/modeling/schema'
 import type {
   BodyId,
+  EdgeId,
+  FaceId,
   FeatureId,
+  VertexId,
 } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
 import { getMultiBodyBooleanPolicy } from '@/domain/modeling/occ/implementation-policy'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
 import {
+  advanceTopologyToken,
   extractSolidShapes,
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,
@@ -20,6 +24,13 @@ import {
   type OccTrackedBody,
   type OccReferenceInvalidationRecord,
 } from '@/domain/modeling/occ/topology'
+import {
+  parseNativeFeatureTransactionHistoryJson,
+  type OccNativeFeatureTransactionHistoryPayload,
+  type OccNativeFeatureTransactionHistoryRecord,
+  type OpenCascadeNativeFeatureTransactionResult,
+  type OpenCascadeNativeTopologyKernelHost,
+} from '@/domain/modeling/occ/native-topology-payload'
 import {
   isOccTopologyHistoryDeleted,
   type OccTopologyHistorySource,
@@ -102,6 +113,271 @@ export function runBoolean(
   }
 }
 
+function appendOwnerFeature(
+  contributors: readonly FeatureId[],
+  ownerFeatureId: FeatureId | null,
+) {
+  return ownerFeatureId && !contributors.includes(ownerFeatureId)
+    ? [...contributors, ownerFeatureId]
+    : [...contributors]
+}
+
+function collectBodyContributors(
+  ownerFeatureId: FeatureId | null,
+  ...maps: readonly ReadonlyMap<FaceId | EdgeId | VertexId, readonly FeatureId[]>[]
+) {
+  const contributors: FeatureId[] = []
+
+  for (const map of maps) {
+    for (const list of map.values()) {
+      for (const featureId of list) {
+        if (!contributors.includes(featureId)) {
+          contributors.push(featureId)
+        }
+      }
+    }
+  }
+
+  if (ownerFeatureId && !contributors.includes(ownerFeatureId)) {
+    contributors.push(ownerFeatureId)
+  }
+
+  return contributors
+}
+
+function nativeHistoryInvalidationReason(reason: OccNativeFeatureTransactionHistoryRecord['reason']) {
+  switch (reason) {
+    case 'ambiguous':
+      return OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous
+    case 'deleted':
+      return OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted
+    case 'missing':
+      return OCC_REFERENCE_INVALIDATION_REASONS.missing
+    case 'unique-successor':
+      return null
+  }
+}
+
+function sameTopologyTargetKind(target: DurableRef, successor: DurableRef) {
+  return (
+    (target.kind === 'face' && successor.kind === 'face')
+    || (target.kind === 'edge' && successor.kind === 'edge')
+    || (target.kind === 'vertex' && successor.kind === 'vertex')
+  )
+}
+
+function collectNativeHistoryResolution(input: {
+  current: OccTrackedBody
+  history: OccNativeFeatureTransactionHistoryPayload
+}) {
+  const preservedTargetsBySuccessorKey = new Map<string, DurableRef>()
+  const invalidations = new Map<string, OccReferenceInvalidationRecord>()
+
+  for (const record of input.history.records) {
+    if (
+      record.reason === 'unique-successor'
+      && record.successors.length === 1
+      && sameTopologyTargetKind(record.target, record.successors[0]!)
+    ) {
+      preservedTargetsBySuccessorKey.set(getOccDurableRefKey(record.successors[0]!), record.target)
+      continue
+    }
+
+    const reason = record.reason === 'unique-successor'
+      ? OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous
+      : nativeHistoryInvalidationReason(record.reason)
+
+    if (reason) {
+      invalidations.set(getOccDurableRefKey(record.target), {
+        target: record.target,
+        reason,
+        sourceTarget: { kind: 'body', bodyId: input.current.bodyId },
+      })
+    }
+  }
+
+  return {
+    preservedTargetsBySuccessorKey,
+    invalidations,
+  }
+}
+
+function reconcileNativeHistoryReplacement(
+  current: OccTrackedBody,
+  replacement: OccTrackedBody,
+  history: OccNativeFeatureTransactionHistoryPayload,
+  ownerFeatureId: FeatureId,
+) {
+  if (history.status !== 'available') {
+    return {
+      body: replacement,
+      historyInvalidations: createUnsupportedHistoryInvalidations(current),
+    }
+  }
+
+  const { preservedTargetsBySuccessorKey, invalidations } = collectNativeHistoryResolution({
+    current,
+    history,
+  })
+  const faceIds: FaceId[] = []
+  const facesById = new Map<FaceId, OccTrackedBody['facesById'] extends Map<FaceId, infer Face> ? Face : never>()
+  const faceContributingFeatureIdsById = new Map<FaceId, FeatureId[]>()
+
+  for (const freshId of replacement.topology.faceIds) {
+    const preservedTarget = preservedTargetsBySuccessorKey.get(getOccDurableRefKey({
+      kind: 'face',
+      bodyId: replacement.bodyId,
+      faceId: freshId,
+    }))
+    const faceId = preservedTarget?.kind === 'face' ? preservedTarget.faceId : freshId
+    const face = replacement.facesById.get(freshId)
+
+    if (!face || facesById.has(faceId)) {
+      continue
+    }
+
+    faceIds.push(faceId)
+    facesById.set(faceId, face as never)
+    faceContributingFeatureIdsById.set(faceId, preservedTarget?.kind === 'face'
+      ? appendOwnerFeature(current.faceContributingFeatureIdsById.get(faceId) ?? [], ownerFeatureId)
+      : [...(replacement.faceContributingFeatureIdsById.get(freshId) ?? [])])
+  }
+
+  const edgeIds: EdgeId[] = []
+  const edgesById = new Map<EdgeId, OccTrackedBody['edgesById'] extends Map<EdgeId, infer Edge> ? Edge : never>()
+  const edgeContributingFeatureIdsById = new Map<EdgeId, FeatureId[]>()
+
+  for (const freshId of replacement.topology.edgeIds) {
+    const preservedTarget = preservedTargetsBySuccessorKey.get(getOccDurableRefKey({
+      kind: 'edge',
+      bodyId: replacement.bodyId,
+      edgeId: freshId,
+    }))
+    const edgeId = preservedTarget?.kind === 'edge' ? preservedTarget.edgeId : freshId
+    const edge = replacement.edgesById.get(freshId)
+
+    if (!edge || edgesById.has(edgeId)) {
+      continue
+    }
+
+    edgeIds.push(edgeId)
+    edgesById.set(edgeId, edge as never)
+    edgeContributingFeatureIdsById.set(edgeId, preservedTarget?.kind === 'edge'
+      ? appendOwnerFeature(current.edgeContributingFeatureIdsById.get(edgeId) ?? [], ownerFeatureId)
+      : [...(replacement.edgeContributingFeatureIdsById.get(freshId) ?? [])])
+  }
+
+  const vertexIds: VertexId[] = []
+  const verticesById = new Map<VertexId, OccTrackedBody['verticesById'] extends Map<VertexId, infer Vertex> ? Vertex : never>()
+  const vertexContributingFeatureIdsById = new Map<VertexId, FeatureId[]>()
+
+  for (const freshId of replacement.topology.vertexIds) {
+    const preservedTarget = preservedTargetsBySuccessorKey.get(getOccDurableRefKey({
+      kind: 'vertex',
+      bodyId: replacement.bodyId,
+      vertexId: freshId,
+    }))
+    const vertexId = preservedTarget?.kind === 'vertex' ? preservedTarget.vertexId : freshId
+    const vertex = replacement.verticesById.get(freshId)
+
+    if (!vertex || verticesById.has(vertexId)) {
+      continue
+    }
+
+    vertexIds.push(vertexId)
+    verticesById.set(vertexId, vertex as never)
+    vertexContributingFeatureIdsById.set(vertexId, preservedTarget?.kind === 'vertex'
+      ? appendOwnerFeature(current.vertexContributingFeatureIdsById.get(vertexId) ?? [], ownerFeatureId)
+      : [...(replacement.vertexContributingFeatureIdsById.get(freshId) ?? [])])
+  }
+
+  return {
+    body: {
+      ...replacement,
+      topology: {
+        faceIds,
+        edgeIds,
+        vertexIds,
+      },
+      contributingFeatureIds: collectBodyContributors(
+        ownerFeatureId,
+        faceContributingFeatureIdsById,
+        edgeContributingFeatureIdsById,
+        vertexContributingFeatureIdsById,
+      ),
+      facesById,
+      faceContributingFeatureIdsById,
+      edgesById,
+      edgeContributingFeatureIdsById,
+      verticesById,
+      vertexContributingFeatureIdsById,
+      naming: undefined,
+    } satisfies OccTrackedBody,
+    historyInvalidations: invalidations,
+  }
+}
+
+export function resolveNativeFeatureTransactionReplacement(
+  context: OccFeatureExecutionContext,
+  current: OccTrackedBody,
+  transaction: OpenCascadeNativeFeatureTransactionResult,
+  operation: string,
+  ownerFeatureId: FeatureId,
+) {
+  if (!transaction.IsDone()) {
+    throw new Error(`Native OCC ${operation} failed to build.`)
+  }
+
+  const replacement = trackReplacementSolidBody(context.oc, {
+    previous: current,
+    ownerFeatureId,
+    shape: transaction.Shape() as InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+  })
+  const history = parseNativeFeatureTransactionHistoryJson(transaction.HistoryJson())
+
+  const reconciled = reconcileNativeHistoryReplacement(current, replacement, history, ownerFeatureId)
+
+  return {
+    replacements: [reconciled.body],
+    historyInvalidations: reconciled.historyInvalidations,
+  }
+}
+
+function resolveNativeBooleanReplacement(
+  context: OccFeatureExecutionContext,
+  current: OccTrackedBody,
+  featureShape: InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+  operation: Exclude<FeatureBooleanOperation, 'newBody'>,
+  ownerFeatureId: FeatureId,
+) {
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const builder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildBooleanCommittedShapeTransactionWithHistory
+
+  if (!builder) {
+    return null
+  }
+
+  const nextTopologyToken = advanceTopologyToken(current.topologyToken)
+  const transaction = builder(
+    current.shape,
+    featureShape,
+    operation,
+    current.bodyId,
+    current.topologyToken,
+    nextTopologyToken,
+    context.modelingTolerance,
+    0.5,
+  )
+
+  return resolveNativeFeatureTransactionReplacement(
+    context,
+    current,
+    transaction,
+    operation,
+    ownerFeatureId,
+  )
+}
+
 function createHistoryTargetForShape(
   target: DurableRef,
   ownerBodyId: BodyId,
@@ -167,6 +443,32 @@ export function collectTopologyHistoryInvalidations(
   return invalidations
 }
 
+export function createUnsupportedHistoryInvalidations(body: OccTrackedBody) {
+  const invalidations = new Map<string, OccReferenceInvalidationRecord>()
+  const sourceTarget = { kind: 'body', bodyId: body.bodyId } as DurableRef
+  const register = (target: DurableRef) => {
+    invalidations.set(getOccDurableRefKey(target), {
+      target,
+      reason: OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory,
+      sourceTarget,
+    })
+  }
+
+  for (const faceId of body.facesById.keys()) {
+    register({ kind: 'face', bodyId: body.bodyId, faceId })
+  }
+
+  for (const edgeId of body.edgesById.keys()) {
+    register({ kind: 'edge', bodyId: body.bodyId, edgeId })
+  }
+
+  for (const vertexId of body.verticesById.keys()) {
+    register({ kind: 'vertex', bodyId: body.bodyId, vertexId })
+  }
+
+  return invalidations
+}
+
 export function resolveReplacementBodies(
   context: OccFeatureExecutionContext,
   bodyId: BodyId,
@@ -188,6 +490,10 @@ export function resolveReplacementBodies(
   let historyInvalidations = invalidationHistorySource
     ? collectTopologyHistoryInvalidations(current, invalidationHistorySource)
     : new Map<string, OccReferenceInvalidationRecord>()
+
+  if (historySources.length === 0) {
+    mergeHistoryInvalidations(historyInvalidations, createUnsupportedHistoryInvalidations(current))
+  }
 
   if (solids.length === 0) {
     if (options.allowEmpty) {
@@ -301,11 +607,19 @@ export function applyBooleanPolicy(
   if (!policy) {
     const bodyId = targetBodyIds[0]!
     const targetBody = requireBody(context, bodyId)
-    const result = runBoolean(context.oc, operation, targetBody.shape, featureShape)
-    const replacementResult = resolveReplacementBodies(context, bodyId, result.shape, ownerFeatureId, {
-      allowEmpty: true,
-      historySources: result.historySources,
-    })
+    const replacementResult = resolveNativeBooleanReplacement(
+      context,
+      targetBody,
+      featureShape,
+      operation,
+      ownerFeatureId,
+    ) ?? (() => {
+      const result = runBoolean(context.oc, operation, targetBody.shape, featureShape)
+      return resolveReplacementBodies(context, bodyId, result.shape, ownerFeatureId, {
+        allowEmpty: true,
+        historySources: result.historySources,
+      })
+    })()
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId)
     nextBodies.splice(index, 1, ...replacementResult.replacements)
     for (const replacement of replacementResult.replacements) {

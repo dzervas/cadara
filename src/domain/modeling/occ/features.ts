@@ -22,7 +22,6 @@ export type {
 } from '@/domain/modeling/occ/features/shared'
 
 export { createConstructionPresentationArtifacts, createEmptyOccRenderExport } from '@/domain/modeling/occ/features/plane'
-export { createCadaraBrepTopologyFromShape } from '@/domain/modeling/occ/features/brep-topology'
 
 export function executeOccFeature(
   context: OccFeatureExecutionContext,

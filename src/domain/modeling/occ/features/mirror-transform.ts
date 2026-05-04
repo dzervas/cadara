@@ -8,6 +8,7 @@ import {
   buildConstructionPlaneFromPlanarFace,
 } from '@/domain/modeling/occ/sketch-profile'
 import type { OccReferenceInvalidationRecord, OccTrackedBody } from '@/domain/modeling/occ/topology'
+import { advanceTopologyToken } from '@/domain/modeling/occ/topology'
 import {
   requireBody,
   requireFace,
@@ -16,10 +17,12 @@ import {
   type OccFeatureExecutionResult,
 } from '@/domain/modeling/occ/features/shared'
 import {
+  resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
   requireUniqueTargetBodies,
   trackBodiesFromShape,
 } from '@/domain/modeling/occ/features/boolean-operations'
+import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
 
 function resolvePlanarReferencePlane(
   context: OccFeatureExecutionContext,
@@ -224,17 +227,38 @@ export function executeTransformFeature(
 
   for (const bodyTarget of bodyTargets) {
     const body = requireBody(context, bodyTarget.bodyId)
-    const transform = new context.oc.BRepBuilderAPI_Transform_2(body.shape, translation, true)
-    transform.Build(new context.oc.Message_ProgressRange_1())
+    const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+    const nativeBuilder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildTransformCommittedShapeTransactionWithHistory
+    const replacementResult = nativeBuilder
+      ? resolveNativeFeatureTransactionReplacement(
+          context,
+          body,
+          nativeBuilder(
+            body.shape,
+            translation,
+            true,
+            body.bodyId,
+            body.topologyToken,
+            advanceTopologyToken(body.topologyToken),
+            context.modelingTolerance,
+            0.5,
+          ),
+          'transform',
+          ownerFeatureId,
+        )
+      : (() => {
+          const transform = new context.oc.BRepBuilderAPI_Transform_2(body.shape, translation, true)
+          transform.Build(new context.oc.Message_ProgressRange_1())
 
-    if (!transform.IsDone()) {
-      throw new Error('advanced-feature-unsupported-kernel-case: OCC transform build failed.')
-    }
+          if (!transform.IsDone()) {
+            throw new Error('advanced-feature-unsupported-kernel-case: OCC transform build failed.')
+          }
 
-    const replacementResult = resolveReplacementBodies(context, body.bodyId, transform.Shape(), ownerFeatureId, {
-      allowEmpty: false,
-      historySource: transform,
-    })
+          return resolveReplacementBodies(context, body.bodyId, transform.Shape(), ownerFeatureId, {
+            allowEmpty: false,
+            historySource: transform,
+          })
+        })()
     const index = nextBodies.findIndex((entry) => entry.bodyId === body.bodyId)
     nextBodies.splice(index, 1, ...replacementResult.replacements)
     for (const replacement of replacementResult.replacements) {

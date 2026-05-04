@@ -902,6 +902,15 @@ export declare type BRepBuilderAPI_WireError = {
   BRepBuilderAPI_NonManifoldWire: {};
 }
 
+export declare class BRepCheck_Analyzer {
+  constructor(S: TopoDS_Shape, GeomControls: Standard_Boolean, theIsParallel: Standard_Boolean)
+  Init(S: TopoDS_Shape, GeomControls: Standard_Boolean, theIsParallel: Standard_Boolean): void;
+  IsValid_1(S: TopoDS_Shape): Standard_Boolean;
+  IsValid_2(): Standard_Boolean;
+  Result(theSubS: TopoDS_Shape): Handle_BRepCheck_Result;
+  delete(): void;
+}
+
 export declare class BRepFilletAPI_LocalOperation extends BRepBuilderAPI_MakeShape {
   Add(E: TopoDS_Edge): void;
   ResetContour(IC: Graphic3d_ZLayerId): void;
@@ -3482,6 +3491,65 @@ export declare class gp_Vec {
     constructor(theP1: gp_Pnt, theP2: gp_Pnt);
   }
 
+export declare class CadaraNativeFeatureTransactionResult {
+  Shape(): TopoDS_Shape;
+  PayloadJson(): string;
+  HistoryJson(): string;
+  IsDone(): Standard_Boolean;
+  delete(): void;
+}
+
+  export declare class CadaraNativeFeatureTransactionResult_1 extends CadaraNativeFeatureTransactionResult {
+    constructor();
+  }
+
+  export declare class CadaraNativeFeatureTransactionResult_2 extends CadaraNativeFeatureTransactionResult {
+    constructor(committedShape: TopoDS_Shape, committedPayloadJson: string, committedHistoryJson: string, transactionDone: Standard_Boolean);
+  }
+
+export declare class CadaraNativeTopologyProbe {
+  constructor();
+  static SchemaVersion(): string;
+  static HasPre8Shim(): Standard_Boolean;
+  static SummarizeShape(shape: TopoDS_Shape): string;
+  delete(): void;
+}
+
+export declare class CadaraBuildNativeTopologyPayload {
+  constructor();
+  static EntrypointName(): string;
+  static BuildJson(shape: TopoDS_Shape, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): string;
+  delete(): void;
+}
+
+export declare class CadaraExecuteNativeFeatureTransaction {
+  constructor();
+  static EntrypointName(): string;
+  static BuildCommittedShapePayload(shape: TopoDS_Shape, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): string;
+  static BuildBooleanCommittedShapePayload(left: TopoDS_Shape, right: TopoDS_Shape, operation: string, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): string;
+  static BuildBooleanCommittedShapeTransaction(left: TopoDS_Shape, right: TopoDS_Shape, operation: string, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  static BuildBooleanCommittedShapeTransactionWithHistory(left: TopoDS_Shape, right: TopoDS_Shape, operation: string, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  static BuildFilletCommittedShapeTransactionWithHistory(shape: TopoDS_Shape, edgeIdsCsv: string, radius: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  static BuildChamferCommittedShapeTransactionWithHistory(shape: TopoDS_Shape, edgeIdsCsv: string, distance: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  static BuildShellCommittedShapeTransactionWithHistory(shape: TopoDS_Shape, faceIdsCsv: string, signedThickness: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  static BuildTransformCommittedShapeTransactionWithHistory(shape: TopoDS_Shape, transform: gp_Trsf, copy: Standard_Boolean, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  delete(): void;
+}
+
+export declare class CadaraBuildNativeExactBrepPayload {
+  constructor();
+  static EntrypointName(): string;
+  static BuildJson(shape: TopoDS_Shape, bodyId: string, topologyToken: string): string;
+  delete(): void;
+}
+
+export declare class CadaraBuildNativeMeshExportPayload {
+  constructor();
+  static EntrypointName(): string;
+  static BuildJson(shape: TopoDS_Shape, linearDeflection: Standard_Real, angularDeflection: Standard_Real): string;
+  delete(): void;
+}
+
 type Standard_Boolean = boolean;
 type Standard_Byte = number;
 type Standard_Character = number;
@@ -3762,6 +3830,7 @@ export type OpenCascadeInstance = {FS: typeof FS} & {
   BRepBuilderAPI_Transform_1: typeof BRepBuilderAPI_Transform_1;
   BRepBuilderAPI_Transform_2: typeof BRepBuilderAPI_Transform_2;
   BRepBuilderAPI_WireError: BRepBuilderAPI_WireError;
+  BRepCheck_Analyzer: typeof BRepCheck_Analyzer;
   BRepFilletAPI_LocalOperation: typeof BRepFilletAPI_LocalOperation;
   BRepFilletAPI_MakeChamfer: typeof BRepFilletAPI_MakeChamfer;
   BRepFilletAPI_MakeFillet: typeof BRepFilletAPI_MakeFillet;
@@ -4011,6 +4080,14 @@ export type OpenCascadeInstance = {FS: typeof FS} & {
   gp_Vec_3: typeof gp_Vec_3;
   gp_Vec_4: typeof gp_Vec_4;
   gp_Vec_5: typeof gp_Vec_5;
+  CadaraNativeFeatureTransactionResult: typeof CadaraNativeFeatureTransactionResult;
+  CadaraNativeFeatureTransactionResult_1: typeof CadaraNativeFeatureTransactionResult_1;
+  CadaraNativeFeatureTransactionResult_2: typeof CadaraNativeFeatureTransactionResult_2;
+  CadaraNativeTopologyProbe: typeof CadaraNativeTopologyProbe;
+  CadaraBuildNativeTopologyPayload: typeof CadaraBuildNativeTopologyPayload;
+  CadaraExecuteNativeFeatureTransaction: typeof CadaraExecuteNativeFeatureTransaction;
+  CadaraBuildNativeExactBrepPayload: typeof CadaraBuildNativeExactBrepPayload;
+  CadaraBuildNativeMeshExportPayload: typeof CadaraBuildNativeMeshExportPayload;
 };
 
 declare function init(): Promise<OpenCascadeInstance>;

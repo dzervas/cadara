@@ -95,6 +95,7 @@ export const OCC_REFERENCE_INVALIDATION_REASONS = {
   topologyDeleted: 'occ-topology-deleted',
   topologyModified: 'occ-topology-modified',
   topologyAmbiguous: 'occ-topology-ambiguous',
+  topologyUnsupportedHistory: 'occ-topology-unsupported-history',
 } as const satisfies Record<string, string>
 
 const OCC_INVALID_REFERENCE_DIAGNOSTIC_CODE = 'occ-invalid-reference'

@@ -3,15 +3,94 @@ import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanc
 import type { BodyId, FeatureId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
 import { getAdvancedParticipant } from '@/contracts/modeling/advanced-solid'
-import type { OccReferenceInvalidationRecord } from '@/domain/modeling/occ/topology'
+import {
+  advanceTopologyToken,
+  type OccReferenceInvalidationRecord,
+  type OccTrackedBody,
+} from '@/domain/modeling/occ/topology'
 import {
   requireBody,
   requireEdge,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from '@/domain/modeling/occ/features/shared'
-import type { OccTrackedBody } from '@/domain/modeling/occ/topology'
-import { resolveReplacementBodies } from '@/domain/modeling/occ/features/boolean-operations'
+import {
+  resolveNativeFeatureTransactionReplacement,
+  resolveReplacementBodies,
+} from '@/domain/modeling/occ/features/boolean-operations'
+import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
+
+function serializeNativeEdgeTargets(targets: readonly { edgeId: `edge_${string}` }[]) {
+  return targets.map((target) => target.edgeId).join(',')
+}
+
+function resolveNativeFilletReplacement(
+  context: OccFeatureExecutionContext,
+  body: OccTrackedBody,
+  targets: FilletFeatureParameters['edgeTargets'],
+  radius: number,
+  ownerFeatureId: FeatureId,
+) {
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const builder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildFilletCommittedShapeTransactionWithHistory
+
+  if (!builder) {
+    return null
+  }
+
+  const transaction = builder(
+    body.shape,
+    serializeNativeEdgeTargets(targets),
+    radius,
+    body.bodyId,
+    body.topologyToken,
+    advanceTopologyToken(body.topologyToken),
+    context.modelingTolerance,
+    0.5,
+  )
+
+  return resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    transaction,
+    'fillet',
+    ownerFeatureId,
+  )
+}
+
+function resolveNativeChamferReplacement(
+  context: OccFeatureExecutionContext,
+  body: OccTrackedBody,
+  targets: readonly Extract<DurableRef, { kind: 'edge' }>[],
+  distance: number,
+  ownerFeatureId: FeatureId,
+) {
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const builder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildChamferCommittedShapeTransactionWithHistory
+
+  if (!builder) {
+    return null
+  }
+
+  const transaction = builder(
+    body.shape,
+    serializeNativeEdgeTargets(targets),
+    distance,
+    body.bodyId,
+    body.topologyToken,
+    advanceTopologyToken(body.topologyToken),
+    context.modelingTolerance,
+    0.5,
+  )
+
+  return resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    transaction,
+    'chamfer',
+    ownerFeatureId,
+  )
+}
 
 export function executeFilletFeature(
   context: OccFeatureExecutionContext,
@@ -39,25 +118,33 @@ export function executeFilletFeature(
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
     const body = requireBody(context, bodyId)
-    const fillet = new context.oc.BRepFilletAPI_MakeFillet(
-      body.shape,
-      context.oc.ChFi3d_FilletShape.ChFi3d_Rational as never,
-    )
+    const replacementResult = resolveNativeFilletReplacement(
+      context,
+      body,
+      targets,
+      parameters.radius,
+      ownerFeatureId,
+    ) ?? (() => {
+      const fillet = new context.oc.BRepFilletAPI_MakeFillet(
+        body.shape,
+        context.oc.ChFi3d_FilletShape.ChFi3d_Rational as never,
+      )
 
-    for (const target of targets) {
-      fillet.Add_2(parameters.radius, requireEdge(body, target.edgeId))
-    }
+      for (const target of targets) {
+        fillet.Add_2(parameters.radius, requireEdge(body, target.edgeId))
+      }
 
-    fillet.Build(new context.oc.Message_ProgressRange_1())
+      fillet.Build(new context.oc.Message_ProgressRange_1())
 
-    if (!fillet.IsDone()) {
-      throw new Error(`OCC fillet build failed for body ${bodyId}.`)
-    }
+      if (!fillet.IsDone()) {
+        throw new Error(`OCC fillet build failed for body ${bodyId}.`)
+      }
 
-    const replacementResult = resolveReplacementBodies(context, bodyId, fillet.Shape(), ownerFeatureId, {
-      allowEmpty: false,
-      historySource: fillet,
-    })
+      return resolveReplacementBodies(context, bodyId, fillet.Shape(), ownerFeatureId, {
+        allowEmpty: false,
+        historySource: fillet,
+      })
+    })()
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId)
     nextBodies.splice(index, 1, ...replacementResult.replacements)
     for (const replacement of replacementResult.replacements) {
@@ -156,23 +243,31 @@ export function executeChamferFeature(
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
     const body = requireBody(context, bodyId)
-    const chamfer = new context.oc.BRepFilletAPI_MakeChamfer(body.shape)
+    const replacementResult = resolveNativeChamferReplacement(
+      context,
+      body,
+      targets,
+      distance,
+      ownerFeatureId,
+    ) ?? (() => {
+      const chamfer = new context.oc.BRepFilletAPI_MakeChamfer(body.shape)
 
-    for (const target of targets) {
-      const edge = requireEdge(body, target.edgeId)
-      chamfer.Add_3(distance, distance, edge, requireAdjacentFaceForChamfer(context, body, edge, target.edgeId))
-    }
+      for (const target of targets) {
+        const edge = requireEdge(body, target.edgeId)
+        chamfer.Add_3(distance, distance, edge, requireAdjacentFaceForChamfer(context, body, edge, target.edgeId))
+      }
 
-    chamfer.Build(new context.oc.Message_ProgressRange_1())
+      chamfer.Build(new context.oc.Message_ProgressRange_1())
 
-    if (!chamfer.IsDone()) {
-      throw new Error(`advanced-feature-unsupported-kernel-case: OCC chamfer build failed for body ${bodyId}.`)
-    }
+      if (!chamfer.IsDone()) {
+        throw new Error(`advanced-feature-unsupported-kernel-case: OCC chamfer build failed for body ${bodyId}.`)
+      }
 
-    const replacementResult = resolveReplacementBodies(context, bodyId, chamfer.Shape(), ownerFeatureId, {
-      allowEmpty: false,
-      historySource: chamfer,
-    })
+      return resolveReplacementBodies(context, bodyId, chamfer.Shape(), ownerFeatureId, {
+        allowEmpty: false,
+        historySource: chamfer,
+      })
+    })()
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId)
     nextBodies.splice(index, 1, ...replacementResult.replacements)
     for (const replacement of replacementResult.replacements) {

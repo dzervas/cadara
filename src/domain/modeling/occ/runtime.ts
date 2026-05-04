@@ -1,4 +1,9 @@
 import type { OpenCascadeInstance } from 'opencascade.js/dist/opencascade.full'
+import {
+  getMissingNativeTopologyKernelEntrypoints,
+  probeNativeTopologyKernelCapabilities,
+  type OccNativeTopologyCapabilityProbeResult,
+} from '@/domain/modeling/occ/native-topology-payload'
 
 const DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL = '/cadara-occ.js'
 const DEFAULT_CUSTOM_OPENCASCADE_WASM_URL = '/cadara-occ.wasm'
@@ -206,6 +211,28 @@ function assertRequiredOpenCascadeBindings(oc: OpenCascadeInstance) {
     p3.delete?.()
     p2.delete?.()
     p1.delete?.()
+  }
+}
+
+export function probeOpenCascadeNativeTopologyKernelCapabilities(
+  oc: OpenCascadeInstance,
+): OccNativeTopologyCapabilityProbeResult {
+  return probeNativeTopologyKernelCapabilities(
+    oc as unknown as Parameters<typeof probeNativeTopologyKernelCapabilities>[0],
+  )
+}
+
+export function assertOpenCascadeNativeTopologyKernelCapabilities(
+  oc: OpenCascadeInstance,
+) {
+  const missingEntrypoints = getMissingNativeTopologyKernelEntrypoints(
+    oc as unknown as Parameters<typeof getMissingNativeTopologyKernelEntrypoints>[0],
+  )
+
+  if (missingEntrypoints.length > 0) {
+    throw new Error(
+      `Loaded OpenCascade build is missing native topology kernel entrypoints: ${missingEntrypoints.join(', ')}.`,
+    )
   }
 }
 

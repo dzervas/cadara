@@ -13,6 +13,7 @@ import type {
   WorkspaceSnapshot,
 } from '@/contracts/modeling/schema'
 import type {
+  RenderMeshGeometry,
   RenderPoint3D,
   RenderableEntityRecord,
 } from '@/contracts/render/schema'
@@ -77,6 +78,10 @@ import {
   getOccTessellationTier,
   type OccTessellationTierId,
 } from '@/domain/modeling/occ/tessellation'
+import type {
+  OccNativeShimMeshSummary,
+  OccNativeTopologyPayload,
+} from '@/domain/modeling/occ/native-topology-payload'
 
 const FACE_PICK_PRIORITY = 20
 const SKETCH_CURVE_PICK_PRIORITY = 12
@@ -95,6 +100,7 @@ const PROFILE_TEXT_WIDTH_FACTOR = 0.6
 
 interface OccSnapshotBuildOptions {
   lodTierId?: OccTessellationTierId
+  nativeTopologyPayload?: OccNativeTopologyPayload
 }
 
 function sanitizeIdSegment(value: string) {
@@ -962,6 +968,117 @@ function buildFaceRenderRecord(
   }
 }
 
+function getNativeRenderMeshSummary(
+  body: OccTrackedBody,
+  options: OccSnapshotBuildOptions,
+) {
+  return options.nativeTopologyPayload
+    ?.bodies
+    .find((candidate) => candidate.bodyId === body.bodyId)
+    ?.renderMeshSummary
+}
+
+function buildNativeFaceMeshGeometry(
+  mesh: OccNativeShimMeshSummary,
+  faceId: FaceId,
+): RenderMeshGeometry | null {
+  const positions = mesh.positions
+  const triangleIndices = mesh.triangleIndices
+  const triangleFaceBindings = mesh.triangleFaceBindings
+
+  if (!positions || !triangleIndices || !triangleFaceBindings) {
+    return null
+  }
+
+  const vertexPositions: RenderPoint3D[] = []
+  const nativeVertexToLocalIndex = new Map<number, number>()
+  const localTriangleIndices: Array<readonly [number, number, number]> = []
+
+  const getLocalVertexIndex = (nativeIndex: number) => {
+    const existing = nativeVertexToLocalIndex.get(nativeIndex)
+    if (existing !== undefined) {
+      return existing
+    }
+
+    const position = positions[nativeIndex]
+    if (!position) {
+      throw new Error(`Native render mesh triangle references missing vertex index ${nativeIndex}.`)
+    }
+
+    const localIndex = vertexPositions.length
+    nativeVertexToLocalIndex.set(nativeIndex, localIndex)
+    vertexPositions.push([position[0], position[1], position[2]])
+    return localIndex
+  }
+
+  for (let index = 0; index < triangleIndices.length; index += 1) {
+    if (triangleFaceBindings[index] !== faceId) {
+      continue
+    }
+
+    const triangle = triangleIndices[index]
+    if (!triangle) {
+      continue
+    }
+
+    localTriangleIndices.push([
+      getLocalVertexIndex(triangle[0]),
+      getLocalVertexIndex(triangle[1]),
+      getLocalVertexIndex(triangle[2]),
+    ])
+  }
+
+  if (localTriangleIndices.length === 0) {
+    return null
+  }
+
+  return {
+    kind: 'mesh',
+    vertexPositions,
+    vertexNormals: null,
+    triangleIndices: localTriangleIndices,
+  }
+}
+
+function buildNativeFaceRenderRecords(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+  mesh: OccNativeShimMeshSummary,
+) {
+  const records: RenderableEntityRecord[] = []
+
+  for (const faceId of body.topology.faceIds) {
+    const geometry = buildNativeFaceMeshGeometry(mesh, faceId)
+
+    if (!geometry) {
+      continue
+    }
+
+    const target: FaceRef = createFaceTarget(body.bodyId, faceId)
+    const face = body.facesById.get(faceId)
+    const semantics = faceSemanticClasses.get(getOccDurableRefKey(target))
+      ?? (face ? getFaceSemanticClasses(state, face) : { entity: ['face'] as const, render: 'bodyFace' as const })
+
+    records.push({
+      id: createRenderableId(target),
+      label: `${body.label} ${faceId}`,
+      ownerBodyId: body.bodyId,
+      ownerFeatureId: body.ownerFeatureId,
+      binding: {
+        pickId: createPickId(target),
+        pickPriority: FACE_PICK_PRIORITY,
+        target,
+        topology: 'face',
+        semanticClass: semantics.render,
+      },
+      geometry,
+    })
+  }
+
+  return records
+}
+
 function buildCurrentFaceMapForMeshedBody(
   state: OccAuthoringState,
   body: OccTrackedBody,
@@ -1253,6 +1370,37 @@ function buildBodyRenderRecords(
   options: OccSnapshotBuildOptions = {},
 ) {
   const records: RenderableEntityRecord[] = []
+  const nativeRenderMesh = getNativeRenderMeshSummary(body, options)
+
+  if (nativeRenderMesh) {
+    records.push(...buildNativeFaceRenderRecords(state, body, faceSemanticClasses, nativeRenderMesh))
+
+    for (const edgeId of body.topology.edgeIds) {
+      const edge = body.edgesById.get(edgeId)
+
+      if (!edge) {
+        continue
+      }
+
+      const record = buildEdgeRenderRecord(state, body, edgeId, edge, [])
+      if (record) {
+        records.push(record)
+      }
+    }
+
+    for (const vertexId of body.topology.vertexIds) {
+      const vertex = body.verticesById.get(vertexId)
+
+      if (!vertex) {
+        continue
+      }
+
+      records.push(buildVertexRenderRecord(state, body, vertexId, vertex))
+    }
+
+    return records
+  }
+
   const tessellationTier = getOccTessellationTier(options.lodTierId)
 
   const mesher = new state.oc.BRepMesh_IncrementalMesh_2(

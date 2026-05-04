@@ -47,7 +47,7 @@ Strategic design context lives in `PRODUCT.md` at the project root — register,
 
 ## Testing Policy
 
-1. Read `docs/testing.md` in the current turn before making any test-related edit.
+1. Read `docs/testing.md` before making any test-related edit.
 2. In a `commentary` update before editing tests, state:
    - the chosen lane: `logic`, `ui`, `e2e`, or `static`
    - the seam being tested

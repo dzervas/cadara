@@ -1,7 +1,7 @@
 import type { ShellFeatureParameters } from '@/contracts/modeling/schema'
 import type { BodyId, FeatureId } from '@/contracts/shared/ids'
 import type { OccReferenceInvalidationRecord } from '@/domain/modeling/occ/topology'
-import { trackDerivedSolidBody } from '@/domain/modeling/occ/topology'
+import { advanceTopologyToken, trackDerivedSolidBody } from '@/domain/modeling/occ/topology'
 import {
   requireBody,
   requireFace,
@@ -9,6 +9,11 @@ import {
   type OccFeatureExecutionResult,
 } from '@/domain/modeling/occ/features/shared'
 import { applyBooleanPolicy } from '@/domain/modeling/occ/features/boolean-operations'
+import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
+
+function serializeNativeFaceTargets(targets: readonly { faceId: `face_${string}` }[]) {
+  return targets.map((target) => target.faceId).join(',')
+}
 
 function buildShellFeatureShape(
   context: OccFeatureExecutionContext,
@@ -62,46 +67,98 @@ function buildShellFeatureShape(
   }
 }
 
+function buildNativeShellFeatureShape(
+  context: OccFeatureExecutionContext,
+  parameters: ShellFeatureParameters,
+) {
+  if (parameters.thickness <= 0) {
+    throw new Error('Shell thickness must be positive.')
+  }
+
+  if (parameters.faceTargets.length === 0) {
+    throw new Error('Shell requires at least one removable face.')
+  }
+
+  const sourceBody = requireBody(context, parameters.bodyTarget.bodyId)
+
+  for (const target of parameters.faceTargets) {
+    if (target.bodyId !== parameters.bodyTarget.bodyId) {
+      throw new Error('Shell removable faces must belong to the selected source body.')
+    }
+  }
+
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const builder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildShellCommittedShapeTransactionWithHistory
+
+  if (!builder) {
+    return null
+  }
+
+  const signedThickness = parameters.direction === 'outside'
+    ? parameters.thickness
+    : -parameters.thickness
+  const transaction = builder(
+    sourceBody.shape,
+    serializeNativeFaceTargets(parameters.faceTargets),
+    signedThickness,
+    sourceBody.bodyId,
+    sourceBody.topologyToken,
+    advanceTopologyToken(sourceBody.topologyToken),
+    context.modelingTolerance,
+    0.5,
+  )
+
+  if (!transaction.IsDone()) {
+    throw new Error('OCC shell build failed.')
+  }
+
+  return {
+    sourceBody,
+    shape: transaction.Shape() as InstanceType<OccFeatureExecutionContext['oc']['TopoDS_Shape']>,
+  }
+}
+
 export function executeShellFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
   parameters: ShellFeatureParameters,
 ): OccFeatureExecutionResult {
-  const shellResult = buildShellFeatureShape(context, parameters)
-
-  if (parameters.operation === 'newBody') {
-    const newBody = trackDerivedSolidBody(context.oc, {
-      previous: shellResult.sourceBody,
-      bodyId: `body_${ownerFeatureId}` as BodyId,
-      label: ownerFeatureId,
-      ownerFeatureId,
-      shape: shellResult.shape,
-      historySources: [shellResult.builder],
-    })
+  if (parameters.operation !== 'newBody') {
+    const shellResult = buildNativeShellFeatureShape(context, parameters) ?? buildShellFeatureShape(context, parameters)
+    const result = applyBooleanPolicy(context, ownerFeatureId, parameters.operation, parameters.booleanScope, shellResult.shape)
 
     return {
-      bodies: [
-        ...context.bodies,
-        newBody,
-      ],
+      bodies: result.bodies,
       constructions: [...context.constructions],
       constructionPlanes: new Map(context.constructionPlanes),
-      producedTargets: [{ kind: 'body', bodyId: newBody.bodyId }],
+      producedTargets: result.producedTargets,
       entities: [],
       renderRecords: [],
-      historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
+      historyInvalidations: result.historyInvalidations,
     }
   }
 
-  const result = applyBooleanPolicy(context, ownerFeatureId, parameters.operation, parameters.booleanScope, shellResult.shape)
+  const shellResult = buildShellFeatureShape(context, parameters)
+
+  const newBody = trackDerivedSolidBody(context.oc, {
+    previous: shellResult.sourceBody,
+    bodyId: `body_${ownerFeatureId}` as BodyId,
+    label: ownerFeatureId,
+    ownerFeatureId,
+    shape: shellResult.shape,
+    historySources: [shellResult.builder],
+  })
 
   return {
-    bodies: result.bodies,
+    bodies: [
+      ...context.bodies,
+      newBody,
+    ],
     constructions: [...context.constructions],
     constructionPlanes: new Map(context.constructionPlanes),
-    producedTargets: result.producedTargets,
+    producedTargets: [{ kind: 'body', bodyId: newBody.bodyId }],
     entities: [],
     renderRecords: [],
-    historyInvalidations: result.historyInvalidations,
+    historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
   }
 }

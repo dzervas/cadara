@@ -13,6 +13,7 @@ import type {
   DeleteFeatureResponse,
   EvaluatePreviewRequest,
   EvaluatePreviewResponse,
+  FeatureBooleanOperation,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
   ModelingDiagnostic,
@@ -35,7 +36,7 @@ import type {
 } from '@/contracts/modeling/schema'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type { RequestId, RevisionId } from '@/contracts/shared/ids'
+import type { BodyId, RequestId, RevisionId } from '@/contracts/shared/ids'
 import type { MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
 import type { SketchVectorExportModel } from '@/contracts/export/sketch-vector'
 import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
@@ -45,6 +46,13 @@ import type {
   ProjectSketchExternalReferencesResponse,
 } from '@/contracts/solver/schema'
 import type { PackedWorkspaceSnapshot } from '@/domain/modeling/occ/mesh-transport'
+import type {
+  OccNativeExactBrepPayload,
+  OccNativeMeshExportPayload,
+  OccNativeTopologyCapabilityProbeResult,
+  OccNativeTopologyDiagnostic,
+  OccNativeTopologyPayload,
+} from '@/domain/modeling/occ/native-topology-payload'
 import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
 
 const requestIdSchema = z.string().min(1)
@@ -62,9 +70,27 @@ interface AuthoredDocumentWorkerOperationBase {
   assets?: readonly GeometryAssetBlobInput[]
 }
 
+export interface OccNativeTopologyUnavailableResult {
+  kind: 'nativeTopologyUnavailable'
+  diagnostics: readonly OccNativeTopologyDiagnostic[]
+  capability: OccNativeTopologyCapabilityProbeResult
+}
+
+export type OccNativeTopologyWorkerResult<TPayload> =
+  | {
+      kind: 'nativeTopologyPayload'
+      payload: TPayload
+      diagnostics: readonly OccNativeTopologyDiagnostic[]
+    }
+  | OccNativeTopologyUnavailableResult
+
 export type OccWorkerOperation =
   | {
       kind: 'warmup'
+      assets?: OccWorkerAssetConfig
+    }
+  | {
+      kind: 'probeNativeTopologyKernelCapabilities'
       assets?: OccWorkerAssetConfig
     }
   | ({
@@ -80,6 +106,24 @@ export type OccWorkerOperation =
   | {
       kind: 'getDocumentSnapshot'
       request: GetDocumentSnapshotRequest
+      lodTierId?: OccTessellationTierId
+    }
+  | {
+      kind: 'buildNativeTopologySnapshot'
+      request: GetDocumentSnapshotRequest
+      lodTierId?: OccTessellationTierId
+    }
+  | ({
+      kind: 'executeNativeFeatureHistoryRebuild'
+      lodTierId?: OccTessellationTierId
+    } & AuthoredDocumentWorkerOperationBase)
+  | {
+      kind: 'buildNativeBooleanFeatureTransactionPayload'
+      documentId: AuthoredModelDocument['documentId']
+      baseRevisionId: RevisionId
+      leftBodyId: BodyId
+      rightBodyId: BodyId
+      operation: Exclude<FeatureBooleanOperation, 'newBody'>
       lodTierId?: OccTessellationTierId
     }
   | {
@@ -150,6 +194,19 @@ export type OccWorkerOperation =
       options: MeshExportAccuracy
     }
   | {
+      kind: 'buildNativeMeshExportPayload'
+      documentId: AuthoredModelDocument['documentId']
+      baseRevisionId: RevisionId
+      target: DurableRef
+      options: MeshExportAccuracy
+    }
+  | {
+      kind: 'buildNativeExactBrepPayload'
+      documentId: AuthoredModelDocument['documentId']
+      baseRevisionId: RevisionId
+      target: DurableRef
+    }
+  | {
       kind: 'writeStepExport'
       documentId: AuthoredModelDocument['documentId']
       baseRevisionId: RevisionId
@@ -182,6 +239,10 @@ export type OccWorkerOperationResult =
   | UpdateDocumentVariableResponse
   | EvaluatePreviewResponse
   | ResolveReferenceResponse
+  | OccNativeTopologyCapabilityProbeResult
+  | OccNativeTopologyWorkerResult<OccNativeTopologyPayload>
+  | OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>
+  | OccNativeTopologyWorkerResult<OccNativeMeshExportPayload>
   | MeshTriangle[]
   | SketchVectorExportModel
   | { payload: string }

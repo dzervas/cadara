@@ -13,10 +13,11 @@ import { buildSketchVectorExportModel } from '@/domain/export/sketch-vector-expo
 import type { OccAuthoringState } from '@/domain/modeling/occ/authoring-state'
 import type { OccTrackedBody } from '@/domain/modeling/occ/topology'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import {
+  parseNativeShimPayloadJson,
+  type OpenCascadeNativeTopologyKernelHost,
+} from '@/domain/modeling/occ/native-topology-payload'
 
-type OccFace = InstanceType<OpenCascadeInstance['TopoDS_Face']>
-type OccLocation = InstanceType<OpenCascadeInstance['TopLoc_Location']>
-type OccShape = InstanceType<OpenCascadeInstance['TopoDS_Shape']>
 type MeshPoint = readonly [number, number, number]
 
 let tempExportPathCounter = 0
@@ -72,20 +73,6 @@ function resolveBody(
   return body
 }
 
-function getFaceOrientationIsReversed(state: OccAuthoringState, face: OccFace) {
-  return (face.Orientation_1() as { value?: number }).value
-    === (state.oc.TopAbs_Orientation.TopAbs_REVERSED as { value?: number }).value
-}
-
-function toMeshPoint(
-  point: { Transformed(theT: InstanceType<OpenCascadeInstance['gp_Trsf']>): { X(): number; Y(): number; Z(): number } },
-  location: OccLocation,
-): MeshPoint {
-  const transformed = point.Transformed(location.Transformation())
-
-  return [transformed.X(), transformed.Y(), transformed.Z()]
-}
-
 function normalizeVector(vector: MeshPoint): MeshPoint {
   const length = Math.hypot(vector[0], vector[1], vector[2])
 
@@ -108,71 +95,70 @@ function calculateNormal(vertices: readonly [MeshPoint, MeshPoint, MeshPoint]): 
   ])
 }
 
-function meshShape(oc: OpenCascadeInstance, shape: OccShape, options: MeshExportAccuracy) {
-  new oc.BRepMesh_IncrementalMesh_2(
-    shape,
-    options.chordTolerance,
-    false,
-    options.angleToleranceRadians,
-    false,
-  )
+function getNativeMeshPayloadBuilder(oc: OpenCascadeInstance) {
+  return (oc as unknown as OpenCascadeNativeTopologyKernelHost)
+    .CadaraBuildNativeMeshExportPayload
+    ?.BuildJson
 }
 
-function collectTrianglesFromBody(
+function collectTrianglesFromNativeBodyPayload(
   state: OccAuthoringState,
   body: OccTrackedBody,
+  target: DurableRef,
   options: MeshExportAccuracy,
-): MeshTriangle[] {
-  meshShape(state.oc, body.shape, options)
+): MeshTriangle[] | ExportDiagnostic {
+  const buildNativeMeshPayload = getNativeMeshPayloadBuilder(state.oc)
 
-  const triangles: MeshTriangle[] = []
-  let missingTriangulationFaceCount = 0
+  if (!buildNativeMeshPayload) {
+    return createExportDiagnostic(
+      'occ-native-mesh-export-unavailable',
+      'Native OCC mesh export payload generation is not available in this OpenCascade runtime.',
+      target,
+    )
+  }
 
-  for (const faceId of body.topology.faceIds) {
-    const face = body.facesById.get(faceId)
+  try {
+    const nativePayload = parseNativeShimPayloadJson(buildNativeMeshPayload(
+      body.shape,
+      options.chordTolerance,
+      options.angleToleranceRadians,
+    ))
+    const positions = nativePayload.mesh?.positions
+    const triangleIndices = nativePayload.mesh?.triangleIndices
 
-    if (!face) {
-      continue
+    if (!positions || !triangleIndices) {
+      return createExportDiagnostic(
+        'occ-native-mesh-export-invalid-payload',
+        'Native OCC mesh export payload did not include position and triangle-index tables.',
+        target,
+      )
     }
 
-    const location = new state.oc.TopLoc_Location_1()
-    const triangulationHandle = state.oc.BRep_Tool.Triangulation(face, location, 0 as never)
+    return triangleIndices.map((triangle) => {
+      const first = positions[triangle[0]]
+      const second = positions[triangle[1]]
+      const third = positions[triangle[2]]
 
-    if (triangulationHandle.IsNull()) {
-      missingTriangulationFaceCount += 1
-      continue
-    }
+      if (!first || !second || !third) {
+        throw new Error(`Native mesh triangle references missing vertex index ${triangle.join(',')}.`)
+      }
 
-    const triangulation = triangulationHandle.get()
-    const isReversed = getFaceOrientationIsReversed(state, face)
+      const vertices: [MeshPoint, MeshPoint, MeshPoint] = [first, second, third]
 
-    for (let index = 1; index <= triangulation.NbTriangles(); index += 1) {
-      const triangle = triangulation.Triangle(index)
-      const first = triangle.Value(1)
-      const second = triangle.Value(2)
-      const third = triangle.Value(3)
-      const indices = isReversed
-        ? [first, third, second]
-        : [first, second, third]
-      const vertices = indices.map((nodeIndex) =>
-        toMeshPoint(triangulation.Node(nodeIndex), location)
-      ) as [MeshPoint, MeshPoint, MeshPoint]
-
-      triangles.push({
+      return {
         normal: calculateNormal(vertices),
         vertices,
-      })
-    }
+      }
+    })
+  } catch (error) {
+    return createExportDiagnostic(
+      'occ-native-mesh-export-invalid-payload',
+      error instanceof Error
+        ? error.message
+        : 'Native OCC mesh export payload could not be parsed.',
+      target,
+    )
   }
-
-  if (missingTriangulationFaceCount > 0 && body.meshExportFallback) {
-    return body.meshExportFallback.map((vertices) => ({
-      normal: calculateNormal(vertices),
-      vertices,
-    }))
-  }
-
-  return triangles
 }
 
 function mapStepSchema(schema: StepWriterOptions['schema']) {
@@ -195,7 +181,18 @@ function createOccMeshTessellationCapability(state: OccAuthoringState): MeshTess
         return bodyOrDiagnostic
       }
 
-      return collectTrianglesFromBody(state, bodyOrDiagnostic, options)
+      const nativeResult = collectTrianglesFromNativeBodyPayload(
+        state,
+        bodyOrDiagnostic,
+        target,
+        options,
+      )
+
+      if ('code' in nativeResult) {
+        return nativeResult
+      }
+
+      return nativeResult
     },
   }
 }
