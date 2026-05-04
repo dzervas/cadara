@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
-import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import type { DocumentId } from '@/contracts/shared/ids'
 import { createModelingService } from '@/domain/modeling/modeling-service'
 import { isLocalFileSyncDocumentRepository } from '@/domain/modeling/document-repository'
-import { createLocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
 import type { RuntimeExtensionRegistryComposition } from '@/domain/extensions/runtime-registry-composition'
 import { OCC_KERNEL_DOCUMENT_ID } from '@/domain/modeling/opencascade-kernel-seed'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
@@ -20,7 +18,7 @@ import { ModelingServiceProvider } from '@/hooks/modeling-service-provider'
 import { RuntimeExtensionRegistryProvider } from '@/hooks/runtime-extension-registry-provider'
 import { ToolActionProvider } from '@/hooks/tool-action-provider'
 import type { ToolActionBus } from '@/core/tools/tool-action-bus'
-import { CadWorkbench, type WorkbenchDocumentActionResult } from '@/app/workbench/cad-workbench'
+import { CadWorkbench } from '@/app/workbench/cad-workbench'
 import { createDurableHistoryService } from '@/application/workbench/durable-history'
 import { createLocalStorageOperationHistoryStore } from '@/infrastructure/persistence/local-storage-operation-history-store'
 import { createLocalStorageWorkbenchTabsStore } from '@/infrastructure/persistence/local-storage-workbench-tabs-store'
@@ -33,11 +31,10 @@ import { createWorkerBackedDocumentRepository } from '@/infrastructure/modeling/
 import type { DocumentSyncWorkerClient } from '@/infrastructure/workers/document-sync-worker-client'
 import { DurableHistoryProvider } from '@/hooks/durable-history-provider'
 import {
-  ensureLocalFileWritePermission,
-  readCadaraDocumentFile,
-  readLocalCadaraDocument,
-  showOpenLocalDocumentPicker,
-} from '@/lib/local-file-system-access'
+  openDocumentCopyAsTab,
+  openLinkedDocumentAsTab,
+  type WorkbenchDocumentActionResult,
+} from '@/application/workbench/document-file-actions'
 
 const DEFAULT_WORKBENCH_DOCUMENT_NAME = 'Workspace'
 
@@ -59,19 +56,6 @@ function createDefaultWorkbenchTab(documentId: DocumentId): WorkbenchTab {
 
 function createWorkbenchOperationHistoryKey(documentId: DocumentId) {
   return `cad.modeling.operationHistory.${documentId}.v1`
-}
-
-function toDocumentActionError(
-  source: string,
-  message: string,
-  error: unknown,
-): WorkbenchDocumentActionResult {
-  return {
-    status: 'unexpected-error',
-    source,
-    message,
-    error,
-  }
 }
 
 interface WorkbenchAppProps {
@@ -249,163 +233,25 @@ export function WorkbenchApp({
     tabsDispatch({ type: 'syncActive', tab })
   }, [])
 
-  const importDocumentFile = useCallback(async (file: File): Promise<WorkbenchDocumentActionResult> => {
-    if (!documentRepository) {
-      return {
-        status: 'user-error',
-        message: 'Document import requires the repository-backed workbench session.',
-      }
-    }
-
-    let payload: unknown
-    try {
-      payload = await readCadaraDocumentFile(file)
-    } catch (error: unknown) {
-      return {
-        status: 'user-error',
-        message: error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
-          ? 'Import failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
-          : 'Import failed. Select a valid cadara JSON document.',
-      }
-    }
-
-    const parsed = parseAuthoredModelDocument(structuredClone(payload))
-    if (!parsed.ok) {
-      return {
-        status: 'user-error',
-        message: parsed.diagnostic.message,
-      }
-    }
-
-    const documentId = generateDocumentId()
-    const result = await documentRepository.mutate({
-      documentId,
-      document: {
-        ...parsed.document,
-        documentId,
+  const openDocumentCopy = useCallback(async (file: File): Promise<WorkbenchDocumentActionResult> => {
+    return openDocumentCopyAsTab({
+      file,
+      repository: documentRepository,
+      createDocumentId: generateDocumentId,
+      openTab(tab) {
+        tabsDispatch({ type: 'open', tab, activate: true })
       },
     })
-    if (!result.ok) {
-      return {
-        status: 'user-error',
-        message: result.status.diagnostic.message,
-      }
-    }
-
-    tabsDispatch({
-      type: 'open',
-      tab: {
-        documentId,
-        title: parsed.document.name,
-        storageKind: 'browser',
-        storageDescriptor: null,
-      },
-      activate: true,
-    })
-    return {
-      status: 'success',
-      documentId,
-      message: `Imported ${file.name}.`,
-    }
   }, [documentRepository])
 
-  const openLocalFile = useCallback(async (): Promise<WorkbenchDocumentActionResult> => {
-    if (!isLocalFileSyncDocumentRepository(documentRepository)) {
-      return {
-        status: 'user-error',
-        message: 'Local file sync requires the repository-backed workbench session.',
-      }
-    }
-
-    const pickerResult = await showOpenLocalDocumentPicker()
-    if (!pickerResult.ok) {
-      if (pickerResult.reason === 'cancelled') {
-        return { status: 'cancelled' }
-      }
-      if (pickerResult.reason === 'unsupported') {
-        return {
-          status: 'user-error',
-          message: 'Local file sync requires the File System Access API. In Brave, enable brave://flags/#file-system-access-api and relaunch, or use Chrome/Edge.',
-        }
-      }
-
-      return toDocumentActionError(
-        'workbench.file.openLocal',
-        'Open local file failed.',
-        pickerResult.error,
-      )
-    }
-
-    if (!await ensureLocalFileWritePermission(pickerResult.handle)) {
-      return {
-        status: 'user-error',
-        message: 'Local file write permission was denied.',
-      }
-    }
-
-    let payload: unknown
-    try {
-      payload = await readLocalCadaraDocument(pickerResult.handle)
-    } catch (error: unknown) {
-      return {
-        status: 'user-error',
-        message: error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
-          ? 'Open local file failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
-          : 'Open local file failed. Select a valid cadara JSON document.',
-      }
-    }
-
-    const parsed = parseAuthoredModelDocument(structuredClone(payload))
-    if (!parsed.ok) {
-      return {
-        status: 'user-error',
-        message: parsed.diagnostic.message,
-      }
-    }
-
-    const documentId = generateDocumentId()
-    const mutateResult = await documentRepository.mutate({
-      documentId,
-      document: {
-        ...parsed.document,
-        documentId,
+  const openLinkedDocument = useCallback(async (): Promise<WorkbenchDocumentActionResult> => {
+    return openLinkedDocumentAsTab({
+      repository: documentRepository,
+      createDocumentId: generateDocumentId,
+      openTab(tab) {
+        tabsDispatch({ type: 'open', tab, activate: true })
       },
     })
-    if (!mutateResult.ok) {
-      return {
-        status: 'user-error',
-        message: mutateResult.status.diagnostic.message,
-      }
-    }
-
-    const bindResult = await documentRepository.bindLocalFile({
-      documentId,
-      handle: pickerResult.handle,
-      metadata: createLocalFileBindingMetadata(documentId, pickerResult.handle),
-    })
-    if (!bindResult.ok) {
-      await documentRepository.reset(documentId)
-      return {
-        status: 'user-error',
-        message: bindResult.message,
-      }
-    }
-
-    tabsDispatch({
-      type: 'open',
-      tab: {
-        documentId,
-        title: parsed.document.name,
-        storageKind: 'filesystem',
-        storageDescriptor: pickerResult.handle.name,
-      },
-      activate: true,
-    })
-    return {
-      status: 'success',
-      documentId,
-      message: `Opened ${pickerResult.handle.name}. Local file sync is active.`,
-    }
   }, [documentRepository])
 
   return (
@@ -422,8 +268,8 @@ export function WorkbenchApp({
                 onActivateDocumentTab={activateDocumentTab}
                 onCloseDocumentTab={closeDocumentTab}
                 onCreateNewDocument={createNewDocumentTab}
-                onImportDocumentFile={importDocumentFile}
-                onOpenLocalFile={openLocalFile}
+                onOpenDocumentCopy={openDocumentCopy}
+                onOpenLinkedDocument={openLinkedDocument}
                 onReorderDocumentTab={reorderDocumentTab}
                 onSyncActiveDocumentTab={syncActiveDocumentTab}
               />

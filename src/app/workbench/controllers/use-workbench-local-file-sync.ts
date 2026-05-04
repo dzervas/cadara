@@ -12,7 +12,7 @@ function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
 }
 
 interface WorkbenchLocalFileSyncInput {
-  modelingService: Pick<ModelingService, 'restoreLocalFileBinding' | 'subscribeToLocalFileSyncStatus'>
+  modelingService: Pick<ModelingService, 'currentDocumentId' | 'restoreLocalFileBinding' | 'subscribeToLocalFileSyncStatus'>
   reportDocumentFileActionFailure: (source: string, message: string, error: unknown) => void
   showWorkbenchError: (message: string) => void
   showWorkbenchInfo: (message: string) => void
@@ -27,9 +27,16 @@ export function useWorkbenchLocalFileSync({
   const [localFileSyncEnabled, setLocalFileSyncEnabled] = useState(false)
   const [localFileBindingMetadata, setLocalFileBindingMetadata] = useState<LocalFileBindingMetadata | null>(null)
   const bindingRestoreAnnouncedRef = useRef(false)
+  const activeDocumentId = modelingService.currentDocumentId
+  const activeLocalFileBindingMetadata =
+    localFileBindingMetadata?.documentId === activeDocumentId ? localFileBindingMetadata : null
 
   useEffect(() => {
     return modelingService.subscribeToLocalFileSyncStatus((status) => {
+      if (status.documentId !== activeDocumentId) {
+        return
+      }
+
       setLocalFileSyncEnabled(isLocalFileSyncEnabledStatus(status))
 
       switch (status.kind) {
@@ -67,12 +74,16 @@ export function useWorkbenchLocalFileSync({
           return
       }
     })
-  }, [modelingService, showWorkbenchError, showWorkbenchInfo])
+  }, [activeDocumentId, modelingService, showWorkbenchError, showWorkbenchInfo])
 
   useEffect(() => {
     let disposed = false
 
     void modelingService.restoreLocalFileBinding().then((metadata) => {
+      if (!disposed && !metadata) {
+        setLocalFileBindingMetadata(null)
+        setLocalFileSyncEnabled(false)
+      }
       if (!disposed && metadata) {
         setLocalFileBindingMetadata(metadata)
       }
@@ -92,7 +103,7 @@ export function useWorkbenchLocalFileSync({
   }, [modelingService, reportDocumentFileActionFailure, showWorkbenchInfo])
 
   return {
-    localFileSyncEnabled,
-    localFileBindingMetadata,
+    localFileSyncEnabled: localFileSyncEnabled && activeLocalFileBindingMetadata !== null,
+    localFileBindingMetadata: activeLocalFileBindingMetadata,
   }
 }

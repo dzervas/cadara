@@ -65,8 +65,8 @@ export async function importWorkbenchDocumentFile(input: {
     payload = await io.readCadaraDocumentFile(input.file)
   } catch (error: unknown) {
     const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
-      ? 'Import failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
-      : 'Import failed. Select a valid cadara JSON document.'
+      ? 'Open failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
+      : 'Open failed. Select a valid cadara JSON document.'
     input.showWorkbenchError(message)
     return
   }
@@ -74,13 +74,13 @@ export async function importWorkbenchDocumentFile(input: {
   try {
     const result = await input.modelingService.importDocument({ document: payload })
     if (!result.ok) {
-      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'Import failed.')
+      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'Open failed.')
       return
     }
 
-    await input.replaceAfterDocumentFileAction(`Imported ${input.file.name}.`)
+    await input.replaceAfterDocumentFileAction(`Opened ${input.file.name}.`)
   } catch (error) {
-    input.reportDocumentFileActionFailure('workbench.file.import', 'Import failed.', error)
+    input.reportDocumentFileActionFailure('workbench.file.openCopy', 'Open failed.', error)
   }
 }
 
@@ -95,13 +95,11 @@ export async function openWorkbenchLocalFile(input: {
       return
     }
     if (pickerResult.reason === 'unsupported') {
-      input.showWorkbenchError(
-        'Local file sync requires the File System Access API. In Brave, enable brave://flags/#file-system-access-api and relaunch, or use Chrome/Edge.',
-      )
+      input.showWorkbenchError('Linked file saving is unavailable in the current browser.')
       return
     }
 
-    input.reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed.', pickerResult.error)
+    input.reportDocumentFileActionFailure('workbench.file.openLinked', 'Open linked document failed.', pickerResult.error)
     return
   }
 
@@ -115,16 +113,16 @@ export async function openWorkbenchLocalFile(input: {
     payload = await io.readLocalCadaraDocument(pickerResult.handle)
   } catch (error: unknown) {
     const message = error instanceof Error && error.message.includes('ZIP-backed .cadara packages are unsupported')
-      ? 'Open local file failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
-      : 'Open local file failed. Select a valid cadara JSON document.'
-    input.reportDocumentFileActionFailure('workbench.file.openLocal', message, error)
+      ? 'Open failed. ZIP-backed .cadara packages are no longer supported; select a single JSON .cadara document.'
+      : 'Open failed. Select a valid cadara JSON document.'
+    input.reportDocumentFileActionFailure('workbench.file.openLinked', message, error)
     return
   }
 
   try {
     const result = await input.modelingService.importDocument({ document: payload })
     if (!result.ok) {
-      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'Open local file failed.')
+      input.showWorkbenchError(result.diagnostics[0]?.message ?? 'Open failed.')
       return
     }
 
@@ -137,37 +135,35 @@ export async function openWorkbenchLocalFile(input: {
       return
     }
 
-    await input.replaceAfterDocumentFileAction(`Opened ${pickerResult.handle.name}. Local file sync is active.`)
+    await input.replaceAfterDocumentFileAction(`Opened ${pickerResult.handle.name}. Future changes will save to that file.`)
   } catch (error: unknown) {
-    input.reportDocumentFileActionFailure('workbench.file.openLocal', 'Open local file failed.', error)
+    input.reportDocumentFileActionFailure('workbench.file.openLinked', 'Open linked document failed.', error)
   }
 }
 
 export async function saveWorkbenchLocalFile(input: {
   modelingService: Pick<ModelingService, 'bindLocalFile' | 'currentDocumentId' | 'exportCurrentDocument'>
   io?: Partial<WorkbenchDocumentActionIo>
-} & Pick<WorkbenchDocumentActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchError' | 'showWorkbenchInfo'>) {
+} & Pick<WorkbenchDocumentActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchError' | 'showWorkbenchInfo'>): Promise<boolean> {
   const io = { ...defaultWorkbenchDocumentActionIo, ...input.io }
   const pickerResult = await io.showSaveLocalDocumentPicker()
   if (!pickerResult.ok) {
     if (pickerResult.reason === 'cancelled') {
-      return
+      return false
     }
     if (pickerResult.reason === 'unsupported') {
-      input.showWorkbenchError(
-        'Local file sync requires the File System Access API. In Brave, enable brave://flags/#file-system-access-api and relaunch, or use Chrome/Edge.',
-      )
-      return
+      input.showWorkbenchError('Linked file saving is unavailable in the current browser.')
+      return false
     }
 
-    input.reportDocumentFileActionFailure('workbench.file.saveLocal', 'Save local file failed.', pickerResult.error)
-    return
+    input.reportDocumentFileActionFailure('workbench.file.saveLinked', 'Save linked document failed.', pickerResult.error)
+    return false
   }
 
   try {
     if (!await io.ensureLocalFileWritePermission(pickerResult.handle)) {
       input.showWorkbenchError('Local file write permission was denied.')
-      return
+      return false
     }
 
     const result = await input.modelingService.exportCurrentDocument()
@@ -175,11 +171,11 @@ export async function saveWorkbenchLocalFile(input: {
     if (!writeResult.ok) {
       if (writeResult.reason === 'permission-denied') {
         input.showWorkbenchError('Local file write permission was denied.')
-        return
+        return false
       }
 
-      input.reportDocumentFileActionFailure('workbench.file.saveLocal', 'Save local file failed.', writeResult.error)
-      return
+      input.reportDocumentFileActionFailure('workbench.file.saveLinked', 'Save linked document failed.', writeResult.error)
+      return false
     }
 
     const binding = await input.modelingService.bindLocalFile({
@@ -188,25 +184,29 @@ export async function saveWorkbenchLocalFile(input: {
     })
     if (!binding.ok) {
       input.showWorkbenchError(binding.diagnostics[0]?.message ?? 'Local file sync target could not be bound.')
-      return
+      return false
     }
 
-    input.showWorkbenchInfo(`Saved ${pickerResult.handle.name}. Local file sync is active.`)
+    input.showWorkbenchInfo(`Saved ${pickerResult.handle.name}. Future changes will save to that file.`)
+    return true
   } catch (error: unknown) {
-    input.reportDocumentFileActionFailure('workbench.file.saveLocal', 'Save local file failed.', error)
+    input.reportDocumentFileActionFailure('workbench.file.saveLinked', 'Save linked document failed.', error)
+    return false
   }
 }
 
 export async function exportWorkbenchDocument(input: {
   modelingService: Pick<ModelingService, 'exportCurrentDocument'>
   io?: Partial<WorkbenchDocumentActionIo>
-} & Pick<WorkbenchDocumentActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchInfo'>) {
+} & Pick<WorkbenchDocumentActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchInfo'>): Promise<boolean> {
   const io = { ...defaultWorkbenchDocumentActionIo, ...input.io }
   try {
     const result = await input.modelingService.exportCurrentDocument()
     io.downloadDocumentExportResult(result)
-    input.showWorkbenchInfo(`Exported ${result.filename}.`)
+    input.showWorkbenchInfo(`Downloaded ${result.filename}.`)
+    return true
   } catch (error) {
-    input.reportDocumentFileActionFailure('workbench.file.export', 'Export failed.', error)
+    input.reportDocumentFileActionFailure('workbench.file.downloadCopy', 'Download failed.', error)
+    return false
   }
 }

@@ -36,8 +36,9 @@ test('useWorkbenchLocalFileSync restores a binding on mount and reports restore 
   let controller = hookHarness.render(() =>
     useWorkbenchLocalFileSync({
       modelingService: {
+        currentDocumentId: 'document_local_sync' as never,
         async restoreLocalFileBinding() {
-          return { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
+          return { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
         },
         subscribeToLocalFileSyncStatus() {
           return () => undefined
@@ -61,8 +62,9 @@ test('useWorkbenchLocalFileSync restores a binding on mount and reports restore 
   controller = hookHarness.render(() =>
     useWorkbenchLocalFileSync({
       modelingService: {
+        currentDocumentId: 'document_local_sync' as never,
         async restoreLocalFileBinding() {
-          return { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
+          return { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
         },
         subscribeToLocalFileSyncStatus() {
           return () => undefined
@@ -92,6 +94,7 @@ test('useWorkbenchLocalFileSync restores a binding on mount and reports restore 
   hookHarness.render(() =>
     useWorkbenchLocalFileSync({
       modelingService: {
+        currentDocumentId: 'document_local_sync' as never,
         async restoreLocalFileBinding() {
           throw restoreFailure
         },
@@ -130,6 +133,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
   let statusListener: ((status: DocumentSyncWriteStatus) => void) | null = null
 
   const modelingService = {
+    currentDocumentId: 'document_local_sync' as never,
     async restoreLocalFileBinding() {
       return null
     },
@@ -161,7 +165,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
 
   statusListener?.(makeStatus({
     kind: 'binding-restored',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   controller = hookHarness.render(() =>
     useWorkbenchLocalFileSync({
@@ -181,16 +185,16 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
 
   statusListener?.(makeStatus({
     kind: 'syncing',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   statusListener?.(makeStatus({
     kind: 'synced',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   statusListener?.(makeStatus({
     kind: 'persistent-binding-unavailable',
     message: 'Persistent local bindings are unavailable in this browser.',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   controller = hookHarness.render(() =>
     useWorkbenchLocalFileSync({
@@ -220,7 +224,7 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
 
   statusListener?.(makeStatus({
     kind: 'permission-required',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   controller = hookHarness.render(() =>
     useWorkbenchLocalFileSync({
@@ -241,12 +245,12 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
   statusListener?.(makeStatus({
     kind: 'permission-denied',
     message: 'Local file write permission was denied.',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   statusListener?.(makeStatus({
     kind: 'failed',
     message: 'Local file sync target could not be bound.',
-    metadata: { fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+    metadata: { documentId: 'document_local_sync', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
   }))
   statusListener?.(makeStatus({
     kind: 'idle',
@@ -259,5 +263,137 @@ test('useWorkbenchLocalFileSync maps worker status updates to visible messages a
       'Local file sync target could not be bound.',
     ]),
     'Permission and failure statuses should map to the expected workbench error messages.',
+  )
+})
+
+test('useWorkbenchLocalFileSync does not expose stale binding metadata after switching active documents', async () => {
+  let firstStatusListener: ((status: DocumentSyncWriteStatus) => void) | null = null
+  let secondStatusListener: ((status: DocumentSyncWriteStatus) => void) | null = null
+
+  const firstModelingService = {
+    currentDocumentId: 'document_filesystem' as never,
+    async restoreLocalFileBinding() {
+      return { documentId: 'document_filesystem', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never
+    },
+    subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void) {
+      firstStatusListener = listener
+      return () => {
+        firstStatusListener = null
+      }
+    },
+  }
+  const secondModelingService = {
+    currentDocumentId: 'document_browser' as never,
+    async restoreLocalFileBinding() {
+      return null
+    },
+    subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void) {
+      secondStatusListener = listener
+      return () => {
+        secondStatusListener = null
+      }
+    },
+  }
+
+  let controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: firstModelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Successful restore should not report a document-file failure.')
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Successful restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo() {},
+    }),
+  )
+
+  await hookHarness.flushEffects()
+  await flushMicrotasks()
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: firstModelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Successful restore should not report a document-file failure.')
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Successful restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo() {},
+    }),
+  )
+
+  expectTrue(
+    controller.localFileBindingMetadata?.fileName === 'assembly.cadara',
+    'The filesystem-backed document should expose its restored local-file binding.',
+  )
+
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: secondModelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Browser-only document restore should not report a document-file failure.')
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Browser-only document restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo() {},
+    }),
+  )
+
+  expectTrue(
+    controller.localFileBindingMetadata === null && controller.localFileSyncEnabled === false,
+    'Switching to a browser-only document should not expose the previous document filesystem binding before async restore settles.',
+  )
+
+  await hookHarness.flushEffects()
+  await flushMicrotasks()
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: secondModelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Browser-only document restore should not report a document-file failure.')
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Browser-only document restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo() {},
+    }),
+  )
+
+  expectTrue(firstStatusListener === null, 'Switching modeling services should unsubscribe the previous document status listener.')
+
+  secondStatusListener?.({
+    documentId: 'document_filesystem',
+    sequence: 2,
+    kind: 'synced',
+    metadata: { documentId: 'document_filesystem', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  })
+  secondStatusListener?.({
+    documentId: 'document_browser',
+    sequence: 3,
+    kind: 'idle',
+  })
+  controller = hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: secondModelingService,
+      reportDocumentFileActionFailure() {
+        throw new Error('Browser-only document restore should not report a document-file failure.')
+      },
+      showWorkbenchError(message) {
+        throw new Error(`Browser-only document restore should not show an error: ${message}`)
+      },
+      showWorkbenchInfo() {},
+    }),
+  )
+
+  firstStatusListener?.(makeStatus({
+    kind: 'synced',
+    metadata: { documentId: 'document_filesystem', fileName: 'assembly.cadara', handleKey: 'binding_1' } as never,
+  }))
+
+  expectTrue(
+    controller.localFileBindingMetadata === null && controller.localFileSyncEnabled === false,
+    'Stale sync events and idle browser-document status should keep the active browser-only document unbound.',
   )
 })

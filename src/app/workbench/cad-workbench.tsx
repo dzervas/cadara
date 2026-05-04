@@ -10,9 +10,14 @@ import { FloatingPartsTree } from "@/components/layout/floating-parts-tree";
 import { ImportInspector } from "@/components/layout/import-inspector";
 import { SketchPlaneInspector } from "@/components/layout/sketch-plane-inspector";
 import { DocumentTabsBar, type DocumentTabsBarHandle } from "@/components/layout/document-tabs-bar";
+import { BrowserTabCloseWarningModal } from "@/components/layout/browser-tab-close-warning-modal";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
 import { MeasurementPanel } from "@/components/layout/measurement-panel";
 import { DocumentExportModal } from "@/components/layout/document-export-modal";
+import {
+	OpenDocumentModal,
+	SaveAsDocumentModal,
+} from "@/components/layout/document-file-menu";
 import { WorkbenchInspectorOverlay } from "@/components/layout/workbench-inspector-overlay";
 import { WorkspaceToolbar } from "@/components/layout/workspace-toolbar";
 import { WorkbenchVariablesFab } from "@/components/layout/workbench-variables-fab";
@@ -34,6 +39,8 @@ import {
 	exportWorkbenchDocument,
 	saveWorkbenchLocalFile,
 } from "@/app/workbench/document/workbench-document-actions";
+import { getBrowserOnlyTabCloseWarning } from "@/app/workbench/document/browser-tab-close";
+import type { WorkbenchDocumentActionResult } from "@/application/workbench/document-file-actions";
 import type { WorkbenchTab, WorkbenchTabsState } from "@/domain/workspace/workbench-tabs";
 import type { DocumentId } from "@/contracts/shared/ids";
 import { useWorkbenchHistory } from "@/app/workbench/controllers/use-workbench-history";
@@ -114,20 +121,15 @@ import { getBuildModeLabel } from "@/components/layout/build-metadata";
 
 type FeatureHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "feature" }>;
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "sketch" }>;
-
-export type WorkbenchDocumentActionResult =
-	| { status: "success"; documentId: DocumentId; message: string }
-	| { status: "cancelled" }
-	| { status: "user-error"; message: string }
-	| { status: "unexpected-error"; source: string; message: string; error: unknown };
+type BrowserTabCloseSaveAction = "downloadCopy" | "saveLinked";
 
 interface CadWorkbenchProps {
 	tabsState: WorkbenchTabsState;
 	onActivateDocumentTab: (documentId: DocumentId) => void;
 	onCloseDocumentTab: (documentId: DocumentId) => void;
 	onCreateNewDocument: () => Promise<DocumentId>;
-	onImportDocumentFile: (file: File) => Promise<WorkbenchDocumentActionResult>;
-	onOpenLocalFile: () => Promise<WorkbenchDocumentActionResult>;
+	onOpenDocumentCopy: (file: File) => Promise<WorkbenchDocumentActionResult>;
+	onOpenLinkedDocument: () => Promise<WorkbenchDocumentActionResult>;
 	onReorderDocumentTab: (documentId: DocumentId, toIndex: number) => void;
 	onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
 }
@@ -137,8 +139,8 @@ export function CadWorkbench({
 	onActivateDocumentTab,
 	onCloseDocumentTab,
 	onCreateNewDocument,
-	onImportDocumentFile,
-	onOpenLocalFile,
+	onOpenDocumentCopy,
+	onOpenLinkedDocument,
 	onReorderDocumentTab,
 	onSyncActiveDocumentTab,
 }: CadWorkbenchProps) {
@@ -186,6 +188,12 @@ export function CadWorkbench({
 	const initialOccRenderPending = isInitialOccRenderPending(machineState);
 	const previewRenderables = machineState.previewRenderables;
 	const [variablesPanelOpen, setVariablesPanelOpen] = useState(false);
+	const [openDocumentModalOpened, setOpenDocumentModalOpened] = useState(false);
+	const [saveAsDocumentModalOpened, setSaveAsDocumentModalOpened] = useState(false);
+	const [browserTabCloseWarning, setBrowserTabCloseWarning] = useState<WorkbenchTab | null>(null);
+	const [pendingBrowserTabCloseSaveAction, setPendingBrowserTabCloseSaveAction] =
+		useState<BrowserTabCloseSaveAction | null>(null);
+	const [isBrowserTabCloseSavePending, setIsBrowserTabCloseSavePending] = useState(false);
 	const snapshotRef = useRef(snapshot);
 	const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true });
 	// TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
@@ -301,8 +309,45 @@ export function CadWorkbench({
 		});
 	}, [localFileBindingMetadata, onSyncActiveDocumentTab, snapshot]);
 	const handleTabClose = useCallback((documentId: DocumentId) => {
+		const browserOnlyTab = getBrowserOnlyTabCloseWarning(tabsState, documentId);
+		if (browserOnlyTab) {
+			setBrowserTabCloseWarning(browserOnlyTab);
+			setPendingBrowserTabCloseSaveAction(null);
+			setIsBrowserTabCloseSavePending(false);
+			return;
+		}
+
 		onCloseDocumentTab(documentId);
-	}, [onCloseDocumentTab]);
+	}, [onCloseDocumentTab, tabsState]);
+	const cancelBrowserTabCloseWarning = useCallback(() => {
+		if (isBrowserTabCloseSavePending) {
+			return;
+		}
+		setBrowserTabCloseWarning(null);
+		setPendingBrowserTabCloseSaveAction(null);
+		setIsBrowserTabCloseSavePending(false);
+	}, [isBrowserTabCloseSavePending]);
+	const closeBrowserTabWithoutSaving = useCallback(() => {
+		if (!browserTabCloseWarning || isBrowserTabCloseSavePending) {
+			return;
+		}
+
+		onCloseDocumentTab(browserTabCloseWarning.documentId);
+		setBrowserTabCloseWarning(null);
+		setPendingBrowserTabCloseSaveAction(null);
+		setIsBrowserTabCloseSavePending(false);
+	}, [browserTabCloseWarning, isBrowserTabCloseSavePending, onCloseDocumentTab]);
+	const requestBrowserTabCloseSave = useCallback((action: BrowserTabCloseSaveAction) => {
+		if (!browserTabCloseWarning || isBrowserTabCloseSavePending) {
+			return;
+		}
+
+		setPendingBrowserTabCloseSaveAction(action);
+		setIsBrowserTabCloseSavePending(true);
+		if (modelingService.currentDocumentId !== browserTabCloseWarning.documentId) {
+			onActivateDocumentTab(browserTabCloseWarning.documentId);
+		}
+	}, [browserTabCloseWarning, isBrowserTabCloseSavePending, modelingService.currentDocumentId, onActivateDocumentTab]);
 	const handleTabReorder = useCallback((documentId: DocumentId, toIndex: number) => {
 		onReorderDocumentTab(documentId, toIndex);
 	}, [onReorderDocumentTab]);
@@ -349,6 +394,60 @@ export function CadWorkbench({
 		showWorkbenchInfo,
 		snapshot,
 		tabsState.tabs,
+	]);
+
+	useEffect(() => {
+		if (!browserTabCloseWarning || !pendingBrowserTabCloseSaveAction || !isBrowserTabCloseSavePending) {
+			return;
+		}
+		if (
+			modelingService.currentDocumentId !== browserTabCloseWarning.documentId
+			|| snapshot?.document.documentId !== browserTabCloseWarning.documentId
+		) {
+			return;
+		}
+
+		let disposed = false;
+
+		void (async () => {
+			const succeeded = pendingBrowserTabCloseSaveAction === "downloadCopy"
+				? await exportWorkbenchDocument({
+						modelingService,
+						reportDocumentFileActionFailure,
+						showWorkbenchInfo,
+					})
+				: await saveWorkbenchLocalFile({
+						modelingService,
+						reportDocumentFileActionFailure,
+						showWorkbenchError,
+						showWorkbenchInfo,
+					});
+
+			if (disposed) {
+				return;
+			}
+
+			setIsBrowserTabCloseSavePending(false);
+			setPendingBrowserTabCloseSaveAction(null);
+			if (succeeded) {
+				onCloseDocumentTab(browserTabCloseWarning.documentId);
+				setBrowserTabCloseWarning(null);
+			}
+		})();
+
+		return () => {
+			disposed = true;
+		};
+	}, [
+		browserTabCloseWarning,
+		isBrowserTabCloseSavePending,
+		modelingService,
+		onCloseDocumentTab,
+		pendingBrowserTabCloseSaveAction,
+		reportDocumentFileActionFailure,
+		showWorkbenchError,
+		showWorkbenchInfo,
+		snapshot?.document.documentId,
 	]);
 
 	const visibleObjectTargetKeys = useMemo(
@@ -1204,16 +1303,31 @@ export function CadWorkbench({
 
 	const handleNewDocument = async () => {
 		await onCreateNewDocument();
+		showWorkbenchInfo("Created a new document.");
 	};
 
-	const handleImportDocument = async (file: File) => {
-		const result = await onImportDocumentFile(file);
-		handleDocumentActionResult(result);
+	const handleOpenDocument = () => {
+		setOpenDocumentModalOpened(true);
 	};
 
-	const handleOpenLocalFile = async () => {
-		const result = await onOpenLocalFile();
+	const handleSaveDocumentAs = () => {
+		setSaveAsDocumentModalOpened(true);
+	};
+
+	const handleOpenDocumentCopy = async (file: File) => {
+		const result = await onOpenDocumentCopy(file);
 		handleDocumentActionResult(result);
+		if (result.status === "success") {
+			setOpenDocumentModalOpened(false);
+		}
+	};
+
+	const handleOpenLinkedDocument = async () => {
+		const result = await onOpenLinkedDocument();
+		handleDocumentActionResult(result);
+		if (result.status === "success") {
+			setOpenDocumentModalOpened(false);
+		}
 	};
 
 	const handleDocumentActionResult = (result: WorkbenchDocumentActionResult) => {
@@ -1231,28 +1345,23 @@ export function CadWorkbench({
 		}
 	};
 
-	const handleNewDocumentTab = useCallback(async () => {
-		const id = await onCreateNewDocument();
-		requestAnimationFrame(() => {
-			tabsBarRef.current?.requestRename(id);
-		});
-	}, [onCreateNewDocument]);
-
-	const handleSaveLocalFile = async () => {
+	const handleSaveLinkedDocument = async () => {
 		await saveWorkbenchLocalFile({
 			modelingService,
 			reportDocumentFileActionFailure,
 			showWorkbenchError,
 			showWorkbenchInfo,
 		});
+		setSaveAsDocumentModalOpened(false);
 	};
 
-	const handleExportDocument = async () => {
+	const handleDownloadDocumentCopy = async () => {
 		await exportWorkbenchDocument({
 			modelingService,
 			reportDocumentFileActionFailure,
 			showWorkbenchInfo,
 		});
+		setSaveAsDocumentModalOpened(false);
 	};
 
 	return (
@@ -1400,16 +1509,34 @@ export function CadWorkbench({
 									onDownload={downloadDocumentExportResult}
 									onClose={() => setObjectExportModal(null)}
 								/>
+								<OpenDocumentModal
+									opened={openDocumentModalOpened}
+									onClose={() => setOpenDocumentModalOpened(false)}
+									onOpenCopy={handleOpenDocumentCopy}
+									onOpenLinked={handleOpenLinkedDocument}
+								/>
+								<SaveAsDocumentModal
+									opened={saveAsDocumentModalOpened}
+									onClose={() => setSaveAsDocumentModalOpened(false)}
+									onDownloadCopy={handleDownloadDocumentCopy}
+									onSaveLinked={handleSaveLinkedDocument}
+								/>
+								<BrowserTabCloseWarningModal
+									opened={browserTabCloseWarning !== null}
+									documentTitle={browserTabCloseWarning?.title ?? ""}
+									pending={isBrowserTabCloseSavePending}
+									onCancel={cancelBrowserTabCloseWarning}
+									onCloseWithoutSaving={closeBrowserTabWithoutSaving}
+									onDownloadCopy={() => requestBrowserTabCloseSave("downloadCopy")}
+									onSaveLinked={() => requestBrowserTabCloseSave("saveLinked")}
+								/>
 
 								<WorkspaceToolbar
 									historyAvailability={toolbarHistoryAvailability}
 									showBrowserStorageWarning={showBrowserStorageWarning}
 									onNewDocument={handleNewDocument}
-									onNewDocumentTab={handleNewDocumentTab}
-									onOpenLocalFile={handleOpenLocalFile}
-									onSaveLocalFile={handleSaveLocalFile}
-									onImportDocument={handleImportDocument}
-									onExportDocument={handleExportDocument}
+									onOpenDocument={handleOpenDocument}
+									onSaveDocumentAs={handleSaveDocumentAs}
 									onReportBug={handleReportBug}
 									onDownloadBugReportState={handleDownloadBugReportState}
 								/>

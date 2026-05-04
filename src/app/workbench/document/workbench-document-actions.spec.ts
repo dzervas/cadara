@@ -101,8 +101,8 @@ test('workbench document actions cover creation, import/open/save branches, and 
     ...importCallbacks.callbacks,
   })
   expectTrue(
-    importCallbacks.replacements[0]?.message === 'Imported fixture.cadara.',
-    'Successful document imports should replace the active workbench document.',
+    importCallbacks.replacements[0]?.message === 'Opened fixture.cadara.',
+    'Successful copy-open actions should replace the active workbench document.',
   )
 
   const zipImportCallbacks = createCallbacks()
@@ -118,7 +118,7 @@ test('workbench document actions cover creation, import/open/save branches, and 
   })
   expectTrue(
     zipImportCallbacks.errors[0]?.includes('ZIP-backed .cadara packages are no longer supported'),
-    'ZIP-backed import failures should surface the explicit unsupported-package guidance.',
+    'ZIP-backed copy-open failures should surface the explicit unsupported-package guidance.',
   )
 
   const unsupportedOpenCallbacks = createCallbacks()
@@ -132,8 +132,8 @@ test('workbench document actions cover creation, import/open/save branches, and 
     ...unsupportedOpenCallbacks.callbacks,
   })
   expectTrue(
-    unsupportedOpenCallbacks.errors[0]?.includes('Local file sync requires the File System Access API.'),
-    'Unsupported local-open environments should surface the File System Access API guidance.',
+    unsupportedOpenCallbacks.errors[0] === 'Linked file saving is unavailable in the current browser.',
+    'Unsupported linked-open environments should surface the linked-file fallback guidance.',
   )
 
   const openCallbacks = createCallbacks()
@@ -165,20 +165,25 @@ test('workbench document actions cover creation, import/open/save branches, and 
   })
   expectTrue(
     boundHandles[0] === 'workspace.cadara'
-      && openCallbacks.replacements[0]?.message === 'Opened workspace.cadara. Local file sync is active.',
-    'Successful local-open actions should import the file, bind it for sync, and replace the workbench document.',
+      && openCallbacks.replacements[0]?.message === 'Opened workspace.cadara. Future changes will save to that file.',
+    'Successful linked-open actions should import the file, bind it for sync, and replace the workbench document.',
   )
 
   const saveCallbacks = createCallbacks()
   const savedHandle = createHandle('saved.cadara')
   const writes: string[] = []
-  await saveWorkbenchLocalFile({
+  const savedBindings: Array<{ documentId: string; handleName: string }> = []
+  const saveSucceeded = await saveWorkbenchLocalFile({
     modelingService: {
       currentDocumentId: 'doc_workspace',
       async exportCurrentDocument() {
         return { filename: 'saved.cadara', payload: '{"documentId":"doc_workspace"}' }
       },
-      async bindLocalFile() {
+      async bindLocalFile(input) {
+        savedBindings.push({
+          documentId: input.metadata.documentId,
+          handleName: input.handle.name,
+        })
         return { ok: true as const, diagnostics: [] }
       },
     } as never,
@@ -197,13 +202,15 @@ test('workbench document actions cover creation, import/open/save branches, and 
     ...saveCallbacks.callbacks,
   })
   expectTrue(
-    writes[0] === '{"documentId":"doc_workspace"}'
-      && saveCallbacks.infos[0] === 'Saved saved.cadara. Local file sync is active.',
-    'Successful local-save actions should write the exported payload, bind the handle, and announce sync activation.',
+    saveSucceeded
+      && writes[0] === '{"documentId":"doc_workspace"}'
+      && JSON.stringify(savedBindings) === JSON.stringify([{ documentId: 'doc_workspace', handleName: 'saved.cadara' }])
+      && saveCallbacks.infos[0] === 'Saved saved.cadara. Future changes will save to that file.',
+    'Successful linked-save actions should write the exported payload, bind the handle to the active document, and announce sync activation.',
   )
 
   const deniedSaveCallbacks = createCallbacks()
-  await saveWorkbenchLocalFile({
+  const deniedSaveSucceeded = await saveWorkbenchLocalFile({
     modelingService: {
       currentDocumentId: 'doc_workspace',
       async exportCurrentDocument() {
@@ -227,13 +234,13 @@ test('workbench document actions cover creation, import/open/save branches, and 
     ...deniedSaveCallbacks.callbacks,
   })
   expectTrue(
-    deniedSaveCallbacks.errors[0] === 'Local file write permission was denied.',
+    !deniedSaveSucceeded && deniedSaveCallbacks.errors[0] === 'Local file write permission was denied.',
     'Permission-denied saves should surface the user-facing write-permission error.',
   )
 
   const exportCallbacks = createCallbacks()
   const downloaded: string[] = []
-  await exportWorkbenchDocument({
+  const exportSucceeded = await exportWorkbenchDocument({
     modelingService: {
       async exportCurrentDocument() {
         return { filename: 'exported.cadara', payload: '{"documentId":"doc_workspace"}' }
@@ -247,8 +254,9 @@ test('workbench document actions cover creation, import/open/save branches, and 
     ...exportCallbacks.callbacks,
   })
   expectTrue(
-    downloaded[0] === 'exported.cadara'
-      && exportCallbacks.infos[0] === 'Exported exported.cadara.',
-    'Document export should delegate to the download helper and surface the exported filename.',
+    exportSucceeded
+      && downloaded[0] === 'exported.cadara'
+      && exportCallbacks.infos[0] === 'Downloaded exported.cadara.',
+    'Document download should delegate to the download helper and surface the downloaded filename.',
   )
 })

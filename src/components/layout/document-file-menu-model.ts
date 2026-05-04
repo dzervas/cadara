@@ -8,18 +8,12 @@ export interface DocumentFileMenuItem {
 
 export type DocumentFileMenuItemId =
   | 'new'
-  | 'newDocumentTab'
-  | 'openLocal'
-  | 'saveLocal'
-  | 'import'
-  | 'export'
+  | 'openDocument'
+  | 'saveDocumentAs'
 export type DocumentFileMenuCommand =
   | 'newDocument'
-  | 'newDocumentTab'
-  | 'openLocalFile'
-  | 'saveLocalFile'
-  | 'importDocument'
-  | 'exportDocument'
+  | 'openDocument'
+  | 'saveDocumentAs'
 
 export const DOCUMENT_FILE_MENU_ITEMS: readonly DocumentFileMenuItem[] = [
   {
@@ -28,28 +22,13 @@ export const DOCUMENT_FILE_MENU_ITEMS: readonly DocumentFileMenuItem[] = [
     icon: 'newDocument',
   },
   {
-    id: 'newDocumentTab',
-    label: 'New document',
-    icon: 'plus',
-  },
-  {
-    id: 'openLocal',
-    label: 'Open local file',
+    id: 'openDocument',
+    label: 'Open...',
     icon: 'import',
   },
   {
-    id: 'saveLocal',
-    label: 'Save local file',
-    icon: 'download',
-  },
-  {
-    id: 'import',
-    label: 'Import',
-    icon: 'import',
-  },
-  {
-    id: 'export',
-    label: 'Export',
+    id: 'saveDocumentAs',
+    label: 'Save As',
     icon: 'download',
   },
 ]
@@ -58,15 +37,9 @@ export function getDocumentFileMenuCommand(itemId: DocumentFileMenuItemId): Docu
   switch (itemId) {
     case 'new':
       return 'newDocument'
-    case 'newDocumentTab':
-      return 'newDocumentTab'
-    case 'openLocal':
-      return 'openLocalFile'
-    case 'saveLocal':
-      return 'saveLocalFile'
-    case 'import':
-      return 'importDocument'
-    case 'export':
-      return 'exportDocument'
+    case 'openDocument':
+      return 'openDocument'
+    case 'saveDocumentAs':
+      return 'saveDocumentAs'
   }
 }

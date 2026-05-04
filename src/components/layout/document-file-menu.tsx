@@ -1,5 +1,5 @@
 import { useRef, type ChangeEvent, type ReactElement } from 'react'
-import { ActionIcon, Menu, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Group, Menu, Modal, Stack, Text, Tooltip } from '@mantine/core'
 
 import {
   DOCUMENT_FILE_MENU_ITEMS,
@@ -7,8 +7,16 @@ import {
   type DocumentFileMenuItemId,
 } from '@/components/layout/document-file-menu-model'
 import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
+import { WorkbenchIcon, type WorkbenchIconName } from '@/components/ui/workbench-icon'
 
+export const OPEN_COPY_DOCUMENT_DESCRIPTION =
+  'Choose a .cadara file; CADara opens it in a new tab, and future changes stay in browser storage until you save again.'
+export const OPEN_LINKED_DOCUMENT_DESCRIPTION =
+  'Choose a .cadara file; CADara opens it in a new tab and keeps future changes saving to that same file on your computer.'
+export const DOWNLOAD_COPY_DOCUMENT_DESCRIPTION =
+  'CADara downloads a portable .cadara file; future changes stay in browser storage until you save again.'
+export const SAVE_LINKED_DOCUMENT_DESCRIPTION =
+  'Choose where to save; CADara writes this document there and keeps future changes saving to that same file on your computer.'
 export const BROWSER_STORAGE_WARNING_TOOLTIP =
   "The data are currently saved within the browser, which might result in data loss. Please use the local file functionality to make sure that all changes are saved on your computer's disk so you can back them up"
 
@@ -22,11 +30,8 @@ function BrowserStorageWarningTooltipLabel() {
 
 interface DocumentFileMenuHandlers {
   onNewDocument: () => void
-  onNewDocumentTab: () => void
-  onOpenLocalFile: () => void
-  onSaveLocalFile: () => void
-  onImportDocument: (file: File) => void
-  onExportDocument: () => void
+  onOpenDocument: () => void
+  onSaveDocumentAs: () => void
 }
 
 interface DocumentFileMenuProps extends DocumentFileMenuHandlers {
@@ -44,46 +49,20 @@ export function DocumentFileMenu({
   defaultOpened = false,
   showBrowserStorageWarning = false,
   onNewDocument,
-  onNewDocumentTab,
-  onOpenLocalFile,
-  onSaveLocalFile,
-  onImportDocument,
-  onExportDocument,
+  onOpenDocument,
+  onSaveDocumentAs,
   trigger,
 }: DocumentFileMenuProps) {
-  const importInputRef = useRef<HTMLInputElement | null>(null)
-  const openImportPicker = () => {
-    importInputRef.current?.click()
-  }
-
-  const handleImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-
-    if (file) {
-      onImportDocument(file)
-    }
-  }
-
   const handleMenuItemSelect = (itemId: DocumentFileMenuItemId) => {
     switch (getDocumentFileMenuCommand(itemId)) {
       case 'newDocument':
         onNewDocument()
         return
-      case 'newDocumentTab':
-        onNewDocumentTab()
+      case 'openDocument':
+        onOpenDocument()
         return
-      case 'openLocalFile':
-        onOpenLocalFile()
-        return
-      case 'saveLocalFile':
-        onSaveLocalFile()
-        return
-      case 'importDocument':
-        openImportPicker()
-        return
-      case 'exportDocument':
-        onExportDocument()
+      case 'saveDocumentAs':
+        onSaveDocumentAs()
         return
     }
   }
@@ -103,7 +82,7 @@ export function DocumentFileMenu({
                 label={
                   <ToolbarTooltipContent
                     title="File"
-                    description="Create, open, save, import, or export the current document."
+                    description="Create, open, or save the current document."
                   />
                 }
               >
@@ -156,14 +135,172 @@ export function DocumentFileMenu({
           </Tooltip>
         ) : null}
       </div>
+    </>
+  )
+}
+
+interface OpenDocumentModalProps {
+  opened: boolean
+  withinPortal?: boolean
+  onClose: () => void
+  onOpenCopy: (file: File) => void
+  onOpenLinked: () => void
+}
+
+export function OpenDocumentModal({
+  opened,
+  withinPortal,
+  onClose,
+  onOpenCopy,
+  onOpenLinked,
+}: OpenDocumentModalProps) {
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const openImportPicker = () => {
+    importInputRef.current?.click()
+  }
+
+  const handleImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+
+    if (file) {
+      onOpenCopy(file)
+    }
+  }
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Open Document"
+      centered
+      withinPortal={withinPortal}
+      transitionProps={{ duration: 0 }}
+    >
+      <Stack gap="sm">
+        <DocumentChoiceButton
+          label="Open a copy"
+          description={OPEN_COPY_DOCUMENT_DESCRIPTION}
+          icon="import"
+          onClick={openImportPicker}
+        />
+        <DocumentChoiceButton
+          label="Open and keep linked"
+          description={OPEN_LINKED_DOCUMENT_DESCRIPTION}
+          icon="file"
+          onClick={onOpenLinked}
+        />
+      </Stack>
       <input
         ref={importInputRef}
-        aria-label="Import document file"
+        aria-label="Open document copy file"
         type="file"
         accept=".cadara,application/json,application/vnd.cadara+json"
         hidden
         onChange={handleImportFileChange}
       />
-    </>
+    </Modal>
+  )
+}
+
+interface SaveAsDocumentModalProps {
+  opened: boolean
+  withinPortal?: boolean
+  onClose: () => void
+  onDownloadCopy: () => void
+  onSaveLinked: () => void
+}
+
+export function SaveAsDocumentModal({
+  opened,
+  withinPortal,
+  onClose,
+  onDownloadCopy,
+  onSaveLinked,
+}: SaveAsDocumentModalProps) {
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Save As"
+      centered
+      withinPortal={withinPortal}
+      transitionProps={{ duration: 0 }}
+    >
+      <Stack gap="sm">
+        <DocumentChoiceButton
+          label="Download a copy"
+          description={DOWNLOAD_COPY_DOCUMENT_DESCRIPTION}
+          icon="download"
+          onClick={onDownloadCopy}
+        />
+        <DocumentChoiceButton
+          label="Save and keep linked"
+          description={SAVE_LINKED_DOCUMENT_DESCRIPTION}
+          icon="file"
+          onClick={onSaveLinked}
+        />
+      </Stack>
+    </Modal>
+  )
+}
+
+interface DocumentChoiceButtonProps {
+  label: string
+  description: string
+  icon: WorkbenchIconName
+  onClick: () => void
+}
+
+function DocumentChoiceButton({
+  label,
+  description,
+  icon,
+  onClick,
+}: DocumentChoiceButtonProps) {
+  return (
+    <Button
+      type="button"
+      variant="subtle"
+      color="workbench"
+      justify="flex-start"
+      fullWidth
+      h="auto"
+      py="sm"
+      onClick={onClick}
+      styles={{
+        inner: {
+          justifyContent: 'flex-start',
+          width: '100%',
+        },
+        label: {
+          minWidth: 0,
+          overflow: 'visible',
+          textOverflow: 'clip',
+          whiteSpace: 'normal',
+          width: '100%',
+        },
+        root: {
+          textAlign: 'left',
+        },
+      }}
+    >
+      <Group gap="sm" wrap="nowrap" align="flex-start">
+        <WorkbenchIcon name={icon} className="mt-0.5 h-4 w-4 shrink-0" />
+        <span className="grid min-w-0 flex-1 gap-1 text-left">
+          <Text component="span" size="sm" fw={600} c="var(--workbench-shell-text)">
+            {label}
+          </Text>
+          <Text
+            component="span"
+            size="xs"
+            c="var(--workbench-shell-text-dim)"
+            className="whitespace-normal break-words"
+          >
+            {description}
+          </Text>
+        </span>
+      </Group>
+    </Button>
   )
 }
