@@ -22,6 +22,7 @@ beforeEach(() => {
 test('useWorkbenchNotifications maps info and error status messages to notification models', () => {
   const reporter = createTestErrorReporter()
   const modelingService = {
+    currentDocumentId: 'document_notifications',
     async getHistoryRestoreState() {
       return { kind: 'idle' as const }
     },
@@ -63,20 +64,21 @@ test('useWorkbenchNotifications maps info and error status messages to notificat
       && controller.workbenchStatusNotification.message === 'Import failed.',
     'Error notifications should keep the shared failure title and the supplied message.',
   )
+  expectTrue(reporter.reports.length === 0, 'Rendering an error notification should not imply telemetry reporting.')
 })
 
-test('useWorkbenchNotifications exposes restore failures through restoreMessage', async () => {
+test('useWorkbenchNotifications reports restore failures once and exposes restoreMessage', async () => {
   const reporter = createTestErrorReporter()
   const modelingService = {
+    currentDocumentId: 'document_restore_failed',
     async getHistoryRestoreState() {
       return {
         diagnostics: [{
-          code: 'restore-failed',
-          detail: null,
+          entryIndex: 4,
           message: 'History restore could not decode the saved timeline.',
-          severity: 'error' as const,
-          target: null,
+          reasonCode: 'restore-failed',
         }],
+        entriesReplayed: 3,
         kind: 'failed' as const,
       }
     },
@@ -103,11 +105,35 @@ test('useWorkbenchNotifications exposes restore failures through restoreMessage'
     controller.restoreMessage === 'History restore could not decode the saved timeline.',
     'Failed history restore state should surface the first diagnostic message through restoreMessage.',
   )
+  expectTrue(reporter.reports.length === 1, 'Failed history restore state should be reported once.')
+  expectTrue(
+    reporter.reports[0]?.metadata.source === 'workbench.history.restore'
+      && reporter.reports[0]?.metadata.dedupeKey === 'history-restore:document_restore_failed:3:restore-failed:4:History restore could not decode the saved timeline.',
+    'History restore reporting should include source metadata and a stable document/diagnostic dedupe key.',
+  )
+  expectTrue(
+    reporter.reports[0]?.error.context.some((entry) => entry.key === 'documentId' && entry.value === 'document_restore_failed')
+      && reporter.reports[0]?.error.context.some((entry) => entry.key === 'reasonCode' && entry.value === 'restore-failed'),
+    'History restore reports should carry document and diagnostic context.',
+  )
+
+  controller = hookHarness.render(() =>
+    useWorkbenchNotifications({
+      errorReporter: reporter,
+      modelingService,
+    }),
+  )
+
+  await hookHarness.flushEffects()
+  await flushMicrotasks()
+
+  expectTrue(reporter.reports.length === 1, 'Repeated restore failure observation should be deduped for one app session.')
 })
 
 test('useWorkbenchNotifications reports document file action failures and mirrors the user-facing error', () => {
   const reporter = createTestErrorReporter()
   const modelingService = {
+    currentDocumentId: 'document_file_failure',
     async getHistoryRestoreState() {
       return { kind: 'idle' as const }
     },

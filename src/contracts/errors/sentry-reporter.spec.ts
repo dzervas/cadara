@@ -283,5 +283,31 @@ test('src/contracts/errors/sentry-reporter.spec.ts', async () => {  const initOp
     'The development query opt-in should enable Sentry reporting.',
   )
 
+  const releaseInitOptions: unknown[] = []
+  const releaseClient: SentryBrowserBoundary = {
+    init(options) {
+      releaseInitOptions.push(options)
+    },
+    captureException() {
+      return 'event_exception'
+    },
+    captureMessage() {
+      return 'event_message'
+    },
+  }
+  initializeSentryErrorReporting({
+    client: releaseClient,
+    release: 'cadara@abcdef',
+    dist: 'main',
+  })
+  expectTrue(
+    (releaseInitOptions[0] as { release?: string }).release === 'cadara@abcdef',
+    'Sentry initialization should pass the build release to the browser SDK.',
+  )
+  expectTrue(
+    (releaseInitOptions[0] as { dist?: string }).dist === 'main',
+    'Sentry initialization should pass the build distribution to the browser SDK.',
+  )
+
   clearActiveDocumentTelemetryContext()
 })

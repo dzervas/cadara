@@ -5,6 +5,11 @@ import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import type { ImportProvider } from '@/contracts/import/provider'
 import type { FeatureEditorFormSchema } from '@/core/feature-authoring/form-schema'
 import {
+  createAppError,
+  errorContext,
+  type ErrorReporter,
+} from '@/contracts/errors'
+import {
   createImportCapabilities,
   createImportSession,
   resolveLocalFileImportSource,
@@ -13,6 +18,7 @@ import type { ImportProviderRegistry } from '@/domain/import/provider-registry'
 import type { ModelingService } from '@/domain/modeling/modeling-service'
 import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
 import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
+import { handleWorkbenchFailure } from '@/app/workbench/failure-policy'
 import { showOpenImportFilePicker } from '@/lib/import-file-picker'
 
 function promptForImportProvider(
@@ -41,6 +47,7 @@ interface WorkbenchPartImportControllerInput {
   activeImportSession: EditorViewState['activeImportSession']
   deps?: Partial<WorkbenchPartImportDependencies>
   dispatch: (event: EditorEvent) => void
+  errorReporter: ErrorReporter
   modelingService: ModelingService
   showWorkbenchError: (message: string) => void
   showWorkbenchInfo: (message: string) => void
@@ -63,6 +70,7 @@ export function useWorkbenchPartImport({
   activeImportSession,
   deps,
   dispatch,
+  errorReporter,
   modelingService,
   showWorkbenchError,
   showWorkbenchInfo,
@@ -117,9 +125,25 @@ export function useWorkbenchPartImport({
           detail: null,
         }],
       })
-      showWorkbenchError(message)
+      handleWorkbenchFailure({
+        appError: createAppError({
+          code: 'workbench/action-failed',
+          message,
+          context: errorContext('operation', 'commitPartImport'),
+          cause: error,
+        }),
+        reporter: errorReporter,
+        metadata: {
+          source: 'workbench.import.commit',
+          visibility: 'user',
+          dedupeKey: `workbench.import.commit:${message}`,
+        },
+        reportability: 'reportable',
+        userMessage: message,
+        notify: showWorkbenchError,
+      })
     }
-  }, [activeImportSession, dispatch, documentOwner, showWorkbenchError, showWorkbenchInfo, snapshot])
+  }, [activeImportSession, dispatch, documentOwner, errorReporter, showWorkbenchError, showWorkbenchInfo, snapshot])
 
   const requestPartImport = useCallback(async () => {
     if (activeEditSession || activeSketchPlaneEditSession || activeImportSession) {
@@ -178,7 +202,24 @@ export function useWorkbenchPartImport({
       })
       dispatch({ type: 'import.fileSelected', session })
     } catch (error: unknown) {
-      showWorkbenchError(error instanceof Error ? error.message : 'Import review failed.')
+      const message = error instanceof Error ? error.message : 'Import review failed.'
+      handleWorkbenchFailure({
+        appError: createAppError({
+          code: 'workbench/action-failed',
+          message,
+          context: errorContext('operation', 'requestPartImport'),
+          cause: error,
+        }),
+        reporter: errorReporter,
+        metadata: {
+          source: 'workbench.import.review',
+          visibility: 'user',
+          dedupeKey: `workbench.import.review:${message}`,
+        },
+        reportability: 'reportable',
+        userMessage: message,
+        notify: showWorkbenchError,
+      })
     }
   }, [
     activeEditSession,
@@ -187,6 +228,7 @@ export function useWorkbenchPartImport({
     createCapabilities,
     createSession,
     dispatch,
+    errorReporter,
     importProviders,
     modelingService,
     openImportFilePicker,

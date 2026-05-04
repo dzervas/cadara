@@ -27,6 +27,8 @@ interface SentryInitializationOptions {
   client?: SentryBrowserBoundary
   dsn?: string
   environment?: string
+  release?: string | null
+  dist?: string | null
   consoleLike?: ConsoleLike
   enabled?: boolean
   checkDsnReachability?: boolean
@@ -59,6 +61,8 @@ export function initializeSentryErrorReporting(options: SentryInitializationOpti
     client.init({
       dsn: options.dsn ?? SENTRY_DSN,
       environment: options.environment ?? 'production',
+      release: options.release ?? undefined,
+      dist: options.dist ?? undefined,
       enableLogs: true,
     })
     initializedClients.add(client)

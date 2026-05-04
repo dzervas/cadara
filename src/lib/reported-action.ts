@@ -18,6 +18,13 @@ interface WorkbenchModelingMutationResult {
   diagnostics: readonly ModelingDiagnostic[]
 }
 
+type ReportedActionMappedFailurePolicy = 'expected' | 'reportable'
+
+interface ReportedActionReportingPolicy {
+  mappedFailure?: ReportedActionMappedFailurePolicy
+  thrownFailure?: ReportedActionMappedFailurePolicy
+}
+
 export function requireAcceptedModelingResult<T extends WorkbenchModelingMutationResult>(
   result: T,
   input: {
@@ -55,6 +62,7 @@ export function runReportedAction<TOutput, TSuccess>(input: {
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter
   metadata?: Omit<ErrorReportMetadata, 'source'>
+  reporting?: ReportedActionReportingPolicy
   action: () => PromiseLike<AppResult<TOutput>>
   mapSuccess: (output: TOutput) => AppResult<TSuccess>
   onError: (error: AppError) => void
@@ -64,6 +72,7 @@ export function runReportedAction<TOutput, TSuccess>(input: {
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter
   metadata?: Omit<ErrorReportMetadata, 'source'>
+  reporting?: ReportedActionReportingPolicy
   action: () => PromiseLike<TOutput>
   mapSuccess: (output: TOutput) => AppResult<TSuccess>
   onError: (error: AppError) => void
@@ -73,17 +82,20 @@ export async function runReportedAction<TOutput, TSuccess>(input: {
   context?: readonly AppErrorContextEntry[]
   reporter: ErrorReporter
   metadata?: Omit<ErrorReportMetadata, 'source'>
+  reporting?: ReportedActionReportingPolicy
   action: () => PromiseLike<TOutput> | PromiseLike<AppResult<TOutput>>
   mapSuccess: (output: TOutput) => AppResult<TSuccess>
   onError: (error: AppError) => void
 }): Promise<AppResult<TSuccess>> {
   let mapped: AppResult<TSuccess>
+  let failureSource: 'mapped' | 'thrown' = 'mapped'
 
   try {
     const actionOutput = await input.action()
     const actionResult = isAppResult(actionOutput) ? actionOutput : ok(actionOutput)
     mapped = actionResult.andThen(input.mapSuccess)
   } catch (error: unknown) {
+    failureSource = 'thrown'
     mapped = err(normalizeUnknownError(error, {
       code: 'workbench/action-failed',
       fallbackMessage: `${input.operation} failed.`,
@@ -98,12 +110,19 @@ export async function runReportedAction<TOutput, TSuccess>(input: {
     return ok(mapped.value)
   }
 
-  input.reporter.report(mapped.error, {
-    source: 'workbench',
-    visibility: 'user',
-    dedupeKey: `${input.operation}:${mapped.error.requestId ?? mapped.error.message}`,
-    ...input.metadata,
-  })
+  const reportability = failureSource === 'thrown'
+    ? (input.reporting?.thrownFailure ?? 'reportable')
+    : (input.reporting?.mappedFailure ?? 'reportable')
+
+  if (reportability === 'reportable') {
+    input.reporter.report(mapped.error, {
+      source: 'workbench',
+      visibility: 'user',
+      dedupeKey: `${input.operation}:${mapped.error.requestId ?? mapped.error.message}`,
+      ...input.metadata,
+    })
+  }
+
   input.onError(mapped.error)
   return mapped
 }

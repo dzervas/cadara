@@ -69,6 +69,52 @@ test('runReportedAction reports mapped failures and preserves caller metadata', 
   )
 })
 
+test('runReportedAction lets expected mapped failures notify without reporting', async () => {
+  const reporter = createTestErrorReporter()
+  const handled: string[] = []
+  const mappedError = createAppError({
+    code: 'modeling/diagnostic',
+    message: 'Variable width references missing.',
+  })
+
+  const result = await runReportedAction({
+    operation: 'Update variable',
+    reporter,
+    reporting: { mappedFailure: 'expected' },
+    action: async () => 'raw-payload',
+    mapSuccess: () => err(mappedError),
+    onError: (error) => handled.push(error.message),
+  })
+
+  expectTrue(result.isErr(), 'Expected mapped failures should still resolve as failures.')
+  expectTrue(handled[0] === 'Variable width references missing.', 'Expected mapped failures should still notify callers.')
+  expectTrue(reporter.reports.length === 0, 'Expected mapped failures should not be reported by default.')
+})
+
+test('runReportedAction still reports thrown defects when mapped failures are expected', async () => {
+  const reporter = createTestErrorReporter()
+  const handled: string[] = []
+
+  const result = await runReportedAction({
+    operation: 'Update variable',
+    reporter,
+    reporting: { mappedFailure: 'expected' },
+    action: async () => {
+      throw new Error('Worker crashed.')
+    },
+    mapSuccess: (value: never) => ok(value),
+    onError: (error) => handled.push(error.message),
+  })
+
+  expectTrue(result.isErr(), 'Thrown defects should still resolve as failures.')
+  expectTrue(handled[0] === 'Worker crashed.', 'Thrown defects should still notify callers.')
+  expectTrue(
+    reporter.reports[0]?.error.message === 'Worker crashed.'
+      && reporter.reports[0]?.metadata.source === 'workbench',
+    'Thrown defects should report through the workbench reporter by default.',
+  )
+})
+
 test('runReportedAction normalizes thrown errors and derives dedupe keys from operation and message', async () => {
   const reporter = createTestErrorReporter()
   const handled: string[] = []

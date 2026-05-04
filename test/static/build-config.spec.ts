@@ -4,6 +4,31 @@ import type { UserConfig } from 'vite'
 
 import viteConfig, { getOpenCascadeAssetHeaders } from '../../vite.config'
 
+function collectPluginNames(pluginOption: UserConfig['plugins']): string[] {
+  const names: string[] = []
+
+  function visit(entry: unknown) {
+    if (!entry) {
+      return
+    }
+
+    if (Array.isArray(entry)) {
+      for (const child of entry) {
+        visit(child)
+      }
+      return
+    }
+
+    if (typeof entry === 'object' && 'name' in entry && typeof entry.name === 'string') {
+      names.push(entry.name)
+    }
+  }
+
+  visit(pluginOption)
+
+  return names
+}
+
 test('test/static/build-config.spec.ts', async () => {  const config = typeof viteConfig === 'function'
     ? await viteConfig({
         command: 'build',
@@ -13,7 +38,14 @@ test('test/static/build-config.spec.ts', async () => {  const config = typeof vi
       })
     : viteConfig
 
-  expectTrue((config as UserConfig).build?.sourcemap === true, 'Production build should emit JavaScript source maps.')
+  expectTrue(
+    (config as UserConfig).build?.sourcemap === 'hidden',
+    'Production build should emit hidden JavaScript source maps for private Sentry upload.',
+  )
+  expectTrue(
+    collectPluginNames((config as UserConfig).plugins).some((pluginName) => pluginName.includes('sentry')),
+    'Production build should include the Sentry Vite plugin for release source-map upload.',
+  )
 
   expectTrue(
     getOpenCascadeAssetHeaders('/cadara-occ.wasm')['Content-Type'] === 'application/wasm',

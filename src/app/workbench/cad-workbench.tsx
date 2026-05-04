@@ -49,6 +49,7 @@ import { useWorkbenchLocalFileSync } from "@/app/workbench/controllers/use-workb
 import { useWorkbenchNotifications } from "@/app/workbench/controllers/use-workbench-notifications";
 import { useWorkbenchPartImport } from "@/app/workbench/controllers/use-workbench-part-import";
 import { useWorkbenchViewportEvents } from "@/app/workbench/controllers/use-workbench-viewport-events";
+import { handleWorkbenchFailure } from "@/app/workbench/failure-policy";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type {
 	DocumentFeatureCursor,
@@ -364,6 +365,7 @@ export function CadWorkbench({
 		void runWorkbenchAction({
 			operation: `Rename ${previousTitle}`,
 			reporter: errorReporter,
+			reporting: { mappedFailure: "expected" },
 			context: [
 				{ key: "baseRevisionId", value: snapshot.document.revisionId },
 				{ key: "documentId", value: documentId },
@@ -536,6 +538,7 @@ export function CadWorkbench({
 		activeSketchPlaneEditSession,
 		activeImportSession,
 		dispatch,
+		errorReporter,
 		modelingService,
 		showWorkbenchError,
 		showWorkbenchInfo,
@@ -821,6 +824,7 @@ export function CadWorkbench({
 		void runWorkbenchAction({
 			operation: `Delete ${label}`,
 			reporter: errorReporter,
+			reporting: { mappedFailure: "expected" },
 			context: [
 				{ key: "baseRevisionId", value: snapshot.document.revisionId },
 				{ key: "target", value: getPrimitiveRefKey(target) },
@@ -870,6 +874,7 @@ export function CadWorkbench({
 		void runWorkbenchAction({
 			operation,
 			reporter: errorReporter,
+			reporting: { mappedFailure: "expected" },
 			context: [
 				{ key: "baseRevisionId", value: snapshot.document.revisionId },
 				{ key: "featureId", value: item.featureId },
@@ -903,6 +908,7 @@ export function CadWorkbench({
 		void runWorkbenchAction({
 			operation: "Add variable",
 			reporter: errorReporter,
+			reporting: { mappedFailure: "expected" },
 			context: [{ key: "baseRevisionId", value: snapshot.document.revisionId }],
 			action: () =>
 				documentOwner.addDocumentVariable({
@@ -954,6 +960,7 @@ export function CadWorkbench({
 		void runWorkbenchAction({
 			operation: `Rename ${item.label}`,
 			reporter: errorReporter,
+			reporting: { mappedFailure: "expected" },
 			context: [
 				{ key: "baseRevisionId", value: snapshot.document.revisionId },
 				{ key: "sketchId", value: item.sketchId },
@@ -993,6 +1000,7 @@ export function CadWorkbench({
 		void runWorkbenchAction({
 			operation: `Rename ${item.label}`,
 			reporter: errorReporter,
+			reporting: { mappedFailure: "expected" },
 			context: [
 				{ key: "baseRevisionId", value: snapshot.document.revisionId },
 				{ key: "featureId", value: item.featureId },
@@ -1050,6 +1058,7 @@ export function CadWorkbench({
 			void runWorkbenchAction({
 				operation: `Rename ${label}`,
 				reporter: errorReporter,
+				reporting: { mappedFailure: "expected" },
 				context: [
 					{ key: "baseRevisionId", value: snapshot.document.revisionId },
 					{ key: "bodyId", value: target.bodyId },
@@ -1226,18 +1235,21 @@ export function CadWorkbench({
 						filename: artifact.filename,
 						reason: message,
 					};
-					errorReporter.report(
-						createAppError({
+					handleWorkbenchFailure({
+						appError: createAppError({
 							code: "workbench/action-failed",
 							message: "Bug-report debug artifact generation failed.",
 							context: errorContext("reason", message),
 							cause: error,
 						}),
-						{
+						reporter: errorReporter,
+						metadata: {
 							source: "workbench.reportBug",
 							visibility: "developer",
+							dedupeKey: `workbench.reportBug.artifact:${message}`,
 						},
-					);
+						reportability: "reportable",
+					});
 				}
 			}
 
@@ -1251,18 +1263,21 @@ export function CadWorkbench({
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Bug-report payload generation failed.";
-			errorReporter.report(
-				createAppError({
+			handleWorkbenchFailure({
+				appError: createAppError({
 					code: "workbench/action-failed",
 					message: "Bug-report generation failed.",
 					context: errorContext("reason", message),
 					cause: error,
 				}),
-				{
+				reporter: errorReporter,
+				metadata: {
 					source: "workbench.reportBug",
 					visibility: "developer",
+					dedupeKey: `workbench.reportBug.payload:${message}`,
 				},
-			);
+				reportability: "reportable",
+			});
 
 			const opened = window.open(
 				createFallbackBugReportIssueUrl(error),
@@ -1289,19 +1304,23 @@ export function CadWorkbench({
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Debug state archive could not be downloaded.";
-			showWorkbenchError("Debug state download failed.");
-			errorReporter.report(
-				createAppError({
+			handleWorkbenchFailure({
+				appError: createAppError({
 					code: "workbench/action-failed",
 					message: "Debug state archive generation failed.",
 					context: errorContext("reason", message),
 					cause: error,
 				}),
-				{
+				reporter: errorReporter,
+				metadata: {
 					source: "workbench.downloadBugReportState",
 					visibility: "developer",
+					dedupeKey: `workbench.downloadBugReportState:${message}`,
 				},
-			);
+				reportability: "reportable",
+				userMessage: "Debug state download failed.",
+				notify: showWorkbenchError,
+			});
 		}
 	};
 

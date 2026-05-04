@@ -12,6 +12,7 @@ test('src/app/workbench-action.spec.ts', async () => {  const reporter = createT
   const rejected = await runWorkbenchAction({
     operation: 'Update variable',
     reporter,
+    reporting: { mappedFailure: 'expected' },
     action: async () => ({
       revisionState: { kind: 'rejected' as const, reasonCode: 'invalid-variable' },
       diagnostics: [{
@@ -33,13 +34,14 @@ test('src/app/workbench-action.spec.ts', async () => {  const reporter = createT
 
   expectTrue(rejected.isErr(), 'Rejected modeling results should return an error result.')
   expectTrue(uiMessage === 'Variable width references missing.', 'Rejected modeling diagnostics should update UI-facing error state.')
-  expectTrue(reporter.reports.length === 1, 'Rejected modeling results should be reported.')
+  expectTrue(reporter.reports.length === 0, 'Expected rejected modeling results should not be reported by default.')
 
   const thrownReporter = createTestErrorReporter()
   let thrownMessage = ''
   const thrown = await runWorkbenchAction({
     operation: 'Rename body',
     reporter: thrownReporter,
+    reporting: { mappedFailure: 'expected' },
     action: async () => {
       throw new Error('IndexedDB is unavailable.')
     },

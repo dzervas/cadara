@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 
 import type { EditorEvent, EditorHistoryAvailability } from '@/domain/editor/state-machine'
 import type { SketchSessionState } from '@/domain/editor/sketch-session'
-import { ok, type AppError, type ErrorReporter } from '@/contracts/errors'
+import {
+  createAppError,
+  errorContext,
+  ok,
+  type AppError,
+  type ErrorReporter,
+} from '@/contracts/errors'
 import type {
   DocumentHistoryOrderEntry,
   WorkspaceSnapshot,
@@ -17,6 +23,7 @@ import {
 import { runReportedAction as runWorkbenchAction } from '@/lib/reported-action'
 import { useWorkbenchDocumentOwner } from '@/hooks/use-workbench-document-owner'
 import { useDurableHistory } from '@/hooks/use-durable-history'
+import { handleWorkbenchFailure } from '@/app/workbench/failure-policy'
 
 type DocumentVariablePatch = Pick<DocumentVariableRecord, 'name' | 'valueText'>
 
@@ -181,11 +188,32 @@ export function useWorkbenchHistory({
       })
       dispatch({ type: 'sketch.draftHistoryRestored', session: result.session })
     }).catch((error: unknown) => {
-      showWorkbenchError(error instanceof Error ? error.message : 'Undo failed.')
+      const message = error instanceof Error ? error.message : 'Undo failed.'
+      handleWorkbenchFailure({
+        appError: createAppError({
+          code: 'workbench/action-failed',
+          message,
+          context: [
+            { key: 'operation', value: 'undo' },
+            ...errorContext('documentId', currentSnapshot.document.documentId),
+            ...errorContext('revisionId', currentSnapshot.document.revisionId),
+          ],
+          cause: error,
+        }),
+        reporter: errorReporter,
+        metadata: {
+          source: 'workbench.history.undo',
+          visibility: 'user',
+          dedupeKey: `workbench.history.undo:${currentSnapshot.document.documentId}:${message}`,
+        },
+        reportability: 'reportable',
+        userMessage: message,
+        notify: showWorkbenchError,
+      })
     }).finally(() => {
       setIsUndoRedoRunning(false)
     })
-  }, [dispatch, durableHistory, isUndoRedoRunning, showWorkbenchError])
+  }, [dispatch, durableHistory, errorReporter, isUndoRedoRunning, showWorkbenchError])
 
   const requestRedo = useCallback(() => {
     const currentSnapshot = snapshotRef.current
@@ -217,11 +245,32 @@ export function useWorkbenchHistory({
       })
       dispatch({ type: 'sketch.draftHistoryRestored', session: result.session })
     }).catch((error: unknown) => {
-      showWorkbenchError(error instanceof Error ? error.message : 'Redo failed.')
+      const message = error instanceof Error ? error.message : 'Redo failed.'
+      handleWorkbenchFailure({
+        appError: createAppError({
+          code: 'workbench/action-failed',
+          message,
+          context: [
+            { key: 'operation', value: 'redo' },
+            ...errorContext('documentId', currentSnapshot.document.documentId),
+            ...errorContext('revisionId', currentSnapshot.document.revisionId),
+          ],
+          cause: error,
+        }),
+        reporter: errorReporter,
+        metadata: {
+          source: 'workbench.history.redo',
+          visibility: 'user',
+          dedupeKey: `workbench.history.redo:${currentSnapshot.document.documentId}:${message}`,
+        },
+        reportability: 'reportable',
+        userMessage: message,
+        notify: showWorkbenchError,
+      })
     }).finally(() => {
       setIsUndoRedoRunning(false)
     })
-  }, [dispatch, durableHistory, isUndoRedoRunning, showWorkbenchError])
+  }, [dispatch, durableHistory, errorReporter, isUndoRedoRunning, showWorkbenchError])
 
   const handleVariableUpdate = useCallback((
     variable: DocumentVariableRecord,
@@ -235,6 +284,7 @@ export function useWorkbenchHistory({
     void runAction({
       operation,
       reporter: errorReporter,
+      reporting: { mappedFailure: 'expected' },
       context: [
         { key: 'baseRevisionId', value: snapshot.document.revisionId },
         { key: 'variableId', value: variable.variableId },
@@ -282,6 +332,7 @@ export function useWorkbenchHistory({
     void runAction({
       operation: 'Reorder document history',
       reporter: errorReporter,
+      reporting: { mappedFailure: 'expected' },
       context: [{ key: 'baseRevisionId', value: snapshot.document.revisionId }],
       action: () => documentOwner.reorderDocumentHistory(item, beforeItem, {
         operation: 'Reorder document history',

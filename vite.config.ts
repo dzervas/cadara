@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { sentryVitePlugin } from '@sentry/vite-plugin'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
-import { createBuildMetadataPlugin } from './build-metadata'
+import { createBuildMetadataPlugin, readSentryBuildMetadata } from './build-metadata'
 
 export function getOpenCascadeAssetHeaders(pathname: string): Record<string, string> {
   if (!/cadara-occ\.(?:js|wasm)$/.test(pathname)) {
@@ -43,9 +44,41 @@ function createOpenCascadeAssetHeadersPlugin() {
   }
 }
 
+const sentryBuildMetadata = readSentryBuildMetadata(__dirname)
+const shouldUploadSentrySourceMaps = Boolean(process.env.SENTRY_AUTH_TOKEN && sentryBuildMetadata.release)
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [createBuildMetadataPlugin(__dirname), createOpenCascadeAssetHeadersPlugin(), react(), tailwindcss()],
+  plugins: [
+    createBuildMetadataPlugin(__dirname),
+    createOpenCascadeAssetHeadersPlugin(),
+    react(),
+    tailwindcss(),
+    sentryVitePlugin({
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      disable: !shouldUploadSentrySourceMaps,
+      sourcemaps: {
+        filesToDeleteAfterUpload: ['dist/**/*.map'],
+      },
+      release: {
+        name: sentryBuildMetadata.release ?? undefined,
+        dist: sentryBuildMetadata.dist ?? undefined,
+        inject: true,
+        create: true,
+        finalize: true,
+        setCommits: {
+          auto: true,
+          ignoreMissing: true,
+        },
+        deploy: {
+          env: sentryBuildMetadata.environment,
+          url: process.env.CF_PAGES_URL,
+        },
+      },
+    }),
+  ],
   assetsInclude: ['**/*.wasm'],
   resolve: {
     alias: [
@@ -76,7 +109,7 @@ export default defineConfig({
     ],
   },
   build: {
-    sourcemap: true,
+    sourcemap: 'hidden',
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

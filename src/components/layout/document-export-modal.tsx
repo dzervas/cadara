@@ -240,6 +240,7 @@ function DocumentExportModalContent({
     void runWorkbenchAction({
       operation: `Export ${target.label}`,
       reporter: errorReporter,
+      reporting: { mappedFailure: 'expected' },
       context: [
         { key: 'baseRevisionId', value: target.baseRevisionId },
         { key: 'format', value: input.format },

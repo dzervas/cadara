@@ -36,6 +36,8 @@ interface SentryErrorReporterOptions {
   client?: SentryBrowserBoundary
   dsn?: string
   environment?: string
+  release?: string | null
+  dist?: string | null
   consoleLike?: ConsoleLike
 }
 

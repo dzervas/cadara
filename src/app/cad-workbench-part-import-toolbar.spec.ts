@@ -1,6 +1,7 @@
 import { beforeEach, mock, test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
+import { createTestErrorReporter } from '@/contracts/errors'
 import { createImportProviderRegistry } from '@/domain/import/provider-registry'
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from '@/domain/extensions/test-registry-composition'
 
@@ -134,6 +135,7 @@ test('useWorkbenchPartImport starts an import session for a matching provider', 
       dispatch(event) {
         events.push(event)
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: { id: 'modeling-service' } as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -175,6 +177,7 @@ test('useWorkbenchPartImport blocks invalid request states and reports the visib
       dispatch() {
         throw new Error('Blocked requests should not dispatch editor events.')
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -200,6 +203,7 @@ test('useWorkbenchPartImport blocks invalid request states and reports the visib
       dispatch() {
         throw new Error('Missing snapshots should not dispatch editor events.')
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -224,6 +228,7 @@ test('useWorkbenchPartImport blocks invalid request states and reports the visib
       dispatch() {
         throw new Error('Missing providers should not dispatch editor events.')
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -260,6 +265,7 @@ test('useWorkbenchPartImport blocks invalid request states and reports the visib
       dispatch() {
         throw new Error('Unmatched providers should not dispatch editor events.')
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -331,6 +337,7 @@ test('useWorkbenchPartImport lets the user choose among multiple matching provid
       dispatch(event) {
         events.push(event)
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         throw new Error(`Provider selection should not fail: ${message}`)
@@ -386,6 +393,7 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
       dispatch(event) {
         events.push(event)
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -442,6 +450,7 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
       dispatch(event) {
         failedEvents.push(event)
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)
@@ -471,6 +480,7 @@ test('useWorkbenchPartImport commits the active session, reopens a created sketc
       dispatch(event) {
         thrownEvents.push(event)
       },
+      errorReporter: createTestErrorReporter(),
       modelingService: {} as never,
       showWorkbenchError(message) {
         errors.push(message)

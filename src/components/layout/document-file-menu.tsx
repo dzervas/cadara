@@ -69,7 +69,7 @@ export function DocumentFileMenu({
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-1 px-2.5">
+      <div className="flex shrink-0 items-center gap-1 px-2.5 py-2">
         <Menu
           defaultOpened={defaultOpened}
           position="bottom-start"

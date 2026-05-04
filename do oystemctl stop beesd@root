@@ -1,0 +1,26 @@
+[0;1;32m●[0m beesd@root.service - Bees (root)
+     Loaded: loaded (]8;;file://desktop/etc/systemd/system/beesd@.service\/etc/systemd/system/beesd@.service]8;;\; [0;1;32menabled[0m; preset: ignored)
+    Drop-In: /nix/store/9rh5zbgjsj244bby0wzf9pka5g389rxy-system-units/beesd@root.service.d
+             └─]8;;file://desktop/nix/store/9rh5zbgjsj244bby0wzf9pka5g389rxy-system-units/beesd@root.service.d/overrides.conf\overrides.conf]8;;\
+     Active: [0;1;32mactive (running)[0m since Mon 2026-05-04 02:57:00 EEST; 20h ago
+ Invocation: e65c809d97774a24a2de045039bdb567
+       Docs: ]8;;https://github.com/Zygo/bees\https://github.com/Zygo/bees]8;;\
+   Main PID: 2228 (bees)
+         IP: 0B in, 0B out
+         IO: 116.4G read, 23G written
+      Tasks: 15[0;38:5:245m (limit: 76959)[0m
+     Memory: 236.7M (min: 128M, peak: 17.6G, swap: 916K, swap peak: 1.7M)
+        CPU: 2h 38min 13.895s
+     CGroup: /system.slice/system-beesd.slice/beesd@root.service
+             └─[0;38:5:245m2228 /nix/store/4i85y3c8i0xfxg6q54z2jxqafazn2r2n-bees-0.11/lib/bees/bees --verbose 6 --no-timestamps --thread-count 8 /run/bees/mnt/59584c8e-45e7-4510-ae34-6c443260a5e1[0m
+
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_64f60122000_224K_1[2347]:[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_64f60122000_224K_1[2347]:[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_64f60122000_224K_1[2347]: TRACE: *** EXCEPTION ***[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_64f60122000_224K_1[2347]:         exception type std::invalid_argument: first_bbd = BeesBlockData { 4K 0x1000 fd = 1505 '/run/bees/mnt/59584c8e-45e7-4510-ae34-6c443260a5e1/#11450140 (deleted)', data[4096] }, second_bbd = BeesBlockData { 4K 0x0 fd = 224 '/run/bees/mnt/59584c8e-45e7-4510-ae34-6c443260a5e1/home/dzervas/.local/share/containers/storage/overlay/82f9b0633bb3cbcb0c962fab05b58e40d1a110a0f1da27796c5d391c63aa5c26/diff/root/.bun/install/cache/@t@/abe49d681d74a472.pile', data[4096] } failed constraint check (first_bbd.is_data_equal(second_bbd)) at bees-types.cc:333[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_64f60122000_224K_1[2347]: ***[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_650b7769000_280K_1[2344]:[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_650b7769000_280K_1[2344]:[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_650b7769000_280K_1[2344]: TRACE: *** EXCEPTION ***[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_650b7769000_280K_1[2344]:         exception type std::invalid_argument: first_bbd = BeesBlockData { 4K 0x1000 fd = 1505 '/run/bees/mnt/59584c8e-45e7-4510-ae34-6c443260a5e1/#11450140 (deleted)', data[4096] }, second_bbd = BeesBlockData { 4K 0x0 fd = 225 '/run/bees/mnt/59584c8e-45e7-4510-ae34-6c443260a5e1/home/dzervas/.local/share/containers/storage/overlay/82f9b0633bb3cbcb0c962fab05b58e40d1a110a0f1da27796c5d391c63aa5c26/diff/root/.bun/install/cache/@t@/9ce7c1d1effd562c.pile', data[4096] } failed constraint check (first_bbd.is_data_equal(second_bbd)) at bees-types.cc:333[0m
+May 04 23:31:24 desktop beesd[2228]: [0;1;39m[0;1;31m[0;1;39mref_650b7769000_280K_1[2344]: ***[0m

@@ -30,6 +30,8 @@ interface Window {
 declare module 'virtual:cadara-build-metadata' {
   export const appVersion: string
   export const gitCommit: string
+  export const sentryRelease: string | null
+  export const sentryDist: string | null
 }
 
 interface Window {
