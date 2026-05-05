@@ -58,6 +58,9 @@ export interface OccTrackedBody {
     readonly [number, number, number],
     readonly [number, number, number],
   ]>
+  nativeTopologyIdAliases?: {
+    faceIdsByNativeId: ReadonlyMap<FaceId, FaceId>
+  }
   topology: {
     faceIds: FaceId[]
     edgeIds: EdgeId[]

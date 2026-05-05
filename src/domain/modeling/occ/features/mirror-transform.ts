@@ -22,7 +22,10 @@ import {
   requireUniqueTargetBodies,
   trackBodiesFromShape,
 } from '@/domain/modeling/occ/features/boolean-operations'
-import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
+import type {
+  OpenCascadeNativeFeatureTransactionResult,
+  OpenCascadeNativeTopologyKernelHost,
+} from '@/domain/modeling/occ/native-topology-payload'
 
 function resolvePlanarReferencePlane(
   context: OccFeatureExecutionContext,
@@ -59,6 +62,37 @@ function buildMirrorAxisPlane(
     toGpDir(context.oc, plane.frame.normal),
     toGpDir(context.oc, plane.frame.xAxis),
   )
+}
+
+function buildNativeTransformTransaction(
+  context: OccFeatureExecutionContext,
+  body: OccTrackedBody,
+  transform: InstanceType<OccFeatureExecutionContext['oc']['gp_Trsf_1']>,
+  operation: string,
+): OpenCascadeNativeFeatureTransactionResult | null {
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const nativeBuilder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildTransformCommittedShapeTransactionWithHistory
+
+  if (!nativeBuilder) {
+    return null
+  }
+
+  const transaction = nativeBuilder(
+    body.shape,
+    transform,
+    true,
+    body.bodyId,
+    body.topologyToken,
+    advanceTopologyToken(body.topologyToken),
+    context.modelingTolerance,
+    0.5,
+  )
+
+  if (!transaction.IsDone()) {
+    throw new Error(`advanced-feature-unsupported-kernel-case: OCC ${operation} native transform transaction failed.`)
+  }
+
+  return transaction
 }
 
 function getMirrorBodyTargets(definition: AdvancedSolidFeatureDefinition & { kind: 'mirror' }) {
@@ -120,18 +154,27 @@ export function executeMirrorFeature(
   const mirroredBodies: OccTrackedBody[] = []
   for (const [index, bodyTarget] of bodyTargets.entries()) {
     const body = requireBody(context, bodyTarget.bodyId)
-    const transform = new context.oc.BRepBuilderAPI_Transform_2(body.shape, mirror, true)
-    transform.Build(new context.oc.Message_ProgressRange_1())
+    const transformedShape = (() => {
+      const nativeTransaction = buildNativeTransformTransaction(context, body, mirror, 'mirror')
+      if (nativeTransaction) {
+        return nativeTransaction.Shape() as InstanceType<OccFeatureExecutionContext['oc']['TopoDS_Shape']>
+      }
 
-    if (!transform.IsDone()) {
-      throw new Error('advanced-feature-unsupported-kernel-case: OCC mirror transform build failed.')
-    }
+      const transform = new context.oc.BRepBuilderAPI_Transform_2(body.shape, mirror, true)
+      transform.Build(new context.oc.Message_ProgressRange_1())
+
+      if (!transform.IsDone()) {
+        throw new Error('advanced-feature-unsupported-kernel-case: OCC mirror transform build failed.')
+      }
+
+      return transform.Shape()
+    })()
 
     mirroredBodies.push(...trackBodiesFromShape(
       context,
       ownerFeatureId,
       'Mirror result',
-      transform.Shape(),
+      transformedShape,
       `mirror_${index + 1}`,
     ))
   }
@@ -227,22 +270,12 @@ export function executeTransformFeature(
 
   for (const bodyTarget of bodyTargets) {
     const body = requireBody(context, bodyTarget.bodyId)
-    const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
-    const nativeBuilder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildTransformCommittedShapeTransactionWithHistory
-    const replacementResult = nativeBuilder
+    const nativeTransaction = buildNativeTransformTransaction(context, body, translation, 'transform')
+    const replacementResult = nativeTransaction
       ? resolveNativeFeatureTransactionReplacement(
           context,
           body,
-          nativeBuilder(
-            body.shape,
-            translation,
-            true,
-            body.bodyId,
-            body.topologyToken,
-            advanceTopologyToken(body.topologyToken),
-            context.modelingTolerance,
-            0.5,
-          ),
+          nativeTransaction,
           'transform',
           ownerFeatureId,
         )

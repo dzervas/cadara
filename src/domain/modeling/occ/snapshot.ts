@@ -981,6 +981,7 @@ function getNativeRenderMeshSummary(
 function buildNativeFaceMeshGeometry(
   mesh: OccNativeShimMeshSummary,
   faceId: FaceId,
+  nativeFaceIdsByDurableFaceId: ReadonlyMap<string, FaceId>,
 ): RenderMeshGeometry | null {
   const positions = mesh.positions
   const triangleIndices = mesh.triangleIndices
@@ -1012,7 +1013,8 @@ function buildNativeFaceMeshGeometry(
   }
 
   for (let index = 0; index < triangleIndices.length; index += 1) {
-    if (triangleFaceBindings[index] !== faceId) {
+    const nativeFaceId = triangleFaceBindings[index]
+    if (nativeFaceIdsByDurableFaceId.get(nativeFaceId) !== faceId) {
       continue
     }
 
@@ -1047,9 +1049,11 @@ function buildNativeFaceRenderRecords(
   mesh: OccNativeShimMeshSummary,
 ) {
   const records: RenderableEntityRecord[] = []
+  const nativeFaceIdsByDurableFaceId = body.nativeTopologyIdAliases?.faceIdsByNativeId
+    ?? new Map(body.topology.faceIds.map((faceId) => [faceId, faceId]))
 
   for (const faceId of body.topology.faceIds) {
-    const geometry = buildNativeFaceMeshGeometry(mesh, faceId)
+    const geometry = buildNativeFaceMeshGeometry(mesh, faceId, nativeFaceIdsByDurableFaceId)
 
     if (!geometry) {
       continue

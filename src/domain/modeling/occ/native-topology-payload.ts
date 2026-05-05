@@ -1,7 +1,10 @@
 import { z } from 'zod'
 
 import type { MeshExportAccuracy } from '@/contracts/export/capabilities'
-import type { CadaraBrepGeometryAssetData } from '@/contracts/modeling/geometry-assets'
+import type {
+  CadaraBrepGeometryAssetData,
+  CadaraBrepTopologyRecord,
+} from '@/contracts/modeling/geometry-assets'
 import type {
   BodyId,
   CoedgeId,
@@ -72,6 +75,15 @@ export interface OpenCascadeNativeTopologyKernelHost {
       left: unknown,
       right: unknown,
       operation: 'join' | 'cut' | 'intersect',
+      bodyId: string,
+      previousTopologyToken: string,
+      topologyToken: string,
+      linearDeflection: number,
+      angularDeflection: number,
+    ) => OpenCascadeNativeFeatureTransactionResult
+    BuildSplitCommittedShapeTransactionWithHistory?: (
+      target: unknown,
+      tool: unknown,
       bodyId: string,
       previousTopologyToken: string,
       topologyToken: string,
@@ -540,6 +552,43 @@ function createExactBrepTableLayout(topology: OccNativeTopologyTableLayout): Occ
   }
 }
 
+function createEmptyCadaraBrepTopology(): CadaraBrepTopologyRecord {
+  return {
+    vertices: [],
+    edges: [],
+    coedges: [],
+    loops: [],
+    faces: [],
+    shells: [],
+    solids: [],
+  }
+}
+
+function createNativeExactBrepUnsupportedDiagnostic(
+  nativePayload: OccNativeShimPayload,
+  target: DurableRef,
+): OccNativeTopologyDiagnostic | null {
+  const hasNativeTopology = nativePayload.topology.length > 0
+
+  if (!hasNativeTopology) {
+    return null
+  }
+
+  return createNativeTopologyDiagnostic(
+    'occ-native-exact-brep-unsupported-topology',
+    'Native exact B-rep payload lacks oriented wires, coedges, and real OCC curve/surface records required to emit valid Cadara B-rep topology.',
+    {
+      reason: 'missing-oriented-coedges',
+      nativeFaces: nativePayload.counts?.faces ?? nativePayload.topology.filter((entry) => entry.kind === 'face').length,
+      nativeEdges: nativePayload.counts?.edges ?? nativePayload.topology.filter((entry) => entry.kind === 'edge').length,
+      nativeVertices: nativePayload.counts?.vertices ?? nativePayload.topology.filter((entry) => entry.kind === 'vertex').length,
+      nativeFaceEdgeRecords: nativePayload.faceEdges.length,
+      nativeMeshTriangles: nativePayload.mesh?.triangleCount ?? 0,
+    },
+    target,
+  )
+}
+
 function createDiagnosticTableLayout(rowCount = 0): OccNativeDiagnosticTableLayout {
   return {
     diagnostics: emptyTableLayout(rowCount),
@@ -788,8 +837,25 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
   nativePayload: OccNativeShimPayload
   diagnostics?: readonly OccNativeTopologyDiagnostic[]
 }): OccNativeExactBrepPayload {
-  const topology = createBodyTopologyRecords(input.bodyId, input.nativePayload)
-  const topologyLayout = createTopologyTableLayout(countTopologyKinds(topology))
+  const brepTopology = createEmptyCadaraBrepTopology()
+  const topologyLayout = createTopologyTableLayout()
+  const unsupportedDiagnostic = createNativeExactBrepUnsupportedDiagnostic(input.nativePayload, input.target)
+  const diagnostics = [
+    ...input.nativePayload.diagnostics,
+    ...(unsupportedDiagnostic ? [unsupportedDiagnostic] : []),
+    ...(!unsupportedDiagnostic
+      ? [createNativeTopologyDiagnostic(
+          'occ-native-exact-brep-empty',
+          'Native exact B-rep payload did not include extractable topology records.',
+          {
+            nativeTopologyRecords: input.nativePayload.topology.length,
+            nativeMeshTriangles: input.nativePayload.mesh?.triangleCount ?? 0,
+          },
+          input.target,
+        )]
+      : []),
+    ...(input.diagnostics ?? []),
+  ]
 
   return {
     schemaVersion: OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION,
@@ -805,20 +871,15 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
       bodies: [{
         bodyKey: input.bodyId,
         label: input.bodyLabel,
-        topology: {
-          vertices: [],
-          edges: [],
-          coedges: [],
-          loops: [],
-          faces: [],
-          shells: [],
-          solids: [],
-        },
+        topology: brepTopology,
       }],
     },
-    tables: createExactBrepTableLayout(topologyLayout),
+    tables: {
+      ...createExactBrepTableLayout(topologyLayout),
+      fallbackTriangles: null,
+    },
     buffers: [],
-    diagnostics: [...input.nativePayload.diagnostics, ...(input.diagnostics ?? [])],
+    diagnostics,
   }
 }
 

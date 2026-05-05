@@ -202,6 +202,20 @@ function collectNativeHistoryResolution(input: {
   }
 }
 
+export function collectNativeFeatureHistoryInvalidations(
+  current: OccTrackedBody,
+  history: OccNativeFeatureTransactionHistoryPayload,
+) {
+  if (history.status !== 'available') {
+    return createUnsupportedHistoryInvalidations(current)
+  }
+
+  return collectNativeHistoryResolution({
+    current,
+    history,
+  }).invalidations
+}
+
 function reconcileNativeHistoryReplacement(
   current: OccTrackedBody,
   replacement: OccTrackedBody,
@@ -222,6 +236,7 @@ function reconcileNativeHistoryReplacement(
   const faceIds: FaceId[] = []
   const facesById = new Map<FaceId, OccTrackedBody['facesById'] extends Map<FaceId, infer Face> ? Face : never>()
   const faceContributingFeatureIdsById = new Map<FaceId, FeatureId[]>()
+  const faceIdsByNativeId = new Map<FaceId, FaceId>()
 
   for (const freshId of replacement.topology.faceIds) {
     const preservedTarget = preservedTargetsBySuccessorKey.get(getOccDurableRefKey({
@@ -237,6 +252,7 @@ function reconcileNativeHistoryReplacement(
     }
 
     faceIds.push(faceId)
+    faceIdsByNativeId.set(freshId, faceId)
     facesById.set(faceId, face as never)
     faceContributingFeatureIdsById.set(faceId, preservedTarget?.kind === 'face'
       ? appendOwnerFeature(current.faceContributingFeatureIdsById.get(faceId) ?? [], ownerFeatureId)
@@ -312,6 +328,9 @@ function reconcileNativeHistoryReplacement(
       verticesById,
       vertexContributingFeatureIdsById,
       naming: undefined,
+      nativeTopologyIdAliases: {
+        faceIdsByNativeId,
+      },
     } satisfies OccTrackedBody,
     historyInvalidations: invalidations,
   }
@@ -634,32 +653,74 @@ export function applyBooleanPolicy(
 
   if (policy.application === 'sequential') {
     const [firstBodyId, ...restBodyIds] = targetBodyIds
-    let currentResult = runBoolean(
-      context.oc,
-      policy.operation,
-      requireBody(context, firstBodyId!).shape,
-      featureShape,
-    )
-    const firstBodyHistorySources: OccTopologyHistorySource[] = [...currentResult.historySources]
-    const combinedHistoryInvalidations = new Map<string, OccReferenceInvalidationRecord>()
     const firstBody = requireBody(context, firstBodyId!)
-    for (const [key, value] of collectTopologyHistoryInvalidations(firstBody, currentResult.builder)) {
-      combinedHistoryInvalidations.set(key, value)
-    }
+    const combinedHistoryInvalidations = new Map<string, OccReferenceInvalidationRecord>()
+    let replacementResult = resolveNativeBooleanReplacement(
+      context,
+      firstBody,
+      featureShape,
+      policy.operation,
+      ownerFeatureId,
+    )
 
-    for (const bodyId of restBodyIds) {
-      const body = requireBody(context, bodyId)
-      currentResult = runBoolean(context.oc, policy.operation, currentResult.shape, body.shape)
-      firstBodyHistorySources.push(...currentResult.historySources)
-      for (const [key, value] of collectTopologyHistoryInvalidations(body, currentResult.builder)) {
+    if (replacementResult) {
+      let currentBody = replacementResult.replacements[0]
+      for (const [key, value] of replacementResult.historyInvalidations) {
         combinedHistoryInvalidations.set(key, value)
+      }
+
+      for (const bodyId of restBodyIds) {
+        if (!currentBody) {
+          break
+        }
+
+        const body = requireBody(context, bodyId)
+        replacementResult = resolveNativeBooleanReplacement(
+          context,
+          currentBody,
+          body.shape,
+          policy.operation,
+          ownerFeatureId,
+        )
+
+        if (!replacementResult) {
+          break
+        }
+
+        currentBody = replacementResult.replacements[0]
+        for (const [key, value] of replacementResult.historyInvalidations) {
+          combinedHistoryInvalidations.set(key, value)
+        }
       }
     }
 
-    const replacementResult = resolveReplacementBodies(context, firstBodyId!, currentResult.shape, ownerFeatureId, {
-      allowEmpty: true,
-      historySources: firstBodyHistorySources,
-    })
+    if (!replacementResult) {
+      let currentResult = runBoolean(
+        context.oc,
+        policy.operation,
+        firstBody.shape,
+        featureShape,
+      )
+      const firstBodyHistorySources: OccTopologyHistorySource[] = [...currentResult.historySources]
+      for (const [key, value] of collectTopologyHistoryInvalidations(firstBody, currentResult.builder)) {
+        combinedHistoryInvalidations.set(key, value)
+      }
+
+      for (const bodyId of restBodyIds) {
+        const body = requireBody(context, bodyId)
+        currentResult = runBoolean(context.oc, policy.operation, currentResult.shape, body.shape)
+        firstBodyHistorySources.push(...currentResult.historySources)
+        for (const [key, value] of collectTopologyHistoryInvalidations(body, currentResult.builder)) {
+          combinedHistoryInvalidations.set(key, value)
+        }
+      }
+
+      replacementResult = resolveReplacementBodies(context, firstBodyId!, currentResult.shape, ownerFeatureId, {
+        allowEmpty: true,
+        historySources: firstBodyHistorySources,
+      })
+    }
+
     const firstIndex = nextBodies.findIndex((entry) => entry.bodyId === firstBodyId)
     nextBodies.splice(firstIndex, 1, ...replacementResult.replacements)
 
@@ -690,11 +751,19 @@ export function applyBooleanPolicy(
   const combinedHistoryInvalidations = new Map<string, OccReferenceInvalidationRecord>()
   for (const bodyId of targetBodyIds) {
     const targetBody = requireBody(context, bodyId)
-    const result = runBoolean(context.oc, policy.operation, targetBody.shape, featureShape)
-    const replacementResult = resolveReplacementBodies(context, bodyId, result.shape, ownerFeatureId, {
-      allowEmpty: true,
-      historySources: result.historySources,
-    })
+    const replacementResult = resolveNativeBooleanReplacement(
+      context,
+      targetBody,
+      featureShape,
+      policy.operation,
+      ownerFeatureId,
+    ) ?? (() => {
+      const result = runBoolean(context.oc, policy.operation, targetBody.shape, featureShape)
+      return resolveReplacementBodies(context, bodyId, result.shape, ownerFeatureId, {
+        allowEmpty: true,
+        historySources: result.historySources,
+      })
+    })()
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId)
     nextBodies.splice(index, 1, ...replacementResult.replacements)
     for (const replacement of replacementResult.replacements) {

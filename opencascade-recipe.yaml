@@ -484,10 +484,11 @@ additionalCppCode: |
           }
           needsTriangleComma = true;
           const Poly_Triangle triangle = triangulation->Triangle(triangleIndex);
+          const bool isReversed = face.Orientation() == TopAbs_REVERSED;
           out
             << "[" << nodeOffset + triangle.Value(1) - 1
-            << "," << nodeOffset + triangle.Value(2) - 1
-            << "," << nodeOffset + triangle.Value(3) - 1
+            << "," << nodeOffset + triangle.Value(isReversed ? 3 : 2) - 1
+            << "," << nodeOffset + triangle.Value(isReversed ? 2 : 3) - 1
             << "]";
         }
 
@@ -984,6 +985,120 @@ additionalCppCode: |
       return true;
     }
 
+    int CadaraCountHistorySuccessorsFromList(
+      const TopTools_ListOfShape& source,
+      TopTools_IndexedMapOfShape& finalShapeMap,
+      std::vector<int>& successorIndexes
+    ) {
+      int found = 0;
+      TopTools_ListOfShape copy(source);
+
+      while (copy.Size() > 0) {
+        const int finalIndex = finalShapeMap.FindIndex(copy.First());
+        copy.RemoveFirst();
+
+        if (finalIndex <= 0) {
+          continue;
+        }
+
+        bool alreadyIncluded = false;
+        for (int existingIndex : successorIndexes) {
+          if (existingIndex == finalIndex) {
+            alreadyIncluded = true;
+            break;
+          }
+        }
+
+        if (alreadyIncluded) {
+          continue;
+        }
+
+        successorIndexes.push_back(finalIndex);
+        found += 1;
+      }
+
+      return found;
+    }
+
+    template <typename CutBuilder, typename CommonBuilder>
+    void CadaraAppendSplitHistoryRecordsForKind(
+      std::ostringstream& out,
+      CutBuilder& cutBuilder,
+      CommonBuilder& commonBuilder,
+      const TopoDS_Shape& previousShape,
+      const TopoDS_Shape& finalShape,
+      const TopAbs_ShapeEnum shapeType,
+      const std::string& bodyId,
+      const std::string& previousTopologyToken,
+      bool& needsRecordComma
+    ) {
+      TopTools_IndexedMapOfShape previousShapeMap;
+      TopTools_IndexedMapOfShape finalShapeMap;
+      TopExp::MapShapes(previousShape, shapeType, previousShapeMap);
+      TopExp::MapShapes(finalShape, shapeType, finalShapeMap);
+
+      for (int previousIndex = 1; previousIndex <= previousShapeMap.Size(); previousIndex += 1) {
+        const TopoDS_Shape previousSubshape = previousShapeMap.FindKey(previousIndex);
+        std::vector<int> successorIndexes;
+
+        CadaraCountHistorySuccessorsFromList(cutBuilder.Modified(previousSubshape), finalShapeMap, successorIndexes);
+        CadaraCountHistorySuccessorsFromList(cutBuilder.Generated(previousSubshape), finalShapeMap, successorIndexes);
+        CadaraCountHistorySuccessorsFromList(commonBuilder.Modified(previousSubshape), finalShapeMap, successorIndexes);
+        CadaraCountHistorySuccessorsFromList(commonBuilder.Generated(previousSubshape), finalShapeMap, successorIndexes);
+
+        const bool deletedByBoth = cutBuilder.IsDeleted(previousSubshape) && commonBuilder.IsDeleted(previousSubshape);
+        if (successorIndexes.empty() && !deletedByBoth) {
+          const int preservedIndex = finalShapeMap.FindIndex(previousSubshape);
+          if (preservedIndex > 0) {
+            successorIndexes.push_back(preservedIndex);
+          }
+        }
+
+        const std::string reason = successorIndexes.empty() ? "deleted" : "ambiguous";
+
+        if (needsRecordComma) {
+          out << ",";
+        }
+        needsRecordComma = true;
+
+        out << "{\"target\":";
+        CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, previousTopologyToken, previousIndex);
+        out
+          << ",\"reason\":\"" << reason << "\""
+          << ",\"successors\":[]}";
+      }
+    }
+
+    template <typename CutBuilder, typename CommonBuilder>
+    std::string CadaraBuildSplitFeatureHistoryJson(
+      CutBuilder& cutBuilder,
+      CommonBuilder& commonBuilder,
+      const std::string& bodyId,
+      const std::string& previousTopologyToken,
+      const std::string& topologyToken,
+      const TopoDS_Shape& previousShape,
+      const TopoDS_Shape& finalShape
+    ) {
+      std::ostringstream records;
+      bool needsRecordComma = false;
+      CadaraAppendSplitHistoryRecordsForKind(records, cutBuilder, commonBuilder, previousShape, finalShape, TopAbs_FACE, bodyId, previousTopologyToken, needsRecordComma);
+      CadaraAppendSplitHistoryRecordsForKind(records, cutBuilder, commonBuilder, previousShape, finalShape, TopAbs_EDGE, bodyId, previousTopologyToken, needsRecordComma);
+      CadaraAppendSplitHistoryRecordsForKind(records, cutBuilder, commonBuilder, previousShape, finalShape, TopAbs_VERTEX, bodyId, previousTopologyToken, needsRecordComma);
+
+      std::ostringstream out;
+      out
+        << "{\"schemaVersion\":\"occ-native-history-payload/v1alpha1\""
+        << ",\"source\":\"occt7-shim\""
+        << ",\"status\":\"available\""
+        << ",\"operation\":\"split\""
+        << ",\"bodyId\":\"" << CadaraEscapeJson(bodyId) << "\""
+        << ",\"previousTopologyToken\":\"" << CadaraEscapeJson(previousTopologyToken) << "\""
+        << ",\"topologyToken\":\"" << CadaraEscapeJson(topologyToken) << "\""
+        << ",\"records\":[" << records.str() << "]"
+        << ",\"diagnostics\":[]}";
+      return out.str();
+    }
+
     template <typename Builder>
     CadaraNativeFeatureTransactionResult CadaraBuildBooleanTransactionResult(
       Builder& builder,
@@ -1327,6 +1442,91 @@ additionalCppCode: |
       ), CadaraBuildUnsupportedHistoryJson(operation, bodyId), false);
     }
 
+    static CadaraNativeFeatureTransactionResult BuildSplitCommittedShapeTransactionWithHistory(
+      const TopoDS_Shape& target,
+      const TopoDS_Shape& tool,
+      const std::string& bodyId,
+      const std::string& previousTopologyToken,
+      const std::string& topologyToken,
+      const double linearDeflection,
+      const double angularDeflection
+    ) {
+      BRepAlgoAPI_Cut cutBuilder(target, tool);
+      BRepAlgoAPI_Common commonBuilder(target, tool);
+      cutBuilder.SetToFillHistory(true);
+      commonBuilder.SetToFillHistory(true);
+
+      Message_ProgressRange cutProgress;
+      cutBuilder.Build(cutProgress);
+      Message_ProgressRange commonProgress;
+      commonBuilder.Build(commonProgress);
+
+      if (!cutBuilder.IsDone() || !commonBuilder.IsDone()) {
+        const TopoDS_Shape emptyShape;
+        return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+          emptyShape,
+          bodyId,
+          topologyToken,
+          linearDeflection,
+          angularDeflection,
+          true,
+          CadaraDiagnosticJson(
+            "occ-native-feature-transaction-failed",
+            "error",
+            "Native OCC split feature transaction failed to build.",
+            bodyId,
+            "featureTransaction",
+            "operation",
+            "split"
+          )
+        ), CadaraBuildUnsupportedHistoryJson("split", bodyId), false);
+      }
+
+      cutBuilder.SimplifyResult(true, true, 1.0e-7);
+      commonBuilder.SimplifyResult(true, true, 1.0e-7);
+      const TopoDS_Shape cutShape = CadaraPrepareCommittedShape(
+        cutBuilder.Shape(),
+        linearDeflection,
+        angularDeflection
+      );
+      const TopoDS_Shape commonShape = CadaraPrepareCommittedShape(
+        commonBuilder.Shape(),
+        linearDeflection,
+        angularDeflection
+      );
+
+      TopoDS_Compound compound;
+      BRep_Builder compoundBuilder;
+      compoundBuilder.MakeCompound(compound);
+      if (!cutShape.IsNull()) {
+        compoundBuilder.Add(compound, cutShape);
+      }
+      if (!commonShape.IsNull()) {
+        compoundBuilder.Add(compound, commonShape);
+      }
+
+      const TopoDS_Shape preparedCompound = CadaraPrepareCommittedShape(
+        compound,
+        linearDeflection,
+        angularDeflection
+      );
+
+      return CadaraNativeFeatureTransactionResult(
+        preparedCompound,
+        CadaraBuildTopologyJson(preparedCompound, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+        CadaraBuildSplitFeatureHistoryJson(
+          cutBuilder,
+          commonBuilder,
+          bodyId,
+          previousTopologyToken,
+          topologyToken,
+          target,
+          preparedCompound
+        ),
+        true
+      );
+    }
+
     static CadaraNativeFeatureTransactionResult BuildFilletCommittedShapeTransactionWithHistory(
       const TopoDS_Shape& shape,
       const std::string& edgeIdsCsv,
@@ -1660,7 +1860,7 @@ additionalCppCode: |
       const std::string& bodyId,
       const std::string& topologyToken
     ) {
-      return CadaraBuildTopologyJson(shape, bodyId, topologyToken, 0.1, 0.5, false);
+      return CadaraBuildTopologyJson(shape, bodyId, topologyToken, 0.1, 0.5, true);
     }
   };
 

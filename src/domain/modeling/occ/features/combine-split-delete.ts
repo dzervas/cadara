@@ -1,9 +1,9 @@
 import type { FeatureBooleanOperation } from '@/contracts/modeling/schema'
 import type { AdvancedSolidFeatureDefinition } from '@/contracts/modeling/advanced-solid'
-import type { FeatureId } from '@/contracts/shared/ids'
+import type { BodyId, FeatureId } from '@/contracts/shared/ids'
 import type { DurableRef } from '@/contracts/shared/references'
 import { getAdvancedParticipant } from '@/contracts/modeling/advanced-solid'
-import type { OccReferenceInvalidationRecord } from '@/domain/modeling/occ/topology'
+import { advanceTopologyToken, type OccReferenceInvalidationRecord } from '@/domain/modeling/occ/topology'
 import {
   requireBody,
   type OccFeatureExecutionContext,
@@ -11,6 +11,7 @@ import {
 } from '@/domain/modeling/occ/features/shared'
 import {
   runBoolean,
+  resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
   requireUniqueTargetBodies,
   createDeletedBodyInvalidations,
@@ -18,7 +19,12 @@ import {
   trackBodiesFromShape,
   mergeHistoryInvalidations,
   markSplitAmbiguousInvalidations,
+  collectNativeFeatureHistoryInvalidations,
 } from '@/domain/modeling/occ/features/boolean-operations'
+import {
+  parseNativeFeatureTransactionHistoryJson,
+  type OpenCascadeNativeTopologyKernelHost,
+} from '@/domain/modeling/occ/native-topology-payload'
 
 function getCombineBodyTargets(
   definition: AdvancedSolidFeatureDefinition & { kind: 'combine' },
@@ -54,6 +60,40 @@ function getCombineBooleanOperation(definition: AdvancedSolidFeatureDefinition &
   }
 }
 
+function resolveNativeCombineReplacement(input: {
+  context: OccFeatureExecutionContext
+  targetBodyId: BodyId
+  toolBodyId: BodyId
+  operation: Exclude<FeatureBooleanOperation, 'newBody'>
+  ownerFeatureId: FeatureId
+}) {
+  const targetBody = requireBody(input.context, input.targetBodyId)
+  const toolBody = requireBody(input.context, input.toolBodyId)
+  const nativeHost = input.context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const nativeBuilder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildBooleanCommittedShapeTransactionWithHistory
+
+  if (!nativeBuilder) {
+    return null
+  }
+
+  return resolveNativeFeatureTransactionReplacement(
+    input.context,
+    targetBody,
+    nativeBuilder(
+      targetBody.shape,
+      toolBody.shape,
+      input.operation,
+      targetBody.bodyId,
+      targetBody.topologyToken,
+      advanceTopologyToken(targetBody.topologyToken),
+      input.context.modelingTolerance,
+      0.5,
+    ),
+    `combine-${input.operation}`,
+    input.ownerFeatureId,
+  )
+}
+
 export function executeCombineFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -78,20 +118,37 @@ export function executeCombineFeature(
   if (operation === 'join') {
     const [firstTargetBodyId, ...remainingTargetBodyIds] = targetBodyIds
     const firstTargetBody = requireBody(context, firstTargetBodyId!)
-    let currentShape = firstTargetBody.shape
-    const firstTargetHistorySources: import('@/domain/modeling/occ/topology-naming').OccTopologyHistorySource[] = []
+    const replacementResult = remainingTargetBodyIds.length === 0 && toolBodyIds.length === 1
+      ? resolveNativeCombineReplacement({
+          context,
+          targetBodyId: firstTargetBodyId!,
+          toolBodyId: toolBodyIds[0]!,
+          operation,
+          ownerFeatureId,
+        }) ?? (() => {
+          const toolBody = requireBody(context, toolBodyIds[0]!)
+          const result = runBoolean(context.oc, 'join', firstTargetBody.shape, toolBody.shape)
+          return resolveReplacementBodies(context, firstTargetBodyId!, result.shape, ownerFeatureId, {
+            allowEmpty: true,
+            historySources: result.historySources,
+          })
+        })()
+      : (() => {
+          let currentShape = firstTargetBody.shape
+          const firstTargetHistorySources: import('@/domain/modeling/occ/topology-naming').OccTopologyHistorySource[] = []
 
-    for (const bodyId of [...remainingTargetBodyIds, ...toolBodyIds]) {
-      const body = requireBody(context, bodyId)
-      const result = runBoolean(context.oc, 'join', currentShape, body.shape)
-      currentShape = result.shape
-      firstTargetHistorySources.push(...result.historySources)
-    }
+          for (const bodyId of [...remainingTargetBodyIds, ...toolBodyIds]) {
+            const body = requireBody(context, bodyId)
+            const result = runBoolean(context.oc, 'join', currentShape, body.shape)
+            currentShape = result.shape
+            firstTargetHistorySources.push(...result.historySources)
+          }
 
-    const replacementResult = resolveReplacementBodies(context, firstTargetBodyId!, currentShape, ownerFeatureId, {
-      allowEmpty: true,
-      historySources: firstTargetHistorySources,
-    })
+          return resolveReplacementBodies(context, firstTargetBodyId!, currentShape, ownerFeatureId, {
+            allowEmpty: true,
+            historySources: firstTargetHistorySources,
+          })
+        })()
     const firstIndex = nextBodies.findIndex((entry) => entry.bodyId === firstTargetBodyId)
     nextBodies.splice(firstIndex, 1, ...replacementResult.replacements)
     mergeHistoryInvalidations(historyInvalidations, replacementResult.historyInvalidations)
@@ -111,20 +168,37 @@ export function executeCombineFeature(
   } else {
     for (const targetBodyId of targetBodyIds) {
       const targetBody = requireBody(context, targetBodyId)
-      let currentShape = targetBody.shape
-      const targetHistorySources: import('@/domain/modeling/occ/topology-naming').OccTopologyHistorySource[] = []
+      const replacementResult = toolBodyIds.length === 1
+        ? resolveNativeCombineReplacement({
+            context,
+            targetBodyId,
+            toolBodyId: toolBodyIds[0]!,
+            operation,
+            ownerFeatureId,
+          }) ?? (() => {
+            const toolBody = requireBody(context, toolBodyIds[0]!)
+            const result = runBoolean(context.oc, operation, targetBody.shape, toolBody.shape)
+            return resolveReplacementBodies(context, targetBodyId, result.shape, ownerFeatureId, {
+              allowEmpty: true,
+              historySources: result.historySources,
+            })
+          })()
+        : (() => {
+            let currentShape = targetBody.shape
+            const targetHistorySources: import('@/domain/modeling/occ/topology-naming').OccTopologyHistorySource[] = []
 
-      for (const toolBodyId of toolBodyIds) {
-        const toolBody = requireBody(context, toolBodyId)
-        const result = runBoolean(context.oc, operation, currentShape, toolBody.shape)
-        currentShape = result.shape
-        targetHistorySources.push(...result.historySources)
-      }
+            for (const toolBodyId of toolBodyIds) {
+              const toolBody = requireBody(context, toolBodyId)
+              const result = runBoolean(context.oc, operation, currentShape, toolBody.shape)
+              currentShape = result.shape
+              targetHistorySources.push(...result.historySources)
+            }
 
-      const replacementResult = resolveReplacementBodies(context, targetBodyId, currentShape, ownerFeatureId, {
-        allowEmpty: true,
-        historySources: targetHistorySources,
-      })
+            return resolveReplacementBodies(context, targetBodyId, currentShape, ownerFeatureId, {
+              allowEmpty: true,
+              historySources: targetHistorySources,
+            })
+          })()
       const targetIndex = nextBodies.findIndex((entry) => entry.bodyId === targetBodyId)
       nextBodies.splice(targetIndex, 1, ...replacementResult.replacements)
       mergeHistoryInvalidations(historyInvalidations, replacementResult.historyInvalidations)
@@ -202,6 +276,49 @@ export function executeSplitFeature(
 
   const targetBody = requireBody(context, targetBodyRef.bodyId)
   const toolBody = requireBody(context, toolBodyRef.bodyId)
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const nativeBuilder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildSplitCommittedShapeTransactionWithHistory
+
+  if (nativeBuilder) {
+    const transaction = nativeBuilder(
+      targetBody.shape,
+      toolBody.shape,
+      targetBody.bodyId,
+      targetBody.topologyToken,
+      advanceTopologyToken(targetBody.topologyToken),
+      context.modelingTolerance,
+      0.5,
+    )
+
+    if (!transaction.IsDone()) {
+      throw new Error('advanced-feature-unsupported-kernel-case: OCC split native transaction failed.')
+    }
+
+    const splitBodies = trackBodiesFromShape(
+      context,
+      ownerFeatureId,
+      'Split result',
+      transaction.Shape() as Parameters<typeof trackBodiesFromShape>[3],
+      'split',
+    )
+    const nextBodies = context.bodies
+      .filter((body) => body.bodyId !== targetBody.bodyId)
+      .concat(splitBodies)
+    const historyInvalidations = createDeletedBodyInvalidations(targetBody)
+    const nativeHistory = parseNativeFeatureTransactionHistoryJson(transaction.HistoryJson())
+    mergeHistoryInvalidations(historyInvalidations, collectNativeFeatureHistoryInvalidations(targetBody, nativeHistory))
+
+    return {
+      bodies: nextBodies,
+      constructions: [...context.constructions],
+      constructionPlanes: new Map(context.constructionPlanes),
+      producedTargets: splitBodies.map((body) => ({ kind: 'body' as const, bodyId: body.bodyId })),
+      entities: [],
+      renderRecords: [],
+      historyInvalidations,
+    }
+  }
+
   const cutResult = runBoolean(context.oc, 'cut', targetBody.shape, toolBody.shape)
   const intersectResult = runBoolean(context.oc, 'intersect', targetBody.shape, toolBody.shape)
   const remainderBodies = trackBodiesFromShape(context, ownerFeatureId, 'Split remainder', cutResult.shape, 'remainder')

@@ -25,12 +25,18 @@ type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
     dy: number,
     dz: number,
   ) => NativeBoxBuilderForTest
+  BRepPrimAPI_MakeCylinder_1: new (
+    radius: number,
+    height: number,
+  ) => NativeBoxBuilderForTest
   TopoDS_Shape: new () => { delete?: () => void }
 }
 
 type NativeOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
 ) => Promise<NativeOpenCascadeForTest>
+
+type Point3 = readonly [number, number, number]
 
 test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
   async function loadNativeOpenCascadeForTest() {
@@ -114,8 +120,29 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
       'Converted native topology payload should retain render mesh positions from the shim payload.',
     )
     expectTrue(
-      exactBrepPayload.tables.topology.faces.rowCount === 6,
-      'Native exact B-rep payload should be built from the same flat native topology records.',
+      exactBrepPayload.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'occ-native-exact-brep-unsupported-topology'
+        && diagnostic.detail?.reason === 'missing-oriented-coedges'
+        && diagnostic.target?.kind === 'body'
+        && diagnostic.target.bodyId === bodyId
+      ),
+      'Native exact B-rep payload should diagnose missing oriented coedges instead of fabricating box face loops.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.faces.length === 0,
+      'Native exact B-rep payload should not expose valid-looking face topology without oriented face wires.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.vertices.length === 0,
+      'Native exact B-rep payload should not expose valid-looking vertex topology without oriented face wires.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.edges.length === 0,
+      'Native exact B-rep payload should not expose valid-looking edge topology without oriented face wires.',
+    )
+    expectTrue(
+      exactBrepPayload.tables.topology.faces.rowCount === 0,
+      'Native exact B-rep payload table metadata should stay empty when no valid exact topology is emitted.',
     )
     expectTrue(
       topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount === 12,
@@ -166,6 +193,52 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     )
 
     shape.delete?.()
+  }
+
+  async function testNativeExactBrepDiagnosesCurvedTopologyInsteadOfFlatteningIt() {
+    const oc = await loadNativeOpenCascadeForTest()
+    const cylinderBuilder = new oc.BRepPrimAPI_MakeCylinder_1(1, 2)
+    const shape = cylinderBuilder.Shape()
+    const bodyId = 'body_native_exact_curved_probe' as BodyId
+    const revisionId = 'rev_native_exact_curved_probe' as RevisionId
+    const nativeExactBrep = parseNativeShimPayloadJson(
+      oc.CadaraBuildNativeExactBrepPayload.BuildJson(
+        shape,
+        bodyId,
+        't_native_curved',
+      ),
+    )
+    const exactBrepPayload = createOccNativeExactBrepPayloadFromShimPayload({
+      revisionId,
+      target: { kind: 'body', bodyId },
+      bodyId,
+      bodyLabel: 'Native exact curved probe',
+      nativePayload: nativeExactBrep,
+    })
+
+    expectTrue(
+      (nativeExactBrep.mesh?.triangleCount ?? 0) > nativeExactBrep.topology.filter((record) => record.kind === 'face').length * 2,
+      'Curved native exact probe should expose more mesh triangles than a simple planar fallback can represent.',
+    )
+    expectTrue(
+      exactBrepPayload.diagnostics.some((diagnostic) =>
+        diagnostic.code === 'occ-native-exact-brep-unsupported-topology'
+        && diagnostic.target?.kind === 'body'
+        && diagnostic.target.bodyId === bodyId
+      ),
+      'Native exact B-rep payload should diagnose unsupported topology instead of flattening it into line and plane records.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.faces.length === 0,
+      'Native exact B-rep payload should not return valid-looking planar faces for curved topology.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.edges.length === 0,
+      'Native exact B-rep payload should not return valid-looking line edges for curved topology.',
+    )
+
+    ;(shape as { delete?: () => void }).delete?.()
+    cylinderBuilder.delete?.()
   }
 
   async function testNativeFeatureTransactionPreparesCommittedShapePayload() {
@@ -303,9 +376,82 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     rightBuilder.delete?.()
   }
 
+  async function testNativeMeshPayloadPreservesFaceOrientation() {
+    const oc = await loadNativeOpenCascadeForTest()
+    const boxBuilder = new oc.BRepPrimAPI_MakeBox_2(1, 2, 3)
+    const shape = boxBuilder.Shape()
+    const bodyId = 'body_native_mesh_orientation_probe' as BodyId
+    const nativeTopology = parseNativeShimPayloadJson(
+      oc.CadaraBuildNativeTopologyPayload.BuildJson(
+        shape,
+        bodyId,
+        't_native_orientation',
+        0.1,
+        0.5,
+      ),
+    )
+    const positions = nativeTopology.mesh?.positions
+    const triangleIndices = nativeTopology.mesh?.triangleIndices
+
+    expectTrue(positions != null, 'Native mesh orientation test requires native mesh positions.')
+    expectTrue(triangleIndices != null, 'Native mesh orientation test requires native mesh triangle indices.')
+
+    const center: Point3 = [0.5, 1, 1.5]
+    let outwardTriangleCount = 0
+
+    for (const triangle of triangleIndices ?? []) {
+      const first = positions?.[triangle[0]]
+      const second = positions?.[triangle[1]]
+      const third = positions?.[triangle[2]]
+
+      expectTrue(first != null && second != null && third != null, 'Native mesh triangle should reference existing vertices.')
+
+      const normal = cross(subtract(second, first), subtract(third, first))
+      const triangleCenter = scale(add(add(first, second), third), 1 / 3)
+      const outward = subtract(triangleCenter, center)
+
+      expectTrue(
+        dot(normal, outward) > 0,
+        'Native mesh payload should preserve outward triangle winding for reversed OCC faces.',
+      )
+      outwardTriangleCount += 1
+    }
+
+    expectTrue(outwardTriangleCount === 12, 'Native mesh orientation test should check every box triangle.')
+
+    ;(shape as { delete?: () => void }).delete?.()
+    boxBuilder.delete?.()
+  }
+
   await testNativeShimReturnsFlatTopologyAndMeshPayloads()
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes()
+  await testNativeExactBrepDiagnosesCurvedTopologyInsteadOfFlatteningIt()
   await testNativeFeatureTransactionPreparesCommittedShapePayload()
   await testNativeBooleanTransactionBuildsCommittedPayload()
   await testNativeBooleanTransactionReturnsCommittedShapeResult()
+  await testNativeMeshPayloadPreservesFaceOrientation()
 })
+
+function subtract(left: Point3, right: Point3): Point3 {
+  return [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+function add(left: Point3, right: Point3): Point3 {
+  return [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+function scale(point: Point3, factor: number): Point3 {
+  return [point[0] * factor, point[1] * factor, point[2] * factor]
+}
+
+function cross(left: Point3, right: Point3): Point3 {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ]
+}
+
+function dot(left: Point3, right: Point3) {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}

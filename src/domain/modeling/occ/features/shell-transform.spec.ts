@@ -6,7 +6,7 @@ import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/adva
 import type { BodyId, FeatureId } from '@/contracts/shared/ids'
 import { createOccAuthoringState } from '@/domain/modeling/occ/authoring-state'
 import { executeShellFeature } from '@/domain/modeling/occ/features/shell'
-import { executeTransformFeature } from '@/domain/modeling/occ/features/mirror-transform'
+import { executeMirrorFeature, executeTransformFeature } from '@/domain/modeling/occ/features/mirror-transform'
 import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
 import { toGpPnt } from '@/domain/modeling/occ/planes'
 import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
@@ -139,4 +139,43 @@ test('executeShellFeature uses native shell transaction before replacement boole
   expectTrue(replacement != null, 'Native shell composition should replace the selected body.')
   expectTrue(nativeCallCount === 1, 'Shell feature execution should use the native shell transaction when available.')
   assertNativeHistoryDidNotFallBack(result.historyInvalidations, 'Native shell composition')
+})
+
+test('executeMirrorFeature uses native transform transaction for copied topology', async () => {
+  const oc = await loadCustomOpenCascadeForTest()
+  const body = makeTrackedBox(
+    oc,
+    'body_native_mirror_seed' as BodyId,
+    'feature_native_mirror_seed' as FeatureId,
+  )
+  const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const nativeBuilder = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildTransformCommittedShapeTransactionWithHistory
+  let nativeCallCount = 0
+  expectTrue(typeof nativeBuilder === 'function', 'Expected custom OCC runtime to expose native transform transactions.')
+  nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildTransformCommittedShapeTransactionWithHistory = (...args) => {
+    nativeCallCount += 1
+    return nativeBuilder(...args)
+  }
+  const context = createOccAuthoringState(oc, { bodies: [body] })
+
+  const result = executeMirrorFeature(
+    context,
+    'feature_native_mirror' as FeatureId,
+    {
+      kind: 'mirror',
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [
+          { role: 'body', targets: [{ kind: 'body', bodyId: body.bodyId }] },
+          { role: 'plane', targets: [{ kind: 'construction', constructionId: 'construction_plane-yz' }] },
+        ],
+        options: { copy: true },
+      },
+    } satisfies AdvancedSolidFeatureDefinition & { kind: 'mirror' },
+  )
+  const mirroredBody = result.bodies.find((candidate) => candidate.bodyId !== body.bodyId)
+
+  expectTrue(mirroredBody != null, 'Native mirror should append a copied body.')
+  expectTrue(nativeCallCount === 1, 'Mirror feature execution should use the native transform transaction when available.')
+  expectTrue(result.historyInvalidations.size === 0, 'Mirror copy should keep source topology live and create fresh copied topology.')
 })

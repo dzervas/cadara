@@ -24,7 +24,7 @@
 ## 4. Stability and Cache Policy
 
 - [x] 4.1 Audit every mutating solid feature for usable kernel history and document unsupported history gaps.
-- [ ] 4.2 Make booleans, fillet, chamfer, shell, thicken, sweep, loft, split, mirror, and transform preserve or invalidate topology through native history where supported.
+- [x] 4.2 Make booleans, fillet, chamfer, shell, thicken, sweep, loft, split, mirror, and transform preserve or invalidate topology through native history where supported.
 - [x] 4.3 Add committed-result validation, healing, same-parameter/same-range, same-domain cleanup, and tolerance-normalization policy.
 - [x] 4.4 Add incremental invalidation for native topology, adjacency, bounds, mesh, and exact-extraction caches where mutation scope is known.
 - [x] 4.5 Return structured diagnostics for operations that cannot produce reliable topology history or safe committed solid results instead of remapping by enumeration order.
