@@ -10,7 +10,7 @@ export default defineConfig({
     timeout: 1_000,
   },
   fullyParallel: true,
-  workers: 8,
+  workers: 4,
   retries: 0,
   use: {
     baseURL,

@@ -55,7 +55,7 @@ test('pattern dropdown stays responsive without restarting shortcut profile load
    */
   for (let index = 0; index < 3; index += 1) {
     await patternButton.hover()
-    await expect(page.getByRole('tooltip').getByText('Pattern', { exact: true })).toBeVisible()
+    await expect(page.getByRole('tooltip').filter({ hasText: 'Pattern' })).toBeVisible()
     await patternButton.click({ timeout: 5_000 })
 
     const circularPatternItem = page.getByRole('menuitem').filter({ hasText: 'Circular Pattern' })

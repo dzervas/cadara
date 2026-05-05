@@ -5,8 +5,16 @@ import {
   type ProjectSketchExternalReferencesRequest,
   type ResolveSketchReferenceRequest,
   type SolveSketchRequest,
+  type StartInteractiveSketchSolveSessionRequest,
   type ValidateSketchRequest,
 } from './schema'
+import {
+  disposeInteractiveSketchSolveSessionRequestSchema,
+  finalizeInteractiveSketchSolveSessionRequestSchema,
+  solveSketchRequestSchema,
+  startInteractiveSketchSolveSessionRequestSchema,
+  updateInteractiveSketchSolveSessionRequestSchema,
+} from './runtime-schema'
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   DEFAULT_MOCK_SOLVER_TOLERANCES,
@@ -175,7 +183,6 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {  const sketch
       partialSolvePolicy: 'bestEffort',
       definition: sketchDefinition,
       projectedReferences,
-      incrementalEdit: null,
     }
   }
 
@@ -206,6 +213,19 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {  const sketch
       'Solve should return a machine-readable solved and constrained status.',
     )
     expectTrue(solved.solvedSnapshot.solvedEntities.length === 4, 'Solve should return solved entity geometry.')
+    expectTrue(!solved.regionResult, 'Normal solve responses should not derive regions unless the caller requests them.')
+    expectTrue(solveSketchRequestSchema.safeParse(createSolveRequest(projection.projectedReferences)).success, 'Solve request runtime schema should accept solve-without-regions requests.')
+
+    const solvedWithRegions = await adapter.solveSketch({
+      ...createSolveRequest(projection.projectedReferences),
+      requestId: 'request_solve_with_regions_1',
+      includeRegions: true,
+    })
+    expectTrue(solvedWithRegions.regionResult?.regions.length === 1, 'Caller-selected solve region extraction should return regions explicitly.')
+    expectTrue(
+      solvedWithRegions.diagnostics.length === solved.diagnostics.length,
+      'Caller-selected region extraction diagnostics should stay scoped to the region result.',
+    )
 
     const regions = await adapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
@@ -262,6 +282,97 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {  const sketch
       projectedResolution.resolution.isValid,
       'Projected geometry targets should resolve when their authored reference still exists.',
     )
+  }
+
+  async function testInteractiveSolveLifecycleIsExplicit() {
+    const adapter = new SketchConstraintSolverAdapter({ revisionId: null })
+    const projection = await adapter.projectExternalReferences(createProjectRequest())
+    const solved = await adapter.solveSketch(createSolveRequest(projection.projectedReferences))
+    const startRequest: StartInteractiveSketchSolveSessionRequest = {
+      ...createSolveRequest(projection.projectedReferences),
+      requestId: 'request_interactive_start_1',
+      priorSolvedSnapshot: solved.solvedSnapshot,
+    }
+    const startParse = startInteractiveSketchSolveSessionRequestSchema.safeParse(startRequest)
+    expectTrue(startParse.success, 'Interactive session start request should validate at the contract boundary.')
+    expectTrue(
+      !startInteractiveSketchSolveSessionRequestSchema.safeParse({ ...startRequest, plane: undefined }).success,
+      'Interactive session start request should require the sketch plane at the runtime boundary.',
+    )
+
+    const started = await adapter.startInteractiveSolveSession(startRequest)
+    expectTrue(started.sessionId.startsWith('interactive_sketch_solve_'), 'Interactive start should return an opaque session id.')
+    expectTrue(started.programId.startsWith('compiled_sketch_solve_'), 'Interactive start should expose the compiled solve basis id.')
+    expectTrue(started.warmStarted, 'Interactive start should warm-start from the compatible solved snapshot.')
+
+    const updateRequest = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: 'request_interactive_update_1',
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      sessionId: started.sessionId,
+      dragTarget: {
+        kind: 'sketchPoint' as const,
+        pointId: 'sketch_point_b' as const,
+        position: [2, -1] as const,
+      },
+    }
+    expectTrue(updateInteractiveSketchSolveSessionRequestSchema.safeParse(updateRequest).success, 'Interactive update request should validate at the contract boundary.')
+    expectTrue(
+      !updateInteractiveSketchSolveSessionRequestSchema.safeParse({
+        ...updateRequest,
+        dragTarget: { kind: 'sketchPoint', pointId: 'not_a_point', position: [2, -1] },
+      }).success,
+      'Interactive update request should validate the dragged point target shape.',
+    )
+
+    const staleBasis = await adapter.updateInteractiveSolveSession({
+      ...updateRequest,
+      requestId: 'request_interactive_update_stale_basis_1',
+      revisionId: 'rev_0002',
+    })
+    expectTrue(
+      staleBasis.result.kind === 'blocked'
+      && staleBasis.result.reason === 'staleRevision'
+      && staleBasis.result.diagnostics.some((diagnostic) => diagnostic.code === 'stale-interactive-solve-session-basis'),
+      'Interactive updates with a mismatched request basis should be rejected without mutating the active session.',
+    )
+
+    const updated = await adapter.updateInteractiveSolveSession(updateRequest)
+    expectTrue(updated.result.kind === 'accepted', 'Compatible interactive drag updates should return an accepted frame.')
+
+    const finalizeRequest = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: 'request_interactive_finalize_1',
+      documentId: 'doc_workspace',
+      revisionId: 'rev_0001',
+      sketchId: 'sketch_primary',
+      sessionId: started.sessionId,
+    }
+    expectTrue(finalizeInteractiveSketchSolveSessionRequestSchema.safeParse(finalizeRequest).success, 'Interactive finalize request should validate at the contract boundary.')
+    const finalized = await adapter.finalizeInteractiveSolveSession(finalizeRequest)
+    expectTrue(finalized.solvedSnapshot !== null, 'Interactive finalize should return the latest accepted solved state.')
+
+    const stale = await adapter.updateInteractiveSolveSession({
+      ...updateRequest,
+      requestId: 'request_interactive_update_stale_1',
+    })
+    expectTrue(
+      stale.result.kind === 'blocked' && stale.result.reason === 'staleSession',
+      'Updating a finalized session should return a stale-session result.',
+    )
+
+    const disposeRequest = {
+      ...finalizeRequest,
+      requestId: 'request_interactive_dispose_1',
+      sessionId: 'interactive_sketch_solve_unknown' as const,
+    }
+    expectTrue(disposeInteractiveSketchSolveSessionRequestSchema.safeParse(disposeRequest).success, 'Interactive dispose request should validate at the contract boundary.')
+    const disposed = await adapter.disposeInteractiveSolveSession(disposeRequest)
+    expectTrue(!disposed.disposed && disposed.diagnostics.some((diagnostic) => diagnostic.code === 'stale-interactive-solve-session'), 'Disposing an unknown session should report a stale-session diagnostic.')
   }
 
   async function testRevisionDiagnosticsAreExplicit() {
@@ -330,4 +441,5 @@ test('src/contracts/solver/solver-contract.spec.ts', async () => {  const sketch
   await testRevisionDiagnosticsAreExplicit()
   await testMockProjectionDoesNotFabricateExternalGeometry()
   await testVersioningAndIdBijectionAreEnforced()
+  await testInteractiveSolveLifecycleIsExplicit()
 })

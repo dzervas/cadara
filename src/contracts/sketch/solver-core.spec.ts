@@ -1,9 +1,14 @@
 import { test } from 'bun:test'
 import { expectTrue } from '@/testing/expect.spec'
 import {
+  compileSketchSolveProgram,
+  createCompiledSketchSolveSession,
   evaluateSketchScalarConstraintForTest,
   getSketchSolveInitialValuesForTest,
+  isCompiledSketchSolveProgramCompatible,
   solveSketchDefinitionCore,
+  solveSketchDefinitionWithDraggedPointTarget,
+  updateCompiledSketchSolveSession,
   validateSketchDefinitionCore,
   type SketchSolveStrategy,
 } from '@/contracts/sketch/solver-core'
@@ -1546,6 +1551,300 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {  function assertC
     )
   }
 
+  function createIndependentLineComponentsDefinition(): SketchDefinition {
+    return {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 1, 0),
+        makePoint('sketch_point_c', 'C', 10, 0),
+        makePoint('sketch_point_d', 'D', 11, 0),
+      ],
+      entityIds: ['sketch_entity_ab', 'sketch_entity_cd'],
+      entities: [
+        makeLine('sketch_entity_ab', 'AB', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_cd', 'CD', 'sketch_point_c', 'sketch_point_d'),
+      ],
+      constraintIds: ['constraint_ab_horizontal', 'constraint_cd_horizontal'],
+      constraints: [
+        {
+          constraintId: 'constraint_ab_horizontal',
+          kind: 'horizontal',
+          label: 'AB horizontal',
+          entityId: 'sketch_entity_ab',
+        },
+        {
+          constraintId: 'constraint_cd_horizontal',
+          kind: 'horizontal',
+          label: 'CD horizontal',
+          entityId: 'sketch_entity_cd',
+        },
+      ],
+      dimensionIds: ['dimension_ab_length', 'dimension_cd_length'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_ab_length',
+          kind: 'lineLength',
+          label: 'AB length',
+          entityId: 'sketch_entity_ab',
+          value: 1,
+        },
+        {
+          dimensionId: 'dimension_cd_length',
+          kind: 'lineLength',
+          label: 'CD length',
+          entityId: 'sketch_entity_cd',
+          value: 1,
+        },
+      ],
+    }
+  }
+
+  async function testCompiledSolveProgramReuseAndInvalidation() {
+    const definition = createIndependentLineComponentsDefinition()
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const numericEdit: SketchDefinition = {
+      ...definition,
+      points: definition.points.map((point) =>
+        point.pointId === 'sketch_point_a' ? { ...point, position: [0.25, 0] as const } : point,
+      ),
+    }
+
+    expectTrue(program.components.length === 2, 'Compiled program should partition independent line components.')
+    expectTrue(
+      isCompiledSketchSolveProgramCompatible(program, {
+        definition: numericEdit,
+        tolerances,
+      }),
+      'Compiled program should remain compatible across authored point numeric edits.',
+    )
+    expectTrue(
+      !isCompiledSketchSolveProgramCompatible(program, {
+        definition,
+        tolerances: { ...tolerances, coincidence: 1e-5 },
+      }),
+      'Compiled program should invalidate when tolerance policy changes.',
+    )
+    expectTrue(
+      solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' }).status.solveState === 'solved',
+      'Full solve should route through the compiled-program path and remain solved.',
+    )
+  }
+
+  async function testInteractiveSessionWarmStartStaleRejectionAndComponentIsolation() {
+    const definition = createIndependentLineComponentsDefinition()
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const session = createCompiledSketchSolveSession({
+      sessionId: 'interactive_sketch_solve_core_spec',
+      program,
+      priorSolvedSnapshot: solved.solvedSnapshot,
+    })
+    expectTrue(session.warmStarted, 'Interactive sessions should warm-start from compatible solved snapshots.')
+
+    const result = updateCompiledSketchSolveSession(session, {
+      kind: 'sketchPoint',
+      pointId: 'sketch_point_b',
+      position: [2, 0],
+    }, 1e-4)
+    expectTrue(result.kind === 'solved', 'Interactive update should accept a translatable constrained component.')
+    const points = new Map(result.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
+    assertClose(points.get('sketch_point_c')?.[0] ?? Number.NaN, 10, 1e-6, 'Unaffected component point C should remain stable.')
+    assertClose(points.get('sketch_point_d')?.[0] ?? Number.NaN, 11, 1e-6, 'Unaffected component point D should remain stable.')
+
+    session.disposed = true
+    const stale = updateCompiledSketchSolveSession(session, {
+      kind: 'sketchPoint',
+      pointId: 'sketch_point_b',
+      position: [3, 0],
+    })
+    expectTrue(
+      stale.kind === 'blocked' && stale.reason === 'staleSession' && stale.diagnostics.some((diagnostic) => diagnostic.code === 'stale-interactive-solve-session'),
+      'Disposed interactive sessions should reject later updates with a stale-session diagnostic.',
+    )
+  }
+
+  async function testCompiledInteractiveDragKeepsInitiallyCoincidentPointsTogether() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 0, 0),
+      ],
+      entityIds: [],
+      entities: [],
+      constraintIds: ['constraint_ab_coincident'],
+      constraints: [
+        {
+          constraintId: 'constraint_ab_coincident',
+          kind: 'coincident',
+          label: 'A coincident B',
+          pointIds: ['sketch_point_a', 'sketch_point_b'],
+        },
+      ],
+      dimensionIds: [],
+      dimensions: [],
+    }
+    const dragTarget = {
+      kind: 'sketchPoint',
+      pointId: 'sketch_point_a',
+      position: [2, 3],
+    } as const
+
+    const stateless = solveSketchDefinitionWithDraggedPointTarget({
+      definition,
+      dragTarget,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+      targetTolerance: 1e-4,
+    })
+    expectTrue(stateless.kind === 'solved', 'Stateless dragged solve should accept initially coincident points.')
+
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const session = createCompiledSketchSolveSession({
+      sessionId: 'interactive_sketch_solve_coincident_core_spec',
+      program,
+      priorSolvedSnapshot: solveSketchDefinitionCore({
+        definition,
+        tolerances,
+        partialSolvePolicy: 'bestEffort',
+      }).solvedSnapshot,
+    })
+    const compiled = updateCompiledSketchSolveSession(session, dragTarget, 1e-4)
+
+    expectTrue(compiled.kind === 'solved', 'Compiled interactive update should accept initially coincident points.')
+    const points = new Map(compiled.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
+    assertClose(points.get('sketch_point_a')?.[0] ?? Number.NaN, 2, 1e-4, 'Dragged point A should reach the target x position.')
+    assertClose(points.get('sketch_point_a')?.[1] ?? Number.NaN, 3, 1e-4, 'Dragged point A should reach the target y position.')
+    assertClose(points.get('sketch_point_b')?.[0] ?? Number.NaN, 2, 1e-4, 'Coincident point B should move with A on x.')
+    assertClose(points.get('sketch_point_b')?.[1] ?? Number.NaN, 3, 1e-4, 'Coincident point B should move with A on y.')
+  }
+
+  async function testCompiledInteractiveDragTranslatesRigidRectangle() {
+    const definition: SketchDefinition = {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_a', 'sketch_point_b', 'sketch_point_c', 'sketch_point_d'],
+      points: [
+        makePoint('sketch_point_a', 'A', 0, 0),
+        makePoint('sketch_point_b', 'B', 2, 0),
+        makePoint('sketch_point_c', 'C', 2, 3),
+        makePoint('sketch_point_d', 'D', 0, 3),
+      ],
+      entityIds: [
+        'sketch_entity_line_a',
+        'sketch_entity_line_b',
+        'sketch_entity_line_c',
+        'sketch_entity_line_d',
+      ],
+      entities: [
+        makeLine('sketch_entity_line_a', 'A-B', 'sketch_point_a', 'sketch_point_b'),
+        makeLine('sketch_entity_line_b', 'B-C', 'sketch_point_b', 'sketch_point_c'),
+        makeLine('sketch_entity_line_c', 'C-D', 'sketch_point_c', 'sketch_point_d'),
+        makeLine('sketch_entity_line_d', 'D-A', 'sketch_point_d', 'sketch_point_a'),
+      ],
+      constraintIds: [
+        'constraint_horizontal_a',
+        'constraint_horizontal_c',
+        'constraint_vertical_b',
+        'constraint_vertical_d',
+      ],
+      constraints: [
+        {
+          constraintId: 'constraint_horizontal_a',
+          kind: 'horizontal',
+          label: 'Horizontal A',
+          entityId: 'sketch_entity_line_a',
+        },
+        {
+          constraintId: 'constraint_horizontal_c',
+          kind: 'horizontal',
+          label: 'Horizontal C',
+          entityId: 'sketch_entity_line_c',
+        },
+        {
+          constraintId: 'constraint_vertical_b',
+          kind: 'vertical',
+          label: 'Vertical B',
+          entityId: 'sketch_entity_line_b',
+        },
+        {
+          constraintId: 'constraint_vertical_d',
+          kind: 'vertical',
+          label: 'Vertical D',
+          entityId: 'sketch_entity_line_d',
+        },
+      ],
+      dimensionIds: ['dimension_width', 'dimension_height'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_width',
+          kind: 'horizontalDistance',
+          label: 'Width',
+          pointIds: ['sketch_point_a', 'sketch_point_b'],
+          value: 2,
+        },
+        {
+          dimensionId: 'dimension_height',
+          kind: 'verticalDistance',
+          label: 'Height',
+          pointIds: ['sketch_point_a', 'sketch_point_d'],
+          value: 3,
+        },
+      ],
+    }
+    const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: 'bestEffort' })
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+    })
+    const session = createCompiledSketchSolveSession({
+      sessionId: 'interactive_sketch_solve_rectangle_translate_core_spec',
+      program,
+      priorSolvedSnapshot: solved.solvedSnapshot,
+    })
+    const result = updateCompiledSketchSolveSession(session, {
+      kind: 'sketchPoint',
+      pointId: 'sketch_point_b',
+      position: [7, 11],
+    }, 1e-4)
+
+    expectTrue(result.kind === 'solved', 'Interactive update should accept rigid rectangle translation.')
+    const points = new Map(result.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
+    assertClose(points.get('sketch_point_a')?.[0] ?? Number.NaN, 5, 1e-4, 'Point A should translate on x.')
+    assertClose(points.get('sketch_point_a')?.[1] ?? Number.NaN, 11, 1e-4, 'Point A should translate on y.')
+    assertClose(points.get('sketch_point_b')?.[0] ?? Number.NaN, 7, 1e-4, 'Point B should reach target x.')
+    assertClose(points.get('sketch_point_b')?.[1] ?? Number.NaN, 11, 1e-4, 'Point B should reach target y.')
+    assertClose(points.get('sketch_point_c')?.[0] ?? Number.NaN, 7, 1e-4, 'Point C should translate on x.')
+    assertClose(points.get('sketch_point_c')?.[1] ?? Number.NaN, 14, 1e-4, 'Point C should translate on y.')
+    assertClose(points.get('sketch_point_d')?.[0] ?? Number.NaN, 5, 1e-4, 'Point D should translate on x.')
+    assertClose(points.get('sketch_point_d')?.[1] ?? Number.NaN, 14, 1e-4, 'Point D should translate on y.')
+  }
+
   async function run() {
     await testFixPoint()
     await testEuclideanDistance()
@@ -1575,6 +1874,10 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {  function assertC
     await testValidationRejectsDuplicateEntityRecords()
     await testCircleRadiusDimensionDrivesSolvedCircleRadius()
     await testCircleDiameterDimensionDrivesSolvedCircleRadius()
+    await testCompiledSolveProgramReuseAndInvalidation()
+    await testInteractiveSessionWarmStartStaleRejectionAndComponentIsolation()
+    await testCompiledInteractiveDragKeepsInitiallyCoincidentPointsTogether()
+    await testCompiledInteractiveDragTranslatesRigidRectangle()
   }
 
   run().catch((error: unknown) => {

@@ -335,7 +335,23 @@ export function withLiveSolvedRegions(session: SketchSessionState): SketchSessio
   return {
     ...session,
     solvedRegions: deriveSolvedRegionsForSession(session, session.definition),
+    liveRegionState: {
+      freshness: 'current',
+      pendingSinceSequence: null,
+      debounceMs: session.liveRegionState?.debounceMs ?? 100,
+    },
   }
+}
+
+export function refreshLiveRegionsAfterDebounce(
+  session: SketchSessionState,
+  elapsedMs: number,
+): SketchSessionState {
+  const state = session.liveRegionState
+  if (!state || state.freshness === 'current' || elapsedMs < state.debounceMs) {
+    return session
+  }
+  return withLiveSolvedRegions(session)
 }
 
 export function getHistorySequence(id: string) {

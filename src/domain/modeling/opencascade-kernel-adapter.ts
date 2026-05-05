@@ -1457,7 +1457,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       partialSolvePolicy: 'bestEffort',
       definition,
       projectedReferences: projection.projectedReferences,
-      incrementalEdit: null,
     })
     const regions = await solverAdapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
@@ -2776,7 +2775,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       partialSolvePolicy: 'bestEffort',
       definition: normalizedDefinition,
       projectedReferences: projection.projectedReferences,
-      incrementalEdit: null,
     })
     const regions = await solverAdapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,

@@ -91,6 +91,8 @@ export {
 export {
   filterSketchDefinitionThroughCursor,
   getSketchSessionRegionDiagnostics,
+  refreshLiveRegionsAfterDebounce,
+  withLiveSolvedRegions,
 } from './internals'
 
 export {

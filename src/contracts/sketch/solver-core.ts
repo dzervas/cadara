@@ -1,10 +1,13 @@
 import type {
+  ConstraintDefinition,
   ConstraintStatusRecord,
   DimensionDefinition,
   DimensionStatusRecord,
   ProjectedSketchGeometryRef,
   SketchDefinition,
+  SketchCurveConstraintOperand,
   SketchEntityDefinition,
+  SketchPointConstraintOperand,
   SketchPoint2D,
   SketchSolveDiagnostic,
   SolvedSketchEntityGeometryRecord,
@@ -60,7 +63,7 @@ export type SketchDraggedPointSolveResult =
     }
   | {
       kind: 'blocked'
-      reason: 'missingPoint' | 'unsatisfied' | 'nonConvergent'
+      reason: 'missingPoint' | 'unsatisfied' | 'nonConvergent' | 'staleSession'
       solvedSnapshot: SolvedSketchSnapshot | null
       diagnostics: SketchSolveDiagnostic[]
     }
@@ -135,10 +138,54 @@ interface BuildSystemOptions {
   projectedReferences?: readonly ProjectedSketchReferenceRecord[]
 }
 
+export interface SketchCompiledSolveComponent {
+  componentId: number
+  variableIndices: readonly number[]
+  equationIndices: readonly number[]
+  pointIds: readonly SketchPointId[]
+  entityIds: readonly SketchEntityId[]
+}
+
+export interface SketchCompiledEquationMetadata {
+  equationIndex: number
+  id: ConstraintId | DimensionId
+  targetKind: 'constraint' | 'dimension'
+  variableIndices: readonly number[]
+  componentId: number
+}
+
+export interface SketchCompiledSolveProgram {
+  programId: `compiled_sketch_solve_${string}`
+  compatibilityKey: string
+  definition: SketchDefinition
+  projectedReferences: readonly ProjectedSketchReferenceRecord[]
+  tolerances: SketchSolveTolerancePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy
+  strategy: SketchSolveStrategy
+  diagnostics: readonly SketchSolveDiagnostic[]
+  validation: SketchCoreValidationResult
+  system: BuildSystemResult
+  components: readonly SketchCompiledSolveComponent[]
+  equationMetadata: readonly SketchCompiledEquationMetadata[]
+}
+
+export interface SketchCompiledSolveSession {
+  sessionId: `interactive_sketch_solve_${string}`
+  program: SketchCompiledSolveProgram
+  values: Float64Array
+  lastAcceptedSnapshot: SolvedSketchSnapshot
+  disposed: boolean
+  warmStarted: boolean
+}
+
 const WOLFE_C1 = 1e-4
 const WOLFE_C2 = 0.9
 const LINE_SEARCH_MAX_ITERATIONS = 15
+const SOLVED_LOSS_THRESHOLD = 1e-8
+const BFGS_MIN_LOSS = 1e-12
 const DEGENERATE_NORM_EPSILON = 1e-6
+const EQUATION_SUPPORT_PERTURBATION = 1e-3
+const EQUATION_SUPPORT_LOSS_EPSILON = 1e-18
 
 function cloneValues(values: Float64Array) {
   return new Float64Array(values)
@@ -2822,7 +2869,7 @@ function solveBfgs(
   let recentlyReset = false
 
   for (let iteration = 0; iteration < 1000; iteration += 1) {
-    if (state.loss < 1e-16 || uniformNorm(state.gradient) < 1e-8) {
+    if (state.loss < BFGS_MIN_LOSS || uniformNorm(state.gradient) < 1e-8) {
       break
     }
 
@@ -3067,6 +3114,848 @@ function solveGaussNewtonLike(
   }
 
   return { values, loss: state.loss, perConstraint: state.perConstraint }
+}
+
+function solveSystemValues(
+  initialValues: Float64Array,
+  constraints: ScalarConstraintRecord[],
+  strategy: SketchSolveStrategy,
+) {
+  return strategy === 'gradientDescent'
+    ? solveGradientDescent(initialValues, constraints)
+    : strategy === 'gaussNewton'
+      ? solveGaussNewtonLike(initialValues, constraints, {
+          maxIterations: 500,
+          minLoss: 1e-8,
+          stepSize: 1,
+          damping: 0,
+          pseudoInverseEpsilon: 1e-6,
+        })
+      : strategy === 'levenbergMarquardt'
+        ? solveGaussNewtonLike(initialValues, constraints, {
+            maxIterations: 1000,
+            minLoss: 1e-10,
+            stepSize: 0.1,
+            damping: 1e-5,
+            pseudoInverseEpsilon: 1e-6,
+          })
+        : solveBfgs(initialValues, constraints)
+}
+
+function createStableHash(value: string) {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function createSketchSolveCompatibilityKey(input: {
+  definition: SketchDefinition
+  projectedReferences: readonly ProjectedSketchReferenceRecord[]
+  tolerances: SketchSolveTolerancePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy
+  strategy: SketchSolveStrategy
+}) {
+  const structuralDefinition = {
+    schemaVersion: input.definition.schemaVersion,
+    referenceIds: input.definition.referenceIds,
+    references: input.definition.references,
+    pointIds: input.definition.pointIds,
+    entityIds: input.definition.entityIds,
+    entities: input.definition.entities,
+    constraintIds: input.definition.constraintIds,
+    constraints: input.definition.constraints,
+    dimensionIds: input.definition.dimensionIds,
+    dimensions: input.definition.dimensions,
+    derivedRelationships: input.definition.derivedRelationships,
+  }
+  return JSON.stringify({
+    definition: structuralDefinition,
+    projectedReferences: input.projectedReferences.map((reference) => ({
+      referenceId: reference.referenceId,
+      status: reference.status,
+      geometry: reference.geometry,
+    })),
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy,
+    strategy: input.strategy,
+  })
+}
+
+class VariableUnionFind {
+  private readonly parents: number[]
+
+  constructor(size: number) {
+    this.parents = Array.from({ length: size }, (_, index) => index)
+  }
+
+  find(index: number): number {
+    const parent = this.parents[index]!
+    if (parent === index) {
+      return index
+    }
+    const root = this.find(parent)
+    this.parents[index] = root
+    return root
+  }
+
+  union(left: number, right: number) {
+    const leftRoot = this.find(left)
+    const rightRoot = this.find(right)
+    if (leftRoot !== rightRoot) {
+      this.parents[rightRoot] = leftRoot
+    }
+  }
+}
+
+function nonZeroGradientIndices(gradient: Float64Array) {
+  const indices: number[] = []
+  for (let index = 0; index < gradient.length; index += 1) {
+    if (Math.abs(gradient[index]!) > 1e-12) {
+      indices.push(index)
+    }
+  }
+  return indices
+}
+
+function uniqueSortedIndices(indices: Iterable<number>) {
+  return Array.from(new Set(indices)).sort((left, right) => left - right)
+}
+
+function pointVariableIndices(point: SolverPointRecord | null | undefined) {
+  return point ? [point.baseIndex, point.baseIndex + 1] : []
+}
+
+function entityVariableIndices(
+  entity: SketchEntityDefinition | null | undefined,
+  system: BuildSystemResult,
+) {
+  if (!entity) {
+    return []
+  }
+
+  const pointIndices = getEntityPoints(entity).flatMap((pointId) =>
+    pointVariableIndices(system.pointRecords.get(pointId))
+  )
+  const entityState = system.entityStates.get(entity.entityId)
+  const stateIndices = entityState && entityState.kind !== 'point'
+    ? entityState.kind === 'circle'
+      ? [entityState.baseIndex]
+      : [entityState.baseIndex, entityState.baseIndex + 1, entityState.baseIndex + 2]
+    : []
+
+  return uniqueSortedIndices([...pointIndices, ...stateIndices])
+}
+
+function curveOperandVariableIndices(
+  operand: SketchCurveConstraintOperand,
+  entityById: Map<SketchEntityId, SketchEntityDefinition>,
+  system: BuildSystemResult,
+) {
+  return operand.kind === 'localEntity'
+    ? entityVariableIndices(entityById.get(operand.entityId), system)
+    : []
+}
+
+function pointOperandVariableIndices(
+  operand: SketchPointConstraintOperand,
+  system: BuildSystemResult,
+) {
+  return operand.kind === 'localPoint'
+    ? pointVariableIndices(system.pointRecords.get(operand.pointId))
+    : []
+}
+
+function structuralConstraintVariableIndices(
+  constraint: ConstraintDefinition,
+  entityById: Map<SketchEntityId, SketchEntityDefinition>,
+  system: BuildSystemResult,
+) {
+  switch (constraint.kind) {
+    case 'coincident':
+    case 'angle':
+      return uniqueSortedIndices(constraint.pointIds.flatMap((pointId) =>
+        pointVariableIndices(system.pointRecords.get(pointId))
+      ))
+    case 'horizontal':
+    case 'vertical':
+      return entityVariableIndices(entityById.get(constraint.entityId), system)
+    case 'fixPoint':
+      return pointVariableIndices(system.pointRecords.get(constraint.pointId))
+    case 'parallel':
+    case 'perpendicular':
+    case 'equalLength':
+    case 'tangent':
+    case 'concentric':
+      return uniqueSortedIndices(constraint.entityIds.flatMap((entityId) =>
+        entityVariableIndices(entityById.get(entityId), system)
+      ))
+    case 'coincidentProjectedPoint':
+    case 'pointOnProjectedCurve':
+    case 'midpointProjectedLine':
+      return pointVariableIndices(system.pointRecords.get(constraint.point.pointId))
+    case 'midpoint':
+      return uniqueSortedIndices([
+        ...pointVariableIndices(system.pointRecords.get(constraint.point.pointId)),
+        ...entityVariableIndices(entityById.get(constraint.line.entityId), system),
+      ])
+    case 'pointOnCurve':
+      return uniqueSortedIndices([
+        ...pointVariableIndices(system.pointRecords.get(constraint.point.pointId)),
+        ...entityVariableIndices(entityById.get(constraint.curve.entityId), system),
+      ])
+    case 'parallelProjectedLine':
+    case 'perpendicularProjectedLine':
+      return entityVariableIndices(entityById.get(constraint.line.entityId), system)
+    case 'tangentProjectedCurve':
+    case 'concentricProjectedCurve':
+      return entityVariableIndices(entityById.get(constraint.curve.entityId), system)
+    case 'normal':
+      return uniqueSortedIndices([
+        ...pointVariableIndices(system.pointRecords.get(constraint.point.pointId)),
+        ...entityVariableIndices(entityById.get(constraint.line.entityId), system),
+        ...entityVariableIndices(entityById.get(constraint.curve.entityId), system),
+      ])
+    case 'normalProjectedCurve':
+      return uniqueSortedIndices([
+        ...pointVariableIndices(system.pointRecords.get(constraint.point.pointId)),
+        ...entityVariableIndices(entityById.get(constraint.line.entityId), system),
+      ])
+    case 'symmetric':
+      return uniqueSortedIndices([
+        ...constraint.pointIds.flatMap((pointId) =>
+          pointVariableIndices(system.pointRecords.get(pointId))
+        ),
+        ...entityVariableIndices(entityById.get(constraint.axis.entityId), system),
+      ])
+    case 'symmetricProjectedLine':
+      return uniqueSortedIndices(constraint.pointIds.flatMap((pointId) =>
+        pointVariableIndices(system.pointRecords.get(pointId))
+      ))
+  }
+}
+
+function structuralDimensionVariableIndices(
+  dimension: DimensionDefinition,
+  entityById: Map<SketchEntityId, SketchEntityDefinition>,
+  system: BuildSystemResult,
+) {
+  switch (dimension.kind) {
+    case 'distance':
+    case 'horizontalDistance':
+    case 'verticalDistance':
+      return uniqueSortedIndices(dimension.pointIds.flatMap((pointId) =>
+        pointVariableIndices(system.pointRecords.get(pointId))
+      ))
+    case 'pointDatumDistance':
+      return pointVariableIndices(system.pointRecords.get(dimension.point.pointId))
+    case 'circleRadius':
+    case 'diameter':
+    case 'lineLength':
+      return entityVariableIndices(entityById.get(dimension.entityId), system)
+    case 'lineDistance':
+    case 'lineAngle':
+      return uniqueSortedIndices(dimension.lines.flatMap((operand) =>
+        curveOperandVariableIndices(operand, entityById, system)
+      ))
+    case 'linePointDistance':
+      return uniqueSortedIndices([
+        ...curveOperandVariableIndices(dimension.line, entityById, system),
+        ...pointOperandVariableIndices(dimension.point, system),
+      ])
+    case 'arcStartPointCoincident':
+    case 'arcEndPointCoincident':
+      return uniqueSortedIndices([
+        ...entityVariableIndices(entityById.get(dimension.entityId), system),
+        ...pointVariableIndices(system.pointRecords.get(dimension.pointId)),
+      ])
+  }
+}
+
+function structuralEquationVariableIndexMap(
+  system: BuildSystemResult,
+  definition: SketchDefinition,
+) {
+  const entityById = new Map(definition.entities.map((entity) => [entity.entityId, entity]))
+  const variablesById = new Map<ConstraintId | DimensionId, number[]>()
+
+  for (const constraint of definition.constraints) {
+    variablesById.set(
+      constraint.constraintId,
+      structuralConstraintVariableIndices(constraint, entityById, system),
+    )
+  }
+
+  for (const dimension of definition.dimensions) {
+    variablesById.set(
+      dimension.dimensionId,
+      structuralDimensionVariableIndices(dimension, entityById, system),
+    )
+  }
+
+  return variablesById
+}
+
+function perturbedEquationVariableIndices(
+  constraint: ScalarConstraintRecord,
+  values: Float64Array,
+) {
+  const base = constraint.evaluate(values)
+  const indices = new Set(nonZeroGradientIndices(base.gradient))
+
+  for (let index = 0; index < values.length; index += 1) {
+    const step = Math.max(EQUATION_SUPPORT_PERTURBATION, Math.abs(values[index]!) * 1e-6)
+    const plus = cloneValues(values)
+    const minus = cloneValues(values)
+    plus[index] += step
+    minus[index] -= step
+
+    const plusLoss = constraint.evaluate(plus).residual
+    const minusLoss = constraint.evaluate(minus).residual
+    if (
+      Number.isFinite(plusLoss)
+      && Number.isFinite(minusLoss)
+      && Math.max(Math.abs(plusLoss - base.residual), Math.abs(minusLoss - base.residual)) > EQUATION_SUPPORT_LOSS_EPSILON
+    ) {
+      indices.add(index)
+    }
+  }
+
+  return uniqueSortedIndices(indices)
+}
+
+function buildCompiledComponentData(
+  system: BuildSystemResult,
+  definition: SketchDefinition,
+): {
+  components: SketchCompiledSolveComponent[]
+  equationMetadata: SketchCompiledEquationMetadata[]
+} {
+  const unionFind = new VariableUnionFind(system.parameterCount)
+  const structuralVariables = structuralEquationVariableIndexMap(system, definition)
+  const equationVariables = system.scalarConstraints.map((constraint) => {
+    const variables = structuralVariables.get(constraint.id)
+    return variables && variables.length > 0
+      ? variables
+      : perturbedEquationVariableIndices(constraint, system.initialValues)
+  })
+
+  for (const point of system.pointRecords.values()) {
+    unionFind.union(point.baseIndex, point.baseIndex + 1)
+  }
+
+  for (const entity of definition.entities) {
+    const pointBases = getEntityPoints(entity).flatMap((pointId) => {
+      const point = system.pointRecords.get(pointId)
+      return point ? [point.baseIndex, point.baseIndex + 1] : []
+    })
+    const entityState = system.entityStates.get(entity.entityId)
+    const entityBases = entityState && entityState.kind !== 'point'
+      ? entityState.kind === 'circle'
+        ? [entityState.baseIndex]
+        : [entityState.baseIndex, entityState.baseIndex + 1, entityState.baseIndex + 2]
+      : []
+    const variables = [...pointBases, ...entityBases]
+    const [first, ...rest] = variables
+    if (first === undefined) {
+      continue
+    }
+    for (const next of rest) {
+      unionFind.union(first, next)
+    }
+  }
+
+  for (const variables of equationVariables) {
+    const [first, ...rest] = variables
+    if (first === undefined) {
+      continue
+    }
+    for (const next of rest) {
+      unionFind.union(first, next)
+    }
+  }
+
+  const variablesByRoot = new Map<number, number[]>()
+  for (let index = 0; index < system.parameterCount; index += 1) {
+    const root = unionFind.find(index)
+    const variables = variablesByRoot.get(root) ?? []
+    variables.push(index)
+    variablesByRoot.set(root, variables)
+  }
+
+  const rootToComponentId = new Map<number, number>()
+  const componentEntries = Array.from(variablesByRoot.entries()).map(([root, variableIndices], componentId) => {
+    rootToComponentId.set(root, componentId)
+    return { root, componentId, variableIndices }
+  })
+  const equationIndicesByComponent = new Map<number, number[]>()
+  const equationMetadata: SketchCompiledEquationMetadata[] = []
+
+  equationVariables.forEach((variableIndices, equationIndex) => {
+    const constraint = system.scalarConstraints[equationIndex]!
+    const componentId = variableIndices[0] === undefined
+      ? 0
+      : rootToComponentId.get(unionFind.find(variableIndices[0])) ?? 0
+    const equationIndices = equationIndicesByComponent.get(componentId) ?? []
+    equationIndices.push(equationIndex)
+    equationIndicesByComponent.set(componentId, equationIndices)
+    equationMetadata.push({
+      equationIndex,
+      id: constraint.id,
+      targetKind: constraint.targetKind,
+      variableIndices,
+      componentId,
+    })
+  })
+
+  const pointIdsByComponent = new Map<number, SketchPointId[]>()
+  for (const point of system.pointRecords.values()) {
+    const componentId = rootToComponentId.get(unionFind.find(point.baseIndex)) ?? 0
+    const pointIds = pointIdsByComponent.get(componentId) ?? []
+    pointIds.push(point.pointId)
+    pointIdsByComponent.set(componentId, pointIds)
+  }
+
+  const entityIdsByComponent = new Map<number, SketchEntityId[]>()
+  for (const entity of system.entityStates.values()) {
+    if (entity.kind === 'point') {
+      continue
+    }
+    const componentId = rootToComponentId.get(unionFind.find(entity.baseIndex)) ?? 0
+    const entityIds = entityIdsByComponent.get(componentId) ?? []
+    entityIds.push(entity.entityId)
+    entityIdsByComponent.set(componentId, entityIds)
+  }
+
+  const components = componentEntries.map(({ componentId, variableIndices }) => ({
+    componentId,
+    variableIndices,
+    equationIndices: equationIndicesByComponent.get(componentId) ?? [],
+    pointIds: pointIdsByComponent.get(componentId) ?? [],
+    entityIds: entityIdsByComponent.get(componentId) ?? [],
+  }))
+
+  return { components, equationMetadata }
+}
+
+export function compileSketchSolveProgram(input: {
+  definition: SketchDefinition
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[]
+  tolerances: SketchSolveTolerancePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy
+  strategy?: SketchSolveStrategy
+}): SketchCompiledSolveProgram {
+  const projectedReferences = input.projectedReferences ?? []
+  const derived = evaluateSketchDerivations(input.definition)
+  const definition = derived.definition
+  const validation = validateDefinition(definition, input.tolerances, projectedReferences)
+  const system = buildSystem(definition, { dragTarget: null, projectedReferences })
+  const strategy = input.strategy ?? 'bfgs'
+  const compatibilityKey = createSketchSolveCompatibilityKey({
+    definition,
+    projectedReferences,
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy,
+    strategy,
+  })
+  const { components, equationMetadata } = buildCompiledComponentData(system, definition)
+
+  return {
+    programId: `compiled_sketch_solve_${createStableHash(compatibilityKey)}`,
+    compatibilityKey,
+    definition,
+    projectedReferences,
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy,
+    strategy,
+    diagnostics: derived.diagnostics,
+    validation,
+    system,
+    components,
+    equationMetadata,
+  }
+}
+
+export function isCompiledSketchSolveProgramCompatible(
+  program: SketchCompiledSolveProgram,
+  input: {
+    definition: SketchDefinition
+    projectedReferences?: readonly ProjectedSketchReferenceRecord[]
+    tolerances: SketchSolveTolerancePolicy
+    partialSolvePolicy?: SolverPartialSolvePolicy
+    strategy?: SketchSolveStrategy
+  },
+) {
+  const projectedReferences = input.projectedReferences ?? []
+  const derived = evaluateSketchDerivations(input.definition)
+  const strategy = input.strategy ?? program.strategy
+  const compatibilityKey = createSketchSolveCompatibilityKey({
+    definition: derived.definition,
+    projectedReferences,
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy ?? program.partialSolvePolicy,
+    strategy,
+  })
+  return compatibilityKey === program.compatibilityKey
+}
+
+function seedSolveValuesFromSnapshot(
+  program: SketchCompiledSolveProgram,
+  solvedSnapshot: SolvedSketchSnapshot | null | undefined,
+) {
+  const values = cloneValues(program.system.initialValues)
+  if (!solvedSnapshot) {
+    return { values, warmStarted: false }
+  }
+
+  let seeded = false
+  for (const point of solvedSnapshot.solvedPoints) {
+    const record = program.system.pointRecords.get(point.pointId)
+    if (!record) {
+      continue
+    }
+    values[record.baseIndex] = point.solvedPosition[0]
+    values[record.baseIndex + 1] = point.solvedPosition[1]
+    seeded = true
+  }
+
+  for (const entity of solvedSnapshot.solvedEntities) {
+    const state = program.system.entityStates.get(entity.entityId)
+    if (!state) {
+      continue
+    }
+    if (state.kind === 'circle' && entity.kind === 'circle') {
+      values[state.baseIndex] = entity.solvedRadius
+      seeded = true
+    }
+    if (state.kind === 'arc' && entity.kind === 'arc') {
+      values[state.baseIndex] = length(subtract(entity.startPosition, entity.centerPosition))
+      values[state.baseIndex + 1] = Math.atan2(
+        entity.startPosition[1] - entity.centerPosition[1],
+        entity.startPosition[0] - entity.centerPosition[0],
+      )
+      values[state.baseIndex + 2] = Math.atan2(
+        entity.endPosition[1] - entity.centerPosition[1],
+        entity.endPosition[0] - entity.centerPosition[0],
+      )
+      seeded = true
+    }
+  }
+
+  return { values, warmStarted: seeded }
+}
+
+function materializeSolveResult(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+  solved: ReturnType<typeof solveSystemValues>,
+): SketchCoreSolveResult {
+  const diagnostics = [...program.diagnostics, ...program.validation.diagnostics]
+  const definition = program.definition
+  const solvedEntities = buildSolvedEntities(
+    definition,
+    program.system.pointRecords,
+    program.system.entityStates,
+    values,
+  )
+  const solvedPoints = definition.points.flatMap((point) => {
+    const record = program.system.pointRecords.get(point.pointId)
+    return record
+      ? [{
+          pointId: point.pointId,
+          target: point.target,
+          solvedPosition: getPoint(values, record),
+        }]
+      : []
+  })
+
+  let status: SolvedSketchStatus
+  if (!program.validation.isValid) {
+    status = {
+      solveState: program.partialSolvePolicy === 'bestEffort' ? 'partiallySolved' : 'failed',
+      constraintState: 'inconsistent',
+    }
+  } else if (program.system.scalarConstraints.length === 0) {
+    status = {
+      solveState: definition.entities.length === 0 ? 'notEvaluated' : 'solved',
+      constraintState: definition.entities.length === 0 ? 'unknown' : 'underConstrained',
+    }
+  } else if (solved.loss < SOLVED_LOSS_THRESHOLD) {
+    status = {
+      solveState: 'solved',
+      constraintState: 'wellConstrained',
+    }
+  } else {
+    diagnostics.push(
+      makeDiagnostic(
+        'solver-residual-too-large',
+        'warning',
+        `Sketch solve ended with residual ${solved.loss}.`,
+        null,
+      ),
+    )
+    status = {
+      solveState: program.partialSolvePolicy === 'bestEffort' ? 'partiallySolved' : 'failed',
+      constraintState: 'underConstrained',
+    }
+  }
+
+  const solvedSnapshot: SolvedSketchSnapshot = {
+    schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+    status,
+    solvedEntities,
+    solvedPoints,
+    constraintStatuses: buildConstraintStatuses(
+      definition,
+      program.system.pointRecords,
+      values,
+      program.tolerances,
+      solved.perConstraint,
+      program.projectedReferences,
+    ),
+    dimensionStatuses: buildDimensionStatuses(
+      definition,
+      program.system.pointRecords,
+      program.system.entityStates,
+      values,
+      solved.perConstraint,
+      program.projectedReferences,
+    ),
+    diagnostics,
+  }
+
+  return {
+    status,
+    solvedSnapshot,
+    diagnostics,
+  }
+}
+
+export function solveCompiledSketchProgram(
+  program: SketchCompiledSolveProgram,
+  initialValues: Float64Array = program.system.initialValues,
+): SketchCoreSolveResult {
+  const solved = solveSystemValues(initialValues, program.system.scalarConstraints, program.strategy)
+  return materializeSolveResult(program, solved.values, solved)
+}
+
+export function createCompiledSketchSolveSession(input: {
+  sessionId: `interactive_sketch_solve_${string}`
+  program: SketchCompiledSolveProgram
+  priorSolvedSnapshot?: SolvedSketchSnapshot | null
+}): SketchCompiledSolveSession {
+  const seeded = seedSolveValuesFromSnapshot(input.program, input.priorSolvedSnapshot)
+  const initialState = evaluateLoss(seeded.values, input.program.system.scalarConstraints)
+  const solvedValues = initialState.loss < SOLVED_LOSS_THRESHOLD || uniformNorm(initialState.gradient) < 1e-8
+    ? {
+        values: seeded.values,
+        loss: initialState.loss,
+        perConstraint: initialState.perConstraint,
+      }
+    : solveSystemValues(seeded.values, input.program.system.scalarConstraints, input.program.strategy)
+  const solved = materializeSolveResult(input.program, solvedValues.values, solvedValues)
+  return {
+    sessionId: input.sessionId,
+    program: input.program,
+    values: cloneValues(solvedValues.values),
+    lastAcceptedSnapshot: solved.solvedSnapshot,
+    disposed: false,
+    warmStarted: seeded.warmStarted,
+  }
+}
+
+function createDragTargetConstraint(
+  system: BuildSystemResult,
+  dragTarget: SketchDraggedPointTarget,
+): ScalarConstraintRecord | null {
+  const point = system.pointRecords.get(dragTarget.pointId)
+  if (!point) {
+    return null
+  }
+
+  return {
+    id: `constraint_drag_target_${dragTarget.pointId}` as ConstraintId,
+    targetKind: 'constraint',
+    evaluate(values) {
+      const gradient = zeroVector(system.parameterCount)
+      const actual = getPoint(values, point)
+      const delta = subtract(actual, dragTarget.position)
+      addPointGradient(gradient, point, delta[0], delta[1])
+      return { residual: 0.5 * (delta[0] * delta[0] + delta[1] * delta[1]), gradient }
+    },
+  }
+}
+
+function findComponentForPoint(program: SketchCompiledSolveProgram, pointId: SketchPointId) {
+  return program.components.find((component) => component.pointIds.includes(pointId)) ?? null
+}
+
+function tryTranslateDraggedComponent(
+  session: SketchCompiledSolveSession,
+  component: SketchCompiledSolveComponent | null,
+  dragTarget: SketchDraggedPointTarget,
+  targetTolerance: number,
+): SketchDraggedPointSolveResult | null {
+  if (!component || component.pointIds.length === 0) {
+    return null
+  }
+
+  const draggedPoint = session.program.system.pointRecords.get(dragTarget.pointId)
+  if (!draggedPoint) {
+    return null
+  }
+
+  const delta = subtract(dragTarget.position, getPoint(session.values, draggedPoint))
+  const candidateValues = cloneValues(session.values)
+
+  for (const pointId of component.pointIds) {
+    const point = session.program.system.pointRecords.get(pointId)
+    if (!point) {
+      continue
+    }
+    candidateValues[point.baseIndex] += delta[0]
+    candidateValues[point.baseIndex + 1] += delta[1]
+  }
+
+  const fullState = evaluateLoss(candidateValues, session.program.system.scalarConstraints)
+  if (fullState.loss >= SOLVED_LOSS_THRESHOLD) {
+    return null
+  }
+
+  const materialized = materializeSolveResult(session.program, candidateValues, {
+    values: candidateValues,
+    loss: fullState.loss,
+    perConstraint: fullState.perConstraint,
+  })
+  const solvedPoint = materialized.solvedSnapshot.solvedPoints.find((point) => point.pointId === dragTarget.pointId)
+  const targetDistance = solvedPoint
+    ? length(subtract(solvedPoint.solvedPosition, dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const constraintsSatisfied = materialized.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
+  const dimensionsSatisfied = materialized.solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
+
+  if (
+    session.program.validation.isValid
+    && targetDistance <= targetTolerance
+    && constraintsSatisfied
+    && dimensionsSatisfied
+  ) {
+    session.values = candidateValues
+    session.lastAcceptedSnapshot = materialized.solvedSnapshot
+    return {
+      kind: 'solved',
+      solvedSnapshot: materialized.solvedSnapshot,
+      diagnostics: materialized.diagnostics,
+    }
+  }
+
+  return null
+}
+
+export function updateCompiledSketchSolveSession(
+  session: SketchCompiledSolveSession,
+  dragTarget: SketchDraggedPointTarget,
+  targetTolerance = session.program.tolerances.coincidence,
+): SketchDraggedPointSolveResult {
+  if (session.disposed) {
+    return {
+      kind: 'blocked',
+      reason: 'staleSession',
+      solvedSnapshot: session.lastAcceptedSnapshot,
+      diagnostics: [
+        makeDiagnostic(
+          'stale-interactive-solve-session',
+          'error',
+          `Interactive solve session ${session.sessionId} has been disposed.`,
+          { kind: 'point', pointId: dragTarget.pointId },
+        ),
+      ],
+    }
+  }
+
+  if (!session.program.definition.points.some((point) => point.pointId === dragTarget.pointId)) {
+    return {
+      kind: 'blocked',
+      reason: 'missingPoint',
+      solvedSnapshot: null,
+      diagnostics: [
+        makeDiagnostic(
+          'drag-target-missing-point',
+          'error',
+          `Dragged point ${dragTarget.pointId} does not exist in the sketch definition.`,
+          { kind: 'point', pointId: dragTarget.pointId },
+        ),
+      ],
+    }
+  }
+
+  const dragConstraint = createDragTargetConstraint(session.program.system, dragTarget)
+  const component = findComponentForPoint(session.program, dragTarget.pointId)
+  const translated = tryTranslateDraggedComponent(session, component, dragTarget, targetTolerance)
+  if (translated) {
+    return translated
+  }
+
+  const componentConstraintSet = new Set(component?.equationIndices ?? [])
+  const constraints = [
+    ...session.program.system.scalarConstraints.filter((_, index) =>
+      component ? componentConstraintSet.has(index) : true,
+    ),
+    ...(dragConstraint ? [dragConstraint] : []),
+  ]
+  const candidateInitialValues = cloneValues(session.values)
+  const solved = solveSystemValues(candidateInitialValues, constraints, session.program.strategy)
+  const candidateValues = cloneValues(session.values)
+  const affectedVariables = new Set(component?.variableIndices ?? Array.from({ length: candidateValues.length }, (_, index) => index))
+  for (const index of affectedVariables) {
+    candidateValues[index] = solved.values[index]!
+  }
+
+  const fullState = evaluateLoss(candidateValues, session.program.system.scalarConstraints)
+  const materialized = materializeSolveResult(session.program, candidateValues, {
+    values: candidateValues,
+    loss: fullState.loss,
+    perConstraint: fullState.perConstraint,
+  })
+  const solvedPoint = materialized.solvedSnapshot.solvedPoints.find((point) => point.pointId === dragTarget.pointId)
+  const targetDistance = solvedPoint
+    ? length(subtract(solvedPoint.solvedPosition, dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const constraintsSatisfied = materialized.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
+  const dimensionsSatisfied = materialized.solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
+
+  if (
+    session.program.validation.isValid
+    && fullState.loss < SOLVED_LOSS_THRESHOLD
+    && targetDistance <= targetTolerance
+    && constraintsSatisfied
+    && dimensionsSatisfied
+  ) {
+    session.values = candidateValues
+    session.lastAcceptedSnapshot = materialized.solvedSnapshot
+    return {
+      kind: 'solved',
+      solvedSnapshot: materialized.solvedSnapshot,
+      diagnostics: materialized.diagnostics,
+    }
+  }
+
+  return {
+    kind: 'blocked',
+    reason: fullState.loss < SOLVED_LOSS_THRESHOLD ? 'unsatisfied' : 'nonConvergent',
+    solvedSnapshot: materialized.solvedSnapshot,
+    diagnostics: [
+      ...materialized.diagnostics,
+      makeDiagnostic(
+        'drag-target-unsatisfied',
+        'warning',
+        'Dragged point target could not be satisfied without violating sketch constraints.',
+        { kind: 'point', pointId: dragTarget.pointId },
+      ),
+    ],
+  }
 }
 
 function buildSolvedEntities(
@@ -3824,111 +4713,7 @@ export function solveSketchDefinitionCore(input: {
   partialSolvePolicy: SolverPartialSolvePolicy
   strategy?: SketchSolveStrategy
 }): SketchCoreSolveResult {
-  const projectedReferences = input.projectedReferences ?? []
-  const derived = evaluateSketchDerivations(input.definition)
-  const definition = derived.definition
-  const validation = validateDefinition(definition, input.tolerances, projectedReferences)
-  const system = buildSystem(definition, { dragTarget: null, projectedReferences })
-  const strategy = input.strategy ?? 'bfgs'
-  const solved =
-    strategy === 'gradientDescent'
-      ? solveGradientDescent(system.initialValues, system.scalarConstraints)
-      : strategy === 'gaussNewton'
-        ? solveGaussNewtonLike(system.initialValues, system.scalarConstraints, {
-            maxIterations: 500,
-            minLoss: 1e-8,
-            stepSize: 1,
-            damping: 0,
-            pseudoInverseEpsilon: 1e-6,
-          })
-        : strategy === 'levenbergMarquardt'
-          ? solveGaussNewtonLike(system.initialValues, system.scalarConstraints, {
-              maxIterations: 1000,
-              minLoss: 1e-10,
-              stepSize: 0.1,
-              damping: 1e-5,
-              pseudoInverseEpsilon: 1e-6,
-            })
-          : solveBfgs(system.initialValues, system.scalarConstraints)
-
-  const diagnostics = [...derived.diagnostics, ...validation.diagnostics]
-  const solvedEntities = buildSolvedEntities(
-    definition,
-    system.pointRecords,
-    system.entityStates,
-    solved.values,
-  )
-  const solvedPoints = definition.points.flatMap((point) => {
-    const record = system.pointRecords.get(point.pointId)
-    return record
-      ? [{
-          pointId: point.pointId,
-          target: point.target,
-          solvedPosition: getPoint(solved.values, record),
-        }]
-      : []
-  })
-
-  let status: SolvedSketchStatus
-  if (!validation.isValid) {
-    status = {
-      solveState: input.partialSolvePolicy === 'bestEffort' ? 'partiallySolved' : 'failed',
-      constraintState: 'inconsistent',
-    }
-  } else if (system.scalarConstraints.length === 0) {
-    status = {
-      solveState: definition.entities.length === 0 ? 'notEvaluated' : 'solved',
-      constraintState: definition.entities.length === 0 ? 'unknown' : 'underConstrained',
-    }
-  } else if (solved.loss < 1e-8) {
-    status = {
-      solveState: 'solved',
-      constraintState: 'wellConstrained',
-    }
-  } else {
-    diagnostics.push(
-      makeDiagnostic(
-        'solver-residual-too-large',
-        'warning',
-        `Sketch solve ended with residual ${solved.loss}.`,
-        null,
-      ),
-    )
-    status = {
-      solveState: input.partialSolvePolicy === 'bestEffort' ? 'partiallySolved' : 'failed',
-      constraintState: 'underConstrained',
-    }
-  }
-
-  const solvedSnapshot: SolvedSketchSnapshot = {
-    schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
-    status,
-    solvedEntities,
-    solvedPoints,
-    constraintStatuses: buildConstraintStatuses(
-      definition,
-      system.pointRecords,
-      solved.values,
-      input.tolerances,
-      solved.perConstraint,
-      projectedReferences,
-    ),
-    dimensionStatuses: buildDimensionStatuses(
-      definition,
-      system.pointRecords,
-      system.entityStates,
-      solved.values,
-      solved.perConstraint,
-      projectedReferences,
-    ),
-    diagnostics,
-  }
-
-  return {
-    status,
-    solvedSnapshot,
-    diagnostics,
-  }
+  return solveCompiledSketchProgram(compileSketchSolveProgram(input))
 }
 
 export function solveSketchDefinitionWithDraggedPointTarget(input: {
@@ -3956,105 +4741,27 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
     }
   }
 
-  const projectedReferences = input.projectedReferences ?? []
-  const derived = evaluateSketchDerivations(input.definition)
-  const definition = derived.definition
-  const validation = validateDefinition(definition, input.tolerances, projectedReferences)
-  const system = buildSystem(definition, { dragTarget: input.dragTarget, projectedReferences })
-  const strategy = input.strategy ?? 'bfgs'
-  const solved =
-    strategy === 'gradientDescent'
-      ? solveGradientDescent(system.initialValues, system.scalarConstraints)
-      : strategy === 'gaussNewton'
-        ? solveGaussNewtonLike(system.initialValues, system.scalarConstraints, {
-            maxIterations: 500,
-            minLoss: 1e-8,
-            stepSize: 1,
-            damping: 0,
-            pseudoInverseEpsilon: 1e-6,
-          })
-        : strategy === 'levenbergMarquardt'
-          ? solveGaussNewtonLike(system.initialValues, system.scalarConstraints, {
-              maxIterations: 1000,
-              minLoss: 1e-10,
-              stepSize: 0.1,
-              damping: 1e-5,
-              pseudoInverseEpsilon: 1e-6,
-            })
-          : solveBfgs(system.initialValues, system.scalarConstraints)
-
-  const diagnostics = [...derived.diagnostics, ...validation.diagnostics]
-  const solvedSnapshot: SolvedSketchSnapshot = {
-    schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
-    status:
-      validation.isValid && solved.loss < 1e-8
-        ? {
-            solveState: 'solved',
-            constraintState: 'wellConstrained',
-          }
-        : {
-            solveState: input.partialSolvePolicy === 'bestEffort' ? 'partiallySolved' : 'failed',
-            constraintState: validation.isValid ? 'underConstrained' : 'inconsistent',
-          },
-    solvedEntities: buildSolvedEntities(
-      definition,
-      system.pointRecords,
-      system.entityStates,
-      solved.values,
-    ),
-    solvedPoints: definition.points.flatMap((point) => {
-      const record = system.pointRecords.get(point.pointId)
-      return record
-        ? [{
-            pointId: point.pointId,
-            target: point.target,
-            solvedPosition: getPoint(solved.values, record),
-          }]
-        : []
-    }),
-    constraintStatuses: buildConstraintStatuses(
-      definition,
-      system.pointRecords,
-      solved.values,
-      input.tolerances,
-      solved.perConstraint,
-      projectedReferences,
-    ),
-    dimensionStatuses: buildDimensionStatuses(
-      definition,
-      system.pointRecords,
-      system.entityStates,
-      solved.values,
-      solved.perConstraint,
-      projectedReferences,
-    ),
-    diagnostics,
-  }
-  const solvedPoint = solvedSnapshot.solvedPoints.find((point) => point.pointId === input.dragTarget.pointId)
-  const targetDistance = solvedPoint
-    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
-    : Number.POSITIVE_INFINITY
+  const program = compileSketchSolveProgram({
+    definition: input.definition,
+    projectedReferences: input.projectedReferences,
+    tolerances: input.tolerances,
+    partialSolvePolicy: input.partialSolvePolicy,
+    strategy: input.strategy,
+  })
+  const session = createCompiledSketchSolveSession({
+    sessionId: 'interactive_sketch_solve_stateless_drag',
+    program,
+  })
   const targetTolerance = input.targetTolerance ?? input.tolerances.coincidence
-  const constraintsSatisfied = solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
-  const dimensionsSatisfied = solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
+  const interactive = updateCompiledSketchSolveSession(session, input.dragTarget, targetTolerance)
 
-  if (
-    validation.isValid
-    && solved.loss < 1e-8
-    && targetDistance <= targetTolerance
-    && constraintsSatisfied
-    && dimensionsSatisfied
-  ) {
-    return {
-      kind: 'solved',
-      solvedSnapshot,
-      diagnostics,
-    }
+  if (interactive.kind === 'solved') {
+    return interactive
   }
 
   const translated = trySolveDraggedPointAsComponentTranslation({
-    definition,
-    projectedReferences,
+    definition: program.definition,
+    projectedReferences: program.projectedReferences,
     dragTarget: input.dragTarget,
     tolerances: input.tolerances,
     partialSolvePolicy: input.partialSolvePolicy,
@@ -4066,20 +4773,11 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
     return translated
   }
 
-  const reason = solved.loss < 1e-8 ? 'unsatisfied' : 'nonConvergent'
   return {
     kind: 'blocked',
-    reason,
-    solvedSnapshot,
-    diagnostics: [
-      ...diagnostics,
-      makeDiagnostic(
-        'drag-target-unsatisfied',
-        'warning',
-        'Dragged point target could not be satisfied without violating sketch constraints.',
-        { kind: 'point', pointId: input.dragTarget.pointId },
-      ),
-    ],
+    reason: interactive.reason,
+    solvedSnapshot: interactive.solvedSnapshot,
+    diagnostics: interactive.diagnostics,
   }
 }
 

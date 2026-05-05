@@ -1,12 +1,9 @@
 import type {
-  ConstraintId,
-  DimensionId,
   DocumentId,
   ProjectedGeometryId,
   ReferenceId,
   RequestId,
   RevisionId,
-  SketchEntityId,
   SketchId,
   SketchPointId,
 } from '@/contracts/shared/ids'
@@ -63,30 +60,29 @@ export interface SolverTolerancePolicy {
 }
 
 /**
- * Explicit incremental edit hint for solvers that support warm starting.
- * This is advisory only; solvers may ignore it while preserving the same result.
+ * Opaque identity for a compiled sketch solve basis. The value is stable only
+ * for a compatible authored sketch graph, projection basis, tolerances, and
+ * strategy.
  */
-export type SketchIncrementalEdit =
-  | {
-      /** Indicates that authored points were added, removed, or edited. */
-      kind: 'pointGraphChanged'
-      /** Point identities whose authored records changed since the prior solve. */
-      pointIds: SketchPointId[]
-    }
-  | {
-      /** Indicates that authored entities were added, removed, or edited. */
-      kind: 'entityGraphChanged'
-      /** Entity identities whose authored records changed since the prior solve. */
-      entityIds: SketchEntityId[]
-    }
-  | {
-      /** Indicates that authored constraints or dimensions changed. */
-      kind: 'constraintGraphChanged'
-      /** Constraint identities whose authored records changed. */
-      constraintIds: ConstraintId[]
-      /** Dimension identities whose authored records changed. */
-      dimensionIds: DimensionId[]
-    }
+export type CompiledSketchSolveProgramId = `compiled_sketch_solve_${string}`
+
+/**
+ * Opaque identity for an active interactive solve session.
+ */
+export type InteractiveSketchSolveSessionId = `interactive_sketch_solve_${string}`
+
+/**
+ * Machine-readable reason a compiled basis or interactive session cannot be
+ * reused for a requested solve.
+ */
+export type SketchSolveInvalidationReason =
+  | 'authoredGraphChanged'
+  | 'projectedReferencesChanged'
+  | 'tolerancePolicyChanged'
+  | 'solveStrategyChanged'
+  | 'disposedSession'
+  | 'unknownSession'
+  | 'staleRevision'
 
 /**
  * Temporary interactive drag target supplied by an editor preview.
@@ -353,10 +349,8 @@ export interface SolveSketchRequest extends SketchSolverRequestBase {
   definition: SketchDefinition
   /** Explicit projected external references available to the solver. */
   projectedReferences: ProjectedSketchReferenceRecord[]
-  /** Optional incremental edit hint from the caller for warm-start capable solvers. */
-  incrementalEdit: SketchIncrementalEdit | null
-  /** Optional temporary drag target used for interactive preview solves. */
-  dragTarget?: SolverDraggedSketchPointTarget | null
+  /** Optional caller-selected region extraction for workflows that need profiles immediately. */
+  includeRegions?: boolean
 }
 
 /**
@@ -368,9 +362,132 @@ export interface SolveSketchResponse extends SketchSolverResponseBase {
   status: SolvedSketchStatus
   /** Authoritative solved geometry and per-constraint/dimension results. */
   solvedSnapshot: SolvedSketchSnapshot
-  /** Regions derived from `solvedSnapshot` for the same request basis. */
-  derivedRegions: RegionRecord[]
   /** Diagnostics emitted during validation or solving. */
+  diagnostics: SketchSolveDiagnostic[]
+  /** Caller-selected region extraction result when `includeRegions` was requested. */
+  regionResult?: {
+    regions: RegionRecord[]
+    diagnostics: SketchSolveDiagnostic[]
+  }
+}
+
+/**
+ * Request to start a warm-startable interactive solve session.
+ */
+export interface StartInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
+  /** Sketch-plane frame used to interpret authored and solved coordinates. */
+  plane: SketchPlaneFrame
+  /** Explicit tolerance policy for solve and consistency checks. */
+  tolerances: SolverTolerancePolicy
+  /** Declares whether the solver may return partial results when conflicts exist. */
+  partialSolvePolicy: SolverPartialSolvePolicy
+  /** Durable authored sketch definition to solve. */
+  definition: SketchDefinition
+  /** Explicit projected external references available to the solver. */
+  projectedReferences: ProjectedSketchReferenceRecord[]
+  /** Optional compatible snapshot used to seed mutable solve state. */
+  priorSolvedSnapshot?: SolvedSketchSnapshot | null
+  /** Optional solver strategy selected by the caller/runtime. */
+  strategy?: 'bfgs' | 'gradientDescent' | 'gaussNewton' | 'levenbergMarquardt'
+}
+
+/**
+ * Response returned when an interactive solve session starts.
+ */
+export interface StartInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
+  /** Active interactive session identity. */
+  sessionId: InteractiveSketchSolveSessionId
+  /** Compiled solve basis used by the session. */
+  programId: CompiledSketchSolveProgramId
+  /** True when the session seeded mutable state from a compatible solved snapshot. */
+  warmStarted: boolean
+  /** Complete solved state for the starting basis. */
+  solvedSnapshot: SolvedSketchSnapshot
+  /** Solver-owned solved status summary. */
+  status: SolvedSketchStatus
+  /** Diagnostics emitted while compiling or seeding the session. */
+  diagnostics: SketchSolveDiagnostic[]
+}
+
+/**
+ * Request to update an active interactive solve session with a drag target.
+ */
+export interface UpdateInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
+  /** Active interactive session identity returned by session start. */
+  sessionId: InteractiveSketchSolveSessionId
+  /** Temporary drag target for this interactive frame. */
+  dragTarget: SolverDraggedSketchPointTarget
+}
+
+/**
+ * Interactive solve update accepted result.
+ */
+export interface InteractiveSketchSolveAcceptedUpdate {
+  kind: 'accepted'
+  status: SolvedSketchStatus
+  solvedSnapshot: SolvedSketchSnapshot
+  diagnostics: SketchSolveDiagnostic[]
+}
+
+/**
+ * Interactive solve update blocked result.
+ */
+export interface InteractiveSketchSolveBlockedUpdate {
+  kind: 'blocked'
+  reason: 'missingPoint' | 'unsatisfied' | 'nonConvergent' | 'staleSession' | 'staleRevision'
+  solvedSnapshot: SolvedSketchSnapshot | null
+  diagnostics: SketchSolveDiagnostic[]
+}
+
+/**
+ * Response returned for an interactive drag-frame solve.
+ */
+export interface UpdateInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
+  /** Active interactive session identity. */
+  sessionId: InteractiveSketchSolveSessionId
+  /** Frame result. Accepted frames update session state; blocked frames do not. */
+  result: InteractiveSketchSolveAcceptedUpdate | InteractiveSketchSolveBlockedUpdate
+}
+
+/**
+ * Request to finalize the latest accepted interactive solve state.
+ */
+export interface FinalizeInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
+  /** Active interactive session identity. */
+  sessionId: InteractiveSketchSolveSessionId
+}
+
+/**
+ * Response returned when an interactive session is finalized.
+ */
+export interface FinalizeInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
+  /** Finalized interactive session identity. */
+  sessionId: InteractiveSketchSolveSessionId
+  /** Final accepted solved state, if the session was still active. */
+  solvedSnapshot: SolvedSketchSnapshot | null
+  /** Final status, if the session was still active. */
+  status: SolvedSketchStatus | null
+  /** Diagnostics emitted while finalizing. */
+  diagnostics: SketchSolveDiagnostic[]
+}
+
+/**
+ * Request to dispose an interactive solve session without finalizing geometry.
+ */
+export interface DisposeInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
+  /** Active interactive session identity. */
+  sessionId: InteractiveSketchSolveSessionId
+}
+
+/**
+ * Response returned when an interactive session is disposed.
+ */
+export interface DisposeInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
+  /** Disposed interactive session identity. */
+  sessionId: InteractiveSketchSolveSessionId
+  /** True when an active session was found and disposed. */
+  disposed: boolean
+  /** Diagnostics emitted while disposing. */
   diagnostics: SketchSolveDiagnostic[]
 }
 

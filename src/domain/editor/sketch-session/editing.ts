@@ -11,7 +11,11 @@ import type {
   SolvedSketchSnapshot,
 } from '@/contracts/sketch/schema'
 import {
+  compileSketchSolveProgram,
+  createCompiledSketchSolveSession,
   solveSketchDefinitionWithDraggedPointTarget,
+  updateCompiledSketchSolveSession,
+  type SketchCompiledSolveSession,
 } from '@/contracts/sketch/solver-core'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import {
@@ -920,6 +924,11 @@ export function beginSketchGeometryDrag(
       currentPoint: point,
       status: 'dragging',
       message: null,
+      interactiveSolveSession: createInteractiveSolveSessionForDrag(
+        selected.definition,
+        selected.projectedReferences,
+        target.pointId,
+      ),
     },
     validationMessage: null,
   }
@@ -944,7 +953,11 @@ export function finishSketchGeometryDrag(
     return session
   }
 
+  const interactiveSolveSession = session.activeDrag.interactiveSolveSession
   const updated = applySketchGeometryDrag(session, point, true)
+  if (interactiveSolveSession) {
+    interactiveSolveSession.disposed = true
+  }
 
   return {
     ...updated,
@@ -963,7 +976,13 @@ export function applySketchGeometryDrag(
     return session
   }
 
-  const edit = solveDraggedPointEdit(session.definition, session.projectedReferences, drag.target.pointId, point)
+  const edit = solveDraggedPointEdit(
+    session.definition,
+    session.projectedReferences,
+    drag.target.pointId,
+    point,
+    drag.interactiveSolveSession,
+  )
 
   if (edit.kind === 'blocked') {
     return {
@@ -995,9 +1014,17 @@ export function applySketchGeometryDrag(
           currentPoint: point,
           status: 'dragging',
           message: null,
+          interactiveSolveSession: edit.interactiveSolveSession,
     },
     commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions: deriveSolvedRegionsForSession(session, definition, edit.solvedSnapshot),
+    solvedRegions: complete
+      ? deriveSolvedRegionsForSession(session, definition, edit.solvedSnapshot)
+      : session.solvedRegions,
+    liveRegionState: {
+      freshness: complete ? 'current' : 'pendingRefresh',
+      pendingSinceSequence: complete ? null : session.sequence,
+      debounceMs: 100,
+    },
     validationMessage: null,
   }
 }
@@ -1007,7 +1034,8 @@ export function solveDraggedPointEdit(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   pointId: SketchPointId,
   position: SketchPoint,
-): { kind: 'accepted'; definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } | { kind: 'blocked'; message: string } {
+  interactiveSolveSession: SketchCompiledSolveSession | null = null,
+): { kind: 'accepted'; definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot; interactiveSolveSession: SketchCompiledSolveSession | null } | { kind: 'blocked'; message: string } {
   if (!definition.points.some((point) => point.pointId === pointId)) {
     return { kind: 'blocked', message: 'Sketch point is no longer editable.' }
   }
@@ -1016,21 +1044,37 @@ export function solveDraggedPointEdit(
     return {
       kind: 'accepted',
       definition: applyPointPositionsToDefinition(definition, [{ pointId, position }]),
+      interactiveSolveSession: null,
     }
   }
 
-  const solved = solveSketchDefinitionWithDraggedPointTarget({
+  const solveSession = interactiveSolveSession ?? createInteractiveSolveSessionForDrag(
     definition,
     projectedReferences,
-    dragTarget: {
-      kind: 'sketchPoint',
-      pointId,
-      position,
-    },
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
-    partialSolvePolicy: 'failOnConflict',
-    targetTolerance: 1e-4,
-  })
+    pointId,
+  )
+  const solved = solveSession
+    ? updateCompiledSketchSolveSession(
+        solveSession,
+        {
+          kind: 'sketchPoint',
+          pointId,
+          position,
+        },
+        1e-4,
+      )
+    : solveSketchDefinitionWithDraggedPointTarget({
+        definition,
+        projectedReferences,
+        dragTarget: {
+          kind: 'sketchPoint',
+          pointId,
+          position,
+        },
+        tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+        partialSolvePolicy: 'failOnConflict',
+        targetTolerance: 1e-4,
+      })
 
   if (solved.kind !== 'solved') {
     return { kind: 'blocked', message: CONSTRAINED_DRAG_BLOCKED_MESSAGE }
@@ -1046,5 +1090,30 @@ export function solveDraggedPointEdit(
       })),
     ),
     solvedSnapshot: solved.solvedSnapshot,
+    interactiveSolveSession: solveSession,
   }
+}
+
+function createInteractiveSolveSessionForDrag(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  pointId: SketchPointId,
+): SketchCompiledSolveSession | null {
+  if (
+    !definition.points.some((point) => point.pointId === pointId)
+    || (definition.constraints.length === 0 && definition.dimensions.length === 0)
+  ) {
+    return null
+  }
+
+  const program = compileSketchSolveProgram({
+    definition,
+    projectedReferences,
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    partialSolvePolicy: 'failOnConflict',
+  })
+  return createCompiledSketchSolveSession({
+    sessionId: `interactive_sketch_solve_drag_${pointId}`,
+    program,
+  })
 }

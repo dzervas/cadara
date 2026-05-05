@@ -20,8 +20,8 @@ export const workbenchColors: MantineColorsTuple = [
 
 export const workbenchShellTokens = {
   panelShadow: '0 24px 48px rgba(0, 0, 0, 0.48), 0 8px 20px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-  pillShadow: '0 12px 32px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-  fabShadow: '0 16px 36px rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
+  pillShadow: '0 6px 16px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+  fabShadow: '0 10px 20px rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
   /** Spark Orange (#f0a14a) — see DESIGN.md "Spark Affordance Rule". */
   sparkAccent: '#f0a14a',
   sparkAccentHover: '#f6b777',

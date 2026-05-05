@@ -113,6 +113,13 @@ export interface SketchGeometryDragState {
   currentPoint: SketchPoint
   status: 'dragging' | 'blocked'
   message: string | null
+  interactiveSolveSession: import('@/contracts/sketch/solver-core').SketchCompiledSolveSession | null
+}
+
+export interface SketchLiveRegionState {
+  freshness: 'current' | 'pendingRefresh'
+  pendingSinceSequence: number | null
+  debounceMs: number
 }
 
 export interface SketchEditToolState {
@@ -158,6 +165,7 @@ export interface SketchSessionState {
   drawStartSnap: SketchSnapCandidate | null
   sequence: number
   solvedRegions: RegionRecord[]
+  liveRegionState?: SketchLiveRegionState
   projectedReferences: ProjectedSketchReferenceRecord[]
   projectionDiagnostics: ProjectedSketchReferenceRecord['diagnostics']
   commitRequest: Omit<CommitSketchRequest, 'contractVersion' | 'documentId' | 'baseRevisionId'> | null

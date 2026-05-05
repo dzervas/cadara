@@ -1,7 +1,12 @@
 import type { AuthoredSketchRecord } from '@/contracts/modeling/authored-document'
 import type { DimensionDefinition, SketchDefinition, SketchPoint2D } from '@/contracts/sketch/schema'
 import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
-import { solveSketchDefinitionCore } from '@/contracts/sketch/solver-core'
+import {
+  compileSketchSolveProgram,
+  createCompiledSketchSolveSession,
+  solveSketchDefinitionCore,
+  updateCompiledSketchSolveSession,
+} from '@/contracts/sketch/solver-core'
 import type { ConstraintId, ConstructionId, DimensionId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
 import type { SketchPlaneDefinition, SketchPlaneKey } from '@/contracts/shared/sketch-plane'
 
@@ -11,6 +16,7 @@ export interface SketchSolverBenchmarkFixture {
   sketch: AuthoredSketchRecord
   expectedAnnotationCount: number
   expectedRegionCount: number
+  expectedDiagnosticCount: number
 }
 
 export interface SketchSolverBenchmarkEvaluation {
@@ -25,9 +31,12 @@ export interface SketchSolverBenchmarkEvaluation {
   diagnosticCount: number
   solveState: string
   constraintState: string
+  fullSolveMs: number
+  interactiveDragFrameMs: number
+  interactiveDragAccepted: boolean
 }
 
-const BENCHMARK_TOLERANCES = {
+export const SKETCH_SOLVER_BENCHMARK_TOLERANCES = {
   coincidence: 1e-6,
   angleRadians: 1e-6,
   minimumSegmentLength: 1e-6,
@@ -217,6 +226,7 @@ function makeFixture(
   description: string,
   sketch: AuthoredSketchRecord,
   expectedRegionCount: number,
+  expectedDiagnosticCount = 0,
 ): SketchSolverBenchmarkFixture {
   return {
     name,
@@ -224,10 +234,11 @@ function makeFixture(
     sketch,
     expectedAnnotationCount: countSolverAnnotations(sketch.definition),
     expectedRegionCount,
+    expectedDiagnosticCount,
   }
 }
 
-function createSquareFixture(): SketchSolverBenchmarkFixture {
+export function createSquareFixture(): SketchSolverBenchmarkFixture {
   const sketchId = 'sketch_benchmark_square' as SketchId
   const a = makePoint(sketchId, 'square_a', 'A', [0, 0])
   const b = makePoint(sketchId, 'square_b', 'B', [1, 0.05])
@@ -278,7 +289,7 @@ function createSquareFixture(): SketchSolverBenchmarkFixture {
   )
 }
 
-function createGridFixture(
+export function createGridFixture(
   name: string,
   rows: number,
   columns: number,
@@ -364,11 +375,87 @@ function createGridFixture(
   )
 }
 
+function createConstraintChainFixture(name: string, segmentCount: number): SketchSolverBenchmarkFixture {
+  const sketchId = `sketch_benchmark_${name.replaceAll('-', '_')}` as SketchId
+  const points: SketchDefinition['points'] = []
+  const entities: SketchDefinition['entities'] = []
+  const constraints: SketchDefinition['constraints'] = []
+  const dimensions: SketchDefinition['dimensions'] = []
+
+  for (let index = 0; index <= segmentCount; index += 1) {
+    points.push(makePoint(sketchId, `${name}_p${index}`, `P${index}`, [index, index % 2 === 0 ? 0 : 0.02]))
+  }
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const line = makeLine(
+      sketchId,
+      `${name}_s${index}`,
+      `S${index}`,
+      createPointId(`${name}_p${index}`),
+      createPointId(`${name}_p${index + 1}`),
+    )
+    entities.push(line)
+    constraints.push(makeHorizontalConstraint(`${name}_h${index}`, line.entityId))
+    dimensions.push({
+      dimensionId: createDimensionId(`${name}_l${index}`),
+      kind: 'lineLength',
+      label: `Length ${index}`,
+      entityId: line.entityId,
+      value: 1,
+    })
+  }
+
+  return makeFixture(
+    name,
+    `${segmentCount * 2} solver annotation open-chain sketch.`,
+    makeAuthoredSketchRecord(sketchId, `Benchmark ${name}`, makeDefinition({
+      points,
+      entities,
+      constraints,
+      dimensions,
+    })),
+    0,
+    points.length,
+  )
+}
+
+function createIndependentComponentFixture(): SketchSolverBenchmarkFixture {
+  const first = createConstraintChainFixture('independent-a', 5).sketch.definition
+  const second = createConstraintChainFixture('independent-b', 5).sketch.definition
+  const sketchId = 'sketch_benchmark_independent_components' as SketchId
+  const offsetSecondPoints = second.points.map((point) => ({
+    ...point,
+    target: { kind: 'sketchPoint' as const, sketchId, pointId: point.pointId },
+    position: [point.position[0] + 20, point.position[1]] as const,
+  }))
+  return makeFixture(
+    'independent-components',
+    'Two independent constrained chains for affected-component drag timing.',
+    makeAuthoredSketchRecord(sketchId, 'Benchmark independent components', makeDefinition({
+      points: [
+        ...first.points.map((point) => ({
+          ...point,
+          target: { kind: 'sketchPoint' as const, sketchId, pointId: point.pointId },
+        })),
+        ...offsetSecondPoints,
+      ],
+      entities: [
+        ...first.entities.map((entity) => ({ ...entity, target: { kind: 'sketchEntity' as const, sketchId, entityId: entity.entityId } })),
+        ...second.entities.map((entity) => ({ ...entity, target: { kind: 'sketchEntity' as const, sketchId, entityId: entity.entityId } })),
+      ],
+      constraints: [...first.constraints, ...second.constraints],
+      dimensions: [...first.dimensions, ...second.dimensions],
+    })),
+    0,
+    first.points.length + second.points.length,
+  )
+}
+
 export const SKETCH_SOLVER_BENCHMARK_FIXTURES: readonly SketchSolverBenchmarkFixture[] = [
-  createSquareFixture(),
-  createGridFixture('grid-25', 3, 2),
-  createGridFixture('grid-50', 4, 4),
-  createGridFixture('grid-100', 6, 6),
+  createConstraintChainFixture('constraints-10', 5),
+  createConstraintChainFixture('constraints-50', 25),
+  createConstraintChainFixture('constraints-150', 75),
+  createIndependentComponentFixture(),
 ]
 
 export function countSolverAnnotations(definition: SketchDefinition) {
@@ -379,11 +466,13 @@ export function evaluateSketchSolverBenchmarkFixture(
   fixture: SketchSolverBenchmarkFixture,
 ): SketchSolverBenchmarkEvaluation {
   const definition = fixture.sketch.definition
+  const fullSolveStartedAt = performance.now()
   const solved = solveSketchDefinitionCore({
     definition,
-    tolerances: BENCHMARK_TOLERANCES,
+    tolerances: SKETCH_SOLVER_BENCHMARK_TOLERANCES,
     partialSolvePolicy: 'bestEffort',
   })
+  const fullSolveMs = performance.now() - fullSolveStartedAt
   const extracted = deriveSketchRegionsCore({
     documentId: 'doc_benchmark',
     revisionId: 'rev_benchmark',
@@ -391,6 +480,26 @@ export function evaluateSketchSolverBenchmarkFixture(
     definition,
     solvedSnapshot: solved.solvedSnapshot,
   })
+  const dragPoint = definition.points[1] ?? definition.points[0]
+  const interactiveStartedAt = performance.now()
+  const program = compileSketchSolveProgram({
+    definition,
+    tolerances: SKETCH_SOLVER_BENCHMARK_TOLERANCES,
+    partialSolvePolicy: 'bestEffort',
+  })
+  const session = createCompiledSketchSolveSession({
+    sessionId: `interactive_sketch_solve_benchmark_${fixture.name.replaceAll('-', '_')}`,
+    program,
+    priorSolvedSnapshot: solved.solvedSnapshot,
+  })
+  const dragResult = dragPoint
+    ? updateCompiledSketchSolveSession(session, {
+        kind: 'sketchPoint',
+        pointId: dragPoint.pointId,
+        position: [dragPoint.position[0] + 0.05, dragPoint.position[1]],
+      }, 0.1)
+    : null
+  const interactiveDragFrameMs = performance.now() - interactiveStartedAt
 
   return {
     fixture: fixture.name,
@@ -404,5 +513,8 @@ export function evaluateSketchSolverBenchmarkFixture(
     diagnosticCount: solved.diagnostics.length + extracted.diagnostics.length,
     solveState: solved.status.solveState,
     constraintState: solved.status.constraintState,
+    fullSolveMs,
+    interactiveDragFrameMs,
+    interactiveDragAccepted: dragResult?.kind === 'solved',
   }
 }

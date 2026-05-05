@@ -165,7 +165,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {  const sket
     partialSolvePolicy: 'bestEffort',
     definition: sketchDefinition,
     projectedReferences: [],
-    incrementalEdit: null,
+    includeRegions: true,
   }
 
   const solveSketchResponse: SolveSketchResponse = {
@@ -237,7 +237,9 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {  const sket
       dimensionStatuses: [],
       diagnostics: [],
     },
-    derivedRegions: [{
+    regionResult: {
+      diagnostics: [],
+      regions: [{
         ownerDocumentId: 'doc_workspace',
         ownerRevisionId: 'rev_7',
         ownerFeatureId: null,
@@ -276,6 +278,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {  const sket
         ],
         isClosed: true,
       }],
+    },
     diagnostics: [],
   }
 
@@ -379,7 +382,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {  const sket
           currentRevisionId: 'rev_8',
         },
       },
-    ],
+      ],
   }
 
   const createShellRequest: CreateFeatureRequest = {
@@ -559,7 +562,7 @@ test('src/contracts/shared/contract-examples.spec.ts', async () => {  const sket
     expectTrue(solveSketchRequest.definition.schemaVersion === SKETCH_SCHEMA_VERSION, 'Solve-sketch example must use the authored sketch schema version.')
     expectTrue(solveSketchRequest.partialSolvePolicy === 'bestEffort', 'Solve-sketch example must use an explicit partial-solve policy.')
     expectTrue(solveSketchResponse.requestId === solveSketchRequest.requestId, 'Solve-sketch response must echo the request correlation ID.')
-    expectTrue(solveSketchResponse.derivedRegions[0]?.ownerRevisionId === solveSketchResponse.revisionId, 'Solve-sketch derived regions must carry explicit ownership at the solved revision.')
+    expectTrue(solveSketchResponse.regionResult?.regions[0]?.ownerRevisionId === solveSketchResponse.revisionId, 'Solve-sketch optional region result must carry explicit ownership at the solved revision.')
   }
 
   function testCreateExtrudeExampleUsesTypedProfileRef() {

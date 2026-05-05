@@ -3,6 +3,11 @@ import {
   SOLVER_SCHEMA_VERSION,
   type DeriveSketchRegionsRequest,
   type DeriveSketchRegionsResponse,
+  type DisposeInteractiveSketchSolveSessionRequest,
+  type DisposeInteractiveSketchSolveSessionResponse,
+  type FinalizeInteractiveSketchSolveSessionRequest,
+  type FinalizeInteractiveSketchSolveSessionResponse,
+  type InteractiveSketchSolveSessionId,
   type ProjectedSketchReferenceRecord,
   type ProjectSketchExternalReferencesRequest,
   type ProjectSketchExternalReferencesResponse,
@@ -11,15 +16,22 @@ import {
   type SketchSolverResponseBase,
   type SolveSketchRequest,
   type SolveSketchResponse,
+  type StartInteractiveSketchSolveSessionRequest,
+  type StartInteractiveSketchSolveSessionResponse,
+  type UpdateInteractiveSketchSolveSessionRequest,
+  type UpdateInteractiveSketchSolveSessionResponse,
   type ValidateSketchRequest,
   type ValidateSketchResponse,
 } from '@/contracts/solver/schema'
 import { sketchSolverEnvelopeSchema } from '@/contracts/solver/runtime-schema'
 import {
+  compileSketchSolveProgram,
+  createCompiledSketchSolveSession,
   deriveSketchRegionsCore,
-  solveSketchDefinitionWithDraggedPointTarget,
   solveSketchDefinitionCore,
+  updateCompiledSketchSolveSession,
   validateSketchDefinitionCore,
+  type SketchCompiledSolveSession,
   type ProjectedSketchGeometryRef,
   type SketchSolveDiagnostic,
 } from '@/contracts/sketch'
@@ -29,6 +41,13 @@ import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
 export interface SketchConstraintSolverAdapterOptions {
   documentId: DocumentId
   revisionId: RevisionId | null
+}
+
+interface StoredInteractiveSolveSession {
+  session: SketchCompiledSolveSession
+  documentId: StartInteractiveSketchSolveSessionRequest['documentId']
+  revisionId: StartInteractiveSketchSolveSessionRequest['revisionId']
+  sketchId: StartInteractiveSketchSolveSessionRequest['sketchId']
 }
 
 const DEFAULT_OPTIONS: SketchConstraintSolverAdapterOptions = {
@@ -41,6 +60,10 @@ function makeResponseBase(
     | ProjectSketchExternalReferencesRequest
     | ValidateSketchRequest
     | SolveSketchRequest
+    | StartInteractiveSketchSolveSessionRequest
+    | UpdateInteractiveSketchSolveSessionRequest
+    | FinalizeInteractiveSketchSolveSessionRequest
+    | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
     | ResolveSketchReferenceRequest,
 ): SketchSolverResponseBase {
@@ -109,6 +132,10 @@ function assertSupportedRequest(
     | ProjectSketchExternalReferencesRequest
     | ValidateSketchRequest
     | SolveSketchRequest
+    | StartInteractiveSketchSolveSessionRequest
+    | UpdateInteractiveSketchSolveSessionRequest
+    | FinalizeInteractiveSketchSolveSessionRequest
+    | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
     | ResolveSketchReferenceRequest,
   options: SketchConstraintSolverAdapterOptions,
@@ -127,6 +154,8 @@ function assertSupportedRequest(
 
 export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
   private readonly options: SketchConstraintSolverAdapterOptions
+  private readonly interactiveSessions = new Map<InteractiveSketchSolveSessionId, StoredInteractiveSolveSession>()
+  private nextInteractiveSessionSequence = 1
 
   constructor(options: Partial<SketchConstraintSolverAdapterOptions> = {}) {
     this.options = { ...DEFAULT_OPTIONS, ...options }
@@ -162,51 +191,217 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
 
   async solveSketch(request: SolveSketchRequest): Promise<SolveSketchResponse> {
     assertSupportedRequest(request, this.options)
-    const solved = request.dragTarget
-      ? (() => {
-          const result = solveSketchDefinitionWithDraggedPointTarget({
-            definition: request.definition,
-            projectedReferences: request.projectedReferences,
-            dragTarget: request.dragTarget,
-            tolerances: request.tolerances,
-            partialSolvePolicy: request.partialSolvePolicy,
-          })
-
-          return {
-            status: result.solvedSnapshot?.status ?? {
-              solveState: 'failed' as const,
-              constraintState: 'inconsistent' as const,
-            },
-            solvedSnapshot: result.solvedSnapshot ?? solveSketchDefinitionCore({
-              definition: request.definition,
-              projectedReferences: request.projectedReferences,
-              tolerances: request.tolerances,
-              partialSolvePolicy: 'failOnConflict',
-            }).solvedSnapshot,
-            diagnostics: result.diagnostics,
-          }
-        })()
-      : solveSketchDefinitionCore({
-          definition: request.definition,
-          projectedReferences: request.projectedReferences,
-          tolerances: request.tolerances,
-          partialSolvePolicy: request.partialSolvePolicy,
-        })
-    const derived = deriveSketchRegionsCore({
-      documentId: request.documentId,
-      revisionId: request.revisionId,
-      sketchId: request.sketchId,
-      solvedSnapshot: solved.solvedSnapshot,
+    const solved = solveSketchDefinitionCore({
       definition: request.definition,
       projectedReferences: request.projectedReferences,
+      tolerances: request.tolerances,
+      partialSolvePolicy: request.partialSolvePolicy,
     })
+    const regionResult = request.includeRegions
+      ? deriveSketchRegionsCore({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+          sketchId: request.sketchId,
+          solvedSnapshot: solved.solvedSnapshot,
+          definition: request.definition,
+          projectedReferences: request.projectedReferences,
+        })
+      : null
 
     return {
       ...makeResponseBase(request),
       status: solved.status,
       solvedSnapshot: solved.solvedSnapshot,
-      derivedRegions: derived.regions,
-      diagnostics: [...solved.diagnostics, ...derived.diagnostics],
+      diagnostics: solved.diagnostics,
+      ...(regionResult ? { regionResult: { regions: regionResult.regions, diagnostics: regionResult.diagnostics } } : {}),
+    }
+  }
+
+  async startInteractiveSolveSession(
+    request: StartInteractiveSketchSolveSessionRequest,
+  ): Promise<StartInteractiveSketchSolveSessionResponse> {
+    assertSupportedRequest(request, this.options)
+    const program = compileSketchSolveProgram({
+      definition: request.definition,
+      projectedReferences: request.projectedReferences,
+      tolerances: request.tolerances,
+      partialSolvePolicy: request.partialSolvePolicy,
+      strategy: request.strategy,
+    })
+    const sessionId = `interactive_sketch_solve_${this.nextInteractiveSessionSequence++}` as InteractiveSketchSolveSessionId
+    const session = createCompiledSketchSolveSession({
+      sessionId,
+      program,
+      priorSolvedSnapshot: request.priorSolvedSnapshot,
+    })
+    this.interactiveSessions.set(sessionId, {
+      session,
+      documentId: request.documentId,
+      revisionId: request.revisionId,
+      sketchId: request.sketchId,
+    })
+
+    return {
+      ...makeResponseBase(request),
+      sessionId,
+      programId: program.programId,
+      warmStarted: session.warmStarted,
+      solvedSnapshot: session.lastAcceptedSnapshot,
+      status: session.lastAcceptedSnapshot.status,
+      diagnostics: session.lastAcceptedSnapshot.diagnostics,
+    }
+  }
+
+  async updateInteractiveSolveSession(
+    request: UpdateInteractiveSketchSolveSessionRequest,
+  ): Promise<UpdateInteractiveSketchSolveSessionResponse> {
+    assertSupportedRequest(request, this.options)
+    const stored = this.interactiveSessions.get(request.sessionId)
+    if (!stored || stored.session.disposed) {
+      return {
+        ...makeResponseBase(request),
+        sessionId: request.sessionId,
+        result: {
+          kind: 'blocked',
+          reason: 'staleSession',
+          solvedSnapshot: null,
+          diagnostics: [{
+            code: 'stale-interactive-solve-session',
+            severity: 'error',
+            message: `Interactive solve session ${request.sessionId} is no longer active.`,
+            target: { kind: 'point', pointId: request.dragTarget.pointId },
+          }],
+        },
+      }
+    }
+
+    if (
+      stored.documentId !== request.documentId
+      || stored.revisionId !== request.revisionId
+      || stored.sketchId !== request.sketchId
+    ) {
+      return {
+        ...makeResponseBase(request),
+        sessionId: request.sessionId,
+        result: {
+          kind: 'blocked',
+          reason: 'staleRevision',
+          solvedSnapshot: stored.session.lastAcceptedSnapshot,
+          diagnostics: [{
+            code: 'stale-interactive-solve-session-basis',
+            severity: 'error',
+            message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
+            target: { kind: 'point', pointId: request.dragTarget.pointId },
+          }],
+        },
+      }
+    }
+
+    const result = updateCompiledSketchSolveSession(stored.session, request.dragTarget, request.dragTarget.kind === 'sketchPoint' ? 1e-4 : undefined)
+    return {
+      ...makeResponseBase(request),
+      sessionId: request.sessionId,
+      result: result.kind === 'solved'
+        ? {
+            kind: 'accepted',
+            status: result.solvedSnapshot.status,
+            solvedSnapshot: result.solvedSnapshot,
+            diagnostics: result.diagnostics,
+          }
+        : {
+            kind: 'blocked',
+            reason: result.reason,
+            solvedSnapshot: result.solvedSnapshot,
+            diagnostics: result.diagnostics,
+          },
+    }
+  }
+
+  async finalizeInteractiveSolveSession(
+    request: FinalizeInteractiveSketchSolveSessionRequest,
+  ): Promise<FinalizeInteractiveSketchSolveSessionResponse> {
+    assertSupportedRequest(request, this.options)
+    const stored = this.interactiveSessions.get(request.sessionId)
+    if (!stored || stored.session.disposed) {
+      return {
+        ...makeResponseBase(request),
+        sessionId: request.sessionId,
+        solvedSnapshot: null,
+        status: null,
+        diagnostics: [{
+          code: 'stale-interactive-solve-session',
+          severity: 'error',
+          message: `Interactive solve session ${request.sessionId} is no longer active.`,
+          target: null,
+        }],
+      }
+    }
+
+    if (
+      stored.documentId !== request.documentId
+      || stored.revisionId !== request.revisionId
+      || stored.sketchId !== request.sketchId
+    ) {
+      return {
+        ...makeResponseBase(request),
+        sessionId: request.sessionId,
+        solvedSnapshot: null,
+        status: null,
+        diagnostics: [{
+          code: 'stale-interactive-solve-session-basis',
+          severity: 'error',
+          message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
+          target: null,
+        }],
+      }
+    }
+
+    stored.session.disposed = true
+    this.interactiveSessions.delete(request.sessionId)
+    return {
+      ...makeResponseBase(request),
+      sessionId: request.sessionId,
+      solvedSnapshot: stored.session.lastAcceptedSnapshot,
+      status: stored.session.lastAcceptedSnapshot.status,
+      diagnostics: stored.session.lastAcceptedSnapshot.diagnostics,
+    }
+  }
+
+  async disposeInteractiveSolveSession(
+    request: DisposeInteractiveSketchSolveSessionRequest,
+  ): Promise<DisposeInteractiveSketchSolveSessionResponse> {
+    assertSupportedRequest(request, this.options)
+    const stored = this.interactiveSessions.get(request.sessionId)
+    const basisMatches = Boolean(
+      stored
+      && stored.documentId === request.documentId
+      && stored.revisionId === request.revisionId
+      && stored.sketchId === request.sketchId,
+    )
+    const disposed = Boolean(stored && !stored.session.disposed && basisMatches)
+    if (stored && basisMatches) {
+      stored.session.disposed = true
+      this.interactiveSessions.delete(request.sessionId)
+    }
+    return {
+      ...makeResponseBase(request),
+      sessionId: request.sessionId,
+      disposed,
+      diagnostics: disposed
+        ? []
+        : [basisMatches || !stored
+          ? {
+              code: 'stale-interactive-solve-session',
+              severity: 'warning',
+              message: `Interactive solve session ${request.sessionId} was not active.`,
+              target: null,
+            }
+          : {
+              code: 'stale-interactive-solve-session-basis',
+              severity: 'warning',
+              message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
+              target: null,
+            }],
     }
   }
 

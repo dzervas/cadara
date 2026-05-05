@@ -18,6 +18,7 @@ import {
   isSketchSvgRenderingEnabled,
   patchSketchStyleValue,
   patchSketchEditToolValue,
+  refreshLiveRegionsAfterDebounce,
   selectSketchEditToolTarget,
   startSketchDraw,
   toggleSketchSvgRendering,
@@ -475,7 +476,9 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     expectTrue(target, 'Expected square vertex B.')
 
     session = beginSketchGeometryDrag(session, target, [1, 0])
+    expectTrue(session.activeDrag?.interactiveSolveSession !== null, 'Constrained drag should start an interactive solve session.')
     session = finishSketchGeometryDrag(session, [4, 3])
+    expectTrue(session.activeDrag === null, 'Constrained drag finish should dispose the active drag lifecycle.')
 
     const points = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
     assertClosePoint(points.get('sketch_point_a'), [3, 3], 'Dragging free square vertex should translate A.')
@@ -632,9 +635,11 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     session = beginSketchGeometryDrag(session, target, [2, 0])
     session = updateSketchGeometryDrag(session, [2.25, 0])
 
+    expectTrue(session.liveRegionState?.freshness === 'pendingRefresh', 'Accepted drag movement should defer live region extraction until the debounce interval settles.')
+    session = refreshLiveRegionsAfterDebounce(session, 100)
     expectTrue(
       getSketchSessionRegionDiagnostics(session).some((diagnostic) => diagnostic.code === 'profile-open-segment'),
-      'Live region diagnostics should be available to viewport feedback while editing.',
+      'Deferred live region diagnostics should be available after the refresh runs.',
     )
   }
 
@@ -654,7 +659,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     for (let index = 0; index < frameCount; index += 1) {
       const t = index / (frameCount - 1)
       session = updateSketchGeometryDrag(session, [1 + t * 3, t * 2])
-      expectTrue(session.solvedRegions.length === 1, 'Drag-frame region derivation should keep the constrained square profile live.')
+      expectTrue(session.solvedRegions.length === 1, 'Drag-frame updates should keep the previous constrained square profile visible.')
+      expectTrue(session.liveRegionState?.freshness === 'pendingRefresh', 'Drag-frame updates should defer live region extraction.')
     }
     const elapsed = performance.now() - startedAt
     expectTrue(
@@ -687,7 +693,12 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
 
   function testImmovableConstrainedDragBlocksWithoutChangingDraft() {
     let session = createSessionFromDefinition(createSquareDefinition(true))
+    session = {
+      ...session,
+      solvedRegions: deriveRegionsForDefinition(session.definition),
+    }
     const before = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
+    const beforeRegionIds = session.solvedRegions.map((region) => region.regionId).join(',')
     const target = session.definition.points.find((point) => point.pointId === 'sketch_point_a')?.target
     expectTrue(target, 'Expected fixed square vertex A.')
 
@@ -697,6 +708,10 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     const after = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
     assertClosePoint(after.get('sketch_point_a'), before.get('sketch_point_a')!, 'Blocked drag should leave A unchanged.')
     assertClosePoint(after.get('sketch_point_b'), before.get('sketch_point_b')!, 'Blocked drag should leave B unchanged.')
+    expectTrue(
+      session.solvedRegions.map((region) => region.regionId).join(',') === beforeRegionIds,
+      'Blocked drag should leave current live regions unchanged.',
+    )
     expectTrue(
       session.validationMessage === 'Geometry is constrained and cannot move to that position.',
       'Blocked drag should leave visible constrained-movement feedback.',

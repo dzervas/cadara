@@ -1,12 +1,20 @@
 import type {
   DeriveSketchRegionsRequest,
   DeriveSketchRegionsResponse,
+  DisposeInteractiveSketchSolveSessionRequest,
+  DisposeInteractiveSketchSolveSessionResponse,
+  FinalizeInteractiveSketchSolveSessionRequest,
+  FinalizeInteractiveSketchSolveSessionResponse,
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
   ResolveSketchReferenceRequest,
   ResolveSketchReferenceResponse,
   SolveSketchRequest,
   SolveSketchResponse,
+  StartInteractiveSketchSolveSessionRequest,
+  StartInteractiveSketchSolveSessionResponse,
+  UpdateInteractiveSketchSolveSessionRequest,
+  UpdateInteractiveSketchSolveSessionResponse,
   ValidateSketchRequest,
   ValidateSketchResponse,
 } from '@/contracts/solver/schema'
@@ -35,6 +43,30 @@ export interface SketchSolverAdapter {
    * The solver owns the returned solved snapshot, statuses, and diagnostics.
    */
   solveSketch(request: SolveSketchRequest): Promise<SolveSketchResponse>
+  /**
+   * Starts a warm-startable interactive solve lifecycle for drag-style edits.
+   */
+  startInteractiveSolveSession(
+    request: StartInteractiveSketchSolveSessionRequest,
+  ): Promise<StartInteractiveSketchSolveSessionResponse>
+  /**
+   * Updates an active interactive solve session with the latest drag target.
+   */
+  updateInteractiveSolveSession(
+    request: UpdateInteractiveSketchSolveSessionRequest,
+  ): Promise<UpdateInteractiveSketchSolveSessionResponse>
+  /**
+   * Finalizes the latest accepted result for an interactive solve session.
+   */
+  finalizeInteractiveSolveSession(
+    request: FinalizeInteractiveSketchSolveSessionRequest,
+  ): Promise<FinalizeInteractiveSketchSolveSessionResponse>
+  /**
+   * Disposes an interactive solve session without committing a final result.
+   */
+  disposeInteractiveSolveSession(
+    request: DisposeInteractiveSketchSolveSessionRequest,
+  ): Promise<DisposeInteractiveSketchSolveSessionResponse>
   /**
    * Derives closed sketch regions from a solved sketch state.
    * Regions must be explicit outputs, never editor-authored durable facts.

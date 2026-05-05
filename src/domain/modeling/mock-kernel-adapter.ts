@@ -3295,7 +3295,6 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       partialSolvePolicy: 'bestEffort',
       definition: normalizedDefinition,
       projectedReferences: projection.projectedReferences,
-      incrementalEdit: null,
     })
     const regions = await this.solverAdapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
