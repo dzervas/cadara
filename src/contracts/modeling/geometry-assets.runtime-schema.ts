@@ -98,6 +98,10 @@ const curve3Schema = z.discriminatedUnion('kind', [
     multiplicities: multiplicityArraySchema,
     parameterRange: parameterRangeSchema,
   }).strict(),
+  z.object({
+    kind: z.literal('unsupported'),
+    typeName: stringSchema.min(1),
+  }).strict(),
 ])
 const curve2Schema = z.discriminatedUnion('kind', [
   z.object({
@@ -141,6 +145,10 @@ const curve2Schema = z.discriminatedUnion('kind', [
     knots: knotArraySchema,
     multiplicities: multiplicityArraySchema,
     parameterRange: parameterRangeSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('unsupported'),
+    typeName: stringSchema.min(1),
   }).strict(),
 ])
 const surfaceSchema = z.discriminatedUnion('kind', [
@@ -202,6 +210,10 @@ const surfaceSchema = z.discriminatedUnion('kind', [
     vKnots: knotArraySchema,
     uMultiplicities: multiplicityArraySchema,
     vMultiplicities: multiplicityArraySchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('unsupported'),
+    typeName: stringSchema.min(1),
   }).strict(),
 ])
 
@@ -280,12 +292,12 @@ const cadaraBrepTopologySchema = z.object({
   vertices: z.array(z.object({
     vertexKey: stringSchema.min(1),
     point: point3Schema,
-  }).strict()).min(4),
+  }).strict()),
   edges: z.array(z.object({
     edgeKey: stringSchema.min(1),
     vertices: indexPairSchema,
     curve: curve3Schema,
-  }).strict()).min(6),
+  }).strict()),
   coedges: z.array(z.object({
     coedgeKey: stringSchema.min(1),
     edgeIndex: z.number().int().nonnegative(),
@@ -294,7 +306,7 @@ const cadaraBrepTopologySchema = z.object({
   }).strict()).min(1),
   loops: z.array(z.object({
     loopKey: stringSchema.min(1),
-    coedgeIndices: z.array(z.number().int().nonnegative()).min(3),
+    coedgeIndices: z.array(z.number().int().nonnegative()).min(1),
   }).strict()).min(1),
   faces: z.array(z.object({
     faceKey: stringSchema.min(1),
@@ -302,10 +314,10 @@ const cadaraBrepTopologySchema = z.object({
     surface: surfaceSchema,
     meshVertices: z.array(point3Schema).min(3),
     triangles: z.array(triangleIndexSchema).min(1),
-  }).strict()).min(4),
+  }).strict()).min(1),
   shells: z.array(z.object({
     shellKey: stringSchema.min(1),
-    faceIndices: z.array(z.number().int().nonnegative()).min(4),
+    faceIndices: z.array(z.number().int().nonnegative()).min(1),
     closed: z.literal(true),
   }).strict()).min(1),
   solids: z.array(z.object({

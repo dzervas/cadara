@@ -124,6 +124,44 @@ test('geometry asset record schema reports weighted-curve refinement failures at
   expectTrue(hasIssue(parsed, 'Cadara B-rep spline multiplicities must align 1:1 with knots.'), 'Curve knot/multiplicity mismatches should report a seam-level refinement error.')
 })
 
+test('geometry asset schema accepts compact analytic B-rep solids with single-coedge loops', () => {
+  const base = makeCadaraBrepRecord()
+  const compactRecord = makeCadaraBrepRecord({
+    data: {
+      ...base.data!,
+      bodies: [{
+        ...base.data!.bodies[0]!,
+        topology: {
+          vertices: base.data!.bodies[0]!.topology.vertices.slice(0, 2),
+          edges: [base.data!.bodies[0]!.topology.edges[0]!],
+          coedges: [base.data!.bodies[0]!.topology.coedges[0]!],
+          loops: [{
+            loopKey: 'loop_single_coedge',
+            coedgeIndices: [0],
+          }],
+          faces: base.data!.bodies[0]!.topology.faces.slice(0, 3).map((face) => ({
+            ...face,
+            loopIndices: [0],
+          })),
+          shells: [{
+            shellKey: 'shell_compact',
+            faceIndices: [0, 1, 2],
+            closed: true,
+          }],
+          solids: [{
+            solidKey: 'solid_compact',
+            shellIndices: [0],
+          }],
+        },
+      }],
+    },
+  })
+
+  const parsed = geometryAssetRecordSchema.safeParse(compactRecord)
+
+  expectTrue(parsed.success, `Expected compact analytic B-rep topology to parse: ${formatIssues(parsed)}`)
+})
+
 test('geometry asset record schema reports weighted-surface and topology reference failures at the record entrypoint', () => {
   const base = makeCadaraBrepRecord()
   const invalidSurface = geometryAssetRecordSchema.safeParse({

@@ -2,6 +2,7 @@ import { test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 
 import type { MeshExportAccuracy } from '@/contracts/export/capabilities'
+import type { CadaraBrepGeometryAssetBody } from '@/contracts/modeling/geometry-assets'
 import type { BodyId, RevisionId } from '@/contracts/shared/ids'
 import { expectTrue } from '@/testing/expect.spec'
 import {
@@ -37,6 +38,51 @@ type NativeOpenCascadeMainJSForTest = new (
 ) => Promise<NativeOpenCascadeForTest>
 
 type Point3 = readonly [number, number, number]
+
+function getCoedgeVertexPair(
+  body: CadaraBrepGeometryAssetBody,
+  coedgeIndex: number,
+): readonly [number, number] | null {
+  const coedge = body.topology.coedges[coedgeIndex]
+  if (!coedge) {
+    return null
+  }
+  const edge = body.topology.edges[coedge.edgeIndex]
+  if (!edge) {
+    return null
+  }
+
+  const [first, last] = edge.vertices
+  return coedge.reversed ? [last, first] : [first, last]
+}
+
+function assertEveryLoopIsClosedAndConnected(
+  body: CadaraBrepGeometryAssetBody | undefined,
+  label: string,
+) {
+  expectTrue(body != null, `${label} should include a B-rep body.`)
+  if (!body) {
+    return
+  }
+
+  for (const [loopIndex, loop] of body.topology.loops.entries()) {
+    expectTrue(loop.coedgeIndices.length > 0, `${label} loop ${loopIndex} should contain at least one coedge.`)
+    const pairs = loop.coedgeIndices.map((coedgeIndex) => getCoedgeVertexPair(body, coedgeIndex))
+    expectTrue(
+      pairs.every((pair) => pair != null),
+      `${label} loop ${loopIndex} should reference existing coedges and edges.`,
+    )
+
+    for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
+      const current = pairs[pairIndex]
+      const next = pairs[(pairIndex + 1) % pairs.length]
+      expectTrue(
+        current != null && next != null && current[1] === next[0],
+        `${label} loop ${loopIndex} should be closed and connected at coedge ${pairIndex}.`,
+      )
+    }
+  }
+}
 
 test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
   async function loadNativeOpenCascadeForTest() {
@@ -119,30 +165,56 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
       topologyPayload.bodies[0]?.renderMeshSummary?.positions?.length === 24,
       'Converted native topology payload should retain render mesh positions from the shim payload.',
     )
+    expectTrue(nativeExactBrep.cadaraBrep != null, 'Native exact B-rep shim should return Cadara B-rep records directly.')
     expectTrue(
-      exactBrepPayload.diagnostics.some((diagnostic) =>
+      !exactBrepPayload.diagnostics.some((diagnostic) =>
         diagnostic.code === 'occ-native-exact-brep-unsupported-topology'
-        && diagnostic.detail?.reason === 'missing-oriented-coedges'
-        && diagnostic.target?.kind === 'body'
-        && diagnostic.target.bodyId === bodyId
       ),
-      'Native exact B-rep payload should diagnose missing oriented coedges instead of fabricating box face loops.',
+      'Native exact B-rep payload should not diagnose oriented coedges as missing when the shim emits exact records.',
     )
     expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.faces.length === 0,
-      'Native exact B-rep payload should not expose valid-looking face topology without oriented face wires.',
+      exactBrepPayload.brep.bodies[0]?.topology.faces.length === 6,
+      'Native exact B-rep payload should expose the box face topology from the shim.',
     )
     expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.vertices.length === 0,
-      'Native exact B-rep payload should not expose valid-looking vertex topology without oriented face wires.',
+      exactBrepPayload.brep.bodies[0]?.topology.vertices.length === 8,
+      'Native exact B-rep payload should expose box vertex points from the shim.',
     )
     expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.edges.length === 0,
-      'Native exact B-rep payload should not expose valid-looking edge topology without oriented face wires.',
+      exactBrepPayload.brep.bodies[0]?.topology.edges.length === 12,
+      'Native exact B-rep payload should expose box edge curves from the shim.',
     )
     expectTrue(
-      exactBrepPayload.tables.topology.faces.rowCount === 0,
-      'Native exact B-rep payload table metadata should stay empty when no valid exact topology is emitted.',
+      exactBrepPayload.brep.bodies[0]?.topology.coedges.length === 24,
+      'Native exact B-rep payload should preserve oriented coedge order for each box face loop.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.loops.length === 6,
+      'Native exact B-rep payload should expose one oriented loop per box face.',
+    )
+    assertEveryLoopIsClosedAndConnected(
+      exactBrepPayload.brep.bodies[0],
+      'Native exact box B-rep payload',
+    )
+    expectTrue(
+      exactBrepPayload.tables.topology.faces.rowCount === 6
+        && exactBrepPayload.tables.topology.coedges.rowCount === 24
+        && exactBrepPayload.tables.curves.rowCount === 12
+        && exactBrepPayload.tables.surfaces.rowCount === 6
+        && exactBrepPayload.tables.trims.rowCount === 24,
+      'Native exact B-rep payload table metadata should count topology, curves, surfaces, and trims.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.edges.every((edge) => edge.curve.kind === 'line') === true,
+      'Native exact B-rep payload should preserve box edges as analytic lines.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.faces.every((face) => face.surface.kind === 'plane') === true,
+      'Native exact B-rep payload should preserve box faces as analytic planes.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.coedges.every((coedge) => coedge.curve2d.kind === 'line') === true,
+      'Native exact B-rep payload should preserve box 2D trim curves as analytic lines.',
     )
     expectTrue(
       topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount === 12,
@@ -195,7 +267,7 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     shape.delete?.()
   }
 
-  async function testNativeExactBrepDiagnosesCurvedTopologyInsteadOfFlatteningIt() {
+  async function testNativeExactBrepExtractsCurvedTopologyInsteadOfFlatteningIt() {
     const oc = await loadNativeOpenCascadeForTest()
     const cylinderBuilder = new oc.BRepPrimAPI_MakeCylinder_1(1, 2)
     const shape = cylinderBuilder.Shape()
@@ -217,24 +289,32 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     })
 
     expectTrue(
-      (nativeExactBrep.mesh?.triangleCount ?? 0) > nativeExactBrep.topology.filter((record) => record.kind === 'face').length * 2,
-      'Curved native exact probe should expose more mesh triangles than a simple planar fallback can represent.',
-    )
-    expectTrue(
-      exactBrepPayload.diagnostics.some((diagnostic) =>
+      !exactBrepPayload.diagnostics.some((diagnostic) =>
         diagnostic.code === 'occ-native-exact-brep-unsupported-topology'
-        && diagnostic.target?.kind === 'body'
-        && diagnostic.target.bodyId === bodyId
       ),
-      'Native exact B-rep payload should diagnose unsupported topology instead of flattening it into line and plane records.',
+      'Native exact B-rep payload should return exact curved records instead of the old unsupported-topology diagnostic.',
     )
     expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.faces.length === 0,
-      'Native exact B-rep payload should not return valid-looking planar faces for curved topology.',
+      exactBrepPayload.brep.bodies[0]?.topology.faces.some((face) => face.surface.kind === 'cylinder'),
+      'Native exact B-rep payload should preserve the cylinder side face as an analytic cylinder.',
     )
     expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.edges.length === 0,
-      'Native exact B-rep payload should not return valid-looking line edges for curved topology.',
+      exactBrepPayload.brep.bodies[0]?.topology.edges.some((edge) => edge.curve.kind === 'circle'),
+      'Native exact B-rep payload should preserve circular cylinder trim edges as analytic circles.',
+    )
+    assertEveryLoopIsClosedAndConnected(
+      exactBrepPayload.brep.bodies[0],
+      'Native exact cylinder B-rep payload',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.coedges.every((coedge) =>
+        coedge.curve2d.kind !== 'polyline' && coedge.curve2d.kind !== 'unsupported'
+      ) === true,
+      'Native exact B-rep payload should emit analytic 2D p-curves for cylinder coedges instead of sampled or unsupported trims.',
+    )
+    expectTrue(
+      exactBrepPayload.brep.bodies[0]?.topology.coedges.some((coedge) => coedge.curve2d.kind === 'circle') === true,
+      'Native exact B-rep payload should preserve circular planar cylinder trims as 2D circles.',
     )
 
     ;(shape as { delete?: () => void }).delete?.()
@@ -425,7 +505,7 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
 
   await testNativeShimReturnsFlatTopologyAndMeshPayloads()
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes()
-  await testNativeExactBrepDiagnosesCurvedTopologyInsteadOfFlatteningIt()
+  await testNativeExactBrepExtractsCurvedTopologyInsteadOfFlatteningIt()
   await testNativeFeatureTransactionPreparesCommittedShapePayload()
   await testNativeBooleanTransactionBuildsCommittedPayload()
   await testNativeBooleanTransactionReturnsCommittedShapeResult()

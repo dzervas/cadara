@@ -128,6 +128,10 @@ export type CadaraBrepCurve3Record =
     }
   | CadaraBrepBezierCurve3Record
   | CadaraBrepBSplineCurve3Record
+  | {
+      kind: 'unsupported'
+      typeName: string
+    }
 
 export type CadaraBrepCurve2Record =
   | {
@@ -158,6 +162,10 @@ export type CadaraBrepCurve2Record =
     }
   | CadaraBrepBezierCurve2Record
   | CadaraBrepBSplineCurve2Record
+  | {
+      kind: 'unsupported'
+      typeName: string
+    }
 
 export type CadaraBrepSurfaceRecord =
   | {
@@ -199,6 +207,10 @@ export type CadaraBrepSurfaceRecord =
     }
   | CadaraBrepBezierSurfaceRecord
   | CadaraBrepBSplineSurfaceRecord
+  | {
+      kind: 'unsupported'
+      typeName: string
+    }
 
 export interface CadaraBrepVertexRecord {
   vertexKey: string

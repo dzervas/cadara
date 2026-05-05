@@ -8,5 +8,5 @@ public:
     const std::string& bodyId,
     const std::string& topologyToken
   ) {
-    return CadaraBuildTopologyJson(shape, bodyId, topologyToken, 0.1, 0.5, true);
+    return CadaraBuildExactBrepJson(shape, bodyId, topologyToken);
   }

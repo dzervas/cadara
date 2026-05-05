@@ -464,6 +464,14 @@ const nativeShimPayloadSchema = z.object({
   edgeVertices: z.array(nativeShimEdgeVertexRecordSchema).optional().default([]),
   vertexPoints: z.array(nativeShimVertexPointRecordSchema).optional().default([]),
   faceEdges: z.array(nativeShimFaceEdgeRecordSchema).optional().default([]),
+  cadaraBrep: z.custom<CadaraBrepGeometryAssetData>((value) =>
+    typeof value === 'object'
+    && value !== null
+    && 'kind' in value
+    && value.kind === 'cadaraBrep'
+    && 'schemaVersion' in value
+    && value.schemaVersion === 'cadara-brep/v1alpha1',
+  ).optional(),
   mesh: nativeShimMeshSummarySchema.optional(),
   diagnostics: z.array(nativeTopologyDiagnosticSchema).optional().default([]),
 })
@@ -548,6 +556,38 @@ function createExactBrepTableLayout(topology: OccNativeTopologyTableLayout): Occ
     curves: emptyTableLayout(),
     surfaces: emptyTableLayout(),
     trims: emptyTableLayout(),
+    fallbackTriangles: null,
+  }
+}
+
+function createExactBrepTableLayoutFromCadaraBrep(
+  brep: CadaraBrepGeometryAssetData,
+): OccNativeExactBrepTableLayout {
+  const counts = brep.bodies.reduce((nextCounts, body) => {
+    nextCounts.solids += body.topology.solids.length
+    nextCounts.shells += body.topology.shells.length
+    nextCounts.faces += body.topology.faces.length
+    nextCounts.loops += body.topology.loops.length
+    nextCounts.coedges += body.topology.coedges.length
+    nextCounts.edges += body.topology.edges.length
+    nextCounts.vertices += body.topology.vertices.length
+    return nextCounts
+  }, {
+    bodies: brep.bodies.length,
+    solids: 0,
+    shells: 0,
+    faces: 0,
+    loops: 0,
+    coedges: 0,
+    edges: 0,
+    vertices: 0,
+  })
+
+  return {
+    topology: createTopologyTableLayout(counts),
+    curves: emptyTableLayout(counts.edges),
+    surfaces: emptyTableLayout(counts.faces),
+    trims: emptyTableLayout(counts.coedges),
     fallbackTriangles: null,
   }
 }
@@ -837,13 +877,24 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
   nativePayload: OccNativeShimPayload
   diagnostics?: readonly OccNativeTopologyDiagnostic[]
 }): OccNativeExactBrepPayload {
-  const brepTopology = createEmptyCadaraBrepTopology()
-  const topologyLayout = createTopologyTableLayout()
+  const nativeBrep = input.nativePayload.cadaraBrep
+  const brep = nativeBrep
+    ? {
+        ...nativeBrep,
+        bodies: nativeBrep.bodies.map((body, index) => index === 0
+          ? {
+              ...body,
+              bodyKey: input.bodyId,
+              label: input.bodyLabel,
+            }
+          : body),
+      } satisfies CadaraBrepGeometryAssetData
+    : null
   const unsupportedDiagnostic = createNativeExactBrepUnsupportedDiagnostic(input.nativePayload, input.target)
   const diagnostics = [
     ...input.nativePayload.diagnostics,
-    ...(unsupportedDiagnostic ? [unsupportedDiagnostic] : []),
-    ...(!unsupportedDiagnostic
+    ...(!brep && unsupportedDiagnostic ? [unsupportedDiagnostic] : []),
+    ...(!brep && !unsupportedDiagnostic
       ? [createNativeTopologyDiagnostic(
           'occ-native-exact-brep-empty',
           'Native exact B-rep payload did not include extractable topology records.',
@@ -861,7 +912,7 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
     schemaVersion: OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION,
     revisionId: input.revisionId,
     target: input.target,
-    brep: {
+    brep: brep ?? {
       kind: 'cadaraBrep',
       schemaVersion: 'cadara-brep/v1alpha1',
       source: {
@@ -871,13 +922,12 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
       bodies: [{
         bodyKey: input.bodyId,
         label: input.bodyLabel,
-        topology: brepTopology,
+        topology: createEmptyCadaraBrepTopology(),
       }],
     },
-    tables: {
-      ...createExactBrepTableLayout(topologyLayout),
-      fallbackTriangles: null,
-    },
+    tables: brep
+      ? createExactBrepTableLayoutFromCadaraBrep(brep)
+      : createExactBrepTableLayout(createTopologyTableLayout()),
     buffers: [],
     diagnostics,
   }

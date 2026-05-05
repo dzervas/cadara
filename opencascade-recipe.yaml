@@ -157,6 +157,7 @@ additionalCppCode: |
   };
 
   #include "/src/occ-native-shims/cadara-native-topology-helpers.inc"
+  #include "/src/occ-native-shims/cadara-native-exact-brep-helpers.inc"
 
   class CadaraNativeTopologyProbe {
   #include "/src/occ-native-shims/cadara-native-topology-probe.inc"
