@@ -295,6 +295,73 @@ test('committed native topology snapshots reuse body-owned transaction payloads'
   }
 })
 
+test('native transaction replacements retain rewritten committed payloads after preserving public ids', async () => {
+  const oc = await loadCustomOpenCascadeForTest()
+  const body = makeTrackedBox(
+    oc,
+    'body_rewritten_payload_reuse' as BodyId,
+    'feature_rewritten_payload_seed' as FeatureId,
+    [2, 2, 2],
+  )
+  const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const context = createOccAuthoringState(oc, { bodies: [body] })
+  const featureShape = makeBoxShape(oc, [2, 2, 2])
+  const result = applyBooleanPolicy(
+    context,
+    'feature_rewritten_payload_join' as FeatureId,
+    'join',
+    { kind: 'targetBody', bodyId: body.bodyId },
+    featureShape,
+  )
+  const replacement = result.bodies.find((candidate) => candidate.bodyId === body.bodyId)
+
+  expectTrue(replacement != null, 'Native boolean replacement should preserve the target body.')
+  expectTrue(
+    body.topology.faceIds.every((faceId) => replacement?.topology.faceIds.includes(faceId)),
+    'Native boolean history should preserve public face ids with unique successors.',
+  )
+  expectTrue(
+    replacement?.nativeTopologyPayload?.topology.some((record) => record.id === body.topology.faceIds[0]) === true,
+    'Native transaction payload should be rewritten to the reconciled public face ids.',
+  )
+
+  const originalBuildCommittedShapePayload = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildCommittedShapePayload
+  expectTrue(
+    typeof originalBuildCommittedShapePayload === 'function',
+    'Expected custom OCC runtime to expose committed shape payload extraction.',
+  )
+  nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload = () => {
+    throw new Error('Committed payload extraction should not run after native transaction payload rewrite.')
+  }
+  const adapter = new OpenCascadeKernelAdapter({
+    solverAdapter: {} as never,
+    getOpenCascadeInstance: async () => oc,
+  })
+  const buildCommittedSnapshot = (adapter as unknown as {
+    buildNativeTopologyPayloadForState(
+      state: typeof context,
+      lodTierId: undefined,
+      options: { useCommittedShapeTransaction: true },
+    ): { kind: string; payload?: { bodies: readonly [{ topology: readonly { id: string }[] }] } }
+  }).buildNativeTopologyPayloadForState.bind(adapter)
+
+  try {
+    const nativeSnapshot = buildCommittedSnapshot(
+      createOccAuthoringState(oc, { bodies: [replacement!] }),
+      undefined,
+      { useCommittedShapeTransaction: true },
+    )
+
+    expectTrue(nativeSnapshot.kind === 'nativeTopologyPayload', 'Committed native topology snapshot should build successfully.')
+    expectTrue(
+      nativeSnapshot.payload?.bodies[0]?.topology.some((record) => record.id === body.topology.faceIds[0]) === true,
+      'Committed native topology snapshot should reuse the rewritten transaction payload.',
+    )
+  } finally {
+    nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload = originalBuildCommittedShapePayload
+  }
+})
+
 test('applyBooleanPolicy preserves unique native boolean history successors', async () => {
   const oc = await loadCustomOpenCascadeForTest()
   const body = makeTrackedBox(

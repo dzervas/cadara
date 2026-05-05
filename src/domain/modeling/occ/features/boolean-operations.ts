@@ -16,9 +16,9 @@ import {
   advanceTopologyToken,
   extractSolidShapes,
   getOccDurableRefKey,
-  haveSameOccTopologyIds,
   OCC_REFERENCE_INVALIDATION_REASONS,
   reconcileReplacementSolidBody,
+  rewriteNativeTopologyPayloadIds,
   trackDerivedSolidBody,
   trackNewSolidBody,
   trackReplacementSolidBody,
@@ -326,6 +326,7 @@ function reconcileNativeHistoryReplacement(
   const edgeIds: EdgeId[] = []
   const edgesById = new Map<EdgeId, OccTrackedBody['edgesById'] extends Map<EdgeId, infer Edge> ? Edge : never>()
   const edgeContributingFeatureIdsById = new Map<EdgeId, FeatureId[]>()
+  const edgeIdsByNativeId = new Map<EdgeId, EdgeId>()
 
   for (const freshId of replacement.topology.edgeIds) {
     const preservedTarget = preservedTargetsBySuccessorKey.get(getOccDurableRefKey({
@@ -341,6 +342,7 @@ function reconcileNativeHistoryReplacement(
     }
 
     edgeIds.push(edgeId)
+    edgeIdsByNativeId.set(freshId, edgeId)
     edgesById.set(edgeId, edge as never)
     edgeContributingFeatureIdsById.set(edgeId, preservedTarget?.kind === 'edge'
       ? appendOwnerFeature(current.edgeContributingFeatureIdsById.get(edgeId) ?? [], ownerFeatureId)
@@ -350,6 +352,7 @@ function reconcileNativeHistoryReplacement(
   const vertexIds: VertexId[] = []
   const verticesById = new Map<VertexId, OccTrackedBody['verticesById'] extends Map<VertexId, infer Vertex> ? Vertex : never>()
   const vertexContributingFeatureIdsById = new Map<VertexId, FeatureId[]>()
+  const vertexIdsByNativeId = new Map<VertexId, VertexId>()
 
   for (const freshId of replacement.topology.vertexIds) {
     const preservedTarget = preservedTargetsBySuccessorKey.get(getOccDurableRefKey({
@@ -365,6 +368,7 @@ function reconcileNativeHistoryReplacement(
     }
 
     vertexIds.push(vertexId)
+    vertexIdsByNativeId.set(freshId, vertexId)
     verticesById.set(vertexId, vertex as never)
     vertexContributingFeatureIdsById.set(vertexId, preservedTarget?.kind === 'vertex'
       ? appendOwnerFeature(current.vertexContributingFeatureIdsById.get(vertexId) ?? [], ownerFeatureId)
@@ -391,15 +395,17 @@ function reconcileNativeHistoryReplacement(
     verticesById,
     vertexContributingFeatureIdsById,
     naming: undefined,
-    nativeTopologyPayload: haveSameOccTopologyIds({
-      faceIds,
-      edgeIds,
-      vertexIds,
-    }, replacement.topology)
-      ? replacement.nativeTopologyPayload
+    nativeTopologyPayload: replacement.nativeTopologyPayload
+      ? rewriteNativeTopologyPayloadIds(replacement.bodyId, replacement.nativeTopologyPayload, {
+          faceIdsByNativeId,
+          edgeIdsByNativeId,
+          vertexIdsByNativeId,
+        })
       : undefined,
     nativeTopologyIdAliases: {
       faceIdsByNativeId,
+      edgeIdsByNativeId,
+      vertexIdsByNativeId,
     },
   } satisfies OccTrackedBody
 

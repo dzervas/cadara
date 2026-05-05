@@ -1,6 +1,7 @@
 import { test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
+import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
 import type {
   CommitSketchResponse,
   GetDocumentSnapshotResponse,
@@ -253,6 +254,54 @@ test('src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts', asyn
     )
   }
 
+  async function testNativeFeatureHistoryRebuildDoesNotCallPublicRestore() {
+    let publicRestoreCalls = 0
+    class AdapterWithRejectedPublicRestore extends OpenCascadeKernelAdapter {
+      override async restoreAuthoredModelDocument(): Promise<void> {
+        publicRestoreCalls += 1
+        throw new Error('executeNativeFeatureHistoryRebuild must not delegate through public restore.')
+      }
+    }
+
+    const adapter = new AdapterWithRejectedPublicRestore({
+      solverAdapter: new SketchConstraintSolverAdapter({
+        documentId: OCC_KERNEL_DOCUMENT_ID,
+        revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      }),
+      getOpenCascadeInstance: async () => ({}) as never,
+      initialSnapshotRequiresRuntime: true,
+    })
+    const document: AuthoredModelDocument = {
+      contractVersion: 'modeling-contract/v1alpha1',
+      schemaVersion: 'authored-model-document/v1alpha1',
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      settings: {
+        linearUnit: 'millimeter',
+        modelingTolerance: 0.001,
+        angularToleranceRadians: 0.01,
+      },
+      variables: [],
+      sketches: [],
+      features: [],
+      featureOrder: [],
+      historyOrder: [],
+      cursor: { kind: 'empty' },
+      bodyLabels: [],
+      assets: { records: [] },
+      embeddedBinaryAssets: [],
+    }
+
+    const result = await adapter.executeNativeFeatureHistoryRebuild(document)
+
+    expectTrue(publicRestoreCalls === 0, 'Native feature-history rebuild should not call the public restore path.')
+    expectTrue(
+      result.kind === 'nativeTopologyUnavailable',
+      'Explicit native feature-history rebuild requests should still fail loudly when native support is missing.',
+    )
+  }
+
   await testWorkerOwnedWarmupAndMutationsBypassLocalOcc()
   await testEmptySnapshotsDoNotRequireNativeSolidTopologySupport()
+  await testNativeFeatureHistoryRebuildDoesNotCallPublicRestore()
 })

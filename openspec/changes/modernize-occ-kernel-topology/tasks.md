@@ -16,7 +16,7 @@
 
 - [x] 3.1 Replace JS-side face, edge, and vertex enumeration in the OCC adapter with native topology payload consumption.
 - [x] 3.2 Replace JS-side topology naming/reconciliation loops with native kernel identity and history results.
-- [ ] 3.3 Replace committed feature-history rebuild orchestration with native transaction commands where the kernel can create shapes, collect history, validate, cache, mesh, and emit payloads together.
+- [x] 3.3 Replace committed feature-history rebuild orchestration with native transaction commands where the kernel can create shapes, collect history, validate, cache, mesh, and emit payloads together.
 - [x] 3.4 Replace render mesh extraction loops with native mesh payload consumption.
 - [x] 3.5 Replace exact Cadara B-rep extraction loops with native exact B-rep payload consumption.
 - [x] 3.6 Replace tessellated export traversal with native mesh export payload consumption.

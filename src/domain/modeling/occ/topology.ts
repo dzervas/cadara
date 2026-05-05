@@ -66,6 +66,8 @@ export interface OccTrackedBody {
   nativeTopologyPayload?: OccNativeShimPayload
   nativeTopologyIdAliases?: {
     faceIdsByNativeId: ReadonlyMap<FaceId, FaceId>
+    edgeIdsByNativeId?: ReadonlyMap<EdgeId, EdgeId>
+    vertexIdsByNativeId?: ReadonlyMap<VertexId, VertexId>
   }
   topology: {
     faceIds: FaceId[]
@@ -609,6 +611,61 @@ function disambiguateNativeTopologyPayloadIdentity(
 
   const rewriteId = (kind: 'face' | 'edge' | 'vertex', id: string) =>
     firstReplacementByKindAndId.get(`${kind}:${id}`) ?? id
+
+  return {
+    ...nativePayload,
+    topology,
+    edgeVertices: nativePayload.edgeVertices.map((record) => ({
+      ...record,
+      edgeId: rewriteId('edge', record.edgeId),
+    })),
+    faceEdges: nativePayload.faceEdges.map((record) => ({
+      ...record,
+      faceId: rewriteId('face', record.faceId),
+      edgeIds: record.edgeIds.map((edgeId) => rewriteId('edge', edgeId) as EdgeId),
+    })),
+    vertexPoints: nativePayload.vertexPoints?.map((record) => ({
+      ...record,
+      vertexId: rewriteId('vertex', record.vertexId),
+    })),
+    mesh: nativePayload.mesh
+      ? {
+          ...nativePayload.mesh,
+          triangleFaceBindings: nativePayload.mesh.triangleFaceBindings?.map((faceId) => rewriteId('face', faceId)),
+        }
+      : nativePayload.mesh,
+  }
+}
+
+export function rewriteNativeTopologyPayloadIds(
+  bodyId: BodyId,
+  nativePayload: OccNativeShimPayload,
+  aliases: {
+    faceIdsByNativeId?: ReadonlyMap<FaceId, FaceId>
+    edgeIdsByNativeId?: ReadonlyMap<EdgeId, EdgeId>
+    vertexIdsByNativeId?: ReadonlyMap<VertexId, VertexId>
+  },
+): OccNativeShimPayload {
+  const rewriteId = (kind: 'face' | 'edge' | 'vertex', id: string) => {
+    if (kind === 'face') {
+      return aliases.faceIdsByNativeId?.get(id as FaceId) ?? id
+    }
+    if (kind === 'edge') {
+      return aliases.edgeIdsByNativeId?.get(id as EdgeId) ?? id
+    }
+    return aliases.vertexIdsByNativeId?.get(id as VertexId) ?? id
+  }
+
+  const topology = nativePayload.topology.map((record) => {
+    if (record.bodyId !== bodyId) {
+      return record
+    }
+
+    return {
+      ...record,
+      id: rewriteId(record.kind, record.id),
+    }
+  })
 
   return {
     ...nativePayload,

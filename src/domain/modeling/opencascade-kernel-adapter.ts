@@ -2333,6 +2333,27 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     )
   }
 
+  private async rebuildAuthoredModelDocumentWithNativeFeatureTransactions(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[],
+    assets: readonly GeometryAssetBlobInput[],
+    lodTierId?: OccTessellationTierId,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeTopologyPayload>> {
+    const runtimeState = await this.restoreAuthoredModelDocumentOnMainThread(
+      document,
+      diagnostics,
+      createInMemoryGeometryAssetResolver(assets),
+      { replaceRuntimeState: false },
+    )
+    this.replaceRuntimeState(runtimeState)
+
+    return this.buildNativeTopologyPayloadForState(
+      runtimeState.authoringState,
+      lodTierId,
+      { useCommittedShapeTransaction: true },
+    )
+  }
+
   async executeNativeFeatureHistoryRebuild(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
@@ -2348,17 +2369,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       )
     }
 
-    await this.restoreAuthoredModelDocument(
+    return this.rebuildAuthoredModelDocumentWithNativeFeatureTransactions(
       document,
       diagnostics,
-      createInMemoryGeometryAssetResolver(assets),
-    )
-    const runtimeState = await this.getRuntimeState()
-
-    return this.buildNativeTopologyPayloadForState(
-      runtimeState.authoringState,
+      assets,
       lodTierId,
-      { useCommittedShapeTransaction: true },
     )
   }
 
