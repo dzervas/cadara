@@ -255,6 +255,7 @@ export interface OccNativeTopologyRecord {
   kind: OccNativeTopologyKind
   bodyId: BodyId
   parentId: OccNativeTopologyId | null
+  kernelUid: string
 }
 
 export interface OccNativeKernelIdentityRecord {
@@ -389,6 +390,7 @@ export interface OccNativeShimFaceEdgeRecord {
 
 const nativeShimTopologyRecordSchema = z.object({
   id: z.string().min(1),
+  kernelUid: z.string().min(1).optional(),
   kind: z.enum(['face', 'edge', 'vertex']),
   bodyId: z.string().min(1),
   index: z.number().int().positive(),
@@ -550,6 +552,117 @@ function createMeshTableLayout(): OccNativeMeshTableLayout {
   }
 }
 
+function transferArrayBuffer(view: ArrayBufferView): ArrayBuffer {
+  const copy = new Uint8Array(view.byteLength)
+  copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
+  return copy.buffer
+}
+
+function createBufferRef(
+  suffix: string,
+  scalar: OccNativeBufferScalar,
+  view: ArrayBufferView,
+  itemStride: number,
+): { ref: OccNativeBufferRef, transferable: OccNativeTransferableBuffer } {
+  const bufferId = `occ_buffer_${suffix}` as OccNativeBufferRef['bufferId']
+  const buffer = transferArrayBuffer(view)
+
+  return {
+    ref: {
+      bufferId,
+      scalar,
+      byteOffset: 0,
+      byteLength: buffer.byteLength,
+      itemStride,
+    },
+    transferable: {
+      bufferId,
+      buffer,
+    },
+  }
+}
+
+function packMeshSummaryBuffers(
+  mesh: OccNativeShimMeshSummary | null | undefined,
+  suffix: string,
+  faceIds: readonly string[] = [],
+): {
+  layout: OccNativeMeshTableLayout
+  buffers: OccNativeTransferableBuffer[]
+} {
+  if (!mesh) {
+    return {
+      layout: createMeshTableLayout(),
+      buffers: [],
+    }
+  }
+
+  const buffers: OccNativeTransferableBuffer[] = []
+  const positions = new Float32Array((mesh.positions?.length ?? 0) * 3)
+  mesh.positions?.forEach((point, index) => {
+    positions[(index * 3)] = point[0]
+    positions[(index * 3) + 1] = point[1]
+    positions[(index * 3) + 2] = point[2]
+  })
+
+  const triangleIndices = new Uint32Array((mesh.triangleIndices?.length ?? 0) * 3)
+  mesh.triangleIndices?.forEach((triangle, index) => {
+    triangleIndices[(index * 3)] = triangle[0]
+    triangleIndices[(index * 3) + 1] = triangle[1]
+    triangleIndices[(index * 3) + 2] = triangle[2]
+  })
+
+  const faceIndexById = new Map(faceIds.map((faceId, index) => [faceId, index]))
+  const fallbackFaceIndexById = new Map<string, number>()
+  const triangleFaceBindings = new Uint32Array(mesh.triangleFaceBindings?.length ?? 0)
+  mesh.triangleFaceBindings?.forEach((faceId, index) => {
+    const explicitIndex = faceIndexById.get(faceId)
+    if (explicitIndex !== undefined) {
+      triangleFaceBindings[index] = explicitIndex
+      return
+    }
+
+    const fallbackIndex = fallbackFaceIndexById.get(faceId) ?? fallbackFaceIndexById.size
+    fallbackFaceIndexById.set(faceId, fallbackIndex)
+    triangleFaceBindings[index] = fallbackIndex
+  })
+
+  const packedPositions = createBufferRef(`${suffix}_positions`, 'float32', positions, 3)
+  const packedTriangleIndices = createBufferRef(`${suffix}_triangle_indices`, 'uint32', triangleIndices, 3)
+  const packedTriangleFaceBindings = createBufferRef(
+    `${suffix}_triangle_face_bindings`,
+    'uint32',
+    triangleFaceBindings,
+    1,
+  )
+  buffers.push(
+    packedPositions.transferable,
+    packedTriangleIndices.transferable,
+    packedTriangleFaceBindings.transferable,
+  )
+
+  return {
+    layout: {
+      positions: packedPositions.ref,
+      normals: emptyBufferRef(`${suffix}_normals`, 'float32'),
+      triangleIndices: packedTriangleIndices.ref,
+      triangleFaceBindings: packedTriangleFaceBindings.ref,
+    },
+    buffers,
+  }
+}
+
+function createJsonTransferableBuffer(
+  suffix: string,
+  value: unknown,
+): OccNativeTransferableBuffer {
+  const encoded = new TextEncoder().encode(JSON.stringify(value))
+  return {
+    bufferId: `occ_buffer_${suffix}` as OccNativeBufferRef['bufferId'],
+    buffer: transferArrayBuffer(encoded),
+  }
+}
+
 function createExactBrepTableLayout(topology: OccNativeTopologyTableLayout): OccNativeExactBrepTableLayout {
   return {
     topology,
@@ -689,7 +802,7 @@ function createIdentityRecords(
   return topology.map((record) => ({
     topologyId: record.id,
     source: 'occt7-shim',
-    kernelUid: record.id,
+    kernelUid: record.kernelUid,
     publicRef: nativeTopologyRecordToPublicRef(record),
   }))
 }
@@ -748,12 +861,14 @@ function createBodyTopologyRecords(
       kind: 'body',
       bodyId,
       parentId: null,
+      kernelUid: `occt7-shim:body:${bodyId}`,
     },
     ...nativePayload.topology.map((record) => ({
       id: record.id as OccNativeTopologyId,
       kind: record.kind,
       bodyId: record.bodyId as BodyId,
       parentId: bodyId,
+      kernelUid: record.kernelUid ?? record.id,
     } satisfies OccNativeTopologyRecord)),
   ]
 }
@@ -834,17 +949,22 @@ export function createOccNativeTopologyPayloadFromShimPayloads(input: {
     const topology = createBodyTopologyRecords(bodyId, nativePayload)
     const identity = createIdentityRecords(topology)
     const topologyCounts = countTopologyKinds(topology)
+    const faceIds = topology
+      .filter((record) => record.kind === 'face')
+      .map((record) => record.id)
+    const renderMesh = packMeshSummaryBuffers(nativePayload.mesh, `${bodyId}_render_mesh`, faceIds)
 
     return {
       bodyId,
       topology,
       identity,
       adjacency: createAdjacencyTableLayout(nativePayload.edgeVertices.length),
-      renderMesh: nativePayload.mesh ? createMeshTableLayout() : null,
+      renderMesh: nativePayload.mesh ? renderMesh.layout : null,
       renderMeshSummary: nativePayload.mesh ?? null,
       exactBrep: null,
       invalidations,
       topologyCounts,
+      buffers: renderMesh.buffers,
     }
   })
   const allTopology = bodyPayloads.flatMap((body) => body.topology)
@@ -858,13 +978,13 @@ export function createOccNativeTopologyPayloadFromShimPayloads(input: {
     source: 'occt7-shim',
     revisionId: input.revisionId,
     lodTierId: input.lodTierId,
-    bodies: bodyPayloads.map(({ topologyCounts: _topologyCounts, ...body }) => body),
+    bodies: bodyPayloads.map(({ topologyCounts: _topologyCounts, buffers: _buffers, ...body }) => body),
     tables: {
       topology: createTopologyTableLayout(countTopologyKinds(allTopology)),
       identity: createIdentityTableLayout(allTopology.length),
       diagnostics: createDiagnosticTableLayout(allDiagnostics.length),
     },
-    buffers: [],
+    buffers: bodyPayloads.flatMap((body) => body.buffers),
     diagnostics: allDiagnostics,
   }
 }
@@ -928,7 +1048,9 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
     tables: brep
       ? createExactBrepTableLayoutFromCadaraBrep(brep)
       : createExactBrepTableLayout(createTopologyTableLayout()),
-    buffers: [],
+    buffers: brep
+      ? [createJsonTransferableBuffer(`${input.bodyId}_exact_brep_json`, brep)]
+      : [],
     diagnostics,
   }
 }
@@ -940,14 +1062,24 @@ export function createOccNativeMeshExportPayloadFromShimPayload(input: {
   nativePayload: OccNativeShimPayload
   diagnostics?: readonly OccNativeTopologyDiagnostic[]
 }): OccNativeMeshExportPayload {
+  const mesh = packMeshSummaryBuffers(
+    input.nativePayload.mesh,
+    input.target.kind === 'body'
+      ? `${input.target.bodyId}_mesh_export`
+      : 'unresolved_mesh_export',
+    input.nativePayload.topology
+      .filter((record) => record.kind === 'face')
+      .map((record) => record.id),
+  )
+
   return {
     schemaVersion: OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION,
     revisionId: input.revisionId,
     target: input.target,
     options: input.options,
-    mesh: createMeshTableLayout(),
+    mesh: mesh.layout,
     meshSummary: input.nativePayload.mesh ?? null,
-    buffers: [],
+    buffers: mesh.buffers,
     diagnostics: [...input.nativePayload.diagnostics, ...(input.diagnostics ?? [])],
   }
 }
@@ -957,6 +1089,25 @@ export function createEmptyNativeTransferableBuffer(): OccNativeTransferableBuff
     bufferId: 'occ_buffer_empty' as OccNativeBufferRef['bufferId'],
     buffer: emptyBuffer,
   }
+}
+
+export function getOccNativeTopologyTransferList(
+  result: OccNativeTopologyWorkerResultWithBuffers,
+): Transferable[] {
+  if (result.kind !== 'nativeTopologyPayload') {
+    return []
+  }
+
+  return result.payload.buffers.map(({ buffer }) => buffer)
+}
+
+export type OccNativeTopologyWorkerResultWithBuffers = {
+  kind: 'nativeTopologyPayload'
+  payload: {
+    buffers: readonly OccNativeTransferableBuffer[]
+  }
+} | {
+  kind: 'nativeTopologyUnavailable'
 }
 
 export function getMissingNativeTopologyKernelEntrypoints(

@@ -118,10 +118,14 @@ test('src/domain/modeling/occ/snapshot-native-render.spec.ts', async () => {
 
     expectTrue(typeof nativeJson === 'string', 'Custom OCC build should expose native topology payload JSON.')
 
+    const nativePayload = parseNativeShimPayloadJson(nativeJson)
+    const nativeFaceIds = nativePayload.topology
+      .filter((record) => record.kind === 'face')
+      .map((record) => record.id as FaceId)
     const durableFaceIdsByNativeId = new Map<FaceId, FaceId>(
-      body.topology.faceIds.map((faceId, index) => [
-        `face_${body.bodyId}_${nativeTopologyToken}_${index + 1}` as FaceId,
-        faceId,
+      nativeFaceIds.map((nativeFaceId, index) => [
+        nativeFaceId,
+        body.topology.faceIds[index] ?? nativeFaceId,
       ]),
     )
     const aliasedBody = {
@@ -136,7 +140,7 @@ test('src/domain/modeling/occ/snapshot-native-render.spec.ts', async () => {
       lodTierId: 'fine',
       bodies: [{
         bodyId: body.bodyId,
-        nativePayload: parseNativeShimPayloadJson(nativeJson),
+        nativePayload,
       }],
     })
     const snapshot = buildOccWorkspaceSnapshot(state, [], { nativeTopologyPayload })

@@ -2112,6 +2112,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
   }
 
+  private createNativeTopologyUnavailableError<TPayload>(
+    result: OccNativeTopologyWorkerResult<TPayload>,
+  ) {
+    if (result.kind !== 'nativeTopologyUnavailable') {
+      return new Error('Required OCC native topology payload was unavailable.')
+    }
+
+    const message = result.diagnostics.map((diagnostic) => diagnostic.message).join(' ')
+      || 'Loaded OpenCascade build does not expose required native topology kernel support.'
+    const error = new Error(message)
+    error.name = 'OccNativeTopologyUnavailableError'
+    return error
+  }
+
   private getNativeTopologyHost<TPayload>(state: OccAuthoringState):
     | {
         ok: false
@@ -2163,6 +2177,25 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         lodTierId: tier.id,
         transactionMode,
       })
+      const bodyNativePayload = options.useCommittedShapeTransaction
+        ? body.nativeTopologyPayload
+        : undefined
+
+      if (bodyNativePayload) {
+        this.nativeTopologyBodyPayloadCache.set(cacheKey, {
+          bodyId: body.bodyId,
+          topologyToken: body.topologyToken,
+          lodTierId: tier.id,
+          transactionMode,
+          nativePayload: bodyNativePayload,
+        })
+
+        return {
+          bodyId: body.bodyId,
+          nativePayload: bodyNativePayload,
+        }
+      }
+
       const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey)
 
       if (cached) {
@@ -2264,6 +2297,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       this.snapshotLodTierId,
     )
 
+    if (
+      nativeTopologyResult.kind !== 'nativeTopologyPayload'
+      && runtimeState.authoringState.bodies.length > 0
+    ) {
+      throw this.createNativeTopologyUnavailableError(nativeTopologyResult)
+    }
+
     return {
       contractVersion: CONTRACT_VERSION,
       snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
@@ -2315,7 +2355,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     )
     const runtimeState = await this.getRuntimeState()
 
-    return this.buildNativeTopologyPayloadForState(runtimeState.authoringState, lodTierId)
+    return this.buildNativeTopologyPayloadForState(
+      runtimeState.authoringState,
+      lodTierId,
+      { useCommittedShapeTransaction: true },
+    )
   }
 
   async buildNativeBooleanFeatureTransactionPayload(

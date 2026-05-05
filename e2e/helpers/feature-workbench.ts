@@ -131,9 +131,17 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   async selectSupportedLoftFaceProfile() {
     await this.activateFeature('loft')
     await expect.poll(() => this.featureSessionLabel(), { timeout: 10_000 }).toContain('create:loft:')
-    await this.selectReferenceThroughCurrentUi('body_feature_extrude-1.face_body_feature_extrude-1_t0001_1')
-    await expect.poll(() => this.currentEditorSelection(), { timeout: 10_000 }).toContain('body_feature_extrude-1.face_body_feature_extrude-1_t0001_1')
-    await this.selectReferenceThroughCurrentUi('body_feature_extrude-1.face_body_feature_extrude-1_t0001_6')
+    const faceTargets = await this.currentSelectableTargetsMatching(/^Select .* body_feature_extrude-1\.face_/)
+    const firstFaceTarget = faceTargets[0]
+    const secondFaceTarget = faceTargets[5] ?? faceTargets[1]
+
+    if (!firstFaceTarget || !secondFaceTarget) {
+      throw new Error('Expected the base extrude fixture to expose at least two selectable face targets.')
+    }
+
+    await this.selectReferenceThroughCurrentUi(firstFaceTarget)
+    await expect.poll(() => this.currentEditorSelection(), { timeout: 10_000 }).toContain(firstFaceTarget)
+    await this.selectReferenceThroughCurrentUi(secondFaceTarget)
 
     await expect.poll(async () => {
       if (await this.hasVisibleFeatureErrorDiagnostics()) {
@@ -145,7 +153,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     }, { timeout: 10_000 }).toBe('ready')
 
     await expect.poll(() => this.hasVisibleFeatureErrorDiagnostics(), { timeout: 2_000 }).toBe(false)
-    return 'Select viewport target body_feature_extrude-1.face_body_feature_extrude-1_t0001_6'
+    return `Select viewport target ${secondFaceTarget}`
   }
 
   async setNumericField(label: string, value: number) {
@@ -290,14 +298,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {
-    const targetId = await this.evaluateWithNavigationRetry(
-      ({ source, flags }) => {
-        const matcher = new RegExp(source, flags)
-        const targets = window.__cadaraDebug?.getState()?.selectableTargets ?? []
-        return targets.find((target) => matcher.test(`Select viewport target ${target}`)) ?? null
-      },
-      { source: pattern.source, flags: pattern.flags },
-    )
+    const [targetId] = await this.currentSelectableTargetsMatching(pattern)
 
     if (!targetId) {
       return null
@@ -305,6 +306,20 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     await this.selectReferenceThroughCurrentUi(targetId)
     return `Select viewport target ${targetId}`
+  }
+
+  private async currentSelectableTargetsMatching(pattern: RegExp) {
+    return this.evaluateWithNavigationRetry(
+      ({ source, flags }) => {
+        const matcher = new RegExp(source, flags)
+        const targets = window.__cadaraDebug?.getState()?.selectableTargets ?? []
+        return targets.filter((target) =>
+          matcher.test(target)
+          || matcher.test(`Select viewport target ${target}`)
+        )
+      },
+      { source: pattern.source, flags: pattern.flags },
+    )
   }
 
   private async listVisibleBodyIds() {

@@ -162,6 +162,18 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     expectTrue(nativeTopology.mesh?.triangleFaceBindings?.length === 12, 'Native topology payload should bind every render triangle to a face.')
     expectTrue(topologyPayload.bodies[0]?.identity.length === 27, 'Payload identity should include the body plus native subshape records.')
     expectTrue(
+      topologyPayload.buffers.length >= 3,
+      'Converted native topology payload should expose transferable mesh buffers.',
+    )
+    expectTrue(
+      topologyPayload.bodies[0]?.renderMesh?.positions.byteLength === 24 * 3 * Float32Array.BYTES_PER_ELEMENT,
+      'Converted native topology payload should describe position data through a buffer-backed table.',
+    )
+    expectTrue(
+      topologyPayload.bodies[0]?.renderMesh?.triangleIndices.byteLength === 12 * 3 * Uint32Array.BYTES_PER_ELEMENT,
+      'Converted native topology payload should describe triangle indices through a buffer-backed table.',
+    )
+    expectTrue(
       topologyPayload.bodies[0]?.renderMeshSummary?.positions?.length === 24,
       'Converted native topology payload should retain render mesh positions from the shim payload.',
     )
@@ -179,6 +191,10 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     expectTrue(
       exactBrepPayload.brep.bodies[0]?.topology.vertices.length === 8,
       'Native exact B-rep payload should expose box vertex points from the shim.',
+    )
+    expectTrue(
+      exactBrepPayload.buffers.length === 1,
+      'Converted native exact B-rep payload should expose a transferable serialized exact payload buffer.',
     )
     expectTrue(
       exactBrepPayload.brep.bodies[0]?.topology.edges.length === 12,
@@ -223,6 +239,14 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
     expectTrue(
       meshPayload.meshSummary?.triangleCount === 12,
       'Native mesh export payload should carry the shim mesh summary without JS face triangulation.',
+    )
+    expectTrue(
+      meshPayload.buffers.length >= 3,
+      'Converted native mesh export payload should expose transferable mesh buffers.',
+    )
+    expectTrue(
+      meshPayload.mesh.triangleIndices.byteLength === 12 * 3 * Uint32Array.BYTES_PER_ELEMENT,
+      'Converted native mesh export payload should describe export triangle indices through a buffer-backed table.',
     )
     expectTrue(
       meshPayload.meshSummary?.triangleIndices?.length === 12,
@@ -319,6 +343,43 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
 
     ;(shape as { delete?: () => void }).delete?.()
     cylinderBuilder.delete?.()
+  }
+
+  function testConvertedPayloadPreservesKernelOwnedIdentity() {
+    const bodyId = 'body_kernel_identity_probe' as BodyId
+    const payload = createOccNativeTopologyPayloadFromShimPayloads({
+      revisionId: 'rev_kernel_identity_probe' as RevisionId,
+      lodTierId: 'fine',
+      bodies: [{
+        bodyId,
+        nativePayload: parseNativeShimPayloadJson(JSON.stringify({
+          schemaVersion: 'occ-native-topology-payload/v1alpha1',
+          source: 'occt7-shim',
+          topology: [{
+            id: `face_${bodyId}_k12345`,
+            kernelUid: 'occt7-shim:face:12345',
+            kind: 'face',
+            bodyId,
+            index: 1,
+          }],
+          edgeVertices: [],
+          diagnostics: [],
+        })),
+      }],
+    })
+    const faceIdentity = payload.bodies[0]?.identity.find((identity) =>
+      identity.publicRef?.kind === 'face'
+    )
+
+    expectTrue(
+      faceIdentity?.kernelUid === 'occt7-shim:face:12345',
+      'Converted native topology payload should preserve kernel-owned identity separately from the public durable id.',
+    )
+    expectTrue(
+      faceIdentity?.publicRef?.kind === 'face'
+        && !faceIdentity.publicRef.faceId.includes('_t0001_'),
+      'Converted native topology payload should allow fresh public ids that are not topology-token traversal ids.',
+    )
   }
 
   async function testNativeFeatureTransactionPreparesCommittedShapePayload() {
@@ -506,6 +567,7 @@ test('src/domain/modeling/occ/native-topology-payload.spec.ts', async () => {
   await testNativeShimReturnsFlatTopologyAndMeshPayloads()
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes()
   await testNativeExactBrepExtractsCurvedTopologyInsteadOfFlatteningIt()
+  testConvertedPayloadPreservesKernelOwnedIdentity()
   await testNativeFeatureTransactionPreparesCommittedShapePayload()
   await testNativeBooleanTransactionBuildsCommittedPayload()
   await testNativeBooleanTransactionReturnsCommittedShapeResult()

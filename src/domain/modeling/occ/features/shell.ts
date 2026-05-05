@@ -8,7 +8,10 @@ import {
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from '@/domain/modeling/occ/features/shared'
-import { applyBooleanPolicy } from '@/domain/modeling/occ/features/boolean-operations'
+import {
+  applyBooleanPolicy,
+  validateNativeFeatureTransaction,
+} from '@/domain/modeling/occ/features/boolean-operations'
 import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
 
 function serializeNativeFaceTargets(targets: readonly { faceId: `face_${string}` }[]) {
@@ -108,9 +111,7 @@ function buildNativeShellFeatureShape(
     0.5,
   )
 
-  if (!transaction.IsDone()) {
-    throw new Error('OCC shell build failed.')
-  }
+  validateNativeFeatureTransaction(transaction, 'shell')
 
   return {
     sourceBody,

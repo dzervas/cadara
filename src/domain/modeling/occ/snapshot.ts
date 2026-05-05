@@ -80,6 +80,7 @@ import {
 } from '@/domain/modeling/occ/tessellation'
 import type {
   OccNativeShimMeshSummary,
+  OccNativeTopologyBodyPayload,
   OccNativeTopologyPayload,
 } from '@/domain/modeling/occ/native-topology-payload'
 
@@ -968,14 +969,39 @@ function buildFaceRenderRecord(
   }
 }
 
-function getNativeRenderMeshSummary(
+function getNativeTopologyBodyPayload(
   body: OccTrackedBody,
   options: OccSnapshotBuildOptions,
 ) {
   return options.nativeTopologyPayload
     ?.bodies
     .find((candidate) => candidate.bodyId === body.bodyId)
-    ?.renderMeshSummary
+}
+
+function createNativeFaceIdAliasMap(
+  body: OccTrackedBody,
+  nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
+) {
+  if (body.nativeTopologyIdAliases?.faceIdsByNativeId) {
+    return body.nativeTopologyIdAliases.faceIdsByNativeId
+  }
+
+  const aliases = new Map<string, FaceId>(body.topology.faceIds.map((faceId) => [faceId, faceId]))
+  const nativeFaceIds = nativeBodyPayload
+    ?.topology
+    .filter((record) => record.kind === 'face')
+    .map((record) => record.id) ?? []
+
+  for (let index = 0; index < nativeFaceIds.length; index += 1) {
+    const durableFaceId = body.topology.faceIds[index]
+    const nativeFaceId = nativeFaceIds[index]
+
+    if (durableFaceId && nativeFaceId) {
+      aliases.set(nativeFaceId, durableFaceId)
+    }
+  }
+
+  return aliases
 }
 
 function buildNativeFaceMeshGeometry(
@@ -1047,10 +1073,10 @@ function buildNativeFaceRenderRecords(
   body: OccTrackedBody,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
   mesh: OccNativeShimMeshSummary,
+  nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
 ) {
   const records: RenderableEntityRecord[] = []
-  const nativeFaceIdsByDurableFaceId = body.nativeTopologyIdAliases?.faceIdsByNativeId
-    ?? new Map(body.topology.faceIds.map((faceId) => [faceId, faceId]))
+  const nativeFaceIdsByDurableFaceId = createNativeFaceIdAliasMap(body, nativeBodyPayload)
 
   for (const faceId of body.topology.faceIds) {
     const geometry = buildNativeFaceMeshGeometry(mesh, faceId, nativeFaceIdsByDurableFaceId)
@@ -1374,10 +1400,17 @@ function buildBodyRenderRecords(
   options: OccSnapshotBuildOptions = {},
 ) {
   const records: RenderableEntityRecord[] = []
-  const nativeRenderMesh = getNativeRenderMeshSummary(body, options)
+  const nativeBodyPayload = getNativeTopologyBodyPayload(body, options)
+  const nativeRenderMesh = nativeBodyPayload?.renderMeshSummary ?? null
 
   if (nativeRenderMesh) {
-    records.push(...buildNativeFaceRenderRecords(state, body, faceSemanticClasses, nativeRenderMesh))
+    records.push(...buildNativeFaceRenderRecords(
+      state,
+      body,
+      faceSemanticClasses,
+      nativeRenderMesh,
+      nativeBodyPayload,
+    ))
 
     for (const edgeId of body.topology.edgeIds) {
       const edge = body.edgesById.get(edgeId)

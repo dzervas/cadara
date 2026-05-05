@@ -276,9 +276,23 @@ async function readNodeOpenCascadeWasmBinary(path: string) {
 }
 
 async function loadNodeOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
+  const allowLegacyTopologyEnumerationForNodeTests = async (initializer: OpenCascadeInitializer) => {
+    const oc = await initializer()
+
+    ;(oc as OpenCascadeInstance & { CadaraAllowLegacyTopologyEnumerationForTests?: boolean })
+      .CadaraAllowLegacyTopologyEnumerationForTests = true
+
+    return oc
+  }
+
   try {
     const nodeEntrySpecifier = 'opencascade.js/dist/' + 'node.js'
-    return await import(/* @vite-ignore */ nodeEntrySpecifier) as Promise<OpenCascadeFactoryModule>
+    const module = await import(/* @vite-ignore */ nodeEntrySpecifier) as OpenCascadeFactoryModule
+    const initializer = resolveOpenCascadeInitializer(module)
+
+    return {
+      default: (settings = {}) => allowLegacyTopologyEnumerationForNodeTests(() => initializer(settings)),
+    }
   } catch {
     const legacyMainSpecifier = 'opencascade.js/dist/' + 'opencascade.wasm.js'
     const legacyWasmSpecifier = 'opencascade.js/dist/' + 'opencascade.wasm.wasm'
@@ -292,13 +306,17 @@ async function loadNodeOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
     )
 
     return {
-      default: async (settings = {}) => defaultInitializer({
-        ...settings,
-        module: {
-          ...settings.module,
-          wasmBinary: settings.module?.wasmBinary ?? await readNodeOpenCascadeWasmBinary(wasmPath),
-        },
-      }),
+      default: async (settings = {}) => {
+        const initializer = async () => defaultInitializer({
+          ...settings,
+          module: {
+            ...settings.module,
+            wasmBinary: settings.module?.wasmBinary ?? await readNodeOpenCascadeWasmBinary(wasmPath),
+          },
+        })
+
+        return allowLegacyTopologyEnumerationForNodeTests(initializer)
+      },
     }
   }
 }

@@ -353,7 +353,7 @@ export function createVertexReferencedCircleOperationHistory(): ModelingOperatio
               source: {
                 kind: 'vertex',
                 bodyId: 'body_feature_extrude-1',
-                vertexId: 'vertex_body_feature_extrude-1_t0001_2',
+                vertexId: 'vertex_body_feature_extrude-1_gcacb85faae727c4a',
               },
               projectionMode: 'projectAlongPlaneNormal',
             }],
@@ -420,7 +420,7 @@ export function createFaceBackedVertexReferencedCircleOperationHistory(): Modeli
             support: {
               kind: 'face',
               bodyId: 'body_feature_extrude-1',
-              faceId: 'face_body_feature_extrude-1_t0001_6',
+              faceId: 'face_body_feature_extrude-1_g6c121d31a8b2062a',
             },
             frame: {
               origin: [0, 0, 10],
@@ -441,7 +441,7 @@ export function createFaceBackedVertexReferencedCircleOperationHistory(): Modeli
               source: {
                 kind: 'vertex',
                 bodyId: 'body_feature_extrude-1',
-                vertexId: 'vertex_body_feature_extrude-1_t0001_2',
+                vertexId: 'vertex_body_feature_extrude-1_gcacb85faae727c4a',
               },
               projectionMode: 'projectAlongPlaneNormal',
             }],

@@ -67,6 +67,110 @@ namespace {
     }
   }
 
+  double CadaraQuantizedDouble(const double value) {
+    if (std::abs(value) < 1.0e-9) {
+      return 0.0;
+    }
+    return std::round(value * 1000000.0) / 1000000.0;
+  }
+
+  std::string CadaraDoubleKey(const double value) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(6) << CadaraQuantizedDouble(value);
+    return out.str();
+  }
+
+  std::string CadaraPointKey(const gp_Pnt& point) {
+    return CadaraDoubleKey(point.X())
+      + ","
+      + CadaraDoubleKey(point.Y())
+      + ","
+      + CadaraDoubleKey(point.Z());
+  }
+
+  std::string CadaraStableDigest(const std::string& value) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const unsigned char character : value) {
+      hash ^= static_cast<std::uint64_t>(character);
+      hash *= 1099511628211ULL;
+    }
+
+    std::ostringstream out;
+    out << std::hex << hash;
+    return out.str();
+  }
+
+  std::string CadaraStableShapeSignature(
+    const TopAbs_ShapeEnum shapeType,
+    const TopoDS_Shape& shape
+  ) {
+    if (shapeType == TopAbs_VERTEX) {
+      const TopoDS_Vertex vertex = TopoDS::Vertex(shape);
+      return "vertex:" + CadaraPointKey(BRep_Tool::Pnt(vertex));
+    }
+
+    if (shapeType == TopAbs_EDGE) {
+      const TopoDS_Edge edge = TopoDS::Edge(shape);
+      const TopoDS_Vertex firstVertex = TopExp::FirstVertex(edge, true);
+      const TopoDS_Vertex lastVertex = TopExp::LastVertex(edge, true);
+      std::string firstPointKey = CadaraPointKey(BRep_Tool::Pnt(firstVertex));
+      std::string lastPointKey = CadaraPointKey(BRep_Tool::Pnt(lastVertex));
+      if (lastPointKey < firstPointKey) {
+        std::swap(firstPointKey, lastPointKey);
+      }
+
+      GProp_GProps properties;
+      BRepGProp::LinearProperties(edge, properties);
+      return "edge:"
+        + firstPointKey
+        + ":"
+        + lastPointKey
+        + ":length:"
+        + CadaraDoubleKey(properties.Mass())
+        + ":center:"
+        + CadaraPointKey(properties.CentreOfMass());
+    }
+
+    if (shapeType == TopAbs_FACE) {
+      const TopoDS_Face face = TopoDS::Face(shape);
+      GProp_GProps properties;
+      BRepGProp::SurfaceProperties(face, properties);
+      const BRepAdaptor_Surface surface(face);
+      return "face:type:"
+        + std::to_string(static_cast<int>(surface.GetType()))
+        + ":area:"
+        + CadaraDoubleKey(properties.Mass())
+        + ":center:"
+        + CadaraPointKey(properties.CentreOfMass());
+    }
+
+    return CadaraTopologyKind(shapeType) + ":unsupported";
+  }
+
+  std::string CadaraKernelUidForShape(
+    const TopAbs_ShapeEnum shapeType,
+    const TopoDS_Shape& shape
+  ) {
+    std::ostringstream out;
+    out
+      << "occt7-shim:"
+      << CadaraTopologyKind(shapeType)
+      << ":"
+      << CadaraStableShapeSignature(shapeType, shape);
+    return out.str();
+  }
+
+  std::string CadaraTopologyIdForShape(
+    const TopAbs_ShapeEnum shapeType,
+    const std::string& bodyId,
+    const TopoDS_Shape& shape
+  ) {
+    return CadaraTopologyIdPrefix(shapeType)
+      + bodyId
+      + "_g"
+      + CadaraStableDigest(CadaraStableShapeSignature(shapeType, shape));
+  }
+
   void CadaraAppendTopologyRecords(
     std::ostringstream& out,
     const TopoDS_Shape& shape,
@@ -88,11 +192,14 @@ namespace {
       }
       needsComma = true;
 
+      const TopoDS_Shape subshape = shapeMap.FindKey(index);
       const std::string kind = CadaraTopologyKind(shapeType);
-      const std::string id = CadaraTopologyIdPrefix(shapeType) + bodyId + "_" + topologyToken + "_" + std::to_string(index);
+      const std::string id = CadaraTopologyIdForShape(shapeType, bodyId, subshape);
+      const std::string kernelUid = CadaraKernelUidForShape(shapeType, subshape);
 
       out
         << "{\"id\":\"" << CadaraEscapeJson(id)
+        << "\",\"kernelUid\":\"" << CadaraEscapeJson(kernelUid)
         << "\",\"kind\":\"" << kind
         << "\",\"bodyId\":\"" << CadaraEscapeJson(bodyId)
         << "\",\"index\":" << index
@@ -123,7 +230,7 @@ namespace {
       const TopoDS_Vertex lastVertex = TopExp::LastVertex(edge, true);
       const gp_Pnt firstPoint = BRep_Tool::Pnt(firstVertex);
       const gp_Pnt lastPoint = BRep_Tool::Pnt(lastVertex);
-      const std::string edgeId = "edge_" + bodyId + "_" + topologyToken + "_" + std::to_string(index);
+      const std::string edgeId = CadaraTopologyIdForShape(TopAbs_EDGE, bodyId, edge);
 
       out
         << "{\"edgeId\":\"" << CadaraEscapeJson(edgeId)
@@ -153,7 +260,7 @@ namespace {
 
       const TopoDS_Vertex vertex = TopoDS::Vertex(vertexMap.FindKey(index));
       const gp_Pnt point = BRep_Tool::Pnt(vertex);
-      const std::string vertexId = "vertex_" + bodyId + "_" + topologyToken + "_" + std::to_string(index);
+      const std::string vertexId = CadaraTopologyIdForShape(TopAbs_VERTEX, bodyId, vertex);
 
       out
         << "{\"vertexId\":\"" << CadaraEscapeJson(vertexId)
@@ -185,7 +292,7 @@ namespace {
       const TopoDS_Face face = TopoDS::Face(faceMap.FindKey(faceIndex));
       TopTools_IndexedMapOfShape faceEdgeMap;
       TopExp::MapShapes(face, TopAbs_EDGE, faceEdgeMap);
-      const std::string faceId = "face_" + bodyId + "_" + topologyToken + "_" + std::to_string(faceIndex);
+      const std::string faceId = CadaraTopologyIdForShape(TopAbs_FACE, bodyId, face);
 
       out
         << "{\"faceId\":\"" << CadaraEscapeJson(faceId)
@@ -201,7 +308,7 @@ namespace {
           out << ",";
         }
         needsComma = true;
-        const std::string edgeId = "edge_" + bodyId + "_" + topologyToken + "_" + std::to_string(globalEdgeIndex);
+        const std::string edgeId = CadaraTopologyIdForShape(TopAbs_EDGE, bodyId, edgeMap.FindKey(globalEdgeIndex));
         out << "\"" << CadaraEscapeJson(edgeId) << "\"";
       }
 
@@ -314,7 +421,7 @@ namespace {
         continue;
       }
 
-      const std::string faceId = "face_" + bodyId + "_" + topologyToken + "_" + std::to_string(faceIndex);
+      const std::string faceId = CadaraTopologyIdForShape(TopAbs_FACE, bodyId, face);
       for (int triangleIndex = 1; triangleIndex <= triangulation->NbTriangles(); triangleIndex += 1) {
         if (needsBindingComma) {
           out << ",";
@@ -513,14 +620,13 @@ namespace {
     std::ostringstream& out,
     const TopAbs_ShapeEnum shapeType,
     const std::string& bodyId,
-    const std::string& topologyToken,
-    const int index
+    const TopoDS_Shape& shape
   ) {
     out
       << "{\"kind\":\"" << CadaraTopologyKind(shapeType) << "\""
       << ",\"bodyId\":\"" << CadaraEscapeJson(bodyId) << "\""
       << ",\"" << CadaraTargetIdFieldForKind(shapeType) << "\":\""
-      << CadaraEscapeJson(CadaraTargetIdForKind(shapeType, bodyId, topologyToken, index))
+      << CadaraEscapeJson(CadaraTopologyIdForShape(shapeType, bodyId, shape))
       << "\"}";
   }
 
@@ -562,7 +668,7 @@ namespace {
       }
       needsSuccessorComma = true;
       successorIndexes.push_back(finalIndex);
-      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, topologyToken, finalIndex);
+      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, finalShapeMap.FindKey(finalIndex));
       appended += 1;
     }
 
@@ -619,7 +725,7 @@ namespace {
       if (successorIndexes.empty() && !deleted) {
         const int preservedIndex = finalShapeMap.FindIndex(previousSubshape);
         if (preservedIndex > 0) {
-          CadaraAppendDurableTopologyTargetJson(successorsJson, shapeType, bodyId, topologyToken, preservedIndex);
+          CadaraAppendDurableTopologyTargetJson(successorsJson, shapeType, bodyId, finalShapeMap.FindKey(preservedIndex));
           successorIndexes.push_back(preservedIndex);
         }
       }
@@ -639,7 +745,7 @@ namespace {
       needsRecordComma = true;
 
       out << "{\"target\":";
-      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, previousTopologyToken, previousIndex);
+      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, previousSubshape);
       out
         << ",\"reason\":\"" << reason << "\""
         << ",\"successors\":[" << successorsJson.str() << "]}";
@@ -733,18 +839,23 @@ namespace {
   ) {
     const int index = CadaraParseTargetIndex(edgeId, TopAbs_EDGE, bodyId, topologyToken);
 
-    if (index <= 0) {
-      return false;
-    }
-
     TopTools_IndexedMapOfShape edgeMap;
     TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
-    if (index > edgeMap.Size()) {
-      return false;
+
+    if (index > 0 && index <= edgeMap.Size()) {
+      edge = TopoDS::Edge(edgeMap.FindKey(index));
+      return true;
     }
 
-    edge = TopoDS::Edge(edgeMap.FindKey(index));
-    return true;
+    for (int edgeIndex = 1; edgeIndex <= edgeMap.Size(); edgeIndex += 1) {
+      const TopoDS_Edge candidate = TopoDS::Edge(edgeMap.FindKey(edgeIndex));
+      if (CadaraTopologyIdForShape(TopAbs_EDGE, bodyId, candidate) == edgeId) {
+        edge = candidate;
+        return true;
+      }
+    }
+
+    return false;
   }
 
   bool CadaraFindFaceById(
@@ -756,18 +867,23 @@ namespace {
   ) {
     const int index = CadaraParseTargetIndex(faceId, TopAbs_FACE, bodyId, topologyToken);
 
-    if (index <= 0) {
-      return false;
-    }
-
     TopTools_IndexedMapOfShape faceMap;
     TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
-    if (index > faceMap.Size()) {
-      return false;
+
+    if (index > 0 && index <= faceMap.Size()) {
+      face = TopoDS::Face(faceMap.FindKey(index));
+      return true;
     }
 
-    face = TopoDS::Face(faceMap.FindKey(index));
-    return true;
+    for (int faceIndex = 1; faceIndex <= faceMap.Size(); faceIndex += 1) {
+      const TopoDS_Face candidate = TopoDS::Face(faceMap.FindKey(faceIndex));
+      if (CadaraTopologyIdForShape(TopAbs_FACE, bodyId, candidate) == faceId) {
+        face = candidate;
+        return true;
+      }
+    }
+
+    return false;
   }
 
   bool CadaraFindFirstAdjacentFace(
@@ -869,7 +985,7 @@ namespace {
       needsRecordComma = true;
 
       out << "{\"target\":";
-      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, previousTopologyToken, previousIndex);
+      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, previousSubshape);
       out
         << ",\"reason\":\"" << reason << "\""
         << ",\"successors\":[]}";
@@ -1026,4 +1142,3 @@ namespace {
     ).PayloadJson();
   }
 }
-

@@ -1,4 +1,5 @@
 import { test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
 import { expectTrue } from '@/testing/expect.spec'
 import type { ConstructionSnapshotRecord, FeatureDefinition, SketchSnapshotRecord } from '@/contracts/modeling/schema'
 import type { ConstructionId, SketchEntityId, SketchId, SketchPointId } from '@/contracts/shared/ids'
@@ -11,7 +12,8 @@ import {
   type SketchDefinition as AuthoredSketchDefinition,
   type SketchRecord,
 } from '@/contracts/sketch/schema'
-import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import type { OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
 import {
   advanceTopologyToken,
   createBodySnapshotRecord,
@@ -176,9 +178,9 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {  function pointId
     }
   }
 
-  async function makeBoxBody(token: string) {
-    const oc = await getDefaultOpenCascadeInstance()
-    const builder = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 8, 6)
+  async function makeBoxBody(token: string, dimensions: readonly [number, number, number] = [10, 8, 6]) {
+    const oc = await loadCustomOpenCascadeForTopologyTest()
+    const builder = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), dimensions[0], dimensions[1], dimensions[2])
     builder.Build(new oc.Message_ProgressRange_1())
     expectTrue(builder.IsDone(), 'Expected OCC box builder to succeed in topology test.')
 
@@ -198,6 +200,164 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {  function pointId
     }
 
     return body
+  }
+
+  async function loadCustomOpenCascadeForTopologyTest() {
+    const module = await import('../../../../public/cadara-occ.js') as {
+      default: new (module: Record<string, unknown>) => Promise<OpenCascadeInstance & OpenCascadeNativeTopologyKernelHost>
+    }
+    const wasmBinary = new Uint8Array(
+      await readFile(new URL('../../../../public/cadara-occ.wasm', import.meta.url)),
+    )
+
+    return new module.default({ wasmBinary })
+  }
+
+  async function testNewBodiesUseKernelOwnedNativeTopologyIds() {
+    const oc = await loadCustomOpenCascadeForTopologyTest()
+    const nativeBuildJson = (oc as {
+      CadaraBuildNativeTopologyPayload?: {
+        BuildJson?: unknown
+      }
+    }).CadaraBuildNativeTopologyPayload?.BuildJson
+    expectTrue(
+      typeof nativeBuildJson === 'function',
+      'Default OCC build must expose native topology payloads for tracked solid identity.',
+    )
+
+    const builder = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 8, 6)
+    builder.Build(new oc.Message_ProgressRange_1())
+    expectTrue(builder.IsDone(), 'Expected OCC box builder to succeed in native identity topology test.')
+
+    const body = trackNewSolidBody(oc, {
+      bodyId: 'body_native_identity',
+      label: 'Native Identity Body',
+      ownerFeatureId: 'feature_native_identity',
+      shape: builder.Shape(),
+    })
+    const tokenSegment = `_${body.topologyToken}_`
+
+    expectTrue(
+      body.topology.faceIds.every((faceId) => !faceId.includes(tokenSegment)),
+      'New tracked bodies must not expose traversal-token face ids when native topology payloads are available.',
+    )
+    expectTrue(
+      body.topology.edgeIds.every((edgeId) => !edgeId.includes(tokenSegment)),
+      'New tracked bodies must not expose traversal-token edge ids when native topology payloads are available.',
+    )
+    expectTrue(
+      body.topology.vertexIds.every((vertexId) => !vertexId.includes(tokenSegment)),
+      'New tracked bodies must not expose traversal-token vertex ids when native topology payloads are available.',
+    )
+
+    builder.delete?.()
+  }
+
+  async function testBodyCommitRequiresNativeTopologyPayloads() {
+    const oc = await loadCustomOpenCascadeForTopologyTest()
+    const nativeHost = oc as OpenCascadeNativeTopologyKernelHost
+    const originalBuildJson = nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson
+    expectTrue(typeof originalBuildJson === 'function', 'Native topology fallback test requires the native build entrypoint.')
+    const builder = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 8, 6)
+    builder.Build(new oc.Message_ProgressRange_1())
+    expectTrue(builder.IsDone(), 'Expected OCC box builder to succeed in native fallback topology test.')
+    nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = undefined
+
+    try {
+      trackNewSolidBody(oc, {
+        bodyId: 'body_native_required',
+        label: 'Native Required Body',
+        ownerFeatureId: 'feature_native_required',
+        shape: builder.Shape(),
+      })
+      expectTrue(false, 'Committed body tracking must fail when the native topology payload entrypoint is missing.')
+    } catch (error) {
+      expectTrue(
+        error instanceof Error && error.message.includes('required native topology payload support'),
+        'Missing native topology support should fail at body commit time instead of falling back to TS enumeration.',
+      )
+    } finally {
+      nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = originalBuildJson
+      builder.delete?.()
+    }
+  }
+
+  async function testBodyCommitRejectsNativePayloadErrorsAndDisambiguatesDuplicateIdentity() {
+    const oc = await loadCustomOpenCascadeForTopologyTest()
+    const nativeHost = oc as OpenCascadeNativeTopologyKernelHost
+    const originalBuildJson = nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson
+    expectTrue(typeof originalBuildJson === 'function', 'Native payload release gate test requires the native build entrypoint.')
+    const builder = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 10, 8, 6)
+    builder.Build(new oc.Message_ProgressRange_1())
+    expectTrue(builder.IsDone(), 'Expected OCC box builder to succeed in native payload release gate test.')
+
+    nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = (...args) => {
+      const payload = JSON.parse(originalBuildJson(...args)) as {
+        diagnostics: unknown[]
+      }
+      payload.diagnostics.push({
+        code: 'occ-native-topology-invalid-shape',
+        severity: 'error',
+        message: 'Injected native topology validation error.',
+        target: { kind: 'body', bodyId: 'body_native_payload_error' },
+        detail: { kind: 'shapeValidation' },
+      })
+
+      return JSON.stringify(payload)
+    }
+
+    try {
+      trackNewSolidBody(oc, {
+        bodyId: 'body_native_payload_error',
+        label: 'Native Payload Error Body',
+        ownerFeatureId: 'feature_native_payload_error',
+        shape: builder.Shape(),
+      })
+      expectTrue(false, 'Committed body tracking must reject native topology payload error diagnostics.')
+    } catch (error) {
+      expectTrue(
+        error instanceof Error && error.message.includes('Injected native topology validation error.'),
+        'Native topology payload error diagnostics should gate committed body state.',
+      )
+    }
+
+    nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = (...args) => {
+      const payload = JSON.parse(originalBuildJson(...args)) as {
+        topology: { kind: string; id: string; bodyId: string; kernelUid?: string }[]
+      }
+      const firstFace = payload.topology.find((record) => record.kind === 'face')
+      const secondFace = payload.topology.find((record) =>
+        record.kind === 'face' && record.id !== firstFace?.id)
+
+      if (firstFace && secondFace) {
+        secondFace.id = firstFace.id
+        secondFace.kernelUid = firstFace.kernelUid ?? firstFace.id
+      }
+
+      return JSON.stringify(payload)
+    }
+
+    try {
+      const body = trackNewSolidBody(oc, {
+        bodyId: 'body_native_payload_duplicate',
+        label: 'Native Payload Duplicate Body',
+        ownerFeatureId: 'feature_native_payload_duplicate',
+        shape: builder.Shape(),
+      })
+      const faceIds = body.topology.faceIds
+
+      expectTrue(
+        new Set(faceIds).size === faceIds.length,
+        'Duplicate native topology identity should be deterministically disambiguated before ids are inserted into topology maps.',
+      )
+      expectTrue(
+        faceIds.some((faceId) => faceId.includes('_i')),
+        'Disambiguated native topology ids should retain a deterministic collision suffix.',
+      )
+    } finally {
+      nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = originalBuildJson
+      builder.delete?.()
+    }
   }
 
   function testTopologyTokensAdvanceForReplacementBodies() {
@@ -248,10 +408,10 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {  function pointId
     const entity = sketch.sketch.definition.entities[0]
     const region = sketch.sketch.regions[0]
 
-    expectTrue(snapshot.topology.faceIds[0] === faceId, 'Body snapshot must preserve enumerated face ids.')
-    expectTrue(snapshot.topology.edgeIds[0] === edgeId, 'Body snapshot must preserve enumerated edge ids.')
-    expectTrue(faceId.includes('_t0001_'), 'Face ids must encode the current body topology token.')
-    expectTrue(edgeId.includes('_t0001_'), 'Edge ids must encode the current body topology token.')
+    expectTrue(snapshot.topology.faceIds[0] === faceId, 'Body snapshot must preserve committed native face ids.')
+    expectTrue(snapshot.topology.edgeIds[0] === edgeId, 'Body snapshot must preserve committed native edge ids.')
+    expectTrue(!faceId.includes('_t0001_'), 'Face ids must not fall back to topology-token traversal ids.')
+    expectTrue(!edgeId.includes('_t0001_'), 'Edge ids must not fall back to topology-token traversal ids.')
 
     const liveFaceResolution = resolveOccReference({
       documentId: OCC_KERNEL_DOCUMENT_ID,
@@ -298,10 +458,13 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {  function pointId
 
   async function testMissingTopologyReferencesInvalidateAgainstPriorState() {
     const original = await makeBoxBody(createInitialTopologyToken())
-    const replaced = await makeBoxBody(advanceTopologyToken(original.topologyToken))
-    const staleFaceId = original.topology.faceIds[0]
-    const staleEdgeId = original.topology.edgeIds[0]
-    const staleVertexId = original.topology.vertexIds[0]
+    const replaced = await makeBoxBody(advanceTopologyToken(original.topologyToken), [12, 8, 6])
+    const staleFaceId = original.topology.faceIds.find((faceId) => !replaced.topology.faceIds.includes(faceId))
+      ?? original.topology.faceIds[0]
+    const staleEdgeId = original.topology.edgeIds.find((edgeId) => !replaced.topology.edgeIds.includes(edgeId))
+      ?? original.topology.edgeIds[0]
+    const staleVertexId = original.topology.vertexIds.find((vertexId) => !replaced.topology.vertexIds.includes(vertexId))
+      ?? original.topology.vertexIds[0]
     const previous = createOccReferenceState({
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
@@ -397,6 +560,9 @@ test('src/domain/modeling/occ/topology.spec.ts', async () => {  function pointId
   }
 
   await testTopologyTokensAdvanceForReplacementBodies()
+  await testNewBodiesUseKernelOwnedNativeTopologyIds()
+  await testBodyCommitRequiresNativeTopologyPayloads()
+  await testBodyCommitRejectsNativePayloadErrorsAndDisambiguatesDuplicateIdentity()
   await testBodySnapshotsAndReferenceStateExposeLiveTopology()
   await testMissingTopologyReferencesInvalidateAgainstPriorState()
 

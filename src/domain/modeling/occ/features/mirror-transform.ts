@@ -21,6 +21,7 @@ import {
   resolveReplacementBodies,
   requireUniqueTargetBodies,
   trackBodiesFromShape,
+  validateNativeFeatureTransaction,
 } from '@/domain/modeling/occ/features/boolean-operations'
 import type {
   OpenCascadeNativeFeatureTransactionResult,
@@ -88,9 +89,7 @@ function buildNativeTransformTransaction(
     0.5,
   )
 
-  if (!transaction.IsDone()) {
-    throw new Error(`advanced-feature-unsupported-kernel-case: OCC ${operation} native transform transaction failed.`)
-  }
+  validateNativeFeatureTransaction(transaction, operation)
 
   return transaction
 }

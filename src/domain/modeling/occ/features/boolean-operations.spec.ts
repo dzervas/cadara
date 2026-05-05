@@ -6,11 +6,13 @@ import type { DurableRef } from '@/contracts/shared/references'
 import { createOccAuthoringState } from '@/domain/modeling/occ/authoring-state'
 import {
   applyBooleanPolicy,
+  resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
 } from '@/domain/modeling/occ/features/boolean-operations'
 import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
 import { toGpPnt } from '@/domain/modeling/occ/planes'
 import { getDefaultOpenCascadeInstance, type OpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+import { OpenCascadeKernelAdapter } from '@/domain/modeling/opencascade-kernel-adapter'
 import {
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,
@@ -116,6 +118,180 @@ test('resolveReplacementBodies invalidates topology explicitly when replacement 
       invalidation.sourceTarget?.kind === 'body' && invalidation.sourceTarget.bodyId === body.bodyId,
       `Expected ${getOccDurableRefKey(target)} to identify its owning body as the invalidation source.`,
     )
+  }
+})
+
+test('resolveNativeFeatureTransactionReplacement rejects committed shapes with native validation errors', async () => {
+  const oc = await getDefaultOpenCascadeInstance()
+  const body = makeTrackedBox(
+    oc,
+    'body_native_validation_gate_seed' as BodyId,
+    'feature_native_validation_gate_seed' as FeatureId,
+    [1, 1, 1],
+  )
+  const context = createOccAuthoringState(oc, { bodies: [body] })
+  const transaction = {
+    IsDone: () => true,
+    Shape: () => body.shape,
+    PayloadJson: () => JSON.stringify({
+      schemaVersion: 'occ-native-topology-payload/v1alpha1',
+      source: 'occt7-shim',
+      topology: [],
+      edgeVertices: [],
+      diagnostics: [{
+        code: 'occ-native-topology-invalid-shape',
+        severity: 'error',
+        message: 'Native validation rejected test shape.',
+        target: { kind: 'body', bodyId: body.bodyId },
+        detail: { kind: 'shapeValidation' },
+      }],
+    }),
+    HistoryJson: () => JSON.stringify({
+      schemaVersion: 'occ-native-history-payload/v1alpha1',
+      source: 'occt7-shim',
+      status: 'available',
+      records: [],
+      diagnostics: [],
+    }),
+  }
+
+  try {
+    resolveNativeFeatureTransactionReplacement(
+      context,
+      body,
+      transaction,
+      'validation-gate',
+      'feature_native_validation_gate_replace' as FeatureId,
+    )
+    expectTrue(false, 'Native transaction validation diagnostics should reject committed state.')
+  } catch (error) {
+    expectTrue(
+      error instanceof Error && error.message.includes('Native validation rejected test shape.'),
+      'Native transaction rejection should surface the native validation diagnostic message.',
+    )
+  }
+})
+
+test('resolveNativeFeatureTransactionReplacement consumes native replacement topology ids', async () => {
+  const oc = await getDefaultOpenCascadeInstance()
+  const body = makeTrackedBox(
+    oc,
+    'body_native_payload_identity_seed' as BodyId,
+    'feature_native_payload_identity_seed' as FeatureId,
+    [1, 1, 1],
+  )
+  const context = createOccAuthoringState(oc, { bodies: [body] })
+  const nativeFaceId = `face_${body.bodyId}_native_payload_1`
+  const nativeEdgeId = `edge_${body.bodyId}_native_payload_1`
+  const nativeVertexId = `vertex_${body.bodyId}_native_payload_1`
+  const transactionPayload = {
+    schemaVersion: 'occ-native-topology-payload/v1alpha1',
+    source: 'occt7-shim',
+    topology: [
+      ...body.topology.faceIds.map((_, index) => ({
+        id: `face_${body.bodyId}_native_payload_${index + 1}`,
+        kind: 'face',
+        bodyId: body.bodyId,
+        index: index + 1,
+      })),
+      ...body.topology.edgeIds.map((_, index) => ({
+        id: `edge_${body.bodyId}_native_payload_${index + 1}`,
+        kind: 'edge',
+        bodyId: body.bodyId,
+        index: index + 1,
+      })),
+      ...body.topology.vertexIds.map((_, index) => ({
+        id: `vertex_${body.bodyId}_native_payload_${index + 1}`,
+        kind: 'vertex',
+        bodyId: body.bodyId,
+        index: index + 1,
+      })),
+    ],
+    edgeVertices: [],
+    diagnostics: [],
+  }
+  const transaction = {
+    IsDone: () => true,
+    Shape: () => body.shape,
+    PayloadJson: () => JSON.stringify(transactionPayload),
+    HistoryJson: () => JSON.stringify({
+      schemaVersion: 'occ-native-history-payload/v1alpha1',
+      source: 'occt7-shim',
+      status: 'available',
+      records: [],
+      diagnostics: [],
+    }),
+  }
+
+  const result = resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    transaction,
+    'native-payload-identity',
+    'feature_native_payload_identity_replace' as FeatureId,
+  )
+
+  expectTrue(
+    result.replacements[0]?.topology.faceIds[0] === nativeFaceId,
+    'Native transaction replacement faces should come from native payload ids, not a second TS enumeration pass.',
+  )
+  expectTrue(
+    result.replacements[0]?.topology.edgeIds[0] === nativeEdgeId,
+    'Native transaction replacement edges should come from native payload ids, not a second TS enumeration pass.',
+  )
+  expectTrue(
+    result.replacements[0]?.topology.vertexIds[0] === nativeVertexId,
+    'Native transaction replacement vertices should come from native payload ids, not a second TS enumeration pass.',
+  )
+  expectTrue(
+    result.replacements[0]?.nativeTopologyPayload?.topology[0]?.id === transactionPayload.topology[0]?.id,
+    'Native transaction replacements should retain their native payload when history reconciliation leaves payload ids intact.',
+  )
+})
+
+test('committed native topology snapshots reuse body-owned transaction payloads', async () => {
+  const oc = await loadCustomOpenCascadeForTest()
+  const body = makeTrackedBox(
+    oc,
+    'body_committed_payload_reuse' as BodyId,
+    'feature_committed_payload_reuse' as FeatureId,
+    [1, 1, 1],
+  )
+  expectTrue(body.nativeTopologyPayload != null, 'Tracked OCC body should carry the native topology payload that established its ids.')
+  const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const originalBuildCommittedShapePayload = nativeHost.CadaraExecuteNativeFeatureTransaction?.BuildCommittedShapePayload
+  expectTrue(
+    typeof originalBuildCommittedShapePayload === 'function',
+    'Expected custom OCC runtime to expose committed shape payload extraction.',
+  )
+  nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload = () => {
+    throw new Error('Committed payload extraction should not be called when a body-owned native payload is available.')
+  }
+  const adapter = new OpenCascadeKernelAdapter({
+    solverAdapter: {} as never,
+    getOpenCascadeInstance: async () => oc,
+  })
+  const state = createOccAuthoringState(oc, { bodies: [body] })
+  const buildCommittedSnapshot = (adapter as unknown as {
+    buildNativeTopologyPayloadForState(
+      state: typeof state,
+      lodTierId: undefined,
+      options: { useCommittedShapeTransaction: true },
+    ): { kind: string; payload?: { bodies: readonly [{ topology: readonly { id: string }[] }] } }
+  }).buildNativeTopologyPayloadForState.bind(adapter)
+
+  try {
+    const result = buildCommittedSnapshot(state, undefined, { useCommittedShapeTransaction: true })
+    const firstPayloadId = result.payload?.bodies[0]?.topology.find((record) => record.id !== body.bodyId)?.id
+    const firstBodyPayloadId = body.nativeTopologyPayload?.topology[0]?.id
+
+    expectTrue(result.kind === 'nativeTopologyPayload', 'Committed native topology snapshot should build successfully.')
+    expectTrue(
+      firstPayloadId === firstBodyPayloadId,
+      'Committed native topology snapshot should emit the body-owned native transaction payload.',
+    )
+  } finally {
+    nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload = originalBuildCommittedShapePayload
   }
 })
 

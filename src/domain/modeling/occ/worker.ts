@@ -9,6 +9,10 @@ import {
   type OpenCascadeInstance,
 } from '@/domain/modeling/occ/runtime'
 import {
+  getOccNativeTopologyTransferList,
+  type OccNativeTopologyWorkerResultWithBuffers,
+} from '@/domain/modeling/occ/native-topology-payload'
+import {
   normalizeOccWorkerFailure,
   occWorkerRequestEnvelopeSchema,
   type OccWorkerAssetConfig,
@@ -254,6 +258,27 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
             snapshot: snapshotResult.snapshot,
           },
         }, snapshotResult.transferList)
+        return
+      }
+
+      if (
+        (
+          request.operation.kind === 'buildNativeTopologySnapshot'
+          || request.operation.kind === 'executeNativeFeatureHistoryRebuild'
+          || request.operation.kind === 'buildNativeBooleanFeatureTransactionPayload'
+          || request.operation.kind === 'buildNativeMeshExportPayload'
+          || request.operation.kind === 'buildNativeExactBrepPayload'
+        )
+        && result
+        && typeof result === 'object'
+        && 'kind' in result
+      ) {
+        postOccWorkerMessage({
+          kind: 'invoked',
+          requestId: request.requestId,
+          operation: request.operation.kind,
+          payload: result,
+        }, getOccNativeTopologyTransferList(result as OccNativeTopologyWorkerResultWithBuffers))
         return
       }
 

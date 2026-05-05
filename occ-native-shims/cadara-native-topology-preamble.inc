@@ -1,3 +1,7 @@
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -5,6 +9,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Curve2d.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepGProp.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_BezierSurface.hxx>
@@ -31,3 +36,4 @@
 #include <gp_Dir2d.hxx>
 #include <gp_Sphere.hxx>
 #include <gp_Torus.hxx>
+#include <GProp_GProps.hxx>

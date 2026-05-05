@@ -194,7 +194,10 @@ export class SketchWorkbenchHarness {
 
   async expectSketchSessionActive() {
     await this.expectMachine('editingSketch')
-    await expect.poll(() => this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.sketchPlane ?? 'none')).not.toBe('none')
+    await expect.poll(
+      () => this.evaluateWithNavigationRetry(() => window.__cadaraDebug?.getState()?.sketchPlane ?? 'none'),
+      { timeout: 10_000 },
+    ).not.toBe('none')
   }
 
   async expectMachine(kind: string, timeout = 10_000) {

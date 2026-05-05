@@ -16,18 +16,22 @@ import {
   advanceTopologyToken,
   extractSolidShapes,
   getOccDurableRefKey,
+  haveSameOccTopologyIds,
   OCC_REFERENCE_INVALIDATION_REASONS,
   reconcileReplacementSolidBody,
   trackDerivedSolidBody,
   trackNewSolidBody,
   trackReplacementSolidBody,
+  trackReplacementSolidBodyFromNativePayload,
   type OccTrackedBody,
   type OccReferenceInvalidationRecord,
 } from '@/domain/modeling/occ/topology'
 import {
   parseNativeFeatureTransactionHistoryJson,
+  parseNativeShimPayloadJson,
   type OccNativeFeatureTransactionHistoryPayload,
   type OccNativeFeatureTransactionHistoryRecord,
+  type OccNativeShimPayload,
   type OpenCascadeNativeFeatureTransactionResult,
   type OpenCascadeNativeTopologyKernelHost,
 } from '@/domain/modeling/occ/native-topology-payload'
@@ -166,20 +170,78 @@ function sameTopologyTargetKind(target: DurableRef, successor: DurableRef) {
   )
 }
 
+function createNativeCurrentTargetAliases(
+  current: OccTrackedBody,
+  nativePayload: OccNativeShimPayload | null,
+) {
+  const aliases = new Map<string, DurableRef>()
+
+  if (!nativePayload) {
+    return aliases
+  }
+
+  for (const record of nativePayload.topology) {
+    if (record.bodyId !== current.bodyId) {
+      continue
+    }
+
+    if (record.kind === 'face') {
+      const faceId = current.topology.faceIds[record.index - 1]
+      if (faceId) {
+        aliases.set(getOccDurableRefKey({ kind: 'face', bodyId: current.bodyId, faceId: record.id as FaceId }), {
+          kind: 'face',
+          bodyId: current.bodyId,
+          faceId,
+        })
+      }
+      continue
+    }
+
+    if (record.kind === 'edge') {
+      const edgeId = current.topology.edgeIds[record.index - 1]
+      if (edgeId) {
+        aliases.set(getOccDurableRefKey({ kind: 'edge', bodyId: current.bodyId, edgeId: record.id as EdgeId }), {
+          kind: 'edge',
+          bodyId: current.bodyId,
+          edgeId,
+        })
+      }
+      continue
+    }
+
+    if (record.kind === 'vertex') {
+      const vertexId = current.topology.vertexIds[record.index - 1]
+      if (vertexId) {
+        aliases.set(getOccDurableRefKey({ kind: 'vertex', bodyId: current.bodyId, vertexId: record.id as VertexId }), {
+          kind: 'vertex',
+          bodyId: current.bodyId,
+          vertexId,
+        })
+      }
+    }
+  }
+
+  return aliases
+}
+
 function collectNativeHistoryResolution(input: {
   current: OccTrackedBody
   history: OccNativeFeatureTransactionHistoryPayload
+  currentNativePayload?: OccNativeShimPayload | null
 }) {
   const preservedTargetsBySuccessorKey = new Map<string, DurableRef>()
   const invalidations = new Map<string, OccReferenceInvalidationRecord>()
+  const currentTargetAliases = createNativeCurrentTargetAliases(input.current, input.currentNativePayload ?? null)
 
   for (const record of input.history.records) {
+    const target = currentTargetAliases.get(getOccDurableRefKey(record.target)) ?? record.target
+
     if (
       record.reason === 'unique-successor'
       && record.successors.length === 1
-      && sameTopologyTargetKind(record.target, record.successors[0]!)
+      && sameTopologyTargetKind(target, record.successors[0]!)
     ) {
-      preservedTargetsBySuccessorKey.set(getOccDurableRefKey(record.successors[0]!), record.target)
+      preservedTargetsBySuccessorKey.set(getOccDurableRefKey(record.successors[0]!), target)
       continue
     }
 
@@ -188,8 +250,8 @@ function collectNativeHistoryResolution(input: {
       : nativeHistoryInvalidationReason(record.reason)
 
     if (reason) {
-      invalidations.set(getOccDurableRefKey(record.target), {
-        target: record.target,
+      invalidations.set(getOccDurableRefKey(target), {
+        target,
         reason,
         sourceTarget: { kind: 'body', bodyId: input.current.bodyId },
       })
@@ -221,6 +283,7 @@ function reconcileNativeHistoryReplacement(
   replacement: OccTrackedBody,
   history: OccNativeFeatureTransactionHistoryPayload,
   ownerFeatureId: FeatureId,
+  currentNativePayload: OccNativeShimPayload | null,
 ) {
   if (history.status !== 'available') {
     return {
@@ -232,6 +295,7 @@ function reconcileNativeHistoryReplacement(
   const { preservedTargetsBySuccessorKey, invalidations } = collectNativeHistoryResolution({
     current,
     history,
+    currentNativePayload,
   })
   const faceIds: FaceId[] = []
   const facesById = new Map<FaceId, OccTrackedBody['facesById'] extends Map<FaceId, infer Face> ? Face : never>()
@@ -307,31 +371,40 @@ function reconcileNativeHistoryReplacement(
       : [...(replacement.vertexContributingFeatureIdsById.get(freshId) ?? [])])
   }
 
-  return {
-    body: {
-      ...replacement,
-      topology: {
-        faceIds,
-        edgeIds,
-        vertexIds,
-      },
-      contributingFeatureIds: collectBodyContributors(
-        ownerFeatureId,
-        faceContributingFeatureIdsById,
-        edgeContributingFeatureIdsById,
-        vertexContributingFeatureIdsById,
-      ),
-      facesById,
+  const reconciledBody = {
+    ...replacement,
+    topology: {
+      faceIds,
+      edgeIds,
+      vertexIds,
+    },
+    contributingFeatureIds: collectBodyContributors(
+      ownerFeatureId,
       faceContributingFeatureIdsById,
-      edgesById,
       edgeContributingFeatureIdsById,
-      verticesById,
       vertexContributingFeatureIdsById,
-      naming: undefined,
-      nativeTopologyIdAliases: {
-        faceIdsByNativeId,
-      },
-    } satisfies OccTrackedBody,
+    ),
+    facesById,
+    faceContributingFeatureIdsById,
+    edgesById,
+    edgeContributingFeatureIdsById,
+    verticesById,
+    vertexContributingFeatureIdsById,
+    naming: undefined,
+    nativeTopologyPayload: haveSameOccTopologyIds({
+      faceIds,
+      edgeIds,
+      vertexIds,
+    }, replacement.topology)
+      ? replacement.nativeTopologyPayload
+      : undefined,
+    nativeTopologyIdAliases: {
+      faceIdsByNativeId,
+    },
+  } satisfies OccTrackedBody
+
+  return {
+    body: reconciledBody,
     historyInvalidations: invalidations,
   }
 }
@@ -343,22 +416,57 @@ export function resolveNativeFeatureTransactionReplacement(
   operation: string,
   ownerFeatureId: FeatureId,
 ) {
-  if (!transaction.IsDone()) {
-    throw new Error(`Native OCC ${operation} failed to build.`)
-  }
-
-  const replacement = trackReplacementSolidBody(context.oc, {
+  const { payload, history } = validateNativeFeatureTransaction(transaction, operation)
+  const replacement = trackReplacementSolidBodyFromNativePayload(context.oc, {
     previous: current,
     ownerFeatureId,
     shape: transaction.Shape() as InstanceType<OpenCascadeInstance['TopoDS_Shape']>,
+    nativePayload: payload,
   })
-  const history = parseNativeFeatureTransactionHistoryJson(transaction.HistoryJson())
-
-  const reconciled = reconcileNativeHistoryReplacement(current, replacement, history, ownerFeatureId)
+  const nativeHost = context.oc as unknown as OpenCascadeNativeTopologyKernelHost
+  const currentNativePayloadJson = nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson?.(
+    current.shape,
+    current.bodyId,
+    current.topologyToken,
+    context.modelingTolerance,
+    0.5,
+  )
+  const currentNativePayload = currentNativePayloadJson
+    ? parseNativeShimPayloadJson(currentNativePayloadJson)
+    : null
+  const reconciled = reconcileNativeHistoryReplacement(current, replacement, history, ownerFeatureId, currentNativePayload)
 
   return {
     replacements: [reconciled.body],
     historyInvalidations: reconciled.historyInvalidations,
+  }
+}
+
+export function validateNativeFeatureTransaction(
+  transaction: OpenCascadeNativeFeatureTransactionResult,
+  operation: string,
+) {
+  if (!transaction.IsDone()) {
+    throw new Error(`Native OCC ${operation} failed to build.`)
+  }
+
+  const payload = parseNativeShimPayloadJson(transaction.PayloadJson())
+  const payloadError = payload.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
+
+  if (payloadError) {
+    throw new Error(`Native OCC ${operation} rejected committed result: ${payloadError.message}`)
+  }
+
+  const history = parseNativeFeatureTransactionHistoryJson(transaction.HistoryJson())
+  const historyError = history.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
+
+  if (historyError) {
+    throw new Error(`Native OCC ${operation} rejected topology history: ${historyError.message}`)
+  }
+
+  return {
+    payload,
+    history,
   }
 }
 

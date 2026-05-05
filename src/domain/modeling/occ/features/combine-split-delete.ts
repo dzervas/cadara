@@ -20,11 +20,9 @@ import {
   mergeHistoryInvalidations,
   markSplitAmbiguousInvalidations,
   collectNativeFeatureHistoryInvalidations,
+  validateNativeFeatureTransaction,
 } from '@/domain/modeling/occ/features/boolean-operations'
-import {
-  parseNativeFeatureTransactionHistoryJson,
-  type OpenCascadeNativeTopologyKernelHost,
-} from '@/domain/modeling/occ/native-topology-payload'
+import type { OpenCascadeNativeTopologyKernelHost } from '@/domain/modeling/occ/native-topology-payload'
 
 function getCombineBodyTargets(
   definition: AdvancedSolidFeatureDefinition & { kind: 'combine' },
@@ -290,9 +288,7 @@ export function executeSplitFeature(
       0.5,
     )
 
-    if (!transaction.IsDone()) {
-      throw new Error('advanced-feature-unsupported-kernel-case: OCC split native transaction failed.')
-    }
+    const { history: nativeHistory } = validateNativeFeatureTransaction(transaction, 'split')
 
     const splitBodies = trackBodiesFromShape(
       context,
@@ -305,7 +301,6 @@ export function executeSplitFeature(
       .filter((body) => body.bodyId !== targetBody.bodyId)
       .concat(splitBodies)
     const historyInvalidations = createDeletedBodyInvalidations(targetBody)
-    const nativeHistory = parseNativeFeatureTransactionHistoryJson(transaction.HistoryJson())
     mergeHistoryInvalidations(historyInvalidations, collectNativeFeatureHistoryInvalidations(targetBody, nativeHistory))
 
     return {

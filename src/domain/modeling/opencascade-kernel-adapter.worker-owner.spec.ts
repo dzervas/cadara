@@ -227,5 +227,32 @@ test('src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts', asyn
     expectTrue(localOccLoads === 0, 'Worker-owned browser mutations should not initialize a local OCC runtime.')
   }
 
+  async function testEmptySnapshotsDoNotRequireNativeSolidTopologySupport() {
+    const adapter = new OpenCascadeKernelAdapter({
+      solverAdapter: new SketchConstraintSolverAdapter({
+        documentId: OCC_KERNEL_DOCUMENT_ID,
+        revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      }),
+      getOpenCascadeInstance: async () => ({}) as never,
+      initialSnapshotRequiresRuntime: true,
+    })
+
+    const snapshot = await adapter.getDocumentSnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+    })
+    const nativeSnapshot = await adapter.buildNativeTopologySnapshot({
+      contractVersion: 'modeling-contract/v1alpha1',
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+    })
+
+    expectTrue(snapshot.snapshot.document.bodies.length === 0, 'Empty snapshots should not require solid topology payloads.')
+    expectTrue(
+      nativeSnapshot.kind === 'nativeTopologyUnavailable',
+      'Explicit native topology requests should still fail loudly when native support is missing.',
+    )
+  }
+
   await testWorkerOwnedWarmupAndMutationsBypassLocalOcc()
+  await testEmptySnapshotsDoNotRequireNativeSolidTopologySupport()
 })
