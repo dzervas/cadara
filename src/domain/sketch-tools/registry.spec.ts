@@ -115,6 +115,9 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {  function testReg
     )
 
     const sketchDrawingSection = getToolbarSectionsForMode('sketch').find((section) => section.id === 'drawing')
+    expectTrue(getToolById('point').id === 'point', 'Point should resolve through the shared tool registry.')
+    expectTrue(getToolById('point').icon === 'point', 'Point should expose a dedicated toolbar icon instead of reusing Circle.')
+    expectTrue(sketchDrawingSection?.toolIds.includes('point'), 'Sketch toolbar should include the Point constructor.')
     expectTrue(sketchDrawingSection?.toolIds.includes('centerPointArc'), 'Sketch toolbar should include an arc family trigger.')
     expectTrue(sketchDrawingSection?.toolIds.includes('ellipse'), 'Sketch toolbar should include an advanced curve family trigger.')
     expectTrue(sketchDrawingSection?.toolIds.includes('inscribedPolygon'), 'Sketch toolbar should include a polygon family trigger.')
@@ -147,6 +150,7 @@ test('src/domain/sketch-tools/registry.spec.ts', async () => {  function testReg
         && searchToolDefinitions('text').some((tool) => tool.id === 'profileText'),
       'Tool search should discover advanced curve and text constructors.',
     )
+    expectTrue(searchToolDefinitions('point').some((tool) => tool.id === 'point'), 'Tool search should discover the Point constructor.')
   }
 
   function testLinePointerLifecycleProducesStagedGeometry() {

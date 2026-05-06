@@ -475,6 +475,10 @@ export type ReadOnlySketchCurveConstraintOperand =
   | SketchDatumConstraintOperand
   | ProjectedSketchGeometryConstraintOperand
 
+export type LocalCollinearTargetOperand =
+  | LocalSketchPointConstraintOperand
+  | LocalSketchEntityConstraintOperand
+
 export type DimensionLineAnnotationPlacement = {
   kind: 'dimensionLine'
   offset: number
@@ -615,6 +619,26 @@ export type ConstraintDefinition =
       point: LocalSketchPointConstraintOperand
       /** Local editable line, circle, or arc target. */
       curve: LocalSketchEntityConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'collinear'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point or line constrained to the reference line. */
+      target: LocalCollinearTargetOperand
+      /** Local editable line defining the reference infinite geometry. */
+      line: LocalSketchEntityConstraintOperand
+    }
+  | {
+      constraintId: ConstraintId
+      kind: 'collinearProjectedLine'
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string
+      /** Local editable point or line constrained to the read-only reference line. */
+      target: LocalCollinearTargetOperand
+      /** Read-only projected line or sketch datum axis defining the reference infinite geometry. */
+      projectedLine: ReadOnlySketchCurveConstraintOperand
     }
   | {
       constraintId: ConstraintId

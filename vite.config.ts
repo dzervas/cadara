@@ -140,7 +140,7 @@ export default defineConfig({
     port: 3000,
     allowedHosts: ['frontend'],
     watch: {
-      ignored: ['/e2e', '/tmp-*', '/.tmp*', '**/Dockerfile*', '**/.*', '/openspec', '**/*.spec.ts', '**/*.cadara']
+      ignored: ['/e2e/**', '/tmp-*', '/.tmp*', '**/Dockerfile*', '**/.*', '/openspec/**', '**/*.spec.ts', '**/*.cadara']
     }
   },
 })

@@ -62,7 +62,7 @@ export const pointSketchToolDefinition: SketchToolDefinition<'point'> = {
     group: 'drawing',
     name: 'Point',
     tooltip: 'Create a sketch point.',
-    icon: 'circle',
+    icon: 'point',
     modes: ['sketch'],
   },
   activate() {

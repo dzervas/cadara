@@ -87,6 +87,7 @@ export interface SketchDimensionAnnotationDragHandle {
 
 export type SketchAnnotationGlyphKind =
   | 'constraintCoincident'
+  | 'constraintCollinear'
   | 'constraintParallel'
   | 'constraintEqual'
   | 'constraintHorizontal'

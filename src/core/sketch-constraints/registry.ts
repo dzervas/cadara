@@ -3,6 +3,7 @@ import type {
   ConstraintDefinition,
   DimensionAnnotationPlacement,
   DimensionLineAnnotationPlacement,
+  LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
   ReadOnlySketchCurveConstraintOperand,
   SketchDatumConstraintOperand,
@@ -16,6 +17,7 @@ import type {
   SketchToolOverlayDescriptor,
 } from '@/core/sketch-tools/editor-schema'
 import type {
+  SketchConstraintCommitInput,
   SketchConstraintDefinition,
   SketchConstraintPreviewInput,
   SketchConstraintTargetRecord,
@@ -532,6 +534,91 @@ function readOnlyLineOperand(target: SketchConstraintTargetRecord): ReadOnlySket
   }
 
   return null
+}
+
+function collinearTargetOperand(target: SketchConstraintTargetRecord): LocalCollinearTargetOperand | null {
+  if (target.point) {
+    return {
+      kind: 'localPoint',
+      pointId: target.point.pointId,
+    }
+  }
+
+  if (target.entity?.kind === 'lineSegment') {
+    return {
+      kind: 'localEntity',
+      entityId: target.entity.entityId,
+    }
+  }
+
+  return null
+}
+
+function isEditableCollinearTarget(target: SketchConstraintTargetRecord) {
+  return Boolean(target.point || target.entity?.kind === 'lineSegment')
+}
+
+function isLineCompatibleTarget(target: SketchConstraintTargetRecord) {
+  return Boolean(target.line)
+}
+
+function isDegenerateLineTarget(target: SketchConstraintTargetRecord) {
+  return !target.line || distanceBetween(target.line.start, target.line.end) <= 1e-6
+}
+
+function selectedFirstLineTarget(targets: readonly SketchConstraintTargetRecord[]) {
+  return targets.find((target) => readOnlyLineOperand(target)) ?? targets.find(isLineCompatibleTarget) ?? null
+}
+
+function createCollinearConstraints(input: SketchConstraintCommitInput): ConstraintDefinition[] {
+  const reference = selectedFirstLineTarget(input.selectedTargets)
+
+  if (!reference || isDegenerateLineTarget(reference)) {
+    return []
+  }
+
+  const referenceLine = localEntityOperand(reference)
+  const referenceProjectedLine = readOnlyLineOperand(reference)
+  const editableTargets = input.selectedTargets.filter((target) =>
+    target !== reference && isEditableCollinearTarget(target)
+  )
+
+  if (editableTargets.length === 0) {
+    return []
+  }
+
+  const constraints: ConstraintDefinition[] = []
+
+  editableTargets.forEach((target, index) => {
+    const operand = collinearTargetOperand(target)
+
+    if (!operand) {
+      return
+    }
+
+    if (referenceProjectedLine) {
+      constraints.push({
+        constraintId: input.createConstraintId(`collinear-projected-line-${index + 1}`),
+        kind: 'collinearProjectedLine' as const,
+        label: `Collinear ${input.sequence}`,
+        target: operand,
+        projectedLine: referenceProjectedLine,
+      })
+      return
+    }
+
+    if (referenceLine) {
+      constraints.push({
+        constraintId: input.createConstraintId(`collinear-${index + 1}`),
+        kind: 'collinear' as const,
+        label: `Collinear ${input.sequence}`,
+        target: operand,
+        line: referenceLine,
+      })
+    }
+  })
+
+  return constraints
 }
 
 function pointDimensionOperand(target: SketchConstraintTargetRecord): SketchPointConstraintOperand | null {
@@ -1362,6 +1449,29 @@ const sketchConstraintDefinitions = [
             }]
           : [],
       }
+    },
+  },
+  {
+    metadata: {
+      id: 'constraintCollinear',
+      name: 'Collinear',
+      tooltip: 'Align points or lines to a selected line.',
+      icon: 'constraintCollinear',
+      group: 'constraints',
+      modes: ['sketch'],
+    },
+    steps: [
+      { id: 'collinear-a', label: 'Select a line reference or editable point', acceptedKinds: ['point', 'line'] },
+      { id: 'collinear-b', label: 'Select a line or editable target to align', acceptedKinds: ['point', 'line'] },
+    ],
+    resolveTarget(definition, target, projectedReferences) {
+      return resolvePointOrLineTarget(definition, target, projectedReferences)
+    },
+    buildPreview(input) {
+      return buildRelationshipPreview(input, 'collinear-preview', 'Collinear preview', 'Select a line and an editable point or line')
+    },
+    createCommitContribution(input) {
+      return { constraints: createCollinearConstraints(input) }
     },
   },
   {

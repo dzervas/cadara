@@ -344,6 +344,7 @@ const toolbarSections = [
     modes: ['sketch'],
     toolIds: [
       'constraintCoincident',
+      'constraintCollinear',
       'constraintParallel',
       'constraintPerpendicular',
       'constraintTangent',

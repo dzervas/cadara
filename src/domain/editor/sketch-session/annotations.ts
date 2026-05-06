@@ -13,6 +13,7 @@ import type {
   ConstraintDefinition,
   DimensionAnnotationPlacement,
   DimensionDefinition,
+  LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
   RegionRecord,
   SketchAuthoringOperationGraphSnapshot,
@@ -1161,6 +1162,9 @@ export function getConstraintGlyphKind(constraint: ConstraintDefinition): Sketch
   switch (constraint.kind) {
     case 'coincident':
       return 'constraintCoincident'
+    case 'collinear':
+    case 'collinearProjectedLine':
+      return 'constraintCollinear'
     case 'parallel':
       return 'constraintParallel'
     case 'equalLength':
@@ -1266,6 +1270,16 @@ export function getConstraintAffectedGeometryRefs(
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),
         createSketchEntityRef(sketchId, constraint.curve.entityId),
+      ]
+    case 'collinear':
+      return [
+        createCollinearTargetPrimitiveRef(sketchId, constraint.target),
+        createSketchEntityRef(sketchId, constraint.line.entityId),
+      ]
+    case 'collinearProjectedLine':
+      return [
+        createCollinearTargetPrimitiveRef(sketchId, constraint.target),
+        createReferencePrimitiveRef(constraint.projectedLine, sketchId)!,
       ]
     case 'normal':
       return [
@@ -1418,6 +1432,16 @@ export function createConstraintAnnotationAnchor(
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
         getPointPosition(definition, constraint.point.pointId),
         getEntityAnchor(definition, constraint.curve.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'collinear':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getCollinearTargetAnchor(definition, constraint.target),
+        getEntityAnchor(definition, constraint.line.entityId),
+      ].filter((point): point is SketchPoint => point !== null)))
+    case 'collinearProjectedLine':
+      return createOffsetAnnotationAnchor(getAverageSketchPoint([
+        getCollinearTargetAnchor(definition, constraint.target),
+        getReferenceGeometryAnchor(session, constraint.projectedLine),
       ].filter((point): point is SketchPoint => point !== null)))
     case 'normal':
       return createOffsetAnnotationAnchor(getAverageSketchPoint([
@@ -2156,6 +2180,24 @@ export function getReferenceGeometryAnchor(
   return null
 }
 
+export function createCollinearTargetPrimitiveRef(
+  sketchId: SketchId,
+  target: LocalCollinearTargetOperand,
+): PrimitiveRef {
+  return target.kind === 'localPoint'
+    ? createSketchPointRef(sketchId, target.pointId)
+    : createSketchEntityRef(sketchId, target.entityId)
+}
+
+export function getCollinearTargetAnchor(
+  definition: SketchDefinition,
+  target: LocalCollinearTargetOperand,
+): SketchPoint | null {
+  return target.kind === 'localPoint'
+    ? getPointPosition(definition, target.pointId)
+    : getEntityAnchor(definition, target.entityId)
+}
+
 export function getReferenceLineGeometry(
   definition: SketchDefinition,
   session: SketchSessionState,
@@ -2332,6 +2374,10 @@ export function describeConstraint(constraint: ConstraintDefinition) {
       return 'Point at projected midpoint'
     case 'pointOnCurve':
       return 'Point on curve'
+    case 'collinear':
+      return 'Collinear'
+    case 'collinearProjectedLine':
+      return 'Collinear to projected line'
     case 'coincidentProjectedPoint':
       return 'Coincident projected point'
     case 'pointOnProjectedCurve':

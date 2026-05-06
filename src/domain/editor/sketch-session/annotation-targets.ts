@@ -97,6 +97,20 @@ export function getConstraintAffectedGeometryRefs(
         createSketchPointRef(sketchId, constraint.point.pointId),
         createSketchEntityRef(sketchId, constraint.curve.entityId),
       ]
+    case 'collinear':
+      return [
+        constraint.target.kind === 'localPoint'
+          ? createSketchPointRef(sketchId, constraint.target.pointId)
+          : createSketchEntityRef(sketchId, constraint.target.entityId),
+        createSketchEntityRef(sketchId, constraint.line.entityId),
+      ]
+    case 'collinearProjectedLine':
+      return [
+        constraint.target.kind === 'localPoint'
+          ? createSketchPointRef(sketchId, constraint.target.pointId)
+          : createSketchEntityRef(sketchId, constraint.target.entityId),
+        createReferencePrimitiveRef(constraint.projectedLine, sketchId)!,
+      ]
     case 'normal':
       return [
         createSketchPointRef(sketchId, constraint.point.pointId),

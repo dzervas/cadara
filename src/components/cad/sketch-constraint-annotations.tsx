@@ -265,6 +265,8 @@ function getAnnotationGlyphIconSrc(glyphKind: SketchAnnotationDescriptor['glyphK
   switch (glyphKind) {
     case 'constraintCoincident':
       return getToolIconSrc('constraintCoincident')
+    case 'constraintCollinear':
+      return getToolIconSrc('constraintCollinear')
     case 'constraintParallel':
       return getToolIconSrc('constraintParallel')
     case 'constraintEqual':

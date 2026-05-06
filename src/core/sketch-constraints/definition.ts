@@ -17,6 +17,7 @@ import type {
 
 export type SketchConstraintToolId =
   | 'constraintCoincident'
+  | 'constraintCollinear'
   | 'constraintParallel'
   | 'constraintPerpendicular'
   | 'constraintTangent'

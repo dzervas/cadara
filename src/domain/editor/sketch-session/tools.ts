@@ -1675,6 +1675,10 @@ export function getConstraintDedupeKey(constraint: ConstraintDefinition): string
       return `${constraint.kind}:${constraint.point.pointId}:${constraint.line.entityId}`
     case 'pointOnCurve':
       return `${constraint.kind}:${constraint.point.pointId}:${constraint.curve.entityId}`
+    case 'collinear':
+      return `${constraint.kind}:${collinearTargetKey(constraint.target)}:${constraint.line.entityId}`
+    case 'collinearProjectedLine':
+      return `${constraint.kind}:${collinearTargetKey(constraint.target)}:${readOnlyOperandKey(constraint.projectedLine)}`
     case 'fixPoint':
       return `${constraint.kind}:${constraint.pointId}:${constraint.position.join(':')}`
     case 'angle':
@@ -1700,6 +1704,12 @@ export function getConstraintDedupeKey(constraint: ConstraintDefinition): string
     case 'symmetricProjectedLine':
       return `${constraint.kind}:${[...constraint.pointIds].sort().join(':')}:${readOnlyOperandKey(constraint.projectedLine)}`
   }
+}
+
+function collinearTargetKey(operand: { kind: string; pointId?: string; entityId?: string }) {
+  return operand.kind === 'localPoint'
+    ? `point:${operand.pointId}`
+    : `entity:${operand.entityId}`
 }
 
 export function startSketchDraw(session: SketchSessionState, point: SketchPoint): SketchSessionState {

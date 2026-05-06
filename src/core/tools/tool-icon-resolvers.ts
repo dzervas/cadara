@@ -140,6 +140,9 @@ function getSketchConstraintToolIcon(constraint: ConstraintDefinition): ToolIcon
     case 'coincident':
     case 'coincidentProjectedPoint':
       return 'constraintCoincident'
+    case 'collinear':
+    case 'collinearProjectedLine':
+      return 'constraintCollinear'
     case 'parallel':
     case 'parallelProjectedLine':
       return 'constraintParallel'

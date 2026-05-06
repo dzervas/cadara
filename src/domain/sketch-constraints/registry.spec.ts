@@ -21,10 +21,11 @@ import {
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { toolIconAssetFileNames } from '@/core/tools/tool-icons'
 import {
+  getSketchConstraintDefinition,
   getRegisteredSketchConstraintDefinitions,
   selectPointToPointDimensionReference,
 } from '@/core/sketch-constraints/registry'
-import { getToolById, getToolbarSectionsForMode } from '@/core/tools/tool-registry'
+import { getToolById, getToolbarSectionsForMode, searchToolDefinitions } from '@/core/tools/tool-registry'
 import { mapSketchPointToWorkspaceWorld } from '@/core/workspace/sketch-plane-mapping'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 
@@ -129,6 +130,7 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
     )
 
     const newConstraintTools = {
+      constraintCollinear: 'sketch-collinear.svg',
       constraintHorizontal: 'sketch-horizontal.svg',
       constraintVertical: 'sketch-vertical.svg',
       constraintConcentric: 'sketch-concentric.svg',
@@ -154,6 +156,10 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
       expectTrue(!partToolIds.includes(tool.id), `${toolId} should not be exposed in part mode.`)
       expectTrue(registeredConstraintIds.has(tool.id), `${toolId} should have sketch constraint behavior registered.`)
     }
+    expectTrue(
+      searchToolDefinitions('collinear').some((tool) => tool.id === 'constraintCollinear'),
+      'Tool search should expose the Collinear sketch constraint.',
+    )
   }
 
   function testHorizontalAndVerticalAuthoringCommitDurableConstraints() {
@@ -466,6 +472,209 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
       projectedSession.definition.constraints[0]?.kind === 'pointOnProjectedCurve',
       'Pierce should commit a projected point-on-curve constraint.',
     )
+  }
+
+  function testCollinearAuthoringCommitsLocalProjectedAndMultiTargetConstraints() {
+    let localSession = createSessionWithTwoLines()
+    const [referenceLineId, drivenLineId] = localSession.definition.entityIds
+    expectTrue(referenceLineId && drivenLineId, 'Expected two local lines for collinear authoring.')
+
+    localSession = beginSketchTool(localSession, 'constraintCollinear')
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: referenceLineId!,
+    })
+    localSession = selectSketchConstraintTarget(localSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: drivenLineId!,
+    })
+
+    const localConstraint = localSession.definition.constraints.at(-1)
+    expectTrue(localConstraint?.kind === 'collinear', 'Collinear should commit a durable local collinear constraint.')
+    expectTrue(
+      localConstraint?.kind === 'collinear'
+        && localConstraint.target.kind === 'localEntity'
+        && localConstraint.target.entityId === drivenLineId
+        && localConstraint.line.entityId === referenceLineId,
+      'Line-line Collinear should preserve selection order with the first line as reference.',
+    )
+    expectTrue(
+      getSketchAnnotationDescriptors(localSession).some((annotation) => annotation.glyphKind === 'constraintCollinear'),
+      'Collinear should expose a committed collinear annotation glyph.',
+    )
+
+    let pointLineSession = createSessionWithTwoLines()
+    const pointId = pointLineSession.definition.pointIds[2]
+    const lineId = pointLineSession.definition.entityIds[0]
+    expectTrue(pointId && lineId, 'Expected a point and line for point-line collinear authoring.')
+    pointLineSession = beginSketchTool(pointLineSession, 'constraintCollinear')
+    pointLineSession = selectSketchConstraintTarget(pointLineSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: pointId!,
+    })
+    pointLineSession = selectSketchConstraintTarget(pointLineSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lineId!,
+    })
+
+    const pointConstraint = pointLineSession.definition.constraints.at(-1)
+    expectTrue(
+      pointConstraint?.kind === 'collinear'
+        && pointConstraint.target.kind === 'localPoint'
+        && pointConstraint.target.pointId === pointId
+        && pointConstraint.line.entityId === lineId,
+      'Point-line Collinear should commit with the editable point as the driven target regardless of selection order.',
+    )
+
+    let projectedSession = createSessionWithTwoLines()
+    const projectedLineId = projectedSession.definition.entityIds[0]
+    projectedSession = addProjectedReference(projectedSession, {
+      referenceId: 'ref_collinear_line',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_collinear_line',
+        kind: 'lineSegment',
+        startPosition: [0, 3],
+        endPosition: [10, 3],
+      }],
+      diagnostics: [],
+    })
+
+    projectedSession = beginSketchTool(projectedSession, 'constraintCollinear')
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: projectedLineId!,
+    })
+    projectedSession = selectSketchConstraintTarget(projectedSession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_collinear_line',
+      geometryId: 'projected_geometry_collinear_line',
+      geometryKind: 'lineSegment',
+    })
+
+    const projectedConstraint = projectedSession.definition.constraints.at(-1)
+    expectTrue(
+      projectedConstraint?.kind === 'collinearProjectedLine'
+        && projectedConstraint.target.kind === 'localEntity'
+        && projectedConstraint.projectedLine.kind === 'projectedGeometry',
+      'Collinear should commit editable local targets against a read-only projected line in either selection order.',
+    )
+
+    const definition = getSketchConstraintDefinition('constraintCollinear')
+    const projectedTarget = definition.resolveTarget(projectedSession.definition, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_collinear_line',
+      geometryId: 'projected_geometry_collinear_line',
+      geometryKind: 'lineSegment',
+    }, projectedSession.projectedReferences)
+    const localLineTarget = definition.resolveTarget(projectedSession.definition, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: projectedLineId!,
+    }, projectedSession.projectedReferences)
+    const localPointTarget = definition.resolveTarget(projectedSession.definition, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: projectedSession.definition.pointIds[2]!,
+    }, projectedSession.projectedReferences)
+    expectTrue(projectedTarget && localLineTarget && localPointTarget, 'Collinear registry should resolve projected lines, local lines, and local points.')
+
+    const multi = definition.createCommitContribution({
+      sequence: 42,
+      selectedTargets: [projectedTarget!, localPointTarget!, localLineTarget!],
+      pointer: null,
+      value: null,
+      annotationPlacement: null,
+      createConstraintId: (suffix) => `constraint_42_${suffix}` as const,
+      createDimensionId: (suffix) => `dimension_42_${suffix}` as const,
+    })
+    expectTrue(
+      multi.constraints?.length === 2
+        && multi.constraints.every((constraint) => constraint.kind === 'collinearProjectedLine'),
+      'Collinear commit contribution should support multiple editable targets against the first projected reference line.',
+    )
+  }
+
+  function testCollinearRejectsUnsupportedDegenerateAndReadonlyOnlyTargets() {
+    let unsupportedSession = createSessionWithLineAndCircle()
+    const circle = unsupportedSession.definition.entities.find((entity) => entity.kind === 'circle')
+    expectTrue(circle?.kind === 'circle', 'Expected a circle target for unsupported collinear picks.')
+    const unsupportedInitialConstraintCount = unsupportedSession.definition.constraints.length
+    unsupportedSession = beginSketchTool(unsupportedSession, 'constraintCollinear')
+    unsupportedSession = selectSketchConstraintTarget(unsupportedSession, circle.target)
+    expectTrue(unsupportedSession.definition.constraints.length === unsupportedInitialConstraintCount, 'Unsupported Collinear targets should not commit constraints.')
+    expectTrue(
+      getSketchToolPresentation(unsupportedSession)?.validation?.[0]?.message === 'Collinear needs the supported target combination.',
+      'Unsupported Collinear targets should surface validation feedback.',
+    )
+
+    let readonlySession = createSessionWithTwoLines()
+    const readonlyInitialConstraintCount = readonlySession.definition.constraints.length
+    readonlySession = addProjectedReference(readonlySession, {
+      referenceId: 'ref_readonly_collinear',
+      status: 'projected',
+      geometry: [{
+        geometryId: 'projected_geometry_readonly_collinear',
+        kind: 'lineSegment',
+        startPosition: [0, 0],
+        endPosition: [10, 0],
+      }],
+      diagnostics: [],
+    })
+    readonlySession = beginSketchTool(readonlySession, 'constraintCollinear')
+    readonlySession = selectSketchConstraintTarget(readonlySession, {
+      kind: 'projectedReferenceGeometry',
+      referenceId: 'ref_readonly_collinear',
+      geometryId: 'projected_geometry_readonly_collinear',
+      geometryKind: 'lineSegment',
+    })
+    readonlySession = selectSketchConstraintTarget(readonlySession, {
+      kind: 'sketchDatumReference',
+      sketchId: 'sketch_draft',
+      datumId: 'xAxis',
+      geometryKind: 'lineSegment',
+    })
+    expectTrue(readonlySession.definition.constraints.length === readonlyInitialConstraintCount, 'Readonly-only Collinear targets should not commit constraints.')
+    expectTrue(readonlySession.validationMessage?.includes('Collinear needs'), 'Readonly-only Collinear should report validation feedback.')
+
+    let degenerateSession = createSessionWithTwoLines()
+    const firstLine = degenerateSession.definition.entities.find((entity) => entity.kind === 'lineSegment')
+    expectTrue(firstLine?.kind === 'lineSegment', 'Expected a line fixture for degenerate collinear validation.')
+    const start = degenerateSession.definition.points.find((point) => point.pointId === firstLine.startPointId)
+    expectTrue(start, 'Expected a start point for degenerate collinear validation.')
+    const degenerateDefinition = {
+      ...degenerateSession.definition,
+      points: degenerateSession.definition.points.map((point) =>
+        point.pointId === firstLine.endPointId ? { ...point, position: start!.position } : point,
+      ),
+    }
+    degenerateSession = {
+      ...degenerateSession,
+      definition: degenerateDefinition,
+      fullDefinition: degenerateDefinition,
+    }
+    degenerateSession = beginSketchTool(degenerateSession, 'point')
+    degenerateSession = startSketchDraw(degenerateSession, [1, 1])
+    degenerateSession = acceptSketchDraw(degenerateSession, [1, 1])
+
+    const degenerateLine = degenerateSession.definition.entities.find((entity) => entity.kind === 'lineSegment')
+    const standalonePoint = degenerateSession.definition.entities.find((entity) => entity.kind === 'point')
+    expectTrue(degenerateLine?.kind === 'lineSegment' && standalonePoint?.kind === 'point', 'Expected degenerate line and standalone point fixtures.')
+
+    degenerateSession = beginSketchTool(degenerateSession, 'constraintCollinear')
+    degenerateSession = selectSketchConstraintTarget(degenerateSession, degenerateLine.target)
+    degenerateSession = selectSketchConstraintTarget(degenerateSession, {
+      kind: 'sketchPoint',
+      sketchId: 'sketch_draft',
+      pointId: standalonePoint.pointId,
+    })
+    expectTrue(degenerateSession.definition.constraints.length === 0, 'Degenerate Collinear references should not commit constraints.')
+    expectTrue(degenerateSession.validationMessage?.includes('Collinear needs'), 'Degenerate Collinear references should report validation feedback.')
   }
 
   function testFixGeometryCommitsSupportedTargets() {
@@ -1801,6 +2010,8 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
   testConcentricAuthoringCommitsLocalAndProjectedConstraints()
   testMidpointAuthoringCommitsLocalAndProjectedConstraints()
   testPierceAuthoringCommitsLocalAndProjectedConstraints()
+  testCollinearAuthoringCommitsLocalProjectedAndMultiTargetConstraints()
+  testCollinearRejectsUnsupportedDegenerateAndReadonlyOnlyTargets()
   testFixGeometryCommitsSupportedTargets()
   testNormalAuthoringCommitsValidTargetsAndRejectsInvalidTargets()
   testSymmetricAuthoringCommitsLocalAndProjectedAxes()

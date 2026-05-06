@@ -246,6 +246,11 @@ const localSketchEntityConstraintOperandSchema = z.object({
   entityId: sketchEntityIdSchema,
 })
 
+const localCollinearTargetOperandSchema = z.union([
+  localSketchPointConstraintOperandSchema,
+  localSketchEntityConstraintOperandSchema,
+])
+
 const sketchDatumConstraintOperandSchema = z.object({
   kind: z.literal('sketchDatum'),
   datum: z.union([z.literal('origin'), z.literal('xAxis'), z.literal('yAxis')]),
@@ -375,6 +380,20 @@ const constraintDefinitionSchema = z.discriminatedUnion('kind', [
     label: z.string(),
     point: localSketchPointConstraintOperandSchema,
     curve: localSketchEntityConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('collinear'),
+    label: z.string(),
+    target: localCollinearTargetOperandSchema,
+    line: localSketchEntityConstraintOperandSchema,
+  }),
+  z.object({
+    constraintId: constraintIdSchema,
+    kind: z.literal('collinearProjectedLine'),
+    label: z.string(),
+    target: localCollinearTargetOperandSchema,
+    projectedLine: referenceCurveConstraintOperandSchema,
   }),
   z.object({
     constraintId: constraintIdSchema,

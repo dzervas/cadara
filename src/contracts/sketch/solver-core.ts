@@ -3,6 +3,7 @@ import type {
   ConstraintStatusRecord,
   DimensionDefinition,
   DimensionStatusRecord,
+  LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
   SketchDefinition,
   SketchCurveConstraintOperand,
@@ -556,6 +557,61 @@ function resolveLineDimensionOperand(
   return start && end
     ? { start: getPoint(values, start), end: getPoint(values, end) }
     : null
+}
+
+function resolveLocalLineOperand(
+  values: Float64Array,
+  operand: { entityId: SketchEntityId },
+  lineEntityMap: Map<SketchEntityId, Extract<SketchEntityDefinition, { kind: 'lineSegment' }>>,
+  pointRecords: Map<SketchPointId, SolverPointRecord>,
+): { start: SketchPoint2D; end: SketchPoint2D } | null {
+  const line = lineEntityMap.get(operand.entityId)
+  const start = line ? pointRecords.get(line.startPointId) : null
+  const end = line ? pointRecords.get(line.endPointId) : null
+
+  return start && end
+    ? { start: getPoint(values, start), end: getPoint(values, end) }
+    : null
+}
+
+function resolveReadOnlyLineOperand(
+  operand: { kind: string; reference?: ProjectedSketchGeometryRef & { kind: NonNullable<ProjectedSketchGeometryRef['kind']> }; datum?: 'origin' | 'xAxis' | 'yAxis' },
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): { start: SketchPoint2D; end: SketchPoint2D } | null {
+  if (operand.kind === 'projectedGeometry' && operand.reference) {
+    const projected = findProjectedGeometry(projectedReferences, operand.reference)
+    return projected?.kind === 'lineSegment'
+      ? { start: projected.startPosition, end: projected.endPosition }
+      : null
+  }
+
+  if (operand.kind === 'sketchDatum' && operand.datum) {
+    return resolveSketchDatumLine(operand.datum)
+  }
+
+  return null
+}
+
+function localCollinearResidual(
+  values: Float64Array,
+  target: LocalCollinearTargetOperand,
+  referenceLine: { start: SketchPoint2D; end: SketchPoint2D },
+  lineEntityMap: Map<SketchEntityId, Extract<SketchEntityDefinition, { kind: 'lineSegment' }>>,
+  pointRecords: Map<SketchPointId, SolverPointRecord>,
+) {
+  if (target.kind === 'localPoint') {
+    const point = pointRecords.get(target.pointId)
+    return point ? Math.abs(pointLineSignedDistance(getPoint(values, point), referenceLine.start, referenceLine.end)) : 0
+  }
+
+  const targetLine = resolveLocalLineOperand(values, target, lineEntityMap, pointRecords)
+  if (!targetLine) {
+    return 0
+  }
+
+  const startDistance = pointLineSignedDistance(targetLine.start, referenceLine.start, referenceLine.end)
+  const endDistance = pointLineSignedDistance(targetLine.end, referenceLine.start, referenceLine.end)
+  return Math.sqrt(startDistance * startDistance + endDistance * endDistance)
 }
 
 function resolvePointDimensionOperand(
@@ -1366,6 +1422,49 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         parameterCount,
         evaluateResidual(values) {
           return pointOnLocalCurveResidual(values, point, curve)
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'collinear') {
+      const referenceLine = lineEntityMap.get(constraint.line.entityId)
+      if (!referenceLine) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          const line = resolveLocalLineOperand(values, constraint.line, lineEntityMap, pointRecords)
+          if (!line || !unitVector(line.start, line.end)) {
+            return Number.POSITIVE_INFINITY
+          }
+
+          return localCollinearResidual(values, constraint.target, line, lineEntityMap, pointRecords)
+        },
+      }))
+      continue
+    }
+
+    if (constraint.kind === 'collinearProjectedLine') {
+      const projectedLine = resolveReadOnlyLineOperand(constraint.projectedLine, options.projectedReferences ?? [])
+      if (!projectedLine) {
+        continue
+      }
+
+      scalarConstraints.push(createNumericalScalarConstraint({
+        id: constraint.constraintId,
+        targetKind: 'constraint',
+        parameterCount,
+        evaluateResidual(values) {
+          if (!unitVector(projectedLine.start, projectedLine.end)) {
+            return Number.POSITIVE_INFINITY
+          }
+
+          return localCollinearResidual(values, constraint.target, projectedLine, lineEntityMap, pointRecords)
         },
       }))
       continue
@@ -2515,6 +2614,37 @@ function validateDefinition(
         }
         break
       }
+      case 'collinear': {
+        const targetEntity = constraint.target.kind === 'localEntity'
+          ? entityMap.get(constraint.target.entityId)
+          : null
+        const reference = entityMap.get(constraint.line.entityId)
+        if (
+          (constraint.target.kind === 'localPoint' && !pointMap.has(constraint.target.pointId))
+          || (constraint.target.kind === 'localEntity' && targetEntity?.kind !== 'lineSegment')
+          || reference?.kind !== 'lineSegment'
+        ) {
+          diagnostics.push(makeDiagnostic('missing-collinear-target', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported collinear target.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        break
+      }
+      case 'collinearProjectedLine': {
+        const targetEntity = constraint.target.kind === 'localEntity'
+          ? entityMap.get(constraint.target.entityId)
+          : null
+        if (
+          (constraint.target.kind === 'localPoint' && !pointMap.has(constraint.target.pointId))
+          || (constraint.target.kind === 'localEntity' && targetEntity?.kind !== 'lineSegment')
+        ) {
+          diagnostics.push(makeDiagnostic('missing-projected-collinear-local-target', 'error', `Constraint ${constraint.constraintId} references a missing or unsupported local collinear target.`, { kind: 'constraint', constraintId: constraint.constraintId }))
+        }
+        if (constraint.projectedLine.kind === 'projectedGeometry') {
+          validateProjectedTarget(constraint.constraintId, constraint.projectedLine.reference, ['projectedLineSegment'])
+        } else {
+          validateDatumConstraintTarget(constraint.constraintId, constraint.projectedLine.datum, ['axis'])
+        }
+        break
+      }
       case 'pointOnProjectedCurve':
         if (!pointMap.has(constraint.point.pointId)) {
           diagnostics.push(makeDiagnostic('missing-point-on-projected-curve-point', 'error', `Constraint ${constraint.constraintId} references a missing point.`, { kind: 'constraint', constraintId: constraint.constraintId }))
@@ -3272,6 +3402,16 @@ function pointOperandVariableIndices(
     : []
 }
 
+function collinearTargetVariableIndices(
+  operand: LocalCollinearTargetOperand,
+  entityById: Map<SketchEntityId, SketchEntityDefinition>,
+  system: BuildSystemResult,
+) {
+  return operand.kind === 'localPoint'
+    ? pointVariableIndices(system.pointRecords.get(operand.pointId))
+    : entityVariableIndices(entityById.get(operand.entityId), system)
+}
+
 function structuralConstraintVariableIndices(
   constraint: ConstraintDefinition,
   entityById: Map<SketchEntityId, SketchEntityDefinition>,
@@ -3310,6 +3450,13 @@ function structuralConstraintVariableIndices(
         ...pointVariableIndices(system.pointRecords.get(constraint.point.pointId)),
         ...entityVariableIndices(entityById.get(constraint.curve.entityId), system),
       ])
+    case 'collinear':
+      return uniqueSortedIndices([
+        ...collinearTargetVariableIndices(constraint.target, entityById, system),
+        ...entityVariableIndices(entityById.get(constraint.line.entityId), system),
+      ])
+    case 'collinearProjectedLine':
+      return collinearTargetVariableIndices(constraint.target, entityById, system)
     case 'parallelProjectedLine':
     case 'perpendicularProjectedLine':
       return entityVariableIndices(entityById.get(constraint.line.entityId), system)
@@ -4540,6 +4687,27 @@ function buildConstraintStatuses(
       status = point && entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc' || entity.kind === 'spline')
         ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
+    } else if (constraint.kind === 'collinear') {
+      const targetValid = constraint.target.kind === 'localPoint'
+        ? pointRecords.has(constraint.target.pointId)
+        : lineEntityMap.has(constraint.target.entityId)
+      const line = lineEntityMap.get(constraint.line.entityId)
+      status = targetValid && line
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
+    } else if (constraint.kind === 'collinearProjectedLine') {
+      const targetValid = constraint.target.kind === 'localPoint'
+        ? pointRecords.has(constraint.target.pointId)
+        : lineEntityMap.has(constraint.target.entityId)
+      const projected = constraint.projectedLine.kind === 'projectedGeometry'
+        ? findProjectedGeometry(projectedReferences, constraint.projectedLine.reference)
+        : null
+      status = targetValid && (
+        projected?.kind === 'lineSegment'
+        || constraint.projectedLine.kind === 'sketchDatum'
+      )
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
+        : 'conflicting'
     } else if (constraint.kind === 'coincidentProjectedPoint') {
       const point = pointRecords.get(constraint.point.pointId)
       const projected = constraint.projectedPoint.kind === 'projectedGeometry'
@@ -4753,6 +4921,15 @@ function getLineEntityPoints(
     : []
 }
 
+function getCollinearTargetPointIds(
+  definition: SketchDefinition,
+  target: LocalCollinearTargetOperand,
+): readonly SketchPointId[] {
+  return target.kind === 'localPoint'
+    ? [target.pointId]
+    : getLineEntityPoints(definition, target.entityId)
+}
+
 function getEntityPoints(entity: SketchEntityDefinition): readonly SketchPointId[] {
   switch (entity.kind) {
     case 'point':
@@ -4849,6 +5026,17 @@ function collectTranslationComponent(
             ...(entity ? getEntityPoints(entity) : []),
           ])
         }
+        break
+      case 'collinear':
+        {
+          connectPoints(graph, [
+            ...getCollinearTargetPointIds(definition, constraint.target),
+            ...getLineEntityPoints(definition, constraint.line.entityId),
+          ])
+        }
+        break
+      case 'collinearProjectedLine':
+        connectPoints(graph, getCollinearTargetPointIds(definition, constraint.target))
         break
       case 'parallelProjectedLine':
       case 'perpendicularProjectedLine':
@@ -5011,6 +5199,14 @@ function trySolveDraggedPointAsComponentTranslation(input: {
 
       if (constraint.kind === 'parallelProjectedLine' || constraint.kind === 'perpendicularProjectedLine') {
         return getLineEntityPoints(input.definition, constraint.line.entityId).some((pointId) => component.has(pointId))
+      }
+
+      if (constraint.kind === 'collinearProjectedLine') {
+        if (constraint.target.kind === 'localPoint') {
+          return component.has(constraint.target.pointId)
+        }
+
+        return getLineEntityPoints(input.definition, constraint.target.entityId).some((pointId) => component.has(pointId))
       }
 
       if (constraint.kind === 'tangentProjectedCurve' || constraint.kind === 'concentricProjectedCurve') {

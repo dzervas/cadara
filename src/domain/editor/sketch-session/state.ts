@@ -444,6 +444,11 @@ export function constraintReferencesSketchGeometry(
       return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
     case 'pointOnCurve':
       return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.curve.entityId)
+    case 'collinear':
+      return operandReferencesSketchGeometry(constraint.target, deletedPointIds, deletedEntityIds)
+        || deletedEntityIds.has(constraint.line.entityId)
+    case 'collinearProjectedLine':
+      return operandReferencesSketchGeometry(constraint.target, deletedPointIds, deletedEntityIds)
     case 'normal':
       return (
         deletedPointIds.has(constraint.point.pointId) ||
@@ -471,6 +476,15 @@ export function constraintReferencesSketchGeometry(
     case 'fixPoint':
       return deletedPointIds.has(constraint.pointId)
   }
+}
+
+function operandReferencesSketchGeometry(
+  operand: { kind: string; pointId?: SketchPointId; entityId?: SketchEntityId },
+  deletedPointIds: ReadonlySet<SketchPointId>,
+  deletedEntityIds: ReadonlySet<SketchEntityId>,
+) {
+  return (operand.kind === 'localPoint' && operand.pointId !== undefined && deletedPointIds.has(operand.pointId))
+    || (operand.kind === 'localEntity' && operand.entityId !== undefined && deletedEntityIds.has(operand.entityId))
 }
 
 export function dimensionReferencesSketchGeometry(
