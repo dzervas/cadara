@@ -96,7 +96,7 @@ export function hasSketchStyleTarget(
 }
 
 export function isSketchSvgRenderingEnabled(session: SketchSessionState): boolean {
-  return session.fullDefinition.svgRenderingEnabled ?? true
+  return session.fullDefinition.svgRenderingEnabled ?? false
 }
 
 export function toggleSketchSvgRendering(session: SketchSessionState): SketchSessionState {

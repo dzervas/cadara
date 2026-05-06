@@ -8,6 +8,7 @@ import {
   getNextSketchHistoryCursor,
   getPreviousSketchHistoryCursor,
   getSketchSessionPreviewLabel,
+  isSketchSvgRenderingEnabled,
   moveSketchHistoryCursor,
   toggleSketchSvgRendering,
 } from '@/domain/editor/sketch-session'
@@ -154,6 +155,10 @@ function handleEditingSketchToolActivation(
   }
 
   if (isPassiveSketchTool(event.toolId)) {
+    if (!isSketchSvgRenderingEnabled(state.session)) {
+      return { state, effects: [] }
+    }
+
     const session = focusSketchStyleTool(state.session, state.selection, event.toolId)
     return {
       state: {

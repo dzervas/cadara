@@ -180,7 +180,7 @@ export function createEmptyDefinition(): SketchDefinition {
     constraints: [],
     dimensionIds: [],
     dimensions: [],
-    svgRenderingEnabled: true,
+    svgRenderingEnabled: false,
     derivedRelationships: [],
     authoringOperations: [],
   }
@@ -261,7 +261,7 @@ export function cloneDefinition(definition: SketchDefinition): SketchDefinition 
     dimensions: [...definition.dimensions],
     styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
     styles: definition.styles ? [...definition.styles] : undefined,
-    svgRenderingEnabled: definition.svgRenderingEnabled ?? true,
+    svgRenderingEnabled: definition.svgRenderingEnabled ?? false,
     derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
     authoringOperations: definition.authoringOperations ? [...definition.authoringOperations] : undefined,
   }
@@ -1301,7 +1301,7 @@ export function appendDefinition(definition: SketchDefinition, patch: SketchTool
     dimensions: [...definition.dimensions, ...(patch.dimensions ?? [])],
     styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
     styles: definition.styles ? [...definition.styles] : undefined,
-    svgRenderingEnabled: definition.svgRenderingEnabled ?? true,
+    svgRenderingEnabled: definition.svgRenderingEnabled ?? false,
     derivedRelationships: [
       ...(definition.derivedRelationships ?? []),
       ...(patch.derivedRelationships ?? []),

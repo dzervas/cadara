@@ -54,7 +54,7 @@ test('src/contracts/sketch/style-runtime-schema.spec.ts', () => {  const baseDef
   expectTrue(Array.isArray(migrated.data.styles), 'Older payloads should migrate with styles present.')
   expectTrue(migrated.data.styleIds.length === 0, 'Older payloads should default styleIds to an empty list.')
   expectTrue(migrated.data.styles.length === 0, 'Older payloads should default styles to an empty list.')
-  expectTrue(migrated.data.svgRenderingEnabled === true, 'Older payloads should default SVG rendering to enabled.')
+  expectTrue(migrated.data.svgRenderingEnabled === false, 'Older payloads should default SVG rendering to disabled.')
 
   const withStyles: SketchDefinition = {
     ...baseDefinition,

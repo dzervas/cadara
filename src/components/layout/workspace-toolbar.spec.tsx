@@ -16,6 +16,7 @@ import {
   createNewSketchSession,
   focusSketchStyleTool,
   startSketchDraw,
+  toggleSketchSvgRendering,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
 import { createToolActionBus } from '@/core/tools/tool-action-bus'
@@ -201,9 +202,10 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
     'Sketch dropdown tools should not render a divider between the tool icon and dropdown affordance.',
   )
   expectTrue(
-    !getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"')
-      && !getToolMarkup(sketchToolbarMarkup, 'stroke').includes('data-disabled="true"'),
-    'SVG style toolbar controls should stay available without a target so activation can show target guidance.',
+    getToolMarkup(sketchToolbarMarkup, 'fill').includes('data-disabled="true"')
+      && getToolMarkup(sketchToolbarMarkup, 'stroke').includes('data-disabled="true"')
+      && !getToolMarkup(sketchToolbarMarkup, 'svgRendering').includes('aria-pressed="true"'),
+    'New sketch sessions should render SVG style controls disabled until SVG rendering is enabled.',
   )
   expectTrue(
     sketchToolbarMarkup.includes('var(--workbench-shell-success-surface)')
@@ -211,7 +213,7 @@ test('src/components/layout/workspace-toolbar.spec.tsx', async () => {  function
     'Finish Sketch should use the semantic success treatment from the shared workbench theme.',
   )
 
-  let styledSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+  let styledSession = toggleSketchSvgRendering(createNewSketchSession(createStandardPlaneDefinition('xy')))
   styledSession = beginSketchTool(styledSession, 'line')
   styledSession = startSketchDraw(styledSession, [0, 0])
   styledSession = acceptSketchDraw(styledSession, [4, 0])

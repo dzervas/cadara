@@ -68,6 +68,7 @@ test('src/domain/editor/sketch-session-style.spec.ts', () => {  const definition
     constraints: [],
     dimensionIds: [],
     dimensions: [],
+    svgRenderingEnabled: true,
   } as SketchDefinition & {
     styles: Array<{
       styleId: string

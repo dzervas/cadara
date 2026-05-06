@@ -38,7 +38,7 @@ function cloneDefinition(definition: SketchDefinition): SketchDefinition {
     dimensions: [...definition.dimensions],
     styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
     styles: definition.styles ? [...definition.styles] : undefined,
-    svgRenderingEnabled: definition.svgRenderingEnabled ?? true,
+    svgRenderingEnabled: definition.svgRenderingEnabled ?? false,
     derivedRelationships: definition.derivedRelationships ? [...definition.derivedRelationships] : undefined,
     authoringOperations: definition.authoringOperations ? [...definition.authoringOperations] : undefined,
   }

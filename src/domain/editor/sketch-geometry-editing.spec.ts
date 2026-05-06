@@ -1027,7 +1027,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
   }
 
   function testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets() {
-    let session = createSessionFromDefinition(createSquareDefinition(false))
+    let session = toggleSketchSvgRendering(createSessionFromDefinition(createSquareDefinition(false)))
     session = {
       ...session,
       solvedRegions: deriveRegionsForDefinition(session.definition),
@@ -1166,7 +1166,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
   }
 
   function testSvgRenderingToggleSuppressesAuthoredStylesWithoutDeletingThem() {
-    let session = createSessionFromDefinition(createSquareDefinition(false))
+    let session = toggleSketchSvgRendering(createSessionFromDefinition(createSquareDefinition(false)))
     session = {
       ...session,
       solvedRegions: deriveRegionsForDefinition(session.definition),

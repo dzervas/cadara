@@ -782,7 +782,7 @@ export const sketchDefinitionSchema = z.object({
   dimensions: z.array(dimensionDefinitionSchema),
   styleIds: z.array(sketchStyleIdSchema).default([]),
   styles: z.array(sketchStyleRecordSchema).default([]),
-  svgRenderingEnabled: z.boolean().default(true),
+  svgRenderingEnabled: z.boolean().default(false),
   derivedRelationships: z.array(sketchDerivationDefinitionSchema).default([]),
   authoringOperations: z.array(sketchAuthoringOperationSchema).default([]),
 }).transform((value) => value as SketchDefinition)

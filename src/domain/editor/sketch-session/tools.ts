@@ -38,10 +38,7 @@ import {
   collectSketchSnapGeometries,
   resolveSketchSnap,
 } from '@/domain/sketch-snapping/snap-candidates'
-import {
-  buildSketchStyleControls,
-  buildSketchStylePresentation,
-} from '@/domain/sketch-styles/definition'
+import { buildSketchStylePresentation } from '@/domain/sketch-styles/definition'
 import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
@@ -2095,14 +2092,8 @@ export function getSketchToolPresentation(session: SketchSessionState): SketchTo
       return overlays.length > 0 ? { prompts: [], overlays } : null
     }
 
-    const styledPoint = session.definition.points.find((point) => point.pointId === session.activeEditTarget?.pointId)
-    const controls = buildSketchStyleControls(styledPoint?.style)
-
-    return {
-      prompts: [{ id: 'sketch-style-prompt', text: 'Edit local sketch style' }],
-      controls,
-      controlGroups: [{ id: 'sketch-style-controls', label: 'Style', controls }],
-    }
+    const overlays = buildCommittedDimensionOverlays(session, session.definition)
+    return overlays.length > 0 ? { prompts: [], overlays } : null
   }
 
   return session.toolPresentation

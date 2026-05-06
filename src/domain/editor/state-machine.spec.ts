@@ -56,10 +56,12 @@ import {
   getSketchAnnotationDescriptors,
   getSketchSessionPreviewLabel,
   getSketchToolPresentation,
+  isSketchSvgRenderingEnabled,
   mapSketchPointToWorld,
   patchSketchConstraintValue,
   selectSketchConstraintTarget,
   startSketchDraw,
+  toggleSketchSvgRendering,
 } from '@/domain/editor/sketch-session'
 import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
 import { getPreviousDocumentHistoryCursor } from '@/domain/modeling/document-history'
@@ -3263,7 +3265,34 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {  function creat
     ] as const satisfies readonly ToolId[]
 
     for (const toolId of passiveSketchToolIds) {
-      const result = transitionEditorState(withTool.state, {
+      const disabledResult = transitionEditorState(withTool.state, {
+        type: 'tool.activated',
+        toolId,
+      })
+
+      expectTrue(
+        disabledResult.state.kind === 'editingSketch' && disabledResult.state.session.activeStyleFocus === null,
+        `${toolId} should stay inactive while SVG rendering is disabled.`,
+      )
+    }
+
+    expectTrue(
+      withTool.state.kind === 'editingSketch' && !isSketchSvgRenderingEnabled(withTool.state.session),
+      'New sketch sessions should start with SVG rendering disabled.',
+    )
+
+    const svgEnabled = transitionEditorState(withTool.state, {
+      type: 'tool.activated',
+      toolId: 'svgRendering',
+    })
+
+    expectTrue(
+      svgEnabled.state.kind === 'editingSketch' && isSketchSvgRenderingEnabled(svgEnabled.state.session),
+      'SVG rendering activation should explicitly enable sketch style tools.',
+    )
+
+    for (const toolId of passiveSketchToolIds) {
+      const result = transitionEditorState(svgEnabled.state, {
         type: 'tool.activated',
         toolId,
       })
@@ -3284,13 +3313,15 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {  function creat
       )
     }
 
-    let styledSession = createNewSketchSession(createStandardPlaneDefinition('xy'))
+    let styledSession = toggleSketchSvgRendering(createNewSketchSession(createStandardPlaneDefinition('xy')))
     styledSession = beginSketchTool(styledSession, 'line')
     styledSession = startSketchDraw(styledSession, [0, 0])
     styledSession = acceptSketchDraw(styledSession, [8, 0])
 
     const target = styledSession.definition.entities[0]?.target
     expectTrue(target, 'Style focus fixture should create a selectable local sketch entity.')
+    const pointTarget = styledSession.definition.points[0]?.target
+    expectTrue(pointTarget, 'Style focus fixture should create a selectable local sketch point.')
 
     const styledBaseState: SketchEditorState = {
       ...initialEditorState,
@@ -3343,6 +3374,25 @@ test('src/contracts/editor/state-machine.spec.ts', async () => {  function creat
         )
       }
     }
+
+    const pointSelected = transitionEditorState(
+      {
+        ...styledBaseState,
+        selection: [],
+        hoverTarget: null,
+      },
+      {
+        type: 'viewport.selectionRequested',
+        target: pointTarget,
+      },
+    )
+
+    expectTrue(pointSelected.state.kind === 'editingSketch', 'Sketch point selection should keep sketch editing active.')
+    expectTrue(pointSelected.state.session.activeEditTarget?.pointId === pointTarget.pointId, 'Sketch point selection should select the point edit target.')
+    expectTrue(
+      !getSketchToolPresentation(pointSelected.state.session)?.controlGroups?.some((group) => group.id === 'sketch-style-controls'),
+      'Sketch point selection should not open SVG style controls.',
+    )
   }
 
   function createConstraintAuthoringEditorState(toolId: 'dimensionDistance' | 'dimensionHorizontal' = 'dimensionDistance'): {
