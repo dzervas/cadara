@@ -9,7 +9,7 @@
     "kind": "sketch",
     "sketchId": "sketch_primary"
   },
-  "documentId": "doc_workspace",
+  "documentId": "doc_38f2d69f599945e8a10ba65ca84bee8b",
   "embeddedBinaryAssets": [],
   "featureOrder": [],
   "features": [],
@@ -19,6 +19,7 @@
       "sketchId": "sketch_primary"
     }
   ],
+  "name": "CADara Logo",
   "revisionId": "rev_0017",
   "schemaVersion": "authored-model-document/v1alpha1",
   "settings": {
@@ -1559,11 +1560,6 @@
           "constructionId": "construction_plane-xy",
           "kind": "construction"
         }
-      },
-      "planeKey": "xy",
-      "planeTarget": {
-        "constructionId": "construction_plane-xy",
-        "kind": "construction"
       },
       "sketchId": "sketch_primary"
     }
