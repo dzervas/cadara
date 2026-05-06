@@ -79,6 +79,19 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
     return session
   }
 
+  function drawSketchTool(toolId: Parameters<typeof beginSketchTool>[1], points: readonly [number, number][]) {
+    let session = beginSketchTool(
+      createNewSketchSessionFromSupport({ kind: 'construction', constructionId: 'construction_plane-xy' }),
+      toolId,
+    )
+    session = startSketchDraw(session, points[0]!)
+    for (const point of points.slice(1)) {
+      session = acceptSketchDraw(session, point)
+    }
+
+    return session
+  }
+
   function addProjectedReference(
     session: ReturnType<typeof createNewSketchSessionFromSupport>,
     projectedReference: ProjectedSketchReferenceRecord,
@@ -714,6 +727,137 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
     expectTrue(
       center && Math.hypot(center.position[0] - 3, center.position[1] - 3) < 1e-6,
       'Circle-to-projected-point coincident authoring should solve the circle center onto the projected point immediately.',
+    )
+  }
+
+  function testCoincidentAuthoringCommitsLocalPointOnCurveOperands() {
+    const cases = [
+      {
+        label: 'line',
+        createSession: () => createSessionWithTwoLines(),
+        selectCurve(session: ReturnType<typeof createNewSketchSessionFromSupport>) {
+          return session.definition.entities.find((entity) => entity.kind === 'lineSegment')?.entityId
+        },
+      },
+      {
+        label: 'circle',
+        createSession: () => drawSketchTool('circle', [[0, 0], [4, 0]]),
+        selectCurve(session: ReturnType<typeof createNewSketchSessionFromSupport>) {
+          return session.definition.entities.find((entity) => entity.kind === 'circle')?.entityId
+        },
+      },
+      {
+        label: 'arc',
+        createSession: () => drawSketchTool('centerPointArc', [[0, 0], [4, 0], [0, 4]]),
+        selectCurve(session: ReturnType<typeof createNewSketchSessionFromSupport>) {
+          return session.definition.entities.find((entity) => entity.kind === 'arc')?.entityId
+        },
+      },
+      {
+        label: 'spline',
+        createSession: () => drawSketchTool('spline', [[0, 0], [2, 3], [4, 0]]),
+        selectCurve(session: ReturnType<typeof createNewSketchSessionFromSupport>) {
+          return session.definition.entities.find((entity) => entity.kind === 'spline')?.entityId
+        },
+      },
+    ]
+
+    for (const testCase of cases) {
+      let session = testCase.createSession()
+      const targetPointId = session.definition.pointIds.at(-1)
+      const curveId = testCase.selectCurve(session)
+
+      expectTrue(Boolean(targetPointId), `${testCase.label} setup should create a selectable sketch point.`)
+      expectTrue(Boolean(curveId), `${testCase.label} setup should create a selectable sketch curve.`)
+
+      session = beginSketchTool(session, 'constraintCoincident')
+      session = selectSketchConstraintTarget(session, {
+        kind: 'sketchPoint',
+        sketchId: 'sketch_draft',
+        pointId: targetPointId!,
+      })
+      session = selectSketchConstraintTarget(session, {
+        kind: 'sketchEntity',
+        sketchId: 'sketch_draft',
+        entityId: curveId!,
+      })
+
+      const constraint = session.definition.constraints.at(-1)
+      expectTrue(
+        constraint?.kind === 'pointOnCurve',
+        `Coincident authoring should commit a local point-on-${testCase.label} constraint.`,
+      )
+      expectTrue(
+        constraint.kind === 'pointOnCurve'
+          && constraint.point.pointId === targetPointId
+          && constraint.curve.entityId === curveId,
+        `Local point-on-${testCase.label} coincident authoring should store typed point and curve operands.`,
+      )
+    }
+  }
+
+  function testCoincidentAuthoringCanConstrainLocalCircleCenters() {
+    let session = createSessionWithTwoCircles()
+    const circles = session.definition.entities.filter((entity) => entity.kind === 'circle')
+    expectTrue(circles.length === 2, 'Circle setup should create two selectable circle entities.')
+
+    session = beginSketchTool(session, 'constraintCoincident')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: circles[0]!.entityId,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: circles[1]!.entityId,
+    })
+
+    const constraint = session.definition.constraints.at(-1)
+    expectTrue(
+      constraint?.kind === 'coincident',
+      'Coincident authoring should support selecting two local circle entities by constraining their centers.',
+    )
+    expectTrue(
+      constraint.kind === 'coincident'
+        && constraint.pointIds[0] === circles[0]!.centerPointId
+        && constraint.pointIds[1] === circles[1]!.centerPointId,
+      'Local circle-circle coincident authoring should store the selected circle center points.',
+    )
+  }
+
+  function testCoincidentAuthoringMakesLocalLinesShareUnderlyingGeometry() {
+    let session = createSessionWithTwoLines()
+    const lines = session.definition.entities.filter((entity) => entity.kind === 'lineSegment')
+    expectTrue(lines.length === 2, 'Line setup should create two selectable line entities.')
+
+    session = beginSketchTool(session, 'constraintCoincident')
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lines[0]!.entityId,
+    })
+    session = selectSketchConstraintTarget(session, {
+      kind: 'sketchEntity',
+      sketchId: 'sketch_draft',
+      entityId: lines[1]!.entityId,
+    })
+
+    const constraints = session.definition.constraints.slice(-2)
+    expectTrue(
+      constraints.length === 2 && constraints.every((constraint) => constraint.kind === 'pointOnCurve'),
+      'Coincident authoring should constrain the second selected line onto the first selected line.',
+    )
+    expectTrue(
+      constraints.every((constraint) =>
+        constraint.kind === 'pointOnCurve'
+        && constraint.curve.entityId === lines[0]!.entityId
+        && (
+          constraint.point.pointId === lines[1]!.startPointId
+          || constraint.point.pointId === lines[1]!.endPointId
+        ),
+      ),
+      'Line-line coincident authoring should store the driven line endpoints against the first selected line.',
     )
   }
 
@@ -1663,6 +1807,9 @@ test('src/domain/sketch-constraints/registry.spec.ts', async () => {  function c
   testGeometricConstraintAuthoringCommitsDurableRecord()
   testProjectedCoincidentAuthoringCommitsTypedOperand()
   testProjectedCoincidentAuthoringCanConstrainCircleCenter()
+  testCoincidentAuthoringCommitsLocalPointOnCurveOperands()
+  testCoincidentAuthoringCanConstrainLocalCircleCenters()
+  testCoincidentAuthoringMakesLocalLinesShareUnderlyingGeometry()
   testProjectedParallelAuthoringCommitsTypedOperand()
   testSketchDatumAuthoringCommitsTypedOperands()
   testSketchDatumDimensionAuthoringCommitsTypedOperands()

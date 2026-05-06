@@ -131,7 +131,11 @@ const resolveCoincidentTarget: ConstraintTargetResolver = (definition, target, p
         target,
         projectedReferences,
       )
-    : createCompositeResolver([resolvePointTarget, resolveCircleTarget])(definition, target, projectedReferences)
+    : createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])(
+        definition,
+        target,
+        projectedReferences,
+      )
 
 const resolvePointOrLineTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget])
 const resolvePierceTarget = createCompositeResolver([resolvePointTarget, resolveLineTarget, resolveCircleTarget, resolveCurveTarget])
@@ -192,6 +196,22 @@ function selectedLocalCurve(targets: readonly SketchConstraintTargetRecord[]) {
       || target.entity.kind === 'spline'
     ),
   ) ?? null
+}
+
+function isLocalCurveTarget(target: SketchConstraintTargetRecord) {
+  return Boolean(
+    target.entity
+    && (
+      target.entity.kind === 'lineSegment'
+      || target.entity.kind === 'circle'
+      || target.entity.kind === 'arc'
+      || target.entity.kind === 'spline'
+    ),
+  )
+}
+
+function isLocalLineTarget(target: SketchConstraintTargetRecord) {
+  return target.entity?.kind === 'lineSegment'
 }
 
 function singleConstraint(constraint: ConstraintDefinition | null | undefined) {
@@ -1172,7 +1192,7 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: 'constraintCoincident',
       name: 'Coincident',
-      tooltip: 'Constrain two sketch points to the same position.',
+      tooltip: 'Constrain sketch points or entities to share location.',
       icon: 'constraintCoincident',
       group: 'constraints',
       modes: ['sketch'],
@@ -1211,6 +1231,73 @@ const sketchConstraintDefinitions = [
               kind: 'coincident',
               label: `Coincident ${input.sequence}`,
               pointIds: [left.point.pointId, right.point.pointId],
+            },
+          ],
+        }
+      }
+
+      if (isLocalLineTarget(left) && isLocalLineTarget(right)) {
+        const baseLine = localEntityOperand(left)
+        const drivenPoints = right.entityPoints ?? []
+
+        return {
+          constraints: baseLine
+            ? drivenPoints.map((point, index) => ({
+                constraintId: input.createConstraintId(`line-coincident-point-on-curve-${index + 1}`),
+                kind: 'pointOnCurve' as const,
+                label: `Coincident ${input.sequence}`,
+                point: {
+                  kind: 'localPoint' as const,
+                  pointId: point.pointId,
+                },
+                curve: baseLine,
+              }))
+            : [],
+        }
+      }
+
+      const localPointTarget = left.point
+        ? left
+        : right.point
+          ? right
+          : null
+      const localCurveTarget = left !== localPointTarget && isLocalCurveTarget(left)
+        ? left
+        : right !== localPointTarget && isLocalCurveTarget(right)
+          ? right
+          : null
+      const localPoint = localPointTarget ? localPointOperand(localPointTarget) : null
+      const localCurve = localCurveTarget ? localEntityOperand(localCurveTarget) : null
+
+      if (localPoint && localCurve) {
+        return {
+          constraints: [
+            {
+              constraintId: input.createConstraintId('point-on-curve'),
+              kind: 'pointOnCurve',
+              label: `Coincident ${input.sequence}`,
+              point: localPoint,
+              curve: localCurve,
+            },
+          ],
+        }
+      }
+
+      const leftCoincidentPoint = localCoincidentPointOperand(left)
+      const rightCoincidentPoint = localCoincidentPointOperand(right)
+
+      if (
+        leftCoincidentPoint
+        && rightCoincidentPoint
+        && leftCoincidentPoint.pointId !== rightCoincidentPoint.pointId
+      ) {
+        return {
+          constraints: [
+            {
+              constraintId: input.createConstraintId('coincident'),
+              kind: 'coincident',
+              label: `Coincident ${input.sequence}`,
+              pointIds: [leftCoincidentPoint.pointId, rightCoincidentPoint.pointId],
             },
           ],
         }
