@@ -14,7 +14,10 @@ import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-ass
 import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/infrastructure/workers/document-sync-worker-client'
 import { createDocumentSyncWorkerMessageHandler } from '@/infrastructure/workers/document-sync-worker-runtime'
 import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
-import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
+import {
+  createLocalAuthoredDocumentPayload,
+  type LocalFileSystemFileHandle,
+} from '@/lib/local-file-system-access'
 
 test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () => {  async function testRequestOrderingAndStructuredFailures() {
     const worker = new FakeDocumentSyncWorker()
@@ -449,10 +452,62 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
     )
   }
 
+  async function testWorkerRuntimeLoadReReadsBoundFilesystemFile() {
+    const seed = await createSeedAuthoredModelDocument()
+    const staleBrowserDocument = withBodyLabel(seed, 'Stale Browser State')
+    const authoritativeFileDocument = withBodyLabel(seed, 'Authoritative File State')
+    const repository = createMemoryDocumentRepository([staleBrowserDocument])
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    const writes: string[] = []
+    await bindingStore.save({
+      metadata: {
+        documentId: seed.documentId,
+        fileName: 'authoritative.cadara',
+        storedAt: '2026-05-06T00:00:00.000Z',
+      },
+      handle: createWritableHandle({
+        name: 'authoritative.cadara',
+        writes,
+        fileText: createLocalAuthoredDocumentPayload(authoritativeFileDocument),
+        permission: 'granted',
+      }).handle,
+    })
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle({
+      kind: 'load',
+      requestId: 'request_document_sync_file_backed_load' as DocumentSyncWorkerRequest['requestId'],
+      documentId: seed.documentId,
+      seedDocument: seed,
+    })
+
+    const loaded = posted.find((message): message is Extract<DocumentSyncWorkerResponse, { kind: 'loaded' }> =>
+      message.kind === 'loaded' && message.requestId === 'request_document_sync_file_backed_load',
+    )
+    expectTrue(
+      loaded?.result.ok === true && loaded.result.document.bodyLabels[0]?.label === 'Authoritative File State',
+      'File-backed document loads should use the current linked filesystem file instead of stale browser repository state.',
+    )
+    expectTrue(
+      repository.savedDocuments.at(-1)?.bodyLabels[0]?.label === 'Authoritative File State',
+      'The repository should be refreshed from the bound file during initialization.',
+    )
+    expectTrue(writes.length === 0, 'Re-reading a bound filesystem file during load should not autosync-write back to the same file.')
+    expectTrue(
+      posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'binding-restored'),
+      'File-backed document loads should restore the persisted binding while initializing.',
+    )
+  }
+
   await testRequestOrderingAndStructuredFailures()
   await testSubscriptionDisposalAndStaleWriteStatusFiltering()
   await testWorkerRuntimeShell()
   await testWorkerRuntimeFileBindingAutosyncAndPermissionFailures()
+  await testWorkerRuntimeLoadReReadsBoundFilesystemFile()
   await testWorkerRuntimeStorageResetAndBindingFailures()
 })
 
@@ -559,6 +614,7 @@ function withBodyLabel(seed: AuthoredModelDocument, label: string) {
 function createWritableHandle(options: {
   name: string
   writes: string[]
+  fileText?: string
   permission: 'granted' | 'denied'
   writeGate?: Deferred<void>
 }) {
@@ -567,7 +623,7 @@ function createWritableHandle(options: {
   const handle: LocalFileSystemFileHandle = {
     name: options.name,
     async getFile() {
-      return new File([], options.name)
+      return new File([options.fileText ?? ''], options.name)
     },
     async createWritable() {
       return {

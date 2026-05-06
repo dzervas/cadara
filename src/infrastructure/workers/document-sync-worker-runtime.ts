@@ -1,5 +1,6 @@
 import { normalizeCollaborativeAuthoredModelDocument } from '@/domain/modeling/collaborative-authored-document'
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/contracts/modeling/authored-document'
+import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import {
   createDocumentSyncWorkerFailure,
   type DocumentSyncWorkerRequest,
@@ -10,9 +11,14 @@ import {
   isGeometryAssetDocumentRepository,
   type DocumentRepository,
 } from '@/domain/modeling/document-repository'
+import type { DocumentId } from '@/contracts/shared/ids'
 import type { LocalFileBindingRecord, LocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
 import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
-import { createLocalAuthoredDocumentPayload, writeTextToLocalFileHandle } from '@/lib/local-file-system-access'
+import {
+  createLocalAuthoredDocumentPayload,
+  readLocalCadaraDocument,
+  writeTextToLocalFileHandle,
+} from '@/lib/local-file-system-access'
 
 export interface DocumentSyncWorkerRuntimeOptions {
   repository: DocumentRepository
@@ -40,6 +46,67 @@ export function createDocumentSyncWorkerMessageHandler(
   function publishWriteStatus(status: DocumentSyncWriteStatus) {
     writeStatuses.set(status.documentId, status)
     postMessage({ kind: 'writeStatusChanged', status })
+  }
+
+  async function restoreBoundFileRecord(documentId: DocumentId, restoreOptions?: { throwOnFailure?: boolean }) {
+    const restored = await options.bindingStore?.load(documentId)
+    if (restored && !restored.ok) {
+      if (restoreOptions?.throwOnFailure) {
+        throw new Error(restored.reason === 'unsupported-storage' ? 'Persistent local file binding storage is unavailable.' : 'Local file binding could not be restored.')
+      }
+      return null
+    }
+
+    const record = restored?.value ?? null
+    if (!record) {
+      return null
+    }
+
+    bindings.set(documentId, record)
+    const status: DocumentSyncWriteStatus = {
+      kind: 'binding-restored',
+      documentId,
+      sequence: nextWriteSequence(documentId),
+      metadata: record.metadata,
+    }
+    publishWriteStatus(status)
+    return record
+  }
+
+  function createFailedLoadResult(documentId: DocumentId, diagnostic: AuthoredModelDocumentDiagnostic) {
+    return {
+      ok: false as const,
+      status: {
+        kind: 'failed' as const,
+        documentId,
+        diagnostic,
+      },
+    }
+  }
+
+  async function readBoundFileDocument(documentId: DocumentId, record: LocalFileBindingRecord) {
+    let payload: unknown
+    try {
+      payload = await readLocalCadaraDocument(record.handle)
+    } catch (error: unknown) {
+      return createFailedLoadResult(documentId, {
+        reasonCode: 'local-file-read-failed',
+        message: error instanceof Error ? error.message : 'Linked local file could not be read.',
+      })
+    }
+
+    const parsed = parseAuthoredModelDocument(structuredClone(payload))
+    if (!parsed.ok) {
+      return createFailedLoadResult(documentId, parsed.diagnostic)
+    }
+
+    return {
+      ok: true as const,
+      document: {
+        ...parsed.document,
+        documentId,
+      },
+    }
   }
 
   function queueBoundFileWrite(
@@ -127,12 +194,45 @@ export function createDocumentSyncWorkerMessageHandler(
               request.storageKey as Parameters<DocumentRepositoryUrlStore['set']>[1],
             )
           }
+          const loadResult = await options.repository.load({
+            documentId: request.documentId,
+            seedDocument: request.seedDocument,
+          })
+          if (!loadResult.ok) {
+            postMessage({
+              kind: 'loaded',
+              requestId: request.requestId,
+              result: loadResult,
+            })
+            return
+          }
+
+          const boundFileRecord = await restoreBoundFileRecord(request.documentId)
+          if (!boundFileRecord) {
+            postMessage({
+              kind: 'loaded',
+              requestId: request.requestId,
+              result: loadResult,
+            })
+            return
+          }
+
+          const boundFileDocument = await readBoundFileDocument(request.documentId, boundFileRecord)
+          if (!boundFileDocument.ok) {
+            postMessage({
+              kind: 'loaded',
+              requestId: request.requestId,
+              result: boundFileDocument,
+            })
+            return
+          }
+
           postMessage({
             kind: 'loaded',
             requestId: request.requestId,
-            result: await options.repository.load({
+            result: await options.repository.mutate({
               documentId: request.documentId,
-              seedDocument: request.seedDocument,
+              document: boundFileDocument.document,
             }),
           })
           return
@@ -225,22 +325,7 @@ export function createDocumentSyncWorkerMessageHandler(
           return
         }
         case 'restoreBinding': {
-          const restored = await options.bindingStore?.load(request.documentId)
-          if (restored && !restored.ok) {
-            throw new Error(restored.reason === 'unsupported-storage' ? 'Persistent local file binding storage is unavailable.' : 'Local file binding could not be restored.')
-          }
-
-          const record = restored?.value ?? null
-          if (record) {
-            bindings.set(request.documentId, record)
-            const status: DocumentSyncWriteStatus = {
-              kind: 'binding-restored',
-              documentId: request.documentId,
-              sequence: nextWriteSequence(request.documentId),
-              metadata: record.metadata,
-            }
-            publishWriteStatus(status)
-          }
+          const record = await restoreBoundFileRecord(request.documentId, { throwOnFailure: true })
           postMessage({
             kind: 'bindingRestored',
             requestId: request.requestId,
