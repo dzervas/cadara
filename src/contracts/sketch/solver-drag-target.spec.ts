@@ -198,6 +198,273 @@ test('src/contracts/sketch/solver-drag-target.spec.ts', () => {  function assert
     }
   }
 
+  function createLogoLikeDragDefinition(): SketchDefinition {
+    return {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_1_line-start',
+        'sketch_point_1_line-end',
+        'sketch_point_2_line-end',
+        'sketch_point_3_line-end',
+        'sketch_point_4_line-end',
+        'sketch_point_5_line-end',
+      ],
+      points: [
+        makePoint('sketch_point_1_line-start', 'Line 1 start', 3.7533016694624166e-7, 0),
+        makePoint('sketch_point_1_line-end', 'Line 1 end', -2.5022011129749444e-7, 9.133302219150853),
+        makePoint('sketch_point_2_line-end', 'Line 2 end', 8.729451147568751, 16.4148664011001),
+        makePoint('sketch_point_3_line-end', 'Line 3 end', 20.868582202662076, 12.173020618432101),
+        makePoint('sketch_point_4_line-end', 'Line 4 end', 20.86858224838759, -7.82697899411442),
+        makePoint('sketch_point_5_line-end', 'Line 5 end', 10.227407084029718, -4.433639586425089),
+      ],
+      entityIds: [
+        'sketch_entity_1_line',
+        'sketch_entity_2_line',
+        'sketch_entity_3_line',
+        'sketch_entity_4_line',
+        'sketch_entity_5_line',
+      ],
+      entities: [
+        makeLine('sketch_entity_1_line', 'Line 1', 'sketch_point_1_line-start', 'sketch_point_1_line-end'),
+        makeLine('sketch_entity_2_line', 'Line 2', 'sketch_point_1_line-end', 'sketch_point_2_line-end'),
+        makeLine('sketch_entity_3_line', 'Line 3', 'sketch_point_2_line-end', 'sketch_point_3_line-end'),
+        makeLine('sketch_entity_4_line', 'Line 4', 'sketch_point_3_line-end', 'sketch_point_4_line-end'),
+        makeLine('sketch_entity_5_line', 'Line 5', 'sketch_point_4_line-end', 'sketch_point_5_line-end'),
+      ],
+      constraintIds: [
+        'constraint_1_origin',
+        'constraint_1_vertical',
+        'constraint_4_vertical',
+      ],
+      constraints: [
+        {
+          constraintId: 'constraint_1_origin' as const,
+          kind: 'coincidentProjectedPoint',
+          label: 'Line 1 start at origin',
+          point: {
+            kind: 'localPoint',
+            pointId: 'sketch_point_1_line-start' as const,
+          },
+          projectedPoint: {
+            kind: 'sketchDatum',
+            datum: 'origin',
+          },
+        },
+        {
+          constraintId: 'constraint_1_vertical' as const,
+          kind: 'vertical',
+          label: 'Line 1 vertical',
+          entityId: 'sketch_entity_1_line' as const,
+        },
+        {
+          constraintId: 'constraint_4_vertical' as const,
+          kind: 'vertical',
+          label: 'Line 4 vertical',
+          entityId: 'sketch_entity_4_line' as const,
+        },
+      ],
+      dimensionIds: ['dimension_4_length'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_4_length' as const,
+          kind: 'lineLength',
+          label: 'Line 4 length',
+          entityId: 'sketch_entity_4_line' as const,
+          value: 20,
+        },
+      ],
+    }
+  }
+
+  function createAnchoredLogoFlipDefinition(): SketchDefinition {
+    const anchor1 = 'sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1'
+    const anchor2 = 'sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2'
+    const line6End = 'sketch_point_6_line-end'
+    const line8End = 'sketch_point_8_line-end'
+    const line12End = 'sketch_point_12_line-end'
+    const line13End = 'sketch_point_13_line-end'
+    const line19End = 'sketch_point_19_line-end'
+    const line21End = 'sketch_point_21_line-end'
+
+    return {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        anchor1,
+        anchor2,
+        line6End,
+        line8End,
+        line12End,
+        line13End,
+        line19End,
+        line21End,
+      ],
+      points: [
+        makePoint(anchor1, 'Anchor 1', -6.45492548301263e-11, -20.00000000144171),
+        makePoint(anchor2, 'Anchor 2', 0, 0),
+        makePoint(line6End, 'Line 6 end', 16.420739052696923, -15.60007626054567),
+        makePoint(line8End, 'Line 8 end', 32.39551360005226, -21.414418708092832),
+        makePoint(line12End, 'Line 12 end', 16.420739050742696, 4.399923751375514),
+        makePoint(line13End, 'Line 13 end', 32.39551359627179, -1.4144187060831115),
+        makePoint(line19End, 'Line 19 end', 32.395513600164705, -21.414418707726117),
+        makePoint(line21End, 'Line 21 end', 15.974774547466922, -25.81434244596269),
+      ],
+      entityIds: [
+        'sketch_entity_3_line',
+        'sketch_entity_6_line',
+        'sketch_entity_8_line',
+        'sketch_entity_12_line',
+        'sketch_entity_13_line',
+        'sketch_entity_19_line',
+        'sketch_entity_21_line',
+        'sketch_entity_22_line',
+      ],
+      entities: [
+        makeLine('sketch_entity_3_line', 'Line 3', anchor1, anchor2),
+        makeLine('sketch_entity_6_line', 'Line 6', anchor1, line6End),
+        makeLine('sketch_entity_8_line', 'Line 8', line6End, line8End),
+        makeLine('sketch_entity_12_line', 'Line 12', anchor2, line12End),
+        makeLine('sketch_entity_13_line', 'Line 13', line12End, line13End),
+        makeLine('sketch_entity_19_line', 'Line 19', line13End, line19End),
+        makeLine('sketch_entity_21_line', 'Line 21', anchor1, line21End),
+        makeLine('sketch_entity_22_line', 'Line 22', line21End, line19End),
+      ],
+      constraintIds: [
+        'constraint_4_vertical',
+        'constraint_11_equal',
+        'constraint_15_equal',
+        'constraint_16_parallel',
+        'constraint_17_parallel',
+        'constraint_18_equal',
+        'constraint_20_coincident',
+        'constraint_23_equal',
+        'constraint_24_equal',
+        'constraint_25_equal',
+        'constraint_27_coincident-projected-point',
+      ],
+      constraints: [
+        {
+          constraintId: 'constraint_4_vertical',
+          kind: 'vertical',
+          label: 'Line 3 vertical',
+          entityId: 'sketch_entity_3_line',
+        },
+        {
+          constraintId: 'constraint_11_equal',
+          kind: 'equalLength',
+          label: 'Lines 6 and 8 equal',
+          entityIds: ['sketch_entity_6_line', 'sketch_entity_8_line'],
+        },
+        {
+          constraintId: 'constraint_15_equal',
+          kind: 'equalLength',
+          label: 'Lines 12 and 6 equal',
+          entityIds: ['sketch_entity_12_line', 'sketch_entity_6_line'],
+        },
+        {
+          constraintId: 'constraint_16_parallel',
+          kind: 'parallel',
+          label: 'Lines 12 and 6 parallel',
+          entityIds: ['sketch_entity_12_line', 'sketch_entity_6_line'],
+        },
+        {
+          constraintId: 'constraint_17_parallel',
+          kind: 'parallel',
+          label: 'Lines 13 and 8 parallel',
+          entityIds: ['sketch_entity_13_line', 'sketch_entity_8_line'],
+        },
+        {
+          constraintId: 'constraint_18_equal',
+          kind: 'equalLength',
+          label: 'Lines 12 and 13 equal',
+          entityIds: ['sketch_entity_12_line', 'sketch_entity_13_line'],
+        },
+        {
+          constraintId: 'constraint_20_coincident',
+          kind: 'coincident',
+          label: 'Line 19 end coincident with Line 8 end',
+          pointIds: [line19End, line8End],
+        },
+        {
+          constraintId: 'constraint_23_equal',
+          kind: 'equalLength',
+          label: 'Lines 22 and 6 equal',
+          entityIds: ['sketch_entity_22_line', 'sketch_entity_6_line'],
+        },
+        {
+          constraintId: 'constraint_24_equal',
+          kind: 'equalLength',
+          label: 'Lines 21 and 8 equal',
+          entityIds: ['sketch_entity_21_line', 'sketch_entity_8_line'],
+        },
+        {
+          constraintId: 'constraint_25_equal',
+          kind: 'equalLength',
+          label: 'Lines 19 and 3 equal',
+          entityIds: ['sketch_entity_19_line', 'sketch_entity_3_line'],
+        },
+        {
+          constraintId: 'constraint_27_coincident-projected-point',
+          kind: 'coincidentProjectedPoint',
+          label: 'Anchor 2 at origin',
+          point: {
+            kind: 'localPoint',
+            pointId: anchor2,
+          },
+          projectedPoint: {
+            kind: 'sketchDatum',
+            datum: 'origin',
+          },
+        },
+      ],
+      dimensionIds: [
+        'dimension_5_line-length',
+        'dimension_7_line-angle',
+        'dimension_10_line-angle',
+        'dimension_26_line-length',
+      ],
+      dimensions: [
+        {
+          dimensionId: 'dimension_5_line-length',
+          kind: 'lineLength',
+          label: 'Line 3 length',
+          entityId: 'sketch_entity_3_line',
+          value: 20,
+        },
+        {
+          dimensionId: 'dimension_7_line-angle',
+          kind: 'lineAngle',
+          label: 'Line 6 angle from Line 3',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_3_line' },
+            { kind: 'localEntity', entityId: 'sketch_entity_6_line' },
+          ],
+          valueRadians: 1.3089969389957472,
+        },
+        {
+          dimensionId: 'dimension_10_line-angle',
+          kind: 'lineAngle',
+          label: 'Line 8 angle from Line 6',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_8_line' },
+            { kind: 'localEntity', entityId: 'sketch_entity_6_line' },
+          ],
+          valueRadians: 2.5307274153917776,
+        },
+        {
+          dimensionId: 'dimension_26_line-length',
+          kind: 'lineLength',
+          label: 'Line 6 length',
+          entityId: 'sketch_entity_6_line',
+          value: 17,
+        },
+      ],
+    }
+  }
+
   const tolerances = {
     coincidence: 1e-6,
     angleRadians: 1e-6,
@@ -251,6 +518,76 @@ test('src/contracts/sketch/solver-drag-target.spec.ts', () => {  function assert
     }
   }
 
+  function testDraggedPointSolvesLogoLikeFreeEndpoint() {
+    const requestedPosition = [10.386898346172789, -3.3335358542735576] as const
+    const result = solveSketchDefinitionWithDraggedPointTarget({
+      definition: createLogoLikeDragDefinition(),
+      dragTarget: {
+        kind: 'sketchPoint',
+        pointId: 'sketch_point_5_line-end',
+        position: requestedPosition,
+      },
+      tolerances,
+      partialSolvePolicy: 'failOnConflict',
+      targetTolerance: 1e-4,
+    })
+
+    expectTrue(result.kind === 'solved', 'Dragged-point solver should accept the logo-like free endpoint drag.')
+    const points = new Map(result.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
+    assertClosePoint(
+      points.get('sketch_point_5_line-end'),
+      requestedPosition,
+      'Logo-like dragged endpoint should reach the requested position.',
+    )
+  }
+
+  function testDraggedPointFlipsLogoLikeAnchoredComponent() {
+    const cases = [
+      {
+        pointId: 'sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1',
+        cursor: [5, 25],
+        expected: [0, 20],
+      },
+      {
+        pointId: 'sketch_point_8_line-end',
+        cursor: [-40, 25],
+        expected: [-32.39551360005226, 21.414418708092832],
+      },
+      {
+        pointId: 'sketch_point_21_line-end',
+        cursor: [-22, 33],
+        expected: [-15.974774547466922, 25.81434244596269],
+      },
+    ] as const
+
+    for (const entry of cases) {
+      const result = solveSketchDefinitionWithDraggedPointTarget({
+        definition: createAnchoredLogoFlipDefinition(),
+        dragTarget: {
+          kind: 'sketchPoint',
+          pointId: entry.pointId,
+          position: entry.cursor,
+        },
+        tolerances,
+        partialSolvePolicy: 'failOnConflict',
+        targetTolerance: 1e-4,
+      })
+
+      expectTrue(result.kind === 'solved', `Dragged-point solver should accept a logo-like flip from ${entry.pointId}.`)
+      const points = new Map(result.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]))
+      assertClosePoint(
+        points.get(entry.pointId),
+        entry.expected,
+        'Logo-like dragged point should move to the nearest valid flipped branch.',
+      )
+      assertClosePoint(
+        points.get('sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2'),
+        [0, 0],
+        'Logo-like origin anchor should stay fixed during the flip.',
+      )
+    }
+  }
+
   function testDraggedPointBlocksFixedGeometry() {
     const result = solveSketchDefinitionWithDraggedPointTarget({
       definition: createSquareDefinition(true),
@@ -273,5 +610,7 @@ test('src/contracts/sketch/solver-drag-target.spec.ts', () => {  function assert
 
   testDraggedPointSolvesFreeSquareTranslation()
   testDraggedPointSolvesRectangleToolTranslation()
+  testDraggedPointSolvesLogoLikeFreeEndpoint()
+  testDraggedPointFlipsLogoLikeAnchoredComponent()
   testDraggedPointBlocksFixedGeometry()
 })

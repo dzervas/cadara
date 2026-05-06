@@ -102,6 +102,8 @@ function createInteractiveDragBenchmarkState(fixture: SketchSolverBenchmarkFixtu
   pointId: NonNullable<SketchSolverBenchmarkFixture['sketch']['definition']['points'][number]>['pointId']
   basePosition: readonly [number, number]
   direction: 1 | -1
+  explicitTarget: readonly [number, number] | null
+  targetTolerance: number
 } {
   const definition = fixture.sketch.definition
   const solved = solveSketchDefinitionCore({
@@ -119,7 +121,9 @@ function createInteractiveDragBenchmarkState(fixture: SketchSolverBenchmarkFixtu
     program,
     priorSolvedSnapshot: solved.solvedSnapshot,
   })
-  const dragPoint = definition.points[1] ?? definition.points[0]
+  const dragPoint = fixture.interactiveDragTarget
+    ? definition.points.find((point) => point.pointId === fixture.interactiveDragTarget?.pointId)
+    : definition.points[1] ?? definition.points[0]
   if (!dragPoint) {
     throw new Error(`${fixture.name} does not expose a benchmark drag point.`)
   }
@@ -128,6 +132,8 @@ function createInteractiveDragBenchmarkState(fixture: SketchSolverBenchmarkFixtu
     pointId: dragPoint.pointId,
     basePosition: dragPoint.position,
     direction: 1,
+    explicitTarget: fixture.interactiveDragTarget?.position ?? null,
+    targetTolerance: fixture.interactiveDragTarget?.targetTolerance ?? 0.1,
   }
 }
 
@@ -145,11 +151,13 @@ summary(() => {
       const result = updateCompiledSketchSolveSession(interactive.session, {
         kind: 'sketchPoint',
         pointId: interactive.pointId,
-        position: [
-          interactive.basePosition[0] + interactive.direction * 0.05,
-          interactive.basePosition[1],
-        ],
-      }, 0.1)
+        position: interactive.explicitTarget
+          ? interactive.direction === 1 ? interactive.explicitTarget : interactive.basePosition
+          : [
+              interactive.basePosition[0] + interactive.direction * 0.05,
+              interactive.basePosition[1],
+            ],
+      }, interactive.targetTolerance)
       if (result.kind !== 'solved') {
         throw new Error(`${fixture.name} interactive drag frame did not solve; received ${result.kind}.`)
       }

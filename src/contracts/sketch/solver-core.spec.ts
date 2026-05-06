@@ -174,6 +174,179 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {  function assertC
     expectTrue(matches(d, [3 * halfSqrt2, -3 * halfSqrt2]), `D should match isotope down-right branch for ${strategy}.`)
   }
 
+  function createLogoReferenceImageAnchorFixture(): SketchDefinition {
+    const anchor1 = 'sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1'
+    const anchor2 = 'sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2'
+    const line6End = 'sketch_point_6_line-end'
+    const line8End = 'sketch_point_8_line-end'
+    const line12End = 'sketch_point_12_line-end'
+    const line13End = 'sketch_point_13_line-end'
+    const line19End = 'sketch_point_19_line-end'
+    const line21End = 'sketch_point_21_line-end'
+
+    return {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        anchor1,
+        anchor2,
+        line6End,
+        line8End,
+        line12End,
+        line13End,
+        line19End,
+        line21End,
+      ],
+      points: [
+        makePoint(anchor1, 'Anchor 1', 29.110404607012146, 1.2961566959965458),
+        makePoint(anchor2, 'Anchor 2', 29.110404607076696, 21.296156697438256),
+        makePoint(line6End, 'Line 6 end', 45.53114365977362, 5.6960804368925855),
+        makePoint(line8End, 'Line 8 end', 61.50591820712896, -0.11826201065457728),
+        makePoint(line12End, 'Line 12 end', 45.53114365781939, 25.69608044881377),
+        makePoint(line13End, 'Line 13 end', 61.505918203348486, 19.881737991355145),
+        makePoint(line19End, 'Line 19 end', 61.5059182072414, -0.11826201028785953),
+        makePoint(line21End, 'Line 21 end', 45.08517915454362, -4.518185748524435),
+      ],
+      entityIds: [
+        'sketch_entity_3_line',
+        'sketch_entity_6_line',
+        'sketch_entity_8_line',
+        'sketch_entity_12_line',
+        'sketch_entity_13_line',
+        'sketch_entity_19_line',
+        'sketch_entity_21_line',
+        'sketch_entity_22_line',
+      ],
+      entities: [
+        makeLine('sketch_entity_3_line', 'Line 3', anchor1, anchor2),
+        makeLine('sketch_entity_6_line', 'Line 6', anchor1, line6End),
+        makeLine('sketch_entity_8_line', 'Line 8', line6End, line8End),
+        makeLine('sketch_entity_12_line', 'Line 12', anchor2, line12End),
+        makeLine('sketch_entity_13_line', 'Line 13', line12End, line13End),
+        makeLine('sketch_entity_19_line', 'Line 19', line13End, line19End),
+        makeLine('sketch_entity_21_line', 'Line 21', anchor1, line21End),
+        makeLine('sketch_entity_22_line', 'Line 22', line21End, line19End),
+      ],
+      constraintIds: [
+        'constraint_4_vertical',
+        'constraint_11_equal',
+        'constraint_15_equal',
+        'constraint_16_parallel',
+        'constraint_17_parallel',
+        'constraint_18_equal',
+        'constraint_20_coincident',
+        'constraint_23_equal',
+        'constraint_24_equal',
+        'constraint_25_equal',
+      ],
+      constraints: [
+        {
+          constraintId: 'constraint_4_vertical',
+          kind: 'vertical',
+          label: 'Line 3 vertical',
+          entityId: 'sketch_entity_3_line',
+        },
+        {
+          constraintId: 'constraint_11_equal',
+          kind: 'equalLength',
+          label: 'Lines 6 and 8 equal',
+          entityIds: ['sketch_entity_6_line', 'sketch_entity_8_line'],
+        },
+        {
+          constraintId: 'constraint_15_equal',
+          kind: 'equalLength',
+          label: 'Lines 12 and 6 equal',
+          entityIds: ['sketch_entity_12_line', 'sketch_entity_6_line'],
+        },
+        {
+          constraintId: 'constraint_16_parallel',
+          kind: 'parallel',
+          label: 'Lines 12 and 6 parallel',
+          entityIds: ['sketch_entity_12_line', 'sketch_entity_6_line'],
+        },
+        {
+          constraintId: 'constraint_17_parallel',
+          kind: 'parallel',
+          label: 'Lines 13 and 8 parallel',
+          entityIds: ['sketch_entity_13_line', 'sketch_entity_8_line'],
+        },
+        {
+          constraintId: 'constraint_18_equal',
+          kind: 'equalLength',
+          label: 'Lines 12 and 13 equal',
+          entityIds: ['sketch_entity_12_line', 'sketch_entity_13_line'],
+        },
+        {
+          constraintId: 'constraint_20_coincident',
+          kind: 'coincident',
+          label: 'Line 19 end coincident with Line 8 end',
+          pointIds: [line19End, line8End],
+        },
+        {
+          constraintId: 'constraint_23_equal',
+          kind: 'equalLength',
+          label: 'Lines 22 and 6 equal',
+          entityIds: ['sketch_entity_22_line', 'sketch_entity_6_line'],
+        },
+        {
+          constraintId: 'constraint_24_equal',
+          kind: 'equalLength',
+          label: 'Lines 21 and 8 equal',
+          entityIds: ['sketch_entity_21_line', 'sketch_entity_8_line'],
+        },
+        {
+          constraintId: 'constraint_25_equal',
+          kind: 'equalLength',
+          label: 'Lines 19 and 3 equal',
+          entityIds: ['sketch_entity_19_line', 'sketch_entity_3_line'],
+        },
+      ],
+      dimensionIds: [
+        'dimension_5_line-length',
+        'dimension_7_line-angle',
+        'dimension_10_line-angle',
+        'dimension_26_line-length',
+      ],
+      dimensions: [
+        {
+          dimensionId: 'dimension_5_line-length',
+          kind: 'lineLength',
+          label: 'Line 3 length',
+          entityId: 'sketch_entity_3_line',
+          value: 20,
+        },
+        {
+          dimensionId: 'dimension_7_line-angle',
+          kind: 'lineAngle',
+          label: 'Line 6 angle from Line 3',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_3_line' },
+            { kind: 'localEntity', entityId: 'sketch_entity_6_line' },
+          ],
+          valueRadians: 1.3089969389957472,
+        },
+        {
+          dimensionId: 'dimension_10_line-angle',
+          kind: 'lineAngle',
+          label: 'Line 8 angle from Line 6',
+          lines: [
+            { kind: 'localEntity', entityId: 'sketch_entity_8_line' },
+            { kind: 'localEntity', entityId: 'sketch_entity_6_line' },
+          ],
+          valueRadians: 2.5307274153917776,
+        },
+        {
+          dimensionId: 'dimension_26_line-length',
+          kind: 'lineLength',
+          label: 'Line 6 length',
+          entityId: 'sketch_entity_6_line',
+          value: 17,
+        },
+      ],
+    }
+  }
+
   async function testFixPoint() {
     const definition: SketchDefinition = {
       schemaVersion: 'sketch-definition/v1alpha1',
@@ -1070,6 +1243,55 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {  function assertC
     })
   }
 
+  async function testProjectedDatumConstraintSeedsLogoReferenceImageAnchorTranslation() {
+    const anchor2 = 'sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2'
+    const baseDefinition = createLogoReferenceImageAnchorFixture()
+    const anchoredDefinition: SketchDefinition = {
+      ...baseDefinition,
+      constraintIds: [
+        ...baseDefinition.constraintIds,
+        'constraint_reference_image_anchor_2_origin',
+      ],
+      constraints: [
+        ...baseDefinition.constraints,
+        {
+          constraintId: 'constraint_reference_image_anchor_2_origin',
+          kind: 'coincidentProjectedPoint',
+          label: 'Anchor 2 at origin',
+          point: {
+            kind: 'localPoint',
+            pointId: anchor2,
+          },
+          projectedPoint: {
+            kind: 'sketchDatum',
+            datum: 'origin',
+          },
+        },
+      ],
+    }
+
+    const solved = solveSketchDefinitionCore({
+      definition: anchoredDefinition,
+      tolerances,
+      partialSolvePolicy: 'bestEffort',
+      strategy: 'bfgs',
+    })
+    const anchor = solved.solvedSnapshot.solvedPoints.find((point) => point.pointId === anchor2)
+
+    expectTrue(solved.status.solveState === 'solved', 'Logo-like anchor-to-origin constraint should solve.')
+    expectTrue(anchor !== undefined, 'Expected solved reference image anchor.')
+    assertClose(anchor.solvedPosition[0], 0, 1e-5, 'Reference image anchor should solve to origin x.')
+    assertClose(anchor.solvedPosition[1], 0, 1e-5, 'Reference image anchor should solve to origin y.')
+    expectTrue(
+      solved.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied'),
+      'All logo-like fixture constraints should remain satisfied after anchor-to-origin solve.',
+    )
+    expectTrue(
+      solved.solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied'),
+      'All logo-like fixture dimensions should remain satisfied after anchor-to-origin solve.',
+    )
+  }
+
   async function assertRotatedRectangleSolvesWithStrategy(
     strategy: SketchSolveStrategy,
     options: {
@@ -1863,6 +2085,7 @@ test('src/contracts/sketch/solver-core.spec.ts', async () => {  function assertC
     await testArcStartPointCoincident()
     await testArcEndPointCoincident()
     await testAxisAlignedRectangle()
+    await testProjectedDatumConstraintSeedsLogoReferenceImageAnchorTranslation()
     await testRotatedRectangle()
     await testRotatedRectangleGradientDescent()
     await testRotatedRectangleGaussNewton()

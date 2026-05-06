@@ -15,9 +15,9 @@ test('src/contracts/sketch/solver-benchmark.spec.ts', () => {  function assertAu
     expectTrue(sketch.definition.schemaVersion === 'sketch-definition/v1alpha1', 'Benchmark fixtures should expose authored definitions.')
   }
 
-  expectTrue(SKETCH_SOLVER_BENCHMARK_FIXTURES.length === 4, 'Expected 10, 50, 150 constraint and independent-component benchmark fixtures.')
+  expectTrue(SKETCH_SOLVER_BENCHMARK_FIXTURES.length === 5, 'Expected incremental, independent-component, and branch-fallback benchmark fixtures.')
   expectTrue(
-    SKETCH_SOLVER_BENCHMARK_FIXTURES.map((fixture) => fixture.name).join(',') === 'constraints-10,constraints-50,constraints-150,independent-components',
+    SKETCH_SOLVER_BENCHMARK_FIXTURES.map((fixture) => fixture.name).join(',') === 'constraints-10,constraints-50,constraints-150,independent-components,three-branch-drag-fallback',
     'Benchmark fixtures should cover the required incremental solver scenarios.',
   )
 

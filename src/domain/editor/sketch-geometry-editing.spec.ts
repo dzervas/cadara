@@ -216,6 +216,142 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     }
   }
 
+  function createLogoLikeDragDefinition(withFixedDraggedPoint = false): SketchDefinition {
+    const constraints = [
+      {
+        constraintId: 'constraint_1_origin' as const,
+        kind: 'coincidentProjectedPoint' as const,
+        label: 'Line 1 start at origin',
+        point: {
+          kind: 'localPoint' as const,
+          pointId: 'sketch_point_1_line-start' as const,
+        },
+        projectedPoint: {
+          kind: 'sketchDatum' as const,
+          datum: 'origin' as const,
+        },
+      },
+      {
+        constraintId: 'constraint_1_vertical' as const,
+        kind: 'vertical' as const,
+        label: 'Line 1 vertical',
+        entityId: 'sketch_entity_1_line' as const,
+      },
+      {
+        constraintId: 'constraint_4_vertical' as const,
+        kind: 'vertical' as const,
+        label: 'Line 4 vertical',
+        entityId: 'sketch_entity_4_line' as const,
+      },
+      ...(withFixedDraggedPoint
+        ? [{
+            constraintId: 'constraint_5_fixed' as const,
+            kind: 'fixPoint' as const,
+            label: 'Line 5 endpoint fixed',
+            pointId: 'sketch_point_5_line-end' as const,
+            position: [10.227407084029718, -4.433639586425089] as const,
+          }]
+        : []),
+    ]
+
+    return {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        'sketch_point_1_line-start',
+        'sketch_point_1_line-end',
+        'sketch_point_2_line-end',
+        'sketch_point_3_line-end',
+        'sketch_point_4_line-end',
+        'sketch_point_5_line-end',
+      ],
+      points: [
+        makePoint('sketch_point_1_line-start', 'Line 1 start', 3.7533016694624166e-7, 0),
+        makePoint('sketch_point_1_line-end', 'Line 1 end', -2.5022011129749444e-7, 9.133302219150853),
+        makePoint('sketch_point_2_line-end', 'Line 2 end', 8.729451147568751, 16.4148664011001),
+        makePoint('sketch_point_3_line-end', 'Line 3 end', 20.868582202662076, 12.173020618432101),
+        makePoint('sketch_point_4_line-end', 'Line 4 end', 20.86858224838759, -7.82697899411442),
+        makePoint('sketch_point_5_line-end', 'Line 5 end', 10.227407084029718, -4.433639586425089),
+      ],
+      entityIds: [
+        'sketch_entity_1_line',
+        'sketch_entity_2_line',
+        'sketch_entity_3_line',
+        'sketch_entity_4_line',
+        'sketch_entity_5_line',
+      ],
+      entities: [
+        makeLine('sketch_entity_1_line', 'Line 1', 'sketch_point_1_line-start', 'sketch_point_1_line-end'),
+        makeLine('sketch_entity_2_line', 'Line 2', 'sketch_point_1_line-end', 'sketch_point_2_line-end'),
+        makeLine('sketch_entity_3_line', 'Line 3', 'sketch_point_2_line-end', 'sketch_point_3_line-end'),
+        makeLine('sketch_entity_4_line', 'Line 4', 'sketch_point_3_line-end', 'sketch_point_4_line-end'),
+        makeLine('sketch_entity_5_line', 'Line 5', 'sketch_point_4_line-end', 'sketch_point_5_line-end'),
+      ],
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+      constraints,
+      dimensionIds: ['dimension_4_length'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_4_length' as const,
+          kind: 'lineLength',
+          label: 'Line 4 length',
+          entityId: 'sketch_entity_4_line' as const,
+          value: 20,
+        },
+      ],
+    }
+  }
+
+  function createAnchoredBranchDragDefinition(): SketchDefinition {
+    return {
+      schemaVersion: 'sketch-definition/v1alpha1',
+      referenceIds: [],
+      references: [],
+      pointIds: ['sketch_point_anchor', 'sketch_point_tip'],
+      points: [
+        makePoint('sketch_point_anchor', 'Anchor', 0, 0),
+        makePoint('sketch_point_tip', 'Tip', 0, -20),
+      ],
+      entityIds: ['sketch_entity_branch_line'],
+      entities: [
+        makeLine('sketch_entity_branch_line', 'Branch line', 'sketch_point_anchor', 'sketch_point_tip'),
+      ],
+      constraintIds: ['constraint_anchor_origin', 'constraint_branch_vertical'],
+      constraints: [
+        {
+          constraintId: 'constraint_anchor_origin',
+          kind: 'coincidentProjectedPoint',
+          label: 'Anchor at origin',
+          point: {
+            kind: 'localPoint',
+            pointId: 'sketch_point_anchor',
+          },
+          projectedPoint: {
+            kind: 'sketchDatum',
+            datum: 'origin',
+          },
+        },
+        {
+          constraintId: 'constraint_branch_vertical',
+          kind: 'vertical',
+          label: 'Branch line vertical',
+          entityId: 'sketch_entity_branch_line',
+        },
+      ],
+      dimensionIds: ['dimension_branch_length'],
+      dimensions: [
+        {
+          dimensionId: 'dimension_branch_length',
+          kind: 'lineLength',
+          label: 'Branch length',
+          entityId: 'sketch_entity_branch_line',
+          value: 20,
+        },
+      ],
+    }
+  }
+
   function createSessionFromDefinition(definition: SketchDefinition) {
     const plane = createStandardPlaneDefinition('xy')
     const solved = solveSketchDefinitionCore({
@@ -488,6 +624,40 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     expectTrue(session.validationMessage === null, 'Valid constrained drag should not leave blocked feedback.')
   }
 
+  function testLogoLikeFreeEndpointDragClearsValidationFeedback() {
+    let session = createSessionFromDefinition(createLogoLikeDragDefinition())
+    const requestedPosition = [10.386898346172789, -3.3335358542735576] as const
+    const target = session.definition.points.find((point) => point.pointId === 'sketch_point_5_line-end')?.target
+    expectTrue(target, 'Expected logo-like free endpoint.')
+
+    session = beginSketchGeometryDrag(session, target, [10.227407084029718, -4.433639586425089])
+    expectTrue(session.activeDrag?.interactiveSolveSession !== null, 'Logo-like constrained drag should start an interactive solve session.')
+    session = finishSketchGeometryDrag(session, requestedPosition)
+
+    const points = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
+    assertClosePoint(
+      points.get('sketch_point_5_line-end'),
+      requestedPosition,
+      'Logo-like dragged endpoint should update to the requested position.',
+    )
+    expectTrue(session.validationMessage === null, 'Accepted logo-like drag should not leave constrained feedback.')
+  }
+
+  function testAnchoredBranchDragChoosesAlternateValidPosition() {
+    let session = createSessionFromDefinition(createAnchoredBranchDragDefinition())
+    const target = session.definition.points.find((point) => point.pointId === 'sketch_point_tip')?.target
+    expectTrue(target, 'Expected anchored branch tip.')
+
+    session = beginSketchGeometryDrag(session, target, [0, -20])
+    expectTrue(session.activeDrag?.interactiveSolveSession !== null, 'Anchored branch drag should start an interactive solve session.')
+    session = finishSketchGeometryDrag(session, [4, 26])
+
+    const points = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
+    assertClosePoint(points.get('sketch_point_anchor'), [0, 0], 'Anchored branch drag should keep the anchor at origin.')
+    assertClosePoint(points.get('sketch_point_tip'), [0, 20], 'Anchored branch drag should choose the alternate valid branch.')
+    expectTrue(session.validationMessage === null, 'Accepted branch drag should not leave constrained feedback.')
+  }
+
   function testLiveRegionRenderableTracksJiggledSketchDrag() {
     let session = createSessionFromDefinition(createSquareDefinition(false))
     session = {
@@ -715,6 +885,27 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     expectTrue(
       session.validationMessage === 'Geometry is constrained and cannot move to that position.',
       'Blocked drag should leave visible constrained-movement feedback.',
+    )
+  }
+
+  function testFixedLogoLikeEndpointDragBlocksWithConstrainedFeedback() {
+    let session = createSessionFromDefinition(createLogoLikeDragDefinition(true))
+    const before = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
+    const target = session.definition.points.find((point) => point.pointId === 'sketch_point_5_line-end')?.target
+    expectTrue(target, 'Expected fixed logo-like endpoint.')
+
+    session = beginSketchGeometryDrag(session, target, [10.227407084029718, -4.433639586425089])
+    session = finishSketchGeometryDrag(session, [10.386898346172789, -3.3335358542735576])
+
+    const after = new Map(session.definition.points.map((point) => [point.pointId, point.position]))
+    assertClosePoint(
+      after.get('sketch_point_5_line-end'),
+      before.get('sketch_point_5_line-end')!,
+      'Blocked fixed logo-like endpoint drag should leave the point unchanged.',
+    )
+    expectTrue(
+      session.validationMessage === 'Geometry is constrained and cannot move to that position.',
+      'Blocked fixed logo-like endpoint drag should leave constrained feedback.',
     )
   }
 
@@ -1661,6 +1852,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
 
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
+  testLogoLikeFreeEndpointDragClearsValidationFeedback()
+  testAnchoredBranchDragChoosesAlternateValidPosition()
   testLiveRegionRenderableTracksJiggledSketchDrag()
   testLiveRegionRenderablePreservesInnerLoopHole()
   testLiveRegionRenderableTriangulatesConcaveRegion()
@@ -1672,6 +1865,7 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
   testConnectedSketchSelectionSelectsBranchingComponentAndRejectsUnsupportedTargets()
   testRectangleToolDragTranslatesWholeRectangle()
   testImmovableConstrainedDragBlocksWithoutChangingDraft()
+  testFixedLogoLikeEndpointDragBlocksWithConstrainedFeedback()
   testSelectedEntityDeletionRemovesDependentAnnotations()
   testSelectedPointDeletionRemovesDependentGeometryAndAnnotations()
   testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets()

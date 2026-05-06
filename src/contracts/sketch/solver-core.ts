@@ -204,6 +204,10 @@ function zeroVector(length: number) {
   return new Float64Array(length)
 }
 
+function isConstraintResidualWithinTolerance(residual: number, tolerance: number) {
+  return residual <= tolerance * tolerance
+}
+
 function addScaled(target: Float64Array, scale: number, source: Float64Array) {
   for (let index = 0; index < target.length; index += 1) {
     target[index] += scale * source[index]!
@@ -3540,6 +3544,73 @@ function buildCompiledComponentData(
   return { components, equationMetadata }
 }
 
+function resolvePointConstraintTarget(
+  constraint: ConstraintDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): { pointId: SketchPointId; target: SketchPoint2D } | null {
+  if (constraint.kind === 'fixPoint') {
+    return { pointId: constraint.pointId, target: constraint.position }
+  }
+
+  if (constraint.kind !== 'coincidentProjectedPoint') {
+    return null
+  }
+
+  const target = constraint.projectedPoint.kind === 'projectedGeometry'
+    ? (() => {
+        const projected = findProjectedGeometry(projectedReferences, constraint.projectedPoint.reference)
+        return projected?.kind === 'point' ? projected.position : null
+      })()
+    : resolveSketchDatumPoint(constraint.projectedPoint.datum)
+
+  return target ? { pointId: constraint.point.pointId, target } : null
+}
+
+function preconditionValuesForPointAnchors(
+  program: SketchCompiledSolveProgram,
+  initialValues: Float64Array,
+): Float64Array {
+  const values = cloneValues(initialValues)
+  let translated = false
+
+  for (const component of program.components) {
+    const deltas = program.definition.constraints.flatMap((constraint) => {
+      const resolved = resolvePointConstraintTarget(constraint, program.projectedReferences)
+      if (!resolved || !component.pointIds.includes(resolved.pointId)) {
+        return []
+      }
+
+      const point = program.system.pointRecords.get(resolved.pointId)
+      return point ? [subtract(resolved.target, getPoint(values, point))] : []
+    })
+
+    if (deltas.length === 0) {
+      continue
+    }
+
+    const first = deltas[0]!
+    if (deltas.some((delta) => length(subtract(delta, first)) > program.tolerances.coincidence)) {
+      continue
+    }
+
+    if (length(first) <= program.tolerances.coincidence) {
+      continue
+    }
+
+    for (const pointId of component.pointIds) {
+      const point = program.system.pointRecords.get(pointId)
+      if (!point) {
+        continue
+      }
+      values[point.baseIndex] += first[0]
+      values[point.baseIndex + 1] += first[1]
+      translated = true
+    }
+  }
+
+  return translated ? values : initialValues
+}
+
 export function compileSketchSolveProgram(input: {
   definition: SketchDefinition
   projectedReferences?: readonly ProjectedSketchReferenceRecord[]
@@ -3710,7 +3781,6 @@ function materializeSolveResult(
     constraintStatuses: buildConstraintStatuses(
       definition,
       program.system.pointRecords,
-      values,
       program.tolerances,
       solved.perConstraint,
       program.projectedReferences,
@@ -3737,7 +3807,8 @@ export function solveCompiledSketchProgram(
   program: SketchCompiledSolveProgram,
   initialValues: Float64Array = program.system.initialValues,
 ): SketchCoreSolveResult {
-  const solved = solveSystemValues(initialValues, program.system.scalarConstraints, program.strategy)
+  const preconditionedValues = preconditionValuesForPointAnchors(program, initialValues)
+  const solved = solveSystemValues(preconditionedValues, program.system.scalarConstraints, program.strategy)
   return materializeSolveResult(program, solved.values, solved)
 }
 
@@ -3747,14 +3818,15 @@ export function createCompiledSketchSolveSession(input: {
   priorSolvedSnapshot?: SolvedSketchSnapshot | null
 }): SketchCompiledSolveSession {
   const seeded = seedSolveValuesFromSnapshot(input.program, input.priorSolvedSnapshot)
-  const initialState = evaluateLoss(seeded.values, input.program.system.scalarConstraints)
+  const initialValues = preconditionValuesForPointAnchors(input.program, seeded.values)
+  const initialState = evaluateLoss(initialValues, input.program.system.scalarConstraints)
   const solvedValues = initialState.loss < SOLVED_LOSS_THRESHOLD || uniformNorm(initialState.gradient) < 1e-8
     ? {
-        values: seeded.values,
+        values: cloneValues(initialValues),
         loss: initialState.loss,
         perConstraint: initialState.perConstraint,
       }
-    : solveSystemValues(seeded.values, input.program.system.scalarConstraints, input.program.strategy)
+    : solveSystemValues(initialValues, input.program.system.scalarConstraints, input.program.strategy)
   const solved = materializeSolveResult(input.program, solvedValues.values, solvedValues)
   return {
     sessionId: input.sessionId,
@@ -3854,6 +3926,285 @@ function tryTranslateDraggedComponent(
   return null
 }
 
+function createDraggedPointAcceptance(input: {
+  program: SketchCompiledSolveProgram
+  materialized: SketchCoreSolveResult
+  dragTarget: SketchDraggedPointTarget
+  targetTolerance: number
+  loss: number
+}) {
+  const solvedPoint = input.materialized.solvedSnapshot.solvedPoints.find((point) =>
+    point.pointId === input.dragTarget.pointId
+  )
+  const targetDistance = solvedPoint
+    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const constraintsSatisfied = input.materialized.solvedSnapshot.constraintStatuses.every((status) =>
+    status.status === 'satisfied'
+  )
+  const dimensionsSatisfied = input.materialized.solvedSnapshot.dimensionStatuses.every((status) =>
+    status.status !== 'unsatisfied'
+  )
+  const accepted =
+    input.program.validation.isValid
+    && input.loss < SOLVED_LOSS_THRESHOLD
+    && targetDistance <= input.targetTolerance
+    && constraintsSatisfied
+    && dimensionsSatisfied
+
+  return { accepted, targetDistance }
+}
+
+function materializeDraggedPointCandidate(
+  session: SketchCompiledSolveSession,
+  values: Float64Array,
+) {
+  const state = evaluateLoss(values, session.program.system.scalarConstraints)
+  const materialized = materializeSolveResult(session.program, values, {
+    values: cloneValues(values),
+    loss: state.loss,
+    perConstraint: state.perConstraint,
+  })
+  return { state, materialized }
+}
+
+function acceptDraggedPointCandidate(
+  session: SketchCompiledSolveSession,
+  values: Float64Array,
+  materialized: SketchCoreSolveResult,
+): SketchDraggedPointSolveResult {
+  session.values = values
+  session.lastAcceptedSnapshot = materialized.solvedSnapshot
+  return {
+    kind: 'solved',
+    solvedSnapshot: materialized.solvedSnapshot,
+    diagnostics: materialized.diagnostics,
+  }
+}
+
+function tryPolishDraggedComponent(input: {
+  session: SketchCompiledSolveSession
+  constraints: ScalarConstraintRecord[]
+  candidateValues: Float64Array
+  affectedVariables: Set<number>
+  dragTarget: SketchDraggedPointTarget
+  targetTolerance: number
+  targetDistance: number
+  loss: number
+}): SketchDraggedPointSolveResult | null {
+  if (
+    input.targetDistance > input.targetTolerance
+    || input.loss >= SOLVED_LOSS_THRESHOLD
+  ) {
+    return null
+  }
+
+  const polished = solveSystemValues(input.candidateValues, input.constraints, 'gradientDescent')
+  const polishedValues = cloneValues(input.session.values)
+  for (const index of input.affectedVariables) {
+    polishedValues[index] = polished.values[index]!
+  }
+
+  const { state, materialized } = materializeDraggedPointCandidate(input.session, polishedValues)
+  const acceptance = createDraggedPointAcceptance({
+    program: input.session.program,
+    materialized,
+    dragTarget: input.dragTarget,
+    targetTolerance: input.targetTolerance,
+    loss: state.loss,
+  })
+
+  return acceptance.accepted
+    ? acceptDraggedPointCandidate(input.session, polishedValues, materialized)
+    : null
+}
+
+function createTwoPointIsometryBranchValues(input: {
+  session: SketchCompiledSolveSession
+  component: SketchCompiledSolveComponent
+  fromAnchor: SketchPoint2D
+  toAnchor: SketchPoint2D
+  fromDragged: SketchPoint2D
+  toDragged: SketchPoint2D
+  orientation: 1 | -1
+  targetTolerance: number
+}): Float64Array | null {
+  const fromAxis = subtract(input.fromDragged, input.fromAnchor)
+  const toAxis = subtract(input.toDragged, input.toAnchor)
+  const fromLength = length(fromAxis)
+  const toLength = length(toAxis)
+  if (
+    fromLength <= input.session.program.tolerances.minimumSegmentLength
+    || toLength <= input.session.program.tolerances.minimumSegmentLength
+  ) {
+    return null
+  }
+
+  const fromUnit: SketchPoint2D = [fromAxis[0] / fromLength, fromAxis[1] / fromLength]
+  const fromPerp: SketchPoint2D = [-fromUnit[1], fromUnit[0]]
+  const toUnit: SketchPoint2D = [toAxis[0] / toLength, toAxis[1] / toLength]
+  const toPerp: SketchPoint2D = [-toUnit[1], toUnit[0]]
+  const values = cloneValues(input.session.values)
+
+  for (const pointId of input.component.pointIds) {
+    const point = input.session.program.system.pointRecords.get(pointId)
+    if (!point) {
+      continue
+    }
+
+    const relative = subtract(getPoint(input.session.values, point), input.fromAnchor)
+    const along = dot2(relative, fromUnit)
+    const across = dot2(relative, fromPerp)
+    values[point.baseIndex] = input.toAnchor[0] + along * toUnit[0] + input.orientation * across * toPerp[0]
+    values[point.baseIndex + 1] = input.toAnchor[1] + along * toUnit[1] + input.orientation * across * toPerp[1]
+  }
+
+  return values
+}
+
+function createDraggedComponentBranchSeeds(input: {
+  session: SketchCompiledSolveSession
+  component: SketchCompiledSolveComponent | null
+  dragTarget: SketchDraggedPointTarget
+  targetTolerance: number
+}) {
+  const { session, component, dragTarget, targetTolerance } = input
+  if (!component) {
+    return []
+  }
+
+  const draggedPoint = session.program.system.pointRecords.get(dragTarget.pointId)
+  if (!draggedPoint) {
+    return []
+  }
+
+  const seeds: Float64Array[] = []
+  const componentPointIds = new Set(component.pointIds)
+  const draggedCurrent = getPoint(session.values, draggedPoint)
+  for (const constraint of session.program.definition.constraints) {
+    const anchor = resolvePointConstraintTarget(constraint, session.program.projectedReferences)
+    if (!anchor || anchor.pointId === dragTarget.pointId || !componentPointIds.has(anchor.pointId)) {
+      continue
+    }
+
+    const anchorPoint = session.program.system.pointRecords.get(anchor.pointId)
+    if (!anchorPoint) {
+      continue
+    }
+
+    const cursorVector = subtract(dragTarget.position, anchor.target)
+    const cursorDistance = length(cursorVector)
+    const currentDistance = length(subtract(draggedCurrent, getPoint(session.values, anchorPoint)))
+    if (
+      cursorDistance <= session.program.tolerances.minimumSegmentLength
+      || currentDistance <= session.program.tolerances.minimumSegmentLength
+    ) {
+      continue
+    }
+
+    const projectedDragTarget: SketchPoint2D = [
+      anchor.target[0] + (cursorVector[0] / cursorDistance) * currentDistance,
+      anchor.target[1] + (cursorVector[1] / cursorDistance) * currentDistance,
+    ]
+
+    for (const orientation of [1, -1] as const) {
+      const values = createTwoPointIsometryBranchValues({
+        session,
+        component,
+        fromAnchor: getPoint(session.values, anchorPoint),
+        toAnchor: anchor.target,
+        fromDragged: draggedCurrent,
+        toDragged: projectedDragTarget,
+        orientation,
+        targetTolerance,
+      })
+      if (values) {
+        seeds.push(values)
+      }
+    }
+  }
+
+  return seeds
+}
+
+function createDraggedBranchAcceptance(input: {
+  session: SketchCompiledSolveSession
+  materialized: SketchCoreSolveResult
+  dragTarget: SketchDraggedPointTarget
+  targetTolerance: number
+  loss: number
+}) {
+  const draggedPoint = input.session.program.system.pointRecords.get(input.dragTarget.pointId)
+  const solvedPoint = input.materialized.solvedSnapshot.solvedPoints.find((point) =>
+    point.pointId === input.dragTarget.pointId
+  )
+  const currentDistance = draggedPoint
+    ? length(subtract(getPoint(input.session.values, draggedPoint), input.dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const targetDistance = solvedPoint
+    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
+    : Number.POSITIVE_INFINITY
+  const constraintsSatisfied = input.materialized.solvedSnapshot.constraintStatuses.every((status) =>
+    status.status === 'satisfied'
+  )
+  const dimensionsSatisfied = input.materialized.solvedSnapshot.dimensionStatuses.every((status) =>
+    status.status !== 'unsatisfied'
+  )
+  const accepted =
+    input.session.program.validation.isValid
+    && input.loss < SOLVED_LOSS_THRESHOLD
+    && constraintsSatisfied
+    && dimensionsSatisfied
+    && (
+      targetDistance <= input.targetTolerance
+      || targetDistance + input.targetTolerance < currentDistance
+    )
+
+  return { accepted, targetDistance }
+}
+
+function tryExploreDraggedComponentBranches(input: {
+  session: SketchCompiledSolveSession
+  component: SketchCompiledSolveComponent | null
+  constraints: ScalarConstraintRecord[]
+  affectedVariables: Set<number>
+  dragTarget: SketchDraggedPointTarget
+  targetTolerance: number
+}): SketchDraggedPointSolveResult | null {
+  const seeds = createDraggedComponentBranchSeeds({
+    session: input.session,
+    component: input.component,
+    dragTarget: input.dragTarget,
+    targetTolerance: input.targetTolerance,
+  }).slice(0, 8)
+  const branchConstraints = input.constraints.filter((constraint) =>
+    !constraint.id.startsWith(`constraint_drag_target_${input.dragTarget.pointId}`)
+  )
+
+  for (const seed of seeds) {
+    const solved = solveSystemValues(seed, branchConstraints, input.session.program.strategy)
+    const candidateValues = cloneValues(input.session.values)
+    for (const index of input.affectedVariables) {
+      candidateValues[index] = solved.values[index]!
+    }
+
+    const { state, materialized } = materializeDraggedPointCandidate(input.session, candidateValues)
+    const acceptance = createDraggedBranchAcceptance({
+      session: input.session,
+      materialized,
+      dragTarget: input.dragTarget,
+      targetTolerance: input.targetTolerance,
+      loss: state.loss,
+    })
+
+    if (acceptance.accepted) {
+      return acceptDraggedPointCandidate(input.session, candidateValues, materialized)
+    }
+  }
+
+  return null
+}
+
 export function updateCompiledSketchSolveSession(
   session: SketchCompiledSolveSession,
   dragTarget: SketchDraggedPointTarget,
@@ -3913,33 +4264,43 @@ export function updateCompiledSketchSolveSession(
     candidateValues[index] = solved.values[index]!
   }
 
-  const fullState = evaluateLoss(candidateValues, session.program.system.scalarConstraints)
-  const materialized = materializeSolveResult(session.program, candidateValues, {
-    values: candidateValues,
+  const { state: fullState, materialized } = materializeDraggedPointCandidate(session, candidateValues)
+  const acceptance = createDraggedPointAcceptance({
+    program: session.program,
+    materialized,
+    dragTarget,
+    targetTolerance,
     loss: fullState.loss,
-    perConstraint: fullState.perConstraint,
   })
-  const solvedPoint = materialized.solvedSnapshot.solvedPoints.find((point) => point.pointId === dragTarget.pointId)
-  const targetDistance = solvedPoint
-    ? length(subtract(solvedPoint.solvedPosition, dragTarget.position))
-    : Number.POSITIVE_INFINITY
-  const constraintsSatisfied = materialized.solvedSnapshot.constraintStatuses.every((status) => status.status === 'satisfied')
-  const dimensionsSatisfied = materialized.solvedSnapshot.dimensionStatuses.every((status) => status.status !== 'unsatisfied')
 
-  if (
-    session.program.validation.isValid
-    && fullState.loss < SOLVED_LOSS_THRESHOLD
-    && targetDistance <= targetTolerance
-    && constraintsSatisfied
-    && dimensionsSatisfied
-  ) {
-    session.values = candidateValues
-    session.lastAcceptedSnapshot = materialized.solvedSnapshot
-    return {
-      kind: 'solved',
-      solvedSnapshot: materialized.solvedSnapshot,
-      diagnostics: materialized.diagnostics,
-    }
+  if (acceptance.accepted) {
+    return acceptDraggedPointCandidate(session, candidateValues, materialized)
+  }
+
+  const polished = tryPolishDraggedComponent({
+    session,
+    constraints,
+    candidateValues,
+    affectedVariables,
+    dragTarget,
+    targetTolerance,
+    targetDistance: acceptance.targetDistance,
+    loss: fullState.loss,
+  })
+  if (polished) {
+    return polished
+  }
+
+  const branched = tryExploreDraggedComponentBranches({
+    session,
+    component,
+    constraints,
+    affectedVariables,
+    dragTarget,
+    targetTolerance,
+  })
+  if (branched) {
+    return branched
   }
 
   return {
@@ -4127,7 +4488,6 @@ function buildSolvedEntities(
 function buildConstraintStatuses(
   definition: SketchDefinition,
   pointRecords: Map<SketchPointId, SolverPointRecord>,
-  values: Float64Array,
   tolerance: SketchSolveTolerancePolicy,
   perConstraint: Map<string, number>,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
@@ -4141,6 +4501,10 @@ function buildConstraintStatuses(
   return definition.constraints.map((constraint) => {
     let status: ConstraintStatusRecord['status'] = 'satisfied'
     const residual = perConstraint.get(constraint.constraintId) ?? 0
+    const residualTolerance =
+      constraint.kind === 'parallelProjectedLine' || constraint.kind === 'perpendicularProjectedLine'
+        ? tolerance.angleRadians
+        : tolerance.coincidence
 
     if (constraint.kind === 'horizontal' || constraint.kind === 'vertical') {
       const entity = lineEntityMap.get(constraint.entityId)
@@ -4152,15 +4516,13 @@ function buildConstraintStatuses(
         if (!start || !end) {
           status = 'conflicting'
         } else {
-          const delta = subtract(getPoint(values, end), getPoint(values, start))
-          const axisError = constraint.kind === 'horizontal' ? Math.abs(delta[1]) : Math.abs(delta[0])
-          status = axisError <= tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+          status = isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         }
       }
     } else if (constraint.kind === 'midpoint') {
       const point = pointRecords.get(constraint.point.pointId)
       const line = lineEntityMap.get(constraint.line.entityId)
-      status = point && line ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied' : 'conflicting'
+      status = point && line ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied' : 'conflicting'
     } else if (constraint.kind === 'midpointProjectedLine') {
       const point = pointRecords.get(constraint.point.pointId)
       const projected = constraint.projectedLine.kind === 'projectedGeometry'
@@ -4170,13 +4532,13 @@ function buildConstraintStatuses(
         projected?.kind === 'lineSegment'
         || constraint.projectedLine.kind === 'sketchDatum'
       )
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'pointOnCurve') {
       const point = pointRecords.get(constraint.point.pointId)
       const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
       status = point && entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc' || entity.kind === 'spline')
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'coincidentProjectedPoint') {
       const point = pointRecords.get(constraint.point.pointId)
@@ -4187,7 +4549,7 @@ function buildConstraintStatuses(
         projected?.kind === 'point'
         || constraint.projectedPoint.kind === 'sketchDatum'
       )
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'pointOnProjectedCurve') {
       const point = pointRecords.get(constraint.point.pointId)
@@ -4198,7 +4560,7 @@ function buildConstraintStatuses(
         projected !== null
         || constraint.projectedCurve.kind === 'sketchDatum'
       )
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'parallelProjectedLine' || constraint.kind === 'perpendicularProjectedLine') {
       const line = lineEntityMap.get(constraint.line.entityId)
@@ -4209,7 +4571,7 @@ function buildConstraintStatuses(
         projected?.kind === 'lineSegment'
         || constraint.projectedLine.kind === 'sketchDatum'
       )
-        ? residual <= tolerance.angleRadians * tolerance.angleRadians ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'tangentProjectedCurve') {
       const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
@@ -4218,21 +4580,21 @@ function buildConstraintStatuses(
         && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc')
         && projected
         && projectedCircleLikeGeometry(projected) !== null
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'tangent') {
       const entities = constraint.entityIds.map((entityId) =>
         definition.entities.find((candidate) => candidate.entityId === entityId),
       )
       status = entities.every((entity) => entity && (entity.kind === 'lineSegment' || entity.kind === 'circle' || entity.kind === 'arc'))
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'concentric') {
       const entities = constraint.entityIds.map((entityId) =>
         definition.entities.find((candidate) => candidate.entityId === entityId),
       )
       status = entities.every((entity) => entity && (entity.kind === 'circle' || entity.kind === 'arc'))
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'concentricProjectedCurve') {
       const entity = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
@@ -4241,28 +4603,28 @@ function buildConstraintStatuses(
         && (entity.kind === 'circle' || entity.kind === 'arc')
         && projected
         && projectedCircleLikeGeometry(projected) !== null
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'normal') {
       const line = lineEntityMap.get(constraint.line.entityId)
       const curve = definition.entities.find((candidate) => candidate.entityId === constraint.curve.entityId)
       const point = pointRecords.get(constraint.point.pointId)
       status = line && point && curve && (curve.kind === 'circle' || curve.kind === 'arc')
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'normalProjectedCurve') {
       const line = lineEntityMap.get(constraint.line.entityId)
       const projected = findProjectedGeometry(projectedReferences, constraint.projectedCurve.reference)
       const point = pointRecords.get(constraint.point.pointId)
       status = line && point && projected && projectedCircleLikeGeometry(projected) !== null
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'symmetric') {
       const first = pointRecords.get(constraint.pointIds[0])
       const second = pointRecords.get(constraint.pointIds[1])
       const axis = lineEntityMap.get(constraint.axis.entityId)
       status = first && second && axis
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
     } else if (constraint.kind === 'symmetricProjectedLine') {
       const first = pointRecords.get(constraint.pointIds[0])
@@ -4274,9 +4636,9 @@ function buildConstraintStatuses(
         projected?.kind === 'lineSegment'
         || constraint.projectedLine.kind === 'sketchDatum'
       )
-        ? residual <= tolerance.coincidence * tolerance.coincidence ? 'satisfied' : 'unsatisfied'
+        ? isConstraintResidualWithinTolerance(residual, residualTolerance) ? 'satisfied' : 'unsatisfied'
         : 'conflicting'
-    } else if (residual > tolerance.coincidence * tolerance.coincidence) {
+    } else if (!isConstraintResidualWithinTolerance(residual, residualTolerance)) {
       status = 'unsatisfied'
     }
 

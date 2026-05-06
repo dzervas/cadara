@@ -17,6 +17,11 @@ export interface SketchSolverBenchmarkFixture {
   expectedAnnotationCount: number
   expectedRegionCount: number
   expectedDiagnosticCount: number
+  interactiveDragTarget?: {
+    pointId: SketchPointId
+    position: SketchPoint2D
+    targetTolerance?: number
+  }
 }
 
 export interface SketchSolverBenchmarkEvaluation {
@@ -138,6 +143,37 @@ function makeVerticalDistanceDimension(
     label: `Vertical distance ${name}`,
     pointIds,
     value,
+  } satisfies DimensionDefinition
+}
+
+function makeLineLengthDimension(
+  name: string,
+  entityId: SketchEntityId,
+  value: number,
+) {
+  return {
+    dimensionId: createDimensionId(name),
+    kind: 'lineLength',
+    label: `Line length ${name}`,
+    entityId,
+    value,
+  } satisfies DimensionDefinition
+}
+
+function makeLineAngleDimension(
+  name: string,
+  lines: readonly [
+    { kind: 'localEntity'; entityId: SketchEntityId },
+    { kind: 'localEntity'; entityId: SketchEntityId },
+  ],
+  valueRadians: number,
+) {
+  return {
+    dimensionId: createDimensionId(name),
+    kind: 'lineAngle',
+    label: `Line angle ${name}`,
+    lines,
+    valueRadians,
   } satisfies DimensionDefinition
 }
 
@@ -451,11 +487,133 @@ function createIndependentComponentFixture(): SketchSolverBenchmarkFixture {
   )
 }
 
+function createThreeBranchFallbackFixture(): SketchSolverBenchmarkFixture {
+  const sketchId = 'sketch_benchmark_three_branch_fallback' as SketchId
+  const anchor1 = makePoint(sketchId, 'branch_anchor_1', 'Anchor 1', [-6.45492548301263e-11, -20.00000000144171])
+  const anchor2 = makePoint(sketchId, 'branch_anchor_2', 'Anchor 2', [0, 0])
+  const p6 = makePoint(sketchId, 'branch_p6', 'P6', [16.420739052696923, -15.60007626054567])
+  const p8 = makePoint(sketchId, 'branch_p8', 'P8', [32.39551360005226, -21.414418708092832])
+  const p12 = makePoint(sketchId, 'branch_p12', 'P12', [16.420739050742696, 4.399923751375514])
+  const p13 = makePoint(sketchId, 'branch_p13', 'P13', [32.39551359627179, -1.4144187060831115])
+  const p19 = makePoint(sketchId, 'branch_p19', 'P19', [32.395513600164705, -21.414418707726117])
+  const p21 = makePoint(sketchId, 'branch_p21', 'P21', [15.974774547466922, -25.81434244596269])
+  const line3 = makeLine(sketchId, 'branch_l3', 'L3', anchor1.pointId, anchor2.pointId)
+  const line6 = makeLine(sketchId, 'branch_l6', 'L6', anchor1.pointId, p6.pointId)
+  const line8 = makeLine(sketchId, 'branch_l8', 'L8', p6.pointId, p8.pointId)
+  const line12 = makeLine(sketchId, 'branch_l12', 'L12', anchor2.pointId, p12.pointId)
+  const line13 = makeLine(sketchId, 'branch_l13', 'L13', p12.pointId, p13.pointId)
+  const line19 = makeLine(sketchId, 'branch_l19', 'L19', p13.pointId, p19.pointId)
+  const line21 = makeLine(sketchId, 'branch_l21', 'L21', anchor1.pointId, p21.pointId)
+  const line22 = makeLine(sketchId, 'branch_l22', 'L22', p21.pointId, p19.pointId)
+
+  const fixture = makeFixture(
+    'three-branch-drag-fallback',
+    'Logo-like anchored drag that times the local branch plus two bounded alternate branch orientations.',
+    makeAuthoredSketchRecord(sketchId, 'Benchmark three-branch fallback', makeDefinition({
+      points: [anchor1, anchor2, p6, p8, p12, p13, p19, p21],
+      entities: [line3, line6, line8, line12, line13, line19, line21, line22],
+      constraints: [
+        makeVerticalConstraint('branch_l3_vertical', line3.entityId),
+        {
+          constraintId: createConstraintId('branch_l6_l8_equal'),
+          kind: 'equalLength',
+          label: 'L6 L8 equal',
+          entityIds: [line6.entityId, line8.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_l12_l6_equal'),
+          kind: 'equalLength',
+          label: 'L12 L6 equal',
+          entityIds: [line12.entityId, line6.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_l12_l6_parallel'),
+          kind: 'parallel',
+          label: 'L12 L6 parallel',
+          entityIds: [line12.entityId, line6.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_l13_l8_parallel'),
+          kind: 'parallel',
+          label: 'L13 L8 parallel',
+          entityIds: [line13.entityId, line8.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_l12_l13_equal'),
+          kind: 'equalLength',
+          label: 'L12 L13 equal',
+          entityIds: [line12.entityId, line13.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_p19_p8_coincident'),
+          kind: 'coincident',
+          label: 'P19 P8 coincident',
+          pointIds: [p19.pointId, p8.pointId],
+        },
+        {
+          constraintId: createConstraintId('branch_l22_l6_equal'),
+          kind: 'equalLength',
+          label: 'L22 L6 equal',
+          entityIds: [line22.entityId, line6.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_l21_l8_equal'),
+          kind: 'equalLength',
+          label: 'L21 L8 equal',
+          entityIds: [line21.entityId, line8.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_l19_l3_equal'),
+          kind: 'equalLength',
+          label: 'L19 L3 equal',
+          entityIds: [line19.entityId, line3.entityId],
+        },
+        {
+          constraintId: createConstraintId('branch_anchor_origin'),
+          kind: 'coincidentProjectedPoint',
+          label: 'Anchor 2 at origin',
+          point: {
+            kind: 'localPoint',
+            pointId: anchor2.pointId,
+          },
+          projectedPoint: {
+            kind: 'sketchDatum',
+            datum: 'origin',
+          },
+        },
+      ],
+      dimensions: [
+        makeLineLengthDimension('branch_l3_length', line3.entityId, 20),
+        makeLineAngleDimension('branch_l6_from_l3', [
+          { kind: 'localEntity', entityId: line3.entityId },
+          { kind: 'localEntity', entityId: line6.entityId },
+        ], 1.3089969389957472),
+        makeLineAngleDimension('branch_l8_from_l6', [
+          { kind: 'localEntity', entityId: line8.entityId },
+          { kind: 'localEntity', entityId: line6.entityId },
+        ], 2.5307274153917776),
+        makeLineLengthDimension('branch_l6_length', line6.entityId, 17),
+      ],
+    })),
+    2,
+  )
+
+  return {
+    ...fixture,
+    interactiveDragTarget: {
+      pointId: anchor1.pointId,
+      position: [5, 25],
+      targetTolerance: 1e-4,
+    },
+  }
+}
+
 export const SKETCH_SOLVER_BENCHMARK_FIXTURES: readonly SketchSolverBenchmarkFixture[] = [
   createConstraintChainFixture('constraints-10', 5),
   createConstraintChainFixture('constraints-50', 25),
   createConstraintChainFixture('constraints-150', 75),
   createIndependentComponentFixture(),
+  createThreeBranchFallbackFixture(),
 ]
 
 export function countSolverAnnotations(definition: SketchDefinition) {
@@ -480,7 +638,9 @@ export function evaluateSketchSolverBenchmarkFixture(
     definition,
     solvedSnapshot: solved.solvedSnapshot,
   })
-  const dragPoint = definition.points[1] ?? definition.points[0]
+  const dragPoint = fixture.interactiveDragTarget
+    ? definition.points.find((point) => point.pointId === fixture.interactiveDragTarget?.pointId)
+    : definition.points[1] ?? definition.points[0]
   const interactiveStartedAt = performance.now()
   const program = compileSketchSolveProgram({
     definition,
@@ -496,8 +656,8 @@ export function evaluateSketchSolverBenchmarkFixture(
     ? updateCompiledSketchSolveSession(session, {
         kind: 'sketchPoint',
         pointId: dragPoint.pointId,
-        position: [dragPoint.position[0] + 0.05, dragPoint.position[1]],
-      }, 0.1)
+        position: fixture.interactiveDragTarget?.position ?? [dragPoint.position[0] + 0.05, dragPoint.position[1]],
+      }, fixture.interactiveDragTarget?.targetTolerance ?? 0.1)
     : null
   const interactiveDragFrameMs = performance.now() - interactiveStartedAt
 
