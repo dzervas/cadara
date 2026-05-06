@@ -1,5 +1,6 @@
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import type { DocumentId } from '@/contracts/shared/ids'
+import type { ModelingService } from '@/domain/modeling/modeling-service'
 import {
   type DocumentRepository,
   type LocalFileSyncDocumentRepository,
@@ -7,12 +8,15 @@ import {
 } from '@/domain/modeling/document-repository'
 import { createLocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
 import type { WorkbenchTab } from '@/domain/workspace/workbench-tabs'
+import { downloadDocumentExportResult } from '@/lib/download-export'
 import {
   ensureLocalFileWritePermission,
   readCadaraDocumentFile,
   readLocalCadaraDocument,
   showOpenLocalDocumentPicker,
+  showSaveLocalDocumentPicker,
   type LocalFileSystemFileHandle,
+  writeTextToLocalFileHandle,
 } from '@/lib/local-file-system-access'
 
 export type WorkbenchDocumentActionResult =
@@ -22,17 +26,29 @@ export type WorkbenchDocumentActionResult =
   | { status: 'unexpected-error'; source: string; message: string; error: unknown }
 
 interface WorkbenchDocumentFileActionIo {
+  downloadDocumentExportResult: typeof downloadDocumentExportResult
   ensureLocalFileWritePermission: typeof ensureLocalFileWritePermission
   readCadaraDocumentFile: typeof readCadaraDocumentFile
   readLocalCadaraDocument: typeof readLocalCadaraDocument
   showOpenLocalDocumentPicker: typeof showOpenLocalDocumentPicker
+  showSaveLocalDocumentPicker: typeof showSaveLocalDocumentPicker
+  writeTextToLocalFileHandle: typeof writeTextToLocalFileHandle
 }
 
 const defaultIo: WorkbenchDocumentFileActionIo = {
+  downloadDocumentExportResult,
   ensureLocalFileWritePermission,
   readCadaraDocumentFile,
   readLocalCadaraDocument,
   showOpenLocalDocumentPicker,
+  showSaveLocalDocumentPicker,
+  writeTextToLocalFileHandle,
+}
+
+interface WorkbenchDocumentFileActionCallbacks {
+  reportDocumentFileActionFailure: (source: string, message: string, error: unknown) => void
+  showWorkbenchError: (message: string) => void
+  showWorkbenchInfo: (message: string) => void
 }
 
 export async function openDocumentCopyAsTab(input: {
@@ -213,5 +229,75 @@ async function openLinkedDocumentHandleAsTab(input: {
     status: 'success',
     documentId,
     message: `Opened ${input.handle.name}. Future changes will save to that file.`,
+  }
+}
+
+export async function saveWorkbenchLocalFile(input: {
+  modelingService: Pick<ModelingService, 'bindLocalFile' | 'currentDocumentId' | 'exportCurrentDocument'>
+  io?: Partial<WorkbenchDocumentFileActionIo>
+} & Pick<WorkbenchDocumentFileActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchError' | 'showWorkbenchInfo'>): Promise<boolean> {
+  const io = { ...defaultIo, ...input.io }
+  const pickerResult = await io.showSaveLocalDocumentPicker()
+  if (!pickerResult.ok) {
+    if (pickerResult.reason === 'cancelled') {
+      return false
+    }
+    if (pickerResult.reason === 'unsupported') {
+      input.showWorkbenchError('Linked file saving is unavailable in the current browser.')
+      return false
+    }
+
+    input.reportDocumentFileActionFailure('workbench.file.saveLinked', 'Save linked document failed.', pickerResult.error)
+    return false
+  }
+
+  try {
+    if (!await io.ensureLocalFileWritePermission(pickerResult.handle)) {
+      input.showWorkbenchError('Local file write permission was denied.')
+      return false
+    }
+
+    const result = await input.modelingService.exportCurrentDocument()
+    const writeResult = await io.writeTextToLocalFileHandle(pickerResult.handle, result.payload)
+    if (!writeResult.ok) {
+      if (writeResult.reason === 'permission-denied') {
+        input.showWorkbenchError('Local file write permission was denied.')
+        return false
+      }
+
+      input.reportDocumentFileActionFailure('workbench.file.saveLinked', 'Save linked document failed.', writeResult.error)
+      return false
+    }
+
+    const binding = await input.modelingService.bindLocalFile({
+      handle: pickerResult.handle,
+      metadata: createLocalFileBindingMetadata(input.modelingService.currentDocumentId, pickerResult.handle),
+    })
+    if (!binding.ok) {
+      input.showWorkbenchError(binding.diagnostics[0]?.message ?? 'Local file sync target could not be bound.')
+      return false
+    }
+
+    input.showWorkbenchInfo(`Saved ${pickerResult.handle.name}. Future changes will save to that file.`)
+    return true
+  } catch (error: unknown) {
+    input.reportDocumentFileActionFailure('workbench.file.saveLinked', 'Save linked document failed.', error)
+    return false
+  }
+}
+
+export async function exportWorkbenchDocument(input: {
+  modelingService: Pick<ModelingService, 'exportCurrentDocument'>
+  io?: Partial<WorkbenchDocumentFileActionIo>
+} & Pick<WorkbenchDocumentFileActionCallbacks, 'reportDocumentFileActionFailure' | 'showWorkbenchInfo'>): Promise<boolean> {
+  const io = { ...defaultIo, ...input.io }
+  try {
+    const result = await input.modelingService.exportCurrentDocument()
+    io.downloadDocumentExportResult(result)
+    input.showWorkbenchInfo(`Downloaded ${result.filename}.`)
+    return true
+  } catch (error) {
+    input.reportDocumentFileActionFailure('workbench.file.downloadCopy', 'Download failed.', error)
+    return false
   }
 }

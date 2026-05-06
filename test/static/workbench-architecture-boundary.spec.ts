@@ -78,7 +78,6 @@ test('src/app/workbench-architecture-boundary.spec.ts tool activation routing', 
 test('src/app/workbench-architecture-boundary.spec.ts workbench document ownership routing', () => {  const workbenchSource = readFileSync(join(ROOT, 'src/app/workbench/cad-workbench.tsx'), 'utf8')
   const historySource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-history.ts'), 'utf8')
   const importSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-part-import.ts'), 'utf8')
-  const fileActionsSource = readFileSync(join(ROOT, 'src/app/workbench/document/workbench-document-actions.ts'), 'utf8')
   const ownerHookSource = readFileSync(join(ROOT, 'src/hooks/use-workbench-document-owner.ts'), 'utf8')
   const ownerServiceSource = readFileSync(join(ROOT, 'src/application/workbench/document-owner.ts'), 'utf8')
   const presentationHookSource = readFileSync(join(ROOT, 'src/app/workbench/controllers/use-workbench-document-presentation.ts'), 'utf8')
@@ -110,11 +109,6 @@ test('src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
       && !workbenchSource.includes('modelingService.commitSketch')
       && !workbenchSource.includes('modelingService.renameBody'),
     'CadWorkbench should not own ordinary document mutation sequencing once the shared document owner hook is in place.',
-  )
-  expectTrue(
-    fileActionsSource.includes('replaceAfterDocumentFileAction')
-      && !fileActionsSource.includes('refreshAfterDocumentFileAction'),
-    'Whole-document file flows should use the explicit replacement handoff instead of the ordinary refresh callback.',
   )
   expectTrue(
     presentationHookSource.includes('resetForDocumentReplacement')

@@ -5,8 +5,10 @@ import type { LocalFileSyncDocumentRepository } from '@/domain/modeling/document
 import { createSeedAuthoredModelDocument } from '@/domain/modeling/modeling-test-fixtures'
 import type { WorkbenchTab } from '@/domain/workspace/workbench-tabs'
 import {
+  exportWorkbenchDocument,
   openDocumentCopyAsTab,
   openLinkedDocumentAsTab,
+  saveWorkbenchLocalFile,
 } from '@/application/workbench/document-file-actions'
 import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
 
@@ -61,6 +63,29 @@ function createRepository() {
   } as LocalFileSyncDocumentRepository
 
   return { bindings, mutations, repository, resets }
+}
+
+function createCallbacks() {
+  const errors: string[] = []
+  const infos: string[] = []
+  const reports: Array<{ source: string; message: string; error: unknown }> = []
+
+  return {
+    errors,
+    infos,
+    reports,
+    callbacks: {
+      reportDocumentFileActionFailure(source: string, message: string, error: unknown) {
+        reports.push({ source, message, error })
+      },
+      showWorkbenchError(message: string) {
+        errors.push(message)
+      },
+      showWorkbenchInfo(message: string) {
+        infos.push(message)
+      },
+    },
+  }
 }
 
 describe('document file actions', () => {
@@ -197,5 +222,104 @@ describe('document file actions', () => {
     expect(openedTabs).toEqual([])
     expect(mutations).toEqual([])
     expect(bindings).toEqual([])
+  })
+
+  it('saves the active document to a linked local file and binds future sync to that handle', async () => {
+    const callbacks = createCallbacks()
+    const savedHandle = createHandle('saved.cadara')
+    const writes: string[] = []
+    const savedBindings: Array<{ documentId: string; handleName: string }> = []
+
+    const saveSucceeded = await saveWorkbenchLocalFile({
+      modelingService: {
+        currentDocumentId: 'doc_workspace',
+        async exportCurrentDocument() {
+          return { filename: 'saved.cadara', payload: '{"documentId":"doc_workspace"}' }
+        },
+        async bindLocalFile(input) {
+          savedBindings.push({
+            documentId: input.metadata.documentId,
+            handleName: input.handle.name,
+          })
+          return { ok: true as const, diagnostics: [] }
+        },
+      } as never,
+      io: {
+        async showSaveLocalDocumentPicker() {
+          return { ok: true as const, handle: savedHandle }
+        },
+        async ensureLocalFileWritePermission() {
+          return true
+        },
+        async writeTextToLocalFileHandle(_handle, text) {
+          writes.push(String(text))
+          return { ok: true as const }
+        },
+      },
+      ...callbacks.callbacks,
+    })
+
+    expect(saveSucceeded).toBe(true)
+    expect(writes).toEqual(['{"documentId":"doc_workspace"}'])
+    expect(savedBindings).toEqual([{ documentId: 'doc_workspace', handleName: 'saved.cadara' }])
+    expect(callbacks.infos).toEqual(['Saved saved.cadara. Future changes will save to that file.'])
+  })
+
+  it('surfaces permission-denied linked saves without binding a new handle', async () => {
+    const callbacks = createCallbacks()
+    const savedHandle = createHandle('saved.cadara')
+    let bindCalls = 0
+
+    const saveSucceeded = await saveWorkbenchLocalFile({
+      modelingService: {
+        currentDocumentId: 'doc_workspace',
+        async exportCurrentDocument() {
+          return { filename: 'saved.cadara', payload: '{}' }
+        },
+        async bindLocalFile() {
+          bindCalls += 1
+          return { ok: true as const, diagnostics: [] }
+        },
+      } as never,
+      io: {
+        async showSaveLocalDocumentPicker() {
+          return { ok: true as const, handle: savedHandle }
+        },
+        async ensureLocalFileWritePermission() {
+          return true
+        },
+        async writeTextToLocalFileHandle() {
+          return { ok: false as const, reason: 'permission-denied' as const }
+        },
+      },
+      ...callbacks.callbacks,
+    })
+
+    expect(saveSucceeded).toBe(false)
+    expect(callbacks.errors).toEqual(['Local file write permission was denied.'])
+    expect(bindCalls).toBe(0)
+  })
+
+  it('downloads a document copy through the export helper', async () => {
+    const callbacks = createCallbacks()
+    const downloaded: string[] = []
+
+    const exportSucceeded = await exportWorkbenchDocument({
+      modelingService: {
+        async exportCurrentDocument() {
+          return { filename: 'exported.cadara', payload: '{"documentId":"doc_workspace"}' }
+        },
+      } as never,
+      io: {
+        downloadDocumentExportResult(result) {
+          downloaded.push(result.filename)
+        },
+      },
+      ...callbacks.callbacks,
+    })
+
+    expect(exportSucceeded).toBe(true)
+    expect(downloaded).toEqual(['exported.cadara'])
+    expect(callbacks.infos).toEqual(['Downloaded exported.cadara.'])
   })
 })

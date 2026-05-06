@@ -24,6 +24,7 @@ import type {
   RequestId,
   RevisionId,
 } from '@/contracts/shared/ids'
+import { evaluateSketchDerivations } from '@/contracts/sketch/derived-geometry'
 import { SOLVER_SCHEMA_VERSION } from '@/contracts/solver/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { AppResultAsync } from '@/contracts/errors'
@@ -495,6 +496,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   return {
     getCurrentDocumentSnapshot: () => modelingService.getCurrentDocumentSnapshot(),
     async commitSketch(input) {
+      const commitDefinition = evaluateSketchDerivations(input.session.fullDefinition).definition
       const result = await modelingService.commitSketch({
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,
@@ -502,7 +504,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         sketchId: input.session.commitRequest?.sketchId ?? null,
         sketchLabel: input.session.commitRequest?.sketchLabel ?? input.session.sketchLabel,
         plane: input.session.commitRequest?.plane ?? input.session.plane,
-        definition: input.session.commitRequest?.definition ?? input.session.definition,
+        definition: commitDefinition,
         solverCorrelation: modelingService.sketchSolver
           ? modelingService.sketchSolver.createCommitCorrelation(input.requestId)
           : null,

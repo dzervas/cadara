@@ -38,7 +38,7 @@ import { selectCadaraDebugTarget } from "@/app/debug/cadara-debug-actions";
 import {
 	exportWorkbenchDocument,
 	saveWorkbenchLocalFile,
-} from "@/app/workbench/document/workbench-document-actions";
+} from "@/application/workbench/document-file-actions";
 import { getBrowserOnlyTabCloseWarning } from "@/app/workbench/document/browser-tab-close";
 import type { WorkbenchDocumentActionResult } from "@/application/workbench/document-file-actions";
 import type { WorkbenchTab, WorkbenchTabsState } from "@/domain/workspace/workbench-tabs";
