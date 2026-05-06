@@ -3,12 +3,16 @@ import * as THREE from 'three'
 
 import { expectTrue } from '@/testing/expect.spec'
 import {
+  ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS,
   buildSketchGradientMeshMaterial,
   buildSketchPolylineStrokeGeometry,
+  getActiveSketchMarkerWorldRadii,
+  getActiveSketchPolylineStrokeGeometryConfig,
   getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMeshMaterialConfig,
   getSketchDisplayMarkerMaterialConfig,
   getSketchDisplayPolylineMaterialConfig,
+  getSketchFeedbackWorldUnitsPerPixel,
   shouldUseSketchStrokeMeshGeometry,
   splitSketchPolylineDashSegments,
   shouldDepthTestSketchDisplayMarker,
@@ -249,6 +253,149 @@ test('src/components/cad/three-cad-viewport-style.spec.ts', () => {  const palet
   )
 })
 
+test('src/components/cad/three-cad-viewport-style.spec.ts active sketch feedback world units per pixel', () => {
+  const orthographic = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000)
+  orthographic.zoom = 1
+  orthographic.updateProjectionMatrix()
+  expectTrue(
+    nearlyEqual(getSketchFeedbackWorldUnitsPerPixel(orthographic, 1000, [[0, 0, 0]]), 0.02),
+    'Orthographic active sketch feedback scale should derive from camera span and viewport height.',
+  )
+
+  orthographic.zoom = 4
+  orthographic.updateProjectionMatrix()
+  expectTrue(
+    nearlyEqual(getSketchFeedbackWorldUnitsPerPixel(orthographic, 1000, [[0, 0, 0]]), 0.005),
+    'Orthographic active sketch feedback scale should shrink as zoom increases.',
+  )
+
+  const perspective = new THREE.PerspectiveCamera(90, 1, 0.1, 1000)
+  perspective.position.set(0, 0, 10)
+  perspective.updateMatrixWorld()
+  const nearScale = getSketchFeedbackWorldUnitsPerPixel(perspective, 1000, [[0, 0, 0]])
+  perspective.position.set(0, 0, 100)
+  perspective.updateMatrixWorld()
+  const farScale = getSketchFeedbackWorldUnitsPerPixel(perspective, 1000, [[0, 0, 0]])
+
+  expectTrue(nearlyEqual(nearScale, 0.02), 'Perspective active sketch feedback scale should use camera distance to the anchor.')
+  expectTrue(nearlyEqual(farScale, 0.2), 'Perspective active sketch feedback scale should grow as the camera moves away.')
+})
+
+test('src/components/cad/three-cad-viewport-style.spec.ts active sketch marker screen-space radii', () => {
+  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000)
+  camera.zoom = 1
+  camera.updateProjectionMatrix()
+  const renderable = {
+    id: 'renderable_sketch_marker_1',
+    label: 'Point',
+    geometry: { kind: 'marker', position: [0, 0, 0], displayRadius: 0.18 },
+    target: { kind: 'sketchPoint', sketchId: 'sketch_primary', pointId: 'point_1' },
+    linePattern: 'solid',
+    role: 'local',
+  } as const
+
+  const zoomedOut = getActiveSketchMarkerWorldRadii(renderable, camera, 1000)
+  camera.zoom = 5
+  camera.updateProjectionMatrix()
+  const zoomedIn = getActiveSketchMarkerWorldRadii(renderable, camera, 1000)
+
+  expectTrue(
+    zoomedOut.visiblePixelRadius === zoomedIn.visiblePixelRadius,
+    'Active sketch marker visible pixel radius should stay stable after camera zoom changes.',
+  )
+  expectTrue(
+    zoomedOut.pickPixelRadius === zoomedIn.pickPixelRadius,
+    'Active sketch marker pick proxy pixel radius should stay stable after camera zoom changes.',
+  )
+  expectTrue(
+    zoomedOut.pickPixelRadius >= zoomedOut.visiblePixelRadius
+      && zoomedOut.pickPixelRadius >= ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.pickProxy.min,
+    'Active sketch marker pick proxy should remain at least as reachable as the visible marker.',
+  )
+  expectTrue(
+    zoomedIn.visibleRadius < zoomedOut.visibleRadius && zoomedIn.pickRadius < zoomedOut.pickRadius,
+    'Active sketch marker world radii should change with camera scale to preserve screen-space size.',
+  )
+  expectTrue(
+    zoomedOut.visiblePixelRadius <= 5.1,
+    'Default active sketch vertices should stay compact while remaining screen-space stabilized.',
+  )
+
+  const overlay = getActiveSketchMarkerWorldRadii({
+    ...renderable,
+    geometry: { ...renderable.geometry, displayRadius: 0.4 },
+    markerLayer: 'overlay',
+  }, camera, 1000)
+  expectTrue(
+    overlay.visiblePixelRadius === ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.overlay.max,
+    'Overlay active sketch markers should clamp to the overlay marker pixel bounds.',
+  )
+})
+
+test('src/components/cad/three-cad-viewport-style.spec.ts active sketch stroke geometry screen-space sizing', () => {
+  const palette = {
+    constrained: 0x222222,
+    underconstrained: 0x1651b0,
+    overconstrained: 0xff5555,
+    regionFill: 0x343a40,
+  } as const
+  const renderable = {
+    id: 'renderable_sketch_default_line_1',
+    label: 'Default line',
+    geometry: {
+      kind: 'polyline',
+      points: [
+        [0, 0, 0],
+        [10, 0, 0],
+      ],
+      isClosed: false,
+    },
+    target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_1' },
+    linePattern: 'solid',
+    role: 'local',
+  } as const
+  const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, true, palette)
+  const geometryConfig = getActiveSketchPolylineStrokeGeometryConfig(renderable, materialConfig, true)
+  const wideWorld = buildSketchPolylineStrokeGeometry({
+    points: renderable.geometry.points,
+    isClosed: false,
+    materialConfig: geometryConfig,
+    worldUnitsPerPixel: 0.2,
+  })
+  const narrowWorld = buildSketchPolylineStrokeGeometry({
+    points: renderable.geometry.points,
+    isClosed: false,
+    materialConfig: geometryConfig,
+    worldUnitsPerPixel: 0.02,
+  })
+  const wideBounds = getGeometryBounds(wideWorld)
+  const narrowBounds = getGeometryBounds(narrowWorld)
+
+  expectTrue(
+    shouldUseSketchStrokeMeshGeometry(renderable, materialConfig, true),
+    'Default active sketch wires should use mesh stroke geometry instead of native line width.',
+  )
+  expectTrue(
+    geometryConfig.lineWidth === ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.default.min,
+    'Default active sketch wires should use the default wire pixel-size bounds.',
+  )
+  expectTrue(
+    materialConfig.color === geometryConfig.color
+      && materialConfig.opacity === geometryConfig.opacity
+      && materialConfig.lineCap === geometryConfig.lineCap
+      && materialConfig.lineJoin === geometryConfig.lineJoin
+      && materialConfig.linePattern === geometryConfig.linePattern,
+    'Active sketch stroke sizing should preserve existing wire color, opacity, cap, join, and pattern styling.',
+  )
+  expectTrue(
+    getStrokeWorldHeight(wideBounds) > getStrokeWorldHeight(narrowBounds),
+    'Active sketch stroke geometry world thickness should change as the camera-derived pixel scale changes.',
+  )
+
+  wideWorld.dispose()
+  narrowWorld.dispose()
+})
+
 test('src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geometry', () => {
   const baseConfig = {
     linePattern: 'solid' as const,
@@ -393,6 +540,27 @@ test('src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
     hasPositionX(dashedSquare, 3) && hasPositionX(dashedSquare, 7) && getPositionCount(dashedSquare) > getPositionCount(square),
     'Dashed strokes should apply caps to every dash segment, not only to the whole path.',
   )
+
+  const longDatumGuideStroke = buildSketchPolylineStrokeGeometry({
+    points: [
+      [-10, 0, 0],
+      [10, 0, 0],
+    ],
+    isClosed: false,
+    materialConfig: {
+      ...baseConfig,
+      linePattern: 'dashed',
+      lineCap: 'round',
+      lineJoin: 'round',
+      dashSize: 0.24,
+      gapSize: 0.14,
+    },
+    worldUnitsPerPixel: 0.02,
+  })
+  expectTrue(
+    getPositionCount(longDatumGuideStroke) <= 13_200,
+    'Long active sketch dashed guides should cap mesh dash tessellation instead of emitting thousands of tiny dash strokes.',
+  )
 })
 
 function getGeometryBounds(geometry: THREE.BufferGeometry) {
@@ -413,6 +581,10 @@ function hasPositionX(geometry: THREE.BufferGeometry, expected: number) {
     }
   }
   return false
+}
+
+function getStrokeWorldHeight(bounds: THREE.Box3) {
+  return bounds.max.y - bounds.min.y
 }
 
 function nearlyEqual(left: number, right: number) {

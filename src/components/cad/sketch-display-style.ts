@@ -54,6 +54,26 @@ export interface SketchDisplayMarkerMaterialConfig {
   opacity: number
 }
 
+export const ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS = {
+  stroke: {
+    default: { min: 1.75, max: 4 },
+    construction: { min: 1.5, max: 3.25 },
+    reference: { min: 1.5, max: 3 },
+    diagnostic: { min: 1.5, max: 3 },
+    authored: { min: 1.5, max: 8 },
+  },
+  marker: {
+    default: { min: 3, max: 6 },
+    reference: { min: 3, max: 5.5 },
+    overlay: { min: 4, max: 6.5 },
+    pickProxy: { min: 8, max: 22 },
+  },
+} as const
+
+const ACTIVE_SKETCH_MARKER_RADIUS_PIXELS_PER_DISPLAY_UNIT = 28
+const ACTIVE_SKETCH_MARKER_PICK_RADIUS_MULTIPLIER = 2.2
+const MAX_SKETCH_STROKE_DASH_SEGMENTS = 128
+
 export function shouldDepthTestSketchDisplayMarker(renderable: SketchSessionDisplayRenderable) {
   return renderable.markerLayer !== 'overlay'
 }
@@ -146,9 +166,85 @@ export function shouldUseSketchStrokeMeshGeometry(
 ) {
   return applyStyles
     && renderable.geometry.kind === 'polyline'
-    && renderable.strokeStyle !== undefined
-    && renderable.diagnosticStyle === undefined
     && materialConfig.lineWidth > 0
+}
+
+export function getActiveSketchPolylineStrokeGeometryConfig(
+  renderable: SketchSessionDisplayRenderable,
+  materialConfig: SketchDisplayPolylineMaterialConfig,
+  applyStyles: boolean,
+): SketchDisplayPolylineMaterialConfig {
+  if (!shouldUseSketchStrokeMeshGeometry(renderable, materialConfig, applyStyles)) {
+    return materialConfig
+  }
+
+  const bounds = getActiveSketchStrokePixelBounds(renderable, materialConfig)
+  return {
+    ...materialConfig,
+    lineWidth: clamp(materialConfig.lineWidth, bounds.min, bounds.max),
+  }
+}
+
+export function getActiveSketchMarkerWorldRadii(
+  renderable: SketchSessionDisplayRenderable,
+  camera: THREE.Camera,
+  viewportHeight: number,
+) {
+  if (renderable.geometry.kind !== 'marker') {
+    throw new Error('Expected active sketch marker renderable.')
+  }
+
+  const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(
+    camera,
+    viewportHeight,
+    [renderable.geometry.position],
+  )
+  const markerBounds = renderable.markerLayer === 'overlay'
+    ? ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.overlay
+    : renderable.role === 'reference'
+      ? ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.reference
+      : ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.default
+  const visiblePixelRadius = clamp(
+    renderable.geometry.displayRadius * ACTIVE_SKETCH_MARKER_RADIUS_PIXELS_PER_DISPLAY_UNIT,
+    markerBounds.min,
+    markerBounds.max,
+  )
+  const pickPixelRadius = clamp(
+    visiblePixelRadius * ACTIVE_SKETCH_MARKER_PICK_RADIUS_MULTIPLIER,
+    ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.pickProxy.min,
+    ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.pickProxy.max,
+  )
+
+  return {
+    visiblePixelRadius,
+    pickPixelRadius,
+    visibleRadius: Math.max(visiblePixelRadius * worldUnitsPerPixel, Number.EPSILON),
+    pickRadius: Math.max(pickPixelRadius * worldUnitsPerPixel, Number.EPSILON),
+    worldUnitsPerPixel,
+  }
+}
+
+function getActiveSketchStrokePixelBounds(
+  renderable: SketchSessionDisplayRenderable,
+  materialConfig: SketchDisplayPolylineMaterialConfig,
+) {
+  if (renderable.diagnosticStyle) {
+    return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.diagnostic
+  }
+
+  if (renderable.role === 'reference') {
+    return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.reference
+  }
+
+  if (renderable.strokeStyle) {
+    return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.authored
+  }
+
+  if (materialConfig.linePattern === 'dashed') {
+    return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.construction
+  }
+
+  return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.default
 }
 
 export interface BuildSketchPolylineStrokeGeometryInput {
@@ -172,8 +268,19 @@ export function buildSketchPolylineStrokeGeometry(input: BuildSketchPolylineStro
     input.materialConfig.lineCap,
     input.materialConfig.miterLimit,
   )
-  const strokeSegments = input.materialConfig.linePattern === 'dashed' && dashSize > 0 && gapSize > 0
-    ? splitSketchPolylineDashSegments(projectedPoints, dashSize, gapSize, input.isClosed)
+  const cappedDashPattern = getCappedSketchStrokeDashPattern(
+    projectedPoints,
+    dashSize,
+    gapSize,
+    input.isClosed,
+  )
+  const strokeSegments = input.materialConfig.linePattern === 'dashed' && cappedDashPattern
+    ? splitSketchPolylineDashSegments(
+        projectedPoints,
+        cappedDashPattern.dashSize,
+        cappedDashPattern.gapSize,
+        input.isClosed,
+      )
     : [getSvgStrokePathPoints(projectedPoints, input.isClosed)]
   const positions: number[] = []
 
@@ -203,6 +310,35 @@ export function buildSketchPolylineStrokeGeometry(input: BuildSketchPolylineStro
   geometry.computeVertexNormals()
   geometry.computeBoundingSphere()
   return geometry
+}
+
+function getCappedSketchStrokeDashPattern(
+  points: readonly THREE.Vector2[],
+  dashSize: number,
+  gapSize: number,
+  isClosed: boolean,
+) {
+  if (dashSize <= 0 || gapSize <= 0) {
+    return null
+  }
+
+  const pathPoints = getSvgStrokePathPoints(points, isClosed)
+  let pathLength = 0
+  for (let index = 1; index < pathPoints.length; index += 1) {
+    pathLength += pathPoints[index - 1]!.distanceTo(pathPoints[index]!)
+  }
+
+  const patternLength = dashSize + gapSize
+  const estimatedDashCount = Math.ceil(pathLength / patternLength)
+  if (estimatedDashCount <= MAX_SKETCH_STROKE_DASH_SEGMENTS) {
+    return { dashSize, gapSize }
+  }
+
+  const scale = estimatedDashCount / MAX_SKETCH_STROKE_DASH_SEGMENTS
+  return {
+    dashSize: dashSize * scale,
+    gapSize: gapSize * scale,
+  }
 }
 
 export function splitSketchPolylineDashSegments(
@@ -264,10 +400,10 @@ export function splitSketchPolylineDashSegments(
   return dashSegments
 }
 
-export function getSketchStrokeWorldUnitsPerPixel(
+export function getSketchFeedbackWorldUnitsPerPixel(
   camera: THREE.Camera,
   viewportHeight: number,
-  points: readonly (readonly [number, number, number])[],
+  anchors: readonly (readonly [number, number, number])[],
 ) {
   if (viewportHeight <= 0) {
     return 1
@@ -278,7 +414,7 @@ export function getSketchStrokeWorldUnitsPerPixel(
   }
 
   if (camera instanceof THREE.PerspectiveCamera) {
-    const center = getPointsCenter(points)
+    const center = getPointsCenter(anchors)
     const cameraPosition = new THREE.Vector3()
     camera.getWorldPosition(cameraPosition)
     const distance = cameraPosition.distanceTo(center)
@@ -286,6 +422,14 @@ export function getSketchStrokeWorldUnitsPerPixel(
   }
 
   return 1
+}
+
+export function getSketchStrokeWorldUnitsPerPixel(
+  camera: THREE.Camera,
+  viewportHeight: number,
+  points: readonly (readonly [number, number, number])[],
+) {
+  return getSketchFeedbackWorldUnitsPerPixel(camera, viewportHeight, points)
 }
 
 export function buildSketchGradientMeshMaterial(config: SketchDisplayMeshMaterialConfig) {
@@ -488,6 +632,10 @@ function getPointsCenter(points: readonly (readonly [number, number, number])[])
     center.add(vectorFromTuple(point))
   }
   return center.divideScalar(points.length)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
 }
 
 function vectorFromTuple(point: readonly [number, number, number]) {

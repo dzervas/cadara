@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 import {
+  getActiveSketchMarkerWorldRadii,
+  getActiveSketchPolylineStrokeGeometryConfig,
   buildSketchGradientMeshMaterial,
   buildSketchPolylineStrokeGeometry,
-  getSketchStrokeWorldUnitsPerPixel,
+  getSketchFeedbackWorldUnitsPerPixel,
   getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMarkerMaterialConfig,
   getSketchDisplayMeshMaterialConfig,
@@ -22,7 +24,6 @@ import {
   applyWireMaterialDepthPolicy,
   bindRenderableObject,
   createMarkerPickProxy,
-  getVisibleMarkerRadius,
 } from '@/infrastructure/viewport/render-picking'
 
 interface SketchDisplayRenderableNodeProps {
@@ -228,8 +229,19 @@ export function SketchDisplayPolylineNode({
   }
 
   const geometry = useMemo(() => new THREE.BufferGeometry(), [])
-  const materialConfig = getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette)
+  const materialConfig = useMemo(
+    () => getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette),
+    [applyStyles, palette, renderable],
+  )
   const useStrokeMesh = shouldUseSketchStrokeMeshGeometry(renderable, materialConfig, applyStyles)
+  const strokeGeometryMaterialConfig = useMemo(
+    () => getActiveSketchPolylineStrokeGeometryConfig(renderable, materialConfig, applyStyles),
+    [applyStyles, materialConfig, renderable],
+  )
+  const strokeGeometryStaticToken = useMemo(
+    () => createStrokeGeometryStaticToken(geometryData, strokeGeometryMaterialConfig),
+    [geometryData, strokeGeometryMaterialConfig],
+  )
   const {
     color,
     dashSize,
@@ -292,18 +304,20 @@ export function SketchDisplayPolylineNode({
 
   useLayoutEffect(() => {
     if (useStrokeMesh) {
+      const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(camera, size.height, geometryData.points)
+      const token = createStrokeGeometryToken(strokeGeometryStaticToken, worldUnitsPerPixel)
+      if (token === strokeGeometryTokenRef.current) {
+        return
+      }
+
       updatePolylineStrokeGeometryBuffer(
         geometry,
         geometryData,
-        materialConfig,
-        getSketchStrokeWorldUnitsPerPixel(camera, size.height, geometryData.points),
+        strokeGeometryMaterialConfig,
+        worldUnitsPerPixel,
         renderable.sketchPlaneFrame,
       )
-      strokeGeometryTokenRef.current = createStrokeGeometryToken(
-        geometryData,
-        materialConfig,
-        getSketchStrokeWorldUnitsPerPixel(camera, size.height, geometryData.points),
-      )
+      strokeGeometryTokenRef.current = token
       return
     }
 
@@ -312,28 +326,7 @@ export function SketchDisplayPolylineNode({
     if (linePattern === 'dashed' && line instanceof THREE.Line) {
       line.computeLineDistances()
     }
-  }, [camera, geometry, geometryData, line, linePattern, materialConfig, renderable.sketchPlaneFrame, size.height, useStrokeMesh])
-
-  useFrame(({ camera: frameCamera, size: frameSize }) => {
-    if (!useStrokeMesh) {
-      return
-    }
-
-    const worldUnitsPerPixel = getSketchStrokeWorldUnitsPerPixel(frameCamera, frameSize.height, geometryData.points)
-    const token = createStrokeGeometryToken(geometryData, materialConfig, worldUnitsPerPixel)
-    if (token === strokeGeometryTokenRef.current) {
-      return
-    }
-
-    updatePolylineStrokeGeometryBuffer(
-      geometry,
-      geometryData,
-      materialConfig,
-      worldUnitsPerPixel,
-      renderable.sketchPlaneFrame,
-    )
-    strokeGeometryTokenRef.current = token
-  })
+  }, [camera, geometry, geometryData, line, linePattern, renderable.sketchPlaneFrame, size.height, strokeGeometryMaterialConfig, strokeGeometryStaticToken, useStrokeMesh])
 
   useEffect(() => {
     return () => {
@@ -365,10 +358,9 @@ function updatePolylineStrokeGeometryBuffer(
   geometry.computeBoundingSphere()
 }
 
-function createStrokeGeometryToken(
+function createStrokeGeometryStaticToken(
   geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
   materialConfig: ReturnType<typeof getSketchDisplayPolylineMaterialConfig>,
-  worldUnitsPerPixel: number,
 ) {
   return JSON.stringify({
     points: geometryData.points,
@@ -380,8 +372,19 @@ function createStrokeGeometryToken(
     pattern: materialConfig.linePattern,
     dashSize: materialConfig.dashSize,
     gapSize: materialConfig.gapSize,
-    worldUnitsPerPixel: Number.isFinite(worldUnitsPerPixel) ? worldUnitsPerPixel.toFixed(8) : '1',
   })
+}
+
+function createStrokeGeometryToken(staticToken: string, worldUnitsPerPixel: number) {
+  return `${staticToken}:${getStrokeScaleToken(worldUnitsPerPixel)}`
+}
+
+function getStrokeScaleToken(worldUnitsPerPixel: number) {
+  if (!Number.isFinite(worldUnitsPerPixel) || worldUnitsPerPixel <= 0) {
+    return '1'
+  }
+
+  return String(Math.round(Math.log2(worldUnitsPerPixel) * 48))
 }
 
 export function SketchDisplayMarkerNode({
@@ -407,15 +410,19 @@ export function SketchDisplayMarkerNode({
     depthTest: shouldDepthTestSketchDisplayMarker(renderable),
     depthWrite: false,
   }), [materialConfig, renderable])
+  const { camera, size } = useThree()
+  const visibleMeshRef = useRef<THREE.Mesh | null>(null)
   const pickProxy = useMemo(() => {
     const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius)
     proxy.userData.highlightExcluded = true
     return proxy
   }, [geometryData.displayRadius])
+  const initialRadii = getActiveSketchMarkerWorldRadii(renderable, camera, size.height)
 
   useLayoutEffect(() => {
     pickProxy.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
-  }, [geometryData.position, pickProxy])
+    updateActiveSketchMarkerScales(visibleMeshRef.current, pickProxy, renderable, camera, size.height)
+  }, [camera, geometryData.position, pickProxy, renderable, size.height])
 
   useEffect(() => () => material.dispose(), [material])
   useEffect(() => {
@@ -441,13 +448,26 @@ export function SketchDisplayMarkerNode({
       }}
     >
       <mesh
+        ref={visibleMeshRef}
         geometry={MARKER_SPHERE_GEOMETRY}
         material={material}
         position={geometryData.position}
-        scale={getVisibleMarkerRadius(geometryData.displayRadius)}
+        scale={initialRadii.visibleRadius}
         renderOrder={getSketchDisplayMarkerRenderOrder(renderable)}
       />
       <primitive object={pickProxy} />
     </group>
   )
+}
+
+function updateActiveSketchMarkerScales(
+  visibleMesh: THREE.Mesh | null,
+  pickProxy: THREE.Mesh,
+  renderable: SketchSessionDisplayRenderable,
+  camera: THREE.Camera,
+  viewportHeight: number,
+) {
+  const radii = getActiveSketchMarkerWorldRadii(renderable, camera, viewportHeight)
+  visibleMesh?.scale.setScalar(radii.visibleRadius)
+  pickProxy.scale.setScalar(radii.pickRadius)
 }
