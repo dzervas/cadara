@@ -3,12 +3,14 @@ import { test } from 'bun:test'
 import { expectTrue } from '@/testing/expect.spec'
 import {
   getAutoHiddenSketchTargetKeys,
+  getSketchEditingOriginPlaneTargetKeys,
   getWorkbenchVisibilityState,
   reconcileVisibilityIntentKeys,
   toggleWorkbenchTargetVisibility,
 } from '@/domain/editor/visibility'
 import { getPrimitiveRefKey } from '@/core/editor/schema'
 import { MockKernelAdapter } from '@/domain/modeling/mock-kernel-adapter'
+import { OCC_KERNEL_CONSTRUCTION_IDS } from '@/domain/modeling/opencascade-kernel-seed'
 
 test('src/domain/editor/visibility.spec.ts', async () => {  const adapter = new MockKernelAdapter()
   const response = await adapter.getDocumentSnapshot({
@@ -39,6 +41,55 @@ test('src/domain/editor/visibility.spec.ts', async () => {  const adapter = new 
   expectTrue(
     initialVisibility.effectiveHiddenTargetKeys[sketchKey] === true,
     'Consumed sketch rows should start hidden when no explicit show override exists.',
+  )
+
+  const originPlaneKeys = Object.values(OCC_KERNEL_CONSTRUCTION_IDS).map((constructionId) =>
+    getPrimitiveRefKey({ kind: 'construction', constructionId })
+  )
+  const originPlaneVisibility = getSketchEditingOriginPlaneTargetKeys(true)
+
+  expectTrue(
+    originPlaneKeys.every((key) => originPlaneVisibility[key] === true),
+    'Sketch editing should derive temporary hidden state for every origin plane.',
+  )
+
+  const sketchEditingVisibility = getWorkbenchVisibilityState({
+    snapshot,
+    explicitHiddenTargetKeys: {},
+    explicitlyShownAutoHiddenTargetKeys: {},
+    isSketchEditing: true,
+  })
+
+  expectTrue(
+    originPlaneKeys.every((key) => sketchEditingVisibility.effectiveHiddenTargetKeys[key] === true),
+    'Sketch editing should hide all origin planes without a user visibility toggle.',
+  )
+
+  const exitedSketchVisibility = getWorkbenchVisibilityState({
+    snapshot,
+    explicitHiddenTargetKeys: {},
+    explicitlyShownAutoHiddenTargetKeys: {},
+    isSketchEditing: false,
+  })
+
+  expectTrue(
+    originPlaneKeys.every((key) => exitedSketchVisibility.effectiveHiddenTargetKeys[key] !== true),
+    'Leaving sketch editing should restore origin-plane visibility when the user had not hidden them.',
+  )
+
+  const explicitlyHiddenPlaneKey = originPlaneKeys[1]
+  expectTrue(explicitlyHiddenPlaneKey != null, 'Origin-plane visibility fixture should include a YZ plane key.')
+
+  const exitedWithPreviousPlaneHiddenVisibility = getWorkbenchVisibilityState({
+    snapshot,
+    explicitHiddenTargetKeys: { [explicitlyHiddenPlaneKey]: true },
+    explicitlyShownAutoHiddenTargetKeys: {},
+    isSketchEditing: false,
+  })
+
+  expectTrue(
+    exitedWithPreviousPlaneHiddenVisibility.effectiveHiddenTargetKeys[explicitlyHiddenPlaneKey] === true,
+    'Leaving sketch editing should preserve an origin plane that was already hidden.',
   )
 
   const shownOverride = toggleWorkbenchTargetVisibility({

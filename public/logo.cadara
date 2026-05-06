@@ -9,7 +9,7 @@
     "kind": "sketch",
     "sketchId": "sketch_primary"
   },
-  "documentId": "doc_38f2d69f599945e8a10ba65ca84bee8b",
+  "documentId": "doc_0243d23b6f7049a798c6efdbdb09c0df",
   "embeddedBinaryAssets": [],
   "featureOrder": [],
   "features": [],
@@ -20,7 +20,7 @@
     }
   ],
   "name": "CADara Logo",
-  "revisionId": "rev_0017",
+  "revisionId": "rev_0019",
   "schemaVersion": "authored-model-document/v1alpha1",
   "settings": {
     "angularToleranceRadians": 0.0001,
@@ -1080,6 +1080,40 @@
                 }
               ]
             }
+          },
+          {
+            "createdGraph": {
+              "constraints": [
+                {
+                  "constraintId": "constraint_27_coincident-projected-point",
+                  "kind": "coincidentProjectedPoint",
+                  "label": "Coincident 27",
+                  "point": {
+                    "kind": "localPoint",
+                    "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2"
+                  },
+                  "projectedPoint": {
+                    "datum": "origin",
+                    "kind": "sketchDatum"
+                  }
+                }
+              ],
+              "derivedRelationships": [],
+              "dimensions": [],
+              "entities": [],
+              "points": []
+            },
+            "kind": "constraint",
+            "label": "Coincident 27",
+            "operationId": "sketch_operation_27_constraintCoincident",
+            "targets": {
+              "created": [
+                {
+                  "constraintId": "constraint_27_coincident-projected-point",
+                  "kind": "constraint"
+                }
+              ]
+            }
           }
         ],
         "constraintIds": [
@@ -1092,7 +1126,8 @@
           "constraint_20_coincident",
           "constraint_23_equal",
           "constraint_24_equal",
-          "constraint_25_equal"
+          "constraint_25_equal",
+          "constraint_27_coincident-projected-point"
         ],
         "constraints": [
           {
@@ -1181,6 +1216,19 @@
             ],
             "kind": "equalLength",
             "label": "Equal 25"
+          },
+          {
+            "constraintId": "constraint_27_coincident-projected-point",
+            "kind": "coincidentProjectedPoint",
+            "label": "Coincident 27",
+            "point": {
+              "kind": "localPoint",
+              "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2"
+            },
+            "projectedPoint": {
+              "datum": "origin",
+              "kind": "sketchDatum"
+            }
           }
         ],
         "derivedRelationships": [],
@@ -1414,8 +1462,8 @@
             "label": "Anchor 1",
             "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
             "position": [
-              29.110404607012146,
-              1.2961566959965458
+              -4.837616421578813e-7,
+              20.000000024749696
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1428,8 +1476,8 @@
             "label": "Anchor 2",
             "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
             "position": [
-              29.110404607076696,
-              21.296156697438256
+              -2.139240497972294e-7,
+              1.7907070440586647e-7
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1442,8 +1490,8 @@
             "label": "Line 6 end",
             "pointId": "sketch_point_6_line-end",
             "position": [
-              45.53114365977362,
-              5.6960804368925855
+              -16.42074049728928,
+              15.600079131727409
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1456,8 +1504,8 @@
             "label": "Line 8 end",
             "pointId": "sketch_point_8_line-end",
             "position": [
-              61.50591820712896,
-              -0.11826201065457728
+              -32.39551383256106,
+              21.414425588064997
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1470,8 +1518,8 @@
             "label": "Line 12 end",
             "pointId": "sketch_point_12_line-end",
             "position": [
-              45.53114365781939,
-              25.69608044881377
+              -16.420739762147306,
+              -4.399921793217081
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1484,8 +1532,8 @@
             "label": "Line 13 end",
             "pointId": "sketch_point_13_line-end",
             "position": [
-              61.505918203348486,
-              19.881737991355145
+              -32.39551238426594,
+              1.4144260550206966
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1498,8 +1546,8 @@
             "label": "Line 19 end",
             "pointId": "sketch_point_19_line-end",
             "position": [
-              61.5059182072414,
-              -0.11826201028785953
+              -32.395513689099715,
+              21.41442568287559
             ],
             "target": {
               "kind": "sketchPoint",
@@ -1512,8 +1560,8 @@
             "label": "Line 21 end",
             "pointId": "sketch_point_21_line-end",
             "position": [
-              45.08517915454362,
-              -4.518185748524435
+              -15.974773686595166,
+              25.814347193067068
             ],
             "target": {
               "kind": "sketchPoint",

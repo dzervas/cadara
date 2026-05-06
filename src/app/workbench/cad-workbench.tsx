@@ -486,8 +486,9 @@ export function CadWorkbench({
 				snapshot,
 				explicitHiddenTargetKeys,
 				explicitlyShownAutoHiddenTargetKeys,
+				isSketchEditing: sketchSession !== null,
 			}).effectiveHiddenTargetKeys,
-		[explicitHiddenTargetKeys, explicitlyShownAutoHiddenTargetKeys, snapshot],
+		[explicitHiddenTargetKeys, explicitlyShownAutoHiddenTargetKeys, sketchSession, snapshot],
 	);
 
 	const visibleSelection = useMemo(
@@ -795,6 +796,7 @@ export function CadWorkbench({
 			snapshot,
 			explicitHiddenTargetKeys: nextVisibility.explicitHiddenTargetKeys,
 			explicitlyShownAutoHiddenTargetKeys: nextVisibility.explicitlyShownAutoHiddenTargetKeys,
+			isSketchEditing: sketchSession !== null,
 		}).effectiveHiddenTargetKeys;
 
 		setRawExplicitHiddenTargetKeys(nextVisibility.explicitHiddenTargetKeys);

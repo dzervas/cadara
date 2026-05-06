@@ -1,8 +1,10 @@
 import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
 import { getPrimitiveRefKey, type PrimitiveRef } from '@/core/editor/schema'
+import { OCC_KERNEL_CONSTRUCTION_IDS } from '@/domain/modeling/opencascade-kernel-seed'
 
 export interface WorkbenchVisibilityState {
   autoHiddenSketchTargetKeys: Record<string, boolean>
+  sketchEditingOriginPlaneTargetKeys: Record<string, boolean>
   effectiveHiddenTargetKeys: Record<string, boolean>
 }
 
@@ -31,6 +33,19 @@ export function getAutoHiddenSketchTargetKeys(snapshot: WorkspaceSnapshot | null
   )
 }
 
+export function getSketchEditingOriginPlaneTargetKeys(isSketchEditing: boolean): Record<string, boolean> {
+  if (!isSketchEditing) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.values(OCC_KERNEL_CONSTRUCTION_IDS).map((constructionId) => [
+      getPrimitiveRefKey({ kind: 'construction', constructionId }),
+      true,
+    ]),
+  )
+}
+
 export function reconcileVisibilityIntentKeys(
   targetKeys: Record<string, boolean>,
   allowedTargetKeys: ReadonlySet<string>,
@@ -44,11 +59,16 @@ export function getWorkbenchVisibilityState(input: {
   snapshot: WorkspaceSnapshot | null
   explicitHiddenTargetKeys: Record<string, boolean>
   explicitlyShownAutoHiddenTargetKeys: Record<string, boolean>
+  isSketchEditing?: boolean
 }): WorkbenchVisibilityState {
   const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(input.snapshot)
+  const sketchEditingOriginPlaneTargetKeys = getSketchEditingOriginPlaneTargetKeys(input.isSketchEditing === true)
   const effectiveHiddenTargetKeys = { ...input.explicitHiddenTargetKeys }
 
-  for (const key of Object.keys(autoHiddenSketchTargetKeys)) {
+  for (const key of Object.keys({
+    ...autoHiddenSketchTargetKeys,
+    ...sketchEditingOriginPlaneTargetKeys,
+  })) {
     if (input.explicitlyShownAutoHiddenTargetKeys[key] === true) {
       continue
     }
@@ -58,6 +78,7 @@ export function getWorkbenchVisibilityState(input: {
 
   return {
     autoHiddenSketchTargetKeys,
+    sketchEditingOriginPlaneTargetKeys,
     effectiveHiddenTargetKeys,
   }
 }
