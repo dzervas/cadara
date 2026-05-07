@@ -11,12 +11,12 @@ test('test/static/App.preload.spec.ts', () => {  const appSource = readFileSync(
   )
 
   expectTrue(
-    bootstrapSource.includes('startBrowserOccWarmup()'),
+    bootstrapSource.includes('startBrowserOccWarmup(createSentryPerformanceTelemetry'),
     'Browser bootstrap should start OCC eager warmup before React mount.',
   )
   expectTrue(
     runtimeSource.includes('createOccPreloadController')
-      && runtimeSource.includes('getBrowserOccKernelAdapter().preloadRuntime()'),
+      && runtimeSource.includes('getBrowserOccKernelAdapter(performanceTelemetry).preloadRuntime()'),
     'Bootstrap warmup should preload the shared browser OCC runtime owner.',
   )
   expectTrue(
@@ -28,7 +28,7 @@ test('test/static/App.preload.spec.ts', () => {  const appSource = readFileSync(
     'App should observe bootstrap warmup failures without owning the startup trigger.',
   )
   expectTrue(
-    runtimeSource.includes('workerSnapshotClient: browserOccWorkerClient'),
+    runtimeSource.includes('workerSnapshotClient: createInstrumentedOccWorkerClient(browserOccWorkerClient, performanceTelemetry)'),
     'Browser app snapshots and mutations should route through the shared worker-backed OCC client.',
   )
 })

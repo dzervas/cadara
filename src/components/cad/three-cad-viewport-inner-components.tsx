@@ -389,6 +389,32 @@ export function RenderIdleSignal({
   return null
 }
 
+export function FirstNonEmptyGeometryFrameSignal({
+  hasNonEmptyGeometry,
+  onReady,
+}: {
+  hasNonEmptyGeometry: boolean
+  onReady: () => void
+}) {
+  const recordedRef = useRef(false)
+  const onReadyRef = useRef(onReady)
+
+  useEffect(() => {
+    onReadyRef.current = onReady
+  }, [onReady])
+
+  useFrame(() => {
+    if (recordedRef.current || !hasNonEmptyGeometry) {
+      return
+    }
+
+    recordedRef.current = true
+    onReadyRef.current()
+  })
+
+  return null
+}
+
 export function WorkspaceSceneScaffold() {
   const grid = useMemo(() => {
     const helper = new THREE.GridHelper(100, 100, 0x5a7594, 0x34465a)

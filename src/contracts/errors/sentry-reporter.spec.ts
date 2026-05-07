@@ -11,6 +11,7 @@ import {
   SENTRY_DSN,
   createSentryErrorReporter,
   initializeSentryErrorReporting,
+  shouldEnablePerformanceTelemetry,
   shouldEnableSentryErrorReporting,
   type SentryBrowserBoundary,
 } from '@/contracts/errors/sentry-reporter'
@@ -307,6 +308,51 @@ test('src/contracts/errors/sentry-reporter.spec.ts', async () => {  const initOp
   expectTrue(
     (releaseInitOptions[0] as { dist?: string }).dist === 'main',
     'Sentry initialization should pass the build distribution to the browser SDK.',
+  )
+  const tracingInitOptions: unknown[] = []
+  const tracingClient: SentryBrowserBoundary = {
+    init(options) {
+      tracingInitOptions.push(options)
+    },
+    captureException() {
+      return 'event_exception'
+    },
+    captureMessage() {
+      return 'event_message'
+    },
+  }
+  initializeSentryErrorReporting({
+    client: tracingClient,
+    enablePerformanceTelemetry: true,
+    tracesSampleRate: 0.02,
+  })
+  expectTrue(
+    (tracingInitOptions[0] as { tracesSampleRate?: number }).tracesSampleRate === 0.02,
+    'Sentry initialization should configure tracing only when performance telemetry is enabled.',
+  )
+  const defaultTracingInitOptions: unknown[] = []
+  const defaultTracingClient: SentryBrowserBoundary = {
+    init(options) {
+      defaultTracingInitOptions.push(options)
+    },
+    captureException() {
+      return 'event_exception'
+    },
+    captureMessage() {
+      return 'event_message'
+    },
+  }
+  initializeSentryErrorReporting({
+    client: defaultTracingClient,
+    enablePerformanceTelemetry: true,
+  })
+  expectTrue(
+    (defaultTracingInitOptions[0] as { tracesSampleRate?: number }).tracesSampleRate === 1,
+    'Sentry performance telemetry should default to full trace sampling.',
+  )
+  expectTrue(
+    shouldEnablePerformanceTelemetry({ isProduction: false, search: '?cadEnableSentry=1&cadEnablePerfTelemetry=1' }),
+    'Development performance telemetry should require the explicit perf opt-in.',
   )
 
   clearActiveDocumentTelemetryContext()

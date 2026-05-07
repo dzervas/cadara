@@ -237,13 +237,17 @@ async function main() {
               occPerf?.firstSnapshotReadyAt != null
                 ? Number(occPerf.firstSnapshotReadyAt.toFixed(1))
                 : null,
+            firstNonEmptyGeometryFrameMs:
+              occPerf?.firstNonEmptyGeometryFrameAt != null
+                ? Number(occPerf.firstNonEmptyGeometryFrameAt.toFixed(1))
+                : null,
             postStartupMutationLatencyMs:
               mutationPerf?.elapsedMs != null
                 ? Number(mutationPerf.elapsedMs.toFixed(1))
                 : null,
             postStartupMutationAccepted: mutationPerf?.accepted ?? null,
             bodyTextSample: bodyText.slice(0, 500),
-            readinessSignal: 'window.__cadOccPerf.firstSnapshotReadyAt + 2 animation frames',
+            readinessSignal: 'window.__cadOccPerf.firstNonEmptyGeometryFrameAt || firstSnapshotReadyAt + 2 animation frames',
           },
           null,
           2,

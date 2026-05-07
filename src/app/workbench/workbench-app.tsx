@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
 import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import type { PerformanceTelemetry } from '@/contracts/performance/telemetry'
+import { noopPerformanceTelemetry } from '@/contracts/performance/telemetry'
 import type { DocumentId } from '@/contracts/shared/ids'
 import { createModelingService } from '@/domain/modeling/modeling-service'
+import { createInstrumentedModelingService } from '@/domain/modeling/modeling-service/instrumented-service'
 import { isLocalFileSyncDocumentRepository } from '@/domain/modeling/document-repository'
+import { createInstrumentedDocumentRepository } from '@/domain/modeling/instrumented-document-repository'
 import type { RuntimeExtensionRegistryComposition } from '@/domain/extensions/runtime-registry-composition'
 import { OCC_KERNEL_DOCUMENT_ID } from '@/domain/modeling/opencascade-kernel-seed'
 import { SketchConstraintSolverAdapter } from '@/domain/solver/sketch-constraint-solver-adapter'
+import { createInstrumentedSketchSolverAdapter } from '@/domain/solver/instrumented-sketch-solver-adapter'
 import {
   createInitialWorkbenchTabsState,
   reduceWorkbenchTabs,
@@ -60,8 +65,9 @@ function createWorkbenchOperationHistoryKey(documentId: DocumentId) {
 
 interface WorkbenchAppProps {
   actionBus: ToolActionBus
-  createKernelAdapter: (documentId: DocumentId) => ModelingKernelAdapter
+  createKernelAdapter: (documentId: DocumentId, performanceTelemetry?: PerformanceTelemetry) => ModelingKernelAdapter
   documentSyncWorkerClient: DocumentSyncWorkerClient | null
+  performanceTelemetry?: PerformanceTelemetry
   runtimeExtensionRegistries: RuntimeExtensionRegistryComposition
 }
 
@@ -69,6 +75,7 @@ export function WorkbenchApp({
   actionBus,
   createKernelAdapter,
   documentSyncWorkerClient,
+  performanceTelemetry = noopPerformanceTelemetry,
   runtimeExtensionRegistries,
 }: WorkbenchAppProps) {
   const tabsStorage = useMemo(() => (
@@ -79,14 +86,14 @@ export function WorkbenchApp({
       return null
     }
 
-    return createWorkerBackedDocumentRepository({
+    return createInstrumentedDocumentRepository(createWorkerBackedDocumentRepository({
       client: documentSyncWorkerClient,
       urlStore: createLocalStorageDocumentRepositoryUrlStore(
         window.localStorage,
         createDocumentRepositoryUrlStorageKey(getDocumentRepositoryStorageNamespace(window.location.search)),
       ),
-    })
-  }, [documentSyncWorkerClient])
+    }), performanceTelemetry)
+  }, [documentSyncWorkerClient, performanceTelemetry])
   const [tabsState, tabsDispatch] = useReducer(
     reduceWorkbenchTabs,
     undefined,
@@ -110,24 +117,27 @@ export function WorkbenchApp({
   )
   const modelingService = useMemo(
     () =>
-      createModelingService(createKernelAdapter(tabsState.activeDocumentId), {
-        currentDocumentId: tabsState.activeDocumentId,
-        sketchSolver: new SketchConstraintSolverAdapter({
-          documentId: tabsState.activeDocumentId,
-          revisionId: null,
+      createInstrumentedModelingService(
+        createModelingService(createKernelAdapter(tabsState.activeDocumentId, performanceTelemetry), {
+          currentDocumentId: tabsState.activeDocumentId,
+          sketchSolver: createInstrumentedSketchSolverAdapter(new SketchConstraintSolverAdapter({
+            documentId: tabsState.activeDocumentId,
+            revisionId: null,
+          }), performanceTelemetry),
+          exportProviders: runtimeExtensionRegistries.exportProviders,
+          operationHistoryStore:
+            typeof window === 'undefined'
+              ? null
+              : createLocalStorageOperationHistoryStore(
+                  window.localStorage,
+                  createWorkbenchOperationHistoryKey(tabsState.activeDocumentId),
+                ),
+          documentRepositoryPersistence: 'background',
+          documentRepository,
         }),
-        exportProviders: runtimeExtensionRegistries.exportProviders,
-        operationHistoryStore:
-          typeof window === 'undefined'
-            ? null
-            : createLocalStorageOperationHistoryStore(
-                window.localStorage,
-                createWorkbenchOperationHistoryKey(tabsState.activeDocumentId),
-              ),
-        documentRepositoryPersistence: 'background',
-        documentRepository,
-      }),
-    [createKernelAdapter, documentRepository, runtimeExtensionRegistries.exportProviders, tabsState.activeDocumentId],
+        performanceTelemetry,
+      ),
+    [createKernelAdapter, documentRepository, performanceTelemetry, runtimeExtensionRegistries.exportProviders, tabsState.activeDocumentId],
   )
   const durableHistory = useMemo(
     () => createDurableHistoryService({
@@ -270,6 +280,7 @@ export function WorkbenchApp({
                 onCreateNewDocument={createNewDocumentTab}
                 onOpenDocumentCopy={openDocumentCopy}
                 onOpenLinkedDocument={openLinkedDocument}
+                performanceTelemetry={performanceTelemetry}
                 onReorderDocumentTab={reorderDocumentTab}
                 onSyncActiveDocumentTab={syncActiveDocumentTab}
               />

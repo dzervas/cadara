@@ -13,6 +13,10 @@ import { ReportedErrorBoundary } from "@/components/layout/reported-error-bounda
 import { BuildMetadataLabel } from "@/components/layout/build-metadata-label";
 import { SentryAdBlockNotification } from "@/components/layout/sentry-ad-block-notification";
 import { normalizeUnknownError } from "@/contracts/errors";
+import {
+	createSentryPerformanceTelemetry,
+	shouldEnablePerformanceTelemetry,
+} from "@/contracts/errors/sentry-client";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { createBuiltinRuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 
@@ -20,6 +24,16 @@ function App() {
 	const actionBus = useMemo(() => createToolActionBus(), []);
 	const runtimeExtensionRegistries = useMemo(
 		() => createBuiltinRuntimeExtensionRegistryComposition(),
+		[],
+	);
+	const performanceTelemetry = useMemo(
+		() =>
+			createSentryPerformanceTelemetry({
+				enabled: shouldEnablePerformanceTelemetry({
+					isProduction: import.meta.env.PROD,
+					search: typeof window === "undefined" ? null : window.location.search,
+				}),
+			}),
 		[],
 	);
 	const documentSyncWorkerClient = useMemo(
@@ -51,12 +65,13 @@ function App() {
 	return (
 		<ErrorReporterProvider>
 			<ReportedErrorBoundary>
-				<OccWarmupErrorEffect />
+				<OccWarmupErrorEffect performanceTelemetry={performanceTelemetry} />
 				<OccAssetCacheEffect />
 				<WorkbenchApp
 					actionBus={actionBus}
 					createKernelAdapter={createBrowserOccKernelAdapter}
 					documentSyncWorkerClient={shouldDisableDevRepository() ? null : documentSyncWorkerClient}
+					performanceTelemetry={performanceTelemetry}
 					runtimeExtensionRegistries={runtimeExtensionRegistries}
 				/>
 			</ReportedErrorBoundary>
@@ -93,11 +108,11 @@ function OccAssetCacheEffect() {
 	return null;
 }
 
-function OccWarmupErrorEffect() {
+function OccWarmupErrorEffect({ performanceTelemetry }: { performanceTelemetry: Parameters<typeof startBrowserOccWarmup>[0] }) {
 	const errorReporter = useErrorReporter();
 
 	useEffect(() => {
-		const warmupPromise = startBrowserOccWarmup();
+		const warmupPromise = startBrowserOccWarmup(performanceTelemetry);
 		if (!warmupPromise) return;
 
 		void warmupPromise.catch((error: unknown) => {
@@ -114,7 +129,7 @@ function OccWarmupErrorEffect() {
 				},
 			);
 		});
-	}, [errorReporter]);
+	}, [errorReporter, performanceTelemetry]);
 
 	return null;
 }

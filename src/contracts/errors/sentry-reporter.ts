@@ -13,6 +13,7 @@ import {
   SENTRY_DSN,
   defaultSentryBrowserClient,
   initializeSentryErrorReporting,
+  shouldEnablePerformanceTelemetry,
   shouldEnableSentryErrorReporting,
   type SentryBrowserBoundary,
 } from '@/contracts/errors/sentry-client'
@@ -24,6 +25,7 @@ import {
 export {
   SENTRY_DSN,
   initializeSentryErrorReporting,
+  shouldEnablePerformanceTelemetry,
   shouldEnableSentryErrorReporting,
   type SentryBrowserBoundary,
 }

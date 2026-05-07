@@ -52,6 +52,7 @@ import {
 import { SectionCapLayer, SectionViewOverlay } from '@/components/cad/three-cad-viewport-section'
 import {
   BodyLodWatcher,
+  FirstNonEmptyGeometryFrameSignal,
   MeasurementWitnessLayer,
   RenderIdleSignal,
   SketchProjectionFrameWatcher,
@@ -178,6 +179,9 @@ interface ThreeCadViewportProps {
   sketchToolPresentation: SketchToolPresentationSchema | null
   specialModePresentation: SketchSpecialModeViewportPresentation | null
   fitViewRequestId: number
+  hasNonEmptyCommittedGeometry?: boolean
+  onCanvasCreated?: () => void
+  onFirstNonEmptyGeometryFrame?: () => void
 }
 
 export function ThreeCadViewport({
@@ -212,6 +216,9 @@ export function ThreeCadViewport({
   sketchToolPresentation,
   specialModePresentation,
   fitViewRequestId,
+  hasNonEmptyCommittedGeometry = false,
+  onCanvasCreated,
+  onFirstNonEmptyGeometryFrame,
 }: ThreeCadViewportProps) {
   const { sketchSpecialModes } = useRuntimeExtensionRegistry()
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -280,6 +287,8 @@ export function ThreeCadViewport({
   const sketchToolPatchRef = useRef(onSketchToolPatch)
   const projectSketchClientPointRef = useRef<(clientX: number, clientY: number) => readonly [number, number] | null>(() => null)
   const lodTierChangeRef = useRef(onLodTierChange)
+  const canvasCreatedRef = useRef(onCanvasCreated)
+  const firstNonEmptyGeometryFrameRef = useRef(onFirstNonEmptyGeometryFrame)
   const {
     machineState,
     state: { mode, selectionFilter, selectionCatalog, sketchSession },
@@ -427,6 +436,8 @@ export function ThreeCadViewport({
     sectionClearRef.current = onSectionClear
     sketchToolPatchRef.current = onSketchToolPatch
     lodTierChangeRef.current = onLodTierChange
+    canvasCreatedRef.current = onCanvasCreated
+    firstNonEmptyGeometryFrameRef.current = onFirstNonEmptyGeometryFrame
     selectionRef.current = selection
     sketchSessionRef.current = sketchSession
     sectionViewRef.current = activeSectionView
@@ -455,6 +466,8 @@ export function ThreeCadViewport({
     onSectionOffsetChange,
     onSketchToolPatch,
     onLodTierChange,
+    onCanvasCreated,
+    onFirstNonEmptyGeometryFrame,
     selection,
     sketchSession,
     selectionCatalog,
@@ -1605,6 +1618,7 @@ export function ThreeCadViewport({
           applyViewportCameraFrameToCamera(viewportCamera, getDefaultViewportCameraFrame())
           cameraRef.current = viewportCamera
           canvasElementRef.current = gl.domElement
+          canvasCreatedRef.current?.()
           setCanvasReadyVersion((current) => current + 1)
           gl.setClearColor(0x000000, 0)
           raycaster.params.Line.threshold = 0.75
@@ -1641,6 +1655,10 @@ export function ThreeCadViewport({
           isEditorIdle={isEditorRenderIdle}
           sceneKey={bvhSceneKey}
           viewportRef={viewportRef}
+        />
+        <FirstNonEmptyGeometryFrameSignal
+          hasNonEmptyGeometry={hasNonEmptyCommittedGeometry}
+          onReady={() => firstNonEmptyGeometryFrameRef.current?.()}
         />
         <Bvh key={bvhSceneKey} enabled>
           <group ref={pickRootRef}>

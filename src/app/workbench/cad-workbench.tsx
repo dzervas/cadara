@@ -27,7 +27,15 @@ import {
 	type WorkbenchStateDebuggerModel,
 } from "@/components/layout/workbench-state-debugger";
 import { WorkbenchNotification } from "@/components/layout/workbench-notification";
-import { isInitialOccRenderPending } from "@/app/workbench/initial-occ-render-state";
+import {
+	hasNonEmptyCommittedGeometry,
+	isInitialOccRenderPending,
+} from "@/app/workbench/initial-occ-render-state";
+import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
+import {
+	noopPerformanceTelemetry,
+	recordPerformanceMark,
+} from "@/contracts/performance/telemetry";
 import {
 	composeViewportRenderables,
 	isTargetHidden,
@@ -131,6 +139,7 @@ interface CadWorkbenchProps {
 	onCreateNewDocument: () => Promise<DocumentId>;
 	onOpenDocumentCopy: (file: File) => Promise<WorkbenchDocumentActionResult>;
 	onOpenLinkedDocument: () => Promise<WorkbenchDocumentActionResult>;
+	performanceTelemetry?: PerformanceTelemetry;
 	onReorderDocumentTab: (documentId: DocumentId, toIndex: number) => void;
 	onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
 }
@@ -142,6 +151,7 @@ export function CadWorkbench({
 	onCreateNewDocument,
 	onOpenDocumentCopy,
 	onOpenLinkedDocument,
+	performanceTelemetry = noopPerformanceTelemetry,
 	onReorderDocumentTab,
 	onSyncActiveDocumentTab,
 }: CadWorkbenchProps) {
@@ -196,6 +206,7 @@ export function CadWorkbench({
 		useState<BrowserTabCloseSaveAction | null>(null);
 	const [isBrowserTabCloseSavePending, setIsBrowserTabCloseSavePending] = useState(false);
 	const snapshotRef = useRef(snapshot);
+	const firstSnapshotReadyRecordedRef = useRef(false);
 	const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({ reserveViewCube: true });
 	// TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
 	const cloudSaveEnabled = false;
@@ -236,12 +247,31 @@ export function CadWorkbench({
 			return;
 		}
 
+		const firstSnapshotReadyAt = window.__cadOccPerf?.firstSnapshotReadyAt ?? performance.now();
 		window.__cadOccPerf = {
 			warmupStatus: "idle",
 			...window.__cadOccPerf,
-			firstSnapshotReadyAt: window.__cadOccPerf?.firstSnapshotReadyAt ?? performance.now(),
+			firstSnapshotReadyAt,
 		};
-	}, [snapshot]);
+		if (firstSnapshotReadyRecordedRef.current) {
+			return;
+		}
+		firstSnapshotReadyRecordedRef.current = true;
+		recordPerformanceMark(performanceTelemetry, {
+			name: "Startup first snapshot ready",
+			op: "cad.startup",
+			attributes: {
+				"cadara.seam": "startup",
+				"cadara.operation": "firstSnapshotReady",
+				"cadara.startup_phase": "first_snapshot_ready",
+				"cadara.feature_count": snapshot.document.features.length,
+				"cadara.sketch_count": snapshot.document.sketches.length,
+				"cadara.body_count": snapshot.document.bodies.length,
+				"cadara.render_record_count": snapshot.document.render.records.length,
+				"cadara.diagnostic_count": snapshot.document.diagnostics.length,
+			},
+		});
+	}, [performanceTelemetry, snapshot]);
 
 	// TODO: Move the perf bridge to its own file
 	useEffect(() => {
@@ -1389,6 +1419,40 @@ export function CadWorkbench({
 		setSaveAsDocumentModalOpened(false);
 	};
 
+	const handleViewportCanvasCreated = useCallback(() => {
+		recordPerformanceMark(performanceTelemetry, {
+			name: "Startup viewport canvas created",
+			op: "cad.startup",
+			attributes: {
+				"cadara.seam": "startup",
+				"cadara.operation": "viewportCanvasCreated",
+				"cadara.startup_phase": "canvas_created",
+				"cadara.canvas_created": true,
+			},
+		});
+	}, [performanceTelemetry]);
+
+	const handleFirstNonEmptyGeometryFrame = useCallback(() => {
+		recordPerformanceMark(performanceTelemetry, {
+			name: "Startup first non-empty geometry frame",
+			op: "cad.startup",
+			attributes: {
+				"cadara.seam": "startup",
+				"cadara.operation": "firstNonEmptyGeometryFrame",
+				"cadara.startup_phase": "first_non_empty_geometry_frame",
+				"cadara.render_record_count": viewportRenderables.documentRenderables.length,
+				"cadara.body_count": snapshot?.document.bodies.length ?? 0,
+			},
+		});
+		if (typeof window !== "undefined") {
+			window.__cadOccPerf = {
+				warmupStatus: "idle",
+				...window.__cadOccPerf,
+				firstNonEmptyGeometryFrameAt: window.__cadOccPerf?.firstNonEmptyGeometryFrameAt ?? performance.now(),
+			};
+		}
+	}, [performanceTelemetry, snapshot?.document.bodies.length, viewportRenderables.documentRenderables.length]);
+
 	return (
 		<WorkbenchCommandProvider
 			handlers={{
@@ -1438,6 +1502,9 @@ export function CadWorkbench({
 									sketchToolPresentation={sketchToolPresentation}
 									specialModePresentation={sketchSpecialModeViewportPresentation}
 									fitViewRequestId={viewportFitRequestId}
+									hasNonEmptyCommittedGeometry={hasNonEmptyCommittedGeometry(viewportRenderables.documentRenderables)}
+									onCanvasCreated={handleViewportCanvasCreated}
+									onFirstNonEmptyGeometryFrame={handleFirstNonEmptyGeometryFrame}
 								/>
 								{initialOccRenderPending ? (
 									<div

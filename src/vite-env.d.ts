@@ -18,6 +18,7 @@ interface Window {
     warmupStatus?: 'idle' | 'pending' | 'fulfilled' | 'rejected'
     warmupError?: string | null
     firstSnapshotReadyAt?: number | null
+    firstNonEmptyGeometryFrameAt?: number | null
     lastMutationLatencyMs?: number | null
   }
   __cadMeasureOccMutation?: () => Promise<{
