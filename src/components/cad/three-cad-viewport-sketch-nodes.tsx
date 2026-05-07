@@ -24,6 +24,7 @@ import {
   applyWireMaterialDepthPolicy,
   bindRenderableObject,
   createMarkerPickProxy,
+  excludeRenderableObjectFromRaycastPicking,
 } from '@/infrastructure/viewport/render-picking'
 
 interface SketchDisplayRenderableNodeProps {
@@ -297,6 +298,7 @@ export function SketchDisplayPolylineNode({
         renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve',
         'document',
       )
+      excludeRenderableObjectFromRaycastPicking(nextLine)
     }
 
     return nextLine

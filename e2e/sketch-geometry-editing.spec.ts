@@ -59,6 +59,48 @@ test('dragging an active sketch vertex updates the committed sketch definition',
   expect(pointPositions[0]![0]).toBeGreaterThan(pointPositions[1]![0])
 })
 
+test('active sketch curve picking selects semantic curves without pixel-perfect clicks', async ({ page }) => {
+  const workbench = new SketchWorkbenchHarness(page)
+
+  await workbench.open()
+  await workbench.activateTool('Start a new sketch.')
+  await page.getByRole('button', { name: /Top Plane/ }).first().click()
+  await workbench.expectSketchSessionActive()
+
+  await workbench.activateTool('Create line geometry.')
+  await workbench.clickViewportAt({ x: 320, y: 260 })
+  await workbench.clickViewportAt({ x: 420, y: 260 })
+
+  await workbench.activateTool('Create circular geometry.')
+  await workbench.clickViewportAt({ x: 560, y: 260 })
+  await workbench.clickViewportAt({ x: 680, y: 260 })
+
+  await workbench.activateTool('Create spline geometry.')
+  await workbench.clickViewportAt({ x: 280, y: 520 })
+  await workbench.clickViewportAt({ x: 420, y: 360 })
+  await workbench.clickViewportAt({ x: 560, y: 520 })
+
+  await workbench.activateTool('Toggle sketch geometry construction-only or mark new sketch geometry as construction.')
+  await workbench.activateTool('Create line geometry.')
+  await workbench.clickViewportAt({ x: 520, y: 460 })
+  await workbench.clickViewportAt({ x: 620, y: 460 })
+  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('4 entities staged')
+
+  await page.keyboard.press('Escape')
+
+  await workbench.clickViewportAt({ x: 370, y: 268 })
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_1_line')
+
+  await workbench.clickViewportAt({ x: 688, y: 260 })
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_2_circle')
+
+  await workbench.clickViewportAt({ x: 420, y: 440 })
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_3_spline')
+
+  await workbench.clickViewportAt({ x: 570, y: 468 })
+  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_4_line')
+})
+
 test('repository-backed sketch commit stays responsive and survives immediate refresh without file system access', async ({
   page,
 }, testInfo) => {

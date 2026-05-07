@@ -932,6 +932,10 @@ export function bindFaceHoverPerimeterObject(
   object.userData.pickExcluded = true
 }
 
+export function excludeRenderableObjectFromRaycastPicking(object: THREE.Object3D) {
+  object.userData.pickExcluded = true
+}
+
 function getBoundPickId(object: THREE.Object3D) {
   return findBoundValue<string>(object, 'pickId')
 }

@@ -5,16 +5,21 @@ import {
   primitiveRefEquals,
 } from '@/core/editor/schema'
 import {
-  getSketchDatumGuideExtent,
   mapSketchPointToWorld,
   type SketchAnnotationDescriptor,
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
 } from '@/domain/editor/sketch-session'
+import {
+  collectSketchInteractionGeometry,
+  flattenSketchInteractionCurve,
+  isSketchInteractionCurveGeometry,
+} from '@/domain/sketch-interaction/geometry'
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from '@/contracts/shared/references'
+import type { SketchPoint2D } from '@/contracts/sketch/schema'
 import {
   createProjectedPickCandidate,
   DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
@@ -25,7 +30,8 @@ import {
 import type { ViewportCamera } from '@/infrastructure/viewport/viewport-projection'
 import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
 
-const DEFAULT_PROJECTED_SKETCH_DATUM_LINE_PICK_RADIUS_PX = 10
+export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX = 10
+export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX = 14
 
 export function collectProjectedVertexCandidates({
   clientX,
@@ -170,128 +176,79 @@ export function collectProjectedSketchDisplayPointCandidates({
   })
 }
 
-export function collectProjectedSketchDatumLineCandidates({
+export function collectProjectedSketchCurveCandidates({
   clientX,
   clientY,
   camera,
   viewportRect,
   sketchSession,
-  sketchDisplayRenderables,
   acceptsTarget,
+  currentHoverTarget,
 }: {
   clientX: number
   clientY: number
   camera: ViewportCamera
   viewportRect: DOMRectReadOnly
   sketchSession: SketchSessionState | null
-  sketchDisplayRenderables: SketchSessionDisplayRenderable[]
   acceptsTarget: (target: PrimitiveRef) => boolean
+  currentHoverTarget: PrimitiveRef | null
 }): PickCandidate[] {
   const pointerX = clientX - viewportRect.left
   const pointerY = clientY - viewportRect.top
-  const projectedStart = new THREE.Vector3()
-  const projectedEnd = new THREE.Vector3()
 
-  const renderableAxes = sketchDisplayRenderables.flatMap((renderable) => {
-    const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
-    const target = renderable.target
+  if (!sketchSession) {
+    return []
+  }
 
+  return collectSketchInteractionGeometry(sketchSession).flatMap((geometry) => {
     if (
-      !geometryData
-      || !target
-      || target.kind !== 'sketchDatumReference'
-      || target.geometryKind !== 'lineSegment'
-      || geometryData.points.length < 2
-      || !acceptsTarget(target)
+      !isSketchInteractionCurveGeometry(geometry)
+      || !acceptsTarget(geometry.target)
     ) {
       return []
     }
 
-    const start = geometryData.points[0]!
-    const end = geometryData.points[geometryData.points.length - 1]!
-
-    return [{
-      start,
-      end,
-      target,
-      stableKey: `sketch:${renderable.id}`,
-    }]
-  })
-
-  const sessionAxes = sketchSession
-    ? createSketchDatumAxisDescriptors(sketchSession)
-    : []
-
-  return [...renderableAxes, ...sessionAxes].flatMap(({ start, end, target, stableKey }) => {
-    if (!acceptsTarget(target)) {
+    const points = flattenSketchInteractionCurve(geometry)
+    if (points.length < 2) {
       return []
     }
 
-    projectedStart.set(start[0], start[1], start[2])
-    projectedEnd.set(end[0], end[1], end[2])
-    projectedStart.project(camera)
-    projectedEnd.project(camera)
-
-    if (!hasVisibleProjectedDepth(projectedStart) || !hasVisibleProjectedDepth(projectedEnd)) {
+    const projected = projectSketchCurvePoints({
+      points,
+      sketchSession,
+      camera,
+      viewportRect,
+    })
+    if (projected.length < 2) {
       return []
     }
 
-    const startScreen = {
-      x: ((projectedStart.x + 1) / 2) * viewportRect.width,
-      y: ((-projectedStart.y + 1) / 2) * viewportRect.height,
-    }
-    const endScreen = {
-      x: ((projectedEnd.x + 1) / 2) * viewportRect.width,
-      y: ((-projectedEnd.y + 1) / 2) * viewportRect.height,
-    }
-    const distance = getPointToSegmentDistance({
+    const distance = getPointToPolylineDistance({
       x: pointerX,
       y: pointerY,
-    }, startScreen, endScreen)
+    }, projected)
 
-    if (distance > DEFAULT_PROJECTED_SKETCH_DATUM_LINE_PICK_RADIUS_PX) {
+    if (!shouldIncludeProjectedPickCandidate({
+      target: geometry.target,
+      currentHoverTarget,
+      screenDistance: distance,
+      enterRadius: DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX,
+      exitRadius: DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX,
+    })) {
       return []
     }
 
     return [
       createProjectedPickCandidate({
         pickId: null,
-        target,
-        semanticClass: 'sketchReference',
+        target: geometry.target,
+        semanticClass: geometry.source === 'local' ? 'sketchCurve' : 'sketchReference',
         screenDistance: distance,
-        depth: Math.min(projectedStart.z, projectedEnd.z),
-        stableKey,
+        depth: projected.reduce((nearest, point) => Math.min(nearest, point.depth), Number.POSITIVE_INFINITY),
+        stableKey: `sketch-interaction:${geometry.id}`,
       }),
     ]
   })
-}
-
-function createSketchDatumAxisDescriptors(session: SketchSessionState) {
-  const sketchId = session.sketchId ?? 'sketch_draft'
-  const extent = getSketchDatumGuideExtent(session.definition, session.projectedReferences)
-
-  return ([
-    {
-      datumId: 'xAxis',
-      start: mapSketchPointToWorld(session.plane, [-extent, 0]),
-      end: mapSketchPointToWorld(session.plane, [extent, 0]),
-    },
-    {
-      datumId: 'yAxis',
-      start: mapSketchPointToWorld(session.plane, [0, -extent]),
-      end: mapSketchPointToWorld(session.plane, [0, extent]),
-    },
-  ] as const).map(({ datumId, start, end }) => ({
-    start,
-    end,
-    target: {
-      kind: 'sketchDatumReference',
-      sketchId,
-      datumId,
-      geometryKind: 'lineSegment',
-    } satisfies PrimitiveRef,
-    stableKey: `sketch-session-datum:${sketchId}:${datumId}`,
-  }))
 }
 
 function getProjectedSketchDisplayPointSemanticClass(renderable: SketchSessionDisplayRenderable) {
@@ -315,6 +272,49 @@ function hasVisibleProjectedDepth(projectedPoint: THREE.Vector3) {
     && Number.isFinite(projectedPoint.z)
     && projectedPoint.z >= -1
     && projectedPoint.z <= 1
+}
+
+function projectSketchCurvePoints({
+  points,
+  sketchSession,
+  camera,
+  viewportRect,
+}: {
+  points: readonly SketchPoint2D[]
+  sketchSession: SketchSessionState
+  camera: ViewportCamera
+  viewportRect: DOMRectReadOnly
+}) {
+  const projectedPoint = new THREE.Vector3()
+
+  return points.flatMap((point) => {
+    const worldPoint = mapSketchPointToWorld(sketchSession.plane, point)
+    projectedPoint.set(worldPoint[0], worldPoint[1], worldPoint[2])
+    projectedPoint.project(camera)
+
+    if (!hasVisibleProjectedDepth(projectedPoint)) {
+      return []
+    }
+
+    return [{
+      x: ((projectedPoint.x + 1) / 2) * viewportRect.width,
+      y: ((-projectedPoint.y + 1) / 2) * viewportRect.height,
+      depth: projectedPoint.z,
+    }]
+  })
+}
+
+function getPointToPolylineDistance(
+  point: { x: number, y: number },
+  polyline: readonly { x: number, y: number }[],
+) {
+  let distance = Number.POSITIVE_INFINITY
+
+  for (let index = 1; index < polyline.length; index += 1) {
+    distance = Math.min(distance, getPointToSegmentDistance(point, polyline[index - 1]!, polyline[index]!))
+  }
+
+  return distance
 }
 
 function getPointToSegmentDistance(
