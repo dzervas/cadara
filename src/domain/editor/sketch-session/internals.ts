@@ -97,6 +97,7 @@ export const REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS = 0.28
 export const REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS = 0.4
 export const REFERENCE_IMAGE_ANCHOR_MARKER_COLOR = 0xf6c453
 export const liveRegionDiagnosticsByRegions = new WeakMap<RegionRecord[], ReturnType<typeof deriveSketchRegionsCore>['diagnostics']>()
+export const liveRegionSolvedSnapshotByRegions = new WeakMap<RegionRecord[], SolvedSketchSnapshot>()
 
 export function createPointId(sequence: number, suffix: string): SketchPointId {
   return `sketch_point_${sequence}_${suffix}` as SketchPointId
@@ -301,6 +302,10 @@ export function getSketchSessionDisplayProjectedReferences(
   )
 }
 
+let cachedSolveDefinition: SketchDefinition | null = null
+let cachedSolveProjectedRefs: ProjectedSketchReferenceRecord[] | null = null
+let cachedSolveResult: SolvedSketchSnapshot | null = null
+
 export function deriveSolvedRegionsForSession(
   session: Pick<SketchSessionState, 'projectedReferences' | 'sketchId'>,
   definition: SketchDefinition,
@@ -308,12 +313,22 @@ export function deriveSolvedRegionsForSession(
 ): RegionRecord[] {
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const evaluatedDefinition = evaluateSketchDerivations(definition).definition
-  const usableSolvedSnapshot = solvedSnapshot ?? solveSketchDefinitionCore({
-    definition: evaluatedDefinition,
-    projectedReferences: session.projectedReferences,
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
-    partialSolvePolicy: 'bestEffort',
-  }).solvedSnapshot
+  let usableSolvedSnapshot = solvedSnapshot
+  if (!usableSolvedSnapshot) {
+    if (cachedSolveDefinition === evaluatedDefinition && cachedSolveProjectedRefs === session.projectedReferences && cachedSolveResult) {
+      usableSolvedSnapshot = cachedSolveResult
+    } else {
+      usableSolvedSnapshot = solveSketchDefinitionCore({
+        definition: evaluatedDefinition,
+        projectedReferences: session.projectedReferences,
+        tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+        partialSolvePolicy: 'bestEffort',
+      }).solvedSnapshot
+      cachedSolveDefinition = evaluatedDefinition
+      cachedSolveProjectedRefs = session.projectedReferences
+      cachedSolveResult = usableSolvedSnapshot
+    }
+  }
 
   const derived = deriveSketchRegionsCore({
     documentId: LIVE_REGION_DOCUMENT_ID,
@@ -324,11 +339,16 @@ export function deriveSolvedRegionsForSession(
     projectedReferences: session.projectedReferences,
   })
   liveRegionDiagnosticsByRegions.set(derived.regions, derived.diagnostics)
+  liveRegionSolvedSnapshotByRegions.set(derived.regions, usableSolvedSnapshot)
   return derived.regions
 }
 
 export function getSketchSessionRegionDiagnostics(session: SketchSessionState) {
   return liveRegionDiagnosticsByRegions.get(session.solvedRegions) ?? []
+}
+
+export function getSketchSessionSolvedSnapshot(session: SketchSessionState): SolvedSketchSnapshot | null {
+  return liveRegionSolvedSnapshotByRegions.get(session.solvedRegions) ?? null
 }
 
 export function withLiveSolvedRegions(session: SketchSessionState): SketchSessionState {

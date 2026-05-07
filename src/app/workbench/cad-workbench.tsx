@@ -68,7 +68,6 @@ import {
 	getSketchAnnotationDescriptors,
 	getSketchToolPresentation,
 } from "@/domain/editor/sketch-session";
-import { persistSketchDraftSession } from "@/domain/editor/sketch-session/persistence";
 import {
 	getSketchSpecialModePanel,
 	getSketchSpecialModeViewportPresentation,
@@ -187,10 +186,12 @@ export function CadWorkbench({
 		documentId: DocumentId | null;
 		draftKey: string | null;
 		sessionHash: string | null;
+		wasDragging: boolean;
 	}>({
 		documentId: null,
 		draftKey: null,
 		sessionHash: null,
+		wasDragging: false,
 	});
 	const previousSketchDraftRef = useRef<{
 		documentId: DocumentId;
@@ -608,6 +609,7 @@ export function CadWorkbench({
 				documentId: null,
 				draftKey: null,
 				sessionHash: null,
+				wasDragging: false,
 			};
 			if (previousDraft) {
 				void durableHistory.clearSketchDraft(previousDraft);
@@ -615,9 +617,17 @@ export function CadWorkbench({
 			return;
 		}
 
+		if (sketchSession.activeDrag) {
+			sketchDraftSyncRef.current.wasDragging = true;
+			return;
+		}
+
+		const dragJustEnded = sketchDraftSyncRef.current.wasDragging;
+		sketchDraftSyncRef.current.wasDragging = false;
+
 		const documentId = snapshot.document.documentId;
 		const draftKey = durableHistory.getSketchDraftKey(sketchSession);
-		const sessionHash = JSON.stringify(persistSketchDraftSession(sketchSession));
+		const sessionHash = `${sketchSession.sketchId}:${sketchSession.sequence}:${sketchSession.historyCursor.kind === 'item' ? sketchSession.historyCursor.itemId : 'empty'}`;
 		const trackedSession = sketchDraftSyncRef.current;
 		previousSketchDraftRef.current = { documentId, draftKey };
 
@@ -632,11 +642,12 @@ export function CadWorkbench({
 				}
 
 				if (restoredSession) {
-					const restoredHash = JSON.stringify(persistSketchDraftSession(restoredSession));
+					const restoredHash = `${restoredSession.sketchId}:${restoredSession.sequence}:${restoredSession.historyCursor.kind === 'item' ? restoredSession.historyCursor.itemId : 'empty'}`;
 					sketchDraftSyncRef.current = {
 						documentId,
 						draftKey,
 						sessionHash: restoredHash,
+						wasDragging: false,
 					};
 					if (restoredHash !== sessionHash) {
 						dispatch({ type: "sketch.draftHistoryRestored", session: restoredSession });
@@ -648,6 +659,7 @@ export function CadWorkbench({
 					documentId,
 					draftKey,
 					sessionHash,
+					wasDragging: false,
 				};
 				void durableHistory.syncSketchDraft({
 					documentId,
@@ -660,7 +672,7 @@ export function CadWorkbench({
 			};
 		}
 
-		if (trackedSession.sessionHash === sessionHash) {
+		if (trackedSession.sessionHash === sessionHash && !dragJustEnded) {
 			return;
 		}
 
@@ -668,6 +680,7 @@ export function CadWorkbench({
 			documentId,
 			draftKey,
 			sessionHash,
+			wasDragging: false,
 		};
 		void durableHistory.syncSketchDraft({
 			documentId,

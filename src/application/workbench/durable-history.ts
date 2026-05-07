@@ -83,11 +83,11 @@ export function createDurableHistoryService(input: {
   }
 
   function getPersistedSessionHash(session: PersistedSketchDraftSession) {
-    return JSON.stringify(session)
+    return `${session.sketchId}:${session.sequence}:${session.historyCursor.kind === 'item' ? session.historyCursor.itemId : 'empty'}`
   }
 
   function getSketchSessionHash(session: SketchSessionState) {
-    return getPersistedSessionHash(persistSketchDraftSession(session))
+    return `${session.sketchId}:${session.sequence}:${session.historyCursor.kind === 'item' ? session.historyCursor.itemId : 'empty'}`
   }
 
   function setDraftAvailability(

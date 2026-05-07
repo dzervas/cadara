@@ -176,10 +176,19 @@ function transformedEntity(
   return output
 }
 
+let cachedDerivationInput: SketchDefinition | null = null
+let cachedDerivationResult: SketchDerivationEvaluationResult | null = null
+
 export function evaluateSketchDerivations(definition: SketchDefinition): SketchDerivationEvaluationResult {
+  if (cachedDerivationInput === definition && cachedDerivationResult) {
+    return cachedDerivationResult
+  }
+
   const relationships = definition.derivedRelationships ?? []
   if (relationships.length === 0) {
-    return { definition, diagnostics: [] }
+    cachedDerivationInput = definition
+    cachedDerivationResult = { definition, diagnostics: [] }
+    return cachedDerivationResult
   }
 
   const diagnostics: SketchSolveDiagnostic[] = []
@@ -283,7 +292,7 @@ export function evaluateSketchDerivations(definition: SketchDefinition): SketchD
     }
   }
 
-  return {
+  const result: SketchDerivationEvaluationResult = {
     definition: {
       ...definition,
       points: nextPoints,
@@ -291,4 +300,7 @@ export function evaluateSketchDerivations(definition: SketchDefinition): SketchD
     },
     diagnostics,
   }
+  cachedDerivationInput = definition
+  cachedDerivationResult = result
+  return result
 }

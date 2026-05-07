@@ -57,6 +57,7 @@ import {
   getReferenceImageOperationOverrides,
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
+  getSketchSessionSolvedSnapshot,
   mapDefinitionEntityToDraftEntity,
 } from './internals'
 import {
@@ -129,12 +130,15 @@ export function getStableSketchSessionDisplayRenderables(session: SketchSessionS
     displayDefinition,
     referenceImageOperationOverrides,
   )
-  const solved = solveSketchDefinitionCore({
-    definition: displayDefinition,
-    projectedReferences: displayProjectedReferences,
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
-    partialSolvePolicy: 'bestEffort',
-  })
+  const cachedSnapshot = getSketchSessionSolvedSnapshot(session)
+  const solved = cachedSnapshot
+    ? { solvedSnapshot: cachedSnapshot }
+    : solveSketchDefinitionCore({
+        definition: displayDefinition,
+        projectedReferences: displayProjectedReferences,
+        tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+        partialSolvePolicy: 'bestEffort',
+      })
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({
     sketchId,
     definition: displayDefinition,

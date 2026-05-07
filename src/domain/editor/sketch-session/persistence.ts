@@ -12,13 +12,13 @@ export function persistSketchDraftSession(
   return {
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,
-    plane: structuredClone(session.plane),
-    definition: structuredClone(session.definition),
-    fullDefinition: structuredClone(session.fullDefinition),
-    historyCursor: structuredClone(session.historyCursor) as PersistedSketchHistoryCursor,
-    historyOperations: structuredClone(session.historyOperations) as PersistedSketchHistoryOperation[],
+    plane: session.plane,
+    definition: session.definition,
+    fullDefinition: session.fullDefinition,
+    historyCursor: session.historyCursor as PersistedSketchHistoryCursor,
+    historyOperations: session.historyOperations as PersistedSketchHistoryOperation[],
     sequence: session.sequence,
-    commitRequest: structuredClone(session.commitRequest),
+    commitRequest: session.commitRequest,
   }
 }
 

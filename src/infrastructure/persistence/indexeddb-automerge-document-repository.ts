@@ -322,11 +322,14 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       return createDraftHistoryAvailability(state.draftSessions[draftKey])
     }
 
-    if (documentsEqual(current.current, nextSession)) {
+    if (draftSessionsEqual(current.current, nextSession)) {
       return createDraftHistoryAvailability(current)
     }
 
-    current.undoStack.push(structuredClone(current.current))
+    current.undoStack.push(current.current)
+    if (current.undoStack.length > MAX_DRAFT_UNDO_STACK_SIZE) {
+      current.undoStack.splice(0, current.undoStack.length - MAX_DRAFT_UNDO_STACK_SIZE)
+    }
     current.redoStack = []
     current.current = nextSession
     await this.persistHistoryState(documentId, state)
@@ -351,8 +354,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       }
     }
 
-    entry.redoStack.push(structuredClone(entry.current))
-    entry.current = structuredClone(nextSession)
+    entry.redoStack.push(entry.current)
+    entry.current = nextSession
     await this.persistHistoryState(documentId, state)
     return {
       session: structuredClone(entry.current),
@@ -378,8 +381,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       }
     }
 
-    entry.undoStack.push(structuredClone(entry.current))
-    entry.current = structuredClone(nextSession)
+    entry.undoStack.push(entry.current)
+    entry.current = nextSession
     await this.persistHistoryState(documentId, state)
     return {
       session: structuredClone(entry.current),
@@ -824,8 +827,22 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
   return left.every((value) => rightSet.has(value))
 }
 
+const MAX_DRAFT_UNDO_STACK_SIZE = 50
+
 function documentsEqual(left: unknown, right: unknown) {
   return left !== undefined && JSON.stringify(left) === JSON.stringify(right)
+}
+
+function draftSessionsEqual(
+  left: PersistedSketchDraftSession,
+  right: PersistedSketchDraftSession,
+) {
+  return left.sequence === right.sequence
+    && left.sketchId === right.sketchId
+    && left.historyCursor.kind === right.historyCursor.kind
+    && (left.historyCursor.kind === 'item' && right.historyCursor.kind === 'item'
+      ? left.historyCursor.itemId === right.historyCursor.itemId
+      : true)
 }
 
 function createDraftHistoryAvailability(

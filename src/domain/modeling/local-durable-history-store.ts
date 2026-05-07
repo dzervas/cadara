@@ -134,18 +134,9 @@ export function createIndexedDbLocalDurableHistoryStore(
       }
     },
     async save({ documentId, scope, state }) {
-      const parsed = parseDocumentLocalDurableHistoryState(state)
-      if (!parsed.ok) {
-        return {
-          ok: false,
-          reason: 'failed',
-          error: new Error(parsed.message),
-        }
-      }
-
       const result = await withStore('readwrite', (store) => {
         const storageKey = createScopedStorageKey(documentId, scope)
-        store.put({ storageKey, state: parsed.state } satisfies LocalDurableHistoryRecord)
+        store.put({ storageKey, state } satisfies LocalDurableHistoryRecord)
         return store.get(storageKey) as IDBRequest<LocalDurableHistoryRecord>
       })
       if (!result.ok) {

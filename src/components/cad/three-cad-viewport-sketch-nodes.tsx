@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useThree } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 import {
@@ -305,11 +305,6 @@ export function SketchDisplayPolylineNode({
   useLayoutEffect(() => {
     if (useStrokeMesh) {
       const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(camera, size.height, geometryData.points)
-      const token = createStrokeGeometryToken(strokeGeometryStaticToken, worldUnitsPerPixel)
-      if (token === strokeGeometryTokenRef.current) {
-        return
-      }
-
       updatePolylineStrokeGeometryBuffer(
         geometry,
         geometryData,
@@ -317,16 +312,38 @@ export function SketchDisplayPolylineNode({
         worldUnitsPerPixel,
         renderable.sketchPlaneFrame,
       )
-      strokeGeometryTokenRef.current = token
+      strokeGeometryTokenRef.current = createStrokeGeometryToken(strokeGeometryStaticToken, worldUnitsPerPixel)
       return
     }
 
+    strokeGeometryTokenRef.current = null
     updatePolylineGeometryBuffer(geometry, geometryData)
 
     if (linePattern === 'dashed' && line instanceof THREE.Line) {
       line.computeLineDistances()
     }
   }, [camera, geometry, geometryData, line, linePattern, renderable.sketchPlaneFrame, size.height, strokeGeometryMaterialConfig, strokeGeometryStaticToken, useStrokeMesh])
+
+  useFrame(({ camera: frameCamera, size: frameSize }) => {
+    if (!useStrokeMesh) {
+      return
+    }
+
+    const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(frameCamera, frameSize.height, geometryData.points)
+    const token = createStrokeGeometryToken(strokeGeometryStaticToken, worldUnitsPerPixel)
+    if (token === strokeGeometryTokenRef.current) {
+      return
+    }
+
+    updatePolylineStrokeGeometryBuffer(
+      geometry,
+      geometryData,
+      strokeGeometryMaterialConfig,
+      worldUnitsPerPixel,
+      renderable.sketchPlaneFrame,
+    )
+    strokeGeometryTokenRef.current = token
+  })
 
   useEffect(() => {
     return () => {

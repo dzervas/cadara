@@ -87,13 +87,15 @@ function getSketchAffectedConstraintTargetKeys(input: {
   solvedSnapshot: SolvedSketchSnapshot
 }) {
   const targetKeys = new Set<string>()
+  const constraintById = new Map(input.definition.constraints.map((c) => [c.constraintId, c]))
+  const dimensionById = new Map(input.definition.dimensions.map((d) => [d.dimensionId, d]))
 
   for (const diagnostic of input.solvedSnapshot.diagnostics) {
     if (diagnostic.severity !== 'error' || !diagnostic.target) {
       continue
     }
 
-    for (const target of getSketchDiagnosticAffectedTargets(input.sketchId, input.definition, diagnostic.target)) {
+    for (const target of getSketchDiagnosticAffectedTargets(input.sketchId, constraintById, dimensionById, diagnostic.target)) {
       targetKeys.add(getPrimitiveRefKey(target))
     }
   }
@@ -104,7 +106,7 @@ function getSketchAffectedConstraintTargetKeys(input: {
     }
 
     targetKeys.add(getPrimitiveRefKey(createSketchConstraintRef(input.sketchId, status.constraintId)))
-    const constraint = input.definition.constraints.find((entry) => entry.constraintId === status.constraintId)
+    const constraint = constraintById.get(status.constraintId)
     if (!constraint) {
       continue
     }
@@ -120,7 +122,7 @@ function getSketchAffectedConstraintTargetKeys(input: {
     }
 
     targetKeys.add(getPrimitiveRefKey(createSketchDimensionRef(input.sketchId, status.dimensionId)))
-    const dimension = input.definition.dimensions.find((entry) => entry.dimensionId === status.dimensionId)
+    const dimension = dimensionById.get(status.dimensionId)
     if (!dimension) {
       continue
     }
@@ -135,7 +137,8 @@ function getSketchAffectedConstraintTargetKeys(input: {
 
 function getSketchDiagnosticAffectedTargets(
   sketchId: SketchId,
-  definition: SketchDefinition,
+  constraintById: Map<string, SketchDefinition['constraints'][number]>,
+  dimensionById: Map<string, SketchDefinition['dimensions'][number]>,
   target: NonNullable<SolvedSketchSnapshot['diagnostics'][number]['target']>,
 ): readonly PrimitiveRef[] {
   switch (target.kind) {
@@ -146,13 +149,13 @@ function getSketchDiagnosticAffectedTargets(
     case 'region':
       return [{ kind: 'region', sketchId, regionId: target.regionId }]
     case 'constraint': {
-      const constraint = definition.constraints.find((entry) => entry.constraintId === target.constraintId)
+      const constraint = constraintById.get(target.constraintId)
       return constraint
         ? [createSketchConstraintRef(sketchId, target.constraintId), ...getConstraintAffectedGeometryRefs(sketchId, constraint)]
         : [createSketchConstraintRef(sketchId, target.constraintId)]
     }
     case 'dimension': {
-      const dimension = definition.dimensions.find((entry) => entry.dimensionId === target.dimensionId)
+      const dimension = dimensionById.get(target.dimensionId)
       return dimension
         ? [createSketchDimensionRef(sketchId, target.dimensionId), ...getDimensionAffectedGeometryRefs(sketchId, dimension)]
         : [createSketchDimensionRef(sketchId, target.dimensionId)]

@@ -835,8 +835,10 @@ function createNumericalScalarConstraint(input: {
   id: ConstraintId | DimensionId
   targetKind: 'constraint' | 'dimension'
   parameterCount: number
+  affectedVariableIndices?: readonly number[]
   evaluateResidual(values: Float64Array): number
 }): ScalarConstraintRecord {
+  const indices = input.affectedVariableIndices
   return {
     id: input.id,
     targetKind: input.targetKind,
@@ -844,14 +846,16 @@ function createNumericalScalarConstraint(input: {
       const residualValue = input.evaluateResidual(values)
       const gradient = zeroVector(input.parameterCount)
       const step = 1e-6
+      const loopIndices = indices ?? values
 
-      for (let index = 0; index < values.length; index += 1) {
-        const next = cloneValues(values)
-        const previous = cloneValues(values)
-        next[index] += step
-        previous[index] -= step
-        const nextLoss = 0.5 * input.evaluateResidual(next) ** 2
-        const previousLoss = 0.5 * input.evaluateResidual(previous) ** 2
+      for (let i = 0; i < loopIndices.length; i += 1) {
+        const index = indices ? indices[i]! : i
+        const saved = values[index]!
+        values[index] = saved + step
+        const nextLoss = 0.5 * input.evaluateResidual(values) ** 2
+        values[index] = saved - step
+        const previousLoss = 0.5 * input.evaluateResidual(values) ** 2
+        values[index] = saved
         gradient[index] = (nextLoss - previousLoss) / (2 * step)
       }
 
@@ -1075,6 +1079,43 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
     const pairVector = subtract(secondPoint, firstPoint)
     const axisProjection = dot2(pairVector, axisUnit)
     return Math.sqrt(axisDistance * axisDistance + axisProjection * axisProjection)
+  }
+
+  const pIdx = (...points: (SolverPointRecord | null | undefined)[]) =>
+    points.flatMap(p => p ? [p.baseIndex, p.baseIndex + 1] : [])
+
+  const eIdx = (entityId: SketchEntityId) => {
+    const state = entityStates.get(entityId)
+    if (!state || state.kind === 'point') return []
+    if (state.kind === 'circle') return [state.baseIndex]
+    return [state.baseIndex, state.baseIndex + 1, state.baseIndex + 2]
+  }
+
+  const lineIdx = (entityId: SketchEntityId) => {
+    const line = lineEntityMap.get(entityId)
+    if (!line) return []
+    return pIdx(pointRecords.get(line.startPointId), pointRecords.get(line.endPointId))
+  }
+
+  const entityIdx = (entityId: SketchEntityId) => {
+    const entity = definition.entities.find(e => e.entityId === entityId)
+    if (!entity) return []
+    return [...getEntityPoints(entity).flatMap(pid => pIdx(pointRecords.get(pid))), ...eIdx(entityId)]
+  }
+
+  const collinearTargetIdx = (target: LocalCollinearTargetOperand) => {
+    if (target.kind === 'localPoint') return pIdx(pointRecords.get(target.pointId))
+    return lineIdx(target.entityId)
+  }
+
+  const lineDimOperandIdx = (operand: Extract<DimensionDefinition, { kind: 'lineDistance' }>['lines'][number]) => {
+    if (operand.kind === 'localEntity') return lineIdx(operand.entityId)
+    return []
+  }
+
+  const pointDimOperandIdx = (operand: Extract<DimensionDefinition, { kind: 'linePointDistance' }>['point']) => {
+    if (operand.kind === 'localPoint') return pIdx(pointRecords.get(operand.pointId))
+    return []
   }
 
   for (const constraint of definition.constraints) {
@@ -1320,6 +1361,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(point),
         evaluateResidual(values) {
           return length(subtract(getPoint(values, point), targetPoint))
         },
@@ -1347,6 +1389,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(point),
         evaluateResidual(values) {
           return projected
             ? pointOnProjectedCurveResidual(getPoint(values, point), projected)
@@ -1370,6 +1413,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(point, start, end),
         evaluateResidual(values) {
           const target = midpoint(getPoint(values, start), getPoint(values, end))
           return length(subtract(getPoint(values, point), target))
@@ -1401,6 +1445,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(point),
         evaluateResidual(values) {
           return length(subtract(getPoint(values, point), target))
         },
@@ -1420,6 +1465,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: [...pIdx(point), ...entityIdx(curve.entityId)],
         evaluateResidual(values) {
           return pointOnLocalCurveResidual(values, point, curve)
         },
@@ -1437,6 +1483,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: [...lineIdx(constraint.line.entityId), ...collinearTargetIdx(constraint.target)],
         evaluateResidual(values) {
           const line = resolveLocalLineOperand(values, constraint.line, lineEntityMap, pointRecords)
           if (!line || !unitVector(line.start, line.end)) {
@@ -1459,6 +1506,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: collinearTargetIdx(constraint.target),
         evaluateResidual(values) {
           if (!unitVector(projectedLine.start, projectedLine.end)) {
             return Number.POSITIVE_INFINITY
@@ -1501,6 +1549,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(start, end),
         evaluateResidual(values) {
           const startPoint = getPoint(values, start)
           const endPoint = getPoint(values, end)
@@ -1552,6 +1601,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           id: constraint.constraintId,
           targetKind: 'constraint',
           parameterCount,
+          affectedVariableIndices: pIdx(start, end),
           evaluateResidual(values) {
             const startPoint = getPoint(values, start)
             const endPoint = getPoint(values, end)
@@ -1577,6 +1627,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           id: constraint.constraintId,
           targetKind: 'constraint',
           parameterCount,
+          affectedVariableIndices: entityIdx(entity.entityId),
           evaluateResidual(values) {
             const localCircle = getLocalCircleLike(values, entity)
             if (!localCircle) {
@@ -1616,6 +1667,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           id: constraint.constraintId,
           targetKind: 'constraint',
           parameterCount,
+          affectedVariableIndices: [...pIdx(center), ...eIdx(entity.entityId)],
           evaluateResidual(values) {
             const { radius } = getArcParameters(values, arcState)
             const localCenter = getPoint(values, center)
@@ -1665,6 +1717,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           id: constraint.constraintId,
           targetKind: 'constraint',
           parameterCount,
+          affectedVariableIndices: [...pIdx(start, end), ...entityIdx(curve.entityId)],
           evaluateResidual(values) {
             const circleLike = getLocalCircleLike(values, curve)
             if (!circleLike) {
@@ -1700,6 +1753,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
           id: constraint.constraintId,
           targetKind: 'constraint',
           parameterCount,
+          affectedVariableIndices: [...entityIdx(first.entityId), ...entityIdx(second.entityId)],
           evaluateResidual(values) {
             const firstCircle = getLocalCircleLike(values, first)
             const secondCircle = getLocalCircleLike(values, second)
@@ -1746,6 +1800,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: [...entityIdx(first.entityId), ...entityIdx(second.entityId)],
         evaluateResidual(values) {
           const firstCircle = getLocalCircleLike(values, first)
           const secondCircle = getLocalCircleLike(values, second)
@@ -1772,6 +1827,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: entityIdx(entity.entityId),
         evaluateResidual(values) {
           const localCircle = getLocalCircleLike(values, entity)
           return localCircle
@@ -1794,6 +1850,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: [...pIdx(point), ...lineIdx(line.entityId), ...entityIdx(curve.entityId)],
         evaluateResidual(values) {
           const circleLike = getLocalCircleLike(values, curve)
           if (!circleLike) {
@@ -1830,6 +1887,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: [...pIdx(point), ...lineIdx(line.entityId)],
         evaluateResidual(values) {
           const contactPoint = getPoint(values, point)
           const curveResidual = pointOnProjectedCurveResidual(contactPoint, projected)
@@ -1859,6 +1917,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(first, second, axisStart, axisEnd),
         evaluateResidual(values) {
           return symmetricResidual(
             getPoint(values, first),
@@ -1893,6 +1952,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: constraint.constraintId,
         targetKind: 'constraint',
         parameterCount,
+        affectedVariableIndices: pIdx(first, second),
         evaluateResidual(values) {
           return symmetricResidual(
             getPoint(values, first),
@@ -2019,6 +2079,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: dimension.dimensionId,
         targetKind: 'dimension',
         parameterCount,
+        affectedVariableIndices: entityIdx(entity.entityId),
         evaluateResidual(values) {
           const circleLike = getLocalCircleLike(values, entity)
           return circleLike ? circleLike.radius * 2 - dimension.value : dimension.value
@@ -2038,6 +2099,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: dimension.dimensionId,
         targetKind: 'dimension',
         parameterCount,
+        affectedVariableIndices: pIdx(point),
         evaluateResidual(values) {
           const localPoint = getPoint(values, point)
           if (dimension.axis === 'horizontal') {
@@ -2066,6 +2128,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: dimension.dimensionId,
         targetKind: 'dimension',
         parameterCount,
+        affectedVariableIndices: pIdx(start, end),
         evaluateResidual(values) {
           return length(subtract(getPoint(values, end), getPoint(values, start))) - dimension.value
         },
@@ -2088,6 +2151,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: dimension.dimensionId,
         targetKind: 'dimension',
         parameterCount,
+        affectedVariableIndices: [...lineDimOperandIdx(dimension.lines[0]), ...lineDimOperandIdx(dimension.lines[1])],
         evaluateResidual(values) {
           const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
           const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
@@ -2111,6 +2175,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: dimension.dimensionId,
         targetKind: 'dimension',
         parameterCount,
+        affectedVariableIndices: [...lineDimOperandIdx(dimension.line), ...pointDimOperandIdx(dimension.point)],
         evaluateResidual(values) {
           const line = resolveLineDimensionOperand(values, dimension.line, lineEntityMap, pointRecords, options.projectedReferences ?? [])
           const point = resolvePointDimensionOperand(values, dimension.point, pointRecords, options.projectedReferences ?? [])
@@ -2136,6 +2201,7 @@ function buildSystem(definition: SketchDefinition, options: BuildSystemOptions =
         id: dimension.dimensionId,
         targetKind: 'dimension',
         parameterCount,
+        affectedVariableIndices: [...lineDimOperandIdx(dimension.lines[0]), ...lineDimOperandIdx(dimension.lines[1])],
         evaluateResidual(values) {
           const first = resolveLineDimensionOperand(values, dimension.lines[0], lineEntityMap, pointRecords, options.projectedReferences ?? [])
           const second = resolveLineDimensionOperand(values, dimension.lines[1], lineEntityMap, pointRecords, options.projectedReferences ?? [])
