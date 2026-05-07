@@ -185,11 +185,19 @@ export function ViewportCameraTransitionDriver({
   cameraRef,
   controlsRef,
   transitionControllerRef,
+  transitionVersion,
 }: {
   cameraRef: RefObject<ViewportCamera | null>
   controlsRef: RefObject<ViewportCameraControls | null>
   transitionControllerRef: RefObject<ReturnType<typeof createViewportCameraTransitionController>>
+  transitionVersion: number
 }) {
+  const invalidate = useThree((state) => state.invalidate)
+
+  useEffect(() => {
+    invalidate()
+  }, [invalidate, transitionVersion])
+
   useFrame((_, delta) => {
     const camera = cameraRef.current
     const controls = controlsRef.current
@@ -205,7 +213,42 @@ export function ViewportCameraTransitionDriver({
     }
 
     applyViewportCameraFrame(camera, controls, transitionStep.frame)
+    invalidate()
   })
+
+  return null
+}
+
+export function ViewportInvalidationBridge({
+  controlsReadyVersion,
+  controlsRef,
+  invalidationKey,
+}: {
+  controlsReadyVersion: number
+  controlsRef: RefObject<ViewportCameraControls | null>
+  invalidationKey: string
+}) {
+  const invalidate = useThree((state) => state.invalidate)
+
+  useEffect(() => {
+    invalidate()
+  }, [invalidate, invalidationKey])
+
+  useEffect(() => {
+    const controls = controlsRef.current
+    if (!controls) {
+      return
+    }
+
+    const requestInvalidation = () => invalidate()
+    controls.addEventListener('change', requestInvalidation)
+    window.addEventListener('resize', requestInvalidation)
+
+    return () => {
+      controls.removeEventListener('change', requestInvalidation)
+      window.removeEventListener('resize', requestInvalidation)
+    }
+  }, [controlsReadyVersion, controlsRef, invalidate])
 
   return null
 }
@@ -361,10 +404,12 @@ export function RenderIdleSignal({
   viewportRef: RefObject<HTMLDivElement | null>
 }) {
   const trackerRef = useRef(createRenderIdleTracker())
+  const invalidate = useThree((state) => state.invalidate)
 
   useEffect(() => {
     viewportRef.current?.removeAttribute('data-render-idle')
-  }, [isEditorIdle, sceneKey, viewportRef])
+    invalidate()
+  }, [invalidate, isEditorIdle, sceneKey, viewportRef])
 
   useFrame((_, delta) => {
     const viewportElement = viewportRef.current
@@ -383,6 +428,7 @@ export function RenderIdleSignal({
       viewportElement.setAttribute('data-render-idle', 'true')
     } else {
       viewportElement.removeAttribute('data-render-idle')
+      invalidate()
     }
   })
 

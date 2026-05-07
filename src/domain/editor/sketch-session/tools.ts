@@ -687,15 +687,27 @@ export function updateSketchPointer(
       return session
     }
 
+    const pendingAnnotationPlacement = isSketchConstraintReadyForValue(
+      getSketchConstraintDefinition(session.constraintAuthoring.toolId),
+      session.constraintAuthoring.selectedTargets,
+    )
+      ? inferDimensionAnnotationPlacement(session.constraintAuthoring.selectedTargets, point)
+      : session.constraintAuthoring.pendingAnnotationPlacement
+
+    if (
+      sketchPointsEqual(session.constraintAuthoring.pointer, point)
+      && dimensionAnnotationPlacementsEqual(
+        session.constraintAuthoring.pendingAnnotationPlacement,
+        pendingAnnotationPlacement,
+      )
+    ) {
+      return session
+    }
+
     const nextAuthoring: SketchConstraintAuthoringState = {
       ...session.constraintAuthoring,
       pointer: point,
-      pendingAnnotationPlacement: isSketchConstraintReadyForValue(
-        getSketchConstraintDefinition(session.constraintAuthoring.toolId),
-        session.constraintAuthoring.selectedTargets,
-      )
-        ? inferDimensionAnnotationPlacement(session.constraintAuthoring.selectedTargets, point)
-        : session.constraintAuthoring.pendingAnnotationPlacement,
+      pendingAnnotationPlacement,
     }
 
     return {
@@ -719,7 +731,7 @@ export function updateSketchPointer(
     point: snap.point,
   })
 
-  return {
+  const nextSession: SketchSessionState = {
     ...session,
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
@@ -731,6 +743,69 @@ export function updateSketchPointer(
     toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
     activeSnap: snap.candidate,
   }
+
+  return sketchPointerPreviewStateEqual(session, nextSession) ? session : nextSession
+}
+
+function sketchPointerPreviewStateEqual(
+  current: SketchSessionState,
+  next: SketchSessionState,
+) {
+  return current.status === next.status
+    && sketchPointsEqual(current.pointerDownPoint, next.pointerDownPoint)
+    && sketchPointsEqual(current.livePoint, next.livePoint)
+    && sketchPointArraysEqual(current.toolPlacedPoints, next.toolPlacedPoints)
+    && current.toolSettings === next.toolSettings
+    && current.validationMessage === next.validationMessage
+    && current.activeSnap?.key === next.activeSnap?.key
+    && sketchDraftEntitiesEqual(current.toolStagedEntities, next.toolStagedEntities)
+    && JSON.stringify(current.toolPresentation) === JSON.stringify(next.toolPresentation)
+}
+
+function sketchPointsEqual(
+  left: SketchPoint | null,
+  right: SketchPoint | null,
+) {
+  if (left === right) {
+    return true
+  }
+
+  if (!left || !right) {
+    return false
+  }
+
+  return Math.abs(left[0] - right[0]) <= 1e-9
+    && Math.abs(left[1] - right[1]) <= 1e-9
+}
+
+function sketchPointArraysEqual(
+  left: readonly SketchPoint[],
+  right: readonly SketchPoint[],
+) {
+  return left.length === right.length
+    && left.every((point, index) => sketchPointsEqual(point, right[index] ?? null))
+}
+
+function dimensionAnnotationPlacementsEqual(
+  left: import('@/contracts/sketch/schema').DimensionAnnotationPlacement | null,
+  right: import('@/contracts/sketch/schema').DimensionAnnotationPlacement | null,
+) {
+  if (left === right) {
+    return true
+  }
+
+  if (!left || !right) {
+    return false
+  }
+
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function sketchDraftEntitiesEqual(
+  left: readonly import('@/core/sketch-tools/definition').SketchDraftEntity[],
+  right: readonly import('@/core/sketch-tools/definition').SketchDraftEntity[],
+) {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 export function selectSketchEditTarget(

@@ -9,7 +9,7 @@
     "kind": "sketch",
     "sketchId": "sketch_primary"
   },
-  "documentId": "doc_69eb4af968dd4a7b9108f3a8304a55e1",
+  "documentId": "doc_97ee8f6f4917489b89dd074612eb7d81",
   "embeddedBinaryAssets": [],
   "featureOrder": [],
   "features": [],
@@ -20,7 +20,7 @@
     }
   ],
   "name": "CADara Logo",
-  "revisionId": "rev_0030",
+  "revisionId": "rev_0031",
   "schemaVersion": "authored-model-document/v1alpha1",
   "settings": {
     "angularToleranceRadians": 0.0001,
@@ -356,48 +356,6 @@
             "createdGraph": {
               "constraints": [],
               "derivedRelationships": [],
-              "dimensions": [
-                {
-                  "annotationPlacement": {
-                    "kind": "angleArc",
-                    "radius": 4.828145346239756,
-                    "side": "minor"
-                  },
-                  "dimensionId": "dimension_7_line-angle",
-                  "kind": "lineAngle",
-                  "label": "Line angle 7",
-                  "lines": [
-                    {
-                      "entityId": "sketch_entity_3_line",
-                      "kind": "localEntity"
-                    },
-                    {
-                      "entityId": "sketch_entity_6_line",
-                      "kind": "localEntity"
-                    }
-                  ],
-                  "valueRadians": 1.3089969389957472
-                }
-              ],
-              "entities": [],
-              "points": []
-            },
-            "kind": "dimension",
-            "label": "Distance 7",
-            "operationId": "sketch_operation_7_dimensionDistance",
-            "targets": {
-              "created": [
-                {
-                  "dimensionId": "dimension_7_line-angle",
-                  "kind": "dimension"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [],
-              "derivedRelationships": [],
               "dimensions": [],
               "entities": [
                 {
@@ -443,96 +401,6 @@
                 {
                   "entityId": "sketch_entity_8_line",
                   "kind": "entity"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [],
-              "derivedRelationships": [],
-              "dimensions": [
-                {
-                  "annotationPlacement": {
-                    "kind": "angleArc",
-                    "radius": 2.631213269740899,
-                    "side": "minor"
-                  },
-                  "dimensionId": "dimension_10_line-angle",
-                  "kind": "lineAngle",
-                  "label": "Line angle 10",
-                  "lines": [
-                    {
-                      "entityId": "sketch_entity_8_line",
-                      "kind": "localEntity"
-                    },
-                    {
-                      "entityId": "sketch_entity_6_line",
-                      "kind": "localEntity"
-                    }
-                  ],
-                  "valueRadians": 2.5307274153917776
-                }
-              ],
-              "entities": [],
-              "points": []
-            },
-            "kind": "dimension",
-            "label": "Distance 10",
-            "operationId": "sketch_operation_10_dimensionDistance",
-            "targets": {
-              "created": [
-                {
-                  "dimensionId": "dimension_10_line-angle",
-                  "kind": "dimension"
-                }
-              ],
-              "edited": [
-                {
-                  "dimensionId": "dimension_10_line-angle",
-                  "kind": "dimension"
-                },
-                {
-                  "dimensionId": "dimension_10_line-angle",
-                  "kind": "dimension"
-                },
-                {
-                  "dimensionId": "dimension_10_line-angle",
-                  "kind": "dimension"
-                },
-                {
-                  "dimensionId": "dimension_10_line-angle",
-                  "kind": "dimension"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_11_equal",
-                  "entityIds": [
-                    "sketch_entity_6_line",
-                    "sketch_entity_8_line"
-                  ],
-                  "kind": "equalLength",
-                  "label": "Equal 11"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Equal 11",
-            "operationId": "sketch_operation_11_constraintEqual",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_11_equal",
-                  "kind": "constraint"
                 }
               ]
             }
@@ -639,126 +507,6 @@
                 {
                   "entityId": "sketch_entity_13_line",
                   "kind": "entity"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_15_equal",
-                  "entityIds": [
-                    "sketch_entity_12_line",
-                    "sketch_entity_6_line"
-                  ],
-                  "kind": "equalLength",
-                  "label": "Equal 15"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Equal 15",
-            "operationId": "sketch_operation_15_constraintEqual",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_15_equal",
-                  "kind": "constraint"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_16_parallel",
-                  "entityIds": [
-                    "sketch_entity_12_line",
-                    "sketch_entity_6_line"
-                  ],
-                  "kind": "parallel",
-                  "label": "Parallel 16"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Parallel 16",
-            "operationId": "sketch_operation_16_constraintParallel",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_16_parallel",
-                  "kind": "constraint"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_17_parallel",
-                  "entityIds": [
-                    "sketch_entity_13_line",
-                    "sketch_entity_8_line"
-                  ],
-                  "kind": "parallel",
-                  "label": "Parallel 17"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Parallel 17",
-            "operationId": "sketch_operation_17_constraintParallel",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_17_parallel",
-                  "kind": "constraint"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_18_equal",
-                  "entityIds": [
-                    "sketch_entity_12_line",
-                    "sketch_entity_13_line"
-                  ],
-                  "kind": "equalLength",
-                  "label": "Equal 18"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Equal 18",
-            "operationId": "sketch_operation_18_constraintEqual",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_18_equal",
-                  "kind": "constraint"
                 }
               ]
             }
@@ -935,96 +683,6 @@
           },
           {
             "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_23_equal",
-                  "entityIds": [
-                    "sketch_entity_22_line",
-                    "sketch_entity_6_line"
-                  ],
-                  "kind": "equalLength",
-                  "label": "Equal 23"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Equal 23",
-            "operationId": "sketch_operation_23_constraintEqual",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_23_equal",
-                  "kind": "constraint"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_24_equal",
-                  "entityIds": [
-                    "sketch_entity_21_line",
-                    "sketch_entity_8_line"
-                  ],
-                  "kind": "equalLength",
-                  "label": "Equal 24"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Equal 24",
-            "operationId": "sketch_operation_24_constraintEqual",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_24_equal",
-                  "kind": "constraint"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
-              "constraints": [
-                {
-                  "constraintId": "constraint_25_equal",
-                  "entityIds": [
-                    "sketch_entity_19_line",
-                    "sketch_entity_3_line"
-                  ],
-                  "kind": "equalLength",
-                  "label": "Equal 25"
-                }
-              ],
-              "derivedRelationships": [],
-              "dimensions": [],
-              "entities": [],
-              "points": []
-            },
-            "kind": "constraint",
-            "label": "Equal 25",
-            "operationId": "sketch_operation_25_constraintEqual",
-            "targets": {
-              "created": [
-                {
-                  "constraintId": "constraint_25_equal",
-                  "kind": "constraint"
-                }
-              ]
-            }
-          },
-          {
-            "createdGraph": {
               "constraints": [],
               "derivedRelationships": [],
               "dimensions": [
@@ -1118,15 +776,7 @@
         ],
         "constraintIds": [
           "constraint_4_vertical",
-          "constraint_11_equal",
-          "constraint_15_equal",
-          "constraint_16_parallel",
-          "constraint_17_parallel",
-          "constraint_18_equal",
           "constraint_20_coincident",
-          "constraint_23_equal",
-          "constraint_24_equal",
-          "constraint_25_equal",
           "constraint_27_coincident-projected-point"
         ],
         "constraints": [
@@ -1137,51 +787,6 @@
             "label": "Vertical 4"
           },
           {
-            "constraintId": "constraint_11_equal",
-            "entityIds": [
-              "sketch_entity_6_line",
-              "sketch_entity_8_line"
-            ],
-            "kind": "equalLength",
-            "label": "Equal 11"
-          },
-          {
-            "constraintId": "constraint_15_equal",
-            "entityIds": [
-              "sketch_entity_12_line",
-              "sketch_entity_6_line"
-            ],
-            "kind": "equalLength",
-            "label": "Equal 15"
-          },
-          {
-            "constraintId": "constraint_16_parallel",
-            "entityIds": [
-              "sketch_entity_12_line",
-              "sketch_entity_6_line"
-            ],
-            "kind": "parallel",
-            "label": "Parallel 16"
-          },
-          {
-            "constraintId": "constraint_17_parallel",
-            "entityIds": [
-              "sketch_entity_13_line",
-              "sketch_entity_8_line"
-            ],
-            "kind": "parallel",
-            "label": "Parallel 17"
-          },
-          {
-            "constraintId": "constraint_18_equal",
-            "entityIds": [
-              "sketch_entity_12_line",
-              "sketch_entity_13_line"
-            ],
-            "kind": "equalLength",
-            "label": "Equal 18"
-          },
-          {
             "constraintId": "constraint_20_coincident",
             "kind": "coincident",
             "label": "Coincident 20",
@@ -1189,33 +794,6 @@
               "sketch_point_19_line-end",
               "sketch_point_8_line-end"
             ]
-          },
-          {
-            "constraintId": "constraint_23_equal",
-            "entityIds": [
-              "sketch_entity_22_line",
-              "sketch_entity_6_line"
-            ],
-            "kind": "equalLength",
-            "label": "Equal 23"
-          },
-          {
-            "constraintId": "constraint_24_equal",
-            "entityIds": [
-              "sketch_entity_21_line",
-              "sketch_entity_8_line"
-            ],
-            "kind": "equalLength",
-            "label": "Equal 24"
-          },
-          {
-            "constraintId": "constraint_25_equal",
-            "entityIds": [
-              "sketch_entity_19_line",
-              "sketch_entity_3_line"
-            ],
-            "kind": "equalLength",
-            "label": "Equal 25"
           },
           {
             "constraintId": "constraint_27_coincident-projected-point",
@@ -1234,8 +812,6 @@
         "derivedRelationships": [],
         "dimensionIds": [
           "dimension_5_line-length",
-          "dimension_7_line-angle",
-          "dimension_10_line-angle",
           "dimension_26_line-length"
         ],
         "dimensions": [
@@ -1249,48 +825,6 @@
             "kind": "lineLength",
             "label": "Line length 5",
             "value": 20
-          },
-          {
-            "annotationPlacement": {
-              "kind": "angleArc",
-              "radius": 4.828145346239756,
-              "side": "minor"
-            },
-            "dimensionId": "dimension_7_line-angle",
-            "kind": "lineAngle",
-            "label": "Line angle 7",
-            "lines": [
-              {
-                "entityId": "sketch_entity_3_line",
-                "kind": "localEntity"
-              },
-              {
-                "entityId": "sketch_entity_6_line",
-                "kind": "localEntity"
-              }
-            ],
-            "valueRadians": 1.3089969389957472
-          },
-          {
-            "annotationPlacement": {
-              "kind": "angleArc",
-              "radius": 2.631213269740899,
-              "side": "minor"
-            },
-            "dimensionId": "dimension_10_line-angle",
-            "kind": "lineAngle",
-            "label": "Line angle 10",
-            "lines": [
-              {
-                "entityId": "sketch_entity_8_line",
-                "kind": "localEntity"
-              },
-              {
-                "entityId": "sketch_entity_6_line",
-                "kind": "localEntity"
-              }
-            ],
-            "valueRadians": 2.5307274153917776
           },
           {
             "annotationPlacement": {

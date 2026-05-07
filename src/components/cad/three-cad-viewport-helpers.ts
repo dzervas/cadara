@@ -157,6 +157,36 @@ export function createViewportBvhSceneKey(
   ].join('|')
 }
 
+export function createViewportInvalidationKey(input: {
+  sceneKey: string
+  hoverTargetKey: string
+  selectionKeys: readonly string[]
+  sketchFeedbackKey: string
+  measurementWitnessCount: number
+  sectionViewKey: string
+  clippingKey: string
+  lodKey: string
+  projectionMode: string
+  themeKey: string
+  fitViewRequestId: number
+  transitionVersion: number
+}) {
+  return [
+    input.sceneKey,
+    input.hoverTargetKey,
+    input.selectionKeys.join(','),
+    input.sketchFeedbackKey,
+    input.measurementWitnessCount,
+    input.sectionViewKey,
+    input.clippingKey,
+    input.lodKey,
+    input.projectionMode,
+    input.themeKey,
+    input.fitViewRequestId,
+    input.transitionVersion,
+  ].join('|')
+}
+
 export function projectSceneTargetCentroidToViewport(input: {
   root: THREE.Object3D | null
   camera: THREE.Camera | null

@@ -60,7 +60,6 @@ import {
   mapDefinitionEntityToDraftEntity,
 } from './internals'
 import {
-  deriveSketchDisplayEntities,
   mapSketchPointToWorld,
 } from './state'
 import {
@@ -94,7 +93,25 @@ export function sketchSessionHasReferenceImage(session: SketchSessionState): boo
   return collectActiveReferenceImageOperations(session.definition).length > 0
 }
 
+let stableDisplayCacheKey: string | null = null
+let stableDisplayCacheRenderables: SketchSessionDisplayRenderable[] = []
+const stableDisplayObjectIds = new WeakMap<object, number>()
+let nextStableDisplayObjectId = 1
+
 export function getSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
+  return [
+    ...getStableSketchSessionDisplayRenderables(session),
+    ...getTransientSketchSessionDisplayRenderables(session),
+  ]
+}
+
+export function getStableSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
+  const stableKey = getStableSketchSessionDisplayKey(session)
+
+  if (stableDisplayCacheKey === stableKey) {
+    return stableDisplayCacheRenderables
+  }
+
   const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
   const svgRenderingEnabled = isSketchSvgRenderingEnabled(session)
   const localStyleLookup = svgRenderingEnabled ? createSketchEntityStyleLookup(session) : new Map<SketchEntityId, SketchEntityDisplayStyle>()
@@ -191,7 +208,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       index,
     ),
   )
-  const entityRenderables = deriveSketchDisplayEntities(session).map((entity, index) =>
+  const entityRenderables = getAcceptedSketchDisplayEntities(sketchId, displayDefinition).map((entity, index) =>
     withSketchConstraintDisplay(
       createDisplayRenderableForEntity(
         session,
@@ -203,7 +220,7 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
     ),
   )
 
-  return [
+  const renderables = [
     ...regionRenderables,
     ...referenceImageRenderables,
     createDisplayRenderableForSketchDatum(session, sketchId, 'origin', datumGuideExtent),
@@ -233,6 +250,79 @@ export function getSketchSessionDisplayRenderables(session: SketchSessionState):
       ),
       ),
   ]
+  stableDisplayCacheKey = stableKey
+  stableDisplayCacheRenderables = renderables
+
+  return renderables
+}
+
+export function getTransientSketchSessionDisplayRenderables(session: SketchSessionState): SketchSessionDisplayRenderable[] {
+  if (session.toolStagedEntities.length === 0) {
+    return []
+  }
+
+  const sketchId = session.sketchId ?? ('sketch_draft' as SketchId)
+  const displayDefinition = getSketchSessionDisplayDefinition(session)
+  const acceptedEntityCount = getAcceptedSketchDisplayEntities(sketchId, displayDefinition).length
+
+  return session.toolStagedEntities.map((entity, index) =>
+    createDisplayRenderableForEntity(
+      session,
+      entity,
+      acceptedEntityCount + index,
+      undefined,
+    ),
+  )
+}
+
+function getAcceptedSketchDisplayEntities(
+  sketchId: SketchId,
+  displayDefinition: SketchDefinition,
+): readonly SketchDraftEntity[] {
+  return displayDefinition.entities.flatMap((entity) =>
+    mapDefinitionEntityToDraftEntity(sketchId, displayDefinition.points, entity),
+  )
+}
+
+export function getStableSketchSessionDisplayKey(session: SketchSessionState): string {
+  return [
+    'sketch',
+    session.sketchId ?? 'draft',
+    objectIdentity(session.plane),
+    objectIdentity(session.definition),
+    objectIdentity(session.projectedReferences),
+    objectIdentity(session.projectionDiagnostics),
+    objectIdentity(session.solvedRegions),
+    objectIdentity(session.historyCursor),
+    session.liveRegionState?.freshness ?? 'no-live-regions',
+    session.liveRegionState?.pendingSinceSequence ?? 'no-pending-regions',
+    session.activeSpecialMode
+      ? [
+          session.activeSpecialMode.modeId,
+          objectIdentity(session.activeSpecialMode.operationTarget),
+          unknownIdentity(session.activeSpecialMode.state),
+          session.activeSpecialMode.generation,
+        ].join(':')
+      : 'no-special-mode',
+  ].join('|')
+}
+
+function unknownIdentity(value: unknown): string {
+  return value !== null && typeof value === 'object'
+    ? String(objectIdentity(value))
+    : String(value)
+}
+
+function objectIdentity(value: object): number {
+  const existing = stableDisplayObjectIds.get(value)
+  if (existing !== undefined) {
+    return existing
+  }
+
+  const nextId = nextStableDisplayObjectId
+  nextStableDisplayObjectId += 1
+  stableDisplayObjectIds.set(value, nextId)
+  return nextId
 }
 
 export function shouldRenderProjectedReference(

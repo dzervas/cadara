@@ -1,9 +1,11 @@
 import { test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 
 import { expectTrue } from '@/testing/expect.spec'
 import type { SketchDefinition } from '@/contracts/sketch/schema'
 import type { ProjectedSketchReferenceRecord } from '@/contracts/solver/schema'
 import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
+import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import {
   beginSketchGeometryDrag,
   beginSketchTool,
@@ -15,6 +17,9 @@ import {
   getConnectedSketchEntitySelectionTargets,
   getSketchSessionRegionDiagnostics,
   getSketchSessionDisplayRenderables,
+  getStableSketchSessionDisplayKey,
+  getStableSketchSessionDisplayRenderables,
+  getTransientSketchSessionDisplayRenderables,
   isSketchSvgRenderingEnabled,
   patchSketchStyleValue,
   patchSketchEditToolValue,
@@ -23,6 +28,7 @@ import {
   startSketchDraw,
   toggleSketchSvgRendering,
   updateSketchGeometryDrag,
+  updateSketchPointer,
   acceptSketchDraw,
 } from '@/domain/editor/sketch-session'
 import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
@@ -1850,6 +1856,113 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
     )
   }
 
+  function testPointerOnlyPreviewReusesStableDisplayRenderables() {
+    let session = beginSketchTool(createSessionFromDefinition(createSquareDefinition(false)), 'line')
+    session = startSketchDraw(session, [0, 0])
+    const previewAtOne = updateSketchPointer(session, [1, 0])
+    const stableAtOne = getStableSketchSessionDisplayRenderables(previewAtOne)
+    const transientAtOne = getTransientSketchSessionDisplayRenderables(previewAtOne)
+    const previewAtTwo = updateSketchPointer(previewAtOne, [2, 0])
+    const stableAtTwo = getStableSketchSessionDisplayRenderables(previewAtTwo)
+    const transientAtTwo = getTransientSketchSessionDisplayRenderables(previewAtTwo)
+
+    expectTrue(stableAtOne === stableAtTwo, 'Pointer-only drawing preview should reuse the accepted stable display renderables.')
+    expectTrue(transientAtOne !== transientAtTwo, 'Pointer-only drawing preview should rebuild only transient staged renderables.')
+    expectTrue(transientAtTwo.length > 0, 'Pointer-only drawing preview should still produce visible staged tool feedback.')
+  }
+
+  function testAcceptedSketchEditInvalidatesStableDisplayRenderables() {
+    let session = beginSketchTool(createSessionFromDefinition(createSquareDefinition(false)), 'line')
+    session = startSketchDraw(session, [0, 0])
+    const preview = updateSketchPointer(session, [1, 0])
+    const stablePreviewKey = getStableSketchSessionDisplayKey(preview)
+    const stablePreview = getStableSketchSessionDisplayRenderables(preview)
+    const accepted = acceptSketchDraw(preview, [1, 0])
+    const stableAccepted = getStableSketchSessionDisplayRenderables(accepted)
+
+    expectTrue(
+      getStableSketchSessionDisplayKey(accepted) !== stablePreviewKey,
+      'Accepted sketch geometry changes should invalidate the stable display basis.',
+    )
+    expectTrue(stableAccepted !== stablePreview, 'Accepted sketch geometry changes should derive a new stable renderable basis.')
+  }
+
+  function testNoOpPointerMovementPreservesSessionIdentity() {
+    const idleSession = createSessionFromDefinition(createSquareDefinition(false))
+    const idleMoved = updateSketchPointer(idleSession, [4, 4])
+
+    let drawingSession = beginSketchTool(idleSession, 'line')
+    drawingSession = startSketchDraw(drawingSession, [0, 0])
+    const firstPreview = updateSketchPointer(drawingSession, [1, 0])
+    const samePreview = updateSketchPointer(firstPreview, [1, 0])
+
+    expectTrue(idleMoved === idleSession, 'Pointer movement with no active preview state should preserve session identity.')
+    expectTrue(samePreview === firstPreview, 'Pointer movement inside the same preview point bucket should preserve session identity.')
+  }
+
+  function testLogoCadaraPointerPreviewReusesStableDisplayBasis() {
+    const parsed = parseAuthoredModelDocument(JSON.parse(readFileSync('public/logo.cadara', 'utf8')))
+    expectTrue(parsed.ok, 'public/logo.cadara should parse as an authored Cadara document fixture.')
+    if (!parsed.ok) {
+      return
+    }
+
+    const sketch = parsed.document.sketches[0]
+    expectTrue(sketch !== undefined, 'public/logo.cadara should contain a sketch fixture.')
+    if (!sketch) {
+      return
+    }
+
+    const solved = solveSketchDefinitionCore({
+      definition: sketch.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: 'bestEffort',
+    })
+    let session = createSketchSessionFromSnapshot({
+      ownerDocumentId: parsed.document.documentId,
+      ownerRevisionId: parsed.document.revisionId,
+      ownerFeatureId: null,
+      ownerSketchId: sketch.sketchId,
+      ownerBodyId: null,
+      sketchId: sketch.sketchId,
+      label: sketch.label,
+      plane: sketch.plane,
+      planeTarget: sketch.plane.support,
+      planeKey: sketch.plane.key,
+      sketch: {
+        ownerDocumentId: parsed.document.documentId,
+        ownerRevisionId: parsed.document.revisionId,
+        ownerFeatureId: null,
+        ownerSketchId: sketch.sketchId,
+        ownerBodyId: null,
+        sketchId: sketch.sketchId,
+        label: sketch.label,
+        planeSupport: sketch.plane.support,
+        definition: sketch.definition,
+        solvedSnapshot: solved.solvedSnapshot,
+        regions: [],
+      },
+    } satisfies SketchSnapshotRecord)
+    session = beginSketchTool(session, 'line')
+    session = startSketchDraw(session, [0, 0])
+
+    const firstPreview = updateSketchPointer(session, [1, 0])
+    const stableDisplay = getStableSketchSessionDisplayRenderables(firstPreview)
+
+    let nextPreview = firstPreview
+    for (let index = 0; index < 40; index += 1) {
+      nextPreview = updateSketchPointer(nextPreview, [index + 2, index % 5])
+      expectTrue(
+        getStableSketchSessionDisplayRenderables(nextPreview) === stableDisplay,
+        'Logo pointer-only preview movement should not rebuild accepted sketch display.',
+      )
+    }
+  }
+
   testUnconstrainedPointDragUpdatesAuthoredDefinition()
   testConstrainedSquareDragTranslatesSolvedShape()
   testLogoLikeFreeEndpointDragClearsValidationFeedback()
@@ -1883,4 +1996,8 @@ test('src/domain/editor/sketch-geometry-editing.spec.ts', () => {  function asse
   testSketchDerivedTransformOperatorsCreateDurableRelationships()
   testSketchPatternAndTransformOperatorsCommitWithoutPartFeatureSessions()
   testDerivedLinearPatternGeometryParticipatesInProfiles()
+  testPointerOnlyPreviewReusesStableDisplayRenderables()
+  testAcceptedSketchEditInvalidatesStableDisplayRenderables()
+  testNoOpPointerMovementPreservesSessionIdentity()
+  testLogoCadaraPointerPreviewReusesStableDisplayBasis()
 })

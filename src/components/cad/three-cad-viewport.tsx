@@ -56,6 +56,7 @@ import {
   MeasurementWitnessLayer,
   RenderIdleSignal,
   SketchProjectionFrameWatcher,
+  ViewportInvalidationBridge,
   ViewportCameraTransitionDriver,
   ViewportProjectionCameraController,
   ViewportProjectionSelector,
@@ -63,6 +64,7 @@ import {
 } from '@/components/cad/three-cad-viewport-inner-components'
 import {
   type PrimitiveRef,
+  getPrimitiveRefKey,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
 } from '@/core/editor/schema'
@@ -137,6 +139,7 @@ import {
 } from '@/components/cad/viewport-overlay-layout'
 import {
   cancelCoalescedSketchGeometryDragMove,
+  createViewportInvalidationKey,
   createViewportBvhSceneKey,
   getViewportPickTuning,
   isViewportNavigationPointerMove,
@@ -234,6 +237,7 @@ export function ThreeCadViewport({
   const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const [sketchAnnotationProjections, setSketchAnnotationProjections] = useState<SketchViewportFeedbackProjection[]>([])
   const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] = useState<SketchSpecialModeFeedbackProjection[]>([])
+  const [viewportTransitionVersion, setViewportTransitionVersion] = useState(0)
   const raycasterRef = useRef(new THREE.Raycaster())
   const pointerRef = useRef(new THREE.Vector2())
   const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
@@ -318,6 +322,7 @@ export function ThreeCadViewport({
       fromFrame: transitionStartFrame,
       toFrame: targetFrame,
     })
+    setViewportTransitionVersion((current) => current + 1)
 
     if (projectionModeRef.current !== targetFrame.projectionMode) {
       pendingProjectionFrameRef.current = cloneViewportCameraFrame(transitionStartFrame)
@@ -396,6 +401,44 @@ export function ThreeCadViewport({
   const activeSectionClippingPlane = useMemo(
     () => activeSectionView ? createSectionClippingPlane(activeSectionView) : null,
     [activeSectionView],
+  )
+  const viewportInvalidationKey = useMemo(
+    () => createViewportInvalidationKey({
+      sceneKey: bvhSceneKey,
+      hoverTargetKey: hoverTarget ? getPrimitiveRefKey(hoverTarget) : 'none',
+      selectionKeys: selection.map(getPrimitiveRefKey),
+      sketchFeedbackKey: JSON.stringify({
+        annotations: sketchAnnotations.map((annotation) => annotation.id),
+        specialMode: specialModePresentation,
+        tool: sketchToolPresentation,
+      }),
+      measurementWitnessCount: measurementWitnesses.length,
+      sectionViewKey: activeSectionView ? JSON.stringify(activeSectionView) : 'none',
+      clippingKey: activeSectionClippingPlane
+        ? activeSectionClippingPlane.normal.toArray().join(',') + `:${activeSectionClippingPlane.constant}`
+        : 'none',
+      lodKey: renderables.map((entry) => `${entry.origin}:${entry.renderable.id}`).join(','),
+      projectionMode,
+      themeKey: sketchDisplayStylesEnabled ? 'sketch-styles' : 'default-styles',
+      fitViewRequestId,
+      transitionVersion: viewportTransitionVersion,
+    }),
+    [
+      activeSectionClippingPlane,
+      activeSectionView,
+      bvhSceneKey,
+      fitViewRequestId,
+      hoverTarget,
+      measurementWitnesses.length,
+      projectionMode,
+      renderables,
+      selection,
+      sketchAnnotations,
+      sketchDisplayStylesEnabled,
+      sketchToolPresentation,
+      specialModePresentation,
+      viewportTransitionVersion,
+    ],
   )
   const activeSectionCaps = useMemo(
     () => activeSectionView
@@ -1607,7 +1650,7 @@ export function ThreeCadViewport({
       />
       <Canvas
         className="h-full w-full"
-        frameloop="always"
+        frameloop="demand"
         gl={{ antialias: true, alpha: true, localClippingEnabled: true }}
         orthographic
         camera={{ near: 0.1, far: 1000, position: [14, -16, 28] }}
@@ -1635,6 +1678,12 @@ export function ThreeCadViewport({
           cameraRef={cameraRef}
           controlsRef={controlsRef}
           transitionControllerRef={cameraTransitionControllerRef}
+          transitionVersion={viewportTransitionVersion}
+        />
+        <ViewportInvalidationBridge
+          controlsReadyVersion={controlsReadyVersion}
+          controlsRef={controlsRef}
+          invalidationKey={viewportInvalidationKey}
         />
         <ambientLight color={0xd7dfe9} intensity={0.56} />
         <hemisphereLight args={[0xe8edf5, 0x253447, 0.62]} position={[0, 0, 1]} />

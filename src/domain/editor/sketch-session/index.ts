@@ -66,6 +66,9 @@ export {
 
 export {
   getSketchSessionDisplayRenderables,
+  getStableSketchSessionDisplayKey,
+  getStableSketchSessionDisplayRenderables,
+  getTransientSketchSessionDisplayRenderables,
   sketchSessionHasReferenceImage,
 } from './display'
 

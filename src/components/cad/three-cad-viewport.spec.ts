@@ -9,6 +9,7 @@ import {
   configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
   createViewportBvhSceneKey,
+  createViewportInvalidationKey,
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
   resolveSectionScreenDragOffset,
@@ -360,6 +361,86 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
     expectTrue(sceneChanged === false, 'Render idle should clear when the scene changes.')
   }
 
+  function testViewportInvalidationKeyTracksVisibleAuthoringInputs() {
+    const base = {
+      sceneKey: 'scene-a',
+      hoverTargetKey: 'none',
+      selectionKeys: [],
+      sketchFeedbackKey: 'tool-a',
+      measurementWitnessCount: 0,
+      sectionViewKey: 'none',
+      clippingKey: 'none',
+      lodKey: 'lod-a',
+      projectionMode: 'orthographic',
+      themeKey: 'default',
+      fitViewRequestId: 1,
+      transitionVersion: 1,
+    }
+
+    const initial = createViewportInvalidationKey(base)
+
+    expectTrue(
+      createViewportInvalidationKey({ ...base, sceneKey: 'scene-b' }) !== initial,
+      'Renderable changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, hoverTargetKey: 'sketch:point-a' }) !== initial,
+      'Hover changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, selectionKeys: ['body:a'] }) !== initial,
+      'Selection changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, sketchFeedbackKey: 'tool-b' }) !== initial,
+      'Sketch preview feedback changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, transitionVersion: 2 }) !== initial,
+      'Camera transition requests should invalidate the demand-rendered viewport.',
+    )
+  }
+
+  function testViewportInvalidationKeyTracksPresentationInputs() {
+    const base = {
+      sceneKey: 'scene-a',
+      hoverTargetKey: 'none',
+      selectionKeys: [],
+      sketchFeedbackKey: 'tool-a',
+      measurementWitnessCount: 0,
+      sectionViewKey: 'none',
+      clippingKey: 'none',
+      lodKey: 'lod-a',
+      projectionMode: 'orthographic',
+      themeKey: 'default',
+      fitViewRequestId: 1,
+      transitionVersion: 1,
+    }
+
+    const initial = createViewportInvalidationKey(base)
+
+    expectTrue(
+      createViewportInvalidationKey({ ...base, sectionViewKey: 'section-a' }) !== initial,
+      'Section view changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, clippingKey: '0,0,1:4' }) !== initial,
+      'Clipping changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, lodKey: 'lod-b' }) !== initial,
+      'LOD changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, projectionMode: 'perspective' }) !== initial,
+      'Projection changes should invalidate the demand-rendered viewport.',
+    )
+    expectTrue(
+      createViewportInvalidationKey({ ...base, themeKey: 'styled' }) !== initial,
+      'Theme and material changes should invalidate the demand-rendered viewport.',
+    )
+  }
+
   function testViewCubeResizeUpdatesCanvasCssSize() {
     const setSizeCalls: Array<{ width: number, height: number, updateStyle?: boolean }> = []
     const cubeSize = resizeViewCubeRenderer({
@@ -558,6 +639,8 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
   testSectionScreenDragOffsetTracksProjectedNormalMotion()
   testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint()
   testRenderIdleTrackerRequiresStableIdleFrames()
+  testViewportInvalidationKeyTracksVisibleAuthoringInputs()
+  testViewportInvalidationKeyTracksPresentationInputs()
   testViewCubeResizeUpdatesCanvasCssSize()
   testWorkspaceScaffoldWiresDoNotWriteDepth()
   testMeasurePickTuningTightensWirePassThroughTolerance()

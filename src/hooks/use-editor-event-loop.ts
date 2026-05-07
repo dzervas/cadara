@@ -8,6 +8,12 @@ import {
   type EditorExtensionDependencies,
 } from '@/domain/editor/state-machine'
 import type { EditorEventLoopTraceListener } from '@/application/editor/editor-debug-trace'
+import {
+  cancelEditorAnimationFrame,
+  createSketchPointerPreviewScheduler,
+  requestEditorAnimationFrame,
+  type SketchPointerPreviewScheduler,
+} from '@/application/editor/sketch-pointer-preview-scheduler'
 import type { ErrorReporter } from '@/contracts/errors'
 import { createEditorEventLoop, type EditorEventLoop } from '@/application/editor/editor-event-loop'
 
@@ -20,6 +26,7 @@ export function useEditorEventLoop(
 ) {
   const eventLoopRef = useRef<EditorEventLoop | null>(null)
   const pendingEventsRef = useRef<EditorEvent[]>([])
+  const schedulerRef = useRef<SketchPointerPreviewScheduler | null>(null)
   const eventLoop = useMemo(
     () => createEditorEventLoop(runtime, errorReporter, executeEffect, dependencies),
     [dependencies, errorReporter, executeEffect, runtime],
@@ -48,7 +55,7 @@ export function useEditorEventLoop(
     }
   }, [eventLoop, traceListener])
 
-  const dispatch = useCallback((event: EditorEvent) => {
+  const dispatchEvent = useCallback((event: EditorEvent) => {
     if (!eventLoopRef.current) {
       pendingEventsRef.current.push(event)
       return
@@ -56,6 +63,32 @@ export function useEditorEventLoop(
 
     eventLoopRef.current.dispatch(event)
   }, [])
+
+  useEffect(() => {
+    const scheduler = createSketchPointerPreviewScheduler({
+      dispatchEvent,
+      requestFrame: requestEditorAnimationFrame,
+      cancelFrame: cancelEditorAnimationFrame,
+    })
+    schedulerRef.current = scheduler
+
+    return () => {
+      if (schedulerRef.current === scheduler) {
+        schedulerRef.current = null
+      }
+      scheduler.cancel()
+    }
+  }, [dispatchEvent])
+
+  const dispatch = useCallback((event: EditorEvent) => {
+    const scheduler = schedulerRef.current
+    if (scheduler) {
+      scheduler.dispatch(event)
+      return
+    }
+
+    dispatchEvent(event)
+  }, [dispatchEvent])
 
   return {
     eventLoopRef,
