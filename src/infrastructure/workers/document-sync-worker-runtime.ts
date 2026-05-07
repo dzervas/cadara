@@ -1,5 +1,9 @@
 import { normalizeCollaborativeAuthoredModelDocument } from '@/domain/modeling/collaborative-authored-document'
 import type { AuthoredModelDocument, AuthoredModelDocumentDiagnostic } from '@/contracts/modeling/authored-document'
+import {
+  authoredModelDocumentsEqual,
+  normalizeAuthoredDocumentId,
+} from '@/contracts/modeling/authored-document-equality'
 import { parseAuthoredModelDocument } from '@/contracts/modeling/authored-document.runtime-schema'
 import {
   createDocumentSyncWorkerFailure,
@@ -102,10 +106,7 @@ export function createDocumentSyncWorkerMessageHandler(
 
     return {
       ok: true as const,
-      document: {
-        ...parsed.document,
-        documentId,
-      },
+      document: normalizeAuthoredDocumentId(parsed.document, documentId),
     }
   }
 
@@ -223,6 +224,15 @@ export function createDocumentSyncWorkerMessageHandler(
               kind: 'loaded',
               requestId: request.requestId,
               result: boundFileDocument,
+            })
+            return
+          }
+
+          if (authoredModelDocumentsEqual(loadResult.document, boundFileDocument.document)) {
+            postMessage({
+              kind: 'loaded',
+              requestId: request.requestId,
+              result: loadResult,
             })
             return
           }

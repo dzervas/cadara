@@ -2,6 +2,8 @@ import { test } from 'bun:test'
 
 import { expectTrue } from '@/testing/expect.spec'
 import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
+import type { GeometryAssetAvailability } from '@/contracts/modeling/geometry-assets'
+import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
 import { createSeedAuthoredModelDocument } from '@/domain/modeling/modeling-test-fixtures'
 import type {
   DocumentSyncWorkerRequest,
@@ -9,7 +11,12 @@ import type {
   DocumentSyncWriteStatus,
 } from '@/domain/modeling/document-sync-worker-protocol'
 import type { LocalFileBindingRecord, LocalFileBindingStore } from '@/domain/modeling/local-file-binding-store'
-import { createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
+import type {
+  DocumentRepositoryChangeEvent,
+  DocumentRepositoryLoadResult,
+  DocumentRepositoryMetadata,
+} from '@/domain/modeling/document-repository'
+import { MemoryDocumentRepository, createMemoryDocumentRepository } from '@/domain/modeling/memory-document-repository'
 import { createDeterministicGeometryAsset } from '@/domain/modeling/geometry-asset-test-helpers'
 import { DocumentSyncWorkerClient, type DocumentSyncWorkerLike } from '@/infrastructure/workers/document-sync-worker-client'
 import { createDocumentSyncWorkerMessageHandler } from '@/infrastructure/workers/document-sync-worker-runtime'
@@ -503,11 +510,253 @@ test('src/infrastructure/workers/document-sync-worker-client.spec.ts', async () 
     )
   }
 
+  async function testMatchingLinkedFileReusesCachedLoadResult() {
+    const seed = await createSeedAuthoredModelDocument()
+    const repository = new TrackingMemoryDocumentRepository([seed], {
+      metadata: {
+        documentId: seed.documentId,
+        heads: ['cached-head-a', 'cached-head-b'],
+        source: 'restore',
+        storageKey: 'automerge:cached-repository-url',
+      },
+      diagnostics: [createModelingDiagnostic('cached-load-diagnostic')],
+      assetAvailability: [createGeometryAvailability()],
+    })
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    const writes: string[] = []
+    await saveBinding(bindingStore, seed, createWritableHandle({
+      name: 'matching.cadara',
+      writes,
+      fileText: createLocalAuthoredDocumentPayload(seed),
+      permission: 'granted',
+    }).handle)
+    repository.subscribe(seed.documentId, () => undefined)
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle(createLoadRequest(seed, 'request_document_sync_matching_linked_load'))
+
+    const loaded = findLoaded(posted, 'request_document_sync_matching_linked_load')
+    expectTrue(
+      loaded?.result === repository.lastLoadResult
+        && loaded.result.ok
+        && loaded.result.metadata === repository.lastLoadResult?.metadata
+        && loaded.result.diagnostics === repository.lastLoadResult?.diagnostics
+        && loaded.result.assetAvailability === repository.lastLoadResult?.assetAvailability,
+      'Matching linked-file loads should return the exact cached repository load result and preserve metadata, diagnostics, and asset availability.',
+    )
+    expectTrue(repository.mutations.length === 0, 'Matching linked-file loads should not perform a no-op repository mutation.')
+    expectTrue(repository.notifications.length === 0, 'Matching linked-file loads should not emit repository mutation notifications.')
+    expectTrue(writes.length === 0, 'Matching linked-file initialization should not autosync-write back to the same file.')
+  }
+
+  async function testMatchingLinkedFileIgnoresSerializationDifferences() {
+    const seed = await createSeedAuthoredModelDocument()
+    const repository = new TrackingMemoryDocumentRepository([seed])
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    const writes: string[] = []
+    const serializedDifferently = JSON.stringify(seed)
+    expectTrue(
+      serializedDifferently !== createLocalAuthoredDocumentPayload(seed),
+      'The fixture should exercise a linked file whose JSON serialization differs from the repository serializer.',
+    )
+    await saveBinding(bindingStore, seed, createWritableHandle({
+      name: 'compact.cadara',
+      writes,
+      fileText: serializedDifferently,
+      permission: 'granted',
+    }).handle)
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle(createLoadRequest(seed, 'request_document_sync_serialized_linked_load'))
+
+    const loaded = findLoaded(posted, 'request_document_sync_serialized_linked_load')
+    expectTrue(
+      loaded?.result === repository.lastLoadResult && repository.mutations.length === 0,
+      'Linked-file equality should compare parsed authored documents instead of raw serialized JSON.',
+    )
+    expectTrue(writes.length === 0, 'Serialization-only matches should not enqueue initialization autosync writes.')
+  }
+
+  async function testMatchingLinkedFileNormalizesDocumentIdBeforeComparison() {
+    const seed = await createSeedAuthoredModelDocument()
+    const diskDocument = {
+      ...seed,
+      documentId: 'doc_different_disk_identity' as AuthoredModelDocument['documentId'],
+    }
+    const repository = new TrackingMemoryDocumentRepository([seed])
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    await saveBinding(bindingStore, seed, createWritableHandle({
+      name: 'rebased-id.cadara',
+      writes: [],
+      fileText: createLocalAuthoredDocumentPayload(diskDocument),
+      permission: 'granted',
+    }).handle)
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle(createLoadRequest(seed, 'request_document_sync_id_normalized_linked_load'))
+
+    const loaded = findLoaded(posted, 'request_document_sync_id_normalized_linked_load')
+    expectTrue(
+      loaded?.result === repository.lastLoadResult && repository.mutations.length === 0,
+      'Linked-file equality should normalize the disk document id to the active document id before comparing with cache.',
+    )
+  }
+
+  async function testChangedLinkedFileRefreshesRepositoryWithoutAutosyncWrite() {
+    const seed = await createSeedAuthoredModelDocument()
+    const authoritativeFileDocument = withBodyLabel(seed, 'Changed Authoritative File')
+    const repository = new TrackingMemoryDocumentRepository([seed])
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    const writes: string[] = []
+    await saveBinding(bindingStore, seed, createWritableHandle({
+      name: 'changed.cadara',
+      writes,
+      fileText: createLocalAuthoredDocumentPayload(authoritativeFileDocument),
+      permission: 'granted',
+    }).handle)
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle(createLoadRequest(seed, 'request_document_sync_changed_linked_load'))
+
+    const loaded = findLoaded(posted, 'request_document_sync_changed_linked_load')
+    expectTrue(
+      loaded?.result.ok === true
+        && loaded.result.document.bodyLabels[0]?.label === 'Changed Authoritative File'
+        && repository.mutations.length === 1,
+      'Changed linked-file loads should refresh repository state from the authoritative file document.',
+    )
+    expectTrue(writes.length === 0, 'Changed linked-file initialization should not autosync-write back to the same file.')
+  }
+
+  async function testInvalidAndUnreadableLinkedFilesDoNotReuseCache() {
+    const seed = await createSeedAuthoredModelDocument()
+    const staleBrowserDocument = withBodyLabel(seed, 'Stale Cached Geometry')
+    const invalidRepository = new TrackingMemoryDocumentRepository([staleBrowserDocument])
+    const invalidBindingStore = new MemoryLocalFileBindingStore()
+    const invalidPosted: DocumentSyncWorkerResponse[] = []
+    await saveBinding(invalidBindingStore, seed, createWritableHandle({
+      name: 'invalid.cadara',
+      writes: [],
+      fileText: JSON.stringify({ not: 'an authored document' }),
+      permission: 'granted',
+    }).handle)
+
+    await createDocumentSyncWorkerMessageHandler(
+      { repository: invalidRepository, bindingStore: invalidBindingStore },
+      (message) => invalidPosted.push(message),
+    )(createLoadRequest(seed, 'request_document_sync_invalid_linked_load'))
+
+    const invalidLoaded = findLoaded(invalidPosted, 'request_document_sync_invalid_linked_load')
+    expectTrue(
+      invalidLoaded?.result.ok === false
+        && invalidLoaded.result.status.diagnostic.reasonCode === 'invalid-authored-document'
+        && invalidRepository.mutations.length === 0,
+      'Invalid linked files should fail explicitly without mutating or returning stale cached authored state.',
+    )
+
+    const unreadableRepository = new TrackingMemoryDocumentRepository([staleBrowserDocument])
+    const unreadableBindingStore = new MemoryLocalFileBindingStore()
+    const unreadablePosted: DocumentSyncWorkerResponse[] = []
+    await saveBinding(unreadableBindingStore, seed, createUnreadableHandle('unreadable.cadara'))
+
+    await createDocumentSyncWorkerMessageHandler(
+      { repository: unreadableRepository, bindingStore: unreadableBindingStore },
+      (message) => unreadablePosted.push(message),
+    )(createLoadRequest(seed, 'request_document_sync_unreadable_linked_load'))
+
+    const unreadableLoaded = findLoaded(unreadablePosted, 'request_document_sync_unreadable_linked_load')
+    expectTrue(
+      unreadableLoaded?.result.ok === false
+        && unreadableLoaded.result.status.diagnostic.reasonCode === 'local-file-read-failed'
+        && unreadableRepository.mutations.length === 0,
+      'Unreadable linked files should fail explicitly without mutating or returning stale cached authored state.',
+    )
+  }
+
+  async function testBrowserOnlyLoadBypassesLinkedFileComparison() {
+    const seed = await createSeedAuthoredModelDocument()
+    const cachedBrowserDocument = withBodyLabel(seed, 'Browser Only Cached State')
+    const repository = new TrackingMemoryDocumentRepository([cachedBrowserDocument])
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )
+
+    await handle(createLoadRequest(seed, 'request_document_sync_browser_only_load'))
+
+    const loaded = findLoaded(posted, 'request_document_sync_browser_only_load')
+    expectTrue(
+      loaded?.result === repository.lastLoadResult
+        && loaded.result.ok
+        && loaded.result.document.bodyLabels[0]?.label === 'Browser Only Cached State'
+        && repository.mutations.length === 0
+        && !posted.some((message) => message.kind === 'writeStatusChanged' && message.status.kind === 'binding-restored'),
+      'Browser-only loads should return repository load results without linked-file reads, comparisons, or mutations.',
+    )
+  }
+
+  async function testRepositoryLoadFailureDoesNotFallBackToLinkedCache() {
+    const seed = await createSeedAuthoredModelDocument()
+    const repository = new FailingLoadDocumentRepository(seed)
+    const bindingStore = new MemoryLocalFileBindingStore()
+    const posted: DocumentSyncWorkerResponse[] = []
+    let fileRead = false
+    await saveBinding(bindingStore, seed, {
+      name: 'unused.cadara',
+      async getFile() {
+        fileRead = true
+        return new File([createLocalAuthoredDocumentPayload(seed)], 'unused.cadara')
+      },
+      async createWritable() {
+        return { write() {}, close() {} }
+      },
+    })
+
+    await createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    )(createLoadRequest(seed, 'request_document_sync_repository_failed_load'))
+
+    const loaded = findLoaded(posted, 'request_document_sync_repository_failed_load')
+    expectTrue(
+      loaded?.result.ok === false
+        && loaded.result.status.diagnostic.reasonCode === 'repository-load-failed-for-test'
+        && fileRead === false
+        && repository.mutations.length === 0,
+      'Repository load failures should return explicitly without reading linked files or falling back to stale cache.',
+    )
+  }
+
   await testRequestOrderingAndStructuredFailures()
   await testSubscriptionDisposalAndStaleWriteStatusFiltering()
   await testWorkerRuntimeShell()
   await testWorkerRuntimeFileBindingAutosyncAndPermissionFailures()
   await testWorkerRuntimeLoadReReadsBoundFilesystemFile()
+  await testMatchingLinkedFileReusesCachedLoadResult()
+  await testMatchingLinkedFileIgnoresSerializationDifferences()
+  await testMatchingLinkedFileNormalizesDocumentIdBeforeComparison()
+  await testChangedLinkedFileRefreshesRepositoryWithoutAutosyncWrite()
+  await testInvalidAndUnreadableLinkedFilesDoNotReuseCache()
+  await testBrowserOnlyLoadBypassesLinkedFileComparison()
+  await testRepositoryLoadFailureDoesNotFallBackToLinkedCache()
   await testWorkerRuntimeStorageResetAndBindingFailures()
 })
 
@@ -601,6 +850,80 @@ class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   }
 }
 
+class TrackingMemoryDocumentRepository extends MemoryDocumentRepository {
+  lastLoadResult: DocumentRepositoryLoadResult | null = null
+  readonly mutations: AuthoredModelDocument[] = []
+  readonly notifications: DocumentRepositoryChangeEvent[] = []
+
+  constructor(
+    initialDocuments: AuthoredModelDocument[],
+    private readonly loadOverrides: {
+      metadata?: DocumentRepositoryMetadata
+      diagnostics?: ModelingDiagnostic[]
+      assetAvailability?: GeometryAssetAvailability[]
+    } = {},
+  ) {
+    super(initialDocuments)
+  }
+
+  async load(input: Parameters<MemoryDocumentRepository['load']>[0]) {
+    const result = await super.load(input)
+    if (result.ok) {
+      const overridden = {
+        ...result,
+        ...(this.loadOverrides.diagnostics ? { diagnostics: this.loadOverrides.diagnostics } : {}),
+        ...(this.loadOverrides.assetAvailability ? { assetAvailability: this.loadOverrides.assetAvailability } : {}),
+        metadata: {
+          ...(this.loadOverrides.metadata ?? result.metadata),
+          ...(this.loadOverrides.assetAvailability ? { assetAvailability: this.loadOverrides.assetAvailability } : {}),
+        },
+      } satisfies DocumentRepositoryLoadResult
+      this.lastLoadResult = overridden
+      return overridden
+    }
+
+    this.lastLoadResult = result
+    return result
+  }
+
+  async mutate(input: Parameters<MemoryDocumentRepository['mutate']>[0]) {
+    this.mutations.push(structuredClone(input.document))
+    return super.mutate(input)
+  }
+
+  subscribe(
+    documentId: Parameters<MemoryDocumentRepository['subscribe']>[0],
+    listener: Parameters<MemoryDocumentRepository['subscribe']>[1],
+  ) {
+    return super.subscribe(documentId, (event) => {
+      this.notifications.push(event)
+      listener(event)
+    })
+  }
+}
+
+class FailingLoadDocumentRepository extends TrackingMemoryDocumentRepository {
+  constructor(seed: AuthoredModelDocument) {
+    super([seed])
+  }
+
+  async load(input: Parameters<MemoryDocumentRepository['load']>[0]): Promise<DocumentRepositoryLoadResult> {
+    const result: DocumentRepositoryLoadResult = {
+      ok: false,
+      status: {
+        kind: 'failed',
+        documentId: input.documentId,
+        diagnostic: {
+          reasonCode: 'repository-load-failed-for-test',
+          message: 'Repository load failed for test.',
+        },
+      },
+    }
+    this.lastLoadResult = result
+    return result
+  }
+}
+
 function withBodyLabel(seed: AuthoredModelDocument, label: string) {
   return {
     ...seed,
@@ -608,6 +931,56 @@ function withBodyLabel(seed: AuthoredModelDocument, label: string) {
       ...bodyLabel,
       label,
     })),
+  }
+}
+
+function createLoadRequest(seed: AuthoredModelDocument, requestId: string): Extract<DocumentSyncWorkerRequest, { kind: 'load' }> {
+  return {
+    kind: 'load',
+    requestId: requestId as DocumentSyncWorkerRequest['requestId'],
+    documentId: seed.documentId,
+    seedDocument: seed,
+  }
+}
+
+function findLoaded(posted: DocumentSyncWorkerResponse[], requestId: string) {
+  return posted.find((message): message is Extract<DocumentSyncWorkerResponse, { kind: 'loaded' }> =>
+    message.kind === 'loaded' && message.requestId === requestId,
+  )
+}
+
+async function saveBinding(
+  bindingStore: MemoryLocalFileBindingStore,
+  seed: AuthoredModelDocument,
+  handle: LocalFileSystemFileHandle,
+) {
+  await bindingStore.save({
+    metadata: {
+      documentId: seed.documentId,
+      fileName: handle.name,
+      storedAt: '2026-05-07T00:00:00.000Z',
+    },
+    handle,
+  })
+}
+
+function createModelingDiagnostic(code: string): ModelingDiagnostic {
+  return {
+    code,
+    severity: 'warning',
+    message: code,
+    target: null,
+    detail: null,
+  }
+}
+
+function createGeometryAvailability(): GeometryAssetAvailability {
+  return {
+    assetId: 'asset_cached_geometry' as GeometryAssetAvailability['assetId'],
+    hash: 'sha256:cachedgeometry' as GeometryAssetAvailability['hash'],
+    byteLength: 123,
+    format: 'cadara-brep',
+    available: true,
   }
 }
 
@@ -645,6 +1018,21 @@ function createWritableHandle(options: {
     },
   }
   return { handle, writes }
+}
+
+function createUnreadableHandle(name: string): LocalFileSystemFileHandle {
+  return {
+    name,
+    async getFile() {
+      throw new Error('disk read failed')
+    },
+    async createWritable() {
+      return {
+        write() {},
+        close() {},
+      }
+    },
+  }
 }
 
 function createFailingWritableHandle(name: string): LocalFileSystemFileHandle {
